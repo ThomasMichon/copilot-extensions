@@ -175,7 +175,7 @@ permission fails open, unchanged from before this check existed.
 | `pr-watch` | Block until the PR moves (`wait <repo> <pr> [--until …]`) and wake the caller with a race-proof cursor; `cursor <repo> <pr>` prints the current baseline |
 | `pr-merge` | Signal **merge consent** on an approved PR (applies the bound `automerge_label`); the review gate merges when satisfied. `--all` / `--loop` for sweeps |
 | `pr-complete` | Reconcile the worktree after its PR merged — fast-forward past the squash-merge (or rebase), dropping the local commits the squash already absorbed |
-| `attribution-audit` | Config-only check: flags this repo's `pr.head_pattern` for the branch-name leak class (embeds `{machine}`/`{worktree_id}` while `pr.source_attribution` isn't `true`). Plain mode prints findings and exits 1 if any are found (0 if none); `--json` always exits 0 and reports `findings` in the payload |
+| `attribution-audit` | Config-only check: flags this repo's `pr.head_pattern` for the branch-name leak class (embeds `{machine}` while `pr.source_attribution` isn't `true`; `{worktree_id}` is never flagged -- it isn't part of `pr_head_name`'s rendering contract, so it can't actually leak). Plain mode prints findings and exits 1 if any are found (0 if none); `--json` exits 0 whenever it can report findings (empty or not). A configuration-load failure exits 1 in both modes |
 | `pr` | Namespace grouping the `pr-*` verbs |
 
 `get pr-profile` / `get pr-required` / `get pr-provider` report the repo's PR

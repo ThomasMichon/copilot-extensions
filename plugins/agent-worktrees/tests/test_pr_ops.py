@@ -788,12 +788,12 @@ class TestAuditAttributionRisk:
     def test_finding_for_risky_head_pattern_with_explicit_false(self, pr_repo):
         config, _wid, _wt, _ = pr_repo
         config = self._config(
-            config, head_pattern="{worktree_id}/{slug}",
+            config, head_pattern="{machine}/{slug}",
             source_attribution_configured=True,
         )
         findings = pr_ops.audit_attribution_risk(config)
         assert len(findings) == 1
-        assert "{worktree_id}" in findings[0]
+        assert "{machine}" in findings[0]
         assert "absent" not in findings[0]
 
     def test_finding_for_risky_head_pattern_with_genuinely_absent_key(self, pr_repo):
@@ -803,7 +803,7 @@ class TestAuditAttributionRisk:
         # audit's finding text says "absent", not "False", for this case.
         config, _wid, _wt, _ = pr_repo
         config = self._config(
-            config, head_pattern="{worktree_id}/{slug}",
+            config, head_pattern="{machine}/{slug}",
             source_attribution_configured=False,
         )
         findings = pr_ops.audit_attribution_risk(config)
@@ -856,7 +856,7 @@ class TestAttributionAuditCLI:
         import json
         config, _wid, _wt, _ = pr_repo
         repo = config.repos["ext"]
-        pr = dataclasses.replace(repo.pr, head_pattern="{worktree_id}/{slug}")
+        pr = dataclasses.replace(repo.pr, head_pattern="{machine}/{slug}")
         config = dataclasses.replace(
             config, repos={"ext": dataclasses.replace(repo, pr=pr)}
         )
@@ -866,7 +866,7 @@ class TestAttributionAuditCLI:
         payload = json.loads(capfd.readouterr().out)
         assert payload["success"] is True
         assert len(payload["findings"]) == 1
-        assert "{worktree_id}" in payload["findings"][0]
+        assert "{machine}" in payload["findings"][0]
 
     def test_config_load_failure_reported(self, monkeypatch, capsys):
         def _raise(*a, **k):

@@ -104,10 +104,24 @@ def parse_marker(body: str) -> dict[str, str] | None:
 # ``str.format`` conversion/format-spec variant of it (e.g. ``{machine!s}``,
 # ``{machine:>10}``, ``{machine!r:^20}``) -- ``pr_head_name`` renders
 # ``head_pattern`` with ``str.format(**tokens)``, which accepts all of these
-# and substitutes the SAME underlying value, so the static audit
-# (``head_pattern_leak_risk``) must recognize them too or it silently
-# under-reports a pattern that resolves identically to the bare form.
+# and substitutes the SAME underlying value. Used by
+# ``validate_effective_head``'s own defensive "unresolved marker" check
+# against an ALREADY-RESOLVED head string (any caller's chosen branch name,
+# not specifically a rendered ``head_pattern``) -- a literal ``{worktree_id}``
+# surviving there is suspicious regardless of whether that token is part of
+# ``pr_head_name``'s actual rendering contract.
 _UNRESOLVED_TOKEN_RE = re.compile(r"\{(machine|worktree_id)(?:![a-zA-Z])?(?::[^{}]*)?\}")
+
+# The static config-only audit (``head_pattern_leak_risk``) inspects a
+# *configured* ``head_pattern`` string, not a resolved head -- so it must
+# only flag tokens ``pr_head_name`` can ACTUALLY substitute.
+# ``pr_head_name``'s token dict is exactly ``prefix``/``slug``/``suffix``/
+# ``username``/``machine`` -- it has no ``worktree_id`` key, so a pattern
+# containing ``{worktree_id}`` raises ``KeyError`` inside ``str.format`` and
+# is caught, falling back to the safe legacy default pattern; that literal
+# text never reaches a published branch. Flagging it as risky here would be
+# a false positive the audit cannot actually observe at ``create-pr`` time.
+_HEAD_PATTERN_RISKY_TOKEN_RE = re.compile(r"\{(machine)(?:![a-zA-Z])?(?::[^{}]*)?\}")
 
 
 class BranchLeakError(ValueError):
@@ -181,14 +195,19 @@ def head_pattern_leak_risk(head_pattern: str) -> list[str]:
     """Static, config-only risk check for a repo's configured ``head_pattern``.
 
     Used by the migration audit (Phase 5) to flag repos whose
-    ``pr.head_pattern`` embeds ``{machine}``/``{worktree_id}`` while
-    ``pr.source_attribution`` isn't ``true`` -- a risk that is visible from
-    config alone, without needing a live ``create-pr`` run. Returns the list
-    of risky tokens found (empty when the pattern is safe); does not itself
-    know the repo's ``source_attribution`` setting -- callers pair this with
-    that check (see ``audit_source_attribution_risk``).
+    ``pr.head_pattern`` embeds ``{machine}`` (in any ``str.format``
+    conversion/spec variant) while ``pr.source_attribution`` isn't ``true``
+    -- a risk that is visible from config alone, without needing a live
+    ``create-pr`` run. Deliberately does NOT flag ``{worktree_id}``: it is
+    not part of ``pr_head_name``'s actual rendering contract (only
+    ``prefix``/``slug``/``suffix``/``username``/``machine`` are), so a
+    pattern containing it raises inside ``str.format`` and falls back to the
+    safe default rather than ever publishing that literal text. Returns the
+    list of risky tokens found (empty when the pattern is safe); does not
+    itself know the repo's ``source_attribution`` setting -- callers pair
+    this with that check (see ``audit_source_attribution_risk``).
     """
-    return list(dict.fromkeys(_UNRESOLVED_TOKEN_RE.findall(head_pattern or "")))
+    return list(dict.fromkeys(_HEAD_PATTERN_RISKY_TOKEN_RE.findall(head_pattern or "")))
 
 
 def audit_source_attribution_risk(
@@ -202,9 +221,11 @@ def audit_source_attribution_risk(
     ``source_attribution`` is not exactly ``True`` (``False`` **or absent** --
     the key defaults to ``False``, so a config that omits it entirely is
     just as much at risk as one that sets it explicitly) *and* its
-    ``head_pattern`` embeds a token (``{machine}``/``{worktree_id}``) that
-    could carry a private identifier into a published branch name. Returns a
-    list of human-readable findings (empty when the config is not at risk).
+    ``head_pattern`` embeds a ``{machine}`` token (in any ``str.format``
+    conversion/spec variant) that could carry a private identifier into a
+    published branch name -- see :func:`head_pattern_leak_risk` for why
+    ``{worktree_id}`` is deliberately excluded. Returns a list of
+    human-readable findings (empty when the config is not at risk).
     """
     if source_attribution is True:
         return []

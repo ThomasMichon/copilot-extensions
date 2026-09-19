@@ -628,6 +628,26 @@ reverse lookup, no new registry).
   tests (one on `validate_effective_head`'s defensive check, one on
   `head_pattern_leak_risk`/`audit_source_attribution_risk`); full
   `test_pr_ops.py`/`test_providers.py`/`test_config.py` suite: 463 passed.
+- **Review round 7** caught that the static audit flagged `{worktree_id}`
+  as a risky `head_pattern` token, but `pr_head_name`'s actual rendering
+  contract is only `prefix`/`slug`/`suffix`/`username`/`machine` --
+  `{worktree_id}` in a `head_pattern` raises inside `str.format` and falls
+  back to the safe default, so it can never actually reach a published
+  branch and flagging it was a false positive the audit could never
+  observe at `create-pr` time. Split the static-audit token regex
+  (`{machine}` only, the actually-renderable/risky token) from the
+  runtime defensive "unresolved marker" regex used by
+  `validate_effective_head` (unchanged: still checks `{worktree_id}` too,
+  since that check guards an arbitrary chosen head string, not just a
+  rendered `head_pattern`). Also fixed two documentation/docstring
+  inaccuracies: the "Documentation impact" PR statement omitted
+  `cli-reference.md`, and `cmd_attribution_audit`'s docstring said
+  `--json` always exits 0 (a config-load failure exits 1 in both output
+  modes). 3 tests rewritten to use `{machine}` instead of `{worktree_id}`
+  as the risky-pattern fixture, 2 new tests
+  (`{worktree_id}` never flagged alone; `{machine}` still flagged when
+  paired with `{worktree_id}`); full `test_pr_ops.py`/`test_providers.py`/
+  `test_config.py` suite: 464 passed.
 
 Remaining: Phase 3 (descoped SSH-based reverse lookup, not yet
 rewritten/implemented). This effort is not `Done` until Phase 3 lands too.

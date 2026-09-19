@@ -439,10 +439,22 @@ class TestAuditSourceAttributionRisk:
         # once a Config normalizes it), but the audit must flag it exactly
         # like an explicit false, with a distinguishing message.
         findings = attribution.audit_source_attribution_risk(
-            source_attribution=None, head_pattern="{worktree_id}/{slug}",
+            source_attribution=None, head_pattern="{machine}/{slug}",
         )
         assert len(findings) == 1
         assert "absent" in findings[0]
+
+    def test_worktree_id_token_is_never_flagged(self):
+        # {worktree_id} is not part of pr_head_name's actual rendering
+        # contract (only prefix/slug/suffix/username/machine are) -- a
+        # pattern containing it raises inside str.format and falls back to
+        # the safe default, so it never reaches a published branch. Flagging
+        # it here would be a false positive the audit cannot observe at
+        # create-pr time.
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="{worktree_id}/{slug}",
+        )
+        assert findings == []
 
     def test_risky_pattern_flagged_under_codename_mode(self):
         findings = attribution.audit_source_attribution_risk(
@@ -456,11 +468,12 @@ class TestAuditSourceAttributionRisk:
         assert "migrate to source_attribution: true or codename" not in findings[0]
         assert "true" in findings[0]
 
-    def test_both_risky_tokens_each_flagged(self):
+    def test_worktree_id_alongside_machine_only_flags_machine(self):
         findings = attribution.audit_source_attribution_risk(
             source_attribution=False, head_pattern="{machine}/{worktree_id}",
         )
-        assert len(findings) == 2
+        assert len(findings) == 1
+        assert "{machine}" in findings[0]
 
 
 # ---------------------------------------------------------------------------

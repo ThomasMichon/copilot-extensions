@@ -6925,9 +6925,12 @@ def cmd_attribution_audit(args: argparse.Namespace) -> int:
     """Migration audit (pr-attribution-codenames Phase 5): flag this repo's
     ``pr.head_pattern`` for the branch-name leak class.
 
-    Config-only -- never touches git or a provider. Exits non-zero (unless
-    ``--json``, which always exits 0 and reports findings in the payload)
-    when a finding is present, so it composes into a CI/pre-flight check.
+    Config-only -- never touches git or a provider. Exits non-zero when a
+    finding is present in plain mode, so it composes into a CI/pre-flight
+    check. ``--json`` exits 0 whenever it can report findings (empty or
+    not) in the payload; a configuration-load failure is a separate
+    condition and exits 1 in BOTH modes (JSON emits ``{"error": ...}``
+    instead of the findings envelope).
     """
     use_json = getattr(args, "json", False)
     try:
