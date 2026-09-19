@@ -125,14 +125,16 @@ def test_optimize_failure_on_incremental_path_is_not_swallowed(tmp_path, monkeyp
     """A failed optimize() on the full=False path is the ONLY thing that
     would have updated the index (no create_fts_index follows it), so it
     must propagate as a failure -- not be swallowed into a false 'success'
-    that clears _fts_dirty while the on-disk index silently goes stale."""
+    that clears _fts_dirty while the on-disk index silently goes stale.
+
+    Both the initial incremental attempt AND its full-rebuild escalation
+    (#2951) fail here, so the overall rebuild is still a genuine failure.
+    """
     store = ContentStore(str(tmp_path / "db"))
     store.upsert([_chunk(0)])
     store._fts_available = True  # simulate an already-available index
 
     def _failing_run(argv, **kwargs):
-        code = argv[3]
-        assert "create_fts_index" not in code
         return subprocess.CompletedProcess(
             argv, 1, stdout="", stderr="Traceback...\nRuntimeError: optimize boom"
         )
@@ -156,6 +158,88 @@ def test_optimize_failure_on_incremental_path_is_not_swallowed(tmp_path, monkeyp
         "a swallowed optimize() failure would never increment this -- it "
         "must be recorded as a genuine failed rebuild attempt"
     )
+
+
+def test_incremental_optimize_failure_recovers_via_full_rebuild_escalation(
+    tmp_path, monkeypatch
+):
+    """A non-retryable optimize() failure on the incremental path (e.g. a
+    lancedb/lance-index panic against the current on-disk index state, #2951)
+    must escalate to one full replace=True rebuild in the same cycle, since
+    retrying the same incremental call would fail forever. When that
+    escalation succeeds, the overall rebuild must be reported as successful
+    and the failure bookkeeping must be cleared -- not left recording a
+    failure that a full rebuild just resolved."""
+    store = ContentStore(str(tmp_path / "db"))
+    store.upsert([_chunk(0)])
+    store._fts_available = True  # simulate an already-available (but broken) index
+
+    calls: list[str] = []
+
+    def _run(argv, **kwargs):
+        code = argv[3]
+        calls.append(code)
+        if "create_fts_index" not in code:
+            # The incremental optimize()-only call: simulate the panic.
+            return subprocess.CompletedProcess(
+                argv, 1, stdout="",
+                stderr="pyo3_async_runtimes.RustPanic: rust future panicked",
+            )
+        # The escalated full rebuild: succeeds.
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("agent_index.store.content_store.subprocess.run", _run)
+
+    store.mark_fts_dirty()
+    store._fts_consecutive_failures = 3  # simulate prior failed cycles
+    ok = store.ensure_fts_index(max_retries=1)
+
+    assert ok is True
+    assert store.fts_available is True
+    assert store.fts_dirty is False, "the escalated full rebuild resolved the pending work"
+    assert store.fts_consecutive_failures == 0, (
+        "a successful escalation is a genuine recovery, not a continued failure"
+    )
+    assert len(calls) == 2
+    assert "create_fts_index" not in calls[0], "first attempt is the incremental path"
+    assert "t.create_fts_index('content', replace=True)" in calls[1], (
+        "second attempt must be the escalated full rebuild"
+    )
+
+
+def test_retryable_conflict_exhaustion_does_not_escalate_to_full_rebuild(
+    tmp_path, monkeypatch
+):
+    """A commit conflict that is genuinely retryable (per #1818) but exhausts
+    its retries must keep the existing capped-backoff behavior -- it must NOT
+    trigger the #2951 full-rebuild escalation, which is reserved for a
+    non-retryable failure. Escalating here would pay for an unneeded full
+    rebuild (and could mask the conflict) on every ordinary contention spike."""
+    store = ContentStore(str(tmp_path / "db"))
+    store.upsert([_chunk(0)])
+    store._fts_available = True
+
+    calls: list[str] = []
+
+    def _run(argv, **kwargs):
+        code = argv[3]
+        calls.append(code)
+        return subprocess.CompletedProcess(
+            argv, 1, stdout="",
+            stderr="Retryable commit conflict for version 1",
+        )
+
+    monkeypatch.setattr("agent_index.store.content_store.subprocess.run", _run)
+    monkeypatch.setattr("agent_index.store.content_store.time.sleep", lambda _s: None)
+
+    store.mark_fts_dirty()
+    ok = store.ensure_fts_index(max_retries=2)
+
+    assert ok is True, "a prior index remains reported as available/usable"
+    assert store.fts_dirty is True, "work must remain pending for the next retry"
+    assert store.fts_consecutive_failures == 1
+    assert len(calls) == 2, "both attempts are the incremental path; no escalation call"
+    assert all("create_fts_index" not in c for c in calls)
 
 
 def test_optimize_failure_on_full_path_is_swallowed(tmp_path, monkeypatch):
