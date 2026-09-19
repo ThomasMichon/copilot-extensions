@@ -4550,6 +4550,172 @@ def test_native_list_multiselect_and_activation(monkeypatch):
     asyncio.run(run())
 
 
+async def _focus_wt_list(app, pilot, scr):
+    """Shared test helper: Tab until the native Worktrees list body has focus,
+    landing ``scr.sel`` in the ``"L"`` zone."""
+    nl = scr.query_one("#nf-body-data")
+    for _ in range(len(scr.region_heads()) + 1):
+        await pilot.press("tab")
+        await pilot.pause()
+        if app.focused is nl:
+            break
+    return nl
+
+
+def test_command_bar_filters_the_worktrees_list(monkeypatch):
+    """#2228 Phase 4: "/" opens the command bar, typed characters narrow the
+    Worktrees list by title (case-insensitive substring), and Enter commits
+    the filter (leaves compose mode) without activating a row -- the native
+    OptionList's own Enter binding must NOT fire while composing (it would
+    otherwise open the focused row's submenu instead)."""
+    from worktree_manager.production_picker.picker_tui.engine import SubMenuScreen
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert len(scr.list_records()) == 3
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            await pilot.pause()
+            assert scr.cmd_mode is True
+            for ch in "fix":
+                await pilot.press(ch)
+                await pilot.pause()
+            assert scr.list_view.query == "fix"
+            assert [w["title"] for w in scr.list_records()] == ["Fix the thing"]
+            await pilot.press("enter")
+            await pilot.pause()
+            assert scr.cmd_mode is False
+            # Enter committed the filter -- it did NOT also activate the row.
+            assert not any(isinstance(s, SubMenuScreen) for s in app.screen_stack)
+            # The query itself survives leaving compose mode (Enter commits,
+            # it doesn't clear -- only Escape clears).
+            assert scr.list_view.query == "fix"
+            assert [w["title"] for w in scr.list_records()] == ["Fix the thing"]
+
+    asyncio.run(run())
+
+
+def test_command_bar_escape_clears_filter_before_backing_out(monkeypatch):
+    """"Esc clears the filter, then backs out" (README interaction model):
+    the first Esc after a committed filter clears it and stays on the list;
+    only a second Esc (nothing left to clear/collapse) reaches quit-confirm."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert len(scr.list_records()) == 1
+            await pilot.press("escape")
+            await pilot.pause()
+            assert scr.list_view.query == ""
+            assert len(scr.list_records()) == 3
+            assert not _quit_modal_open(scr)
+
+    asyncio.run(run())
+
+
+def test_command_bar_never_hides_a_live_worktree(monkeypatch):
+    """Cross-effort record-shape contract (README, Phase 4): a filter must
+    never silently drop a live worktree just because its title doesn't match
+    the query -- an operator mid-session on it must never see it vanish."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-live", "title": "Unrelated title",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 3, "state": "wip",
+         "mux_session": True, "mux_attached": True, "mux_clients": 1},
+        {"id": "anomalous-potato-win-20260627-fixx", "title": "Fix the thing",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 1, "state": "wip"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+            titles = {w["title"] for w in scr.list_records()}
+            assert titles == {"Unrelated title", "Fix the thing"}
+
+    asyncio.run(run())
+
+
+def test_command_bar_sort_cycles_worktrees_order(monkeypatch):
+    """"s" cycles the Worktrees list's sort key (#2228 Phase 4). The fixture's
+    Active section holds one row, so this exercises the Recent section (two
+    rows sorted by age by default; alpha by title once cycled)."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260620-bbbb", "title": "Zeta idle",
+         "status": "active", "started_at": "2026-06-20T10:00:00",
+         "turn_count": 0, "state": "unused"},
+        {"id": "anomalous-potato-win-20260619-cccc", "title": "Alpha idle",
+         "status": "active", "started_at": "2026-06-19T10:00:00",
+         "turn_count": 0, "state": "unused"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            # Default (age): most-recent-first -> Zeta (newer) before Alpha.
+            assert [w["title"] for w in scr.list_records()] == ["Zeta idle", "Alpha idle"]
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("s")
+            await pilot.pause()
+            assert scr.list_view.sort_label(derive.WT_SORT_KEYS) == "title"
+            assert [w["title"] for w in scr.list_records()] == ["Alpha idle", "Zeta idle"]
+
+    asyncio.run(run())
+
+
 def test_describe_status_marker_expands_known_tokens():
     """Bug-fix phase: raw ``status_markers`` wire tokens must expand to a
     short human phrase for rendering (derive.py's ``status_markers`` string

@@ -615,6 +615,26 @@ def _sessionless(w):
     return True
 
 
+#: (label, key_fn) pairs the Worktrees list's `s` cycles through (#2228
+#: Phase 4). "age" (default, each section's own most-recent-first order) is
+#: index 0 so cycling always starts from the familiar order.
+WT_SORT_KEYS = [
+    ("age", lambda w: w.get("age_secs", 0)),
+    ("title", lambda w: (w.get("title") or "").casefold()),
+    ("state", lambda w: w.get("state") or ""),
+]
+
+
+def wt_row_always_visible(w):
+    """True for a worktree row the "/" command-bar filter must never hide
+    (#2228 Phase 4) -- the cross-effort record-shape-contract: a live or
+    bare-orphan worktree stays visible regardless of query match, since an
+    operator mid-session on it (or one flagged as needing attention) must
+    never simply vanish from the list."""
+    return bool(w.get("mux_live") or w.get("session_lock_live")
+                or w.get("session_bare_orphan"))
+
+
 def norm(
     w,
     machine,

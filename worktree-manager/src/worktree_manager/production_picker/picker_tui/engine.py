@@ -38,6 +38,7 @@ from .. import profiles as profiles_mod
 from ..update_stage import indicator_state
 from . import derive
 from .selection import ListSelection
+from .listview import ListView
 
 log = logging.getLogger("agent-worktrees.picker")
 
@@ -252,6 +253,7 @@ DISPO_MARK = {"SAFE": "✓", "REVIEW": "!", "UNSAFE": "✗"}
 KEY_ALIASES = {
     "left_square_bracket": "[",
     "right_square_bracket": "]",
+    "slash": "/",  # Textual names the "/" key "slash" (#2228 Phase 4 command bar).
     # Ctrl+Space is NUL, which Textual surfaces as "ctrl+at"; the picker treats
     # it as a Ctrl-held Space toggle, identical to "ctrl+space".
     "ctrl+at": "ctrl+space",
@@ -767,7 +769,9 @@ class _PickerNativeData(OptionList):
             nrows = -1
         return (kind, scr.htab, scr.machine_idx, nrows, wt,
                 getattr(scr, "pulse", 0), getattr(scr, "update_state", None),
-                scr.size.width)
+                scr.size.width, getattr(scr, "cmd_mode", False),
+                getattr(scr.list_view, "query", ""),
+                getattr(scr.list_view, "sort_index", 0))
 
     def _rebuild(self):
         scr = self._screen
@@ -1017,12 +1021,14 @@ class _PickerNativeData(OptionList):
         # Global pivot/machine shortcuts stay owned by the picker's BINDINGS.
         if key in scr.BINDING_KEYS:
             return
-        # Let OptionList's own bindings own list navigation + select.
-        if key in self._NATIVE_KEYS:
+        # While composing the "/" command bar (#2228 Phase 4), it owns EVERY
+        # key -- including ones OptionList would otherwise claim natively
+        # (Enter would activate a row instead of committing the filter).
+        if not scr.cmd_mode and key in self._NATIVE_KEYS:
             return
         # Everything else (Tab region cycle, [ ] pivots, ←/→, etc.) routes
         # through the manual model, then focus is mirrored back onto whatever
-        # region sel now names -- exactly like the text-line region bridge.
+        # region sel names -- exactly like the text-line region bridge.
         event.stop()
         event.prevent_default()
         if event.character in ("[", "]"):
@@ -1166,6 +1172,8 @@ class PickerScreen(Widget):
         # now (#88 F5 slice 5b); the engine reaches it via a @property shim.
         self.wt_sel = ListSelection()      # Worktrees list multi-select (#2228 2b)
         self.wt_anchor = None         # Worktrees range-select anchor index (#2258 P3)
+        self.list_view = ListView()   # Worktrees filter/sort state (#2228 Phase 4)
+        self.cmd_mode = False          # composing "/" command-bar text (#2228 Phase 4)
         self.last_l = 0               # remembered Worktrees list focus (Tab memory, #2258 P3)
         self._wt_reconcile_after = None  # live: (m,e) targets whose reload must
                                          # settle before reconciling wt_sel (#2258 P3-7)
@@ -2582,9 +2590,13 @@ class PickerScreen(Widget):
         a specific machine hides them (implied by the tab). Bridge/system
         worktrees are hidden unless Toggle-hidden is on (#1422). Worktrees with
         no owning Copilot session are split into a distinct 'Unowned' section so
-        selecting one never silently cold-starts a blank conversation (#1026)."""
+        selecting one never silently cold-starts a blank conversation (#1026).
+        Each section is filtered/sorted by the "/" command bar's state
+        (#2228 Phase 4) before the Unowned split, so that split still operates
+        on the visible set."""
         cols = ACTIVE_SPECS if self.is_all() else LIST_SPECS
         a, r, c = self.src.bucket(self._visible_scope_data())
+        a, r, c = self._wt_view(a), self._wt_view(r), self._wt_view(c)
         unowned = [w for w in r if w.get("sessionless")]
         if unowned:
             r = [w for w in r if not w.get("sessionless")]
@@ -3260,7 +3272,8 @@ class PickerScreen(Widget):
         return (W, H, self.sel, self.top, self._data_top, kind, self.htab,
                 self.machine_idx, self.btn_idx, getattr(self, "pcol", 0),
                 nrows, wt, getattr(self, "pulse", 0),
-                getattr(self, "update_state", None), getattr(self, "debug", None))
+                getattr(self, "update_state", None), getattr(self, "debug", None),
+                self.cmd_mode, self.list_view.query, self.list_view.sort_index)
 
     def _build_body_split(self, width, sel=None):
         """Return ``(chrome_vrows, data_vrows)`` for the current pivot -- the
@@ -3957,9 +3970,10 @@ class PickerScreen(Widget):
             nsel = len(self.wt_sel)
             if nsel:
                 return (f"Space: select/deselect · Enter: actions for "
-                        f"{nsel} selected · Tab region · ^◀▶ machine")
+                        f"{nsel} selected · / filter · s sort"
+                        f" · Tab region · ^◀▶ machine")
             return (f"Space: select · Enter: sub-menu for worktree {wid}"
-                    f" · Tab region · ^◀▶ machine")
+                    f" · / filter · s sort · Tab region · ^◀▶ machine")
         if zone == "C":
             rec = self._selected_record()
             wid = rec.get("id4") if rec else "?"
@@ -4090,6 +4104,10 @@ class PickerScreen(Widget):
         # Fold framework key-name aliases to canonical tokens once, up front, so
         # every downstream match is declarative and alias-free (#88 F2).
         key = canonical_key(key)
+        # The "/" command bar (#2228 Phase 4) owns every key while composing --
+        # checked first, before any of the picker's own navigation/actions.
+        if self.cmd_mode:
+            return self._dispatch_cmd_key(key)
         # Remember the grid row before any navigation, so Tab out/in restores it.
         if self.sel and self.sel[0] == "PR":
             self.last_pr = self.sel[1]
@@ -4112,6 +4130,14 @@ class PickerScreen(Widget):
             return self._switch_pivot(-1)
         if key == "]":
             return self._switch_pivot(1)
+        # "/" command bar + "s" sort-cycle (#2228 Phase 4) -- Worktrees only
+        # for now; a registered pivot's own wiring is a later slice.
+        if key == "/" and self._kind() == "worktrees":
+            self.cmd_mode = True
+            return
+        if key == "s" and self._kind() == "worktrees":
+            self.list_view.cycle_sort(derive.WT_SORT_KEYS)
+            return
 
         zone = self.sel[0]
 
@@ -4193,12 +4219,66 @@ class PickerScreen(Widget):
             self.sel = self.default_sel()
             self.debug = "refreshed · reloaded worktrees"
         elif key in ("q", "escape"):
-            # Esc composes with selection collapse (#2258 P3-5) before the
-            # quit-confirm (#1429): a multi-selection collapses first; only a
-            # second Esc (nothing left to collapse) reaches the quit prompt.
+            # Esc composes with the filter clear (#2228 Phase 4) and selection
+            # collapse (#2258 P3-5) before the quit-confirm (#1429): an active
+            # filter clears first, then a multi-selection collapses; only a
+            # press with neither reaches the quit prompt.
+            if key == "escape" and self.list_view.query:
+                self.list_view.clear()
+                if self.sel not in self.stops():
+                    self.sel = self.default_sel()
+                return
             if key == "escape" and self._wt_collapse_selection():
                 return
             self._open_quit_confirm()
+
+    def _dispatch_cmd_key(self, key):
+        """Compose the "/" command-bar's free-text filter (#2228 Phase 4).
+        Owns every key while ``cmd_mode`` is set; Enter/Escape leave compose
+        mode (Escape also clears the query), Backspace edits, Space (Textual
+        names the bar itself "space", not a literal " ") appends a literal
+        space, and any other single printable character is appended.
+        Non-printable navigation keys are ignored while composing -- the
+        command bar owns input until the operator leaves it."""
+        if key == "enter":
+            self.cmd_mode = False
+        elif key == "escape":
+            self.cmd_mode = False
+            self.list_view.clear()
+        elif key == "backspace":
+            self.list_view.query = self.list_view.query[:-1]
+        elif key == "space":
+            self.list_view.query += " "
+        elif len(key) == 1 and key.isprintable():
+            self.list_view.query += key
+        if self.sel not in self.stops():
+            self.sel = self.default_sel()
+
+    def _wt_view(self, rows):
+        """Apply the Worktrees list's filter/sort state to one bucket. Never
+        drops a live/bare-orphan row -- the record-shape-contract (README,
+        Phase 4)."""
+        kept = self.list_view.filter(rows, ("title", "id", "id4"),
+                                      keep=derive.wt_row_always_visible)
+        return self.list_view.sort(kept, derive.WT_SORT_KEYS)
+
+    def _cmd_bar_row(self, width):
+        """The "/" command-bar chrome row (#2228 Phase 4): the filter text
+        while composing/active, plus the active sort label once it's been
+        cycled off its default. Only rendered by the caller when there is
+        something to show, so an untouched list's chrome is unchanged."""
+        t = Text("  / " + self.list_view.query,
+                  style="" if self.cmd_mode else C_DIM)
+        if self.cmd_mode:
+            t.append("▏")
+        sort_lbl = self.list_view.sort_label(derive.WT_SORT_KEYS)
+        if sort_lbl and self.list_view.sort_index:
+            suffix = f"  sort: {sort_lbl}"
+            if t.cell_len + len(suffix) <= width:
+                t.append(suffix, style=C_DIM)
+        if t.cell_len < width:
+            t.append(" " * (width - t.cell_len))
+        return t
 
     def _open_quit_confirm(self):
         """Esc/q on a main pivot view asks before quitting (#1429).
@@ -7769,6 +7849,8 @@ class WorktreesView:
         eng = self._eng
         btn_focus = sel == ("BTN", 0)
         add(eng.tab_bar(width, sel == ("M", 0)))
+        if eng.cmd_mode or eng.list_view.query or eng.list_view.sort_index:
+            add(eng._cmd_bar_row(width))
         if eng.button_set():
             add(Text(""))  # breathing room above the buttons
             add(eng.new_worktree_row(width, btn_focus, eng.btn_idx),
