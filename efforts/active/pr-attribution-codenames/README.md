@@ -298,9 +298,14 @@ kill, no encoding-from-a-subprocess concern, no zombie/leak risk.
 - [x] Migration-audit test: a repo config with `source_attribution` entirely
   absent (not just explicit `false`) is correctly flagged by the audit
   tooling from Phase 5. 6 tests landed in `TestAuditSourceAttributionRisk`
-  (`test_providers.py`, the raw `None`-vs-`False` distinction) and
+  (`test_providers.py`, the raw `None`-vs-`False` distinction), 5 in
   `TestAuditAttributionRisk` (`test_pr_ops.py`, the parsed-`Config` entry
-  point).
+  point -- including `PRConfig.source_attribution_configured`, the field
+  added so the audit can tell a genuinely-absent key apart from an explicit
+  `false`), 2 in `test_config.py` (parsing that field from raw YAML), and 5
+  CLI-level tests in `TestAttributionAuditCLI` (`test_pr_ops.py`) covering
+  the plain-mode finding/no-finding paths, JSON-mode exit-0-with-findings,
+  and the config-load-failure path in both output modes.
 
 ## Proposal
 
@@ -532,16 +537,28 @@ reverse lookup, no new registry).
   (distinguishes a genuinely absent `source_attribution` key from an
   explicit `false` in its finding text) and `pr_ops.audit_attribution_risk`,
   exposed as the `agent-worktrees attribution-audit` CLI command (config-only,
-  no git/provider I/O; scans the active project's own resolved config).
-- Tests: 19 new -- 7 on `validate_effective_head` + 6 on
-  `audit_source_attribution_risk` (`test_providers.py`), 6 integration-style
+  no git/provider I/O; scans the active project's own resolved config). A
+  review round caught that the audit path couldn't actually distinguish
+  absent from explicit `false` in practice (config parsing normalizes both
+  to `PRConfig.source_attribution is False`) -- added
+  `PRConfig.source_attribution_configured` (set from raw-key presence in
+  `_parse_pr`) so the audit's finding text is accurate.
+- Tests: 31 new -- 7 on `validate_effective_head` + 6 on
+  `audit_source_attribution_risk` (`test_providers.py`); 6 integration-style
   `create_pr` tests in `TestCreatePRBranchLeakGuard` (explicit `--branch`
   leak, `head_pattern` leak, `source_attribution: true` no-op,
   `codename`-mode still blocks, dry-run reports the block, safe-default
-  regression) + 4 in `TestAuditAttributionRisk` (`test_pr_ops.py`). Full
-  `test_pr_ops.py`/`test_providers.py`/`test_config.py` suite: 443 passed.
-  (10 pre-existing `test_doctor.py` failures on `origin/main`, unrelated to
-  this change, confirmed via `git stash` before touching anything.)
+  regression); 5 in `TestAuditAttributionRisk` (`test_pr_ops.py`, including
+  the genuinely-absent-key case); 2 in `test_config.py`
+  (`source_attribution_configured` parsing); 5 CLI-level tests in
+  `TestAttributionAuditCLI` (`test_pr_ops.py`, plain/JSON output modes +
+  config-load-failure). Full `test_pr_ops.py`/`test_providers.py`/
+  `test_config.py` suite: 451 passed. (10 pre-existing `test_doctor.py`
+  failures on `origin/main`, unrelated to this change, confirmed via
+  `git stash` before touching anything.)
+- Also bumped `.github/plugin/marketplace.json`'s top-level
+  `metadata.version` (a separate, easy-to-miss requirement for any
+  `agent-worktrees` change per `AGENTS.md`), caught by review.
 
 Remaining: Phase 3 (descoped SSH-based reverse lookup, not yet
 rewritten/implemented). This effort is not `Done` until Phase 3 lands too.

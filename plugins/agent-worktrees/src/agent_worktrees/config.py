@@ -232,6 +232,14 @@ class PRConfig:
     #   publishing anything that decodes on its own (effort
     #   pr-attribution-codenames Phase 4).
     source_attribution: SourceAttribution = False
+    # Whether ``pr.source_attribution`` was an explicit key in the merged
+    # raw config, versus omitted entirely (both parse ``source_attribution``
+    # above to ``False``, indistinguishable from each other on that field
+    # alone). The migration audit (Phase 5,
+    # `providers.attribution.audit_source_attribution_risk`) needs this
+    # distinction to report "absent (defaults to false)" accurately rather
+    # than always describing an omitted key as an explicit `false`.
+    source_attribution_configured: bool = True
     # Markdown headings whose sections must contain visible text before
     # create-pr may auto-open a PR. Empty keeps the generic default permissive.
     required_body_sections: tuple[str, ...] = ()
@@ -1748,6 +1756,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         labels=labels,
         auto_open=bool(raw.get("auto_open", False)),
         source_attribution=_source_attribution(raw.get("source_attribution", False)),
+        source_attribution_configured=("source_attribution" in raw),
         required_body_sections=_str_tuple(raw.get("required_body_sections", ())),
         automerge_label=str(raw.get("automerge_label", "")).strip(),
         hold_labels=_str_tuple(raw.get("hold_labels", ())),

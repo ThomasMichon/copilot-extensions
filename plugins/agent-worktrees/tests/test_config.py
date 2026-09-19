@@ -268,6 +268,35 @@ class TestPRConfigParsing:
         assert pr.source_attribution is True
         assert pr.required_body_sections == ("Intent", "Changes", "Validation")
 
+    def test_pr_source_attribution_configured_true_when_key_present(
+        self, tmp_path: Path,
+    ):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      source_attribution: false\n",
+        )
+        conf = cfg.load_config(cfgfile)
+        pr = conf.repos["ext"].pr
+        assert pr.source_attribution is False
+        assert pr.source_attribution_configured is True
+
+    def test_pr_source_attribution_configured_false_when_key_absent(
+        self, tmp_path: Path,
+    ):
+        # The migration audit (Phase 5) needs to tell this apart from an
+        # explicit `false` -- both parse `source_attribution` to `False`
+        # identically, but only the genuinely-absent case sets this to
+        # `False`.
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile, "    pr:\n      enabled: true\n")
+        conf = cfg.load_config(cfgfile)
+        pr = conf.repos["ext"].pr
+        assert pr.source_attribution is False
+        assert pr.source_attribution_configured is False
+
     def test_pr_source_attribution_codename_mode_parsed(self, tmp_path: Path):
         cfgfile = tmp_path / "config.yaml"
         self._write(

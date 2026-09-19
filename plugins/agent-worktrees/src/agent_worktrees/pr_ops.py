@@ -228,8 +228,11 @@ def audit_attribution_risk(config: Config) -> list[str]:
     from .providers.attribution import audit_source_attribution_risk
 
     prcfg = config.default_repo.pr
+    reported_attribution = (
+        prcfg.source_attribution if prcfg.source_attribution_configured else None
+    )
     return audit_source_attribution_risk(
-        source_attribution=prcfg.source_attribution,
+        source_attribution=reported_attribution,
         head_pattern=getattr(prcfg, "head_pattern", "") or "",
     )
 
