@@ -27,6 +27,7 @@ from typing import Any
 from agent_procutil import no_window_flags
 
 from .acp_client import AcpClient
+from .cold_store import SESSION_FETCH_CAPABILITY, ColdStoreSession
 from .connect import ConnectError, ConnectStage, ConnectTracker
 from .db import Database
 from .events import EventLog
@@ -969,6 +970,30 @@ class SessionManager:
     def set_resolver(self, resolver: Any) -> None:
         """Attach the live resolver used for safe provider target refresh."""
         self._resolver = resolver
+
+    async def fetch_cold_store_session(
+        self, session_id: str
+    ) -> ColdStoreSession | None:
+        """Ask a registered cold-store provider for a session this ledger has
+        nothing live for.
+
+        This is the fallback half of the "agent-bridge stays the single
+        caller-facing surface for any session, live or not" contract (see
+        ``visions/plugins/agent-bridge`` §Concepts/*cold-store providers*).
+        Callers should only reach for this **after** :meth:`get_session`
+        returns ``None`` -- it never overrides a legitimate live answer.
+        Returns ``None`` when no cold-store provider is registered, or when
+        the registered provider itself has nothing for this ID.
+        """
+        if self._resolver is None:
+            return None
+        get_client = getattr(self._resolver, "get_cold_store_client", None)
+        if get_client is None:
+            return None
+        client = get_client(SESSION_FETCH_CAPABILITY)
+        if client is None:
+            return None
+        return await client.fetch_session(session_id)
 
     @staticmethod
     def _provider_backed_target(target: SpawnTarget) -> bool:
