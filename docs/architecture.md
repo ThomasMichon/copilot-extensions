@@ -297,11 +297,20 @@ exit-code contract: `0` = found (stdout is `{"session": {...}, "events":
 [...]}`, with `session.session_id` required and matched against the request),
 `3` = not found (a legitimate miss, never an error), anything else = a
 provider error that is logged and treated as "this provider could not
-answer" — never raised to the caller. `GET /api/v1/sessions/{id}` falls
-through to a registered `session-fetch` provider only after the live ledger
-returns nothing, marking the result `read_only`/`at_rest` in the unchanged
-`SessionInfo` shape (the worktree-scoped session-listing and transcript
-routes do not yet fall through to a cold-store provider — a follow-up slice).
+answer" — never raised to the caller. `GET /api/v1/sessions/{id}` and
+`GET /api/v1/worktrees/{id}/sessions/{session_id}/transcript` both fall
+through to a registered `session-fetch` provider once their live answer has
+nothing for the requested session — the bare route when the live ledger
+misses, the worktree-scoped transcript route when there is no live owning
+agent for the worktree at all *or* the owning agent's own local
+session-state has nothing for that session (its `session-transcript` verb
+answers an absent session with an empty list, not an error). Both mark the
+cold-store answer `read_only`/`at_rest` in their existing response shape.
+`GET /api/v1/worktrees/{id}/sessions` (the worktree-scoped *listing*) does
+**not** fall through yet — the cold-store contract is session-ID-keyed
+(`session-fetch <id>`), not worktree-keyed, so there is no provider verb to
+enumerate a worktree's sessions; adding one is a follow-up slice, not a
+wiring gap in the existing mechanism.
 agent-logger is the reference cold-store provider (see its own plugin docs);
 `agent-bridge doctor` reports findings for both `providers.d` and
 `cold-store-providers.d`.
