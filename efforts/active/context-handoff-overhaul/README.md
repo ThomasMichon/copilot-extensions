@@ -1024,3 +1024,56 @@ gate land._
   session remained untouched. All three live-discovered bugs (#2886,
   #2892, #2896) are now fixed and re-verified live.
 
+### 2026-09-18 — Fourth bug found: real interactive Copilot spawns via the harness
+
+- After all three pane-targeting bugs were fixed, the operator asked to
+  test-drive the primitives against a REAL interactive Copilot session
+  (not a stand-in shell payload) — spawn one as a new pane in the
+  operator's own active session, foreground it live, then retire it.
+- The very first attempt with a real `copilot` payload failed
+  reproducibly: `pane_create` reported
+  `"error": "successor did not confirm a stable pane launch (status: failed:0)"`.
+  Live-diagnosed with `remain-on-exit on` (so the crashed pane's own
+  diagnostic screen stayed visible instead of vanishing instantly) down to
+  the exact literal error: `The term 'c' is not recognized as a name of a
+  cmdlet...` — `$rest[0]` was a single **character**, not the word
+  `"copilot"`.
+- Root cause, isolated precisely via a debug-instrumented copy of the
+  wrapper and confirmed in isolation with a bare PowerShell repro:
+  `pane-wrapper.ps1`'s flag-stripping loop used
+  `$rest = if (cond) { @(...) } else { @() }` (if-as-expression
+  assignment). PowerShell silently **unwraps a resulting single-element
+  array to a bare scalar** in this exact pattern — even though the branch
+  itself forces array typing with `@()`. Once `$rest` narrows to exactly
+  one remaining element (the common case: a single-token payload command
+  like bare `copilot`, with an initial prompt in transport, which is
+  *every* handoff-cutover spawn), it collapsed to a scalar string;
+  `$rest += @('--interactive', $prompt)` then did string concatenation
+  instead of array append, and the final `& $rest[0] @($rest[1..])`
+  indexed a single character, crashing before `copilot` ever launched.
+  The wrapper's own crash detection wrote `failed:0` and paused with a
+  diagnostic — but that diagnostic pane vanishes with `remain-on-exit`
+  at its default (off), so none of this was ever visible to a caller.
+- **Plausibly explains a related, previously-unexplained symptom**: any
+  real `handoff-cutover` spawn whose launch command reduces to a single
+  trailing token would silently fail to start its successor — from the
+  operator's view, indistinguishable from "nothing happened," while the
+  predecessor session remained alive. Not confirmed as the exact cause of
+  any specific historical incident, but a strong, mechanistically precise
+  candidate.
+- Fixed by moving the array assignment inside each `if`/`else` branch (a
+  plain statement, not an expression whose result is captured), which does
+  not exhibit the unwrap. Added `test_pane_wrapper_argv.py`: extracts and
+  executes the real parsing loop via a live `pwsh` subprocess, covering the
+  single-token failing shape, the already-working multi-token shape, and
+  the no-control-flags bare-command shape. Verified the new test fails
+  against the reverted (buggy) source and passes against the fix (checked
+  both ways via `git stash`). **PR #2907.**
+- **Final live re-verification**, deployed through the normal
+  `agent-worktrees update` path (not a manual file copy): spawned a real
+  interactive Copilot session as a new pane in the operator's own active
+  worktree via `pane_create` — `ok: true`, `foregrounded: true`, the
+  session loaded and responded normally to its seeded prompt — then
+  retired it cleanly via `pane_terminate` (`gone: true`, graceful),
+  leaving the operator's own pane untouched throughout.
+
