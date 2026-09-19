@@ -673,10 +673,10 @@ class _PickerNativeData(OptionList):
         # A cheap per-pivot data-size probe so the options rebuild when the
         # active pivot's rows change (tasks load, maintenance candidates), not
         # only when the worktrees list does. ``fp`` (review finding, #2228 P4)
-        # additionally fingerprints each row's id/title/state -- nrows alone
-        # cannot see a same-cardinality reload that swaps a row's content
-        # (title/state/liveness change), which would otherwise leave a
-        # query/sort-narrowed view silently stale.
+        # additionally fingerprints every sort-dependent field (id/title/state/
+        # age_secs) -- nrows alone cannot see a same-cardinality reload that
+        # swaps a row's content (title/state/age change), which would
+        # otherwise leave a query/sort-narrowed view silently stale.
         try:
             if kind == "registered":
                 rows = scr._task_rows()
@@ -685,7 +685,8 @@ class _PickerNativeData(OptionList):
             else:
                 rows = scr.list_records()
             nrows = len(rows)
-            fp = tuple((r.get("id"), r.get("title"), r.get("state"))
+            fp = tuple((r.get("id"), r.get("title"), r.get("state"),
+                        r.get("age_secs"))
                        for r in rows)
         except Exception:
             nrows, fp = -1, ()
