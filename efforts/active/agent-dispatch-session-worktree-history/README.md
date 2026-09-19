@@ -136,15 +136,20 @@ Intelligence Dampener)
       `BEGIN IMMEDIATE` transaction as the existing owner-session mutation,
       not a separate one.
 
-### Phase 2 — agent-bridge: resolve by dispatch-task reference
-> **2026-09-19 progress note (route wiring landed):** `GET
+### Phase 2 — agent-bridge: resolve by dispatch-task reference — **Done**
+> **2026-09-19 progress note (fully landed):** `GET
 > /api/v1/dispatch-tasks/{id}/session` now exists
 > (`plugins/agent-bridge/src/agent_bridge/routes/dispatch_tasks.py`), backed
 > by a new `agent_dispatch_client` HTTP client and an
 > `agent_dispatch_url`/`agent_dispatch_token` config surface on
 > `ServiceConfig` (env-overridable via `AGENT_DISPATCH_URL`/
-> `AGENT_DISPATCH_TOKEN`, mirroring `neuron-forge`'s own shape). Phase 2 is
-> now fully delivered, including integration tests.
+> `AGENT_DISPATCH_TOKEN`, mirroring `neuron-forge`'s own shape). Landed
+> across three sequential PRs (#2954 route wiring, #2955 HTTP protocol
+> version bump, #2956 contract-evidence attestation) — split because the
+> contract registry's provenance model pins evidence to real, already-merged
+> commit hashes, which an in-flight PR's own commit reference cannot
+> satisfy under this repo's rebase-then-squash policy. `HTTP_PROTOCOL_VERSION`
+> is now 15 (`DISPATCH_TASK_SESSION_PROTOCOL_VERSION`), fully attested.
 - [x] Extend the existing session/worktree resolver
       (`any-session-any-registered-worktree-regardless-of-liveness`'s
       implementation) to accept a dispatch-task reference as an additional
@@ -199,19 +204,26 @@ Intelligence Dampener)
       Decide, don't guess — this route is used by more than just Dampener's
       link (any dispatched-task viewer), so retiring it needs its own
       callers audited first.
-- [ ] Document the shared resolution primitive in each vision's Concepts &
+- [x] Document the shared resolution primitive in each vision's Concepts &
       Components (not just Features) so a future consumer finds it before
-      inventing its own convention.
+      inventing its own convention. **Delivered:** `visions/plugins/
+      agent-bridge`'s *topology and resolver layer* concept now points to
+      the concrete `GET /api/v1/dispatch-tasks/{id}/session` route;
+      `visions/plugins/agent-dispatch`'s *task* concept now points to the
+      attachment-history query surface.
 
 ## Validation Plan
 
 - [ ] Phase 1: a synthetic multi-release/resume/reattach sequence on one
       task produces a complete, correctly-ordered attachment history with no
       gaps or duplicate records.
-- [ ] Phase 2: resolving the same task by its dispatch-task reference and by
+- [x] Phase 2: resolving the same task by its dispatch-task reference and by
       its worktree ID directly produce identical results when both are
       available; resolving after the task's worktree is reclaimed still
-      answers for its last cold-store-resolvable session.
+      answers for its last cold-store-resolvable session. Validated by
+      `tests/test_dispatch_task_session_route.py` (current-owner live,
+      attachment-history cold-store fallback for a released task, and
+      worktree-latest-session fallback).
 - [ ] Phase 3: Dampener's "View reviewer" link, re-implemented, resolves for
       an in-flight review, a just-completed one, and one whose review
       worktree has since been reclaimed — with zero Dampener-specific
