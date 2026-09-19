@@ -1761,7 +1761,7 @@ def test_jump_to_worktree_keeps_filter_when_target_already_visible(tmp_path):
     asyncio.run(run())
 
 
-
+def test_open_worktree_cli_exits_with_resume_decision():
     """#2253: the ``open-cli`` internal action opens the entry's target worktree
     into a CLI session -- it exits the picker with a standard resume decision for
     that worktree id, so __main__ maps it onto the launch/resume path."""
