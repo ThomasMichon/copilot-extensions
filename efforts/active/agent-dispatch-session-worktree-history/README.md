@@ -4,9 +4,9 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
 - **Created:** 2026-09-19
-- **Status:** Active — Phase 1 and Phase 2 fully done; Phase 3's two
-  remaining checklist items are implemented and out for review downstream,
-  not yet merged. Flips to Done once that downstream PR lands.
+- **Status:** Done; pending archive — all three phases landed and merged.
+  The one exception is Phase 1's Backfill bullet, deliberately deferred (not
+  attempted) rather than completed; see that bullet's own note.
 - **Vision:** [`visions/plugins/agent-dispatch`](../../../visions/plugins/agent-dispatch/README.md)
   §*Features*/`durable-attachment-history` ·
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
@@ -201,14 +201,14 @@ Intelligence Dampener)
       unknown-task 404, and unconfigured-coordinator 503.
 
 ### Phase 3 — consumers: adopt the shared resolver
-- [ ] `aperture-labs` Intelligence Dampener: re-attempt the "View reviewer"
+- [x] `aperture-labs` Intelligence Dampener: re-attempt the "View reviewer"
       link (`session-worktree-archive-linkout` Phase 4, previously reverted
       as PR #7200) using the new dispatch-task-reference resolution instead
-      of the `dampener-pr<N>` naming convention. **Implemented downstream,
-      pending merge:** the consumer's "View reviewer" link now resolves via
+      of the `dampener-pr<N>` naming convention. **Delivered and merged
+      downstream:** the consumer's "View reviewer" link now resolves via
       this effort's Phase 2 route instead of a bespoke worktree-naming
-      convention; keep unchecked until the downstream PR merges.
-- [ ] Neuron Forge's own `/dispatch/:taskId` "exact live session" viewer
+      convention.
+- [x] Neuron Forge's own `/dispatch/:taskId` "exact live session" viewer
       (`worktree_tasks.py`): evaluate whether it should be retired in favor
       of always routing through the general resolver, or kept as a distinct
       "insist on live, nothing else" affordance for a narrower use case.
@@ -221,8 +221,7 @@ Intelligence Dampener)
       new `GET /api/dispatch-tasks/{id}/session` route (this effort's
       Phase 2) before giving up, keeping one stable URL for both the
       in-flight and already-reclaimed-worktree cases instead of inventing a
-      second route. Implemented downstream, pending merge; keep unchecked
-      until that PR merges.
+      second route. **Delivered and merged downstream.**
 - [x] Document the shared resolution primitive in each vision's Concepts &
       Components (not just Features) so a future consumer finds it before
       inventing its own convention. **Delivered:** `visions/plugins/
@@ -248,14 +247,13 @@ Intelligence Dampener)
       `tests/test_dispatch_task_session_route.py` (current-owner live,
       attachment-history cold-store fallback for a released task, and
       worktree-latest-session fallback).
-- [ ] Phase 3: Dampener's "View reviewer" link, re-implemented, resolves for
+- [x] Phase 3: Dampener's "View reviewer" link, re-implemented, resolves for
       an in-flight review, a just-completed one, and one whose review
       worktree has since been reclaimed — with zero Dampener-specific
-      resolution logic in the link builder itself. **Implemented
-      downstream, pending merge:** the consumer's full test suite passes
-      (535/535, including 7 new for the durable route/proxy) and both
-      touched packages' typecheck/lint are clean; keep unchecked until the
-      downstream PR merges.
+      resolution logic in the link builder itself. **Delivered and merged
+      downstream:** the consumer's full test suite passes (535/535,
+      including 7 new for the durable route/proxy) and both touched
+      packages' typecheck/lint are clean.
 
 ## Proposal
 
@@ -324,3 +322,11 @@ _Pending — Phase 1's schema/API design is the first concrete artifact._
   unchecked. Backfill remains a deliberate, documented deferral (not a gap).
 - Status flips to Done once the downstream Phase 3 change merges — the one
   remaining open item.
+
+### 2026-09-19 — Effort Done: downstream Phase 3 change merged
+- The downstream Dampener consumer's Phase 3 change merged. Every actioned
+  Plan and Validation Plan item across all three phases is now checked; the
+  sole exception is Phase 1's Backfill bullet, which stays unchecked as a
+  deliberate, documented deferral rather than an oversight (history starts
+  from this effort's landing forward, not reconstructed for prior tasks).
+  Status flips to Done.
