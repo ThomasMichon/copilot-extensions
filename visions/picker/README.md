@@ -148,10 +148,10 @@ hand. This extends the ordinary single-worktree resume the Picker already
 performs — a batched invocation of it, never a new resume mechanism. Worktrees
 resuming near-simultaneously **without** such a provider-published host-loss
 observation (the operator closing several terminals deliberately, say) is not
-this pattern; the Picker offers the bulk action only on the explicit signal, never
-the Picker distinguishes genuine correlated host loss from ordinary independent
-resumes before offering the bulk action, so it is never presented as a routine
-choice.
+this pattern. The Picker offers the bulk action only on the explicit
+provider-published signal, never on its own inference, so genuine correlated
+host loss is never confused with ordinary independent resumes, and the bulk
+action is never presented as a routine choice.
 
 ### consequential-vs-browsing-clarity
 The Picker visibly distinguishes **browsing** (free, reversible, no side effects)
