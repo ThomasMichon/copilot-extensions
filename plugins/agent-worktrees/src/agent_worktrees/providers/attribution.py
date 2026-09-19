@@ -134,21 +134,32 @@ def _referenced_field_names(text: str) -> list[str]:
     """Field names ``str.format`` would substitute from *text*, in order.
 
     Uses :class:`string.Formatter` -- the same parser ``str.format`` itself
-    uses -- rather than a regex, so a field referenced only inside a NESTED
-    replacement field within a format spec (e.g. ``{machine:{width}}``,
-    where ``width`` is itself a field) is still recognized. Malformed
-    ``str.format`` syntax (unbalanced braces) is treated as containing no
-    recognized fields -- ``str.format`` itself would raise on it, so it can
+    uses -- rather than a regex, so nested replacement fields are still
+    recognized. ``Formatter.parse`` itself only returns TOP-LEVEL field
+    names -- a field referenced inside another field's ``format_spec``
+    (e.g. ``{slug:{machine}}``, where ``machine`` is nested inside
+    ``slug``'s spec) comes back embedded in that spec as literal text, not
+    as its own tuple entry. Recurse into every ``format_spec`` so a field
+    nested at any depth is still found. Malformed ``str.format`` syntax
+    (unbalanced braces) is treated as containing no recognized fields at
+    that point -- ``str.format`` itself would raise on it too, so it can
     never reach a published branch either.
     """
-    try:
-        return [
-            field_name
-            for _, field_name, _, _ in string.Formatter().parse(text or "")
-            if field_name
-        ]
-    except ValueError:
-        return []
+    names: list[str] = []
+
+    def _collect(fragment: str) -> None:
+        try:
+            parsed = list(string.Formatter().parse(fragment or ""))
+        except ValueError:
+            return
+        for _, field_name, format_spec, _ in parsed:
+            if field_name:
+                names.append(field_name)
+            if format_spec and "{" in format_spec:
+                _collect(format_spec)
+
+    _collect(text)
+    return names
 
 
 class BranchLeakError(ValueError):

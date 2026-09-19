@@ -402,6 +402,24 @@ class TestValidateEffectiveHead:
                 source_attribution=False,
             )
 
+    def test_unresolved_field_nested_inside_a_non_risky_fields_spec_is_blocked(
+        self,
+    ):
+        # Formatter.parse only returns TOP-LEVEL field names -- a field
+        # nested inside a DIFFERENT (non-risky) field's format_spec, e.g.
+        # `{slug:{machine}}` (machine nested inside slug's spec), is not
+        # itself a top-level parse result. The detector must recurse into
+        # every format_spec to still catch `machine` here.
+        with pytest.raises(
+            attribution.BranchLeakError, match="unresolved template marker"
+        ):
+            attribution.validate_effective_head(
+                "x{slug:{machine}}",
+                worktree_id="wt-abcd",
+                machine="",
+                source_attribution=False,
+            )
+
     def test_blocked_under_codename_mode_too(self):
         # codename mode is still "not true" -- a raw identifier reaching the
         # branch name defeats the whole point of the codename marker.
@@ -455,6 +473,15 @@ class TestAuditSourceAttributionRisk:
         # (via string.Formatter) must still flag it.
         findings = attribution.audit_source_attribution_risk(
             source_attribution=False, head_pattern="user/{machine:{width}}/{slug}",
+        )
+        assert len(findings) == 1
+
+    def test_risky_field_nested_inside_non_risky_fields_spec_flagged(self):
+        # `{slug:{machine}}` -- machine is nested inside a DIFFERENT
+        # (non-risky) field's format_spec, not a top-level parse result.
+        # The static audit must recurse into every format_spec to catch it.
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="user/{slug:{machine}}",
         )
         assert len(findings) == 1
 

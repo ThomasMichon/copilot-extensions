@@ -1096,7 +1096,7 @@ class TestCreatePRBranchLeakGuard:
         )
 
     def test_head_pattern_with_machine_token_is_blocked(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
+        config, wid, _wt_path, _ = pr_repo
         config = self._config(config, head_pattern="user/{machine}/{slug}")
         res = pr_ops.create_pr(wid, config, title="Add feature")
         assert res["success"] is False
@@ -1104,7 +1104,7 @@ class TestCreatePRBranchLeakGuard:
         assert "machine name" in res["error"]
 
     def test_source_attribution_true_allows_the_raw_head(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
+        config, wid, _wt_path, _ = pr_repo
         config = self._config(config, source_attribution=True)
         res = pr_ops.create_pr(
             wid, config, title="Add feature", branch=f"worktree/{wid}",
@@ -1112,7 +1112,7 @@ class TestCreatePRBranchLeakGuard:
         assert res["success"] is True, res
 
     def test_codename_mode_still_blocks_a_leaking_branch(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
+        config, wid, _wt_path, _ = pr_repo
         config = self._config(config, source_attribution="codename")
         res = pr_ops.create_pr(
             wid, config, title="Add feature", branch=f"worktree/{wid}",
@@ -1121,7 +1121,7 @@ class TestCreatePRBranchLeakGuard:
         assert "leak" in res["error"]
 
     def test_dry_run_still_reports_the_block(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
+        config, wid, _wt_path, _ = pr_repo
         res = pr_ops.create_pr(
             wid, config, title="Add feature", branch=f"worktree/{wid}",
             dry_run=True,
@@ -1132,7 +1132,7 @@ class TestCreatePRBranchLeakGuard:
     def test_safe_default_head_pattern_is_unaffected(self, pr_repo):
         # Regression: the ordinary snapshot/refspec default patterns never
         # embed a private identifier, so they must still succeed unchanged.
-        config, wid, wt_path, _ = pr_repo
+        config, wid, _wt_path, _ = pr_repo
         res = pr_ops.create_pr(wid, config, title="Add feature")
         assert res["success"] is True, res
 
@@ -1141,7 +1141,7 @@ class TestCreatePRBranchLeakGuard:
         # registration, e.g. after a machine rename/migration). An explicit
         # --branch embedding the OLD recorded machine name must still be
         # blocked even though the live config machine no longer matches it.
-        config, wid, wt_path, _ = pr_repo
+        config, wid, _wt_path, _ = pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.machine == "test"
         import dataclasses

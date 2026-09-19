@@ -662,6 +662,18 @@ reverse lookup, no new registry).
   7). 2 new tests (nested-spec unresolved-marker block, nested-spec
   static-audit finding); full `test_pr_ops.py`/`test_providers.py`/
   `test_config.py` suite: 466 passed.
+- **Review round 9** caught that `string.Formatter.parse` itself only
+  returns TOP-LEVEL field names -- a field nested inside a DIFFERENT
+  field's `format_spec` (e.g. `{slug:{machine}}`, where `machine` is
+  nested inside `slug`'s spec, not `machine`'s own) comes back embedded in
+  that spec as literal text, not its own parse result, so round 8's fix
+  still missed this one-level-removed nesting. Made `_referenced_field_names`
+  recurse into every `format_spec` (at any depth) rather than inspecting
+  only the top-level parse. Also fixed a Ruff F841 (unused `wt_path` in 6
+  tests that never read it -- renamed to `_wt_path`). 2 new tests (one on
+  `validate_effective_head`, one on the static audit, both using the
+  nested-inside-a-different-field shape); full `test_pr_ops.py`/
+  `test_providers.py`/`test_config.py` suite: 468 passed.
 
 Remaining: Phase 3 (descoped SSH-based reverse lookup, not yet
 rewritten/implemented). This effort is not `Done` until Phase 3 lands too.
