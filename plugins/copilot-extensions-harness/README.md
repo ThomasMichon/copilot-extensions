@@ -1,10 +1,15 @@
 # copilot-extensions-harness
 
 A **payload-only** Copilot CLI plugin that ships the **operator harness** for the
-copilot-extensions repo — the skills to work *on* the plugin suite. Enable it in
-any control repo and your agent knows how to **contribute** changes to the
-plugins, **diagnose** the deployed runtimes, and **validate** them on a fresh box,
-without you hand-writing a per-repo guide or installing a runtime.
+copilot-extensions repo — the skills to work *on* the plugin suite. Its
+**primary purpose** is to make sure any agent using an enabling plugin can
+quickly identify which local scripts/processes/paths belong to this system and
+never monkey-patches a deployed copy — file a bug upstream or auto-update
+instead. Its **secondary purpose**, for repos that also choose to be
+contributors, is to describe the correct flow for landing a real fix. Enable it
+in any control repo and your agent knows how to **diagnose** the deployed
+runtimes, **contribute** changes to the plugins, and **validate** them on a
+fresh box, without you hand-writing a per-repo guide or installing a runtime.
 
 The plugin declares a checked-in contribution-boundary projection. Adopting
 repositories synchronize that projection with the
@@ -14,10 +19,10 @@ without a competing `sessionStart` output. The full guide remains versioned at
 generic, organization-neutral capabilities are welcome; personal or
 organization-specific needs are routed elsewhere.
 
-| Skill | Covers |
-|-------|--------|
-| [contributing-to-copilot-extensions](skills/contributing-to-copilot-extensions/SKILL.md) | Repo layout, the PR-required worktree flow (`create` → `create-pr`/`push-changes` → `pr-merge --now` → `finalize`), the submitter's hard **merged + finalized** completion gate, the **mandatory version bump**, test + install-contract gates, deploy-after-merge, and source-of-truth rules |
-| [diagnosing-copilot-extensions](skills/diagnosing-copilot-extensions/SKILL.md) | Symptom → cause → action for deployed plugins, key paths, diagnostic commands, and the baseline-reset escape hatch |
+| Skill | Priority | Covers |
+|-------|----------|--------|
+| [diagnosing-copilot-extensions](skills/diagnosing-copilot-extensions/SKILL.md) | **Primary (hard guidance)** | Identify what belongs to this system before touching it; never monkey-patch a deployed copy (file a bug upstream, sanitized, or auto-update instead); symptom → cause → action for deployed plugins; key paths, diagnostic commands, and the baseline-reset escape hatch |
+| [contributing-to-copilot-extensions](skills/contributing-to-copilot-extensions/SKILL.md) | Secondary (opt-in) | Repo layout, the PR-required worktree flow (`create` → `create-pr`/`push-changes` → `pr-merge --now` → `finalize`), the submitter's hard **merged + finalized** completion gate, the **mandatory version bump**, test + install-contract gates, deploy-after-merge, and source-of-truth rules |
 | [validating-in-clean-room](skills/validating-in-clean-room/SKILL.md) | **Run · evaluate · author** clean-room validation (`tools/clean-room/`): fresh-box scenarios, `cr-report.json` + `cr-logs/`, jam taxonomy, Tier-E literal-mode judging, and the scenario contract |
 
 The plugin also ships `.agent-worktrees/related.yaml`, so an active

@@ -72,7 +72,7 @@
     {
       "name": "customizing-copilot",
       "description": "Customize, diagnose, and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, hoisting plugin agents around a delegation limitation, componentizing oversized modules, and authoring <repo>-harness plugins - with the per-skill folder conventions and Agent Skills best practices; ships ten focused skills",
-      "version": "0.1.0-dev75",
+      "version": "0.1.0-dev76",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -89,8 +89,8 @@
     },
     {
       "name": "copilot-extensions-harness",
-      "description": "Operator harness for the copilot-extensions repo - portable contribution, diagnosis, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
-      "version": "0.1.0-dev42",
+      "description": "Operator harness for the copilot-extensions repo. Primary: help any consumer identify which local scripts/processes belong to this suite and enforce never-monkey-patch (file a bug upstream or auto-update instead). Secondary: portable contribution, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
+      "version": "0.1.0-dev43",
       "source": "plugins/copilot-extensions-harness"
     },
     {
