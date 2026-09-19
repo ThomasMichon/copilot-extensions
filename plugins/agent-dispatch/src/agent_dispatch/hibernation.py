@@ -63,6 +63,19 @@ def resume_message(spec: RunSpec, returncode: int) -> str:
     )
 
 
+TIMED_OUT_CODE = 124
+"""Shared "no real transition, the wait window merely elapsed" convention.
+
+Blocking-wait commands intended for this substrate (``agent-worktrees
+pr-watch wait`` and any other tool built to the same contract) exit ``124`` to
+mean "I polled for the full window and nothing changed" -- distinct from ``0``
+(a real transition fired), ``2`` (usage error), and ``3`` (provider/auth
+error, e.g. a bad token). Only ``124`` is safe to treat as a no-op re-arm
+signal; every other code must still wake the worker (a genuine transition, or
+a real problem it needs to know about immediately).
+"""
+
+
 def run_and_resume(
     spec: RunSpec,
     *,
@@ -76,8 +89,23 @@ def run_and_resume(
     so the orchestration is testable. Returns a bounded report of what happened.
     ``resumed`` is ``None`` when no ``resume_worktree`` was given, else the
     resumer's success flag.
+
+    A ``runner`` result of :data:`TIMED_OUT_CODE` (124) is **not** a resume
+    trigger: it means the wait command itself polled the full window and found
+    no real transition, so waking a torn-down, token-costing embodied worker
+    to independently re-discover "nothing changed" would be pure waste -- and,
+    observed in production, a source of redundant near-duplicate PR comments
+    when a worker re-posted a status update on every such no-op wake
+    (ThomasMichon/copilot-extensions#2576, gim-home/odsp-web-harness#458). On a
+    124, re-invoke ``runner`` again in place (the wait command re-arms itself
+    against the same baseline/cursor) rather than resuming; only a genuine
+    transition (0) or an actual error (anything else) escalates to a resume.
     """
     returncode = runner(spec.command)
+    reattempts = 0
+    while returncode == TIMED_OUT_CODE:
+        reattempts += 1
+        returncode = runner(spec.command)
     message = resume_message(spec, returncode)
     resumed: bool | None = None
     if spec.resume_worktree:
@@ -91,6 +119,7 @@ def run_and_resume(
         "resume_worktree": spec.resume_worktree,
         "message": message,
         "resumed": resumed,
+        "reattempts_on_timeout": reattempts,
     }
 
 

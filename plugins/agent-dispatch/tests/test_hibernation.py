@@ -82,6 +82,73 @@ def test_run_and_resume_carries_nonzero_code_into_message():
     assert "exited with code 2" in seen["m"]
 
 
+def test_run_and_resume_reattempts_on_timeout_without_waking(monkeypatch):
+    """A `124` (timed out, no real transition) must never wake the resumer --
+    it means the wait command itself already polled the full window and found
+    nothing. Re-invoke the same wait in place instead (ThomasMichon/
+    copilot-extensions#2576's remaining scope; the observed false-wake/
+    duplicate-comment symptom in gim-home/odsp-web-harness#458)."""
+    calls = []
+
+    def runner(cmd):
+        calls.append(cmd)
+        # Times out twice, then a real transition fires.
+        return 124 if len(calls) < 3 else 0
+
+    resumed = {}
+
+    def resumer(worktree, message):
+        resumed["count"] = resumed.get("count", 0) + 1
+        resumed["message"] = message
+        return True
+
+    spec = hibernation.RunSpec(
+        command=("agent-worktrees", "pr-watch", "42"), resume_worktree="m/wt-1"
+    )
+    report = hibernation.run_and_resume(spec, runner=runner, resumer=resumer)
+
+    assert len(calls) == 3  # two timeouts + the transition, all in-process
+    assert resumed.get("count", 0) == 1  # the resumer only ever fires once
+    assert report["returncode"] == 0
+    assert report["reattempts_on_timeout"] == 2
+
+
+def test_run_and_resume_pure_timeout_still_reports_zero_reattempts():
+    spec = hibernation.RunSpec(command=("true",), resume_worktree="wt")
+    seen = {}
+    report = hibernation.run_and_resume(
+        spec, runner=lambda c: 0, resumer=lambda w, m: seen.setdefault("m", m) or True
+    )
+    assert report["reattempts_on_timeout"] == 0
+    assert "finished" in seen["m"]
+
+
+def test_run_and_resume_only_timeouts_never_wakes_but_still_returns(monkeypatch):
+    """If every attempt times out (the awaited condition genuinely never
+    arrives), the loop must still terminate on its own via the underlying
+    wait command's own bounded polling -- this just asserts the resumer is
+    never invoked across a realistic bounded run of timeouts terminated by an
+    eventual real error surfacing (e.g. auth expiry, code 3), which SHOULD
+    wake the worker."""
+    calls = []
+
+    def runner(cmd):
+        calls.append(cmd)
+        return 124 if len(calls) < 5 else 3
+
+    resumed = {}
+
+    def resumer(worktree, message):
+        resumed["message"] = message
+        return True
+
+    spec = hibernation.RunSpec(command=("agent-worktrees", "pr-watch", "42"), resume_worktree="wt")
+    report = hibernation.run_and_resume(spec, runner=runner, resumer=resumer)
+    assert report["returncode"] == 3
+    assert report["reattempts_on_timeout"] == 4
+    assert "exited with code 3" in resumed["message"]
+
+
 # -- detached_run_argv -------------------------------------------------------
 
 
@@ -189,15 +256,19 @@ def test_run_detach_spawns_waiter_without_executing_the_wait(capsys, monkeypatch
 class _FakeSuspendClient:
     """A minimal fake standing in for DispatchClient's context-manager + suspend."""
 
-    def __init__(self, *, raises: Exception | None = None):
+    def __init__(self, *, raises: Exception | None = None, owner: str | None = "headless-abc123"):
         self.calls = []
         self._raises = raises
+        self._owner = owner
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
         return False
+
+    def get(self, task_id):
+        return {"owner": self._owner} if self._owner else {}
 
     def suspend(self, task_id, worker_id, *, reason):
         self.calls.append((task_id, worker_id, reason))
@@ -243,17 +314,63 @@ def test_run_detach_with_task_suspends_atomically(capsys, monkeypatch):
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out["detached"] is True
+    # the suspend uses the TASK's own recorded owner (a headless worker id
+    # here), not CWD/machine-worktree identity -- see the next test for the
+    # regression this protects against (#2576's remaining scope).
     assert out["suspended"] == {
         "status": "suspended",
-        "worker_id": "m/wt-1",
+        "worker_id": "headless-abc123",
         "claim": {"state": "active"},
     }
     assert fake.calls == [
-        ("t-1", "m/wt-1", "hibernating: agent-worktrees pr-watch 42")
+        ("t-1", "headless-abc123", "hibernating: agent-worktrees pr-watch 42")
     ]
     # the claim is journaled for the task, independent of who resolves as owner
     assert claimed["call"][0] == "t-1"
     assert claimed["call"][1]["note"] == "hibernating: agent-worktrees pr-watch 42"
+
+
+def test_run_detach_with_task_suspends_using_headless_owner_not_cwd_identity(
+    capsys, monkeypatch
+):
+    """Regression test: a headless-embodied worker's real owner id (e.g.
+    ``headless-xxxx``) never equals the CWD-derived ``machine/worktree``
+    identity. Before this fix, ``_suspend_for_detached_wait`` always composed
+    from CWD identity, so the suspend call 409'd for every headless worker
+    ("owned by 'headless-xxx', not 'machine/worktree'") and the task stayed
+    `started` -- continuing to occupy its pool's concurrency slot -- for its
+    entire hibernation. This proves the suspend now targets the task's actual
+    recorded owner even when CWD identity resolves to something else entirely.
+    """
+    from agent_dispatch import hibernation_claims, identity
+
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._spawn_detached_waiter",
+        lambda spec: {"pid": 1, "argv": []},
+    )
+    fake = _FakeSuspendClient(owner="headless-real-owner")
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
+    # CWD identity resolves to something entirely different from the task's
+    # real owner -- the old bug composed THIS as the suspend worker_id.
+    monkeypatch.setattr(
+        identity, "resolve_identity", lambda: ("tmichon-cloud1", "some-other-worktree")
+    )
+    monkeypatch.setattr(
+        hibernation_claims, "add_hibernation_claim", lambda task_id, **k: {"state": "active"}
+    )
+
+    rc = _cmd_run(
+        _args(
+            [
+                "run", "--detach", "--resume", "m/wt-1", "--task", "t-1",
+                "--", "agent-worktrees", "pr-watch", "42",
+            ]
+        )
+    )
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["suspended"]["worker_id"] == "headless-real-owner"
+    assert fake.calls[0][1] == "headless-real-owner"
 
 
 def test_run_detach_claim_add_degrades_gracefully_without_agent_worktrees(
@@ -397,6 +514,11 @@ def test_run_detach_with_task_but_no_resolvable_owner_reports_error(capsys, monk
     monkeypatch.setattr(
         "agent_dispatch.__main__._spawn_detached_waiter",
         lambda spec: {"pid": 1, "argv": []},
+    )
+    # No owner recorded on the task (or lookup unavailable) -- falls through to
+    # CWD-derived identity, which also fails to resolve here.
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._client", lambda args: _FakeSuspendClient(owner=None)
     )
     monkeypatch.setattr(identity, "resolve_identity", lambda: (None, None))
 
