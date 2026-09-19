@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from zdd import routing
+from zdd import breadcrumb, routing
 from zdd.cutover import CutoverOrchestrator
 
 
@@ -147,6 +147,52 @@ def test_rollback_when_new_unhealthy(tmp_path: Path, monkeypatch):
     old_client = registry.get("http://127.0.0.1:9281")
     if old_client is not None:
         assert not any(c.startswith("drain(") for c in old_client.calls)
+    # #5195: the rolled-back breadcrumb still names the passive's own pid, so
+    # a caller that also wants reap_abandoned_passive's backstop can find it
+    # even though _rollback already terminated it in-process here.
+    record = breadcrumb.read_breadcrumb(tmp_path)
+    assert record is not None
+    assert record["new_pid"] == handle.pid
+
+
+def test_breadcrumb_records_new_pid_immediately_after_spawn(
+    tmp_path: Path, monkeypatch,
+):
+    """#5195: if the orchestrator process dies right after spawn_passive
+    returns (before the health gate even starts), the breadcrumb must already
+    carry the passive's pid -- not just the port -- so a later
+    reap_abandoned_passive pass can find and retire it."""
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    registry: dict = {}
+    seen_mid_flight: dict = {}
+
+    handle = FakeHandle(pid=9999)
+
+    def spawn_passive(port):
+        return handle
+
+    def health_check(host, port):
+        # Capture the breadcrumb the instant the health gate is consulted --
+        # simulates a crash immediately after spawn, before health passes.
+        seen_mid_flight["record"] = breadcrumb.read_breadcrumb(tmp_path)
+        return False
+
+    orch = CutoverOrchestrator(
+        tmp_path, bind="127.0.0.1", version="1.0.0",
+        spawn_passive=spawn_passive,
+        health_check=health_check,
+        make_client=lambda base_url: registry.setdefault(
+            base_url, FakeClient(base_url, registry)
+        ),
+        pick_free_port=lambda: 9290,
+        sleep=lambda _s: None,
+        clock=_fake_clock(),
+    )
+    orch.run(health_timeout=0.05, drain_timeout=1, poll=0.01)
+    record = seen_mid_flight["record"]
+    assert record is not None
+    assert record["new_pid"] == 9999
+    assert record["state"] == "started"
 
 
 # -- drain times out, no force -> rollback (route restored) ------------------
