@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import datetime as _dt
 
+from rich.cells import cell_len
+
 from .. import prune
 from . import reciprocal
 from . import source_identity
@@ -244,6 +246,134 @@ def _status_markers(w):
     if not compact or not label or not compact.startswith(label):
         return ""
     return compact[len(label):].strip()
+
+
+def truncate_text(s, w):
+    """Truncate ``s`` to at most ``w`` display cells, ellipsizing when
+    clipped -- used when concatenating several variable-length segments onto
+    one detail line (the Worktree tile's status_markers/asset_hints run) so
+    no single segment can overflow the row and crowd out the ones after it.
+    Deliberately non-padding (unlike ``engine.py``'s column-fitting
+    ``_clip``, which always pads its result out to exactly ``w``): padding
+    mid-line here would insert unwanted blank space between segments instead
+    of just bounding this one's length. Uses Rich's ``cell_len`` throughout
+    (not ``len()``) so a wide/double-width character is measured by its
+    actual display width, not counted as one cell."""
+    s = str(s)
+    if cell_len(s) <= w:
+        return s
+    if w <= 0:
+        return ""
+    if w == 1:
+        # A double-width first character still exceeds a 1-cell budget even
+        # unclipped (e.g. a wide CJK glyph) -- degrade to the ellipsis
+        # (itself exactly 1 cell) rather than returning 2 cells' worth.
+        return s[0] if cell_len(s[0]) <= 1 else "…"
+    # Binary-search the longest prefix whose cell width leaves room for the
+    # ellipsis -- cheap and exact for the short strings this renders (marker
+    # phrases, asset-hint runs), unlike slicing by character count.
+    lo, hi = 0, len(s)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if cell_len(s[:mid]) <= w - 1:
+            lo = mid
+        else:
+            hi = mid - 1
+    return s[:lo] + "…"
+
+
+#: The raw ``status_markers`` tokens above (``C<N>``/``F<N>``/``U*``/``OC*``)
+#: are a closure-descriptor-internal wire shorthand -- meaningful to whoever
+#: wrote the descriptor, opaque to an operator glancing at the tile's second
+#: line. When the marker string is the ONLY content on that line (no asset
+#: hints, no live pulse), a bare "C1 U* OC*" reads as noise. This map/helper
+#: expands each token into a short human phrase for the picker's RENDER layer
+#: only -- ``status_markers`` itself stays the compact wire format other
+#: tests/consumers read.
+_STATUS_MARKER_TEXT = {
+    "U*": "merge unconfirmed",
+    "OC*": "claims unconfirmed",
+}
+
+
+def describe_status_marker(tok):
+    """Expand one ``status_markers`` token into ``(text, is_warning)``. An
+    unrecognized token (a future marker this helper doesn't know about yet)
+    degrades to itself verbatim, still flagged as a warning if it carries the
+    ``*`` unconfirmed-fact suffix, so a new marker never vanishes silently --
+    it just isn't prettied up yet.
+
+    ``compact`` (the source of these tokens) is only validated as a ``str``
+    by ``prune.interpret_descriptor_payload`` -- a malformed/remote descriptor
+    could hand this an absurdly long ``C``/``F`` digit run. No realistic
+    held-claim/follow-up count is more than a few digits, so the numeric
+    suffix is length-bounded BEFORE conversion (not just wrapped in a
+    ``try``/``except``): CPython 3.11+ raises ``ValueError`` past its
+    configured int-string-conversion digit limit, but an older interpreter
+    has no such limit and would otherwise happily (if slowly) convert an
+    arbitrarily long digit run. An over-length or unparseable suffix simply
+    degrades to the verbatim fallback below, same as any other unrecognized
+    token, instead of crashing (or stalling) the picker's render.
+    """
+    _MAX_MARKER_DIGITS = 12
+    if tok in _STATUS_MARKER_TEXT:
+        return _STATUS_MARKER_TEXT[tok], True
+    if (len(tok) > 1 and tok[0] in ("C", "F")
+            and 0 < len(tok) - 1 <= _MAX_MARKER_DIGITS and tok[1:].isdigit()):
+        try:
+            n = int(tok[1:])
+        except ValueError:
+            return tok, tok.endswith("*")
+        noun = "held claim" if tok[0] == "C" else "follow-up"
+        return f"{n} {noun}{'s' if n != 1 else ''}", False
+    return tok, tok.endswith("*")
+
+
+def status_marker_segments(markers, width):
+    """Expand a raw ``status_markers`` string into ``(text, is_warning)``
+    render segments (comma separators included as their own non-warning
+    segments), each already truncated so the whole run never exceeds
+    ``width`` cells -- the human-readable expansion is longer than the
+    compact wire tokens it replaces, so this segment must never be allowed to
+    crowd out whatever the picker's render layer appends after it (asset
+    hints, the live-pulse line). Cell-width measured throughout, matching
+    ``truncate_text``."""
+    segments = []
+    used = 0
+    for j, tok in enumerate(markers.split()):
+        prefix = ", " if j else ""
+        budget = max(0, width - used) - cell_len(prefix)
+        if budget <= 0:
+            break
+        if prefix:
+            segments.append((prefix, False))
+            used += cell_len(prefix)
+        text, is_warn = describe_status_marker(tok)
+        clipped = truncate_text(text, budget)
+        segments.append((clipped, is_warn))
+        used += cell_len(clipped)
+    return segments
+
+
+def status_line_segments(markers, asset_hints, overflow, width):
+    """Combine the ``status_markers`` expansion with the tile's asset-hint
+    text into one bounded run of ``(text, is_warning)`` segments -- the
+    picker's detail-line render layer just appends these in order. Asset
+    hints are already bounded (<=4 tokens + an overflow count) and take
+    priority: their width is reserved BEFORE budgeting the (unbounded-length)
+    readable marker text, so a long marker expansion can't crowd them out."""
+    asset_text = ""
+    if asset_hints:
+        asset_text = " ".join(asset_hints) + (f" +{overflow}" if overflow else "")
+    segments = []
+    if markers:
+        reserve = cell_len(asset_text) + 2 if asset_text else 0
+        segments = status_marker_segments(markers, max(0, width - reserve))
+    if asset_text:
+        prefix = "  " if segments else ""
+        used = sum(cell_len(t) for t, _ in segments)
+        segments.append((truncate_text(prefix + asset_text, max(0, width - used)), False))
+    return segments
 
 
 #: Bounded per-kind short codes for the tile asset-hint line (#6443/upstream

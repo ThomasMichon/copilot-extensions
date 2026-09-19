@@ -256,6 +256,149 @@ def test_asset_hints_render_at_wide_and_narrow_widths(monkeypatch, tmp_path):
         assert "WT" in text
 
 
+def _bare_markers_source():
+    """A fleet with a ``status_markers`` closure descriptor and NO asset hints
+    or live pulse -- the case the operator flagged as an "indecipherable bare
+    marker" second line (bug-fix phase, picker-list-interaction-layer effort):
+    a raw ``C1 U* OC*`` token string with nothing else to give it context."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-eeee", "title": "Bare marker row",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 3, "state": "completed",
+         "closure": {
+             "version": 2, "label": "MERGED", "style": "merged-blocked",
+             "compact": "MERGED C1 U* OC*",
+             "claims": {"held": 1}, "follow_ups": {"open": 0},
+             "closure": {"final": False}, "action": {"disposition": "blocked"},
+         }},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+    return src
+
+
+def test_bare_status_markers_render_as_readable_text(monkeypatch, tmp_path):
+    """The raw closure-descriptor tokens (``C1``/``U*``/``OC*``) are a wire
+    shorthand, not operator-facing copy -- when they're the ONLY thing on the
+    tile's second line, they must expand into a short human phrase rather than
+    render as a bare, undocumented token string."""
+    _isolate_pivots(monkeypatch, tmp_path)
+    text = pcap.capture(_bare_markers_source(), live=False)["text"]
+    assert "1 held claim" in text
+    assert "merge unconfirmed" in text
+    assert "claims unconfirmed" in text
+    # The raw wire tokens themselves never leak into the rendered grid.
+    assert "C1" not in text
+    assert "OC*" not in text
+    assert "U*" not in text
+
+
+def _markers_and_assets_source():
+    """A fleet with BOTH a ``status_markers`` closure descriptor AND asset
+    hints on the same row -- the mixed case a PR #2897 review flagged: the
+    human-readable marker expansion is longer than the compact wire tokens it
+    replaces, and at a narrow capture width the combined line could overflow
+    the row and crowd out (or wrap past) the asset hints that follow it."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-ffff", "title": "Mixed row",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 5, "state": "completed",
+         "closure": {
+             "version": 2, "label": "MERGED", "style": "merged-blocked",
+             "compact": "MERGED C1 U* OC*",
+             "claims": {"held": 1}, "follow_ups": {"open": 0},
+             "closure": {"final": False}, "action": {"disposition": "blocked"},
+         },
+         "resources": [
+             {"kind": "pr", "ref": "https://example/pulls/43",
+              "state": "active"},
+             {"kind": "worktree", "ref": "host/repo/wt-child2",
+              "state": "at-rest"},
+         ]},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+    return src
+
+
+def test_marker_and_asset_line_never_overflows_narrow_width(monkeypatch, tmp_path):
+    """The combined status_markers + asset_hints detail line must never
+    exceed the capture width, even at a narrow 60-column width where the
+    readable marker expansion alone could otherwise overrun the row (PR #2897
+    review). Bounded by construction -- every grid row is exactly `width`
+    cells, so this asserts the capture doesn't crash and stays a clean
+    rectangular grid at the narrow width, AND that the asset hint specifically
+    survives on the detail line itself (not merely somewhere in the grid --
+    the `PR` column header would otherwise produce a false pass)."""
+    _isolate_pivots(monkeypatch, tmp_path)
+    grid = pcap.capture(_markers_and_assets_source(), live=False, size=(60, 24))["text"]
+    lines = grid.splitlines()
+    widths = {len(line) for line in lines}
+    assert len(widths) == 1, f"ragged grid at narrow width: {sorted(widths)}"
+    detail_lines = [ln for ln in lines if "held claim" in ln]
+    assert len(detail_lines) == 1
+    # Asset hints are bounded and take priority: the marker text was
+    # truncated to make room for the hint rather than crowding it out.
+    assert "PR" in detail_lines[0]
+
+
+def _markers_and_pulse_source():
+    """A fleet with BOTH a ``status_markers`` closure descriptor AND a live
+    pulse/intent on the same row, no asset hints -- the second mixed case a
+    PR #2897 review flagged: the pulse segment's own width floor can still
+    push a marker-carrying row past the capture width even after the
+    markers/assets segment is itself bounded."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-9999", "title": "Marker + pulse row",
+         "status": "active", "started_at": "2026-06-27T17:59:00",
+         "turn_count": 5, "state": "completed",
+         "live_intent": "a fairly long live-intent line to press the width budget",
+         "live_intent_at": "2026-06-27T17:59:00", "live_rest": "busy",
+         "closure": {
+             "version": 2, "label": "MERGED", "style": "merged-blocked",
+             "compact": "MERGED C1 U* OC*",
+             "claims": {"held": 1}, "follow_ups": {"open": 0},
+             "closure": {"final": False}, "action": {"disposition": "blocked"},
+         }},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+    return src
+
+
+def test_marker_and_pulse_line_never_overflows_narrow_width(monkeypatch, tmp_path):
+    """The combined status_markers + live-pulse detail line must never exceed
+    the capture width: the pulse segment's own ``avail = max(1, ...)`` floor
+    otherwise unconditionally appends a padded intent clip even when the
+    markers segment already used the whole row (PR #2897 review)."""
+    _isolate_pivots(monkeypatch, tmp_path)
+    grid = pcap.capture(_markers_and_pulse_source(), live=False, size=(60, 24))["text"]
+    lines = grid.splitlines()
+    widths = {len(line) for line in lines}
+    assert len(widths) == 1, f"ragged grid at narrow width: {sorted(widths)}"
+
+
 def test_capture_is_deterministic(monkeypatch, tmp_path):
     _isolate_pivots(monkeypatch, tmp_path)
     first = pcap.capture(_fixture_source(), live=False)["text"]

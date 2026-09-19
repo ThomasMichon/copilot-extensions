@@ -7815,16 +7815,11 @@ class WorktreesView:
                 _assets = rec.get("asset_hints") or {}
                 pline = Text("      ")
                 has_content = False
-                if _markers:
-                    for j, tok in enumerate(_markers.split()):
-                        if j:
-                            pline.append(" ")
-                        tok_style = C_WARN if tok.endswith("*") else C_DIM
-                        pline.append(tok, style=tok_style)
-                    has_content = True
-                if _assets.get("hints"):
-                    over = _assets.get("overflow") or 0
-                    pline.append(("  " if has_content else "") + " ".join(_assets.get("hints") or []) + (f" +{over}" if over else ""), style=C_DIM)
+                if _markers or _assets.get("hints"):
+                    for text, is_warn in derive.status_line_segments(
+                            _markers, _assets.get("hints"),
+                            _assets.get("overflow"), width - pline.cell_len):
+                        pline.append(text, style=C_WARN if is_warn else C_DIM)
                     has_content = True
                 if _pulse and _intent:
                     if has_content:
@@ -7840,6 +7835,11 @@ class WorktreesView:
                     has_content = True
                 if not has_content:
                     pline.append("·", style="grey30")
+                # Hard width guarantee: the pulse segment's own floor can
+                # still push a marker-carrying row past `width` (review
+                # finding) -- clip the assembled line once at the end.
+                if pline.cell_len > width:
+                    pline.truncate(width, overflow="ellipsis")
                 add(pline)
                 li += 1
 
