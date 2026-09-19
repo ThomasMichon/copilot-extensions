@@ -32,12 +32,14 @@ already gates.
 from __future__ import annotations
 
 import json
+import stat
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from agent_logger import sessions
 from agent_logger.config import Config, load_config
 from agent_logger.segmenter.collate import find_copilot_dir, session_archive_stores
 from agent_logger.sessions import SessionRef
+from agent_logger.sync.provenance import existing_real_directory, is_link_or_reparse
 
 #: Exit code signaling "no such session" to the agent-bridge daemon -- a
 #: legitimate miss, never an error (see ``agent_bridge.cold_store``).
@@ -51,15 +53,42 @@ def _local_state_root() -> Path | None:
         return None
 
 
+def _is_safe_ref(ref: SessionRef) -> bool:
+    """Reject a ref that resolves through a symlink/reparse-point component.
+
+    Mirrors the no-link boundary
+    :class:`agent_logger.chronicle.source.SyncedSessionSource` already
+    enforces for the same synced-corpus shape (``existing_real_directory`` /
+    ``is_link_or_reparse``) -- a symlinked ``sync_path`` entry, machine
+    subtree, or session directory/archive must never let ``session-fetch``
+    read outside its configured roots.
+    """
+    if ref.kind == "live":
+        return existing_real_directory(ref.path) is not None
+    if ref.store is not None and existing_real_directory(ref.store) is None:
+        return False
+    try:
+        mode = ref.path.lstat().st_mode
+    except OSError:
+        return False
+    if not stat.S_ISREG(mode) or is_link_or_reparse(ref.path, mode):
+        return False
+    return True
+
+
 def _resolve_from_synced_corpus(session_id: str, corpus_root: Path) -> SessionRef | None:
     """Search every ``<machine>/`` subtree of the local sync target."""
-    if not corpus_root.is_dir():
+    real_corpus_root = existing_real_directory(corpus_root)
+    if real_corpus_root is None:
         return None
-    for machine_dir in sorted(p for p in corpus_root.iterdir() if p.is_dir()):
+    for raw_machine_dir in sorted(p for p in real_corpus_root.iterdir() if p.is_dir()):
+        machine_dir = existing_real_directory(raw_machine_dir)
+        if machine_dir is None:
+            continue
         ref = sessions.resolve_ref(
             session_id, machine_dir / "session-state", machine_dir / "archived"
         )
-        if ref is not None:
+        if ref is not None and _is_safe_ref(ref):
             return ref
     return None
 
@@ -100,7 +129,7 @@ def resolve_session(session_id: str, cfg: Config | None = None) -> SessionRef | 
     state_root = _local_state_root()
     if state_root is not None:
         ref = sessions.resolve_ref(session_id, state_root, *session_archive_stores())
-        if ref is not None:
+        if ref is not None and _is_safe_ref(ref):
             return ref
     try:
         cfg = cfg or load_config(include_repo=False)

@@ -111,6 +111,55 @@ def test_resolve_session_not_found(tmp_path: Path, monkeypatch) -> None:
     assert cold_store.resolve_session("nope") is None
 
 
+@pytest.mark.skipif(
+    not hasattr(Path, "symlink_to"), reason="platform lacks symlink support"
+)
+def test_resolve_session_rejects_symlinked_live_session_dir(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A symlinked session directory under the live root must not resolve.
+
+    Mirrors ``SyncedSessionSource``'s own no-link boundary: a symlink named
+    exactly the requested session id could otherwise redirect
+    ``session-fetch`` to read an arbitrary directory's ``events.jsonl``.
+    """
+    outside = _make_session(tmp_path / "outside", "real-target")
+    state_root = tmp_path / "copilot" / "session-state"
+    state_root.mkdir(parents=True)
+    link = state_root / "linked-sess"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation not permitted in this environment")
+
+    monkeypatch.setattr(cold_store, "_local_state_root", lambda: state_root)
+    monkeypatch.setattr(cold_store, "session_archive_stores", lambda: [])
+
+    assert cold_store.resolve_session("linked-sess") is None
+
+
+@pytest.mark.skipif(
+    not hasattr(Path, "symlink_to"), reason="platform lacks symlink support"
+)
+def test_resolve_session_rejects_symlinked_corpus_machine_dir(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A symlinked ``<machine>/`` subtree under the synced corpus is rejected."""
+    outside = tmp_path / "outside"
+    _make_session(outside / "session-state", "s-outside")
+    corpus_root = tmp_path / "sessions"
+    corpus_root.mkdir(parents=True)
+    try:
+        (corpus_root / "linked-machine").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation not permitted in this environment")
+
+    monkeypatch.setattr(cold_store, "_local_state_root", lambda: None)
+    _cfg_stub(monkeypatch, corpus_root)
+
+    assert cold_store.resolve_session("s-outside") is None
+
+
 @pytest.mark.parametrize(
     "unsafe_id",
     [
