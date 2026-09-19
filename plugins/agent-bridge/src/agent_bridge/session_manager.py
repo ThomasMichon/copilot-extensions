@@ -27,6 +27,7 @@ from typing import Any
 from agent_procutil import no_window_flags
 
 from .acp_client import AcpClient
+from .cold_store import ColdStoreSession, fetch_cold_store_session
 from .connect import ConnectError, ConnectStage, ConnectTracker
 from .db import Database
 from .events import EventLog
@@ -969,6 +970,15 @@ class SessionManager:
     def set_resolver(self, resolver: Any) -> None:
         """Attach the live resolver used for safe provider target refresh."""
         self._resolver = resolver
+
+    async def fetch_cold_store_session(
+        self, session_id: str
+    ) -> ColdStoreSession | None:
+        """Ask a registered cold-store provider for a session this ledger has
+        nothing live for (see :func:`agent_bridge.cold_store.fetch_cold_store_session`
+        and ``visions/plugins/agent-bridge`` §Concepts/*cold-store providers*).
+        Only call after :meth:`get_session` returns ``None``."""
+        return await fetch_cold_store_session(self._resolver, session_id)
 
     @staticmethod
     def _provider_backed_target(target: SpawnTarget) -> bool:

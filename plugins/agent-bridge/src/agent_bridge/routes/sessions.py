@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from .. import elevated
+from ..cold_store_views import cold_store_session_info
 from ..attention_wait import (
     AttentionHistoryChangedError,
     AttentionTokenError,
@@ -826,9 +827,13 @@ async def list_sessions(request: Request, status: str | None = None):
 async def get_session(session_id: str, request: Request):
     mgr: SessionManager = request.app.state.session_manager
     session = mgr.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    return _session_info(session)
+    if session:
+        return _session_info(session)
+    # Nothing live -- ask a registered cold-store provider before giving up.
+    cold = await mgr.fetch_cold_store_session(session_id)
+    if cold is not None:
+        return cold_store_session_info(cold)
+    raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
 
 @router.get("/{session_id}/usage")

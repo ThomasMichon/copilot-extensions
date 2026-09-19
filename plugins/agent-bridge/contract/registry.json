@@ -30,7 +30,7 @@
           "0.4.0-dev432",
           "0.4.0-dev435",
           "0.4.0-dev447",
-          "0.4.0-dev473"
+          "0.4.0-dev493"
         ]
       },
       "capability_versions": {
@@ -70,7 +70,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "0ac218e3616f89d3152827976cf104ac450c970ecf2030223eeec94391829887",
+          "sha256": "3891d74d145943ab0ed9f062012835551549f179ee3be1a8ea0c70197d616b3b",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -120,7 +120,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "38d49a8762f4732216fbda79ad150438d6a7e101249d5d496fae07325111d92a",
+          "sha256": "7c9d2bc91d520e021659492b805fa2f85b021c3b11c11d9f7787adffe679b882",
           "role": "current representative FastAPI error",
           "generation": 14
         },
@@ -299,6 +299,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
           "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
           "capture_method": "Read the immutable health-route blob from the last published HTTP generation before attention waits."
+        },
+        {
+          "commit": "663d52618077672700cc0fe580599c5aa547e3be",
+          "plugin_version": "0.4.0-dev493",
+          "generation": 14,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "ed270918b1813d8552fd42848b73984de0dc3852",
+          "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response; re-attested after adding the cold-store -provider session-lookup fallback (Phase 2b, session-worktree-archive-linkout effort), which does not touch this code path."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 12 supported; evidence currently exercises generations 9 through 12.",
