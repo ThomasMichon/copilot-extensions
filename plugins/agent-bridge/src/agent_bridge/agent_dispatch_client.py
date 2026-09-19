@@ -9,12 +9,16 @@ local **agent-dispatch coordinator** (a distinct loopback service, default
 identical optional dependency, so the two consumers agree on the same shape).
 
 Deliberately small: fetch one task, fetch its durable attachment history
-(``agent-dispatch-session-worktree-history`` Phase 1). Both raise on a
-genuine transport/HTTP error or a malformed (non-object/non-list) coordinator
+(``agent-dispatch-session-worktree-history`` Phase 1). ``fetch_task`` raises
+on a genuine transport/HTTP error or a malformed (non-object) coordinator
 payload -- the caller decides how to degrade (this route treats an
 unreachable or misbehaving coordinator as "cannot resolve", never as
-"resolved to nothing") -- except a 404 task fetch, which is a legitimate
-"task does not exist" answer, not an error.
+"resolved to nothing") -- except a 404, which is a legitimate "task does not
+exist" answer, not an error. ``fetch_attachments`` is more permissive: a
+malformed (non-list, or list of non-object rows) payload degrades to an
+empty history rather than raising, since attachment history is an
+enrichment the caller (``candidate_session_ids``) already tolerates being
+absent -- only the transport/HTTP-error case still raises.
 """
 
 from __future__ import annotations

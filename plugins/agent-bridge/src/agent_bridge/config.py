@@ -135,7 +135,7 @@ def _read_agent_dispatch_token() -> str:
     """
     path = Path.home() / ".agent-dispatch" / "service.env"
     try:
-        for raw in path.read_text().splitlines():
+        for raw in path.read_text(encoding="utf-8").splitlines():
             line = raw.strip()
             if line.startswith("AGENT_DISPATCH_TOKEN="):
                 return line.split("=", 1)[1].strip().strip('"').strip("'")
@@ -146,16 +146,18 @@ def _read_agent_dispatch_token() -> str:
 
 def _apply_agent_dispatch_env_defaults(data: dict[str, object]) -> dict[str, object]:
     """Fill ``agent_dispatch_url``/``agent_dispatch_token`` from the environment
-    when config.yaml leaves them unset, so ``AGENT_DISPATCH_URL``/
+    when config.yaml leaves them **unset entirely**, so ``AGENT_DISPATCH_URL``/
     ``AGENT_DISPATCH_TOKEN`` (and the coordinator's own service env file) work
-    the same way they do for ``neuron-forge`` without requiring a YAML edit.
-    An explicit YAML value always wins over the environment.
+    the same way they do for ``neuron-forge`` without requiring a YAML edit. An
+    explicit YAML value -- including an explicit empty string, the documented
+    way to disable the coordinator lookup -- always wins over the environment;
+    only a genuinely absent key falls through to it.
     """
-    if not data.get("agent_dispatch_url"):
+    if "agent_dispatch_url" not in data:
         env_url = os.environ.get("AGENT_DISPATCH_URL")
         if env_url:
             data["agent_dispatch_url"] = env_url
-    if not data.get("agent_dispatch_token"):
+    if "agent_dispatch_token" not in data:
         token = os.environ.get("AGENT_DISPATCH_TOKEN") or _read_agent_dispatch_token()
         if token:
             data["agent_dispatch_token"] = token

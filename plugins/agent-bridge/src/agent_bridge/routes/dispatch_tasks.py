@@ -65,9 +65,11 @@ async def get_dispatch_task_session(task_id: str, request: Request) -> SessionIn
     try:
         task = await fetch_task(base_url, token, task_id)
     except (httpx.HTTPError, ValueError) as exc:
+        # The exception text itself can carry sensitive connection details
+        # (URLs, host/port, auth hints) -- keep it out of the formatted log
+        # message; exc_info=True still captures the full traceback server-side.
         log.warning(
-            "dispatch task %s: coordinator fetch failed: %s", task_id, exc,
-            exc_info=True,
+            "dispatch task %s: coordinator fetch failed", task_id, exc_info=True,
         )
         raise HTTPException(
             status_code=502,
