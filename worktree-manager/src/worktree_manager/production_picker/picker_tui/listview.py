@@ -85,5 +85,94 @@ class ListView:
         the sort selection alone; only ``/`` narrowing is a "back out" step."""
         self.query = ""
 
+    def narrow(self, rows, fields, keep, keys) -> list:
+        """Filter then sort ``rows`` by the current query/sort state."""
+        return self.sort(self.filter(rows, fields, keep=keep), keys)
 
-__all__ = ["ListView"]
+    def handle_compose_key(self, key: str, character: str | None = None) -> str:
+        """Compose one keystroke into ``query`` while the "/" command bar is
+        active (moved out of the picker engine to keep it under its own
+        module-size budget, #2228 Phase 4 review). Returns ``"commit"``
+        (Enter: leave compose mode, keep the query), ``"cancel"`` (Escape:
+        leave compose mode, clear the query), or ``"continue"`` (still
+        composing). Prefers ``character`` over ``key`` so a NAMED printable
+        key token (e.g. Textual's ``"slash"`` for ``/``) still lands in the
+        query instead of being dropped; Space is named too."""
+        if key == "enter":
+            return "commit"
+        if key == "escape":
+            self.clear()
+            return "cancel"
+        if key == "backspace":
+            self.query = self.query[:-1]
+            return "continue"
+        if key == "space":
+            self.query += " "
+            return "continue"
+        ch = character if (character and len(character) == 1
+                            and character.isprintable()) else key
+        if len(ch) == 1 and ch.isprintable():
+            self.query += ch
+        return "continue"
+
+
+def resolve_index(key, old_idx, ids):
+    """Resolve a captured row ``key`` to its new position in ``ids``, or --
+    when that row is gone entirely (filtered/removed, not just moved) -- the
+    equivalent index clamped into ``ids`` (Phase 3's "focus stays at the
+    equivalent index" rule); ``None`` only when ``ids`` is now empty.
+    Shared by every picker index (focus/anchor/remembered row) that must
+    survive a reorder or re-filter, #2228 Phase 4 review."""
+    if key is not None and key in ids:
+        return ids.index(key)
+    if not ids:
+        return None
+    return min(old_idx, len(ids) - 1) if old_idx is not None else 0
+
+
+def capture_row_refs(ids, sel, wt_anchor, last_l):
+    """Snapshot focus/anchor/last_l by stable key + old index, for
+    :func:`remap_row_refs` after a reorder/re-filter (#2228 Phase 4)."""
+    def key_at(i):
+        return ids[i] if i is not None and 0 <= i < len(ids) else None
+
+    focus_idx = sel[1] if sel[0] == "L" else None
+    return {
+        "focus_key": key_at(focus_idx), "focus_idx": focus_idx,
+        "anchor_key": key_at(wt_anchor), "anchor_idx": wt_anchor,
+        "last_l_key": key_at(last_l), "last_l_idx": last_l,
+    }
+
+
+def remap_row_refs(refs, ids):
+    """Resolve a :func:`capture_row_refs` snapshot against the new ``ids``.
+    Returns ``(last_l, focus_idx_or_None, anchor)`` via :func:`resolve_index`;
+    the caller applies picker-specific fallbacks (default_sel(), stops())."""
+    last_l = resolve_index(refs["last_l_key"], refs["last_l_idx"], ids)
+    focus = None
+    if refs["focus_idx"] is not None:
+        focus = resolve_index(refs["focus_key"], refs["focus_idx"], ids)
+    anchor = resolve_index(refs["anchor_key"], refs["anchor_idx"], ids)
+    return last_l, focus, anchor
+
+
+def render_command_bar(list_view, composing, width, c_dim, keys):
+    """The "/" command-bar chrome row: filter text (with a cursor while
+    composing) + the active sort label, once cycled off its default."""
+    from rich.text import Text
+
+    t = Text("  / " + list_view.query, style="" if composing else c_dim)
+    if composing:
+        t.append("▏")
+    sort_lbl = list_view.sort_label(keys)
+    if sort_lbl and list_view.sort_index:
+        suffix = f"  sort: {sort_lbl}"
+        if t.cell_len + len(suffix) <= width:
+            t.append(suffix, style=c_dim)
+    if t.cell_len < width:
+        t.append(" " * (width - t.cell_len))
+    return t
+
+
+__all__ = ["ListView", "resolve_index", "capture_row_refs", "remap_row_refs",
+           "render_command_bar"]

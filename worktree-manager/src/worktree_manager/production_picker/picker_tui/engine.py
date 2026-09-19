@@ -38,7 +38,7 @@ from .. import profiles as profiles_mod
 from ..update_stage import indicator_state
 from . import derive
 from .selection import ListSelection
-from .listview import ListView
+from .listview import ListView, capture_row_refs, remap_row_refs, render_command_bar
 
 log = logging.getLogger("agent-worktrees.picker")
 
@@ -621,9 +621,7 @@ class _FocusRegion(Widget):
         # them bubble (do NOT stop) so the action_* fires, exactly as
         # PickerScreen.on_key does. Everything else runs through the manual
         # dispatcher, then we mirror focus back onto whatever region sel names.
-        # While composing the "/" command bar (#2228 Phase 4) it owns EVERY
-        # key -- checked first, so Ctrl+Left/Right etc. don't switch the
-        # machine/pivot mid-composition instead of landing in the query.
+        # Composing (#2228 Phase 4) owns EVERY key -- checked first.
         if not scr.cmd_mode and key in scr.BINDING_KEYS:
             return
         event.stop()
@@ -1021,12 +1019,10 @@ class _PickerNativeData(OptionList):
     def on_key(self, event) -> None:
         scr = self._screen
         key = event.key
-        # Global pivot/machine shortcuts stay owned by the picker's BINDINGS --
-        # except while composing the "/" command bar (#2228 Phase 4), which
-        # owns EVERY key (checked first) so Ctrl+Left/Right etc. can't switch
-        # the machine/pivot mid-composition, and Enter can't activate a row
-        # instead of committing the filter (OptionList would otherwise claim
-        # both natively).
+        # Global pivot/machine shortcuts + OptionList's own native bindings
+        # stay owned as usual -- except while composing (#2228 Phase 4),
+        # which owns EVERY key first (Enter would otherwise activate a row
+        # instead of committing the filter).
         if not scr.cmd_mode and key in scr.BINDING_KEYS:
             return
         if not scr.cmd_mode and key in self._NATIVE_KEYS:
@@ -2596,15 +2592,7 @@ class PickerScreen(Widget):
         worktrees are hidden unless Toggle-hidden is on (#1422). Worktrees with
         no owning Copilot session are split into a distinct 'Unowned' section so
         selecting one never silently cold-starts a blank conversation (#1026).
-
-        ALWAYS the full, unfiltered set -- the "/" command bar (#2228 Phase 4)
-        narrows only the render/navigation view (:meth:`current_list_visible`),
-        never this one. Every OTHER consumer (selection reconciliation,
-        cleanup/sync scope, action menus) reads this method, directly or via
-        :meth:`list_records`, and must keep seeing every worktree regardless of
-        the current query -- a filter must never silently drop a selection or
-        action target that still exists in the underlying data (review
-        finding)."""
+        ALWAYS the full, unfiltered set -- see current_list_visible() (#2228 P4)."""
         cols = ACTIVE_SPECS if self.is_all() else LIST_SPECS
         a, r, c = self.src.bucket(self._visible_scope_data())
         unowned = [w for w in r if w.get("sessionless")]
@@ -2617,20 +2605,18 @@ class PickerScreen(Widget):
         return cols, [("Active", a), ("Recent", r), ("Completed", c)]
 
     def current_list_visible(self):
-        """``current_list()``'s sections narrowed/sorted by the "/" command
-        bar's ``ListView`` state (#2228 Phase 4) -- rendering/navigation ONLY
-        (``WorktreesView.build_data``, ``stops``, focus tracking). Never
-        drops a live/bare-orphan/ACTIVE row -- the record-shape-contract
-        (README, Phase 4)."""
+        """current_list() narrowed/sorted by the "/" bar (#2228 P4) --
+        rendering/navigation ONLY; every other consumer keeps the full set."""
         cols, sections = self.current_list()
         if self._kind() != "worktrees":
             return cols, sections
-        return cols, [(label, self._wt_view(rows)) for label, rows in sections]
+        return cols, [(label, self.list_view.narrow(
+            rows, ("title", "id", "id4"), derive.wt_row_always_visible,
+            derive.WT_SORT_KEYS)) for label, rows in sections]
 
     def _wt_visible_records(self):
-        """Flat, render-order list of every VISIBLE Worktrees row (after the
-        command-bar filter/sort) -- the navigation-only counterpart to
-        :meth:`list_records`."""
+        """Flat, render-order VISIBLE Worktrees rows (nav-only counterpart to
+        list_records())."""
         _cols, sections = self.current_list_visible()
         out = []
         for _label, rows in sections:
@@ -2882,9 +2868,8 @@ class PickerScreen(Widget):
 
     # ---- Worktrees list multi-select (#2228 Phase 2b, #2258 Phase 3) ----
     def _l_ids(self):
-        """The collision-safe selection key of each VISIBLE Worktrees row (in
-        render order) -- navigation/focus-tracking only; action execution
-        above resolves against the full ``list_records()`` directly."""
+        """Collision-safe selection key of each VISIBLE row, render order
+        (nav/focus-tracking only; actions resolve against list_records())."""
         return [self._row_key(r) for r in self._wt_visible_records()]
 
     def _wt_focused_id(self):
@@ -2940,8 +2925,8 @@ class PickerScreen(Widget):
 
     def _rehome_l_focus(self):
         """Keep list focus at the equivalent index after a reload removed rows
-        (#2258 P3-7): clamp ``self.sel`` into the current VISIBLE list, or
-        fall back to a safe default when it emptied."""
+        (#2258 P3-7): clamp into the current VISIBLE list, or fall back to a
+        safe default when it emptied."""
         if self.sel[0] != "L":
             return
         n = len(self._wt_visible_records())
@@ -3059,9 +3044,7 @@ class PickerScreen(Widget):
         """Space on a Worktrees row toggles it in the list selection (#2258
         P3-3: additive, independent of the rest) and re-seats the range anchor
         there so a following Shift+arrow extends from this row. ``i`` is a
-        VISIBLE-list index (the render/navigation index space, #2228 Phase 4
-        review) -- resolved against ``_wt_visible_records()``, not the full
-        ``list_records()``."""
+        VISIBLE-list index, resolved against ``_wt_visible_records()``."""
         recs = self._wt_visible_records()
         if 0 <= i < len(recs):
             rec = recs[i]
@@ -4139,13 +4122,16 @@ class PickerScreen(Widget):
         # Keeping a distinct name lets Textual's native binding dispatch run.
         # Fold framework key-name aliases to canonical tokens once, up front, so
         # every downstream match is declarative and alias-free (#88 F2).
-        # ``character`` (raw ``event.character``, only sourced by ``on_key``
-        # callers, #2228 Phase 4 review) is the printable text a NAMED key
-        # token (e.g. Textual's "slash") represents -- passed through so the
-        # command bar composer can append it, not just a bare one-char ``key``.
+        # ``character`` (event.character) is the printable text a NAMED key
+        # token (e.g. "slash") represents, for the "/" bar composer (#2228 P4).
         key = canonical_key(key)
         if self.cmd_mode:
-            return self._dispatch_cmd_key(key, character)
+            refs = self._wt_capture_row_refs()
+            result = self.list_view.handle_compose_key(key, character)
+            if result in ("commit", "cancel"):
+                self.cmd_mode = False
+            self._wt_restore_row_refs(refs)
+            return
         # Remember the grid row before any navigation, so Tab out/in restores it.
         if self.sel and self.sel[0] == "PR":
             self.last_pr = self.sel[1]
@@ -4174,7 +4160,9 @@ class PickerScreen(Widget):
             self.cmd_mode = True
             return
         if key == "s" and self._kind() == "worktrees":
-            self._wt_cycle_sort()
+            refs = self._wt_capture_row_refs()
+            self.list_view.cycle_sort(derive.WT_SORT_KEYS)
+            self._wt_restore_row_refs(refs)
             return
 
         zone = self.sel[0]
@@ -4257,10 +4245,8 @@ class PickerScreen(Widget):
             self.sel = self.default_sel()
             self.debug = "refreshed · reloaded worktrees"
         elif key in ("q", "escape"):
-            # Esc composes with the filter clear (#2228 Phase 4) and selection
-            # collapse (#2258 P3-5) before the quit-confirm (#1429): an active
-            # filter clears first, then a multi-selection collapses; only a
-            # press with neither reaches the quit prompt.
+            # Esc: filter clear, then selection collapse (#2258 P3-5), then
+            # quit-confirm (#1429) -- only when all three are already clear.
             if key == "escape" and self.list_view.query:
                 refs = self._wt_capture_row_refs()
                 self.list_view.clear()
@@ -4270,129 +4256,29 @@ class PickerScreen(Widget):
                 return
             self._open_quit_confirm()
 
-    def _dispatch_cmd_key(self, key, character=None):
-        """Compose the "/" command-bar's free-text filter (#2228 Phase 4).
-        Owns every key while ``cmd_mode`` is set; Enter/Escape leave compose
-        mode (Escape also clears the query), Backspace edits, Space (Textual
-        names the bar itself "space", not a literal " ") appends a literal
-        space, and any other printable character is appended -- preferring
-        ``character`` (``event.character``) over ``key`` so a NAMED printable
-        token (Textual's "slash" for ``/``, and others like it) still lands
-        in the query instead of being silently dropped (review finding).
-        Non-printable navigation keys are ignored while composing -- the
-        command bar owns input until the operator leaves it. Every
-        query-changing branch remaps the focused/anchored/remembered
-        Worktrees row by stable key across the resulting reorder/re-filter
-        (review finding: a plain index-out-of-range check let filtering
-        silently reassign focus to a different row at the same position)."""
-        refs = self._wt_capture_row_refs()
-        if key == "enter":
-            self.cmd_mode = False
-        elif key == "escape":
-            self.cmd_mode = False
-            self.list_view.clear()
-        elif key == "backspace":
-            self.list_view.query = self.list_view.query[:-1]
-        elif key == "space":
-            self.list_view.query += " "
-        else:
-            ch = character if (character and len(character) == 1
-                                and character.isprintable()) else key
-            if len(ch) == 1 and ch.isprintable():
-                self.list_view.query += ch
-        self._wt_restore_row_refs(refs)
-
     def _wt_capture_row_refs(self):
-        """Snapshot the Worktrees list's focused/anchored/remembered rows by
-        their STABLE key (#2228 Phase 4 review), to be handed to
-        :meth:`_wt_restore_row_refs` after an operation that reorders or
-        re-filters the list -- ``sel``/``wt_anchor``/``last_l`` are plain
-        numeric indices, which silently point at a DIFFERENT row once the
-        list changes shape."""
-        ids = self._l_ids()
-
-        def key_at(i):
-            return ids[i] if i is not None and 0 <= i < len(ids) else None
-
-        return {
-            "focus": key_at(self.sel[1]) if self.sel[0] == "L" else None,
-            "anchor": key_at(self.wt_anchor),
-            "last_l": key_at(self.last_l),
-        }
+        """Snapshot focus/anchor/last_l by stable key (listview.py)."""
+        return capture_row_refs(self._l_ids(), self.sel, self.wt_anchor, self.last_l)
 
     def _wt_restore_row_refs(self, refs):
-        """Remap the snapshot from :meth:`_wt_capture_row_refs` onto the
-        (now reordered/re-filtered) list's new indices. ``last_l`` is
-        remapped independently of current focus (review finding: it was
-        previously only refreshed inside the focus branch, leaving it stale
-        when the operator cycled sort/filtered from outside the list, e.g.
-        focus on a machine/button row) -- the focus branch's own update
-        still wins when focus IS in the list. A captured key that no longer
-        exists (the row was filtered/removed entirely, not just moved) lands
-        at the equivalent index instead -- Phase 3's own rule for a deleted
-        row ("focus stays at the equivalent index") -- clamped to the new
-        (possibly shorter) list, or off the list entirely only when it's now
-        empty (review finding: a stale index could otherwise silently keep
-        naming a completely different row)."""
+        """Remap a _wt_capture_row_refs() snapshot onto the new list."""
         ids = self._l_ids()
-        if refs["last_l"] is not None:
-            if refs["last_l"] in ids:
-                self.last_l = ids.index(refs["last_l"])
-            else:
-                self.last_l = min(self.last_l, max(0, len(ids) - 1)) if ids else 0
-        if refs["focus"] is not None:
-            if refs["focus"] in ids:
-                self.sel = ("L", ids.index(refs["focus"]))
-                self.last_l = self.sel[1]
-            elif ids:
-                idx = min(self.sel[1], len(ids) - 1)
-                self.sel = ("L", idx)
-                self.last_l = idx
+        last_l, focus, anchor = remap_row_refs(refs, ids)
+        if last_l is not None:
+            self.last_l = last_l
+        if refs["focus_idx"] is not None:
+            if focus is not None:
+                self.sel, self.last_l = ("L", focus), focus
             else:
                 self.sel = self.default_sel()
         elif self.sel[0] == "L" and self.sel not in self.stops():
             self.sel = self.default_sel()
-        if refs["anchor"] is not None:
-            if refs["anchor"] in ids:
-                self.wt_anchor = ids.index(refs["anchor"])
-            else:
-                self.wt_anchor = min(self.wt_anchor, max(0, len(ids) - 1)) if ids else None
-
-    def _wt_cycle_sort(self):
-        """Cycle the Worktrees list's sort key, then remap the focus/anchor/
-        remembered rows across the reorder (#2228 Phase 4 review): sorting
-        moves every row's position, so those three plain numeric indices
-        would otherwise silently keep pointing at whatever row now sits at
-        the old index."""
-        refs = self._wt_capture_row_refs()
-        self.list_view.cycle_sort(derive.WT_SORT_KEYS)
-        self._wt_restore_row_refs(refs)
-
-    def _wt_view(self, rows):
-        """Apply the Worktrees list's filter/sort state to one bucket. Never
-        drops a live/bare-orphan row -- the record-shape-contract (README,
-        Phase 4)."""
-        kept = self.list_view.filter(rows, ("title", "id", "id4"),
-                                      keep=derive.wt_row_always_visible)
-        return self.list_view.sort(kept, derive.WT_SORT_KEYS)
+        self.wt_anchor = anchor
 
     def _cmd_bar_row(self, width):
-        """The "/" command-bar chrome row (#2228 Phase 4): the filter text
-        while composing/active, plus the active sort label once it's been
-        cycled off its default. Only rendered by the caller when there is
-        something to show, so an untouched list's chrome is unchanged."""
-        t = Text("  / " + self.list_view.query,
-                  style="" if self.cmd_mode else C_DIM)
-        if self.cmd_mode:
-            t.append("▏")
-        sort_lbl = self.list_view.sort_label(derive.WT_SORT_KEYS)
-        if sort_lbl and self.list_view.sort_index:
-            suffix = f"  sort: {sort_lbl}"
-            if t.cell_len + len(suffix) <= width:
-                t.append(suffix, style=C_DIM)
-        if t.cell_len < width:
-            t.append(" " * (width - t.cell_len))
-        return t
+        """The "/" command-bar chrome row (listview.py)."""
+        return render_command_bar(self.list_view, self.cmd_mode, width, C_DIM,
+                                   derive.WT_SORT_KEYS)
 
     def _open_quit_confirm(self):
         """Esc/q on a main pivot view asks before quitting (#1429).
@@ -5688,15 +5574,14 @@ class PickerScreen(Widget):
         if row.get("hidden") if "hidden" in row else (
                 (row.get("kind") or "session") in ("system", "bridge")):
             self.show_hidden = True
-        # Resolve by stable id against the FULL set (#2228 Phase 4 review): an
-        # active "/" filter/query must never make an explicit internal jump
-        # silently fail just because the destination doesn't currently match
-        # it. Clear the query first so the target is guaranteed visible,
-        # THEN resolve its render-order index.
+        # If the target is filtered out by an active "/" query, clear the
+        # query first (so the jump can't silently fail) then resolve index.
         full_match = any(
             (r.get("raw") or {}).get("id") == wid for r in self.list_records())
+        refs = self._wt_capture_row_refs()
         if full_match and self.list_view.query:
             self.list_view.clear()
+        self._wt_restore_row_refs(refs)
         records = self._wt_visible_records()
         target_i = next(
             (i for i, r in enumerate(records)
@@ -6420,9 +6305,8 @@ class PickerScreen(Widget):
         # top-level views -- every modal is a native ModalScreen (#88 F4) that
         # sits above this widget on the screen stack and consumes keys itself --
         # so there is no overlay-active case to guard against. Everything else
-        # goes to the manual dispatcher. While composing the "/" command bar
-        # (#2228 Phase 4) it owns EVERY key -- checked first, same as the
-        # region widgets' own ``on_key``.
+        # goes to the manual dispatcher. Composing (#2228 Phase 4) owns
+        # EVERY key -- checked first, same as the region widgets' own.
         if not self.cmd_mode and key in self.BINDING_KEYS:
             return
         event.stop()

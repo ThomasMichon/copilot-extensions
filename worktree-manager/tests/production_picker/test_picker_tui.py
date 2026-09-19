@@ -4685,10 +4685,11 @@ def test_command_bar_escape_clears_filter_before_backing_out(monkeypatch):
 
 def test_command_bar_idle_escape_preserves_focus_by_key(monkeypatch):
     """PR #2911 review: the idle-Escape filter-clear path (distinct from the
-    composing-Escape path in `_dispatch_cmd_key`) must ALSO remap focus by
-    the row's stable key -- clearing the filter re-expands the list, and a
-    plain index-out-of-range check would leave `sel` pointing at whatever
-    row now sits at the old index instead of the one actually focused."""
+    composing-Escape path in `_dispatch_key`'s cmd_mode branch) must ALSO
+    remap focus by the row's stable key -- clearing the filter re-expands
+    the list, and a plain index-out-of-range check would leave `sel`
+    pointing at whatever row now sits at the old index instead of the one
+    actually focused."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
     local = ("anomalous-potato", "Win")
     raws = [
@@ -4779,7 +4780,7 @@ def test_command_bar_never_hides_a_live_worktree(monkeypatch):
 
 
 def test_command_bar_filter_never_narrows_list_records_or_selection(monkeypatch):
-    """PR #2911 review: `_wt_view()`'s filtering must apply ONLY to the
+    """PR #2911 review: the filter/sort narrowing must apply ONLY to the
     render/navigation view (`current_list_visible`/`_wt_visible_records`) --
     `list_records()` (and everything built on it: selection reconciliation,
     cleanup/sync scope, action menus) must keep seeing the FULL unfiltered
@@ -5012,7 +5013,7 @@ def test_command_bar_sort_cycle_remaps_last_l_from_outside_the_list(monkeypatch)
             scr.sel = ("M", 0)
             scr.refresh()
             await pilot.pause()
-            scr._wt_cycle_sort()
+            scr._dispatch_key("s")
             assert [w["title"] for w in scr._wt_visible_records()] == ["Alpha idle", "Zeta idle"]
             assert scr._wt_visible_records()[scr.last_l]["title"] == "Zeta idle"
 
@@ -5248,7 +5249,7 @@ def test_command_bar_appends_named_printable_keys(monkeypatch):
             # A second literal "/" while composing: Textual delivers it as
             # the named "slash" token, not a bare "/" key -- must still
             # append via event.character, not be silently dropped.
-            scr._dispatch_cmd_key("slash", "/")
+            scr._dispatch_key("slash", "/")
             assert scr.list_view.query == "/"
 
     asyncio.run(run())
