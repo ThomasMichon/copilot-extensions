@@ -141,8 +141,9 @@ ended and listing the execution legs it was hosting
 That observation stays honest even across the provider's own full restart — not
 only a graceful one — because the provider keeps a **durable liveness snapshot**
 of what it was hosting, independent of any one process's memory
-(`§Concepts/Durable liveness snapshot` / `§Features/recoverable-across-full
--restart` on the session-hosting vision); the Picker never needs to distinguish
+(`§Concepts/Durable liveness snapshot` /
+`§Features/recoverable-across-full-restart` on the session-hosting vision); the
+Picker never needs to distinguish
 "the host process died" from "the whole machine restarted," since both surface
 through the identical provider-published signal. The Picker never infers
 correlated loss itself from worktree-side staleness alone — that would cross

@@ -110,14 +110,23 @@ A provider's own process is not exempt from the same loss it is meant to detect
 for others — its host process can itself die, restart, or run on a machine that
 reboots entirely, discarding whatever it held only in memory. A provider that
 wants to honestly answer *"who was I hosting"* after **any** restart of its own —
-not only a graceful one — periodically persists that answer to durable storage
-independent of its own process lifetime, and reconciles against it the next time
-it starts: anything the snapshot names as hosted that current reality no longer
-shows alive is real, attributable host-loss evidence, not a guess reconstructed
-after the fact. This is what makes a provider's host-loss observation
-(`§Concepts/Host-owned execution identity`) honest across the harder case a
-full machine restart represents, not only the case where some part of the
-provider survives to notice its own child died.
+not only a graceful one — persists that answer to durable storage independent of
+its own process lifetime, updating it at meaningful lifecycle transitions (a leg
+starting, retiring, or handing off) in addition to any periodic cadence, so the
+window in which the record can be stale stays small. The snapshot is still only
+ever as fresh as its last write, and reconciliation at startup must treat it
+that way: a leg the snapshot names that current reality no longer shows alive is
+**candidate** host-loss evidence, not an automatic verdict — the same leg may
+simply have retired cleanly between the last write and the restart, and a leg
+that started after the last write is not itself proof of anything either way. A
+provider reconciling a possibly-stale snapshot marks an unconfirmed leg as
+exactly that (mirroring the fabric's own
+`§Behaviors/marked-not-multiplied-uncertainty` on the picker vision) rather than
+asserting loss it cannot actually back, and corroborates with an independent
+liveness check before treating a named leg as genuinely gone. This is what makes
+a provider's host-loss observation (`§Concepts/Host-owned execution identity`)
+honest across the harder case a full machine restart represents, not only the
+case where some part of the provider survives to notice its own child died.
 
 ## Features
 
@@ -196,7 +205,12 @@ survives the provider's own process ending, not held only in memory. A provider
 that never persists this cannot honestly distinguish "nothing was lost" from
 "I simply don't remember" after it restarts — the guarantee exists specifically
 so that distinction stays truthful across the provider's own worst case, a full
-machine restart, not only its process exiting cleanly.
+machine restart, not only its process exiting cleanly. Because the persisted
+record is only ever as current as its last write, a stale entry is reconciled as
+an **unconfirmed** candidate, never asserted as loss outright — the same
+honesty-under-staleness the fabric already requires elsewhere
+(`§Behaviors/marked-not-multiplied-uncertainty` on the picker vision), applied
+here to the provider's own bookkeeping instead of a worktree's.
 
 ### launch-receipts-are-provisional
 
