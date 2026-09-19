@@ -4,7 +4,9 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
 - **Created:** 2026-09-19
-- **Status:** Active
+- **Status:** Active — Phase 1 and Phase 2 fully done; Phase 3's two
+  remaining checklist items are implemented and out for review downstream,
+  not yet merged. Flips to Done once that downstream PR lands.
 - **Vision:** [`visions/plugins/agent-dispatch`](../../../visions/plugins/agent-dispatch/README.md)
   §*Features*/`durable-attachment-history` ·
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
@@ -95,11 +97,17 @@ Intelligence Dampener)
 ## Plan
 
 ### Phase 1 — agent-dispatch: durable attachment history (the data source)
-- [ ] Design the history record shape: `(task_id, session_id, worktree_id,
+- [x] Design the history record shape: `(task_id, session_id, worktree_id,
       machine, attached_at, detached_at, detach_reason)`. Detach reasons
       cover at least: `completed`, `suspended`, `released`, `superseded`
       (context-exhaustion handoff to a successor session per
-      *suspend-idle-resume-same-session*).
+      *suspend-idle-resume-same-session*). **Confirmed delivered as
+      designed:** the shipped `task_attachments` table
+      (`plugins/agent-dispatch/src/agent_dispatch/queue.py`) carries this
+      exact designed field set, plus its own internal
+      `id INTEGER PRIMARY KEY AUTOINCREMENT` row identifier (an
+      implementation detail outside the designed shape, not a deviation
+      from it).
 - [x] Add an append-only `task_attachments` table (or equivalent), written
       by the existing lifecycle transition points that already touch
       `owner_session_id`/`target_worktree` (`bind_owner_session`, `suspend`,
@@ -196,14 +204,25 @@ Intelligence Dampener)
 - [ ] `aperture-labs` Intelligence Dampener: re-attempt the "View reviewer"
       link (`session-worktree-archive-linkout` Phase 4, previously reverted
       as PR #7200) using the new dispatch-task-reference resolution instead
-      of the `dampener-pr<N>` naming convention.
+      of the `dampener-pr<N>` naming convention. **Implemented downstream,
+      pending merge:** the consumer's "View reviewer" link now resolves via
+      this effort's Phase 2 route instead of a bespoke worktree-naming
+      convention; keep unchecked until the downstream PR merges.
 - [ ] Neuron Forge's own `/dispatch/:taskId` "exact live session" viewer
       (`worktree_tasks.py`): evaluate whether it should be retired in favor
       of always routing through the general resolver, or kept as a distinct
       "insist on live, nothing else" affordance for a narrower use case.
       Decide, don't guess — this route is used by more than just Dampener's
       link (any dispatched-task viewer), so retiring it needs its own
-      callers audited first.
+      callers audited first. **Decided: extend, don't retire.** Audited its
+      callers first — the consuming Dampener UI's queue and verdicts panels
+      are its only current callers, no other consumer exists yet. The
+      viewer's resolver now falls back from the exact-live check to the
+      new `GET /api/dispatch-tasks/{id}/session` route (this effort's
+      Phase 2) before giving up, keeping one stable URL for both the
+      in-flight and already-reclaimed-worktree cases instead of inventing a
+      second route. Implemented downstream, pending merge; keep unchecked
+      until that PR merges.
 - [x] Document the shared resolution primitive in each vision's Concepts &
       Components (not just Features) so a future consumer finds it before
       inventing its own convention. **Delivered:** `visions/plugins/
@@ -214,9 +233,14 @@ Intelligence Dampener)
 
 ## Validation Plan
 
-- [ ] Phase 1: a synthetic multi-release/resume/reattach sequence on one
+- [x] Phase 1: a synthetic multi-release/resume/reattach sequence on one
       task produces a complete, correctly-ordered attachment history with no
-      gaps or duplicate records.
+      gaps or duplicate records. Proven by
+      `test_attachment_history_records_bind_release_and_handoff`
+      (`plugins/agent-dispatch/tests/test_queue.py`) — bind→same-session
+      suspend/resume (no-op)→suspend→release→re-claim(session-b)→handoff
+      (session-c), asserting no record is discarded and ordering stays
+      newest-first at every step.
 - [x] Phase 2: resolving the same task by its dispatch-task reference and by
       its worktree ID directly produce identical results when both are
       available; resolving after the task's worktree is reclaimed still
@@ -227,7 +251,11 @@ Intelligence Dampener)
 - [ ] Phase 3: Dampener's "View reviewer" link, re-implemented, resolves for
       an in-flight review, a just-completed one, and one whose review
       worktree has since been reclaimed — with zero Dampener-specific
-      resolution logic in the link builder itself.
+      resolution logic in the link builder itself. **Implemented
+      downstream, pending merge:** the consumer's full test suite passes
+      (535/535, including 7 new for the durable route/proxy) and both
+      touched packages' typecheck/lint are clean; keep unchecked until the
+      downstream PR merges.
 
 ## Proposal
 
@@ -272,3 +300,27 @@ _Pending — Phase 1's schema/API design is the first concrete artifact._
 - Revised `visions/plugins/agent-dispatch` (`durable-attachment-history`) and
   `visions/plugins/agent-bridge` (`resolve-by-any-origin-reference`) ahead of
   this plan, per vision-first discipline.
+
+### 2026-09-19 — Phase 3 implemented downstream, pending merge; Phase 1/Validation Plan retro-check
+- The consuming Dampener UI's "View reviewer" link re-implemented via the
+  Phase 2 resolver instead of the `dampener-pr<N>` naming convention
+  (previously reverted, see the course-correction entry above). Neuron
+  Forge's `/dispatch/:taskId` viewer extended (not retired) to fall back to
+  the durable resolver after its exact-live attempt fails, after auditing
+  its callers first (the Dampener UI's queue/verdicts panels are the only
+  consumers today). 535/535 downstream tests pass (7 new); both touched
+  packages' `tsc`/`eslint` clean. **Change is open for review downstream,
+  not yet merged** — the Plan/Validation Plan checkboxes stay unchecked
+  until it lands, per this repo's own convention against marking an item
+  complete on an unmerged PR.
+- Retro-checked Phase 1 and its Validation Plan item against the merged
+  code rather than leaving them stale: the shipped `task_attachments` table
+  matches the originally-designed record shape (plus its own internal
+  autoincrement row id, outside the designed field set), and
+  `test_attachment_history_records_bind_release_and_handoff`
+  (`plugins/agent-dispatch/tests/test_queue.py`) already proves the
+  no-gaps/no-duplicates multi-release/resume/handoff sequence the
+  Validation Plan called for — both were substantively done but left
+  unchecked. Backfill remains a deliberate, documented deferral (not a gap).
+- Status flips to Done once the downstream Phase 3 change merges — the one
+  remaining open item.
