@@ -7,7 +7,7 @@
 - **Scope:** leaf (per-plugin, under the [visions index](../../README.md); honors
   the [plugin-services](../../plugin-services/README.md) service model)
 - **Status:** Draft
-- **Last revised:** 2026-09-04
+- **Last revised:** 2026-09-18
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's future `plugins/agent-index/docs/`
 
@@ -91,10 +91,25 @@ The pluggable adapters that pull a repo's corpus into the index:
   assigned to me" or a couple of key repositories), never a whole-project or
   whole-organization firehose. Absent an explicit query specification the
   connector indexes nothing, rather than defaulting to a broad crawl.
+- **External, cross-process connectors — content-domain providers.** Beyond
+  the in-process connector interface (a Python object registered inside the
+  engine's own process), a source domain may also be contributed by an
+  **external, unvendored provider**: a self-contained CLI the provider ships,
+  discovered by dropping a manifest into a standard `providers.d/` directory —
+  the same shape the ecosystem's other drop-in provider seams already use
+  (agent-bridge's namespace resolvers). The engine drives the provider's CLI
+  over a process boundary for each connector operation, never links or imports
+  the provider's code. This lets a downstream deployment (or a facility-scale
+  consumer with source domains the engine will never carry as built-ins)
+  extend indexed breadth **without becoming a build-time dependency** of the
+  engine, and without the engine vendoring anything provider-specific.
 
 Every connector shares one **good-citizen ingest discipline** (see Behaviors):
 incremental by default, event-driven where the source offers it, and rate-aware
-everywhere.
+everywhere. An external content-domain provider is held to the same
+discipline as a built-in — the engine cannot inspect its internals, but the
+manifest/CLI contract carries the same incremental/rate-aware expectations as
+a condition of being driven.
 
 ### Metadata facets
 The meaning-bearing structured attributes (source, repo, path, language, item
@@ -165,6 +180,20 @@ managed backlog is **driven by operator-supplied query specifications** (curated
 work-item queries and pull-request filters), so the operator indexes exactly the
 subsets they care about and nothing more.
 
+### external-content-domain-providers
+A source domain may also join as an **external, cross-process provider** —
+a self-contained CLI, discovered by a manifest dropped into a standard
+`providers.d/` directory, driven by the engine over a process boundary for
+each connector operation (the same discovery shape agent-bridge's namespace
+resolvers already use). This is additive to, not a replacement for, the
+in-process connector interface: a provider is never vendored or imported, a
+malformed or missing manifest is skipped with a warning rather than failing
+startup, and a provider that returns malformed data is rejected — fails
+closed — rather than silently treated as empty or trusted as-is. This is how
+a large, many-source deployment (or a facility-scale consumer with source
+domains the engine will never carry as built-ins) extends indexed breadth
+without becoming a build-time dependency of the engine.
+
 ### source-and-facet-scoping
 Queries scope by source and by meaning-bearing metadata facets (repo, path,
 language, item type, label, state) to return the right slice of the corpus rather
@@ -211,6 +240,11 @@ list baked into the plugin.
 The connector interface and query API are a **stable extension surface**: a
 downstream product layers additional sources, a human search experience, and
 branding **on top of** the engine, consuming it rather than re-implementing it.
+Two extension shapes exist: an **in-process connector** (vendored/linked
+directly into whichever process runs the engine) and an **external
+content-domain provider** (an unvendored CLI, discovered via `providers.d/`)
+— a downstream picks whichever fits its deployment without the engine caring
+which.
 
 ### recoverable-rebuildable-index
 The index and any processing state are **derived** and reconstructable from the
@@ -461,3 +495,15 @@ generic is what lets many different products reuse it.
   and selects immutable service runtimes. Direct plugin commands cannot install
   the host stack, and missing configuration or supervision remains inert rather
   than triggering a fallback installer.
+
+- **2026-09-18** — Added **external content-domain providers**: a source domain
+  may join as an unvendored CLI, discovered via a `providers.d/` manifest and
+  driven by the engine over a process boundary — mirroring agent-bridge's
+  namespace-resolver `providers.d/` pattern, additive to the existing in-process
+  connector interface. Sharpened `pluggable-source-connectors` into a
+  dedicated new `external-content-domain-providers` Feature and extended
+  `reusable-engine-extension-seam` to name both extension shapes. Mined from
+  operator direction on a downstream facility-scale deployment's need to reach
+  parity with a richer, in-process consumer's content breadth without a
+  build-time or data-migration coupling (vision-extending, preceding
+  execution).

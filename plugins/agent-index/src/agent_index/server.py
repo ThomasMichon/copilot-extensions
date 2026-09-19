@@ -234,6 +234,14 @@ def build_app(*, passive: bool = False) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         data_dir().mkdir(parents=True, exist_ok=True)
+        try:
+            from .sources.providers import discover_and_register_providers
+
+            discover_and_register_providers()
+        except Exception:
+            # Best-effort: a providers.d discovery failure must never block the
+            # service from starting -- the built-in connectors still work.
+            log.warning("Content-domain provider discovery skipped", exc_info=True)
         if app.state.promoted:
             try:
                 await _start_task_runner(app)
