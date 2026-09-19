@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 import types
 from pathlib import Path
 
+from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
 from agent_worktrees import git_ops, pr_ops, tracking
 
@@ -762,6 +764,129 @@ class TestCreatePRRoleResolution:
 # create_pr -- refspec head scheme (#1815)
 # ---------------------------------------------------------------------------
 
+class TestAuditAttributionRisk:
+    """pr-attribution-codenames Phase 5: audit_attribution_risk (config-only)."""
+
+    def _config(self, config, **pr_overrides):
+        import dataclasses
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(repo.pr, **pr_overrides)
+        return dataclasses.replace(config, repos={"ext": dataclasses.replace(repo, pr=pr)})
+
+    def test_no_findings_for_default_config(self, pr_repo):
+        config, _wid, _wt, _ = pr_repo
+        assert pr_ops.audit_attribution_risk(config) == []
+
+    def test_no_findings_when_attribution_true(self, pr_repo):
+        config, _wid, _wt, _ = pr_repo
+        config = self._config(
+            config, source_attribution=True, head_pattern="user/{machine}/{slug}",
+            source_attribution_configured=True,
+        )
+        assert pr_ops.audit_attribution_risk(config) == []
+
+    def test_finding_for_risky_head_pattern_with_explicit_false(self, pr_repo):
+        config, _wid, _wt, _ = pr_repo
+        config = self._config(
+            config, head_pattern="{machine}/{slug}",
+            source_attribution_configured=True,
+        )
+        findings = pr_ops.audit_attribution_risk(config)
+        assert len(findings) == 1
+        assert "{machine}" in findings[0]
+        assert "absent" not in findings[0]
+
+    def test_finding_for_risky_head_pattern_with_genuinely_absent_key(self, pr_repo):
+        # A raw config that omits `source_attribution` entirely is parsed the
+        # same as an explicit `false` (`prcfg.source_attribution is False`),
+        # but `source_attribution_configured` distinguishes the two so the
+        # audit's finding text says "absent", not "False", for this case.
+        config, _wid, _wt, _ = pr_repo
+        config = self._config(
+            config, head_pattern="{machine}/{slug}",
+            source_attribution_configured=False,
+        )
+        findings = pr_ops.audit_attribution_risk(config)
+        assert len(findings) == 1
+        assert "absent" in findings[0]
+
+    def test_finding_under_codename_mode(self, pr_repo):
+        config, _wid, _wt, _ = pr_repo
+        config = self._config(
+            config, source_attribution="codename", head_pattern="{machine}/{slug}",
+            source_attribution_configured=True,
+        )
+        findings = pr_ops.audit_attribution_risk(config)
+        assert len(findings) == 1
+        assert "true" in findings[0]
+
+
+class TestAttributionAuditCLI:
+    """CLI-level regression tests for `cmd_attribution_audit`."""
+
+    def _args(self, *, use_json: bool = False) -> argparse.Namespace:
+        return argparse.Namespace(json=use_json, config=None)
+
+    def test_plain_mode_no_findings_ok(self, pr_repo, monkeypatch, capsys):
+        config, _wid, _wt, _ = pr_repo
+        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+        rc = m.cmd_attribution_audit(self._args())
+        assert rc == 0
+        assert "No branch-name leak-class risk" in capsys.readouterr().out
+
+    def test_plain_mode_warns_and_returns_1_on_findings(
+        self, pr_repo, monkeypatch, capsys,
+    ):
+        import dataclasses
+        config, _wid, _wt, _ = pr_repo
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(repo.pr, head_pattern="{machine}/{slug}")
+        config = dataclasses.replace(
+            config, repos={"ext": dataclasses.replace(repo, pr=pr)}
+        )
+        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+        rc = m.cmd_attribution_audit(self._args())
+        assert rc == 1
+        assert "{machine}" in capsys.readouterr().out
+
+    def test_json_mode_reports_findings_but_exits_0(
+        self, pr_repo, monkeypatch, capfd,
+    ):
+        import dataclasses
+        import json
+        config, _wid, _wt, _ = pr_repo
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(repo.pr, head_pattern="{machine}/{slug}")
+        config = dataclasses.replace(
+            config, repos={"ext": dataclasses.replace(repo, pr=pr)}
+        )
+        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+        rc = m.cmd_attribution_audit(self._args(use_json=True))
+        assert rc == 0
+        payload = json.loads(capfd.readouterr().out)
+        assert payload["success"] is True
+        assert len(payload["findings"]) == 1
+        assert "{machine}" in payload["findings"][0]
+
+    def test_config_load_failure_reported(self, monkeypatch, capsys):
+        def _raise(*a, **k):
+            raise ValueError("no active project")
+        monkeypatch.setattr(cfg, "load_config", _raise)
+        rc = m.cmd_attribution_audit(self._args())
+        assert rc == 1
+        assert "no active project" in capsys.readouterr().out
+
+    def test_config_load_failure_reported_json(self, monkeypatch, capfd):
+        import json
+        def _raise(*a, **k):
+            raise ValueError("no active project")
+        monkeypatch.setattr(cfg, "load_config", _raise)
+        rc = m.cmd_attribution_audit(self._args(use_json=True))
+        assert rc == 1
+        payload = json.loads(capfd.readouterr().out)
+        assert payload["error"] == "no active project"
+
+
 class TestCreatePRRefspec:
     def _refspec_config(self, config, **pr_overrides):
         import dataclasses
@@ -946,6 +1071,87 @@ class TestCreatePRRefspec:
         assert {p.branch for p in rec.prs} == {
             "pr/add-feature-aaaa", "pr/second-thing-aaaa",
         }
+
+
+class TestCreatePRBranchLeakGuard:
+    """pr-attribution-codenames Phase 5: hard-block a leaking effective head."""
+
+    def _config(self, config, **pr_overrides):
+        import dataclasses
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(repo.pr, **pr_overrides)
+        return dataclasses.replace(config, repos={"ext": dataclasses.replace(repo, pr=pr)})
+
+    def test_explicit_branch_with_raw_worktree_id_is_blocked(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        res = pr_ops.create_pr(
+            wid, config, title="Add feature", branch=f"worktree/{wid}",
+        )
+        assert res["success"] is False
+        assert "leak" in res["error"]
+        assert wid in res["error"]
+        # Nothing was pushed -- the branch never exists on the remote.
+        assert not git_ops.remote_branch_exists(
+            "origin", f"worktree/{wid}", cwd=str(wt_path)
+        )
+
+    def test_head_pattern_with_machine_token_is_blocked(self, pr_repo):
+        config, wid, _wt_path, _ = pr_repo
+        config = self._config(config, head_pattern="user/{machine}/{slug}")
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+        assert res["success"] is False
+        assert "leak" in res["error"]
+        assert "machine name" in res["error"]
+
+    def test_source_attribution_true_allows_the_raw_head(self, pr_repo):
+        config, wid, _wt_path, _ = pr_repo
+        config = self._config(config, source_attribution=True)
+        res = pr_ops.create_pr(
+            wid, config, title="Add feature", branch=f"worktree/{wid}",
+        )
+        assert res["success"] is True, res
+
+    def test_codename_mode_still_blocks_a_leaking_branch(self, pr_repo):
+        config, wid, _wt_path, _ = pr_repo
+        config = self._config(config, source_attribution="codename")
+        res = pr_ops.create_pr(
+            wid, config, title="Add feature", branch=f"worktree/{wid}",
+        )
+        assert res["success"] is False
+        assert "leak" in res["error"]
+
+    def test_dry_run_still_reports_the_block(self, pr_repo):
+        config, wid, _wt_path, _ = pr_repo
+        res = pr_ops.create_pr(
+            wid, config, title="Add feature", branch=f"worktree/{wid}",
+            dry_run=True,
+        )
+        assert res["success"] is False
+        assert "leak" in res["error"]
+
+    def test_safe_default_head_pattern_is_unaffected(self, pr_repo):
+        # Regression: the ordinary snapshot/refspec default patterns never
+        # embed a private identifier, so they must still succeed unchanged.
+        config, wid, _wt_path, _ = pr_repo
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+        assert res["success"] is True, res
+
+    def test_renamed_machine_still_blocks_the_recorded_identity(self, pr_repo):
+        # config.machine (live) can differ from record.machine (frozen at
+        # registration, e.g. after a machine rename/migration). An explicit
+        # --branch embedding the OLD recorded machine name must still be
+        # blocked even though the live config machine no longer matches it.
+        config, wid, _wt_path, _ = pr_repo
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.machine == "test"
+        import dataclasses
+        renamed_config = dataclasses.replace(config, machine="new-machine-name")
+        res = pr_ops.create_pr(
+            wid, renamed_config, title="Add feature", branch="user/test/reused-head",
+        )
+        assert res["success"] is False
+        assert "machine name" in res["error"]
+        assert "'test'" in res["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -1384,6 +1590,61 @@ class TestPRFinalizeAndPush:
         assert rec.pr.head_sha == local_head
         assert rec.pr.state == "open"
 
+    def test_push_changes_blocks_a_leaking_recorded_branch(self, pr_repo):
+        # pr-attribution-codenames Phase 5 (round 2): create-pr's guard only
+        # covers the branch IT chooses -- a leaking name recorded some other
+        # way (e.g. `set-pr --branch`) must still be blocked when
+        # push-changes later republishes `record.pr.branch` directly.
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _remote_dir = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+
+        leaking_branch = f"worktree/{wid}"
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.branch = leaking_branch
+        tracking.save_record(rec)
+
+        # push-changes' snapshot-mode "on worktree/<id>" path resolves the
+        # branch to (re)snapshot from the active PR's recorded branch --
+        # simulate the ordinary post-create-pr state (HEAD back on the
+        # worktree branch with a feedback commit) rather than checking out
+        # the leaking name itself.
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        ok = fin.push_changes(wid, config)
+        assert ok is False
+        assert not git_ops.remote_branch_exists(
+            "origin", leaking_branch, cwd=str(wt_path)
+        )
+
+    def test_push_changes_blocks_recorded_machine_after_rename(self, pr_repo):
+        # config.machine (live) vs record.machine (frozen) -- push-changes
+        # must check both, exactly like create_pr (review round 3).
+        import dataclasses
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _remote_dir = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.machine == "test"
+        rec.pr.branch = "user/test/reused-head"
+        tracking.save_record(rec)
+
+        renamed_config = dataclasses.replace(config, machine="new-machine-name")
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        ok = fin.push_changes(wid, renamed_config)
+        assert ok is False
+        assert not git_ops.remote_branch_exists(
+            "origin", "user/test/reused-head", cwd=str(wt_path)
+        )
+
     def test_push_changes_refreshes_marker_and_preserves_body(
         self, pr_repo, monkeypatch
     ):
@@ -1693,6 +1954,29 @@ class TestPRFinalizeAndPush:
         _git("checkout", "-b", "sidebar", cwd=wt_path)
         ok = fin.push_changes(wid, config)
         assert ok is False
+
+    def test_push_changes_refspec_blocks_a_leaking_recorded_branch(self, pr_repo):
+        # Same guard as the snapshot-mode test above, exercised on the
+        # refspec publish path.
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        config = self._refspec_config(config)
+        pr_ops.create_pr(wid, config, title="Add feature")
+
+        leaking_branch = f"worktree/{wid}"
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.branch = leaking_branch
+        tracking.save_record(rec)
+
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        ok = fin.push_changes(wid, config)
+        assert ok is False
+        assert not git_ops.remote_branch_exists(
+            "origin", leaking_branch, cwd=str(wt_path)
+        )
 
     def test_push_changes_refspec_dirty_refused(self, pr_repo):
         from agent_worktrees import finalize as fin

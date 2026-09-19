@@ -266,6 +266,267 @@ class TestAttribution:
         assert attribution.parse_marker("no marker here") is None
 
 
+class TestValidateEffectiveHead:
+    """pr-attribution-codenames Phase 5: branch-name leak class."""
+
+    def test_true_attribution_is_always_a_noop(self):
+        # source_attribution: true already accepts full raw exposure -- any
+        # head is fine, including one containing the worktree id.
+        attribution.validate_effective_head(
+            "worktree/lambda-core-20260101-abcd",
+            worktree_id="lambda-core-20260101-abcd",
+            machine="lambda-core",
+            source_attribution=True,
+        )
+
+    def test_safe_default_pattern_passes(self):
+        attribution.validate_effective_head(
+            "pr/my-change-abcd",
+            worktree_id="lambda-core-20260101-abcd",
+            machine="lambda-core",
+            source_attribution=False,
+        )
+        attribution.validate_effective_head(
+            "pr/my-change-abcd",
+            worktree_id="lambda-core-20260101-abcd",
+            machine="lambda-core",
+            source_attribution="codename",
+        )
+
+    def test_raw_worktree_id_in_head_is_blocked(self):
+        with pytest.raises(attribution.BranchLeakError, match="raw worktree id"):
+            attribution.validate_effective_head(
+                "worktree/lambda-core-20260101-abcd",
+                worktree_id="lambda-core-20260101-abcd",
+                machine="lambda-core",
+                source_attribution=False,
+            )
+
+    def test_machine_name_in_head_is_blocked(self):
+        with pytest.raises(attribution.BranchLeakError, match="machine name"):
+            attribution.validate_effective_head(
+                "user/lambda-core/my-change",
+                worktree_id="wt-abcd",
+                machine="lambda-core",
+                source_attribution=False,
+            )
+
+    def test_recorded_machine_in_head_is_blocked_even_if_live_machine_differs(
+        self,
+    ):
+        # A renamed/migrated machine: the live config machine no longer
+        # matches the head's embedded identity, but the worktree's originally
+        # RECORDED machine still does -- both must be checked.
+        with pytest.raises(attribution.BranchLeakError, match="machine name"):
+            attribution.validate_effective_head(
+                "user/old-machine-name/my-change",
+                worktree_id="wt-abcd",
+                machine=("new-machine-name", "old-machine-name"),
+                source_attribution=False,
+            )
+
+    def test_multi_machine_tuple_with_no_match_passes(self):
+        attribution.validate_effective_head(
+            "pr/my-change-abcd",
+            worktree_id="wt-abcd",
+            machine=("new-machine-name", "old-machine-name"),
+            source_attribution=False,
+        )
+
+    def test_empty_machine_in_tuple_is_ignored(self):
+        # A record with no machine recorded yet (or in tests, an empty
+        # string) must not accidentally match every branch name.
+        attribution.validate_effective_head(
+            "pr/my-change-abcd",
+            worktree_id="wt-abcd",
+            machine=("lambda-core", ""),
+            source_attribution=False,
+        )
+
+    def test_machine_match_is_case_insensitive(self):
+        with pytest.raises(attribution.BranchLeakError, match="machine name"):
+            attribution.validate_effective_head(
+                "user/Test/reused-head",
+                worktree_id="wt-abcd",
+                machine="test",
+                source_attribution=False,
+            )
+
+    def test_worktree_id_match_is_case_insensitive(self):
+        with pytest.raises(attribution.BranchLeakError, match="raw worktree id"):
+            attribution.validate_effective_head(
+                "worktree/LAMBDA-CORE-20260101-ABCD",
+                worktree_id="lambda-core-20260101-abcd",
+                machine="",
+                source_attribution=False,
+            )
+
+    def test_unresolved_template_marker_is_blocked(self):
+        with pytest.raises(
+            attribution.BranchLeakError, match="unresolved template marker"
+        ):
+            attribution.validate_effective_head(
+                "session-{machine}-{worktree_id}",
+                worktree_id="wt-abcd",
+                machine="",
+                source_attribution=False,
+            )
+
+    def test_unresolved_format_spec_variant_is_blocked(self):
+        # pr_head_name renders head_pattern with str.format(**tokens), which
+        # accepts conversion/format-spec variants like `{machine!s}` and
+        # substitutes the SAME underlying value -- the defensive unresolved-
+        # marker check must recognize these too, not just the bare form.
+        with pytest.raises(
+            attribution.BranchLeakError, match="unresolved template marker"
+        ):
+            attribution.validate_effective_head(
+                "session-{machine!s:>10}-{worktree_id}",
+                worktree_id="wt-abcd",
+                machine="",
+                source_attribution=False,
+            )
+
+    def test_unresolved_nested_format_spec_is_blocked(self):
+        # str.format's mini-language allows a NESTED replacement field
+        # inside a format spec (`{machine:{width}}`) -- a regex cannot
+        # reliably recognize this, but the parser str.format itself uses
+        # (string.Formatter) can. Must still be caught as unresolved.
+        with pytest.raises(
+            attribution.BranchLeakError, match="unresolved template marker"
+        ):
+            attribution.validate_effective_head(
+                "session-{machine:{width}}",
+                worktree_id="wt-abcd",
+                machine="",
+                source_attribution=False,
+            )
+
+    def test_unresolved_field_nested_inside_a_non_risky_fields_spec_is_blocked(
+        self,
+    ):
+        # Formatter.parse only returns TOP-LEVEL field names -- a field
+        # nested inside a DIFFERENT (non-risky) field's format_spec, e.g.
+        # `{slug:{machine}}` (machine nested inside slug's spec), is not
+        # itself a top-level parse result. The detector must recurse into
+        # every format_spec to still catch `machine` here.
+        with pytest.raises(
+            attribution.BranchLeakError, match="unresolved template marker"
+        ):
+            attribution.validate_effective_head(
+                "x{slug:{machine}}",
+                worktree_id="wt-abcd",
+                machine="",
+                source_attribution=False,
+            )
+
+    def test_blocked_under_codename_mode_too(self):
+        # codename mode is still "not true" -- a raw identifier reaching the
+        # branch name defeats the whole point of the codename marker.
+        with pytest.raises(attribution.BranchLeakError):
+            attribution.validate_effective_head(
+                "worktree/wt-abcd",
+                worktree_id="wt-abcd",
+                machine="lambda-core",
+                source_attribution="codename",
+            )
+
+    def test_empty_head_is_a_noop(self):
+        attribution.validate_effective_head(
+            "", worktree_id="wt-abcd", machine="lambda-core",
+            source_attribution=False,
+        )
+
+
+class TestAuditSourceAttributionRisk:
+    """pr-attribution-codenames Phase 5: config-only migration audit."""
+
+    def test_true_attribution_has_no_findings(self):
+        assert attribution.audit_source_attribution_risk(
+            source_attribution=True, head_pattern="user/{machine}/{slug}",
+        ) == []
+
+    def test_safe_pattern_has_no_findings(self):
+        assert attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="pr/{slug}-{suffix}",
+        ) == []
+
+    def test_risky_pattern_flagged_when_false(self):
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="user/{machine}/{slug}",
+        )
+        assert len(findings) == 1
+        assert "{machine}" in findings[0]
+
+    def test_risky_format_spec_variant_flagged(self):
+        # A pattern using `{machine!s}` or `{machine:>10}` renders to the
+        # SAME leaking value via str.format as the bare `{machine}` form --
+        # the audit must not silently pass it as safe.
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="user/{machine!s:>10}/{slug}",
+        )
+        assert len(findings) == 1
+
+    def test_risky_nested_format_spec_flagged(self):
+        # {machine:{width}} nests a replacement field inside the format
+        # spec -- a regex cannot reliably recognize this, but the audit
+        # (via string.Formatter) must still flag it.
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="user/{machine:{width}}/{slug}",
+        )
+        assert len(findings) == 1
+
+    def test_risky_field_nested_inside_non_risky_fields_spec_flagged(self):
+        # `{slug:{machine}}` -- machine is nested inside a DIFFERENT
+        # (non-risky) field's format_spec, not a top-level parse result.
+        # The static audit must recurse into every format_spec to catch it.
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="user/{slug:{machine}}",
+        )
+        assert len(findings) == 1
+
+    def test_risky_pattern_flagged_when_absent(self):
+        # An omitted key parses to None (never seen by attribution.py itself
+        # once a Config normalizes it), but the audit must flag it exactly
+        # like an explicit false, with a distinguishing message.
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=None, head_pattern="{machine}/{slug}",
+        )
+        assert len(findings) == 1
+        assert "absent" in findings[0]
+
+    def test_worktree_id_token_is_never_flagged(self):
+        # {worktree_id} is not part of pr_head_name's actual rendering
+        # contract (only prefix/slug/suffix/username/machine are) -- a
+        # pattern containing it raises inside str.format and falls back to
+        # the safe default, so it never reaches a published branch. Flagging
+        # it here would be a false positive the audit cannot observe at
+        # create-pr time.
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="{worktree_id}/{slug}",
+        )
+        assert findings == []
+
+    def test_risky_pattern_flagged_under_codename_mode(self):
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution="codename", head_pattern="{machine}/{slug}",
+        )
+        assert len(findings) == 1
+        # codename mode only protects the PR-body marker, never the branch
+        # NAME -- the remedy must not tell an already-codename repo to
+        # "migrate to codename" (a no-op that leaves the risky token in
+        # place); it must point at `true` or removing the token instead.
+        assert "migrate to source_attribution: true or codename" not in findings[0]
+        assert "true" in findings[0]
+
+    def test_worktree_id_alongside_machine_only_flags_machine(self):
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="{machine}/{worktree_id}",
+        )
+        assert len(findings) == 1
+        assert "{machine}" in findings[0]
+
+
 # ---------------------------------------------------------------------------
 # Gitea provider (curl seam mocked)
 # ---------------------------------------------------------------------------

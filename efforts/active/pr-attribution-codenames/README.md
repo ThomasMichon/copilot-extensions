@@ -214,7 +214,7 @@ kill, no encoding-from-a-subprocess concern, no zombie/leak risk.
   `docs/config-reference.md` and `skills/worktree/references/pr-workflow.md`.
 
 ### Phase 5 — Close the branch-name leak class
-- [ ] **Validate the effective published ref, not just the `head_scheme`
+- [x] **Validate the effective published ref, not just the `head_scheme`
   default.** Per the corrected Context above, neither `head_scheme` default
   publishes a raw `worktree/<id>` name — the observed leak came from an
   override (explicit `--branch`, existing-PR reuse, or a `head_pattern`
@@ -223,13 +223,26 @@ kill, no encoding-from-a-subprocess concern, no zombie/leak risk.
   `head_pattern`/existing-PR-reuse resolves to, when `source_attribution`
   isn't `true`, must not contain the raw worktree id, machine name, or a
   literal `{machine}`/`{worktree_id}` substitution. Reject at publish time
-  if it does.
-- [ ] **Hard error, not a warning.** A warning still lets the push proceed
+  if it does. Landed as
+  `providers.attribution.validate_effective_head`/`BranchLeakError`, called
+  from `create_pr` immediately after `feature_branch` is resolved (covers
+  the explicit `--branch`, live-active-PR-reuse, and rendered-`head_pattern`
+  paths uniformly, before the dry-run response and before any push) — and
+  from `finalize.push_changes`'s two publish paths (`_push_changes_pr`,
+  `_push_changes_pr_refspec`), which republish `record.pr.branch` on every
+  re-push independent of `create_pr` and needed the same guard (review
+  round 2 caught this second boundary). Checks both the LIVE `config.machine`
+  and the worktree's originally RECORDED `record.machine` at every call site
+  (review round 3 caught that a machine rename/migration otherwise left an
+  old identifying branch unchecked against the live name alone).
+- [x] **Hard error, not a warning.** A warning still lets the push proceed
   with an identifying ref. When `source_attribution` isn't `true` and the
   effective head would carry a private identifier, this must be a hard
   configuration/publish-time error that blocks the push — never a
-  warn-and-continue.
-- [ ] Audit existing repo configs for the actual risk surface: any repo
+  warn-and-continue. Landed: `create_pr` returns `{"success": False,
+  "error": ...}` (and the CLI reports it) before any git/network side
+  effect; the same check gates the dry-run response too.
+- [x] Audit existing repo configs for the actual risk surface: any repo
   where `source_attribution` is `false` **or absent** (it defaults to
   `false`, so an audit that only greps for the literal string `false` misses
   configs that omit the key entirely) combined with any path that could
@@ -237,6 +250,12 @@ kill, no encoding-from-a-subprocess concern, no zombie/leak risk.
   further override, an explicit `--branch`, or a `head_pattern` using
   `{machine}`/`{worktree_id}`). Include the new `codename` mode as a target
   migration state in the same scan, not just a flag for `true`/`false`.
+  Landed as `providers.attribution.audit_source_attribution_risk`/
+  `head_pattern_leak_risk` (config-only, distinguishes an explicit `false`
+  from a genuinely absent key) plus `pr_ops.audit_attribution_risk` and the
+  `agent-worktrees attribution-audit` CLI command (scans the active
+  project's own config; a fleet-wide multi-repo scanner is not built here —
+  the per-repo primitive is the reusable building block for one).
 
 ## Validation Plan
 
@@ -267,17 +286,33 @@ kill, no encoding-from-a-subprocess concern, no zombie/leak risk.
   discovery store) resolves a codename created on machine A from machine B,
   including the qualified project reference needed to actually locate the
   record.
-- [ ] Regression: existing `source_attribution: true`/`false` behavior on
+- [x] Regression: existing `source_attribution: true`/`false` behavior on
   private repos is unchanged (no marker content or format change for those
-  modes).
-- [ ] Config/publish-time validation: when `source_attribution` isn't
+  modes). Verified: the leak-guard is a no-op whenever `source_attribution
+  is True`, and the default/snapshot/refspec head-pattern paths (which never
+  embed `{machine}`/`{worktree_id}`) are unaffected —
+  `TestCreatePRBranchLeakGuard.test_safe_default_head_pattern_is_unaffected`
+  plus the full existing `test_pr_ops.py`/`test_providers.py` suites (443
+  tests) pass unchanged.
+- [x] Config/publish-time validation: when `source_attribution` isn't
   `true`, an effective published head containing the raw worktree id,
   machine name, or an unsubstituted `{machine}`/`{worktree_id}` pattern is a
   **hard error that blocks the push** (not a warning) — cover the default
   path, an explicit `--branch` override, and a `head_pattern` override.
-- [ ] Migration-audit test: a repo config with `source_attribution` entirely
+  6 tests landed in `TestCreatePRBranchLeakGuard`
+  (`test_pr_ops.py`) plus 7 unit tests on `validate_effective_head` itself
+  in `TestValidateEffectiveHead` (`test_providers.py`).
+- [x] Migration-audit test: a repo config with `source_attribution` entirely
   absent (not just explicit `false`) is correctly flagged by the audit
-  tooling from Phase 5.
+  tooling from Phase 5. 6 tests landed in `TestAuditSourceAttributionRisk`
+  (`test_providers.py`, the raw `None`-vs-`False` distinction), 5 in
+  `TestAuditAttributionRisk` (`test_pr_ops.py`, the parsed-`Config` entry
+  point -- including `PRConfig.source_attribution_configured`, the field
+  added so the audit can tell a genuinely-absent key apart from an explicit
+  `false`), 2 in `test_config.py` (parsing that field from raw YAML), and 5
+  CLI-level tests in `TestAttributionAuditCLI` (`test_pr_ops.py`) covering
+  the plain-mode finding/no-finding paths, JSON-mode exit-0-with-findings,
+  and the config-load-failure path in both output modes.
 
 ## Proposal
 
@@ -490,4 +525,156 @@ the corrected scope rather than the original registry design.
 Next: Phase 5 (close the branch-name leak class -- the actual open security
 gap per this effort's own framing) and the descoped Phase 3 (SSH-based
 reverse lookup, no new registry).
+
+### 2026-09-18 — Phase 5 landed (branch-name leak class closed)
+
+- `providers.attribution.validate_effective_head` hard-blocks (raises
+  `BranchLeakError`) whenever `pr.source_attribution` isn't exactly `true`
+  and the *effective* PR head about to be published contains the raw
+  worktree id, the machine name, or an unresolved `{machine}`/
+  `{worktree_id}` template marker. Wired into `create_pr` at the single
+  point `feature_branch` is resolved -- covering the explicit `--branch`,
+  live-active-PR-reuse, and rendered-`head_pattern` paths uniformly, and
+  checked before the dry-run response and before both the refspec and
+  snapshot push branches (and their shared re-run helper,
+  `_push_existing_feature`) ever run. Returns a plain `{"success": False,
+  "error": ...}` result -- never a warning that lets the push proceed.
+- Config-only migration audit landed alongside it:
+  `attribution.head_pattern_leak_risk`/`audit_source_attribution_risk`
+  (distinguishes a genuinely absent `source_attribution` key from an
+  explicit `false` in its finding text) and `pr_ops.audit_attribution_risk`,
+  exposed as the `agent-worktrees attribution-audit` CLI command (config-only,
+  no git/provider I/O; scans the active project's own resolved config). A
+  review round caught that the audit path couldn't actually distinguish
+  absent from explicit `false` in practice (config parsing normalizes both
+  to `PRConfig.source_attribution is False`) -- added
+  `PRConfig.source_attribution_configured` (set from raw-key presence in
+  `_parse_pr`) so the audit's finding text is accurate.
+- Tests: 31 new -- 7 on `validate_effective_head` + 6 on
+  `audit_source_attribution_risk` (`test_providers.py`); 6 integration-style
+  `create_pr` tests in `TestCreatePRBranchLeakGuard` (explicit `--branch`
+  leak, `head_pattern` leak, `source_attribution: true` no-op,
+  `codename`-mode still blocks, dry-run reports the block, safe-default
+  regression); 5 in `TestAuditAttributionRisk` (`test_pr_ops.py`, including
+  the genuinely-absent-key case); 2 in `test_config.py`
+  (`source_attribution_configured` parsing); 5 CLI-level tests in
+  `TestAttributionAuditCLI` (`test_pr_ops.py`, plain/JSON output modes +
+  config-load-failure). Full `test_pr_ops.py`/`test_providers.py`/
+  `test_config.py` suite: 451 passed. (10 pre-existing `test_doctor.py`
+  failures on `origin/main`, unrelated to this change, confirmed via
+  `git stash` before touching anything.)
+- Also bumped `.github/plugin/marketplace.json`'s top-level
+  `metadata.version` (a separate, easy-to-miss requirement for any
+  `agent-worktrees` change per `AGENTS.md`), caught by review.
+- **Review round 2** caught a real gap in the guard's coverage: it only ran
+  inside `create_pr`, but `finalize.push_changes` republishes
+  `record.pr.branch` directly on every re-push (both the snapshot and
+  refspec publish paths), and that branch can be set independently via
+  `set-pr --branch` or simply predate this guard on an existing worktree.
+  Reused `validate_effective_head` at that second publish boundary too
+  (`_push_changes_pr` and `_push_changes_pr_refspec` in `finalize.py`), so a
+  leaking recorded branch can no longer be (re)published through
+  `push-changes` either. 2 new tests (`TestPRFinalizeAndPush`-adjacent,
+  snapshot + refspec modes); full `test_pr_ops.py`/`test_providers.py`/
+  `test_config.py` suite: 453 passed.
+- **Review round 3** caught that `validate_effective_head` only checked the
+  LIVE `config.machine`, never the worktree's originally RECORDED
+  `record.machine` (frozen at registration). After a machine rename or
+  record migration, a reused-existing-PR head or a stale recorded branch
+  embedding the OLD machine name would pass the check against the new live
+  name. Widened `validate_effective_head`'s `machine` parameter to accept a
+  tuple, and pass `(config.machine, record.machine)` from all three call
+  sites (`create_pr`, and both `finalize.push_changes` publish paths). 5 new
+  tests (2 unit on the tuple form in `test_providers.py`, 1 empty-string
+  guard, 2 integration in `test_pr_ops.py` covering create_pr and
+  push_changes after a simulated rename); full `test_pr_ops.py`/
+  `test_providers.py`/`test_config.py` suite: 458 passed.
+- **Review round 4** caught two more real gaps: (1)
+  `PRConfig.source_attribution_configured`'s dataclass default of `True` was
+  wrong for `_parse_pr`'s missing-`pr`-block early return (`PRConfig()`),
+  which meant a repo with NO `pr:` block at all was reported as
+  "explicitly false" instead of "absent" by the audit -- flipped the
+  default to `False` (the safe/conservative reading for any manually
+  constructed `PRConfig`, matching `_parse_pr`'s actual per-key behavior).
+  (2) The audit's remedy text for `codename` mode told a repo already in
+  codename mode to "migrate to codename" -- a no-op that leaves the risky
+  `head_pattern` token in place, since codename mode only ever protects the
+  PR-body marker, never the branch name. Reworded the remedy to distinguish
+  absent / codename / other-false cases. 3 new/adjusted tests (1 config
+  test for the missing-block path, a codename-remedy-wording assertion,
+  and 3 existing audit tests updated to explicitly set
+  `source_attribution_configured=True` where they exercise a genuinely
+  "configured" scenario via direct dataclass construction rather than
+  `_parse_pr`); full `test_pr_ops.py`/`test_providers.py`/`test_config.py`
+  suite: 459 passed.
+- **Review round 5** caught a real gap (case-sensitive matching -- a branch
+  like `user/Test/reused-head` passed against a recorded machine `test`)
+  plus two documentation nits (the branch-name-leak paragraph only
+  mentioned `create-pr`, not `push-changes`'s identical enforcement; the
+  new `attribution-audit` command was missing from
+  `docs/cli-reference.md`). Case-folded both the `worktree_id` and
+  `machine` containment checks in `validate_effective_head`; updated both
+  docs. 2 new unit tests (case-insensitive machine match, case-insensitive
+  worktree-id match); full `test_pr_ops.py`/`test_providers.py`/
+  `test_config.py` suite: 461 passed.
+- **Review round 6** caught that `_UNRESOLVED_TOKEN_RE` (shared by the
+  runtime defensive check and the static `head_pattern_leak_risk` audit)
+  only matched the bare `{machine}`/`{worktree_id}` token form --
+  `pr_head_name` renders `head_pattern` via `str.format(**tokens)`, which
+  also accepts conversion/format-spec variants (`{machine!s}`,
+  `{machine:>10}`) that substitute the identical leaking value, so the
+  static `attribution-audit` command silently under-reported such a
+  pattern as safe. Broadened the regex to recognize those variants. 2 new
+  tests (one on `validate_effective_head`'s defensive check, one on
+  `head_pattern_leak_risk`/`audit_source_attribution_risk`); full
+  `test_pr_ops.py`/`test_providers.py`/`test_config.py` suite: 463 passed.
+- **Review round 7** caught that the static audit flagged `{worktree_id}`
+  as a risky `head_pattern` token, but `pr_head_name`'s actual rendering
+  contract is only `prefix`/`slug`/`suffix`/`username`/`machine` --
+  `{worktree_id}` in a `head_pattern` raises inside `str.format` and falls
+  back to the safe default, so it can never actually reach a published
+  branch and flagging it was a false positive the audit could never
+  observe at `create-pr` time. Split the static-audit token regex
+  (`{machine}` only, the actually-renderable/risky token) from the
+  runtime defensive "unresolved marker" regex used by
+  `validate_effective_head` (unchanged: still checks `{worktree_id}` too,
+  since that check guards an arbitrary chosen head string, not just a
+  rendered `head_pattern`). Also fixed two documentation/docstring
+  inaccuracies: the "Documentation impact" PR statement omitted
+  `cli-reference.md`, and `cmd_attribution_audit`'s docstring said
+  `--json` always exits 0 (a config-load failure exits 1 in both output
+  modes). 3 tests rewritten to use `{machine}` instead of `{worktree_id}`
+  as the risky-pattern fixture, 2 new tests
+  (`{worktree_id}` never flagged alone; `{machine}` still flagged when
+  paired with `{worktree_id}`); full `test_pr_ops.py`/`test_providers.py`/
+  `test_config.py` suite: 464 passed.
+- **Review round 8** caught that the token-detection regex missed a NESTED
+  replacement field inside a format spec (`{machine:{width}}` -- valid
+  `str.format` syntax that still substitutes the leaking value, but a
+  regex cannot reliably recognize arbitrary nesting). Replaced the regex
+  entirely with `string.Formatter().parse()` -- the same parser
+  `str.format` itself uses, so it can never miss (or misidentify) a field
+  `str.format` would actually substitute -- for both
+  `validate_effective_head`'s defensive unresolved-marker check and
+  `head_pattern_leak_risk`'s static audit. Also corrected
+  `pr_ops.audit_attribution_risk`'s docstring, which still said the audit
+  flags `{machine}`/`{worktree_id}` (it only flags `{machine}`, per round
+  7). 2 new tests (nested-spec unresolved-marker block, nested-spec
+  static-audit finding); full `test_pr_ops.py`/`test_providers.py`/
+  `test_config.py` suite: 466 passed.
+- **Review round 9** caught that `string.Formatter.parse` itself only
+  returns TOP-LEVEL field names -- a field nested inside a DIFFERENT
+  field's `format_spec` (e.g. `{slug:{machine}}`, where `machine` is
+  nested inside `slug`'s spec, not `machine`'s own) comes back embedded in
+  that spec as literal text, not its own parse result, so round 8's fix
+  still missed this one-level-removed nesting. Made `_referenced_field_names`
+  recurse into every `format_spec` (at any depth) rather than inspecting
+  only the top-level parse. Also fixed a Ruff F841 (unused `wt_path` in 6
+  tests that never read it -- renamed to `_wt_path`). 2 new tests (one on
+  `validate_effective_head`, one on the static audit, both using the
+  nested-inside-a-different-field shape); full `test_pr_ops.py`/
+  `test_providers.py`/`test_config.py` suite: 468 passed.
+
+Remaining: Phase 3 (descoped SSH-based reverse lookup, not yet
+rewritten/implemented). This effort is not `Done` until Phase 3 lands too.
 
