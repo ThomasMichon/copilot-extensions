@@ -22,7 +22,11 @@ from fastapi import APIRouter, HTTPException, Request
 from ..agent_registry import AgentConfig, AgentResolver
 from ..loop_governance import LoopGovernance
 from ..models import SessionInfo, SessionStatus, WorktreeHandoffRequest
-from ..session_manager import DaemonDrainingError, ProviderTargetRefreshError
+from ..session_manager import (
+    DaemonDrainingError,
+    ProviderTargetRefreshError,
+    SessionManager,
+)
 
 log = logging.getLogger("agent-bridge")
 
@@ -1308,42 +1312,79 @@ async def get_worktree_session_transcript(
     machine that owns the worktree.  Lets Neuron Forge (and any other
     consumer) view a CLI transcript for *any* session in *any* worktree,
     including ones it did not launch, without crawling session-state itself.
+
+    Falls through to a registered cold-store provider (Phase 2b/2c) when
+    there is no live owning agent at all, or the owning agent's own local
+    session-state has nothing for this session (``session-transcript``
+    deliberately answers an absent/unarchived session with an *empty*
+    ``events`` list, not an error -- e.g. the session was compacted into an
+    archive or synced elsewhere on that same machine). This mirrors
+    ``get_session``'s bare session-lookup fallback so a caller never has to
+    know which tier answered.
     """
     cache = get_cache()
     await cache.crawl_if_empty()
 
     owner = _owning_agent(worktree_id, request)
-    if owner is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Worktree {worktree_id} not found on any agent",
-        )
-    agent_name, config = owner
-    resolver = request.app.state.resolver
+    agent_name: str | None = None
+    events: list[Any] = []
+    meta: dict[str, Any] | None = None
 
-    raw = await _run_for_agent(
-        agent_name, config, resolver,
-        ["session-transcript", session_id, "--json"],
-    )
-    if raw is None:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to read transcript for session {session_id}",
+    if owner is not None:
+        agent_name, config = owner
+        resolver = request.app.state.resolver
+        raw = await _run_for_agent(
+            agent_name, config, resolver,
+            ["session-transcript", session_id, "--json"],
         )
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Invalid transcript JSON for session {session_id}",
-        ) from exc
+        if raw is None:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to read transcript for session {session_id}",
+            )
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Invalid transcript JSON for session {session_id}",
+            ) from exc
+        events = data.get("events", []) if isinstance(data, dict) else []
+        meta = data.get("meta") if isinstance(data, dict) else None
+
+    if not events:
+        mgr: SessionManager = request.app.state.session_manager
+        cold = await mgr.fetch_cold_store_session(session_id)
+        # ``cold is not None`` is already the provider's validated identity
+        # hit -- a legitimate archive can have zero events, so gating on
+        # ``cold.events`` truthiness would wrongly 404 a real, empty
+        # transcript. Guard on ``worktree_id`` instead: this route is
+        # worktree-scoped, but the cold-store contract is keyed by
+        # session_id alone, so a provider answer for a *different*
+        # worktree_id must not be accepted as this worktree's transcript
+        # (a caller-supplied worktree_id/session_id mismatch stays
+        # unresolved, same as if cold-store had nothing).
+        if cold is not None and (
+            cold.worktree_id is None or cold.worktree_id == worktree_id
+        ):
+            events = list(cold.events)
+            meta = {
+                "read_only": True,
+                "at_rest": True,
+                "worktree_id": cold.worktree_id,
+            }
+        elif owner is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Worktree {worktree_id} not found on any agent",
+            )
 
     return {
         "worktree_id": worktree_id,
         "agent_name": agent_name,
         "session_id": session_id,
-        "events": data.get("events", []) if isinstance(data, dict) else [],
-        "meta": data.get("meta") if isinstance(data, dict) else None,
+        "events": events,
+        "meta": meta,
     }
 
 
