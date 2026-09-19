@@ -1422,6 +1422,48 @@ def _pid_is_agent_bridge(pid: int, timeout: float = 15.0) -> bool:
         return False
 
 
+def _reap_abandoned_passive(config_dir_path, record: dict | None) -> dict:
+    """Retire a passive daemon stranded by an abandoned cutover (#5195).
+
+    The matching backstop for a `spawn_passive` daemon that never got
+    promoted because the ``deploy`` orchestrator process died before (or
+    without) ever flipping the routing table to it -- see
+    :func:`zdd.breadcrumb.reap_abandoned_passive`'s docstring for the full
+    rationale. Reuses this module's own identity-verified liveness check
+    (:func:`_pid_is_agent_bridge`) and the same graceful-then-forced
+    termination path used for a retired *old* daemon
+    (:func:`_ensure_retired_daemon_exited`), so a stranded passive is retired
+    with the same rigor.
+
+    ``record`` must be the breadcrumb read *before*
+    :func:`zdd.breadcrumb.recover_stale_cutover` ran (that call may rewrite
+    the file to a terminal state, after which ``reap_abandoned_passive``'s own
+    staleness gate would see nothing to do). Best-effort: any failure is
+    caught and reported, never raised.
+    """
+    try:
+        from zdd import routing
+        from zdd.breadcrumb import reap_abandoned_passive
+
+        table = routing.read_table(config_dir_path) or {}
+        active = table.get("active") if isinstance(table, dict) else None
+        active_pid = active.get("pid") if isinstance(active, dict) else None
+
+        def _terminate(pid: int) -> bool:
+            exited, _forced = _ensure_retired_daemon_exited(pid)
+            return exited
+
+        return reap_abandoned_passive(
+            config_dir_path,
+            pid_alive=_pid_is_agent_bridge,
+            terminate=_terminate,
+            active_pid=int(active_pid) if active_pid else None,
+            record=record,
+        )
+    except Exception as exc:  # best-effort: reap must never fail a cutover
+        return {"reaped": False, "reason": f"reap skipped: {exc}", "pid": None}
+
+
 def _pid_from_lock(port: int) -> int | None:
     """Holder pid of the singleton lock, if it is a live agent-bridge daemon.
 
@@ -2590,10 +2632,17 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
     # Heal a prior aborted cutover before starting a new one (#1756): if a
     # stale breadcrumb marks a survivor left drained, undrain it so it is not
     # stranded closed to new work. `--recover` runs *only* this heal and exits.
+    _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(config_dir())
     recovery = breadcrumb.recover_stale_cutover(
         config_dir(), make_client, health_check=health_check,
     )
+    # #5195: recover_stale_cutover only heals the stranded *old* survivor.
+    # reap_abandoned_passive is the matching backstop for a spawn_passive
+    # daemon that never got promoted -- it must see the breadcrumb from
+    # BEFORE recover_stale_cutover rewrote it to a terminal state.
+    passive_reap = _reap_abandoned_passive(config_dir(), _pre_recovery_breadcrumb)
     if getattr(args, "recover", False):
+        recovery["passive_reap"] = passive_reap
         if args.json:
             _json_out(recovery)
         elif recovery.get("recovered"):
@@ -2603,6 +2652,11 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         sys.exit(0)
     if recovery.get("recovered"):
         print(f"[>] Recovered a prior aborted cutover: {recovery.get('reason')}")
+    if passive_reap.get("reaped"):
+        print(
+            f"[>] Reaped an abandoned never-promoted passive "
+            f"(pid={passive_reap.get('pid')})"
+        )
 
     orch = CutoverOrchestrator(
         config_dir(), bind=cfg.bind, version=__version__,

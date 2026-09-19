@@ -239,8 +239,20 @@ class CutoverOrchestrator:
         )
 
         handle = self.spawn_passive(new_port)
-        result.steps.append(f"spawned passive pid={getattr(handle, 'pid', '?')} "
+        new_pid = getattr(handle, "pid", None)
+        result.steps.append(f"spawned passive pid={new_pid if new_pid is not None else '?'} "
                             f"port={new_port}")
+        # Record the passive's own pid the moment it is known -- before the
+        # health gate, flip, or drain even begin -- so a crash anywhere past
+        # this point (including one that never reaches the flip) leaves a
+        # breadcrumb naming the passive to reap if it is never promoted
+        # (#5195, reap_abandoned_passive). Threaded through every later update
+        # like started_at.
+        if isinstance(new_pid, int):
+            breadcrumb.write_breadcrumb(
+                self.config_dir, state="started", old=old_dict,
+                new_port=new_port, new_pid=new_pid, started_at=started_at,
+            )
 
         flipped = False
         try:
@@ -274,7 +286,7 @@ class CutoverOrchestrator:
             result.steps.append("routing table flipped -> new active")
             breadcrumb.write_breadcrumb(
                 self.config_dir, state="flipped", old=old_dict,
-                new_port=new_port, started_at=started_at,
+                new_port=new_port, new_pid=new_pid, started_at=started_at,
             )
             self._emit(
                 lifecycle.CUTOVER_FLIP, lifecycle.OK, port=new_port,
@@ -287,7 +299,7 @@ class CutoverOrchestrator:
                 # so an abort during the (possibly long) drain is traceable.
                 breadcrumb.write_breadcrumb(
                     self.config_dir, state="draining", old=old_dict,
-                    new_port=new_port, started_at=started_at,
+                    new_port=new_port, new_pid=new_pid, started_at=started_at,
                 )
                 self._emit(lifecycle.DRAIN, lifecycle.BEGIN, port=old.port)
                 drain_res = old_client.drain(
@@ -345,7 +357,7 @@ class CutoverOrchestrator:
                 result.committed = True
                 breadcrumb.write_breadcrumb(
                     self.config_dir, state="committed", old=old_dict,
-                    new_port=new_port, started_at=started_at,
+                    new_port=new_port, new_pid=new_pid, started_at=started_at,
                 )
                 old_client.shutdown()
                 result.steps.append("old daemon shutdown requested")
@@ -359,7 +371,7 @@ class CutoverOrchestrator:
                 result.committed = True
                 breadcrumb.write_breadcrumb(
                     self.config_dir, state="committed", old=old_dict,
-                    new_port=new_port, started_at=started_at,
+                    new_port=new_port, new_pid=new_pid, started_at=started_at,
                 )
                 result.steps.append("no prior active daemon -- nothing to retire")
                 # Cold start: nothing was retired; the new port is what now serves.
@@ -400,7 +412,7 @@ class CutoverOrchestrator:
             else:
                 breadcrumb.write_breadcrumb(
                     self.config_dir, state="rolled_back", old=old_dict,
-                    new_port=new_port, error=result.error,
+                    new_port=new_port, new_pid=new_pid, error=result.error,
                     started_at=started_at,
                 )
             # A rollback outcome reflects service AVAILABILITY, not cutover
