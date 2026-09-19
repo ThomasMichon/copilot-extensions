@@ -44,29 +44,11 @@ description: >
 
 # Worktree Skill
 
-> **Before you start — use the payload-local session command.**
-> The agent-worktrees session command catalog supplies an exact `argv[0]`
-> owned by this plugin payload. Replace
-> `<agent-worktrees catalog argv[0]>` in direct runtime operations below with
-> that raw path. Quote the path at each shell call site; if assigning it to a
-> variable, store the raw path without embedded quote characters and invoke
-> the variable quoted. Never paste an absolute path unquoted, search `PATH`, or
-> substitute a same-named command from another payload.
-> Project binstubs and commands explicitly labeled as
-> management boundaries remain distinct attributable entry points. In
-> PowerShell, invoke the catalog path as
-> `& "<agent-worktrees catalog argv[0]>" <args>`.
-> Cross-plugin `<agent-codespaces catalog argv[0]>` examples use that plugin's
-> exact catalog path under the same call-site quoting rule.
->
-> The payload command provisions its runtime on first use and works without
-> the interactive launcher. If session-start hooks did not publish the
-> catalog, enumerate installed agent-worktrees payloads and fail unless
-> exactly one exists. Invoke that payload's
-> `bin/payload/agent-worktrees` on POSIX or
-> `bin\payload\agent-worktrees.cmd` on Windows directly; never choose the first
-> match from multiple marketplaces or stamp a global wrapper just to recover
-> an in-session command.
+> **Always use the payload command.** Replace `<agent-worktrees catalog argv[0]>`
+> below with the exact `argv[0]` supplied by the session catalog. Quote it at
+> each shell call site. See [references/reference.md](references/reference.md)
+> § Payload Command Resolution for the enumeration fallback and quoting detail
+> when session-start hooks didn't publish the catalog.
 
 This system uses **git worktrees** to isolate concurrent Copilot CLI
 sessions. Each session creates or resumes a worktree — a lightweight copy
@@ -122,8 +104,7 @@ anchor repo (base-repo mode).
 **All direct worktree lifecycle operations MUST use the catalog's exact
 payload command.** Never call `python -m worktree_manager`, `python -m
 agent_worktrees`, or any other Python invocation directly. Never attempt
-to replicate finalization with raw git commands. The session catalog makes the owning payload command available inside a
-worktree session.
+to replicate finalization with raw git commands.
 
 ```
 # CORRECT -- always use the payload command
@@ -135,39 +116,14 @@ worktree session.
 # WRONG -- never do any of these
 python -m worktree_manager mark-complete ...
 python -m agent_worktrees push-changes ...
-$env:PYTHONPATH = "..."; python -m worktree_manager ...
 git rebase && git checkout master && git merge ...
 ```
 
-## Cross-machine inspection -- enumerate first, then resolve suffixes
-
-Use the project binstub's **agent-worktrees commands** to inspect worktrees on
-another machine. Do not discover them by listing guessed checkout directories or
-by reconstructing paths from naming conventions.
-
-Operators often identify a worktree by only its four-character display suffix
-(for example, `0541`). Treat that as a lookup key, **not** as a complete
-worktree or Copilot session id:
-
-```bash
-# Run on the target through its canonical SSH alias.
-ssh <machine-alias> "<project> worktrees list --json"
-
-# Resolve the unique full id ending in -0541, then enumerate its sessions.
-ssh <machine-alias> "<project> worktrees list-sessions --worktree <full-worktree-id> --json"
-
-# Read one exact registered session without scanning unrelated transcripts.
-ssh <machine-alias> "<project> worktrees session-transcript <session-id> --json"
-```
-
-For example, a dotfiles control plane uses `dotfiles worktrees list --json`.
-Always pass the resolved **full worktree id** to follow-up commands; some
-surfaces display or accept a four-character suffix, but support is not uniform
-and suffixes can be ambiguous. Once `list-sessions` supplies exact Copilot
-session ids, an explicitly requested deep diagnosis may inspect only their
-`~/.copilot/session-state/<session-id>/events.jsonl` files or keyed rows in
-`~/.copilot/session-store.db`. Enumerate first; never begin with a recursive
-state-root or filesystem sweep.
+Cross-machine worktree inspection uses the project binstub's
+**agent-worktrees commands**, never guessed checkout paths or reconstructed
+worktree naming conventions — see
+[references/reference.md](references/reference.md) § Cross-Machine Inspection
+for the enumerate-then-resolve procedure.
 
 ## ⛔ Never Finalize Manually
 
@@ -208,20 +164,16 @@ keep working; do not use sign-off to close only the latest session or phase.
 <agent-worktrees catalog argv[0]> push-changes --title "Fix auth regression"
 ```
 
-This command:
-1. Squashes all worktree commits into one
-2. Rebases onto the configured upstream default branch
-3. Validates core files
-4. Merges to local default branch and pushes to origin
-5. Sets tracking status to `pushed`
+This squashes worktree commits into one, rebases onto the upstream default
+branch, validates core files, merges to local default branch, and pushes to
+origin.
 
-> **Squash is a hard invariant.** If the pre-squash step fails (e.g. a
-> commit hook rejects the squashed re-commit), `push-changes` **aborts with
-> a non-zero exit and surfaces the underlying reason** -- it never silently
-> falls back to pushing the individual commits, which would pollute the
-> shared default branch irreversibly. Resolve the cause and retry. For the
-> rare case where individual commits are genuinely intended, pass
-> `--allow-unsquashed` to opt in explicitly.
+> **Squash is a hard invariant.** If the pre-squash step fails, `push-changes`
+> **aborts with a non-zero exit and surfaces the underlying reason** -- it
+> never silently falls back to pushing the individual commits, which would
+> pollute the shared default branch irreversibly. Resolve the cause and
+> retry. For the rare case where individual commits are genuinely intended,
+> pass `--allow-unsquashed` to opt in explicitly.
 
 ### Step 2: Finalize (validate and clean up)
 
@@ -229,28 +181,19 @@ This command:
 <agent-worktrees catalog argv[0]> finalize
 ```
 
-This command:
-1. **Validates** (non-mutating) that the branch's content is on
-   the upstream default branch -- using ancestor checks, patch-id comparison, and
-   blob comparison. The worktree's commit must be in the default branch's
-   history (or be equal to it) to be considered safe to prune.
-2. If content IS on the default branch -- the worktree is **finalized**: permissions
-   are merged and tracking is marked `finalized`. The git branch and the
-   worktree folder are removed **only when the worktree is idle** (no live
-   Copilot session and your shell is not inside it). When you run
-   `finalize` from inside the session (the >90% case), the branch and
-   folder are **intentionally left in place** and cleaned up later -- this
-   is the normal, expected outcome, not a failure.
-3. If content is NOT on the default branch -- **fails with an error** telling you
-   to run `push-changes` first
+Validates (non-mutating) that the branch's content is on the upstream
+default branch. If it is, the worktree is **finalized** (permissions merged,
+tracking marked `finalized`); the git branch and folder are removed **only
+when the worktree is idle** (no live session). Finalizing from inside the
+session (the >90% case) intentionally **leaves the branch/folder in
+place** for later cleanup -- this is the normal, expected outcome, not a
+failure. If content is NOT on the default branch, it fails and tells you to
+run `push-changes` first.
 
-**`finalize` does not delete the worktree out from under a running
-session, and it never force-removes the folder or the git branch.** Its
-only job is to guarantee the branch's work is merged to the default branch. Deleting
-the git worktree and folder is a separate, deferred concern handled by
-`cleanup` once the worktree is idle. `finalize` never squashes, rebases,
-or pushes, and is always safe to call -- the worst it can do is say "not
-ready yet."
+**`finalize` never deletes a worktree out from under a running session,
+force-removes a folder or branch, squashes, rebases, or pushes.** Its only
+job is to guarantee the branch's work is merged to the default branch --
+always safe to call.
 
 ### Decision table
 
@@ -267,151 +210,40 @@ ready yet."
 
 When the user asks you to finalize/wrap up/sign off, or you judge your
 assigned goal/effort/task complete, drive `finalize` to a **successful
-result** as the last action before ending your turn -- don't stop at
-`push-changes`, and don't end the turn on a failed or skipped `finalize`
-without saying so.
-
-`finalize` is a **fail-fast assertion**, not a gate you route around: it
-re-validates non-mutating checks (branch content, dirtiness, claim state) and
-names the *specific* blocker on failure. Read the blocker and clean it up
-directly -- resolve the cited obligation, retry `push-changes`, settle the
-named claim -- then call `finalize` again. Repeat this diagnose-and-clean
-cycle until you get a clean pass or hit a genuine blocker only the operator
-can resolve (see the obligation gate below). **Never force-release a claim
-and never improvise a hand-off** to make `finalize` pass -- a claim only
-moves to a successor when the user explicitly names one (an
-`agent-dispatch` handoff task, an async bridge agent, etc.); absent that
-direction, the fix is to close out the obligation yourself.
+result** as the last action before ending your turn. `finalize` is a
+**fail-fast assertion**, not a gate you route around: it re-validates
+non-mutating checks and names the *specific* blocker on failure. Read the
+blocker, clean it up directly (resolve the cited obligation, retry
+`push-changes`, settle the named claim), then call `finalize` again --
+repeat until a clean pass or a genuine operator-only blocker. **Never
+force-release a claim and never improvise a hand-off** to make `finalize`
+pass -- a claim only moves to a successor when the user explicitly names
+one; absent that, close the obligation yourself.
 
 A `finalize` that reports content already on the default branch **is** the
-successful result, even when it also reports the branch/folder were left in
-place because the session is still live (see `finalize does not delete the
-worktree out from under a running session` above) -- that is normal, not a
-failure to loop on.
+successful result even when the branch/folder were left in place because the
+session is still live -- that is normal, not a failure to loop on.
 
 ### Finalize is gated on outbound resource obligations
 
 `finalize` holds a worktree **accountable** for what it allocated. If this
-worktree still owns **unsettled** outbound resources -- a cross-repo worktree, a
-borrowed CodeSpace/container, or a bridge session it brought into being -- the
-**obligation gate blocks finalize by default** (`AGENT_WORKTREES_OBLIGATION_GATE`
-is `block`), refusing *before* any destructive step so the worktree stays intact.
-The error lists each unsettled obligation. Resolve it -- don't bypass:
-
-> **Itemize what you're leaving open -- don't just flip a flag.** Paused
-> mid-effort, mid-bug, or mid-task series? Name it explicitly:
-> `<agent-worktrees catalog argv[0]> follow-ups add "<summary>" --ref
-> effort:<slug>` (or `--ref issue:<repo>#<n>` for a bug you filed that's
-> related to the current task -- claim it proactively rather than letting it
-> drift unattached). An open follow-up item blocks `cleanup`/`gc` the same way
-> a held claim does, and only resolves when you `follow-ups resolve <id>` or
-> `dismiss <id> --reason <text>` -- the operator, not an idle timer, decides
-> when it's really done. `status --follow-up --summary "..."` remains a
-> shorthand for the boolean-only legacy case.
-
-- **A cross-repo worktree you created** -- finalize *it* first; its finalize
-  flips this worktree's claim to `at-rest` automatically (no manual step).
-- **A borrowed CodeSpace/container** -- merge or move its work off-box, then
-  disconnect (the disconnect hook stamps it `at-rest` **and mirrors that onto the
-  shared lease**, so the settle is visible cross-machine), or run
-  `<agent-codespaces catalog argv[0]> finalize <name>`.
-- **A bridge session** -- drive its worktree to final.
-- **A crashed/gone holder that never settled** --
-  `<agent-worktrees catalog argv[0]> claims sweep`
-  (dry-run) then `--apply` explicitly reclaims provably-gone-and-safe
-  obligations. Finalize never auto-reclaims creator ownership. A stale *codespace*
-  obligation -- including one owned on a different machine -- is reclaimed by
-  reading the disposition mirror off the shared lease, so a clean disconnect
-  anywhere unblocks it.
-- **Genuinely cannot close the children yourself** -- ownership still stays with
-  the creating agent. Do **not** choose a handoff unilaterally: ask the operator.
-  Only after the operator explicitly names another recipient/flow may you run
-  `<agent-worktrees catalog argv[0]> finalize --abandon --handoff-to <recipient-or-flow>`.
-  `--abandon` without `--handoff-to` is refused. The command re-homes the
-  obligations to a durable orphanage with that recipient recorded; it never
-  drops them. **Creating-agent cleanup is the default; affirmative handoff is the
-  only exception.** The creating agent remains responsible until the named flow
-  accepts the transfer. Immediately:
-  1. save the finalizing worktree id printed in the orphan entries;
-  2. run `<agent-worktrees catalog argv[0]> claims cleanup <source-worktree-id>` as a dry-run;
-  3. investigate each selected resource (child git/PR state, CodeSpace work,
-     active sessions), then finalize/settle it through its owning lifecycle;
-  4. use `<agent-worktrees catalog argv[0]> claims cleanup <source-worktree-id> --apply` only for
-     the selected resources you intend to reclaim, and rerun the selective
-     dry-run until it reports no matches.
-
-  Never run unfiltered `claims cleanup --apply` merely to clear your blocker:
-  with no selector it acts on the **entire orphanage**, including unrelated
-  agents' resources. Do not report the parent fully closed while its selected
-  orphan entries remain; if the named recipient cannot accept them, return to
-  the operator rather than inventing a different flow.
-
-Inspect the ledger any time with
-`<agent-worktrees catalog argv[0]> claims show`. Creator
-ownership is invariant: `AGENT_WORKTREES_OBLIGATION_GATE=warn|off` does not
-permit releasing unsettled resources without the affirmative handoff above.
-
-> **Investigating someone else's already-open PR or worktree, not your own
-> obligations?** The `owner_ref` recorded above is walkable in reverse: given
-> a worktree id (in any coordinated project), `claims <id> --json` reports
-> the worktree that created it, and `claimant-liveness <owner_ref> --json`
-> reports whether that creator is still live. See the **`tracing-claimant-graphs`**
-> skill for the full walk (including chaining multiple hops back to a root).
-
-#### Resources you create **out-of-band** aren't auto-journaled — claim them by hand
-
-Auto-journaling only covers resources created through the blessed paths: a
-worktree via `<agent-worktrees catalog argv[0]> create`/bridge dispatch, and a
-CodeSpace via `<agent-codespaces catalog argv[0]> ssh`. Anything you bring into being **another way** is invisible
-to the finalize gate unless you journal it yourself — so `finalize` would let this
-worktree vanish while that work is still open. Journal it as a claim on **this**
-worktree, and settle it when it's done:
-
-```
-# You opened a cross-repo / ADO PR out-of-band (e.g. an example-web PR created with
-# the AZ CLI / ADO REST / gh, NOT the payload-local create-pr operation):
-aw='<agent-worktrees catalog argv[0]>'
-"$aw" claims add pr <pr-url-or-id> --owner-ref "$("$aw" get owner-ref)"
-# ...later, when that PR merges or closes:
-"$aw" claims settle <pr-url-or-id>     # or: claims release <pr-url-or-id> --remove
-```
-
-The gate is **kind-agnostic** — a `pr` (or `codespace`/`container`/`workdir`)
-claim blocks finalize exactly like a worktree claim, so this keeps you honest
-about unfinished cross-repo work. But the reclaim **sweep spares `pr`-kind
-claims** (it can't prove an arbitrary PR safe), so a `pr` claim is **manual to
-settle** — there is no auto-reclaim. Kinds: `worktree|codespace|container|ssh|
-workdir|pr`. *(Auto-journaling `pr` claims + settle-on-merge is tracked in
-example-operator/dotfiles#1351.)*
-
-### When the user says "finalize", "wrap up", "sign off", or "done with this"
-
-They mean: push changes and clean up. Run both steps:
-
-```
-<agent-worktrees catalog argv[0]> push-changes --title "concise description of the work"
-<agent-worktrees catalog argv[0]> finalize
-```
-
-If no title is obvious, omit `--title` -- do not pause to ask unless the
-user requested one.
-
-### Reading the output
-
-After running `push-changes`, **read the output carefully**:
-- If it says push failed or status reverted to orphaned, report that to
-  the user. Do not manually recover.
-- If it succeeds, proceed to
-  `<agent-worktrees catalog argv[0]> finalize`.
-
-After running `finalize`, **read the output as success unless it errors.**
-If it reports that content is on the default branch, finalize succeeded -- even when it
-also says the branch/folder were left in place because a session is still
-live. That deferral is the normal outcome of finalizing from inside the
-session; **do not present it as a bug or as cleanup having failed.** Only if
-it says content is *not* on the default branch did something go wrong -- in that case the
-push did not succeed or was not run, so retry `push-changes` first.
-
+worktree still owns **unsettled** outbound resources -- a cross-repo
+worktree, a borrowed CodeSpace/container, or a bridge session it brought
+into being -- the **obligation gate blocks finalize by default**, refusing
+*before* any destructive step. **Resolve each named obligation through its
+own lifecycle -- never bypass the gate and never force-release a claim.**
+**Never run an unfiltered `claims cleanup --apply`** (with no worktree-id
+selector) to clear a blocker -- it acts on the **entire orphanage**,
+including unrelated agents' resources, not just this worktree's; any
+`claims cleanup --apply` must be scoped to the specific
+`<source-worktree-id>` and only after reviewing its selective dry-run.
+Only after the operator explicitly names a recipient may an unclosable
+child be re-homed via `finalize --abandon --handoff-to <recipient>` (refused
+without `--handoff-to`); creating-agent cleanup remains the default. See
+[references/obligations.md](references/obligations.md) for the itemized
+per-resource-kind resolution procedure (cross-repo worktrees, CodeSpaces,
+bridge sessions, crashed holders, out-of-band resources you must journal
+yourself) and the claims-ledger commands.
 
 ## PR Workflow (PR mode)
 
@@ -423,145 +255,48 @@ before signing off -- it is not the same everywhere:**
 <agent-worktrees catalog argv[0]> get pr-profile      # direct | pr-human-merge | pr-agent-merge | pr-self-merge
 <agent-worktrees catalog argv[0]> get pr-enabled      # "true" or "false"
 <agent-worktrees catalog argv[0]> get pr-required     # "true" -> direct-to-default-branch is blocked
-<agent-worktrees catalog argv[0]> get pr-provider     # gitea | github | azure-devops
 ```
 
-The **profile** tells you how the repo lands work and which `pr-*` verbs apply:
-
 - **`direct`** -- no PR flow; `finalize` lands to the default branch.
-- **`pr-human-merge`** -- PR-gated, but a **human** approves + merges: use
-  `create-pr` / `pr-watch` / `pr-status` / `pr-complete`; **`pr-merge` does not
-  apply** (there is no consent label to signal).
-- **`pr-agent-merge`** -- PR-gated with an auto-merge consent label bound: after
-  approval the author runs `pr-merge` to signal consent and the review gate
-  merges. The full `pr-*` family applies.
-- **`pr-self-merge`** -- PR-gated and the submitter is authorized to merge
-  directly once the provider's required checks/reviews allow it. On GitHub,
-  never attempt to approve your own PR; `submitter-direct` names the merge
-  actor, not the review actor. Use `create-pr` / `pr-watch` / `pr-status`, then
-  `pr-merge <pr> --now` when the PR is ready. Bare `pr-merge` deliberately
-  refuses in this profile.
+- **`pr-human-merge`** -- a **human** approves + merges: `create-pr` / `pr-watch` / `pr-status` / `pr-complete`; **`pr-merge` does not apply**.
+- **`pr-agent-merge`** -- after approval the author runs `pr-merge` to signal consent and the review gate merges.
+- **`pr-self-merge`** -- the submitter merges directly once checks/reviews allow. On GitHub, never approve your own PR. Use `pr-merge <pr> --now` when ready; bare `pr-merge` refuses in this profile.
 
-The verbs are **self-describing**: `pr-status` prints the `flow:` profile, and
-`pr-merge` refuses (naming the reason + the right next step) on a repo where it
-does not apply. Believe them -- never hand-merge or escalate past a verb that
-says it does not apply.
-
-In **direct mode**, use the two-phase `push-changes` + `finalize` flow above.
-In **PR mode**, sign-off becomes `create-pr` -> review -> merge ->
-`pr-complete`/`finalize`, and `push-changes` targets the *feature* branch, never
-the default branch.
-**An opened PR is final by default** -- land everything before `create-pr` (or
-open it as a draft with `--draft`, then `pr-ready` when ready for review), since
-a late push races the merge. **Driving the PR through to actual merge -- not
-just opening it -- is the default conduct for every profile**, using whichever
-waiting policy fits (self-merge: brief CI/review wait then `pr-merge --now`;
-human-merge: poll and address feedback; agent-merge: signal consent once
-approved). The only sanctioned deviations are an explicit operator instruction
-or a specific alternate charter that governs differently -- see
-references/pr-workflow.md's *Default conduct* section.
-
-The full PR-mode reference -- profiles + verb applicability, config resolution
-(machine-local vs in-repo), `create-pr` auto-open + attribution + labels, the
-disposition modes (keep-alive / detach), draft PRs, and multiple PRs per
-worktree -- is in [references/pr-workflow.md](references/pr-workflow.md).
+The verbs are **self-describing** and refuse (naming the reason) when they
+don't apply to the current profile -- believe them; never hand-merge or
+escalate past a refusal. **An opened PR is final by default** (land
+everything first, or open as `--draft`), and **driving the PR through to
+actual merge is the default conduct for every profile**. Full profile
+detail, config resolution, `create-pr` mechanics, draft PRs, and multiple
+PRs per worktree: [references/pr-workflow.md](references/pr-workflow.md).
 
 ## Committing and Pushing
 
-### Push Policy
-
 **Never run a bare `git push` from a worktree branch.** A bare push
 creates a `worktree/*` branch on the remote, which should never exist.
-Worktree branches are local-only — all pushes to the remote default branch
-go through the finalization flow (rebase → ff-merge → push).
 
-**Do not auto-push.** Pushing only happens in two cases:
+**Do not auto-push.** Pushing only happens via worktree finalization, or
+when the user explicitly says "push" (`git push origin HEAD:<default-branch>`
+-- always the default branch, never another remote/branch unless specified).
 
-1. **Worktree finalization** — the standard squash → rebase → ff-merge →
-   push flow.
-2. **The user explicitly says "push"** — this means
-   `git push origin HEAD:<default-branch>`. Always push to the remote
-   default branch; never to another remote or branch unless the user
-   specifies one.
+**Commit regularly** to the worktree branch -- worktree branches are
+disposable, commits stay local until finalization. **Only commit work
+belonging to this worktree** -- do not stage or commit unrelated files that
+happen to be present.
 
-Committing freely to the worktree branch is encouraged (see below), but
-commits stay local until finalization or an explicit push.
-
-### In a Worktree
-
-**Commit regularly** to the worktree branch during work — worktree
-branches are disposable, so committing is always safe. Atomic commits
-with descriptive messages; don't let changes pile up unstaged. Commits
-stay on the `worktree/{id}` branch until finalization.
-
-**Only commit work belonging to this worktree.** Each worktree is an
-isolated workspace for a specific task or set of tasks. Do not stage or
-commit files from unrelated work that happens to be present.
-
-### Finalization Merge Strategy
-
-When a worktree is marked complete, finalization merges it back to the
-default branch. The merge strategy preserves **linear history** with
-exactly **one commit per worktree**:
-
-1. **Pre-squash** all worktree commits into a single commit on the
-   worktree branch (uses `git reset --soft` to merge-base, then
-   re-commits). A backup ref is saved for rollback on failure.
-2. **Rebase** the single squashed commit onto the remote default branch
-3. **Fast-forward merge** into the local default branch
-
-**Standard merge commits are never used.** The result is always a linear
-history with one squashed commit per worktree. No two-parent merge nodes,
-no multi-commit replays, no extraneous files from other branches.
-
-### What This Means for Agents
-
-- **Commit normally** during work — individual commits help track progress,
-  but finalization squashes them into one commit for the default branch.
-- **Don't worry about merge conflicts** — pre-squashing reduces rebase
-  conflicts to a single resolution. If rebase still fails, original
-  commits are restored from the backup ref.
-- **Don't manually merge to the default branch** — finalization handles
-  this automatically when the worktree is marked complete.
-- **Don't stage unrelated files** — if the working tree has changes from
-  other sessions or stale state, only stage and commit files relevant to
-  the current task.
-
-### In Base-Repo Mode
-
-Commits go directly to the current branch with no finalization flow.
-Follow the repo's normal commit policy.
+Finalization squashes all worktree commits into **one** commit, rebases
+onto the default branch, and fast-forward merges -- **standard merge
+commits are never used**. See [references/reference.md](references/reference.md)
+§ Finalization Merge Strategy for the exact squash/rebase/ff-merge
+mechanics and what that means for conflict resolution.
 
 ## Quick Reference
 
-Direct runtime commands use the session catalog's exact payload command;
-project binstubs remain attributable project entry points. Never call Python
-modules directly. Context resolves **the way git does — from the current
-directory**: the target worktree and its anchor repo are discovered from CWD
-(not from ambient environment variables or branch names). A project binstub
-(or `--project <name>`) names a specific project, which means *operate as if
-CWD were that project's anchor repo* — so you can act on another repo's
-worktrees from anywhere without env-var contamination.
-
-Project binstubs pin the payload that created them and carry an ownership
-receipt. A different payload cannot silently overwrite one; deliberate
-ownership transfer uses the current payload command's
-`reconcile-binstubs --transfer <project>` operation.
-
-> **`register` (adopt) is the exception — cwd is the only *implicit* locator.**
-> Because a project binstub / `--project <name>` resolves an *already-adopted*
-> project, those levers don't exist for the repo you're about to adopt.
-> `<agent-worktrees catalog argv[0]> register <name>` therefore takes the repo **path from cwd** (the
-> git root of the current directory → its anchor) unless you name one explicitly;
-> `<name>` is only the project **label**. So run `register` **from inside the
-> target repo's checkout**, or pass `--repo-dir <path>` (or use `repos add <name>
-> <path>`). Running `register <name>` from a *different* repo silently adopts
-> *that* repo's path under `<name>`.
-
-Before `create-pr`, prepare a human-readable body with the target repository's
-required sections and pass it through `--body` or `--body-file`. Repositories
-may enforce those headings with `pr.required_body_sections`; hidden source
-metadata never substitutes for reviewable intent, changes, and validation.
+Context resolves **the way git does — from the current directory**: the
+target worktree and its anchor repo are discovered from CWD, not ambient
+env vars or branch names. Before `create-pr`, prepare a human-readable body
+with the target repository's required sections (Intent/Changes/Validation);
+hidden source metadata never substitutes for reviewable intent.
 
 | Action | Command |
 |--------|---------|
@@ -569,9 +304,8 @@ metadata never substitutes for reviewable intent, changes, and validation.
 | **Finalize** (validate + clean up, step 2) | `<agent-worktrees catalog argv[0]> finalize` |
 | **PR mode: create + push a feature branch** | `<agent-worktrees catalog argv[0]> create-pr --title "desc" --body-file <path>` |
 | **PR mode: record PR metadata** (after sub-agent opens it) | `<agent-worktrees catalog argv[0]> set-pr --url URL --number N` |
-| **PR mode: show tracked PR state** (reconciles vs. provider; flags pull-forward when merged) | `<agent-worktrees catalog argv[0]> pr-status` |
-| **Check the target repo's PR flow** (direct / human-merge / agent-merge / self-merge) | `<agent-worktrees catalog argv[0]> get pr-profile` |
-| **Check if PRs are required** (direct-to-default-branch blocked) | `<agent-worktrees catalog argv[0]> get pr-required` |
+| **PR mode: show tracked PR state** | `<agent-worktrees catalog argv[0]> pr-status` |
+| **Check the target repo's PR flow** | `<agent-worktrees catalog argv[0]> get pr-profile` |
 | Set/update title only | `<agent-worktrees catalog argv[0]> push-changes --title "desc" --title-only` |
 | Show worktree git status | `<agent-worktrees catalog argv[0]> status` |
 | List worktrees for cleanup | `<agent-worktrees catalog argv[0]> cleanup` |
@@ -579,125 +313,39 @@ metadata never substitutes for reviewable intent, changes, and validation.
 | Also clean unused worktrees | `<agent-worktrees catalog argv[0]> cleanup --clean --include-unused` |
 | Help | `<agent-worktrees catalog argv[0]> --help` |
 
+See [references/reference.md](references/reference.md) § Binstub and
+Project-Registration Notes for `register`'s cwd-is-the-only-implicit-locator
+exception and project-binstub ownership details.
+
 ## Cleanup Procedure
 
 When the user asks to clean up worktrees:
 
-1. **Run default cleanup** —
-   `<agent-worktrees catalog argv[0]> cleanup --clean` removes
-   only `completed` worktrees (those whose changes are already merged via
-   squash-merge) and `gone` worktrees (path no longer exists).
-   - For `gone` worktrees, the branch is only deleted if its content is
-     verified to be on the default branch (commit ancestry or blob
-     comparison). If unmerged content is detected, the worktree is skipped
-     with a warning.
-   - Cleanup acquires the finalization lock to prevent races with
-     post-exit finalization running in another session.
-   - After cleanup, `git worktree prune` runs automatically to remove
-     stale worktree entries.
-2. **Report unused count** — the script reports how many `unused` worktrees
-   it preserved. These have no commits but may contain planning,
-   conversation history, or uncommitted work.
-3. **Ask the user** whether to also purge unused worktrees. If yes, run
-   `<agent-worktrees catalog argv[0]> cleanup --clean --include-unused`.
+1. **Run default cleanup** -- `<agent-worktrees catalog argv[0]> cleanup --clean`
+   removes only `completed` worktrees (merged) and `gone` worktrees (path
+   missing, branch content verified merged first).
+2. **Report unused count** -- worktrees with no commits but possibly
+   planning/conversation history are preserved and reported.
+3. **Ask the user** whether to also purge unused worktrees --
+   `cleanup --clean --include-unused`. **Never auto-purge unused worktrees
+   without asking** -- a worktree may look "unused" if the session involved
+   only questions or planning with no commits yet.
 
-Never auto-purge unused worktrees without asking — a worktree may appear
-"unused" if the session involved only questions, planning, or conversation
-with no commits yet.
-
-### Fresh safety revalidation before removal
-
-The three **non-forced** cleanup reapers all re-check safety from fresh state
-at the action moment, not just at scan time: batch
-`cleanup --clean`, single-item `cleanup --worktree-id <id>`, and the automatic
-finished-session sweep each reacquire `FinalizeLock`, reload the tracking
-record, rebuild worktree-local liveness, re-classify git state, re-derive
-conversation turns, and re-run the complete cleanup disposition immediately
-before the reap. For a missing worktree directory, the branch-merged proof is
-also re-run under that same lock. Non-forced cleanup then keeps the
-per-record `_RecordLock(require_sidecar=True)` held through `_reap_worktree`,
-so the tool's own record writers (claim/follow-up/session-registration
-mutations) cannot slip a conflicting change into the final read→delete window.
-
-This is a **fail-closed, in-tool writer fence**, not a universal filesystem
-lock: arbitrary external edits or raw git commands outside agent-worktrees can
-still race the local delete. `cleanup --worktree-id <id> --force` remains the
-documented, narrower exception: it still refreshes liveness under `FinalizeLock`
-and refuses an active/hosted session, but it deliberately bypasses the full
-dirty/WIP/claim/follow-up/branch-merge disposition.
-
-**Known limitation (#2649):** a record whose tracking `status` is already
-`finalized` can still mask genuinely new WIP or conversation-only content added
-*after* finalize, because `_apply_tracking_override` currently collapses that
-fresh state to `COMPLETED` before `cleanup_disposition` sees it. The tests pin
-that behavior so it cannot silently drift, but the limitation itself remains
-tracked and unfixed here.
-
-### Dirty worktrees: resolve per-worktree, never blanket `--force`
-
-`cleanup` (and `remove-system`) refuse a worktree with uncommitted changes
-**on purpose** — that refusal is the tool protecting real, unlanded work.
-`cleanup --worktree-id <id> --force` (and `remove-system ... --force`) exist
-for a genuine, individually-verified exception, not as a bulk shortcut for a
-backlog of `dirty` worktrees. Treating "dirty" as a synonym for "safe to
-force" throws away the one signal that distinguishes real work from noise —
-and a mode-only or superseded diff in worktree #1 doesn't guarantee the
-same is true of worktree #2 through #23.
-
-For **every** worktree `cleanup` reports as `dirty`, go in individually:
-
-1. **Read the actual diff, including staged and untracked paths.** `DIRTY`
-   covers modified, staged, *and* untracked content (see the Worktree States
-   table below) — `git diff` alone only shows unstaged tracked changes. Run
-   `git status --porcelain` first to see every path, then `git diff HEAD`
-   for the full tracked diff (staged + unstaged), and open each untracked
-   file directly. Distinguish a real change (content not already on the
-   default branch, an unlanded fix) from noise (a stray mode-only flip, a
-   scratch file, a local edit later superseded upstream) — don't rely on
-   `--stat`, which renders a mode-only/rename-only change as `0
-   insertions/deletions`, indistinguishable at a glance from real content.
-2. **Land real work through the repo's own contribution flow — branch on
-   `pr-profile`.** Check `<agent-worktrees catalog argv[0]> get pr-profile`
-   first: a `pr-*` profile means commit, open its PR, get it
-   reviewed/merged (see § PR Workflow above); a **`direct`** profile has no
-   PR flow at all — commit and let `finalize` land the work directly (see
-   § Two-Phase Sign-Off above). Sending a direct-profile repo through PR
-   steps just produces inapplicable instructions. If the diff looks like it
-   duplicates something already on the default branch, confirm with
-   `git diff <default-branch> -- <path>` before writing it off as noise —
-   don't assume.
-3. **Discard confirmed noise explicitly, file by file, matching how it's
-   dirty.** `git checkout -- <path>` only restores the working tree from
-   the index — a **staged** noise change stays staged and the path stays
-   dirty. For a tracked path, discard both index and working tree with
-   `git restore --staged --worktree -- <path>` (or `git checkout HEAD --
-   <path>`, equivalent for this purpose). For **untracked** noise, remove
-   only the reviewed path(s) — `git clean -fd -- <path>` (or plain `rm`) —
-   never a bare `git clean -fd`, which deletes every untracked file and
-   directory in the worktree, including unrelated unreviewed work.
-4. **Re-check state before assuming plain `cleanup --clean` will prune it.**
-   A clean tree does not by itself make a worktree `completed` — it
-   reclassifies to whatever the underlying content actually is: `wip` if it
-   still carries unmerged commits ahead of the default branch (not pruned
-   by plain `cleanup --clean`; that content needs to land first, per step
-   2); `unused` if it now has no commits *and* the session held no
-   conversation turns (needs `--include-unused`); or `conversation-only` if
-   it has no commits but the session *did* hold turns (needs the separate
-   `--include-conversations` flag — `--include-unused` alone does **not**
-   cover this bucket). Confirm with the user per the existing "ask before
-   purging unused" rule above in either case — clearing noise doesn't
-   retroactively make a worktree's conversation/planning history
-   disposable. Only a worktree that reclassifies to `completed`/`gone` is
-   pruned by plain `cleanup --clean` with no extra flag. If `cleanup` still
-   skips a worktree you expected to be clear, that reclassification — not
-   `--force` — is the next thing to check.
-
-If a whole batch of worktrees turns out `dirty` for the **same root
-cause** (e.g. a shared tool stamping every worktree with an identical
-mode-only bit or a stale generated file), that is itself a defect worth
-tracking or fixing at the source — reaping the symptom once, by hand, after
-verifying it's genuinely inert, is reasonable; silently normalizing
-`--force` as the standing remedy for that pattern is not.
+**Never blanket-`--force` a batch of dirty worktrees.** `cleanup` refuses a
+worktree with uncommitted changes *on purpose* -- that refusal protects real,
+unlanded work. Treating "dirty" as a synonym for "safe to force" throws away
+the one signal that distinguishes real work from noise, and one worktree's
+noise doesn't prove the same of another's. **For every worktree reported
+`dirty`, resolve it individually** -- read its actual diff (including staged
+and untracked paths), land real work through the repo's own flow (PR or
+direct, per `pr-profile`), and discard only confirmed noise file-by-file
+(never a bare `git clean -fd`). **Before actually discarding or force-clearing
+anything, read [references/cleanup-details.md](references/cleanup-details.md)**
+for the exact per-path discard commands (staged vs. untracked differ), the
+fresh-safety-revalidation guarantees non-forced cleanup provides, and the
+narrow, single-worktree `--force` exception -- the policy above tells you
+*what* to do; that reference has the *exact commands* so you don't improvise
+syntax.
 
 ## Worktree States
 
@@ -713,118 +361,37 @@ verifying it's genuinely inert, is reasonable; silently normalizing
 | `orphan` | No merge base with upstream |
 | `finalized` | Merged to default branch, worktree removed |
 
-## Worktree Titles
-
-Titles appear in the picker for easier identification. Resolution order:
-
-1. **Explicit title** — from the `title` field in worktree YAML. Once set
-   (via `<agent-worktrees catalog argv[0]> push-changes --title`), this wins.
-2. **Session summary** — auto-derived from the most recent Copilot CLI
-   session summary for the worktree path.
-3. **None** — just the worktree ID and age.
-
-```powershell
-# Set title without pushing (worktree stays active)
-& "<agent-worktrees catalog argv[0]>" push-changes --title "Fix auth regression" --title-only
-
-# Push changes and set title
-& "<agent-worktrees catalog argv[0]>" push-changes --title "Fix auth regression"
-```
-
 ## Cross-Worktree Safety
 
 **CRITICAL: Never modify a sibling worktree with an active session.**
-Read-only inspection is always safe; any mutating git operation requires
-explicit user authorization.
-
-When diagnosing worktree state across the fleet:
-
-1. **Read-only inspection is always safe** — `git -C <path> log`,
-   `status --porcelain`, `rev-parse`, `merge-base` queries are fine.
-2. **Any mutating git operation on a sibling requires explicit user
-   authorization** — rebase, reset, checkout, stash push/pop, cherry-pick,
-   clean, etc. Ask first, even if the fix looks trivial.
-3. **If the user authorizes work on a sibling**, confirm which worktree
-   and what operation before proceeding.
-
-## Active Worktree Safety
+Read-only inspection (`git -C <path> log/status/rev-parse/merge-base`) is
+always safe; **any mutating git operation on a sibling requires explicit
+user authorization** -- ask first, even if the fix looks trivial, and
+confirm which worktree and what operation before proceeding.
 
 Worktrees with a live Copilot session always show as **active** regardless
-of their git state. Even if the branch appears fully merged, an active
-session means:
-
-- **Cleanup will skip it** — never removes directories or branches for
-  active worktrees.
-- **Finalization defers destruction** — validation, permission merge, and
-  tracking update proceed normally, but the worktree directory and branch
-  are intentionally preserved. This is expected, not a failure: `finalize`
-  guarantees the work is on the default branch; it does not delete an active worktree
-  in git or remove its folder. Cleanup handles that once the worktree is
-  idle.
-- **Status shows `active`** — never `completed`, `unused`, or `wip` while
-  a session is running.
-
-## Session Detection
-
-The picker shows 🟢 on worktrees with live Copilot CLI sessions. Liveness is a
-union of signals: tracked session locks under `~/.copilot/session-state/`, live
-`wt-<id>` tmux/psmux sessions, cached `mux_live` / `bound_live` hints, and
-bridge-owned session locks. Dead PIDs are filtered automatically, and stale
-locks can be reclaimed with the `reclaim` flow above.
-
-### Diagnosing an unretired handoff predecessor pane
-
-A worktree that accumulates extra mux panes after a series of handoffs (a
-predecessor whose successor was spawned but whose own retirement was never
-confirmed -- whether the handoff is only candidate-associated or already
-fully linked) is a handoff-lifecycle bug, not something to fix by hand. Run
-`agent-worktrees handoffs-check --worktree-id <id>` <!-- marketplace-isolation: allow diagnostic-tooling --> (read-only) or add
-`--execute` to retire what it finds. The read-only report does not itself
-confirm the pane is still alive -- it lists every unretired candidate it
-finds; `--execute` runs the same live-check choreography the resident
-status monitor uses for its own automatic sweep, and is what actually
-resolves whether a listed candidate was real. `--all` checks
-every tracked worktree in the current project. See
-[architecture.md § Handoff cutover lifecycle](../../docs/architecture.md#handoff-cutover-lifecycle-the-13-stage-trace)
-for the full 13-stage model this diagnoses against. **Never manually kill a
-pane/process** to work around a suspected stuck handoff -- use this tool.
+of git state -- cleanup skips them and finalize defers destruction (this is
+expected, not a failure). See [references/reference.md](references/reference.md)
+§ Active Worktree Safety and § Session Detection for the full liveness-signal
+model, titles, and diagnosing an unretired handoff predecessor pane (**never
+manually kill a pane/process** to work around a suspected stuck handoff --
+use `handoffs-check` instead).
 
 ## Resource Leases (atomic, cross-machine, same-harness)
 
-The payload-local `lease` operation is the harness's **one atomic primitive** for exclusive,
-cross-machine access to any scarce shared resource — a CodeSpace, a cross-repo
-worktree, a container, a bridge session — so two agents on two machines never
-collide. It is **ref shenanigans only** in an explicitly selected private state
-repo: hidden
-`refs/agent-worktrees/leases/v1/<kind>/<key>` refs updated by atomic
-compare-and-swap (`--force-with-lease`), no branches, no commits, no service, no
-new credential. Each transition appends a synthetic empty-tree metadata commit
-whose **OID is the fencing token**; release appends a **tombstone** (ABA-safe);
-every read strictly validates linear history.
+The payload-local `lease` operation is the harness's one atomic primitive
+for exclusive, cross-machine access to a scarce shared resource (a
+CodeSpace, cross-repo worktree, container, bridge session):
 
 ```bash
-<agent-worktrees catalog argv[0]> lease acquire <kind> <key> --holder <ref> [--ttl N]  # atomic CAS
-<agent-worktrees catalog argv[0]> lease renew   <kind> <key> --token <oid> [--ttl N]   # keep the grip
-<agent-worktrees catalog argv[0]> lease release <kind> <key> --token <oid>             # tombstone
-<agent-worktrees catalog argv[0]> lease inspect <kind> <key>                           # current record
-<agent-worktrees catalog argv[0]> lease list [--kind <kind>]                           # fabric-wide view
+<agent-worktrees catalog argv[0]> lease acquire <kind> <key> --holder <ref> [--ttl N]
+<agent-worktrees catalog argv[0]> lease release <kind> <key> --token <oid>
+<agent-worktrees catalog argv[0]> lease inspect <kind> <key>
 ```
 
-- **Holder** = the qualified **ClaimRef** (`machine/project/worktree_id[#session]`),
-  from `<agent-worktrees catalog argv[0]> get owner-ref` — directly resolvable for stale-takeover.
-- **Store origin** = the resolved lease store repo, from
-  `<agent-worktrees catalog argv[0]> get lease-origin` (the `AGENT_WORKTREES_LEASE_ORIGIN` override,
-  else the bound control-plane/knowledge repo's origin). The current project's
-  source remote is never an implicit fallback. Every agent of one harness
-  resolves the **same** explicitly selected origin — so coordination is
-  **same-harness-scoped by construction**. Set `AGENT_WORKTREES_LEASE_ORIGIN`
-  only to a private state remote when no knowledge repo is bound.
-- **Two-tier consumers.** `agent-codespaces` uses this as the cross-machine **L2**
-  authority behind its host-local **L1** claim (see `agent-codespaces:borrowing-codespaces`); a
-  live claim on another machine raises a `ClaimConflict` naming the remote holder.
-- **Degrade-safe.** Only a definitive lease conflict (exit 3) blocks consumers
-  that support best-effort operation; a missing private store never falls back
-  to publishing refs on the source remote.
+See [references/leases.md](references/leases.md) for the full primitive
+(fencing tokens, renew, the two-tier consumer model, degrade-safe behavior)
+-- most agents only need `acquire`/`release`/`inspect`.
 
 ## Lifecycle
 
@@ -843,3 +410,11 @@ Copilot CLI session
     ├─ Sign off → push-changes → finalize → exit shell
     └─ Detach → session preserved, rejoin later
 ```
+
+## See Also
+
+- [references/pr-workflow.md](references/pr-workflow.md) -- full PR-mode reference
+- [references/obligations.md](references/obligations.md) -- finalize's outbound-resource obligation gate
+- [references/cleanup-details.md](references/cleanup-details.md) -- per-worktree dirty resolution and cleanup safety guarantees
+- [references/leases.md](references/leases.md) -- the resource-lease primitive
+- [references/reference.md](references/reference.md) -- payload-command resolution, cross-machine inspection, finalization merge mechanics, session detection, titles
