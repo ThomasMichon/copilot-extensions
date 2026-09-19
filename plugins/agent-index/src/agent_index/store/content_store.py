@@ -610,8 +610,10 @@ class ContentStore:
         ``replace=True`` on every dirty-triggered rebuild discards the existing
         BM25 index and rebuilds it from scratch over the *entire* content
         table regardless of how small the actual delta is. Only the first-ever
-        build, or a recovery from an index that was never successfully created
-        (``_fts_available`` False), needs the full ``replace=True`` path.
+        build, a recovery from an index that was never successfully created
+        (``_fts_available`` False), or the caller's own escalation from a
+        non-retryable incremental failure (#2951, see
+        ``_rebuild_fts_locked``), needs the full ``replace=True`` path.
 
         On the ``full`` path, an ``optimize()`` failure is swallowed (only
         logged) because ``create_fts_index(replace=True)`` still runs
@@ -712,6 +714,11 @@ class ContentStore:
         ``optimize()``'s incremental FTS update instead (see
         ``_run_fts_build``), avoiding a full-corpus rescan for a small delta.
 
+        If that incremental ``optimize()`` call fails non-retryably (e.g. a
+        lancedb/lance-index panic against the on-disk index state, #2951),
+        the incremental path can never succeed again -- this escalates once
+        to a full ``create_fts_index(replace=True)`` rebuild instead.
+
         ``_fts_available`` is in-process state only, seeded ``False`` on every
         fresh ``ContentStore`` (e.g. after a restart) even when a prior
         process already built a valid FTS index. This checks LanceDB's own
@@ -753,31 +760,33 @@ class ContentStore:
 
             full = not self._fts_available
 
+            def _mark_rebuilt(*, via_full: bool) -> None:
+                # The subprocess built the index on its OWN connection; drop
+                # the cached table handle so the next query sees the fresh
+                # index (a handle from before the first build won't).
+                self._table = None
+                self._fts_available = True
+                self._fts_dirty = False
+                self._fts_consecutive_failures = 0
+                self._fts_next_retry_at = 0.0
+                logger.info(
+                    "FTS index %s on %d chunks",
+                    "created/rebuilt" if via_full else "incrementally updated",
+                    count,
+                )
+
             last_err: Exception | None = None
+            last_retryable = False
             for attempt in range(1, max_retries + 1):
                 try:
                     self._run_fts_build(full=full)
-                    # The subprocess built the index on its OWN connection; drop
-                    # this store's cached table handle so the next query re-opens
-                    # at the latest version and actually sees the new FTS index
-                    # (a handle opened before the first-ever index does not pick
-                    # it up otherwise). Atomic under the GIL; concurrent readers
-                    # holding the old handle are unaffected.
-                    self._table = None
-                    self._fts_available = True
-                    self._fts_dirty = False
-                    self._fts_consecutive_failures = 0
-                    self._fts_next_retry_at = 0.0
-                    logger.info(
-                        "FTS index %s on %d chunks",
-                        "created/rebuilt" if full else "incrementally updated",
-                        count,
-                    )
+                    _mark_rebuilt(via_full=full)
                     return True
                 except Exception as e:
                     last_err = e
                     err_msg = str(e).lower()
                     retryable = "retryable" in err_msg or "commit conflict" in err_msg
+                    last_retryable = retryable
                     if retryable and attempt < max_retries:
                         delay = (2.0 ** attempt) + random.uniform(0, 1)
                         logger.warning(
@@ -788,6 +797,17 @@ class ContentStore:
                         time.sleep(delay)
                     else:
                         break
+
+            if not full and last_err is not None and not last_retryable:
+                # A non-retryable incremental failure (#2951) would repeat
+                # forever -- escalate once to a full rebuild. A merely
+                # retries-exhausted conflict keeps the existing backoff.
+                try:
+                    self._run_fts_build(full=True)
+                    _mark_rebuilt(via_full=True)
+                    return True
+                except Exception as full_err:
+                    last_err = full_err
 
         # Failed - arm a capped exponential backoff so the maintainer stops
         # retrying a stuck conflict every tick (#1818). Keep _fts_dirty True
