@@ -715,6 +715,82 @@ def test_materialization_remains_nonblocking(harness, monkeypatch):
         h.daemon.shutdown()
 
 
+def test_concurrent_materialization_across_plugins_does_not_starve_cleanup(
+    harness, tmp_path
+):
+    """Two *different* plugins' slow builds must run truly concurrently under
+    the daemon's own default runtime pool and real per-plugin locks (not an
+    injected executor and a mocked materialize() that never touches the real
+    lock), and a cleanup pass submitted through the same pool while both are
+    in flight must not be blocked behind either.
+    """
+    h = harness
+    plugin_b = _project(tmp_path / "plugin-b")
+    registration_a = h.registration
+    registration_a["id"] = "declared:plugin@example:service-a"
+    registration_b = _registration(plugin_b)
+    registration_b["id"] = "declared:plugin@example:service-b"
+
+    runner = FakeRunner()
+    runner.install_started = threading.Event()
+    runner.install_release = threading.Event()
+    materializer = ManagedRuntimeMaterializer(h.materializer.policy, runner=runner)
+
+    class Client:
+        def list_registrations(self, **kwargs):
+            return [registration_a, registration_b]
+
+    daemon = SupervisorDaemon(
+        Client(),
+        "machine-a",
+        companion_controller=h.controller,
+        runtime_materializer=materializer,
+        overrides_source=lambda: {},
+    )
+    try:
+        # Submit only registration_a first: its build blocks inside the real
+        # pip-install step, holding registration_a's plugin-scoped lock for
+        # the whole wait.
+        daemon._materialize_managed_runtime_desired({registration_a["id"]: registration_a})
+        assert runner.install_started.wait(timeout=15)
+        runner.install_started.clear()
+        assert runner.install_count == 1
+
+        # Now also declare registration_b -- a *different* plugin -- while
+        # registration_a's build is still blocked. If the daemon's default
+        # pool or a shared (not per-plugin) lock still serialized different
+        # plugins, this second build could never reach its own install while
+        # registration_a's is stuck; since registration_a's own worker thread
+        # cannot re-invoke the runner while blocked, only registration_b's
+        # build can be the one that sets install_started again here.
+        daemon._materialize_managed_runtime_desired(
+            {registration_a["id"]: registration_a, registration_b["id"]: registration_b}
+        )
+        assert runner.install_started.wait(timeout=15)
+        assert runner.install_count == 2
+
+        # A cleanup pass submitted through the same real pool while both
+        # builds are in flight touches no cells for these not-yet-published
+        # plugins, so it must complete promptly rather than waiting out
+        # either build's lock.
+        daemon._cleanup_managed_runtimes()
+        cleanup_future = daemon._managed_cleanup_future
+        assert cleanup_future is not None
+        assert cleanup_future.result(timeout=2) is None
+
+        runner.install_release.set()
+        deadline = time.monotonic() + 5
+        while daemon._managed_runtime_futures and time.monotonic() < deadline:
+            daemon._harvest_managed_runtime_futures()
+            time.sleep(0.05)
+        assert not daemon._managed_runtime_futures
+        assert not daemon._managed_runtime_failures
+    finally:
+        runner.install_release.set()
+        if daemon._runtime_executor is not None and daemon._owns_runtime_executor:
+            daemon._runtime_executor.shutdown(wait=True)
+
+
 def test_materialization_failure_retries_with_backoff(harness):
     h = harness
     h.builder.fail_install = True

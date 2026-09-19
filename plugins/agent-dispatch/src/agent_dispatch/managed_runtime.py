@@ -30,7 +30,20 @@ from .single_instance import SingleInstance
 RECEIPT_NAME = ".agent-dispatch-managed-runtime.json"
 RECEIPT_SCHEMA_VERSION = 2
 MANAGED_RUNTIME_ROOT_ENV = "AGENT_DISPATCH_MANAGED_RUNTIME_ROOT"
-_LOCK_WAIT_SECONDS = 120.0
+# A plugin-scoped lock (see _RootLock) legitimately serializes sibling
+# runtimes of the *same* plugin (e.g. agent-index's engine + service, which
+# share one transition_group) -- and, with the runtime pool now wider than
+# one worker, more than one of them can be actively attempted at once, so a
+# sibling routinely *waits out* a genuinely slow first-time build rather than
+# finding the lock merely briefly contended. An ML-heavy build (torch,
+# transformers, sentence-transformers) can run for tens of minutes on first
+# materialization. A short timeout here does not protect against a stuck
+# lock -- the OS releases it automatically if the holder dies (see
+# SingleInstance) -- it only turns ordinary patient waiting into a spurious
+# ManagedRuntimeLockTimeout, which then backs off and retries, repeating the
+# wait. Set generously above any realistic single build's duration so a
+# sibling blocks quietly until its scope frees, instead of erroring.
+_LOCK_WAIT_SECONDS = 2700.0
 _LOCK_POLL_SECONDS = 0.1
 _WINDOWS_REPARSE_POINT = 0x400
 _COMMAND_TIMEOUT_SECONDS = 600.0
@@ -449,16 +462,34 @@ def _quarantine_cell(root: Path, cell: Path) -> Path:
 
 
 class _RootLock:
+    """A crash-safe interprocess lock file under the managed runtime root.
+
+    ``scope`` narrows the lock to one plugin identity (the same digest used as
+    the cell owner directory name) instead of the whole root. A slow build for
+    one plugin companion (e.g. an ML-heavy runtime installing torch/transformers,
+    which can run for tens of minutes) must only serialize against *another*
+    build attempt for that *same* plugin -- it must not also block every other
+    companion's materialize()/validate() call, or the periodic retention
+    cleanup's deletion of an unrelated plugin's stale cells, for its entire
+    duration. ``scope=None`` keeps the original whole-root lock, used by the
+    fast, root-wide bookkeeping in ``managed_retention.py`` (lease/selection
+    writes, and retention's own preflight scan) that never blocks on a slow
+    build in the first place.
+    """
+
     def __init__(
         self,
         root: Path,
+        scope: str | None = None,
         *,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         timeout: float = _LOCK_WAIT_SECONDS,
     ):
         self._root = root
-        self._lock = SingleInstance(root / ".materialize.lock")
+        self._scope = scope
+        lock_name = f".materialize-{scope}.lock" if scope else ".materialize.lock"
+        self._lock = SingleInstance(root / lock_name)
         self._clock = clock
         self._sleep = sleep
         self._timeout = timeout
@@ -474,8 +505,9 @@ class _RootLock:
         deadline = self._clock() + self._timeout
         while not self._lock.acquire():
             if self._clock() >= deadline:
+                scoped = f" for plugin scope {self._scope}" if self._scope else ""
                 raise ManagedRuntimeLockTimeout(
-                    "timed out waiting for the managed runtime root lock"
+                    f"timed out waiting for the managed runtime root lock{scoped}"
                 )
             self._sleep(_LOCK_POLL_SECONDS)
         return self
@@ -499,6 +531,37 @@ def _plugin_identity(authority: Mapping[str, Any]) -> str:
             "source": authority["plugin_source_path"],
         }
     )[:16]
+
+
+def _cache_authority(authority: Mapping[str, Any], *, identity_scoped: bool) -> dict[str, Any]:
+    """The authority slice that gates a runtime's cell reuse (its cache key input).
+
+    ``identity_paths`` on a runtime declares that its true dependency surface is
+    exactly those specific plugin-relative paths -- already narrowly hashed into
+    ``content_digest`` -- independent of the rest of the plugin. Without this
+    narrowing, a heavy first-time build (e.g. an ML-dependency-laden runtime
+    installing torch/transformers, tens of minutes on first run) would still be
+    invalidated and fully rebuilt on *every* ordinary plugin release, because the
+    plugin's own ever-incrementing ``plugin_version`` is part of the authority
+    that ``_cell_key`` hashes -- even a release that never touches this runtime's
+    declared paths. Excluding ``plugin_version`` from the cache key for an
+    identity-scoped runtime lets it survive routine version churn elsewhere in
+    the plugin; ``content_digest`` (and the other authority fields: owner, root,
+    source path, activation scopes) still force a rebuild the moment its own
+    declared paths, plugin identity, or trust boundary actually change. A
+    runtime without ``identity_paths`` copies the *whole* plugin project, so its
+    ``content_digest`` already covers the entire tree and this narrowing does
+    not apply to it (``identity_scoped=False``).
+
+    This is a *comparison* view only -- callers still store the full,
+    unnarrowed authority (including ``plugin_version``) verbatim in the cell's
+    ``ownership.authority`` for provenance/audit; only the values compared for
+    reuse/validity (the cell key, and the ownership check against a stored
+    receipt) go through this narrowing.
+    """
+    if not identity_scoped:
+        return dict(authority)
+    return {key: value for key, value in authority.items() if key != "plugin_version"}
 
 
 def _cell_key(receipt: Mapping[str, Any]) -> str:
@@ -954,7 +1017,7 @@ class ManagedRuntimeMaterializer:
         *,
         runner: Runner = _default_runner,
         trust_verifier: TrustVerifier = _authenticode_valid,
-        lock_factory: Callable[[Path], Any] = _RootLock,
+        lock_factory: Callable[[Path, str], Any] = _RootLock,
     ):
         self.policy = policy
         self.runner = runner
@@ -1011,6 +1074,55 @@ class ManagedRuntimeMaterializer:
         )
         self.runner([str(python), "-I", "-B", "-c", code], cwd, environment)
 
+    @staticmethod
+    def _receipt_matches(receipt: Mapping[str, Any], expected: Mapping[str, Any]) -> bool:
+        """Compare a stored receipt against the freshly computed ``expected``.
+
+        Every field, and every key of the nested ``ownership`` mapping, must
+        match exactly -- *except* the ``plugin_version`` value inside
+        ``ownership.authority``: an identity-scoped runtime's cell may be
+        reused across an ordinary plugin version bump (see
+        ``_cache_authority``), so that one value, built at potentially
+        different plugin releases, is compared with it excluded rather than
+        byte-for-byte. The full authority (with its true, as-built
+        ``plugin_version``) is still what each side stores, and every other
+        authority key -- including whether ``plugin_version`` is even
+        present -- is still required to match exactly; only its *value* is
+        relaxed. ``receipt`` is untrusted (read from disk), so every shape
+        assumption here is checked rather than presumed.
+        """
+        if set(receipt) != set(expected):
+            return False
+        identity_scoped = bool((expected.get("snapshot") or {}).get("identity_paths"))
+        for key, value in expected.items():
+            if key != "ownership":
+                if receipt.get(key) != value:
+                    return False
+                continue
+            stored = receipt.get(key)
+            if (
+                not isinstance(stored, Mapping)
+                or not isinstance(value, Mapping)
+                or set(stored) != set(value)
+                or stored.get("root") != value.get("root")
+                or stored.get("cell") != value.get("cell")
+                or stored.get("windows") != value.get("windows")
+            ):
+                return False
+            stored_authority = stored.get("authority")
+            expected_authority = value.get("authority")
+            if (
+                not isinstance(stored_authority, Mapping)
+                or not isinstance(expected_authority, Mapping)
+                or set(stored_authority) != set(expected_authority)
+            ):
+                return False
+            if _cache_authority(
+                stored_authority, identity_scoped=identity_scoped
+            ) != _cache_authority(expected_authority, identity_scoped=identity_scoped):
+                return False
+        return True
+
     def _ready(
         self,
         cell: Path,
@@ -1028,7 +1140,7 @@ class ManagedRuntimeMaterializer:
         receipt = _read_metadata(root, receipt_path)
         recorded_cell_digest = receipt.pop("cell_digest", None)
         if (
-            receipt != expected
+            not self._receipt_matches(receipt, expected)
             or not isinstance(recorded_cell_digest, str)
             or _tree_digest(cell, excluded=frozenset({RECEIPT_NAME}))
             != recorded_cell_digest
@@ -1075,11 +1187,14 @@ class ManagedRuntimeMaterializer:
         plugin_root: Path,
         plugin_identity: str,
         authority: Mapping[str, Any],
-        authority_digest: str,
         runtime: Mapping[str, Any],
         policy: ManagedRuntimePolicy,
         toolchain_digest: str,
     ) -> MaterializedRuntime:
+        identity_scoped = bool(runtime.get("identity_paths"))
+        authority_digest = _canonical_digest(
+            _cache_authority(authority, identity_scoped=identity_scoped)
+        )
         layout_version = _LAYOUT_VERSION_COMPACT
         staging_parent = _safe_directory(root, ".staging")
         staging = staging_parent / uuid.uuid4().hex
@@ -1322,6 +1437,23 @@ class ManagedRuntimeMaterializer:
                             f"failed to clean managed runtime staging directory: {exc}"
                         ) from exc
 
+    def _legacy_lock_handshake(self, root: Path) -> None:
+        """Prove no pre-scoped-lock agent-dispatch process is still building.
+
+        Before this change, every companion's materialize()/validate() call
+        serialized through one unscoped ``.materialize.lock``. An older
+        process from before a rolling self-update can still be mid-build,
+        holding *that* lock, while a newer process (using the plugin-scoped
+        lock below) starts up -- the two lock files don't coordinate with
+        each other, so old and new code could publish/reuse the same cell
+        concurrently. Taking and immediately releasing the legacy lock here
+        blocks until any such older in-flight build finishes, closing that
+        rollover window, before relying on the finer-grained scoped lock for
+        the actual (non-cross-plugin-blocking) work.
+        """
+        with _RootLock(root):
+            pass
+
     def materialize(
         self, registration: Mapping[str, Any]
     ) -> tuple[MaterializedRuntime, ...]:
@@ -1331,10 +1463,10 @@ class ManagedRuntimeMaterializer:
         root = _ensure_safe_root(policy.root)
         if not policy.base_python.is_file() or not policy.package_manager.is_file():
             raise ManagedRuntimeError("dispatch managed runtime toolchain is unavailable")
-        authority_digest = _canonical_digest(authority)
         plugin_identity = _plugin_identity(authority)
         managed = authority["managed_runtime"]
-        with self.lock_factory(root):
+        self._legacy_lock_handshake(root)
+        with self.lock_factory(root, plugin_identity):
             toolchain_digest = self._toolchain_digest(policy)
             return tuple(
                 self._materialize_one(
@@ -1342,7 +1474,6 @@ class ManagedRuntimeMaterializer:
                     plugin_root=plugin_root,
                     plugin_identity=plugin_identity,
                     authority=authority,
-                    authority_digest=authority_digest,
                     runtime=runtime,
                     policy=policy,
                     toolchain_digest=toolchain_digest,
@@ -1365,15 +1496,47 @@ class ManagedRuntimeMaterializer:
         declared = authority["managed_runtime"]["runtimes"]
         if len(runtimes) != len(declared):
             raise ManagedRuntimeError("selected managed runtime set is incomplete")
-        authority_digest = _canonical_digest(authority)
+        self._legacy_lock_handshake(root)
         plugin_identity = _plugin_identity(authority)
-        with self.lock_factory(root):
+        with self.lock_factory(root, plugin_identity):
             toolchain_digest = self._toolchain_digest(policy)
             for runtime, declaration in zip(runtimes, declared):
+                identity_scoped = bool(declaration.get("identity_paths"))
                 expected = _read_metadata(root, runtime.receipt)
                 schema = expected.get("schema_version")
                 if type(schema) is not int or schema not in (1, RECEIPT_SCHEMA_VERSION):
                     raise ManagedRuntimeError("selected managed runtime receipt version is invalid")
+                expected.pop("cell_digest", None)
+                stored_ownership = expected.get("ownership")
+                stored_authority = (
+                    stored_ownership.get("authority")
+                    if isinstance(stored_ownership, dict)
+                    else None
+                )
+                # A cell created before this authority narrowing shipped (or
+                # by a plugin release still using the full, unnarrowed
+                # authority) stores its cell key/authority_digest from the
+                # full authority even when identity-scoped -- and, since that
+                # receipt may predate the *current* plugin_version too, the
+                # legacy candidate must be computed from the receipt's own
+                # recorded authority, not the freshly resolved one (whose
+                # plugin_version may already have moved on). Accept whichever
+                # form the stored receipt actually used, rather than always
+                # assuming the new narrowed one, so pre-existing identity-
+                # scoped cells keep validating across this upgrade instead
+                # of being rejected as inconsistent.
+                narrowed_digest = _canonical_digest(
+                    _cache_authority(authority, identity_scoped=identity_scoped)
+                )
+                stored_digest = expected.get("authority_digest")
+                legacy_digest = (
+                    _canonical_digest(_cache_authority(stored_authority, identity_scoped=False))
+                    if identity_scoped and isinstance(stored_authority, dict)
+                    else narrowed_digest
+                )
+                authority_digest = (
+                    legacy_digest if stored_digest == legacy_digest else narrowed_digest
+                )
                 layout_version = _layout_version(expected)
                 cell_identity = {
                     "schema_version": schema,
@@ -1399,11 +1562,17 @@ class ManagedRuntimeMaterializer:
                     != _python_path(_runtime_dir(cell, layout_version=layout_version), windows=policy.windows)
                 ):
                     raise ManagedRuntimeError("selected managed runtime location is inconsistent")
-                expected.pop("cell_digest", None)
-                if schema == RECEIPT_SCHEMA_VERSION and expected.get("ownership") != {
-                    "root": str(root), "cell": str(cell), "authority": authority,
-                    "windows": policy.windows,
-                }:
+                if schema == RECEIPT_SCHEMA_VERSION and (
+                    not isinstance(stored_ownership, dict)
+                    or set(stored_ownership) != {"root", "cell", "authority", "windows"}
+                    or stored_ownership.get("root") != str(root)
+                    or stored_ownership.get("cell") != str(cell)
+                    or stored_ownership.get("windows") != policy.windows
+                    or not isinstance(stored_authority, dict)
+                    or set(stored_authority) != set(authority)
+                    or _cache_authority(stored_authority, identity_scoped=identity_scoped)
+                    != _cache_authority(authority, identity_scoped=identity_scoped)
+                ):
                     raise ManagedRuntimeError("selected managed runtime ownership is inconsistent")
                 expected_fields = {
                     "schema_version": schema,

@@ -285,6 +285,138 @@ def test_identity_paths_decouple_digest_from_unrelated_plugin_changes(tmp_path):
     assert runner.install_count == 1
 
 
+def test_identity_paths_survive_a_plugin_version_bump(tmp_path):
+    """A routine plugin release must not force-rebuild an identity-scoped runtime.
+
+    Without this, an ML-dependency-heavy runtime (torch/transformers, tens of
+    minutes on first build) would be invalidated and rebuilt from scratch on
+    every ordinary release of its plugin, even one that never touches the
+    runtime's own declared paths -- exactly the "isolated from regular churn"
+    property this scoping exists to provide.
+    """
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+    registration = _registration(plugin)
+    registration["spec"]["managed_runtime"]["runtimes"][0]["identity_paths"] = [
+        "example_service"
+    ]
+    registration["runtime_revision"]["managed_runtime"] = registration["spec"]["managed_runtime"]
+    first = materializer.materialize(registration)[0]
+
+    bumped = _registration(plugin)
+    bumped["spec"]["managed_runtime"]["runtimes"][0]["identity_paths"] = [
+        "example_service"
+    ]
+    bumped["runtime_revision"]["managed_runtime"] = bumped["spec"]["managed_runtime"]
+    bumped["plugin"]["version"] = "2.0.1"
+    bumped["runtime_revision"]["plugin_version"] = "2.0.1"
+    second = materializer.materialize(bumped)[0]
+
+    assert second == first
+    assert runner.install_count == 1
+    materializer.validate(bumped, (second,))
+
+
+def test_validate_accepts_a_legacy_full_authority_digest_for_identity_scoped_cell(tmp_path):
+    """``validate()`` must still accept a cell keyed before authority
+    narrowing shipped (its cell path/authority_digest built from the full,
+    unnarrowed authority), not just newly narrowed ones -- otherwise every
+    pre-existing identity-scoped cell fails "selected managed runtime
+    authority is inconsistent" the moment this narrowing ships.
+    """
+    from agent_dispatch.managed_runtime import _cache_authority
+
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+    registration = _registration(plugin)
+    registration["spec"]["managed_runtime"]["runtimes"][0]["identity_paths"] = [
+        "example_service"
+    ]
+    registration["runtime_revision"]["managed_runtime"] = registration["spec"]["managed_runtime"]
+    runtime = materializer.materialize(registration)[0]
+
+    receipt = json.loads((runtime.cell / RECEIPT_NAME).read_text(encoding="utf-8"))
+    authority = receipt["ownership"]["authority"]
+    from agent_dispatch.managed_runtime import _canonical_digest
+
+    legacy_digest = _canonical_digest(_cache_authority(authority, identity_scoped=False))
+    assert legacy_digest != receipt["authority_digest"]
+    receipt["authority_digest"] = legacy_digest
+    legacy_key = _cell_key(receipt)
+    legacy_cell = runtime.cell.parent / legacy_key
+    shutil.copytree(runtime.cell, legacy_cell)
+    receipt["ownership"]["cell"] = str(legacy_cell)
+    (legacy_cell / RECEIPT_NAME).write_text(
+        json.dumps(receipt, sort_keys=True), encoding="utf-8"
+    )
+    layout_version = _layout_version(receipt)
+    legacy_runtime = runtime.__class__(
+        name=runtime.name,
+        version=runtime.version,
+        profile=runtime.profile,
+        content_digest=runtime.content_digest,
+        cell=legacy_cell,
+        python=_python_path(_runtime_dir(legacy_cell, layout_version=layout_version), windows=False),
+        receipt=legacy_cell / RECEIPT_NAME,
+    )
+
+    materializer.validate(registration, (legacy_runtime,))
+
+
+def test_validate_accepts_a_legacy_cell_after_a_plugin_version_bump(tmp_path):
+    """The legacy-digest fallback must be computed from the *receipt's own*
+    recorded authority, not the freshly resolved one: a legacy cell built at
+    an older plugin_version, revalidated after a subsequent version bump,
+    would otherwise never match either digest candidate (the narrowed one
+    differs by construction, and a legacy candidate built from the *current*
+    authority still embeds the *new* plugin_version, not the one the cell
+    was actually keyed with).
+    """
+    from agent_dispatch.managed_runtime import _cache_authority, _canonical_digest
+
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+    registration = _registration(plugin)
+    registration["spec"]["managed_runtime"]["runtimes"][0]["identity_paths"] = [
+        "example_service"
+    ]
+    registration["runtime_revision"]["managed_runtime"] = registration["spec"]["managed_runtime"]
+    runtime = materializer.materialize(registration)[0]
+
+    receipt = json.loads((runtime.cell / RECEIPT_NAME).read_text(encoding="utf-8"))
+    authority = receipt["ownership"]["authority"]
+    legacy_digest = _canonical_digest(_cache_authority(authority, identity_scoped=False))
+    receipt["authority_digest"] = legacy_digest
+    legacy_key = _cell_key(receipt)
+    legacy_cell = runtime.cell.parent / legacy_key
+    shutil.copytree(runtime.cell, legacy_cell)
+    receipt["ownership"]["cell"] = str(legacy_cell)
+    (legacy_cell / RECEIPT_NAME).write_text(
+        json.dumps(receipt, sort_keys=True), encoding="utf-8"
+    )
+    layout_version = _layout_version(receipt)
+    legacy_runtime = runtime.__class__(
+        name=runtime.name,
+        version=runtime.version,
+        profile=runtime.profile,
+        content_digest=runtime.content_digest,
+        cell=legacy_cell,
+        python=_python_path(_runtime_dir(legacy_cell, layout_version=layout_version), windows=False),
+        receipt=legacy_cell / RECEIPT_NAME,
+    )
+
+    bumped = _registration(plugin)
+    bumped["spec"]["managed_runtime"]["runtimes"][0]["identity_paths"] = ["example_service"]
+    bumped["runtime_revision"]["managed_runtime"] = bumped["spec"]["managed_runtime"]
+    bumped["plugin"]["version"] = "2.0.1"
+    bumped["runtime_revision"]["plugin_version"] = "2.0.1"
+
+    materializer.validate(bumped, (legacy_runtime,))
+
+
 def test_empty_directory_changes_snapshot_digest(tmp_path):
     plugin = _project(tmp_path)
     runner = FakeRunner()
