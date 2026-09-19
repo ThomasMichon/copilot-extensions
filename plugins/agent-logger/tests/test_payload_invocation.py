@@ -63,12 +63,19 @@ def test_payload_manifest_covers_every_runtime_command() -> None:
 def test_session_start_emits_payload_catalog_after_bootstrap() -> None:
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     session_hooks = hooks["hooks"]["sessionStart"]
+    expected_order = [
+        "bootstrap-check",
+        "register-cold-store-provider",
+        "write-session-guidance",
+    ]
 
-    assert len(session_hooks) == 2
-    for shell in ("bash", "powershell"):
-        assert "bootstrap-check" in session_hooks[0][shell]
-        assert "write-session-guidance" in session_hooks[1][shell]
-        for hook in session_hooks:
+    assert len(session_hooks) == 3
+    assert [
+        next(name for name in expected_order if name in hook["bash"])
+        for hook in session_hooks
+    ] == expected_order
+    for hook in session_hooks:
+        for shell in ("bash", "powershell"):
             assert "COPILOT_PLUGIN_ROOT" in hook[shell]
             assert "'{}'" in hook[shell]
 
