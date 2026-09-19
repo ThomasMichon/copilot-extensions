@@ -4959,6 +4959,59 @@ def test_command_bar_filter_preserves_focused_row_by_key(monkeypatch):
     asyncio.run(run())
 
 
+def test_command_bar_filter_lands_at_equivalent_index_when_row_vanishes(monkeypatch):
+    """PR #2911 review: when the focused row itself is filtered OUT (not
+    merely moved), focus lands at the equivalent index in the shrunk list
+    -- Phase 3's own rule for a deleted row ("focus stays at the equivalent
+    index") -- rather than either a stale index naming a different row, or
+    jumping off the list entirely while rows still remain."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Alt row",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-bbbb", "title": "Fix row",
+         "status": "active", "started_at": "2026-06-27T16:00:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-cccc", "title": "Fix again",
+         "status": "active", "started_at": "2026-06-27T15:00:00",
+         "turn_count": 1, "state": "wip"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert [w["title"] for w in scr.list_records()] == ["Alt row", "Fix row", "Fix again"]
+            await _focus_wt_list(app, pilot, scr)
+            scr.sel = ("L", 0)  # focused on "Alt row"
+            scr.refresh()
+            await pilot.pause()
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+                await pilot.pause()
+            # "Alt row" is filtered OUT entirely -- the equivalent index (0)
+            # in the shrunk two-row list is "Fix row", not a reset off the list.
+            assert [w["title"] for w in scr.list_records()] == ["Fix row", "Fix again"]
+            assert scr.sel == ("L", 0)
+            assert scr.list_records()[scr.sel[1]]["title"] == "Fix row"
+
+    asyncio.run(run())
+
+
 def test_command_bar_appends_named_printable_keys(monkeypatch):
     """PR #2911 review: a NAMED printable key token (Textual's "slash" for
     "/" is the one this module already documents) must still land in the

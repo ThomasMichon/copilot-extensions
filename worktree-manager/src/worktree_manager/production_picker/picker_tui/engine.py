@@ -4296,17 +4296,30 @@ class PickerScreen(Widget):
         previously only refreshed inside the focus branch, leaving it stale
         when the operator cycled sort/filtered from outside the list, e.g.
         focus on a machine/button row) -- the focus branch's own update
-        still wins when focus IS in the list."""
+        still wins when focus IS in the list. A captured key that no longer
+        exists (the row was filtered/removed entirely, not just moved) lands
+        at the equivalent index instead -- Phase 3's own rule for a deleted
+        row ("focus stays at the equivalent index") -- clamped to the new
+        (possibly shorter) list, or off the list entirely only when it's now
+        empty (review finding: a stale index could otherwise silently keep
+        naming a completely different row)."""
         ids = self._l_ids()
-        if refs["last_l"] is not None and refs["last_l"] in ids:
-            self.last_l = ids.index(refs["last_l"])
-        if refs["focus"] is not None and refs["focus"] in ids:
-            self.sel = ("L", ids.index(refs["focus"]))
-            self.last_l = self.sel[1]
+        if refs["last_l"] is not None:
+            self.last_l = ids.index(refs["last_l"]) if refs["last_l"] in ids else 0
+        if refs["focus"] is not None:
+            if refs["focus"] in ids:
+                self.sel = ("L", ids.index(refs["focus"]))
+                self.last_l = self.sel[1]
+            elif ids:
+                idx = min(self.sel[1], len(ids) - 1)
+                self.sel = ("L", idx)
+                self.last_l = idx
+            else:
+                self.sel = self.default_sel()
         elif self.sel[0] == "L" and self.sel not in self.stops():
             self.sel = self.default_sel()
-        if refs["anchor"] is not None and refs["anchor"] in ids:
-            self.wt_anchor = ids.index(refs["anchor"])
+        if refs["anchor"] is not None:
+            self.wt_anchor = ids.index(refs["anchor"]) if refs["anchor"] in ids else None
 
     def _wt_cycle_sort(self):
         """Cycle the Worktrees list's sort key, then remap the focus/anchor/
