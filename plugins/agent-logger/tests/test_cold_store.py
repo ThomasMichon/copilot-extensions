@@ -160,6 +160,58 @@ def test_resolve_session_rejects_symlinked_corpus_machine_dir(
     assert cold_store.resolve_session("s-outside") is None
 
 
+@pytest.mark.skipif(
+    not hasattr(Path, "symlink_to"), reason="platform lacks symlink support"
+)
+def test_resolve_session_rejects_symlinked_live_events_member(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A live session dir that is real, but whose ``events.jsonl`` member is a
+    symlink to an outside file, must not resolve -- the directory-chain check
+    alone is not enough; individual members must be validated too."""
+    secret = tmp_path / "secret.txt"
+    secret.write_text("top secret", encoding="utf-8")
+    state_root = tmp_path / "copilot" / "session-state"
+    sess_dir = state_root / "s-linked-member"
+    sess_dir.mkdir(parents=True)
+    try:
+        (sess_dir / "events.jsonl").symlink_to(secret)
+    except OSError:
+        pytest.skip("symlink creation not permitted in this environment")
+    (sess_dir / "workspace.yaml").write_text("cwd: /tmp\n", encoding="utf-8")
+
+    monkeypatch.setattr(cold_store, "_local_state_root", lambda: state_root)
+    monkeypatch.setattr(cold_store, "session_archive_stores", lambda: [])
+
+    assert cold_store.resolve_session("s-linked-member") is None
+
+
+@pytest.mark.skipif(
+    not hasattr(Path, "symlink_to"), reason="platform lacks symlink support"
+)
+def test_resolve_session_rejects_symlinked_archive_sidecar(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A real archive whose uncompressed ``workspace.yaml`` sidecar is a
+    symlink to an outside file must not resolve."""
+    secret = tmp_path / "secret.yaml"
+    secret.write_text("cwd: /outside\n", encoding="utf-8")
+    src = _make_session(tmp_path / "raw", "s-linked-sidecar")
+    archive_root = tmp_path / "archived-sessions"
+    sessions.archive_session(src, archive_root)
+    sidecar = archive_root / "s-linked-sidecar.workspace.yaml"
+    sidecar.unlink()
+    try:
+        sidecar.symlink_to(secret)
+    except OSError:
+        pytest.skip("symlink creation not permitted in this environment")
+
+    monkeypatch.setattr(cold_store, "_local_state_root", lambda: tmp_path / "copilot" / "session-state")
+    monkeypatch.setattr(cold_store, "session_archive_stores", lambda: [archive_root])
+
+    assert cold_store.resolve_session("s-linked-sidecar") is None
+
+
 @pytest.mark.parametrize(
     "unsafe_id",
     [

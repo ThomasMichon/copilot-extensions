@@ -53,6 +53,20 @@ def _local_state_root() -> Path | None:
         return None
 
 
+def _safe_member_path(path: Path) -> bool:
+    """Whether ``path``, if it exists, is a plain regular file (no link/reparse).
+
+    A missing path is safe here -- the subsequent ``read_*`` call simply
+    returns ``None`` for it; only an *existing* symlink/reparse point is a
+    disclosure risk.
+    """
+    try:
+        mode = path.lstat().st_mode
+    except OSError:
+        return True
+    return stat.S_ISREG(mode) and not is_link_or_reparse(path, mode)
+
+
 def _is_safe_ref(ref: SessionRef) -> bool:
     """Reject a ref that resolves through a symlink/reparse-point component.
 
@@ -60,11 +74,18 @@ def _is_safe_ref(ref: SessionRef) -> bool:
     :class:`agent_logger.chronicle.source.SyncedSessionSource` already
     enforces for the same synced-corpus shape (``existing_real_directory`` /
     ``is_link_or_reparse``) -- a symlinked ``sync_path`` entry, machine
-    subtree, or session directory/archive must never let ``session-fetch``
-    read outside its configured roots.
+    subtree, session directory/archive, or **individual member file** (a live
+    ``events.jsonl``, or an archive's uncompressed ``workspace.yaml``/
+    ``origin.json`` sidecar) must never let ``session-fetch`` disclose an
+    arbitrary readable file. Tarball members are exempt -- they are not
+    filesystem paths, and :mod:`agent_logger.sessions` already validates
+    them against path-traversal when reading out of the archive.
     """
     if ref.kind == "live":
-        return existing_real_directory(ref.path) is not None
+        if existing_real_directory(ref.path) is None:
+            return False
+        member_names = (sessions.EVENTS_MEMBER, *sessions.SIDECAR_MEMBERS)
+        return all(_safe_member_path(ref.path / name) for name in member_names)
     if ref.store is not None and existing_real_directory(ref.store) is None:
         return False
     try:
@@ -73,6 +94,12 @@ def _is_safe_ref(ref: SessionRef) -> bool:
         return False
     if not stat.S_ISREG(mode) or is_link_or_reparse(ref.path, mode):
         return False
+    if ref.store is not None:
+        sidecar_paths = (
+            ref.store / f"{ref.id}.{name}" for name in sessions.SIDECAR_MEMBERS
+        )
+        if not all(_safe_member_path(p) for p in sidecar_paths):
+            return False
     return True
 
 
