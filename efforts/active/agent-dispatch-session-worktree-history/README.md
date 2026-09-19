@@ -137,14 +137,14 @@ Intelligence Dampener)
       not a separate one.
 
 ### Phase 2 — agent-bridge: resolve by dispatch-task reference
-> **2026-09-19 progress note:** the *ranking* logic (which session IDs to try,
-> in what order) shipped as a pure, dependency-free module. The live
-> HTTP-route wiring (fetching the task + attachment history from
-> agent-dispatch, looping candidates through the existing
-> live-then-cold-store resolver, and a worktree-level "latest session"
-> fallback when nothing resolves) is the concrete next slice — deliberately
-> not rushed into a shared repo's live FastAPI app without settling the
-> agent-dispatch URL/token config shape first (see below).
+> **2026-09-19 progress note (route wiring landed):** `GET
+> /api/v1/dispatch-tasks/{id}/session` now exists
+> (`plugins/agent-bridge/src/agent_bridge/routes/dispatch_tasks.py`), backed
+> by a new `agent_dispatch_client` HTTP client and an
+> `agent_dispatch_url`/`agent_dispatch_token` config surface on
+> `ServiceConfig` (env-overridable via `AGENT_DISPATCH_URL`/
+> `AGENT_DISPATCH_TOKEN`, mirroring `neuron-forge`'s own shape). Phase 2 is
+> now fully delivered, including integration tests.
 - [x] Extend the existing session/worktree resolver
       (`any-session-any-registered-worktree-regardless-of-liveness`'s
       implementation) to accept a dispatch-task reference as an additional
@@ -164,24 +164,28 @@ Intelligence Dampener)
       cold-store provider still has that exact session. **Delivered:**
       `candidate_session_ids()` orders the current owner session first,
       then every attachment history entry newest-first, deduped.
-- [ ] New/extended REST surface mirroring the existing worktree-scoped
+- [x] New/extended REST surface mirroring the existing worktree-scoped
       routes' shape (so consumers' interface doesn't change shape, only
       gains a new valid key) — exact route design TBD at implementation
       time; keep consistent with `docs/architecture.md`'s existing
-      provider-registration and resolver documentation. **Remaining:** wire
-      a route (e.g. `GET /api/v1/dispatch-tasks/{id}/session`) that fetches
-      the task + attachments from agent-dispatch (needs an `AGENT_DISPATCH
-      _URL`/`AGENT_DISPATCH_TOKEN` config surface on agent-bridge, mirroring
-      `neuron-forge`'s own established pattern for the same optional
-      dependency) and loops `candidate_session_ids()` through
-      `SessionManager.get_session()` / `fetch_cold_store_session()`.
-- [ ] Tests: resolving a live dispatch task, a suspended one, a fully
+      provider-registration and resolver documentation. **Delivered:**
+      `GET /api/v1/dispatch-tasks/{id}/session` fetches the task +
+      attachments from agent-dispatch (new `agent_dispatch_url`/
+      `agent_dispatch_token` config surface, mirroring `neuron-forge`'s own
+      established pattern for the same optional dependency) and loops
+      `candidate_session_ids()` through `SessionManager.get_session()` /
+      `fetch_cold_store_session()`, falling back to
+      `task_worktree_id()` + `routes.worktrees._latest_session_for_worktree()`
+      when no candidate resolves.
+- [x] Tests: resolving a live dispatch task, a suspended one, a fully
       terminal/released one whose worktree is gone but whose last session
       is still cold-store-resolvable, and one with no resolvable session at
-      all (graceful 404, never an error). **Delivered so far:** unit tests
-      for the ranking module (current-owner-first, dedup, empty/malformed
-      input). **Remaining:** integration tests for the actual route once it
-      exists.
+      all (graceful 404, never an error). **Delivered:** unit tests for the
+      ranking module (current-owner-first, dedup, empty/malformed input)
+      plus `tests/test_dispatch_task_session_route.py` integration tests
+      covering current-owner-live, attachment-history cold-store fallback,
+      worktree-latest-session fallback, no-resolvable-session 404,
+      unknown-task 404, and unconfigured-coordinator 503.
 
 ### Phase 3 — consumers: adopt the shared resolver
 - [ ] `aperture-labs` Intelligence Dampener: re-attempt the "View reviewer"

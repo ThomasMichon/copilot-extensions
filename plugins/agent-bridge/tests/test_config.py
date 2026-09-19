@@ -17,6 +17,7 @@ from agent_bridge.config import (
     remove_topology,
     save_config,
     validate_config,
+    _apply_agent_dispatch_env_defaults,
 )
 from agent_bridge.models import ServiceConfig, TopologyProfile
 
@@ -470,3 +471,27 @@ class TestInRepoBridgeConfig:
         assert cfg is not None
         assert cfg.default_copilot_args == ["--model", "base"]
         assert cfg.default_env == {"K": "v"}
+
+
+class TestAgentDispatchEnvDefaults:
+    """agent_dispatch_url/agent_dispatch_token env fallback (#2954 review)."""
+
+    def test_env_fills_absent_url(self, monkeypatch):
+        monkeypatch.setenv("AGENT_DISPATCH_URL", "http://example:1234")
+        data = _apply_agent_dispatch_env_defaults({})
+        assert data["agent_dispatch_url"] == "http://example:1234"
+
+    def test_explicit_empty_yaml_value_disables_env_fallback(self, monkeypatch):
+        """An explicit `agent_dispatch_url: ""` in YAML is the documented way
+        to disable the coordinator lookup -- it must not be overridden by an
+        env var just because it is falsy."""
+        monkeypatch.setenv("AGENT_DISPATCH_URL", "http://example:1234")
+        data = _apply_agent_dispatch_env_defaults({"agent_dispatch_url": ""})
+        assert data["agent_dispatch_url"] == ""
+
+    def test_explicit_yaml_value_wins_over_env(self, monkeypatch):
+        monkeypatch.setenv("AGENT_DISPATCH_URL", "http://from-env:1")
+        data = _apply_agent_dispatch_env_defaults(
+            {"agent_dispatch_url": "http://from-yaml:2"}
+        )
+        assert data["agent_dispatch_url"] == "http://from-yaml:2"

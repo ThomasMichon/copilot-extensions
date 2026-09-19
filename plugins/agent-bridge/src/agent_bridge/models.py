@@ -1012,3 +1012,18 @@ class ServiceConfig(BaseModel):
         "acceptable. Set conservatively; 0 disables the live-stall interrupt "
         "entirely (the runner-less resync path is unaffected).",
     )
+    agent_dispatch_url: str = Field(
+        default="http://127.0.0.1:9847",
+        description="Base URL of the local agent-dispatch coordinator, consulted "
+        "by GET /api/v1/dispatch-tasks/{id}/session to resolve a dispatch-task "
+        "reference to the session that worked it (agent-dispatch-session-"
+        "worktree-history, Phase 2). Optional dependency -- mirrors "
+        "neuron-forge's own agent_dispatch_url/AGENT_DISPATCH_URL config shape "
+        "so the two consumers agree on the same coordinator by default.",
+    )
+    agent_dispatch_token: str = Field(
+        default="",
+        description="Bearer token for the agent-dispatch coordinator above. "
+        "Empty by default -- the loopback coordinator commonly runs "
+        "unauthenticated.",
+    )
