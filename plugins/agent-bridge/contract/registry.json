@@ -357,7 +357,7 @@
           "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response; re-attested after adding the cold-store -provider session-lookup fallback (Phase 2b, session-worktree-archive-linkout effort), which does not touch this code path."
         }
       ],
-      "support_window": "The daemon declares HTTP generations 1 through 12 supported; evidence currently exercises generations 9 through 12.",
+      "support_window": "The daemon declares HTTP generations 1 through 15 supported; evidence currently exercises generations 9 through 15.",
       "bridge_contract_rollback_window": "Retain the generation 11 fixture, the older generation 9 fixture, and a generation 10 prior-runtime fixture until the live and recoverable reference census permits retirement.",
       "mixed_version_scenarios": [
         "new-client_old-daemon",
