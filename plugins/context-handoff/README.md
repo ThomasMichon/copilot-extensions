@@ -320,6 +320,41 @@ node $ch consume --locator 'task:<task-id>' --session-id $env:COPILOT_AGENT_SESS
 node $ch consume --locator 'file:<handoff-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 ```
 
+## Last-resort fallback: write the file yourself
+
+The tool-backed path (`save_handoff_prompt` / `trigger_handoff` /
+`consume_handoff`) and the payload-local CLI fallback above both assume
+*something* still works -- the extension host, `node`, or a reachable store.
+When even that assumption is unsafe (the extension is disconnected, the CLI
+fails the same way, or storage reports "no safe task or file store was
+available"), the **most durable** continuation path needs none of it: an
+ordinary file write, plus a short prompt a human pastes into a fresh session
+after `/clear`. This always works because it depends on nothing but the
+agent's normal ability to write a file and print text.
+
+1. Compose the same markdown brief the Template section describes.
+2. Write it with an ordinary file write -- no MCP tool call, no extension, no
+   `node` -- to a stable path under the current session's own state folder:
+   the same `~/.copilot/session-state/<session-id>/` directory the extension
+   itself already uses (for example
+   `~/.copilot/session-state/<session-id>/files/handoff-<slug>.md`). This
+   directory persists independent of the extension, the payload-local CLI,
+   and any store selection.
+3. State the exact absolute path to the user.
+4. Give the user a short prompt to paste into a new session after `/clear`,
+   naming that exact path and instructing the next session to read it and
+   resume the objective it describes -- not merely recap it. For example:
+
+   ```text
+   /clear
+   Read <absolute-path-to-file> and resume the objective it describes.
+   ```
+
+5. This path has no automatic pickup, no claim tracking, and no
+   supersession -- it is a manual handoff between two humans/agents. Prefer
+   the tool-backed and CLI-backed paths above whenever either is reachable;
+   reserve this one for when both have failed.
+
 ## Auditing handoff head alignment
 
 `check-heads` compares the authoritative `agent-worktrees head-session --json`
