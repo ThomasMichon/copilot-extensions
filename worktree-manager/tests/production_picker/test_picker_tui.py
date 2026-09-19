@@ -4576,6 +4576,15 @@ def test_wt_row_always_visible_covers_every_live_signal():
     assert derive.wt_row_always_visible({"mux_live": False}) is False
 
 
+def test_wt_row_always_visible_covers_classified_active_state():
+    """PR #2911 review: a row can classify ``state == "ACTIVE"`` (e.g. a
+    canonical raw ``state: "active"``) with none of the live-signal booleans
+    set -- the Active section's trustworthiness is this predicate's whole
+    point, not just its literal live-signal subset."""
+    assert derive.wt_row_always_visible({"state": "ACTIVE"}) is True
+    assert derive.wt_row_always_visible({"state": "WIP"}) is False
+
+
 def test_command_bar_filters_the_worktrees_list(monkeypatch):
     """#2228 Phase 4: "/" opens the command bar, typed characters narrow the
     Worktrees list by title (case-insensitive substring), and Enter commits
@@ -4593,7 +4602,7 @@ def test_command_bar_filters_the_worktrees_list(monkeypatch):
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
             await pilot.pause()
-            assert len(scr.list_records()) == 3
+            assert len(scr._wt_visible_records()) == 3
             await _focus_wt_list(app, pilot, scr)
             await pilot.press("/")
             await pilot.pause()
@@ -4602,7 +4611,7 @@ def test_command_bar_filters_the_worktrees_list(monkeypatch):
                 await pilot.press(ch)
                 await pilot.pause()
             assert scr.list_view.query == "fix"
-            assert [w["title"] for w in scr.list_records()] == ["Fix the thing"]
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix the thing"]
             await pilot.press("enter")
             await pilot.pause()
             assert scr.cmd_mode is False
@@ -4611,7 +4620,7 @@ def test_command_bar_filters_the_worktrees_list(monkeypatch):
             # The query itself survives leaving compose mode (Enter commits,
             # it doesn't clear -- only Escape clears).
             assert scr.list_view.query == "fix"
-            assert [w["title"] for w in scr.list_records()] == ["Fix the thing"]
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix the thing"]
 
     asyncio.run(run())
 
@@ -4636,11 +4645,11 @@ def test_command_bar_escape_clears_filter_before_backing_out(monkeypatch):
                 await pilot.press(ch)
             await pilot.press("enter")
             await pilot.pause()
-            assert len(scr.list_records()) == 1
+            assert len(scr._wt_visible_records()) == 1
             await pilot.press("escape")
             await pilot.pause()
             assert scr.list_view.query == ""
-            assert len(scr.list_records()) == 3
+            assert len(scr._wt_visible_records()) == 3
             assert not _quit_modal_open(scr)
 
     asyncio.run(run())
@@ -4684,15 +4693,15 @@ def test_command_bar_idle_escape_preserves_focus_by_key(monkeypatch):
                 await pilot.press(ch)
             await pilot.press("enter")
             await pilot.pause()
-            assert [w["title"] for w in scr.list_records()] == ["Zzz match"]
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Zzz match"]
             assert scr.sel == ("L", 0)
             await pilot.press("escape")
             await pilot.pause()
             assert scr.list_view.query == ""
-            assert [w["title"] for w in scr.list_records()] == ["Alt match", "Zzz match"]
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Alt match", "Zzz match"]
             # Zzz match moved from index 0 (filtered) to index 1 (unfiltered) --
             # focus must have followed it there, not stayed at index 0.
-            focused = scr.list_records()[scr.sel[1]]
+            focused = scr._wt_visible_records()[scr.sel[1]]
             assert focused["title"] == "Zzz match"
 
     asyncio.run(run())
@@ -4735,8 +4744,48 @@ def test_command_bar_never_hides_a_live_worktree(monkeypatch):
                 await pilot.press(ch)
             await pilot.press("enter")
             await pilot.pause()
-            titles = {w["title"] for w in scr.list_records()}
+            titles = {w["title"] for w in scr._wt_visible_records()}
             assert titles == {"Unrelated title", "Fix the thing"}
+
+    asyncio.run(run())
+
+
+def test_command_bar_filter_never_narrows_list_records_or_selection(monkeypatch):
+    """PR #2911 review: `_wt_view()`'s filtering must apply ONLY to the
+    render/navigation view (`current_list_visible`/`_wt_visible_records`) --
+    `list_records()` (and everything built on it: selection reconciliation,
+    cleanup/sync scope, action menus) must keep seeing the FULL unfiltered
+    set. A worktree selected before typing a non-matching query must not be
+    silently dropped from `wt_sel` by a reload/reconcile pass just because
+    it's currently hidden by the filter."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            nl = await _focus_wt_list(app, pilot, scr)
+            # Select "Old idle wt" (a Recent-section row not matched by "fix").
+            idx = next(i for i, w in enumerate(scr.list_records())
+                       if w["title"] == "Old idle wt")
+            scr.wt_sel.toggle(scr._row_key(scr.list_records()[idx]))
+            assert len(scr.wt_sel) == 1
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+            # The full set is unaffected by the filter...
+            assert len(scr.list_records()) == 3
+            # ...and the reload-time reconciliation pass (#2258 P3-7) must not
+            # drop the selection just because its row is currently hidden.
+            scr._reconcile_wt_sel()
+            assert len(scr.wt_sel) == 1
+            _ = nl
 
     asyncio.run(run())
 
@@ -4800,12 +4849,12 @@ def test_command_bar_sort_cycles_worktrees_order(monkeypatch):
             scr.machine_idx = scr.local_index()
             await pilot.pause()
             # Default (age): most-recent-first -> Zeta (newer) before Alpha.
-            assert [w["title"] for w in scr.list_records()] == ["Zeta idle", "Alpha idle"]
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Zeta idle", "Alpha idle"]
             await _focus_wt_list(app, pilot, scr)
             await pilot.press("s")
             await pilot.pause()
             assert scr.list_view.sort_label(derive.WT_SORT_KEYS) == "title"
-            assert [w["title"] for w in scr.list_records()] == ["Alpha idle", "Zeta idle"]
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Alpha idle", "Zeta idle"]
 
     asyncio.run(run())
 
@@ -4843,7 +4892,7 @@ def test_command_bar_sort_cycle_preserves_focus_and_anchor(monkeypatch):
             await pilot.pause()
             # Default (age) order: Zeta (index 0), Alpha (index 1). Focus and
             # anchor Zeta -- it will move to index 1 once sorted by title.
-            assert [w["title"] for w in scr.list_records()] == ["Zeta idle", "Alpha idle"]
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Zeta idle", "Alpha idle"]
             scr.sel = ("L", 0)
             scr.wt_anchor = 0
             scr.refresh()
@@ -4853,11 +4902,11 @@ def test_command_bar_sort_cycle_preserves_focus_and_anchor(monkeypatch):
             scr.wt_anchor = 0
             await pilot.press("s")
             await pilot.pause()
-            assert [w["title"] for w in scr.list_records()] == ["Alpha idle", "Zeta idle"]
-            focused = scr.list_records()[scr.sel[1]]
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Alpha idle", "Zeta idle"]
+            focused = scr._wt_visible_records()[scr.sel[1]]
             assert focused["title"] == "Zeta idle"
             assert scr.last_l == scr.sel[1]
-            assert scr.list_records()[scr.wt_anchor]["title"] == "Zeta idle"
+            assert scr._wt_visible_records()[scr.wt_anchor]["title"] == "Zeta idle"
 
     asyncio.run(run())
 
@@ -4895,14 +4944,14 @@ def test_command_bar_sort_cycle_remaps_last_l_from_outside_the_list(monkeypatch)
             await pilot.pause()
             # Zeta remembered as the last-focused row, but focus is now on
             # the machine row -- not "L" -- when the sort cycles.
-            assert [w["title"] for w in scr.list_records()] == ["Zeta idle", "Alpha idle"]
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Zeta idle", "Alpha idle"]
             scr.last_l = 0
             scr.sel = ("M", 0)
             scr.refresh()
             await pilot.pause()
             scr._wt_cycle_sort()
-            assert [w["title"] for w in scr.list_records()] == ["Alpha idle", "Zeta idle"]
-            assert scr.list_records()[scr.last_l]["title"] == "Zeta idle"
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Alpha idle", "Zeta idle"]
+            assert scr._wt_visible_records()[scr.last_l]["title"] == "Zeta idle"
 
     asyncio.run(run())
 
@@ -4940,7 +4989,7 @@ def test_command_bar_filter_preserves_focused_row_by_key(monkeypatch):
             await pilot.pause()
             # Both are Active (state wip), age order -> Alt match (0), Zzz
             # match (1). Focus Zzz match (index 1).
-            assert [w["title"] for w in scr.list_records()] == ["Alt match", "Zzz match"]
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Alt match", "Zzz match"]
             await _focus_wt_list(app, pilot, scr)
             scr.sel = ("L", 1)
             scr.refresh()
@@ -4952,8 +5001,8 @@ def test_command_bar_filter_preserves_focused_row_by_key(monkeypatch):
             for ch in "zzz":
                 await pilot.press(ch)
                 await pilot.pause()
-            assert [w["title"] for w in scr.list_records()] == ["Zzz match"]
-            focused = scr.list_records()[scr.sel[1]]
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Zzz match"]
+            focused = scr._wt_visible_records()[scr.sel[1]]
             assert focused["title"] == "Zzz match"
 
     asyncio.run(run())
@@ -4994,7 +5043,7 @@ def test_command_bar_filter_lands_at_equivalent_index_when_row_vanishes(monkeypa
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
             await pilot.pause()
-            assert [w["title"] for w in scr.list_records()] == ["Alt row", "Fix row", "Fix again"]
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Alt row", "Fix row", "Fix again"]
             await _focus_wt_list(app, pilot, scr)
             scr.sel = ("L", 0)  # focused on "Alt row"
             scr.refresh()
@@ -5005,9 +5054,9 @@ def test_command_bar_filter_lands_at_equivalent_index_when_row_vanishes(monkeypa
                 await pilot.pause()
             # "Alt row" is filtered OUT entirely -- the equivalent index (0)
             # in the shrunk two-row list is "Fix row", not a reset off the list.
-            assert [w["title"] for w in scr.list_records()] == ["Fix row", "Fix again"]
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix row", "Fix again"]
             assert scr.sel == ("L", 0)
-            assert scr.list_records()[scr.sel[1]]["title"] == "Fix row"
+            assert scr._wt_visible_records()[scr.sel[1]]["title"] == "Fix row"
 
     asyncio.run(run())
 

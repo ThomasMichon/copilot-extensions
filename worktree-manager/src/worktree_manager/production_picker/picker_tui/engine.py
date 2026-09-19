@@ -2596,12 +2596,17 @@ class PickerScreen(Widget):
         worktrees are hidden unless Toggle-hidden is on (#1422). Worktrees with
         no owning Copilot session are split into a distinct 'Unowned' section so
         selecting one never silently cold-starts a blank conversation (#1026).
-        Each section is filtered/sorted by the "/" command bar's state
-        (#2228 Phase 4) before the Unowned split, so that split still operates
-        on the visible set."""
+
+        ALWAYS the full, unfiltered set -- the "/" command bar (#2228 Phase 4)
+        narrows only the render/navigation view (:meth:`current_list_visible`),
+        never this one. Every OTHER consumer (selection reconciliation,
+        cleanup/sync scope, action menus) reads this method, directly or via
+        :meth:`list_records`, and must keep seeing every worktree regardless of
+        the current query -- a filter must never silently drop a selection or
+        action target that still exists in the underlying data (review
+        finding)."""
         cols = ACTIVE_SPECS if self.is_all() else LIST_SPECS
         a, r, c = self.src.bucket(self._visible_scope_data())
-        a, r, c = self._wt_view(a), self._wt_view(r), self._wt_view(c)
         unowned = [w for w in r if w.get("sessionless")]
         if unowned:
             r = [w for w in r if not w.get("sessionless")]
@@ -2610,6 +2615,27 @@ class PickerScreen(Widget):
                 ("Unowned · no prior session (Open starts fresh)", unowned),
             ]
         return cols, [("Active", a), ("Recent", r), ("Completed", c)]
+
+    def current_list_visible(self):
+        """``current_list()``'s sections narrowed/sorted by the "/" command
+        bar's ``ListView`` state (#2228 Phase 4) -- rendering/navigation ONLY
+        (``WorktreesView.build_data``, ``stops``, focus tracking). Never
+        drops a live/bare-orphan/ACTIVE row -- the record-shape-contract
+        (README, Phase 4)."""
+        cols, sections = self.current_list()
+        if self._kind() != "worktrees":
+            return cols, sections
+        return cols, [(label, self._wt_view(rows)) for label, rows in sections]
+
+    def _wt_visible_records(self):
+        """Flat, render-order list of every VISIBLE Worktrees row (after the
+        command-bar filter/sort) -- the navigation-only counterpart to
+        :meth:`list_records`."""
+        _cols, sections = self.current_list_visible()
+        out = []
+        for _label, rows in sections:
+            out.extend(rows)
+        return out
 
     def list_records(self):
         _cols, secs = self.current_list()
@@ -2653,7 +2679,7 @@ class PickerScreen(Widget):
             out = [*self._v_stops(), ("M", 0)]
             if self.button_set():
                 out.append(("BTN", 0))
-            for i in range(len(self.list_records())):
+            for i in range(len(self._wt_visible_records())):
                 out.append(("L", i))
         elif self._kind() == "maintenance":
             out = [*self._v_stops(), ("M", 0), ("BTN", 0)]
@@ -2703,7 +2729,7 @@ class PickerScreen(Widget):
             heads = [*v, ("M", 0)]
             if self.button_set():
                 heads.append(("BTN", 0))
-            if self.list_records():
+            if self._wt_visible_records():
                 heads.append(self._l_head())
         elif self._kind() == "maintenance":
             heads = [*v, ("M", 0), ("BTN", 0)]
@@ -2856,8 +2882,10 @@ class PickerScreen(Widget):
 
     # ---- Worktrees list multi-select (#2228 Phase 2b, #2258 Phase 3) ----
     def _l_ids(self):
-        """The collision-safe selection key of each Worktrees row."""
-        return [self._row_key(r) for r in self.list_records()]
+        """The collision-safe selection key of each VISIBLE Worktrees row (in
+        render order) -- navigation/focus-tracking only; action execution
+        above resolves against the full ``list_records()`` directly."""
+        return [self._row_key(r) for r in self._wt_visible_records()]
 
     def _wt_focused_id(self):
         """The id4 of the currently focused Worktrees row, or None when focus is
@@ -2884,7 +2912,7 @@ class PickerScreen(Widget):
     def _l_head(self):
         """Worktrees list entry point for Tab, restoring the last-focused row
         (#2258 P3-6, mirrors the Profiles-grid cell memory #1288)."""
-        n = len(self.list_records())
+        n = len(self._wt_visible_records())
         if n == 0:
             return ("L", 0)
         return ("L", min(self.last_l, n - 1))
@@ -2912,11 +2940,11 @@ class PickerScreen(Widget):
 
     def _rehome_l_focus(self):
         """Keep list focus at the equivalent index after a reload removed rows
-        (#2258 P3-7): clamp ``self.sel`` into the current list, or fall back to a
-        safe default when the list emptied."""
+        (#2258 P3-7): clamp ``self.sel`` into the current VISIBLE list, or
+        fall back to a safe default when it emptied."""
         if self.sel[0] != "L":
             return
-        n = len(self.list_records())
+        n = len(self._wt_visible_records())
         if n == 0:
             self.sel = self.default_sel()
         elif self.sel[1] >= n:
@@ -7939,7 +7967,7 @@ class WorktreesView:
     def build_data(self, add, width, sel):
         eng = self._eng
         btn_focus = sel == ("BTN", 0)
-        cols, sections = eng.current_list()
+        cols, sections = eng.current_list_visible()
         # The checkbox gutter's two left cells (box + margin) are ALWAYS
         # reserved so the table never shifts. Since #88 NF5-5 (mouse support in
         # the native list) the box GLYPH is also always shown per row, so
