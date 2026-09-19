@@ -430,6 +430,28 @@ def test_current_commit_none_is_valid(tmp_path):
     assert connector.current_commit() is None
 
 
+@pytest.mark.parametrize("value", ["inf", "-inf", "nan", "0", "-5", "not-a-number", ""])
+def test_verb_timeout_rejects_invalid_overrides(monkeypatch, value):
+    from agent_index.sources.providers import DEFAULT_VERB_TIMEOUT, _verb_timeout
+
+    monkeypatch.setenv("AGENT_INDEX_PROVIDER_TIMEOUT", value)
+    assert _verb_timeout() == DEFAULT_VERB_TIMEOUT
+
+
+def test_verb_timeout_accepts_valid_override(monkeypatch):
+    from agent_index.sources.providers import _verb_timeout
+
+    monkeypatch.setenv("AGENT_INDEX_PROVIDER_TIMEOUT", "12.5")
+    assert _verb_timeout() == 12.5
+
+
+def test_verb_timeout_default_when_unset(monkeypatch):
+    from agent_index.sources.providers import DEFAULT_VERB_TIMEOUT, _verb_timeout
+
+    monkeypatch.delenv("AGENT_INDEX_PROVIDER_TIMEOUT", raising=False)
+    assert _verb_timeout() == DEFAULT_VERB_TIMEOUT
+
+
 def test_spawn_failure_fails_closed(tmp_path):
     manifest = ProviderManifest(source_name="gitea", command=(str(tmp_path / "does-not-exist"),))
     connector = CliSourceConnector("gitea", manifest)

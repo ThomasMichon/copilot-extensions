@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import stat
 import subprocess
@@ -102,10 +103,23 @@ def providers_dir() -> Path:
 
 
 def _verb_timeout() -> float:
+    """Resolve the per-verb subprocess timeout from the environment.
+
+    Rejects any non-finite (``inf``/``nan``) or non-positive override --
+    ``subprocess.run(timeout=...)`` treats ``inf``/a huge value as effectively
+    "never", and ``0``/negative as "expire immediately" or undefined, either
+    of which would defeat the whole point of a bounded per-call timeout.
+    """
+    raw = os.environ.get("AGENT_INDEX_PROVIDER_TIMEOUT")
+    if raw is None:
+        return DEFAULT_VERB_TIMEOUT
     try:
-        return float(os.environ.get("AGENT_INDEX_PROVIDER_TIMEOUT", str(DEFAULT_VERB_TIMEOUT)))
+        value = float(raw)
     except (TypeError, ValueError):
         return DEFAULT_VERB_TIMEOUT
+    if not math.isfinite(value) or value <= 0:
+        return DEFAULT_VERB_TIMEOUT
+    return value
 
 
 @dataclass(frozen=True)
