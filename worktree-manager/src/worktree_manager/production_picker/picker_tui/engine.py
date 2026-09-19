@@ -1604,8 +1604,7 @@ class PickerScreen(Widget):
     def _setup_live_pivots(self):
         """Scan contributed pivots without delaying local or fleet rows."""
         pivot_payload = self._scan_pivot_payload()
-        from . import tasks as _tasks_mod
-        _tasks_mod.prewarm_optional_modules()
+        from . import tasks as _tasks_mod; _tasks_mod.prewarm_optional_modules()
 
         def apply():
             self._install_pivot_payload(pivot_payload)
@@ -2043,6 +2042,7 @@ class PickerScreen(Widget):
         # Re-scan the pivot registry so a refresh ('r') picks up a newly
         # installed (or removed) contributed pivot without a picker restart.
         self._load_pivots()
+        from . import tasks as _tasks_mod; _tasks_mod.prewarm_optional_modules()
         # A manual reload ('r') must also refresh the registered Tasks pivot, not
         # just the worktree lists (the pivot runtime is separate + has no TTL):
         # clear each pivot runtime's cache so the next frame's ensure() refetches,

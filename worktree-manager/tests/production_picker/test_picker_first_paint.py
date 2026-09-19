@@ -84,6 +84,39 @@ def test_setup_live_pivots_prewarms_optional_modules(monkeypatch):
     assert calls == [1]
 
 
+def test_setup_prewarms_optional_modules_too(monkeypatch):
+    """``setup()`` -- the shared non-live-mount / manual-reload ('r') path --
+    must warm the same modules as ``_setup_live_pivots``: a registered pivot
+    can be *first discovered* here too (e.g. a plugin installed after the
+    picker started, picked up on the next 'r' reload), and unlike
+    ``_setup_live_pivots`` this path already runs synchronously either way
+    (pre-existing pivot filesystem scan), so it must not be the one place
+    left paying the import hitch on the UI thread."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    calls = []
+    monkeypatch.setattr(tasks_mod, "prewarm_optional_modules", lambda: calls.append(1))
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+        @staticmethod
+        def machines():
+            return [("host Win", "host", "Win", True)]
+
+        @staticmethod
+        def load():
+            return []
+
+    screen = eng.PickerScreen(Src(), live=False)
+    calls.clear()  # __init__/on_mount may already have called setup() once
+    screen.setup()
+
+    assert calls == [1]
+
+
 def test_prewarm_optional_modules_imports_data_ssh(monkeypatch):
     """Unlike the call-count test above (which spies on the seam so
     ``_setup_live_pivots`` stays independently testable), this exercises the
@@ -129,10 +162,15 @@ def test_prewarm_optional_modules_survives_import_error(monkeypatch):
 
     real_import = builtins.__import__
 
-    def boom(name, *a, **k):
-        if name.endswith(".data_ssh"):
+    def boom(name, globals=None, locals=None, fromlist=(), level=0):
+        # ``from . import data_ssh`` calls ``__import__('', ..., ('data_ssh',),
+        # 1)`` -- the relative-import ``name`` is empty and the submodule
+        # shows up in ``fromlist``, not appended to ``name`` (an earlier
+        # version of this test checked ``name.endswith(".data_ssh")``, which
+        # never matched, so the simulated failure was never exercised).
+        if level and "data_ssh" in fromlist:
             raise ImportError("simulated broken optional module")
-        return real_import(name, *a, **k)
+        return real_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", boom)
 
