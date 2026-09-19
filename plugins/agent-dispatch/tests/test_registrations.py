@@ -989,6 +989,86 @@ def test_supervisor_daemon_root_resolves_installed_slot_not_sys_executable(
     assert observed["argv"][0] == str(slot_py)
 
 
+def test_ensure_supervisor_daemon_no_ops_for_a_foreign_machine(monkeypatch):
+    """Regression test for #2791: ``--ensure`` must never spawn a local
+    supervisor for a ``--machine`` scope that isn't this host's own resolved
+    identity -- that previously left a persistent, wrongly-scoped daemon
+    running on the wrong box with no local visibility into why."""
+    from agent_dispatch import remote_dispatch
+    from agent_dispatch import supervise_cli
+
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host-a")
+    spawned = {}
+
+    def _fake_spawn(machine, env):
+        spawned["called"] = (machine, env)
+        return True
+
+    monkeypatch.setattr(supervise_cli, "_spawn_supervisor_daemon_detached", _fake_spawn)
+
+    result = supervise_cli._ensure_supervisor_daemon(
+        _parse(["supervise", "register"]), "host-b", "default"
+    )
+
+    assert result["ensured"] is False
+    assert result["reason"] == "not-local-machine"
+    assert result["local_machine"] == "host-a"
+    assert "called" not in spawned
+
+
+def test_ensure_supervisor_daemon_still_spawns_for_the_local_machine(monkeypatch, tmp_path):
+    """Sibling to the above: a scope that DOES match the local host's resolved
+    identity is unaffected by the new guard."""
+    from agent_dispatch import __main__ as cli
+    from agent_dispatch import remote_dispatch
+    from agent_dispatch import supervise_cli
+
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host-a")
+    monkeypatch.setattr(cli.Path, "home", lambda: tmp_path)
+    spawned = {}
+
+    def _fake_spawn(machine, env):
+        spawned["called"] = (machine, env)
+        return True
+
+    monkeypatch.setattr(supervise_cli, "_spawn_supervisor_daemon_detached", _fake_spawn)
+
+    result = supervise_cli._ensure_supervisor_daemon(
+        _parse(["supervise", "register"]), "host-a", "default"
+    )
+
+    assert result["ensured"] is True
+    assert spawned["called"] == ("host-a", "default")
+
+
+def test_ensure_supervisor_daemon_still_spawns_for_a_case_insensitive_local_match(
+    monkeypatch, tmp_path,
+):
+    """Regression test for the reviewed-in follow-up: a differently-cased but
+    otherwise identical machine name is still THIS host, not a foreign one
+    (mirrors :func:`remote_dispatch.is_peer_machine`'s own case-insensitivity)."""
+    from agent_dispatch import __main__ as cli
+    from agent_dispatch import remote_dispatch
+    from agent_dispatch import supervise_cli
+
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host-a")
+    monkeypatch.setattr(cli.Path, "home", lambda: tmp_path)
+    spawned = {}
+
+    def _fake_spawn(machine, env):
+        spawned["called"] = (machine, env)
+        return True
+
+    monkeypatch.setattr(supervise_cli, "_spawn_supervisor_daemon_detached", _fake_spawn)
+
+    result = supervise_cli._ensure_supervisor_daemon(
+        _parse(["supervise", "register"]), "HOST-A", "default"
+    )
+
+    assert result["ensured"] is True
+    assert spawned["called"] == ("HOST-A", "default")
+
+
 def test_cli_build_spec_evaluator_convenience():
     from agent_dispatch.__main__ import _build_registration_spec
 

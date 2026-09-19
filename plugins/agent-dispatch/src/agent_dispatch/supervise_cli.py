@@ -307,13 +307,37 @@ def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
 def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env: str) -> dict:
     """Ensure a singleton supervisor daemon is running for this (machine, env).
 
-    Checks the supervisor lease first; if a daemon already holds it, this is a
-    no-op. Otherwise it launches one detached. Best-effort and fail-soft -- a
-    failure to ensure never fails the register call.
+    ``--ensure`` only ever ensures a daemon for the *local* host. A registration's
+    ``--machine`` names where the work should run, not an instruction for this
+    invocation to become that machine: a scope that names a different machine
+    than this host's own resolved identity is a foreign scope and is a no-op
+    here -- silently starting a same-named-but-elsewhere supervisor process
+    would leave a persistent, wrongly-scoped daemon running on the wrong box
+    with nothing (a local ``daemon-status``/``supervise list`` check included)
+    to reveal it (github.com/ThomasMichon/copilot-extensions#2791). The correct
+    machine's *own* session is expected to run its own ``--ensure`` (or its
+    already-installed supervisor service) for its own scope.
+
+    Otherwise, checks the supervisor lease first; if a daemon already holds it,
+    this is a no-op. Otherwise it launches one detached. Best-effort and
+    fail-soft -- a failure to ensure never fails the register call.
     """
+    from . import remote_dispatch
     from .config import run_dir
     from .single_instance import is_locked, lock_path_for
     from .supervisor_daemon import supervisor_lease_scope
+
+    if remote_dispatch.is_peer_machine(machine):
+        local = remote_dispatch.local_machine()
+        print(
+            f"supervise register --ensure: scope names machine '{machine}', "
+            f"but this host resolves as '{local}' -- not starting a local "
+            "supervisor for a different machine's scope. Run --ensure on "
+            f"'{machine}' itself (or its own installed supervisor service) "
+            "to ensure that scope.",
+            file=sys.stderr,
+        )
+        return {"ensured": False, "reason": "not-local-machine", "local_machine": local}
 
     scope = supervisor_lease_scope(machine, env)
     try:
