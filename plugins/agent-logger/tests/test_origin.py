@@ -251,3 +251,124 @@ def test_config_denylist_parsing(tmp_path: Path) -> None:
                  tmp_path)
     assert cfg.sync_repo_denylist == ["test-chamber", "copilot-extensions"]
     assert Config({"sync": {}}, tmp_path).sync_repo_denylist == []
+
+
+# -- repo-owned sync opt-in gate (mirrors agent-index's activation gate) ----
+
+
+def test_config_require_repo_opt_in_default_false(tmp_path: Path) -> None:
+    assert Config({"sync": {}}, tmp_path).sync_require_repo_opt_in is False
+    assert Config(
+        {"sync": {"require_repo_opt_in": True}}, tmp_path
+    ).sync_require_repo_opt_in is True
+
+
+def _write_opt_in_config(repo: Path, opt_in: bool, *, legacy: bool = False) -> None:
+    rel = origin._LEGACY_OPT_IN_CONFIG_RELATIVE if legacy else origin._OPT_IN_CONFIG_RELATIVE
+    path = repo.joinpath(*rel)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"sync:\n  opt_in: {'true' if opt_in else 'false'}\n",
+                    encoding="utf-8")
+
+
+def test_resolve_repo_opt_in_true_from_canonical_config(tmp_path: Path) -> None:
+    repo = tmp_path / "test-chamber"
+    repo.mkdir()
+    _write_opt_in_config(repo, True)
+    assert origin.resolve_repo_opt_in(repo) is True
+
+
+def test_resolve_repo_opt_in_false_when_declared_false(tmp_path: Path) -> None:
+    repo = tmp_path / "test-chamber"
+    repo.mkdir()
+    _write_opt_in_config(repo, False)
+    assert origin.resolve_repo_opt_in(repo) is False
+
+
+def test_resolve_repo_opt_in_canonical_wins_over_legacy(tmp_path: Path) -> None:
+    repo = tmp_path / "test-chamber"
+    repo.mkdir()
+    _write_opt_in_config(repo, True)
+    _write_opt_in_config(repo, False, legacy=True)
+    assert origin.resolve_repo_opt_in(repo) is True
+
+
+def test_resolve_repo_opt_in_false_when_no_config_and_no_knowledge_repo(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "odsp-web-harness"
+    repo.mkdir()
+    monkeypatch.setattr(origin, "_bound_knowledge_repo", lambda _p: None)
+    assert origin.resolve_repo_opt_in(repo) is False
+
+
+def test_resolve_repo_opt_in_unopinionated_config_falls_through(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # A config file present but silent on `opt_in` is "no opinion", not opt-in.
+    repo = tmp_path / "odsp-web-harness"
+    repo.mkdir()
+    path = repo.joinpath(*origin._OPT_IN_CONFIG_RELATIVE)
+    path.parent.mkdir(parents=True)
+    path.write_text("sync:\n  other_key: 1\n", encoding="utf-8")
+    monkeypatch.setattr(origin, "_bound_knowledge_repo", lambda _p: None)
+    assert origin.resolve_repo_opt_in(repo) is False
+
+
+def test_resolve_repo_opt_in_forwards_to_bound_knowledge_repo(
+    tmp_path: Path, monkeypatch
+) -> None:
+    harness = tmp_path / "odsp-web-harness"
+    harness.mkdir()
+    knowledge = tmp_path / "dotfiles"
+    knowledge.mkdir()
+    _write_opt_in_config(knowledge, True)
+    monkeypatch.setattr(origin, "_bound_knowledge_repo", lambda _p: knowledge)
+    assert origin.resolve_repo_opt_in(harness) is True
+
+
+def test_classify_for_sync_require_repo_opt_in_gates_allowlisted_repo(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "srcroot" / "test-chamber"
+    repo.mkdir(parents=True)
+    d = _mk(tmp_path, "s", f"git_root: {repo}\n")
+    eff = origin.effective_harness(["test-chamber"], ["dotfiles"])
+
+    # No repo-owned config yet -> excluded even though allowlisted.
+    inc, o = origin.classify_for_sync(
+        d, "book2", ["test-chamber"], eff, require_repo_opt_in=True,
+        opt_in_resolver=lambda _p: False,
+    )
+    assert inc is False
+    assert o["source_repo"] == "test-chamber"  # still classified/tagged
+
+    # Repo opts in -> now included.
+    inc2, _ = origin.classify_for_sync(
+        d, "book2", ["test-chamber"], eff, require_repo_opt_in=True,
+        opt_in_resolver=lambda _p: True,
+    )
+    assert inc2 is True
+
+
+def test_classify_for_sync_require_repo_opt_in_default_off_unaffected(
+    tmp_path: Path,
+) -> None:
+    d = _mk(tmp_path, "s", "git_root: /home/u/src/test-chamber\n")
+    eff = origin.effective_harness(["test-chamber"], ["dotfiles"])
+    inc, _ = origin.classify_for_sync(d, "book2", ["test-chamber"], eff)
+    assert inc is True  # unchanged prior behavior when the gate is off
+
+
+def test_classify_for_sync_require_repo_opt_in_excludes_deleted_checkout(
+    tmp_path: Path,
+) -> None:
+    # git_root recorded but no longer on disk -> nothing to consult -> excluded.
+    d = _mk(tmp_path, "s", "git_root: /nonexistent/test-chamber\n")
+    eff = origin.effective_harness(["test-chamber"], ["dotfiles"])
+    inc, _ = origin.classify_for_sync(
+        d, "book2", ["test-chamber"], eff, require_repo_opt_in=True,
+        opt_in_resolver=lambda _p: True,
+    )
+    assert inc is False
+

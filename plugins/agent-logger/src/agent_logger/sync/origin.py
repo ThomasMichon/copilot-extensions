@@ -17,13 +17,27 @@ explicitly.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
+from typing import Any
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - pyyaml is a hard dependency
+    yaml = None  # type: ignore[assignment]
 
 ORIGIN_SIDECAR = "origin.json"
 SCHEMA_VERSION = 1
 
 # workspace.yaml keys carrying a filesystem origin, in match precedence.
 _ORIGIN_KEYS = ("git_root", "repository", "cwd")
+
+# Repo-owned sync opt-in config: same relative shape as agent-index's
+# `.copilot-extensions/<plugin>/config.yaml` activation convention.
+_OPT_IN_CONFIG_RELATIVE = (".copilot-extensions", "agent-logger", "config.yaml")
+_LEGACY_OPT_IN_CONFIG_RELATIVE = (".agent-logger", "config.yaml")
+_OPT_IN_SUBPROCESS_TIMEOUT = 10
 
 
 def _read_workspace_paths(session_dir: Path) -> list[tuple[str, str]]:
@@ -50,6 +64,118 @@ def _read_workspace_paths(session_dir: Path) -> list[tuple[str, str]]:
     except OSError:
         return []
     return [(k, found[k]) for k in _ORIGIN_KEYS if k in found]
+
+
+def _origin_path_for(session_dir: Path, effective: list[str]) -> Path | None:
+    """Return the on-disk repo path a session's origin matched, if any.
+
+    Mirrors :func:`derive_origin`'s matching but returns the actual recorded
+    path instead of a repo name, for filesystem-backed follow-up checks (the
+    repo-owned sync opt-in gate below). Only ``git_root``/``cwd`` carry a
+    real filesystem path here; ``repository`` (a URL/slug in some workspaces)
+    never resolves to a path. The path is never persisted in the origin
+    sidecar -- it stays local to this process.
+    """
+    for basis, value in _read_workspace_paths(session_dir):
+        low = value.lower()
+        for repo in effective:
+            if repo and repo.lower() in low:
+                if basis not in ("git_root", "cwd"):
+                    return None
+                candidate = Path(value)
+                return candidate if candidate.is_dir() else None
+    return None
+
+
+def _load_opt_in_config(path: Path) -> dict[str, Any] | None:
+    if yaml is None or not path.is_file():  # pragma: no cover - hard dependency
+        return None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _declared_opt_in(repo_path: Path) -> bool | None:
+    """Read this repo's own opt-in declaration, if it carries one.
+
+    Returns ``True``/``False`` for an explicit ``sync: {opt_in: <bool>}`` in
+    either the canonical or legacy config location (canonical wins when both
+    are present), or ``None`` when neither file exists or neither declares
+    the key -- "no opinion", letting the caller fall through (e.g. to a bound
+    knowledge repo).
+    """
+    for relative in (_OPT_IN_CONFIG_RELATIVE, _LEGACY_OPT_IN_CONFIG_RELATIVE):
+        data = _load_opt_in_config(repo_path.joinpath(*relative))
+        if data is None:
+            continue
+        sync_block = data.get("sync")
+        if isinstance(sync_block, dict) and "opt_in" in sync_block:
+            return bool(sync_block["opt_in"])
+    return None
+
+
+def _bound_knowledge_repo(repo_path: Path) -> Path | None:
+    """Best-effort resolve ``repo_path``'s bound knowledge repo via
+    ``agent-worktrees state-root``. Returns ``None`` on any ambiguity or
+    failure -- this is a fail-closed forwarding hop, never a hard dependency.
+    """
+    command = shutil.which("agent-worktrees")
+    if not command:
+        return None
+    try:
+        result = subprocess.run(
+            [command, "state-root", "--json"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=_OPT_IN_SUBPROCESS_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except (json.JSONDecodeError, UnicodeError):
+        return None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("source") != "knowledge_repo"
+        or not payload.get("bound")
+        or not isinstance(payload.get("state_root"), str)
+        or not payload["state_root"].strip()
+    ):
+        return None
+    try:
+        state_root = Path(payload["state_root"]).expanduser().resolve(strict=True)
+    except OSError:
+        return None
+    if not state_root.is_dir() or state_root == repo_path.resolve():
+        return None
+    return state_root
+
+
+def resolve_repo_opt_in(repo_path: Path) -> bool:
+    """Return whether ``repo_path`` durably opts itself into session-sync.
+
+    Mirrors ``agent-index``'s repo-owned activation-gate convention: a repo
+    (or, when it declares none and requires external state, its bound
+    knowledge repo) commits ``.copilot-extensions/agent-logger/config.yaml``
+    (legacy: ``.agent-logger/config.yaml``) with a top-level ``sync: {opt_in:
+    true}``. Neither an *unopinionated* config (present but silent on
+    ``opt_in``) nor an unresolvable/absent one activates sync -- this gate
+    fails closed, so being ``enabledPlugins``-enabled never implies syncing.
+    """
+    declared = _declared_opt_in(repo_path)
+    if declared is not None:
+        return declared
+    knowledge_repo = _bound_knowledge_repo(repo_path)
+    if knowledge_repo is None:
+        return False
+    return bool(_declared_opt_in(knowledge_repo))
 
 
 def derive_origin(session_dir: Path, machine: str,
@@ -104,7 +230,9 @@ def effective_harness(allowlist: list[str], harness_repos: list[str],
 def classify_for_sync(session_dir: Path, machine: str, allowlist: list[str],
                       effective: list[str], *,
                       fail_closed: bool = False,
-                      denylist: list[str] | None = None) -> tuple[bool, dict]:
+                      denylist: list[str] | None = None,
+                      require_repo_opt_in: bool = False,
+                      opt_in_resolver=resolve_repo_opt_in) -> tuple[bool, dict]:
     """Origin-based per-repo sync decision. Returns ``(include, origin)``.
 
     Precedence:
@@ -121,16 +249,28 @@ def classify_for_sync(session_dir: Path, machine: str, allowlist: list[str],
        non-denied repo, and (fail-open) an unrecognized/metadata-less session --
        unless ``fail_closed`` drops the truly unclassifiable ones. This is the
        "everything else" sink.
+    4. **Repo opt-in gate (opt-in feature, off by default).** When
+       ``require_repo_opt_in`` is set, a session that would otherwise sync per
+       1-3 additionally requires the matched repo (or its bound knowledge
+       repo) to durably declare ``sync: {opt_in: true}`` -- see
+       :func:`resolve_repo_opt_in`. A session with no on-disk repo path to
+       check (deleted checkout, machine-only, or a ``repository``-only
+       basis) is excluded once this gate is enabled, since there is nothing
+       to consult.
     """
     origin = derive_origin(session_dir, machine, effective)
     src = origin["source_repo"]
-    return classify_source_repo(
+    include = classify_source_repo(
         src,
         has_recorded_paths=bool(_read_workspace_paths(session_dir)),
         allowlist=allowlist,
         denylist=denylist,
         fail_closed=fail_closed,
-    ), origin
+    )
+    if include and require_repo_opt_in:
+        repo_path = _origin_path_for(session_dir, effective)
+        include = repo_path is not None and opt_in_resolver(repo_path)
+    return include, origin
 
 
 def classify_source_repo(
