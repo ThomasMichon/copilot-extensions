@@ -16,8 +16,11 @@ explicitly.
 
 from __future__ import annotations
 
+import functools
 import json
+import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -38,6 +41,8 @@ _ORIGIN_KEYS = ("git_root", "repository", "cwd")
 _OPT_IN_CONFIG_RELATIVE = (".copilot-extensions", "agent-logger", "config.yaml")
 _LEGACY_OPT_IN_CONFIG_RELATIVE = (".agent-logger", "config.yaml")
 _OPT_IN_SUBPROCESS_TIMEOUT = 10
+_MAX_OPT_IN_CONFIG_BYTES = 256 * 1024
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
 
 def _read_workspace_paths(session_dir: Path) -> list[tuple[str, str]]:
@@ -87,8 +92,54 @@ def _origin_path_for(session_dir: Path, effective: list[str]) -> Path | None:
     return None
 
 
-def _load_opt_in_config(path: Path) -> dict[str, Any] | None:
-    if yaml is None or not path.is_file():  # pragma: no cover - hard dependency
+def _is_link_or_reparse(info: os.stat_result) -> bool:
+    return bool(
+        stat.S_ISLNK(info.st_mode)
+        or getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
+        or getattr(info, "st_reparse_tag", 0)
+    )
+
+
+def _safe_repo_file(repo_path: Path, relative: tuple[str, ...]) -> Path | None:
+    """Resolve ``repo_path/relative`` only if every path component -- each
+    intermediate directory and the final file -- is an ordinary entry (no
+    symlink/reparse point), so a committed opt-in config can never point
+    outside the checkout it's declared in. Mirrors agent-index's
+    ``_safe_file`` containment check.
+    """
+    try:
+        root = repo_path.resolve(strict=True)
+    except OSError:
+        return None
+    current = root
+    for part in relative:
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError:
+            return None
+        if _is_link_or_reparse(info):
+            return None
+        is_last = part == relative[-1]
+        if not is_last and not stat.S_ISDIR(info.st_mode):
+            return None
+    try:
+        resolved = current.resolve(strict=True)
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    if not resolved.is_file() or resolved.stat().st_size > _MAX_OPT_IN_CONFIG_BYTES:
+        return None
+    return resolved
+
+
+def _load_opt_in_config(repo_path: Path, relative: tuple[str, ...]) -> dict[str, Any] | None:
+    if yaml is None:  # pragma: no cover - hard dependency
+        return None
+    path = _safe_repo_file(repo_path, relative)
+    if path is None:
         return None
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -102,14 +153,17 @@ def _declared_opt_in(repo_path: Path) -> bool | None:
 
     Returns ``True``/``False`` for an explicit ``sync: {opt_in: <bool>}`` in
     either the canonical or legacy config location (canonical wins when both
-    are present). Only an actual boolean activates or deactivates; any other
-    scalar (a string like ``"false"``, a number, null, ...) is treated the
-    same as the key being absent -- "no opinion", letting the caller fall
-    through (e.g. to a bound knowledge repo) rather than silently truthy-cast
-    an invalid declaration into an accidental opt-in.
+    are present), each loaded only when it is an ordinary, repo-contained
+    file (see :func:`_safe_repo_file` -- a symlink/reparse point pointing
+    outside the repo is never followed). Only an actual boolean activates or
+    deactivates; any other scalar (a string like ``"false"``, a number,
+    null, ...) is treated the same as the key being absent -- "no opinion",
+    letting the caller fall through (e.g. to a bound knowledge repo) rather
+    than silently truthy-cast an invalid declaration into an accidental
+    opt-in.
     """
     for relative in (_OPT_IN_CONFIG_RELATIVE, _LEGACY_OPT_IN_CONFIG_RELATIVE):
-        data = _load_opt_in_config(repo_path.joinpath(*relative))
+        data = _load_opt_in_config(repo_path, relative)
         if data is None:
             continue
         sync_block = data.get("sync")
@@ -121,11 +175,14 @@ def _declared_opt_in(repo_path: Path) -> bool | None:
     return None
 
 
-def _bound_knowledge_repo(repo_path: Path) -> Path | None:
-    """Best-effort resolve ``repo_path``'s bound knowledge repo via
-    ``agent-worktrees state-root``. Returns ``None`` on any ambiguity or
-    failure -- this is a fail-closed forwarding hop, never a hard dependency.
-    """
+@functools.lru_cache(maxsize=256)
+def _bound_knowledge_repo_cached(repo_path_str: str) -> str | None:
+    """Cached body of :func:`_bound_knowledge_repo`, keyed by the resolved
+    repo path string. One ``agent-worktrees`` process launch per distinct
+    repo per interpreter lifetime, instead of one per classified session --
+    a sync/compaction pass over a large session store no longer pays a
+    process-startup cost per session for the same handful of repos."""
+    repo_path = Path(repo_path_str)
     command = shutil.which("agent-worktrees")
     if not command:
         return None
@@ -158,9 +215,23 @@ def _bound_knowledge_repo(repo_path: Path) -> Path | None:
         state_root = Path(payload["state_root"]).expanduser().resolve(strict=True)
     except OSError:
         return None
-    if not state_root.is_dir() or state_root == repo_path.resolve():
+    if not state_root.is_dir() or state_root == repo_path:
         return None
-    return state_root
+    return str(state_root)
+
+
+def _bound_knowledge_repo(repo_path: Path) -> Path | None:
+    """Best-effort resolve ``repo_path``'s bound knowledge repo via
+    ``agent-worktrees state-root``. Returns ``None`` on any ambiguity or
+    failure -- this is a fail-closed forwarding hop, never a hard dependency.
+    Cached per resolved repo path (see :func:`_bound_knowledge_repo_cached`).
+    """
+    try:
+        resolved = repo_path.resolve(strict=True)
+    except OSError:
+        return None
+    cached = _bound_knowledge_repo_cached(str(resolved))
+    return Path(cached) if cached is not None else None
 
 
 def resolve_repo_opt_in(repo_path: Path) -> bool:
@@ -172,8 +243,7 @@ def resolve_repo_opt_in(repo_path: Path) -> bool:
     (legacy: ``.agent-logger/config.yaml``) with a top-level ``sync: {opt_in:
     true}``. Neither an *unopinionated* config (present but silent on
     ``opt_in``) nor an unresolvable/absent one activates sync -- this gate
-    fails closed, so being ``enabledPlugins``-enabled never implies syncing.
-    """
+    fails closed, so being ``enabledPlugins``-enabled never implies syncing.    """
     declared = _declared_opt_in(repo_path)
     if declared is not None:
         return declared

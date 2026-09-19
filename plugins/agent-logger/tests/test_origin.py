@@ -293,6 +293,42 @@ def test_resolve_repo_opt_in_canonical_wins_over_legacy(tmp_path: Path) -> None:
     assert origin.resolve_repo_opt_in(repo) is True
 
 
+def test_resolve_repo_opt_in_rejects_symlinked_config_file(tmp_path: Path) -> None:
+    # A config file that is itself a symlink pointing outside the repo must
+    # never be followed -- the opt-in gate is not repo-owned otherwise.
+    outside = tmp_path / "outside-config.yaml"
+    outside.write_text("sync:\n  opt_in: true\n", encoding="utf-8")
+    repo = tmp_path / "test-chamber"
+    cfg_dir = repo.joinpath(*origin._OPT_IN_CONFIG_RELATIVE).parent
+    cfg_dir.mkdir(parents=True)
+    link = cfg_dir / "config.yaml"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        import pytest
+        pytest.skip("creating symlinks is not permitted in this environment")
+    assert origin._declared_opt_in(repo) is None
+    assert origin.resolve_repo_opt_in(repo) is False
+
+
+def test_resolve_repo_opt_in_rejects_symlinked_intermediate_dir(tmp_path: Path) -> None:
+    # A symlinked intermediate directory (e.g. .copilot-extensions itself
+    # pointing elsewhere) must also be rejected, not just the leaf file.
+    outside_dir = tmp_path / "outside-dir"
+    (outside_dir / "agent-logger").mkdir(parents=True)
+    (outside_dir / "agent-logger" / "config.yaml").write_text(
+        "sync:\n  opt_in: true\n", encoding="utf-8")
+    repo = tmp_path / "test-chamber"
+    repo.mkdir()
+    try:
+        (repo / ".copilot-extensions").symlink_to(outside_dir, target_is_directory=True)
+    except OSError:
+        import pytest
+        pytest.skip("creating symlinks is not permitted in this environment")
+    assert origin._declared_opt_in(repo) is None
+    assert origin.resolve_repo_opt_in(repo) is False
+
+
 def test_resolve_repo_opt_in_false_when_no_config_and_no_knowledge_repo(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -325,6 +361,31 @@ def test_resolve_repo_opt_in_forwards_to_bound_knowledge_repo(
     _write_opt_in_config(knowledge, True)
     monkeypatch.setattr(origin, "_bound_knowledge_repo", lambda _p: knowledge)
     assert origin.resolve_repo_opt_in(harness) is True
+
+
+def test_bound_knowledge_repo_caches_per_repo_path(tmp_path: Path, monkeypatch) -> None:
+    # A sync/compaction pass classifies many sessions against a small number
+    # of distinct repos -- the subprocess-backed lookup must be paid once per
+    # repo, not once per session.
+    origin._bound_knowledge_repo_cached.cache_clear()
+    repo = tmp_path / "odsp-web-harness"
+    repo.mkdir()
+    calls = []
+
+    class _FakeResult:
+        returncode = 1
+        stdout = ""
+
+    def _fake_run(*args, **kwargs):
+        calls.append(1)
+        return _FakeResult()
+
+    monkeypatch.setattr(origin.shutil, "which", lambda _name: "agent-worktrees")
+    monkeypatch.setattr(origin.subprocess, "run", _fake_run)
+    for _ in range(5):
+        origin._bound_knowledge_repo(repo)
+    assert len(calls) == 1
+    origin._bound_knowledge_repo_cached.cache_clear()
 
 
 def test_resolve_repo_opt_in_non_boolean_value_treated_as_no_opinion(

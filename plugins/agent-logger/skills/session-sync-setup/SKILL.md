@@ -112,6 +112,16 @@ recorded `git_root`/`cwd` (never guessed):
 This is an *additional* requirement layered on top of
 `repo_allowlist`/`repo_denylist`, not a replacement — both still apply.
 
+> **Enabling the gate does not retroactively purge prior compaction
+> archives.** `sync.compact` (below) already applies this same gate to which
+> *new* cold sessions it selects, but sessions compacted into
+> `sync.compact.archive_root` **before** the gate was turned on (or while an
+> opted-out repo's cutover was still pending) remain on disk and are still
+> shipped wholesale by `compact-hub`. If you enable `require_repo_opt_in`
+> after compaction has already run, manually prune
+> `sync.compact.archive_root` for any repo that stays opted out, or clear it
+> and let compaction rebuild it under the new policy.
+
 ## Repo-local log organization
 
 Session-sync is machine-local, but log organization can be repo-local. A
