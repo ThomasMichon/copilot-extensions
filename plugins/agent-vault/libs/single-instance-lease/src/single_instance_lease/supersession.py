@@ -52,16 +52,37 @@ def pid_alive(pid: int | None) -> bool:
     if sys.platform == "win32":
         try:
             import ctypes
+            from ctypes import wintypes
 
             PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            handle = ctypes.windll.kernel32.OpenProcess(
+            ERROR_INVALID_PARAMETER = 87  # the definitive "no such pid" on Win32
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL,
+                                        wintypes.DWORD]
+            k32.OpenProcess.restype = wintypes.HANDLE
+            k32.CloseHandle.argtypes = [wintypes.HANDLE]
+            k32.CloseHandle.restype = wintypes.BOOL
+            handle = k32.OpenProcess(
                 PROCESS_QUERY_LIMITED_INFORMATION, False, pid
             )
-            if not handle:
-                return False
-            ctypes.windll.kernel32.CloseHandle(handle)
-            return True
-        except Exception:
+            if handle:
+                k32.CloseHandle(handle)
+                return True
+            # ERROR_ACCESS_DENIED (a protected / other-user process) proves the
+            # pid exists; only "invalid parameter" proves it does not. Treating
+            # every OpenProcess failure as "dead" would violate this function's
+            # own fail-open contract for the access-denied case.
+            return ctypes.get_last_error() != ERROR_INVALID_PARAMETER
+        except (OSError, ctypes.ArgumentError):
+            # OSError: the platform call itself failed (can't tell -> alive).
+            # ctypes.ArgumentError: the declared ``argtypes`` make ctypes
+            # validate ``pid`` as a DWORD before the Win32 call even runs, so
+            # a non-numeric/malformed recorded pid raises here instead of
+            # reaching the branch above -- still a "can't tell", never a
+            # crash for a reaper/self-retire check iterating over untrusted
+            # table data. (Verified empirically: an out-of-range but
+            # genuinely integer pid is silently truncated by ctypes, not
+            # raised -- only a non-int-like value hits this path.)
             return True
     try:
         os.kill(pid, 0)
@@ -145,6 +166,15 @@ def is_superseded(
         return False
     if port <= 0:
         return False
-    host = _client_host(str(raw.get("bind", "")))
+    raw_bind = raw.get("bind")
+    if not isinstance(raw_bind, str) or not raw_bind:
+        # A missing/malformed ``bind`` means the active record itself is
+        # unparseable -- the documented fail-safe contract requires staying
+        # alive for that, not defaulting to a loopback probe that could
+        # coincidentally find *something* listening on the recorded port and
+        # produce a false-positive supersession (a live daemon incorrectly
+        # deciding to self-retire).
+        return False
+    host = _client_host(raw_bind)
     # Require a *live* successor: the newer generation must actually be serving.
     return bool(is_listening(host, port))

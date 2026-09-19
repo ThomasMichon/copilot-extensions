@@ -34,6 +34,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import single_instance_lease
+
 # Bumped only on a breaking change to the on-disk shape; readers tolerate an
 # absent/unknown version (treat as legacy best-effort) so a rollout is safe.
 LOCK_SCHEMA = 1
@@ -53,42 +55,15 @@ def _pid_alive(pid: int) -> bool:
     stated contract -- never hide a session that might be real -- and is what
     makes this safe to use as a reaper's safety veto, where a false "dead"
     terminates a live process.
+
+    Delegates to :func:`single_instance_lease.pid_alive` -- the shared
+    liveness primitive also used by the self-retire/reaper backstop
+    (process-slot-ownership Phase 4, aperture-labs #5091) -- rather than
+    reimplementing the same OS-level probe a second time in this module.
     """
     if pid <= 0:
         return False
-    if platform.system() == "Windows":
-        import ctypes
-        from ctypes import wintypes
-
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        ERROR_INVALID_PARAMETER = 87  # the definitive "no such pid" on Win32
-        try:
-            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL,
-                                        wintypes.DWORD]
-            k32.OpenProcess.restype = wintypes.HANDLE
-            k32.CloseHandle.argtypes = [wintypes.HANDLE]
-            k32.CloseHandle.restype = wintypes.BOOL
-            handle = k32.OpenProcess(
-                PROCESS_QUERY_LIMITED_INFORMATION, False, pid
-            )
-            if handle:
-                k32.CloseHandle(handle)
-                return True
-            # ERROR_ACCESS_DENIED (a protected / other-user process) proves the
-            # pid exists; only "invalid parameter" proves it does not.
-            return ctypes.get_last_error() != ERROR_INVALID_PARAMETER
-        except OSError:
-            return True  # can't tell -> assume alive
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False  # ESRCH -- the only proof of death
-    except PermissionError:
-        return True   # EPERM -- exists, just not ours to signal
-    except OSError:
-        return True   # can't tell -> assume alive
-    return True
+    return single_instance_lease.pid_alive(pid)
 
 
 def pid_alive(pid: int) -> bool:
