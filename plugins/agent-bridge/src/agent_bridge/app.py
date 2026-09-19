@@ -26,6 +26,7 @@ from .routes import (
     acp_ws,
     admin,
     agents,
+    console_ui,
     health,
     live_sessions,
     native,
@@ -1075,6 +1076,7 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:
     # Routes
     app.include_router(health.router)
     app.include_router(ui.router)
+    app.include_router(console_ui.router)
     app.include_router(acp_ws.router)
     app.include_router(sessions.router)
     app.include_router(live_sessions.router)
