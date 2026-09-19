@@ -951,7 +951,7 @@ class TestCmdHandoffCutover:
         self, monkeypatch, capfd,
     ):
         monkeypatch.setattr(
-            sessions, "mux_session_for_pane", lambda pane: None,
+            m, "_resolve_retire_pane_mux_session", lambda pane, expected: None,
         )
         monkeypatch.setattr(
             sessions, "mux_binding_for_session",
@@ -999,8 +999,8 @@ class TestCmdHandoffCutover:
         self, monkeypatch, capfd,
     ):
         monkeypatch.setattr(
-            sessions, "mux_session_for_pane",
-            lambda pane: "different-session",
+            m, "_resolve_retire_pane_mux_session",
+            lambda pane, expected: "different-session",
         )
         monkeypatch.setattr(
             sessions, "mux_binding_for_session",
@@ -1390,7 +1390,8 @@ class TestCmdHandoffCutover:
         _tracking.register_session("wt-retire-mismatch", "old-sess")
 
         monkeypatch.setattr(
-            sessions, "mux_session_for_pane", lambda pane: "new-server-session",
+            m, "_resolve_retire_pane_mux_session",
+            lambda pane, expected: "new-server-session",
         )
         monkeypatch.setattr(
             m.pane_lifecycle, "pane_terminate",
@@ -1420,8 +1421,8 @@ class TestCmdHandoffCutover:
         self, monkeypatch, capfd,
     ):
         monkeypatch.setattr(
-            sessions, "mux_session_for_pane",
-            lambda pane: "new-server-session",
+            m, "_resolve_retire_pane_mux_session",
+            lambda pane, expected: "new-server-session",
         )
         monkeypatch.setattr(
             m.pane_lifecycle, "pane_terminate",
@@ -1452,7 +1453,7 @@ class TestCmdHandoffCutover:
     def test_retire_unresolved_mux_identity_requires_session_reap(
         self, monkeypatch, capfd,
     ):
-        monkeypatch.setattr(sessions, "mux_session_for_pane", lambda pane: None)
+        monkeypatch.setattr(m, "_resolve_retire_pane_mux_session", lambda pane, expected: None)
         monkeypatch.setattr(
             m.pane_lifecycle, "pane_terminate",
             lambda *a, **k: pytest.fail("must not retire an unverified pane"),
@@ -2849,6 +2850,45 @@ class TestCmdHandoffsCheck:
         assert out["found"] == 0
         assert out["findings"] == []
 
+    def test_execute_retires_every_stale_predecessor_in_one_pass(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """Regression: a worktree that accumulated several stale predecessors
+        in a row (the real failure mode this tool exists for) must have ALL
+        of them found and retired in one --execute pass, not just the first
+        -- forcing an operator to re-invoke once per stranded pane."""
+        sessions_chain = ["p0", "p1", "p2", "head"]
+        self._record_with_chain(tmp_tracking_dir, "wt-check-5", sessions_chain)
+
+        spawn_events = [
+            {
+                "handoff_token": f"task-wt-check-5-{i}", "session_id": sessions_chain[i],
+                "old_pane": f"%{i}", "expected_mux_session": "wt-wt-check-5",
+                "predecessor_copilot_pid": 100 + i,
+                "predecessor_copilot_start_time": f"start-{i}",
+            }
+            for i in range(len(sessions_chain) - 1)
+        ]
+        monkeypatch.setattr(activity, "read_events", lambda **kw: (
+            spawn_events if kw.get("event") == "handoff_cutover_spawn" else []
+        ))
+        retired_panes: list[str] = []
+        monkeypatch.setattr(
+            m, "_monitor_retire_handoff_predecessor",
+            lambda req: (
+                retired_panes.append(req["retire_pane"]),
+                (0, {"ok": True, "pane": req["retire_pane"], "gone": True}),
+            )[1],
+        )
+
+        rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-5", execute=True, json=True))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["found"] == len(sessions_chain) - 1
+        assert sorted(retired_panes) == ["%0", "%1", "%2"]
+        assert all(f["retired"] for f in out["findings"])
+
 
 def test_retire_stamps_predecessor_session_state_with_successor_id(monkeypatch):
     predecessor_state = sessions._session_state_dir() / "old-sess"
@@ -2898,7 +2938,7 @@ def test_retire_result_passes_expected_mux_session_to_pane_terminate(monkeypatch
     monkeypatch.setattr(m, "_resolve_worktree_id", lambda raw: raw)
     monkeypatch.setattr(m, "_conclude_retired_predecessor", lambda *args, **kwargs: None)
     monkeypatch.setattr(m, "_maybe_emit_stage_13", lambda *args, **kwargs: None)
-    monkeypatch.setattr(sessions, "mux_session_for_pane", lambda pane: "wt-retire")
+    monkeypatch.setattr(m, "_resolve_retire_pane_mux_session", lambda pane, expected: "wt-retire")
     monkeypatch.setattr(
         m.pane_lifecycle,
         "pane_terminate",
@@ -2924,44 +2964,93 @@ def test_retire_result_passes_expected_mux_session_to_pane_terminate(monkeypatch
     assert result["ok"] is True
     assert observed == {"pane": "%9", "mux_session": "wt-retire"}
 
-    def test_execute_retires_every_stale_predecessor_in_one_pass(
-        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
-    ):
-        """Regression: a worktree that accumulated several stale predecessors
-        in a row (the real failure mode this tool exists for) must have ALL
-        of them found and retired in one --execute pass, not just the first
-        -- forcing an operator to re-invoke once per stranded pane."""
-        sessions_chain = ["p0", "p1", "p2", "head"]
-        self._record_with_chain(tmp_tracking_dir, "wt-check-5", sessions_chain)
 
-        spawn_events = [
-            {
-                "handoff_token": f"task-wt-check-5-{i}", "session_id": sessions_chain[i],
-                "old_pane": f"%{i}", "expected_mux_session": "wt-wt-check-5",
-                "predecessor_copilot_pid": 100 + i,
-                "predecessor_copilot_start_time": f"start-{i}",
-            }
-            for i in range(len(sessions_chain) - 1)
-        ]
-        monkeypatch.setattr(activity, "read_events", lambda **kw: (
-            spawn_events if kw.get("event") == "handoff_cutover_spawn" else []
-        ))
-        retired_panes: list[str] = []
-        monkeypatch.setattr(
-            m, "_monitor_retire_handoff_predecessor",
-            lambda req: (
-                retired_panes.append(req["retire_pane"]),
-                (0, {"ok": True, "pane": req["retire_pane"], "gone": True}),
-            )[1],
-        )
+def test_resolve_retire_pane_mux_session_prefers_scoped_membership_check(
+    monkeypatch,
+):
+    """Regression (live-discovered, 2026-09-18): a bare ``display-message -t
+    <pane_id>`` (what ``sessions.current_mux_session``/``mux_session_for_pane``
+    runs) can resolve to the *caller's own current/default* mux session
+    rather than the session that genuinely contains the pane -- reproduced
+    live even with no real pane-id collision, when the CLI invoking
+    ``handoff-cutover --retire-pane`` is not itself inside the target pane
+    (e.g. an orchestrator, not a self-retiring predecessor). That produced a
+    false ``identity-mismatch-skip`` that silently no-op'd a legitimate
+    retire. ``_resolve_retire_pane_mux_session`` must check membership in the
+    *expected* session first (scoped ``list-panes -a`` filter), and must
+    never call the unscoped/bare lookup for that check."""
+    calls: list[tuple[str, str | None]] = []
 
-        rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-5", execute=True, json=True))
+    def _fake_list_matching(pane_id, mux_bin, *, session_name=None):
+        calls.append((pane_id, session_name))
+        # The pane genuinely lives in "wt-expected" -- simulate the scoped
+        # filter finding it there.
+        return [("wt-expected", "1.0")] if session_name == "wt-expected" else []
 
-        assert rc == 0
-        out = json.loads(capfd.readouterr().out)
-        assert out["found"] == len(sessions_chain) - 1
-        assert sorted(retired_panes) == ["%0", "%1", "%2"]
-        assert all(f["retired"] for f in out["findings"])
+    monkeypatch.setattr(
+        m.sessions_pane_retire, "_list_matching_pane_targets", _fake_list_matching,
+    )
+    monkeypatch.setattr(
+        m.sessions_pane_retire, "_resolve_unambiguous_pane_session",
+        lambda pane, mux_bin: pytest.fail(
+            "must not need the unscoped fallback when the scoped check finds the pane"
+        ),
+    )
+    monkeypatch.setattr(
+        m.sessions, "current_mux_session",
+        lambda pane=None, mux=None: pytest.fail(
+            "must never fall back to the unsafe bare display-message lookup"
+        ),
+    )
+    monkeypatch.setattr(
+        m.sessions, "mux_session_for_pane",
+        lambda pane, mux=None: pytest.fail(
+            "must never fall back to the unsafe bare display-message lookup"
+        ),
+    )
+
+    result = m._resolve_retire_pane_mux_session("%1", "wt-expected")
+
+    assert result == "wt-expected"
+    # Confirms the scoped check ran (and, per the monkeypatched fallbacks
+    # above, that nothing unscoped/bare was ever consulted).
+    assert calls == [("%1", "wt-expected")]
+
+
+def test_resolve_retire_pane_mux_session_falls_back_when_not_in_expected(
+    monkeypatch,
+):
+    """When the pane genuinely isn't in the expected session, fall back to
+    the safe (still ``list-panes -a``-based) unscoped resolver -- never the
+    unsafe bare lookup -- to report where it actually is."""
+    monkeypatch.setattr(
+        m.sessions_pane_retire, "_list_matching_pane_targets",
+        lambda pane, mux_bin, *, session_name=None: [],
+    )
+    monkeypatch.setattr(
+        m.sessions_pane_retire, "_resolve_unambiguous_pane_session",
+        lambda pane, mux_bin: "wt-actual",
+    )
+
+    result = m._resolve_retire_pane_mux_session("%1", "wt-expected")
+
+    assert result == "wt-actual"
+
+
+def test_resolve_retire_pane_mux_session_none_on_ambiguity(monkeypatch):
+    monkeypatch.setattr(
+        m.sessions_pane_retire, "_list_matching_pane_targets",
+        lambda pane, mux_bin, *, session_name=None: [],
+    )
+
+    def _raise(pane, mux_bin):
+        raise m.sessions_pane_retire.MuxPaneTargetAmbiguityError(pane, ["a", "b"])
+
+    monkeypatch.setattr(
+        m.sessions_pane_retire, "_resolve_unambiguous_pane_session", _raise,
+    )
+
+    assert m._resolve_retire_pane_mux_session("%1", "wt-expected") is None
 
 
 class TestPendingHandoffRetireAbandonment:
