@@ -232,6 +232,11 @@ worktree, a borrowed CodeSpace/container, or a bridge session it brought
 into being -- the **obligation gate blocks finalize by default**, refusing
 *before* any destructive step. **Resolve each named obligation through its
 own lifecycle -- never bypass the gate and never force-release a claim.**
+**Never run an unfiltered `claims cleanup --apply`** (with no worktree-id
+selector) to clear a blocker -- it acts on the **entire orphanage**,
+including unrelated agents' resources, not just this worktree's; any
+`claims cleanup --apply` must be scoped to the specific
+`<source-worktree-id>` and only after reviewing its selective dry-run.
 Only after the operator explicitly names a recipient may an unclosable
 child be re-homed via `finalize --abandon --handoff-to <recipient>` (refused
 without `--handoff-to`); creating-agent cleanup remains the default. See
