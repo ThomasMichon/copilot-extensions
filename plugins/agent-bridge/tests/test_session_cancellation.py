@@ -630,6 +630,7 @@ async def test_failed_explicit_remote_reap_keeps_authority_for_retry(owned_conte
 
     ctx = owned_context
     record = _remote_record(ctx)
+    ctx.manager._remote_recovery_inconclusive.add(record.session_id)
     reap = AsyncMock(return_value=False)
     monkeypatch.setattr(ctx.manager, "_remote_reap", reap)
     monkeypatch.setattr(
@@ -645,6 +646,7 @@ async def test_failed_explicit_remote_reap_keeps_authority_for_retry(owned_conte
     await ctx.manager.stop_session(ctx.session.session_id, reap_host=True)
     assert ctx.session.status == SessionStatus.STOPPED
     assert ctx.manager._host_index.get(ctx.session.session_id) is None
+    assert record.session_id not in ctx.manager._remote_recovery_inconclusive
 
 
 async def test_failed_pending_remote_reap_cannot_acknowledge_stop(owned_context, monkeypatch):
@@ -1286,22 +1288,51 @@ async def test_shutdown_retries_orphan_remote_reap(owned_context, monkeypatch, f
     assert not ctx.manager._remote_reap_pending(record.session_id)
 
 
-async def test_shutdown_fails_for_unconfirmed_orphan_without_record(owned_context, monkeypatch):
+@pytest.mark.parametrize("missing", ["record", "endpoint"])
+@pytest.mark.parametrize("orphan", [False, True])
+async def test_shutdown_fails_for_unaddressable_remote_cleanup(owned_context, monkeypatch, missing, orphan):
     from agent_bridge.session_manager import RemoteHostRecoveryPendingError
     from agent_bridge.session_teardown import detach_for_restart
 
     ctx = owned_context
     record = _remote_record(ctx)
-    ctx.manager._sessions.pop(record.session_id)
+    if orphan:
+        ctx.manager._sessions.pop(record.session_id)
+    if missing == "endpoint":
+        record.endpoint = {}
+        ctx.manager._host_index.register(record)
     monkeypatch.setattr(ctx.manager, "_remote_reap", AsyncMock(return_value=False))
     ctx.manager._schedule_remote_reap(record, "orphan authority")
     task = next(iter(ctx.manager._remote_reaps_by_session[record.session_id]))
     assert await task is False
     await asyncio.sleep(0)
-    ctx.manager._host_index.remove(record.session_id)
-    with pytest.raises(RemoteHostRecoveryPendingError, match="no authority record"):
+    if missing == "record":
+        ctx.manager._host_index.remove(record.session_id)
+    expected = "no authority record" if missing == "record" else "no cleanup endpoint"
+    with pytest.raises(RemoteHostRecoveryPendingError, match=expected):
         await detach_for_restart(ctx.manager)
     assert ctx.manager._remote_reap_pending(record.session_id)
+
+
+@pytest.mark.parametrize("background", [False, True])
+async def test_resync_refuses_inconclusive_authority_without_record(owned_context, monkeypatch, background):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    ctx.session.status = SessionStatus.RUNNING if background else SessionStatus.STOPPED
+    sid = ctx.session.session_id
+    ctx.manager._remote_recovery_inconclusive.add(sid)
+    generation = ctx.session._lifecycle_generation
+    cleanup = AsyncMock(side_effect=AssertionError("resync must not disturb inconclusive ownership"))
+    monkeypatch.setattr("agent_bridge.session_resume.cleanup_failed_resume", cleanup)
+    assert ctx.manager._host_index.get(sid) is None
+    with pytest.raises(RemoteHostRecoveryPendingError, match="recovery is inconclusive"):
+        await ctx.manager.resync_session(sid, background=background)
+    cleanup.assert_not_awaited()
+    assert ctx.session._lifecycle_generation == generation
+    assert ctx.session.status == (SessionStatus.RUNNING if background else SessionStatus.STOPPED)
+    assert sid in ctx.manager._remote_recovery_inconclusive
+    assert ctx.processes == []
 
 
 @pytest.mark.parametrize("failure_stage", ["marker", "index"])

@@ -176,8 +176,9 @@ async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
         with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is inconclusive"):
             await manager.stop_session(session.session_id)
         restarted = SessionManager(tmp_db, session_host_state_dir=state_dir)
-        await restarted.stop_session(session.session_id)
         with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is pending"):
+            await restarted.stop_session(session.session_id)
+        with pytest.raises(ValueError, match="not stopped"):
             await restarted.resume_session(session.session_id, drain=False)
         assert spawner.spawn.await_count == 1
         spawner.abort_spawned.return_value = True
@@ -187,8 +188,9 @@ async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("reap_host", [False, True])
 async def test_durable_container_marker_blocks_resume_without_host_index(
-    tmp_db, tmp_path, monkeypatch,
+    tmp_db, tmp_path, monkeypatch, reap_host,
 ):
     session_id = "example-session"
     target = SpawnTarget(
@@ -208,7 +210,7 @@ async def test_durable_container_marker_blocks_resume_without_host_index(
     with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is pending"):
         await manager.resync_session(session_id)
     with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is pending"):
-        await manager.stop_session(session_id, reap_host=True)
+        await manager.stop_session(session_id, reap_host=reap_host)
     attach.assert_not_awaited()
     assert manager._host_index.get(session_id) is None
     assert manager.get_session(session_id).target.container["launch_pending_session_id"] == session_id

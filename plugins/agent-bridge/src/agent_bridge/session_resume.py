@@ -460,6 +460,13 @@ async def resync_session(self: SessionManager, session_id: str, *, background: b
         from .session_host_ownership import require_no_pending_host_launch
 
         require_no_pending_host_launch(self, session_id)
+        if session_id in self._remote_recovery_inconclusive:
+            from .session_manager import RemoteHostRecoveryPendingError
+
+            raise RemoteHostRecoveryPendingError(
+                f"Session Host recovery is inconclusive for {session_id}; "
+                "confirm authority before resync"
+            )
         if background and session.status != SessionStatus.RUNNING:
             raise ValueError(
                 f"Session {session_id} is no longer running; skipping background resync"
