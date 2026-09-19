@@ -4333,7 +4333,10 @@ class PickerScreen(Widget):
         naming a completely different row)."""
         ids = self._l_ids()
         if refs["last_l"] is not None:
-            self.last_l = ids.index(refs["last_l"]) if refs["last_l"] in ids else 0
+            if refs["last_l"] in ids:
+                self.last_l = ids.index(refs["last_l"])
+            else:
+                self.last_l = min(self.last_l, max(0, len(ids) - 1)) if ids else 0
         if refs["focus"] is not None:
             if refs["focus"] in ids:
                 self.sel = ("L", ids.index(refs["focus"]))
@@ -4411,7 +4414,7 @@ class PickerScreen(Widget):
         # otherwise just clear.
         self.wt_sel.clear()
         self.wt_anchor = None
-        if was_in_table and self._kind() == "worktrees" and self.list_records():
+        if was_in_table and self._kind() == "worktrees" and self._wt_visible_records():
             self.sel = ("L", 0)
             self._wt_track_focus()   # wt_sel = {top row}, anchor = 0
 
@@ -4920,7 +4923,7 @@ class PickerScreen(Widget):
             self.sel = ("PR", 0) if self._kind() == "profiles" else ("M", 0)
         elif zone == "M":
             buttons = self.button_set()
-            records = self.list_records()
+            records = self._wt_visible_records()
             if buttons:
                 self.sel = ("BTN", 0)
             elif records:
@@ -5679,7 +5682,7 @@ class PickerScreen(Widget):
         if row.get("hidden") if "hidden" in row else (
                 (row.get("kind") or "session") in ("system", "bridge")):
             self.show_hidden = True
-        records = self.list_records()
+        records = self._wt_visible_records()
         target_i = next(
             (i for i, r in enumerate(records)
              if (r.get("raw") or {}).get("id") == wid),

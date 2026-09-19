@@ -5061,6 +5061,58 @@ def test_command_bar_filter_lands_at_equivalent_index_when_row_vanishes(monkeypa
     asyncio.run(run())
 
 
+def test_command_bar_last_l_clamps_to_equivalent_index_when_row_vanishes(monkeypatch):
+    """PR #2911 review follow-up: when the REMEMBERED (last_l, Tab-out/in)
+    row is filtered out entirely, it must clamp to the equivalent index in
+    the shrunk visible list -- not reset to 0 regardless of where it was."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Fix first",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-bbbb", "title": "Alt row",
+         "status": "active", "started_at": "2026-06-27T16:30:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-cccc", "title": "Fix third",
+         "status": "active", "started_at": "2026-06-27T16:00:00",
+         "turn_count": 1, "state": "wip"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix first", "Alt row", "Fix third"]
+            # Remember "Alt row" (index 1) as last_l without it being focused.
+            scr.last_l = 1
+            await _focus_wt_list(app, pilot, scr)
+            scr.sel = ("M", 0)
+            scr.refresh()
+            await pilot.pause()
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+                await pilot.pause()
+            # "Alt row" is filtered out -- the shrunk two-row list's
+            # equivalent index (clamped 1) is "Fix third", not index 0.
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix first", "Fix third"]
+            assert scr._wt_visible_records()[scr.last_l]["title"] == "Fix third"
+
+    asyncio.run(run())
+
+
 def test_command_bar_appends_named_printable_keys(monkeypatch):
     """PR #2911 review: a NAMED printable key token (Textual's "slash" for
     "/" is the one this module already documents) must still land in the
