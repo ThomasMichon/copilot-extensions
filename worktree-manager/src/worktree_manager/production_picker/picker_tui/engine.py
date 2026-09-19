@@ -5485,10 +5485,18 @@ class PickerScreen(Widget):
             self.show_hidden = True
         # If the target is filtered out by an active "/" query, clear the
         # query first (so the jump can't silently fail) then resolve index.
-        full_match = any(
-            (r.get("raw") or {}).get("id") == wid for r in self.list_records())
-        if full_match and self.list_view.query:
-            self._wt_remap(self.list_view.clear)
+        # Only clear when the query actually HIDES the target (review
+        # finding): a target already visible under the current filter must
+        # not have the operator's query wiped out from under them.
+        visible = self._wt_visible_records()
+        target_visible = any(
+            (r.get("raw") or {}).get("id") == wid for r in visible)
+        if not target_visible and self.list_view.query:
+            full_match = any(
+                (r.get("raw") or {}).get("id") == wid
+                for r in self.list_records())
+            if full_match:
+                self._wt_remap(self.list_view.clear)
         records = self._wt_visible_records()
         target_i = next(
             (i for i, r in enumerate(records)

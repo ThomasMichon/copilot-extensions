@@ -1734,7 +1734,34 @@ def test_jump_to_worktree_clears_a_hiding_filter(tmp_path):
     asyncio.run(run())
 
 
-def test_open_worktree_cli_exits_with_resume_decision():
+def test_jump_to_worktree_keeps_filter_when_target_already_visible(tmp_path):
+    """PR #2911 review: a jump whose target already matches the active "/"
+    filter must NOT clear the operator's query out from under them -- only a
+    query that actually HIDES the target justifies clearing it."""
+    src = _bridge_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.t0 = 0
+            scr.show_hidden = True
+            scr.machine_idx = 0            # All
+            await pilot.pause()
+            # "bridge" matches the jump target itself -- it is already
+            # visible under this query, so the query must survive the jump.
+            scr.list_view.query = "bridge"
+            ok, _msg = scr._jump_to_worktree("emancipation-cube-win-bridge-2222")
+            assert ok is True
+            assert scr.list_view.query == "bridge"   # untouched
+            assert scr.sel[0] == "L"
+            landed = scr._wt_visible_records()[scr.sel[1]]
+            assert (landed.get("raw") or {}).get("id") == "emancipation-cube-win-bridge-2222"
+
+    asyncio.run(run())
+
+
+
     """#2253: the ``open-cli`` internal action opens the entry's target worktree
     into a CLI session -- it exits the picker with a standard resume decision for
     that worktree id, so __main__ maps it onto the launch/resume path."""
