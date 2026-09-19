@@ -194,6 +194,25 @@ test("skill and README agree on the extension-host disconnect recovery", () => {
   }
 });
 
+test("skill and README agree on the last-resort write-the-file-yourself fallback", () => {
+  const skill = readFileSync(
+    join(plugin, "skills", "context-handoff", "SKILL.md"),
+    "utf8",
+  ).replace(/\s+/g, " ");
+  const readme = readFileSync(
+    join(plugin, "README.md"),
+    "utf8",
+  ).replace(/\s+/g, " ");
+
+  for (const source of [skill, readme]) {
+    assert.match(source, /Last-resort fallback: write the file yourself/);
+    assert.match(source, /no MCP tool call, no extension, no `node`/);
+    assert.match(source, /session-state\/<session-id>\//);
+    assert.match(source, /\/clear\s*Read <absolute-path-to-file> and resume the objective/);
+    assert.match(source, /no automatic pickup, no claim tracking, and no\s*supersession/);
+  }
+});
+
 test("consume command remains the canonical resume surface", () => {
   const extension = readFileSync(
     join(plugin, "extensions", "context-handoff", "extension.mjs"),
