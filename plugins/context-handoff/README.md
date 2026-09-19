@@ -337,9 +337,10 @@ agent's normal ability to write a file and print text.
    `node` -- to a stable path under the current session's own state folder:
    the same `~/.copilot/session-state/<session-id>/` directory the extension
    itself already uses (for example
-   `~/.copilot/session-state/<session-id>/files/handoff-<slug>.md`). This
-   directory persists independent of the extension, the payload-local CLI,
-   and any store selection.
+   `~/.copilot/session-state/<session-id>/files/handoff-<slug>.md`). Create the
+   `files/` directory first if it does not already exist -- it is not
+   guaranteed to be pre-created. This directory persists independent of the
+   extension, the payload-local CLI, and any store selection.
 3. State the exact absolute path to the user.
 4. Give the user a short prompt to paste into a new session after `/clear`,
    naming that exact path and instructing the next session to read it and
