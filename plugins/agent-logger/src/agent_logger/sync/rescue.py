@@ -62,7 +62,17 @@ def _repository_allowed(
     denylist: list[str],
     *,
     fail_closed: bool,
+    require_repo_opt_in: bool = False,
 ) -> bool:
+    if require_repo_opt_in:
+        # Rescued sessions carry only a provider-reported repo *name*
+        # (RescuedSession.source_repo), never a resolvable local filesystem
+        # path -- there is nothing on disk here for resolve_repo_opt_in to
+        # read a `.copilot-extensions/agent-logger/config.yaml` from. The
+        # repo-owned opt-in gate cannot be honestly evaluated for rescue
+        # publication, so when it's enabled, rescue-push fails closed and
+        # publishes nothing rather than silently ignoring the setting.
+        return False
     if allowlist and session.source_repo is None:
         return False
     return classify_source_repo(
@@ -436,6 +446,7 @@ def _select_pending(
             cfg.sync_repo_allowlist,
             cfg.sync_repo_denylist,
             fail_closed=cfg.sync_repo_allowlist_fail_closed,
+            require_repo_opt_in=cfg.sync_require_repo_opt_in,
         ):
             summary.rejected_sessions += 1
             summary.details.append(

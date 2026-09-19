@@ -100,79 +100,111 @@ def _is_link_or_reparse(info: os.stat_result) -> bool:
     )
 
 
-def _safe_repo_file(repo_path: Path, relative: tuple[str, ...]) -> Path | None:
-    """Resolve ``repo_path/relative`` only if every path component -- each
-    intermediate directory and the final file -- is an ordinary entry (no
-    symlink/reparse point), so a committed opt-in config can never point
-    outside the checkout it's declared in. Mirrors agent-index's
-    ``_safe_file`` containment check.
+def _safe_repo_file(repo_path: Path, relative: tuple[str, ...]) -> tuple[str, Path | None]:
+    """Resolve ``repo_path/relative``, returning ``(status, path)``.
+
+    ``status`` is ``"absent"`` (nothing at that path -- ordinary, not an
+    error), ``"invalid"`` (something exists there but is unsafe or not a
+    plain file: a symlink/reparse point anywhere along the path, an
+    intermediate that isn't a directory, something outside ``repo_path``
+    after resolution, or an oversized file), or ``"ready"`` (an ordinary,
+    repo-contained file safe to read). Every path component -- each
+    intermediate directory and the final file -- must be an ordinary entry,
+    so a committed opt-in config can never point outside the checkout it's
+    declared in. Mirrors agent-index's ``_safe_file`` containment check.
     """
     try:
         root = repo_path.resolve(strict=True)
     except OSError:
-        return None
+        return "absent", None
     current = root
     for part in relative:
         current = current / part
         try:
             info = current.lstat()
         except FileNotFoundError:
-            return None
+            return "absent", None
         except OSError:
-            return None
+            return "invalid", None
         if _is_link_or_reparse(info):
-            return None
+            return "invalid", None
         is_last = part == relative[-1]
         if not is_last and not stat.S_ISDIR(info.st_mode):
-            return None
+            return "invalid", None
     try:
         resolved = current.resolve(strict=True)
         resolved.relative_to(root)
     except (OSError, ValueError):
-        return None
+        return "invalid", None
     if not resolved.is_file() or resolved.stat().st_size > _MAX_OPT_IN_CONFIG_BYTES:
-        return None
-    return resolved
+        return "invalid", None
+    return "ready", resolved
 
 
-def _load_opt_in_config(repo_path: Path, relative: tuple[str, ...]) -> dict[str, Any] | None:
+def _load_opt_in_config(
+    repo_path: Path, relative: tuple[str, ...]
+) -> tuple[str, dict[str, Any] | None]:
+    """Returns ``(status, data)`` -- see :func:`_safe_repo_file` for
+    ``status``; a "ready" file that fails to parse as YAML, or that doesn't
+    parse to a mapping, downgrades to ``"invalid"``."""
     if yaml is None:  # pragma: no cover - hard dependency
-        return None
-    path = _safe_repo_file(repo_path, relative)
-    if path is None:
-        return None
+        return "absent", None
+    status, path = _safe_repo_file(repo_path, relative)
+    if status != "ready":
+        return status, None
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, yaml.YAMLError):
-        return None
-    return data if isinstance(data, dict) else None
+        return "invalid", None
+    if not isinstance(data, dict):
+        return "invalid", None
+    return "ready", data
 
 
-def _declared_opt_in(repo_path: Path) -> bool | None:
-    """Read this repo's own opt-in declaration, if it carries one.
+def _local_opt_in_status(repo_path: Path) -> tuple[str, bool | None]:
+    """Resolve ``repo_path``'s own opt-in declaration. Returns
+    ``(status, value)``:
 
-    Returns ``True``/``False`` for an explicit ``sync: {opt_in: <bool>}`` in
-    either the canonical or legacy config location (canonical wins when both
-    are present), each loaded only when it is an ordinary, repo-contained
-    file (see :func:`_safe_repo_file` -- a symlink/reparse point pointing
-    outside the repo is never followed). Only an actual boolean activates or
-    deactivates; any other scalar (a string like ``"false"``, a number,
-    null, ...) is treated the same as the key being absent -- "no opinion",
-    letting the caller fall through (e.g. to a bound knowledge repo) rather
-    than silently truthy-cast an invalid declaration into an accidental
-    opt-in.
+    - ``("declared", True/False)`` -- a safe, parseable config (canonical or
+      legacy; canonical wins when both are present) states an explicit
+      ``sync: {opt_in: <bool>}``.
+    - ``("no_opinion", None)`` -- no config exists anywhere in the chain, or
+      every config present is safely readable but silent on ``opt_in`` (or
+      declares a non-boolean value). The caller may fall through (e.g. to a
+      bound knowledge repo).
+    - ``("invalid", None)`` -- a config exists but is unsafe or malformed
+      (a symlink/reparse point, an oversized file, invalid YAML, or a
+      non-mapping document). This is a **hard** fail-closed result: unlike
+      "no opinion", it must never fall through to a knowledge repo, since the
+      repo clearly attempted a local declaration and got it wrong -- treating
+      that the same as silence would let a broken local file be silently
+      overridden by an unrelated repo's config.
     """
     for relative in (_OPT_IN_CONFIG_RELATIVE, _LEGACY_OPT_IN_CONFIG_RELATIVE):
-        data = _load_opt_in_config(repo_path, relative)
-        if data is None:
+        status, data = _load_opt_in_config(repo_path, relative)
+        if status == "invalid":
+            return "invalid", None
+        if status == "absent":
             continue
         sync_block = data.get("sync")
         if not isinstance(sync_block, dict) or "opt_in" not in sync_block:
             continue
         value = sync_block["opt_in"]
         if isinstance(value, bool):
-            return value
-    return None
+            return "declared", value
+    return "no_opinion", None
+
+
+def _declared_opt_in(repo_path: Path) -> bool | None:
+    """Back-compat convenience wrapper over :func:`_local_opt_in_status`.
+
+    Collapses ``"no_opinion"`` and ``"invalid"`` to ``None`` -- callers that
+    need to distinguish an unsafe/malformed local config from simple absence
+    (to decide whether a knowledge-repo fallback is safe) should call
+    :func:`_local_opt_in_status` directly instead.
+    """
+    status, value = _local_opt_in_status(repo_path)
+    return value if status == "declared" else None
 
 
 @functools.lru_cache(maxsize=256)
@@ -243,14 +275,24 @@ def resolve_repo_opt_in(repo_path: Path) -> bool:
     (legacy: ``.agent-logger/config.yaml``) with a top-level ``sync: {opt_in:
     true}``. Neither an *unopinionated* config (present but silent on
     ``opt_in``) nor an unresolvable/absent one activates sync -- this gate
-    fails closed, so being ``enabledPlugins``-enabled never implies syncing.    """
-    declared = _declared_opt_in(repo_path)
-    if declared is not None:
-        return declared
+    fails closed, so being ``enabledPlugins``-enabled never implies syncing.
+
+    An **invalid** local config (unsafe/symlinked, oversized, malformed YAML,
+    or a non-mapping document) is a hard fail-closed result and never falls
+    through to a bound knowledge repo -- the repo clearly attempted a local
+    declaration and got it wrong, so treating that the same as silence would
+    let a broken local file be silently overridden by an unrelated repo.
+    """
+    status, value = _local_opt_in_status(repo_path)
+    if status == "declared":
+        return value
+    if status == "invalid":
+        return False
     knowledge_repo = _bound_knowledge_repo(repo_path)
     if knowledge_repo is None:
         return False
-    return bool(_declared_opt_in(knowledge_repo))
+    k_status, k_value = _local_opt_in_status(knowledge_repo)
+    return k_value if k_status == "declared" else False
 
 
 def derive_origin(session_dir: Path, machine: str,

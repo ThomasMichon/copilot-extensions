@@ -122,6 +122,14 @@ This is an *additional* requirement layered on top of
 > `sync.compact.archive_root` for any repo that stays opted out, or clear it
 > and let compaction rebuild it under the new policy.
 
+> **`rescue-push` fails closed entirely when this gate is on.** A rescued
+> session (see [Provider rescue ingestion](#provider-rescue-ingestion) below)
+> carries only a provider-reported repo *name*, never a resolvable local
+> path -- there is nothing on disk for the opt-in check to read. Rather than
+> silently ignore `require_repo_opt_in` for rescue publication, it is
+> intentionally treated as unresolvable and every rescued session is
+> rejected while the gate is enabled, regardless of `repo_allowlist`.
+
 ## Repo-local log organization
 
 Session-sync is machine-local, but log organization can be repo-local. A

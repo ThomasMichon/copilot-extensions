@@ -363,6 +363,47 @@ def test_resolve_repo_opt_in_forwards_to_bound_knowledge_repo(
     assert origin.resolve_repo_opt_in(harness) is True
 
 
+def test_resolve_repo_opt_in_invalid_local_config_does_not_forward(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # An unsafe/malformed LOCAL config is a hard fail-closed result -- it must
+    # never fall through to a bound knowledge repo, even one that opts in.
+    harness = tmp_path / "odsp-web-harness"
+    path = harness.joinpath(*origin._OPT_IN_CONFIG_RELATIVE)
+    path.parent.mkdir(parents=True)
+    path.write_text("not: valid: yaml: [\n", encoding="utf-8")
+    knowledge = tmp_path / "dotfiles"
+    knowledge.mkdir()
+    _write_opt_in_config(knowledge, True)
+    monkeypatch.setattr(origin, "_bound_knowledge_repo", lambda _p: knowledge)
+    assert origin._local_opt_in_status(harness) == ("invalid", None)
+    assert origin.resolve_repo_opt_in(harness) is False
+
+
+def test_local_opt_in_status_distinguishes_absent_silent_invalid(
+    tmp_path: Path,
+) -> None:
+    absent = tmp_path / "absent-repo"
+    absent.mkdir()
+    assert origin._local_opt_in_status(absent) == ("no_opinion", None)
+
+    silent = tmp_path / "silent-repo"
+    path = silent.joinpath(*origin._OPT_IN_CONFIG_RELATIVE)
+    path.parent.mkdir(parents=True)
+    path.write_text("sync:\n  other_key: 1\n", encoding="utf-8")
+    assert origin._local_opt_in_status(silent) == ("no_opinion", None)
+
+    invalid = tmp_path / "invalid-repo"
+    path = invalid.joinpath(*origin._OPT_IN_CONFIG_RELATIVE)
+    path.parent.mkdir(parents=True)
+    path.write_text("not: valid: yaml: [\n", encoding="utf-8")
+    assert origin._local_opt_in_status(invalid) == ("invalid", None)
+
+    declared = tmp_path / "declared-repo"
+    _write_opt_in_config(declared, True)
+    assert origin._local_opt_in_status(declared) == ("declared", True)
+
+
 def test_bound_knowledge_repo_caches_per_repo_path(tmp_path: Path, monkeypatch) -> None:
     # A sync/compaction pass classifies many sessions against a small number
     # of distinct repos -- the subprocess-backed lookup must be paid once per

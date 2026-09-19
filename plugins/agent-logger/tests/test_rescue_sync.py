@@ -72,6 +72,7 @@ def _cfg(
     denylist: list[str] | None = None,
     fail_closed: bool = False,
     target: str = "local",
+    require_repo_opt_in: bool = False,
 ) -> Config:
     home = tmp_path / "logger-home"
     data = load_config(home=home).as_dict()
@@ -79,6 +80,7 @@ def _cfg(
     data["sync"]["repo_allowlist"] = allowlist or []
     data["sync"]["repo_denylist"] = denylist or []
     data["sync"]["repo_allowlist_fail_closed"] = fail_closed
+    data["sync"]["require_repo_opt_in"] = require_repo_opt_in
     data["sync"]["target"] = target
     return Config(data, home)
 
@@ -1262,6 +1264,31 @@ def test_rescue_repo_allowlist_is_always_fail_closed(tmp_path: Path) -> None:
     )
     summary = rescue.push_rescues(
         _cfg(tmp_path, allowlist=["allowed-repo"]),
+        rescue_roots=[root],
+    )
+    assert summary.accepted == 0
+    assert summary.rejected_sessions == 1
+    assert not (tmp_path / "target").exists()
+
+
+def test_rescue_require_repo_opt_in_fails_closed_even_when_allowlisted(
+    tmp_path: Path,
+) -> None:
+    # Rescued sessions carry only a provider-reported repo name, never a
+    # resolvable local path -- resolve_repo_opt_in cannot be honestly
+    # evaluated for them, so require_repo_opt_in must reject every rescued
+    # session (not silently ignore the setting), even one that would
+    # otherwise pass the allowlist.
+    root = tmp_path / "rescues"
+    _write_capture(
+        root,
+        "100-a",
+        workspace=b"repository: allowed-repo\n",
+        origin=b'{"source_repo":"allowed-repo"}\n',
+        metadata_overrides={"source_repo": "allowed-repo"},
+    )
+    summary = rescue.push_rescues(
+        _cfg(tmp_path, allowlist=["allowed-repo"], require_repo_opt_in=True),
         rescue_roots=[root],
     )
     assert summary.accepted == 0
