@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "340288212311ad6ce21e2539b9a5b67656bf8c7e",
-    "plugin_version": "0.4.0-dev425",
+    "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+    "plugin_version": "0.4.0-dev493",
     "protocol_generation": 1,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
-    "source_git_blob": "09f8fd20efb3a35915989883a3835c7dffcb9a1c",
-    "source_sha256": "65ff14618e7a530a3d5177f3591e71edbc31760c3ebefd9e98e46f76abc45567"
+    "source_git_blob": "16d63fd212905c36874d417a918b8015658c4b03",
+    "source_sha256": "b59c434233fc7e3fcd4fb46cde8a5887f609d14179e068b5ea44b24ab6e84075"
   },
   "framing": "u32be body length, one-byte type, opaque payload",
   "messages": {
@@ -58,6 +58,51 @@
       "type_base64": "Wg==",
       "payload_base64": "ZnV0dXJl",
       "frame_base64": "AAAAB1pmdXR1cmU="
+    },
+    "probe": {
+      "type_base64": "UA==",
+      "payload_base64": "AAAAAAAAAABub25jZQ==",
+      "frame_base64": "AAAADlAAAAAAAAAAAG5vbmNl"
+    },
+    "native_start": {
+      "type_base64": "Qg==",
+      "payload_base64": "AAAAAAAAEJJub25jZQ==",
+      "frame_base64": "AAAADkIAAAAAAAAQkm5vbmNl"
+    },
+    "native_resize": {
+      "type_base64": "Ug==",
+      "payload_base64": "ABgAUA==",
+      "frame_base64": "AAAABVIAGABQ"
+    },
+    "native_retire": {
+      "type_base64": "VA==",
+      "payload_base64": "AAAAAAAAEJJub25jZQ==",
+      "frame_base64": "AAAADlQAAAAAAAAQkm5vbmNl"
+    },
+    "native_observe": {
+      "type_base64": "Tw==",
+      "payload_base64": "AAAAAAAAAAdub25jZQ==",
+      "frame_base64": "AAAADk8AAAAAAAAAB25vbmNl"
+    },
+    "native_acquire": {
+      "type_base64": "UQ==",
+      "payload_base64": "AAAAAAAAAAdub25jZQ==",
+      "frame_base64": "AAAADlEAAAAAAAAAB25vbmNl"
+    },
+    "native_takeover": {
+      "type_base64": "Vg==",
+      "payload_base64": "AAAAAAAAAAdub25jZQ==",
+      "frame_base64": "AAAADlYAAAAAAAAAB25vbmNl"
+    },
+    "native_writer_busy": {
+      "type_base64": "RQ==",
+      "payload_base64": "d3JpdGVyX2J1c3k=",
+      "frame_base64": "AAAADEV3cml0ZXJfYnVzeQ=="
+    },
+    "native_writer_revoked": {
+      "type_base64": "RQ==",
+      "payload_base64": "d3JpdGVyX3Jldm9rZWQ=",
+      "frame_base64": "AAAAD0V3cml0ZXJfcmV2b2tlZA=="
     }
   }
 }

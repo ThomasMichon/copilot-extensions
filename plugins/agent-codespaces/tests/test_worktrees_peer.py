@@ -169,7 +169,7 @@ def test_ssh_does_not_downgrade_peer_refusal_to_bookkeeping_warning(monkeypatch,
         raise worktrees.ContextRefused("active peer rejected")
 
     monkeypatch.setattr(lease, "active_worktree_ids", refused)
-    result = cli._cmd_ssh(SimpleNamespace(name="space"))
+    result = cli._cmd_ssh(SimpleNamespace(name="space", no_relay=False))
     assert result == cli._COORDINATION_EXIT
     assert "active peer rejected" in capsys.readouterr().err
 
@@ -284,7 +284,7 @@ def test_early_ssh_setup_keeps_refusal_exit(monkeypatch, capsys, stage):
         "holder": (coordination, "owner_ref"),
     }[stage]
     monkeypatch.setattr(module, name, refused)
-    assert cli._cmd_ssh(SimpleNamespace(name="space")) == cli._COORDINATION_EXIT
+    assert cli._cmd_ssh(SimpleNamespace(name="space", no_relay=False)) == cli._COORDINATION_EXIT
     assert f"{stage} refused" in capsys.readouterr().err
 
 

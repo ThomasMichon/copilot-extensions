@@ -54,6 +54,8 @@ _PAGE = """<!doctype html>
 </head>
 <body>
   <h1>Agent Bridge</h1>
+  <p class="sub"><a href="/ui/console"><b>&#9654; Open the multi-panel Console</b></a>
+     &mdash; stream &amp; interact with each Codespace session and the main CLI.</p>
   <p class="sub">Built-in status UX. Connect an external ACP client (e.g.
      <a href="https://acp-ui.github.io/" target="_blank" rel="noopener">acp-ui</a>)
      to any <code>ws://</code> URL below using transport

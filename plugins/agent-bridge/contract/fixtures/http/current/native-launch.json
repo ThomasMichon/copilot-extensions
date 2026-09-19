@@ -1,0 +1,32 @@
+{
+  "request": {
+    "requestId": "request-example",
+    "target": "container:example-container",
+    "owner": "/workspaces/example-controller",
+    "cwd": "/workspace",
+    "command": "exec copilot",
+    "remoteCommand": {
+      "schema": "copilot-extensions.remote-command",
+      "version": 1,
+      "argv": [
+        "/selected-payload/bin/agent-bridge"
+      ],
+      "receipt": {
+        "path": "/selected-installation/current-payload.json",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "noPluginStaging": true,
+    "requireRelay": true,
+    "localForward": [],
+    "reverseForward": []
+  },
+  "captured_from": {
+    "commit": "ccf114ccd71d56fe4a0f1c3777bce5636a85baa7",
+    "plugin_version": "0.4.0-dev498",
+    "protocol_generation": 15,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+    "source_git_blob": "c457ec9a5970b599bc2572bac41bfbfe2e089390",
+    "source_sha256": "267928b4cf3bb1e74678e38db35f31b18d28f7a506e1d23f2de258af2aa163a2"
+  }
+}

@@ -57,6 +57,7 @@ def run(
     try:
         result = subprocess.run(
             [*prefix, *args], capture_output=True, encoding="utf-8",
+            stdin=subprocess.DEVNULL,
             timeout=timeout, cwd=cwd, **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError) as error:

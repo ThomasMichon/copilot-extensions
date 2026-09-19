@@ -5,6 +5,7 @@ import asyncio
 import base64
 import json
 import os
+import runpy
 import subprocess
 import struct
 import sys
@@ -93,6 +94,7 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
             bridge_protocol.REMOTE_EVENT_MULTIPLEX_PROTOCOL_VERSION
         ),
         "remote_commands": bridge_protocol.REMOTE_COMMANDS_PROTOCOL_VERSION,
+        "native_executions": bridge_protocol.NATIVE_EXECUTION_PROTOCOL_VERSION,
     }
 
 
@@ -190,7 +192,11 @@ def test_representative_error_fixture_matches_route() -> None:
     assert {"detail": raised.value.detail} == fixture["response"]["json"]
 
 
-def _historical_protocol(commit: str):
+def _historical_protocol(commit: str, captured_from: dict):
+    checker = runpy.run_path(str(REPO / "tools" / "check-agent-bridge-contracts.py"))
+    assert checker["_git_blob"](commit, SESSION_HOST_PROTOCOL_PATH) == captured_from["source_git_blob"]
+    assert checker["_git_file_sha256"](commit, SESSION_HOST_PROTOCOL_PATH) == captured_from["source_sha256"]
+    assert checker["_plugin_version_at"](commit) == captured_from["plugin_version"]
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -239,6 +245,21 @@ def _message_frames(protocol) -> dict[str, dict[str, str]]:
         ),
         "unknown": (None, b"future"),
     }
+    if hasattr(protocol.MsgType, "START"):
+        messages.update({
+            "probe": (protocol.MsgType.PROBE, protocol.pack_attach(0, b"nonce")),
+            "native_start": (protocol.MsgType.START, protocol.pack_attach(4242, b"nonce")),
+            "native_resize": (protocol.MsgType.RESIZE, protocol.pack_resize(24, 80)),
+            "native_retire": (protocol.MsgType.TERMINATE, protocol.pack_attach(4242, b"nonce")),
+        })
+    if hasattr(protocol.MsgType, "OBSERVE"):
+        messages.update({
+            "native_observe": (protocol.MsgType.OBSERVE, protocol.pack_attach(7, b"nonce")),
+            "native_acquire": (protocol.MsgType.ACQUIRE, protocol.pack_attach(7, b"nonce")),
+            "native_takeover": (protocol.MsgType.TAKEOVER, protocol.pack_attach(7, b"nonce")),
+            "native_writer_busy": (protocol.MsgType.ERROR, b"writer_busy"),
+            "native_writer_revoked": (protocol.MsgType.ERROR, b"writer_revoked"),
+        })
     result = {}
     for name, (message_type, payload) in messages.items():
         type_bytes = message_type.value if message_type is not None else b"Z"
@@ -260,6 +281,11 @@ def _message_frames(protocol) -> dict[str, dict[str, str]]:
     [
         ("fixtures/session-host/current/messages.json", None),
         (
+            "fixtures/session-host/prior-runtime-dev492/messages.json",
+            # Published ancestor with the exact captured blob, unlike the pre-integration capture commit.
+            "c11418da112cb73ed459c0d469c56d4180c1a791",
+        ),
+        (
             "fixtures/session-host/prior-runtime-dev150/messages.json",
             "4ed08dcdd0e72377b95a67d6bd22aec819bf7fec",
         ),
@@ -271,7 +297,7 @@ def test_session_host_fixture_matches_generation_one(
 ) -> None:
     fixture = _fixture(relative)
     protocol = (
-        _historical_protocol(historical_commit)
+        _historical_protocol(historical_commit, fixture["captured_from"])
         if historical_commit is not None
         else host_protocol
     )
@@ -296,6 +322,7 @@ def test_session_host_version_mux_fixture_matches_production() -> None:
     [
         "fixtures/session-host/current/messages.json",
         "fixtures/session-host/prior-runtime-dev150/messages.json",
+        "fixtures/session-host/prior-runtime-dev492/messages.json",
     ],
 )
 async def test_session_host_fixture_frames_decode(relative: str) -> None:
@@ -308,5 +335,10 @@ async def test_session_host_fixture_frames_decode(relative: str) -> None:
         if name == "unknown":
             assert message_type is None
         else:
-            assert message_type is host_protocol.MsgType[name.upper()]
+            member = {
+                "native_start": "START", "native_resize": "RESIZE", "native_retire": "TERMINATE",
+                "native_observe": "OBSERVE", "native_acquire": "ACQUIRE", "native_takeover": "TAKEOVER",
+                "native_writer_busy": "ERROR", "native_writer_revoked": "ERROR",
+            }.get(name, name.upper())
+            assert message_type is host_protocol.MsgType[member]
         assert payload == base64.b64decode(encoded_message["payload_base64"])

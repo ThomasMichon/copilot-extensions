@@ -232,6 +232,7 @@ async def enforce_host_ado_login(
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

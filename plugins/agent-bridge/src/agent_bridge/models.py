@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .live_registration_model import RegisterLiveSessionRequest  # noqa: F401 -- compatibility re-export
+
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
@@ -509,20 +511,6 @@ class SessionListResponse(BaseModel):
 
 
 # -- Live interactive-session registry (extension-backed) --------------------
-
-
-class RegisterLiveSessionRequest(BaseModel):
-    """Registration payload from the bundled agent-bridge extension."""
-
-    session_id: str
-    machine: str | None = None
-    cwd: str | None = None
-    worktree_id: str | None = None
-    repo: str | None = None
-    branch: str | None = None
-    pid: int | None = None
-    role: str | None = None
-    driven_by: str | None = None
 
 
 class LiveSessionInfo(BaseModel):

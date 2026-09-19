@@ -17,6 +17,14 @@ RUNTIME_RESOLVER="$SCRIPT_DIR/resolve-runtime.sh"
 INSTALLER="$SCRIPT_DIR/install.sh"
 LEGACY_ROOT="${AGENT_BRIDGE_INSTALL_DIR:-${AGENT_BRIDGE_CONFIG_DIR:-$HOME/.agent-bridge}}" # marketplace-isolation: allow legacy compatibility root
 SEP=$'\034'
+CONVERGE=0
+if [[ "${1:-}" == provision ]]; then
+    [[ "$#" == 3 && "$2" == --current-payload && "$3" == --json ]] || {
+        printf '[agent-bridge] usage: provision --current-payload --json\n' >&2
+        exit 2
+    }
+    CONVERGE=1
+fi
 
 json_path() {
     local result="" component
@@ -35,8 +43,12 @@ resolve_runtime() {
     AGENT_RT_PY=""
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
+    # The resolver deliberately probes missing/stale slots before its fallbacks.
     # shellcheck source=/dev/null
-    . "$RUNTIME_RESOLVER"
+    . "$RUNTIME_RESOLVER" || {
+        printf '[agent-bridge] runtime resolver failed.\n' >&2
+        return 126
+    }
 }
 
 apply_runtime_env() {
@@ -154,8 +166,56 @@ else
     exit 126
 fi
 
+convergence_admit() {
+    local decision rc=0
+    if [[ -n "$CONTEXT" ]]; then
+        decision="$(bash "$MODE_RUNNER" "${STATUS_ARGS[@]}")" || return 126
+        [[ "$(json_get "$decision" "$(json_path status)")" == ready &&
+           "$(json_get "$decision" "$(json_path reason)")" == namespaced-active &&
+           "$(json_get "$decision" "$(json_path desiredMode)")" == namespaced &&
+           "$(json_get "$decision" "$(json_path runtimeRoot)")" == "$RUNTIME_ROOT" &&
+           "$(json_get "$decision" "$(json_path context)")" == "$CONTEXT" &&
+           "$(json_get "$decision" "$(json_path installGeneration)")" == "$INSTALL_GENERATION" ]] || {
+            printf '[agent-bridge] current-payload convergence requires an active, unchanged namespace.\n' >&2
+            return 126
+        }
+    else
+        decision="$(bash "$MODE_RUNNER" probe-legacy "${STATUS_ARGS[@]:1}")" || rc=$?
+        [[ "$rc" == 0 &&
+           "$(json_get "$decision" "$(json_path allowMutation)")" == true &&
+           "$(json_get "$decision" "$(json_path probeReason)")" == legacy-active ]] || {
+            printf '[agent-bridge] current-payload convergence lacks positive legacy authorization.\n' >&2
+            return 126
+        }
+    fi
+}
+
+verify_current_payload() {
+    [[ -n "$AGENT_RT_PY" ]] || return 1
+    local mode=legacy ph=""
+    if [[ -n "$CONTEXT" ]]; then
+        mode=namespaced
+    else
+        # shellcheck source=payload-hash.sh
+        . "$SCRIPT_DIR/payload-hash.sh"
+        ph="$(bridge_payload_hash "$PAYLOAD_ROOT")" || return 1
+    fi
+    "$AGENT_RT_PY" -I -B "$SCRIPT_DIR/current-payload.py" \
+        --payload "$PAYLOAD_ROOT" --root "$RUNTIME_ROOT" --mode "$mode" \
+        --payload-hash "$ph" --context "$CONTEXT" \
+        --generation "$INSTALL_GENERATION" --marketplace "${MARKETPLACE_ID:-}" \
+        --action "${CONVERGENCE_ACTION:-unchanged}" </dev/null
+}
+
 resolve_runtime
-if [[ -n "$AGENT_RT_PY" ]]; then
+if [[ "$CONVERGE" == 1 ]]; then
+    convergence_admit || exit $?
+    if verify_current_payload; then exit 0; fi
+    if [[ -n "$CONTEXT" ]]; then
+        printf '[agent-bridge] namespaced runtime is stale, incomplete, or unsupported; no namespaced bridge update transaction is available. No legacy fallback was attempted.\n' >&2
+        exit 126
+    fi
+elif [[ -n "$AGENT_RT_PY" ]]; then
     run_runtime "$@"
 fi
 
@@ -197,19 +257,32 @@ else
 fi
 trap '_unlock_provision' EXIT INT TERM
 resolve_runtime
-if [[ -n "$AGENT_RT_PY" ]]; then
+if [[ "$CONVERGE" == 1 ]]; then
+    convergence_admit || exit $?
+    if verify_current_payload; then exit 0; fi
+    INSTALL_ACTION=provision
+    CONVERGENCE_ACTION=provisioned
+    if [[ -n "$AGENT_RT_PY" ]]; then
+        INSTALL_ACTION=update
+        CONVERGENCE_ACTION=updated
+    fi
+elif [[ -n "$AGENT_RT_PY" ]]; then
     _unlock_provision
     trap - EXIT INT TERM
     run_runtime "$@"
 fi
-printf '%s\n' '[agent-bridge] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.' >&2
+if [[ "$CONVERGE" == 1 ]]; then
+    printf '[agent-bridge] converging selected legacy runtime through owner %s.\n' "$INSTALL_ACTION" >&2
+else
+    printf '%s\n' '[agent-bridge] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.' >&2
+fi
 printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' \
     'agent-bridge' "$STATUS_PATH" >&2
 printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
 
 apply_runtime_env
 set +e
-bash "$INSTALLER" provision --install-dir "$RUNTIME_ROOT" >&2
+bash "$INSTALLER" "${INSTALL_ACTION:-provision}" --install-dir "$RUNTIME_ROOT" </dev/null >&2
 PROVISION_EXIT=$?
 set -e
 if [[ "$PROVISION_EXIT" -ne 0 ]]; then
@@ -220,6 +293,16 @@ if [[ "$PROVISION_EXIT" -ne 0 ]]; then
 fi
 
 resolve_runtime
+if [[ "$CONVERGE" == 1 ]]; then
+    convergence_admit || exit $?
+    if verify_current_payload; then
+        printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH"
+        exit 0
+    fi
+    printf 'failed current-payload verification\n' > "$STATUS_PATH"
+    printf '[agent-bridge] installer returned success without current-payload readiness.\n' >&2
+    exit 1
+fi
 if [[ -n "$AGENT_RT_PY" ]]; then
     printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
     _unlock_provision

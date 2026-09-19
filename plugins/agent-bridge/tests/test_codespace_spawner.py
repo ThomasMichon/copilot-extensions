@@ -91,6 +91,8 @@ class _FakeTransport:
 
     async def run(self, command, *, timeout=60.0):
         self.runs.append(command)
+        if command.startswith("# execution-mode-guard"):
+            return (0, "EXECUTION_MODE_CLEAR", "")
         if command.startswith("python3 -S "):
             return self.preflight_result or (0, "", "")
         if command.startswith("cat ") or command.startswith("if test -f "):
@@ -707,6 +709,8 @@ async def test_codespace_spawner_launch_failure_raises(monkeypatch):
     class _FailTransport(_FakeTransport):
         async def run(self, command, *, timeout=60.0):
             self.runs.append(command)
+            if command.startswith("# execution-mode-guard"):
+                return (0, "EXECUTION_MODE_CLEAR", "")
             if "setsid nohup" in command:
                 return (1, "", "python3: not found")
             return (0, "", "")

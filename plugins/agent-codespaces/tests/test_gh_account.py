@@ -131,3 +131,76 @@ def test_account_for_codespace_resolves_owner():
 def test_account_for_codespace_swallows_errors():
     with patch.object(lifecycle, "list_codespaces", side_effect=RuntimeError("boom")):
         assert lifecycle.account_for_codespace("cs-a") is None
+
+
+# --- owning_account: bind a token-bearing OWNER, never a billable-org slug ---
+
+
+def test_owning_account_prefers_token_bearing(monkeypatch):
+    monkeypatch.setattr(
+        gh_account, "token_for_account",
+        lambda login: "tok" if login == "owner1" else None,
+    )
+    # prefer already authenticates -> no owner lookup needed
+    monkeypatch.setattr(gh_account, "_codespace_owner_login",
+                        lambda name: pytest.fail("should not query owner"))
+    assert gh_account.owning_account("cs", prefer="owner1") == "owner1"
+
+
+def test_owning_account_skips_tokenless_org(monkeypatch):
+    # prefer is a billable org (no token) -> resolve the real owner instead
+    monkeypatch.setattr(
+        gh_account, "token_for_account",
+        lambda login: "tok" if login == "real-owner" else None,
+    )
+    monkeypatch.setattr(gh_account, "_codespace_owner_login", lambda name: "real-owner")
+    assert gh_account.owning_account("cs", prefer="billable-org") == "real-owner"
+
+
+def test_owning_account_none_when_no_token_bearing_owner(monkeypatch):
+    monkeypatch.setattr(gh_account, "token_for_account", lambda login: None)
+    monkeypatch.setattr(gh_account, "_codespace_owner_login", lambda name: "billable-org")
+    assert gh_account.owning_account("cs", prefer="billable-org") is None
+
+
+def test_create_binds_token_bearing_owner_not_billable_org(monkeypatch):
+    # account-for yields the billable org (tokenless); the create must bind the
+    # CodeSpace's real owner so native hosting can mint the owner token.
+    monkeypatch.setattr(gh_account, "account_for_repo", lambda slug: "billable-org")
+    monkeypatch.setattr(
+        gh_account, "token_for_account",
+        lambda login: "tok" if login == "real-owner" else None,
+    )
+    monkeypatch.setattr(gh_account, "_codespace_owner_login", lambda name: "real-owner")
+    monkeypatch.setattr(gh_account, "env_for_account", lambda login, base=None: {})
+    monkeypatch.setattr(lifecycle, "resolve_devcontainer_path", lambda *a, **k: None)
+    monkeypatch.setattr(
+        lifecycle.subprocess, "run",
+        lambda *a, **k: MagicMock(returncode=0, stdout="cs-new\n", stderr=""),
+    )
+    bound: dict[str, str] = {}
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bind",
+        lambda name, account, repo="": bound.update({name: account}),
+    )
+    info = lifecycle.create_codespace("billable-org/repo", lifecycle.CodespacesConfig())
+    assert info.account == "real-owner"
+    assert bound.get("cs-new") == "real-owner"
+
+
+def test_account_for_codespace_reresolves_stale_tokenless_binding(monkeypatch):
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account", lambda name: "billable-org",
+    )
+    rebound: dict[str, str] = {}
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bind",
+        lambda name, account, repo="": rebound.update({name: account}),
+    )
+    monkeypatch.setattr(
+        gh_account, "token_for_account",
+        lambda login: "tok" if login == "real-owner" else None,
+    )
+    monkeypatch.setattr(gh_account, "_codespace_owner_login", lambda name: "real-owner")
+    assert lifecycle.account_for_codespace("cs-a") == "real-owner"
+    assert rebound.get("cs-a") == "real-owner"

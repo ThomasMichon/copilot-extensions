@@ -179,11 +179,26 @@ function resolveMetadata() {
     // banner so a human dropping in via Neuron Forge sees who's at the wheel.
     // Absent/null for an operator-launched session.
     driven_by: process.env.AGENT_BRIDGE_DRIVEN_BY || null,
+    ...((process.env.AGENT_BRIDGE_NATIVE_EXECUTION_ID || process.env.AGENT_BRIDGE_NATIVE_GENERATION)
+      ? {
+          execution_id: process.env.AGENT_BRIDGE_NATIVE_EXECUTION_ID || null,
+          execution_generation: process.env.AGENT_BRIDGE_NATIVE_GENERATION || null,
+        }
+      : {}),
   };
 }
 
 // --- Bridge I/O (off the event loop; always best-effort) ---
+function refreshConnection() {
+  const base = resolveBaseUrl();
+  const token = resolveToken();
+  if (base !== state.base || token !== state.token) state.registered = false;
+  state.base = base;
+  state.token = token;
+}
+
 async function bridgeFetch(method, path, body) {
+  refreshConnection();
   if (!state.base || !state.token) return false;
   try {
     const res = await fetch(`${state.base}${path}`, {
@@ -203,6 +218,7 @@ async function bridgeFetch(method, path, body) {
 
 // GET a JSON body from the bridge (returns parsed object, or null on any error).
 async function bridgeGetJson(path) {
+  refreshConnection();
   if (!state.base || !state.token) return null;
   try {
     const res = await fetch(`${state.base}${path}`, {
@@ -435,7 +451,7 @@ try {
 
   if (!state.token) {
     extLog("no local agent-bridge auth token found; not registering (ok)");
-  } else {
+  }
     // Initial registration + periodic heartbeat. The heartbeat is the liveness
     // signal (refreshes updated_at); the bridge reaps rows that go stale, so an
     // ungraceful CLI exit is handled even if deregister never runs.
@@ -460,7 +476,6 @@ try {
       pollInbox().catch(() => {});
     }, INBOX_POLL_MS);
     if (state.inboxPoll.unref) state.inboxPoll.unref();
-  }
 } catch (e) {
   extLog(`init error (degrading, session unaffected): ${e.message}`);
 }

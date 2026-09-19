@@ -501,27 +501,9 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
-    # Content fingerprint of the RUNTIME PAYLOAD (#935/#776/ce#811): sha256 over
-    # the sorted "<per-file sha256>  <relpath>" list for pyproject.toml plus every
-    # file under src/ and libs/ (excluding caches/build artifacts). A src/-only
-    # edit without a version bump changes this value, so the completion marker +
-    # content guards detect real content drift, not just a pyproject change.
-    # Re-baselined by the accompanying version bump (self-healing). Empty on error.
     (
-        cd "$PLUGIN_DIR" 2>/dev/null || exit 0
-        {
-            [[ -f pyproject.toml ]] && sha256sum pyproject.toml 2>/dev/null
-            for __sub in src libs; do
-                [[ -d "$__sub" ]] || continue
-                find "$__sub" -type f \
-                    ! -path '*/__pycache__/*' ! -path '*/.venv/*' ! -path '*/venv/*' \
-                    ! -path '*/.pytest_cache/*' ! -path '*/.mypy_cache/*' \
-                    ! -path '*/build/*' ! -path '*/dist/*' ! -path '*.egg-info/*' \
-                    ! -name '*.pyc' -print0 2>/dev/null \
-                  | sort -z \
-                  | xargs -0 -r sha256sum 2>/dev/null
-            done
-        } | sort | sha256sum 2>/dev/null | awk '{print $1}'
+        . "$SCRIPT_DIR/payload-hash.sh"
+        bridge_payload_hash "$PLUGIN_DIR"
     ) || true
 }
 
@@ -1155,7 +1137,7 @@ do_stamp() {
 # holds the lock; systemd-launched and python-cutover (close_fds) daemons don't.
 _enter_install_lock() {
     mkdir -p "$INSTALL_DIR" 2>/dev/null || true
-    exec 8>"$INSTALL_DIR/.install.lock" 2>/dev/null || return 0   # can't open -> lock-free
+    { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 0   # can't open -> lock-free
     command -v flock >/dev/null 2>&1 || return 0                  # no flock -> lock-free
     flock -w 150 8 || return 1                                    # held whole window -> defer
     return 0

@@ -1,0 +1,49 @@
+{
+  "captured_from": {
+    "commit": "015d08fb1f7c675d8a14d43b7c97c69cc492ef1f",
+    "plugin_version": "0.4.0-dev495",
+    "protocol_generation": 15,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
+    "source_git_blob": "222ebf919219493294dc22139b22966fef5437fb",
+    "source_sha256": "580c264777a7d462797251ab87b0700de3e4e6f13b015c74996820f38c561c40"
+  },
+  "capability_fields": {
+    "capability": "codespace-native-host-v1",
+    "version": 1,
+    "capabilities": {
+      "remoteCommand": {
+        "schema": "copilot-extensions.remote-command",
+        "version": 1,
+        "receiptHash": "sha256"
+      },
+      "terminal": {
+        "protocol": "native.v1",
+        "writer": "exclusive",
+        "observers": true,
+        "takeover": "explicit",
+        "replayBytes": 1048576,
+        "nonretryableCloseCodes": {
+          "4409": "writer_busy",
+          "4410": "writer_revoked",
+          "4403": "read_only"
+        }
+      },
+      "observation": {
+        "kind": "represented-result-snapshot",
+        "cursor": "position",
+        "retention": "hosting-bridge-process",
+        "gaps": "snapshot-coverage",
+        "requiresRepresentation": true
+      },
+      "control": {
+        "promptAdmission": true,
+        "promptIdempotency": true,
+        "retireExecution": true,
+        "typedInterrupt": false,
+        "permissionResponses": false,
+        "hiddenReasoning": false
+      }
+    },
+    "hostResources": "native-host-resources-v1"
+  }
+}

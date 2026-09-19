@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import agent_procutil
 import pytest
 
 from agent_codespaces.__main__ import _discover_workspace_folder, _interactive_ssh
+from agent_codespaces.interactive import process_group_options
 
 SPACE = {
     "name": "cs-example",
@@ -68,12 +70,17 @@ def test_workspace_discovery_rejects_failed_or_invalid_results(returncode, stdou
         assert _discover_workspace_folder([SPACE], "example/repo") is None
 
 
-def test_workspace_discovery_does_not_change_interactive_ssh():
+@pytest.mark.asyncio
+async def test_workspace_discovery_does_not_change_interactive_ssh():
+    process = SimpleNamespace(pid=1234, returncode=0, wait=AsyncMock(return_value=0))
     with (
         patch("agent_codespaces.lifecycle.account_for_codespace", return_value=None),
-        patch("subprocess.call", return_value=0) as call,
+        patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=process) as call,
+        patch("agent_codespaces.interactive.foreground_group", return_value=None),
+        patch("agent_codespaces.interactive.restore_foreground"),
     ):
-        assert _interactive_ssh("cs-example", []) == 0
-    call.assert_called_once_with(
-        ["gh", "codespace", "ssh", "-c", "cs-example"], env=None
+        assert await _interactive_ssh("cs-example", []) == 0
+    call.assert_awaited_once_with(
+        "gh", "codespace", "ssh", "-c", "cs-example", env=None, **process_group_options(),
     )
+    process.wait.assert_awaited_once()

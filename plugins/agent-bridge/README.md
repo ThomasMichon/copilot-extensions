@@ -1,5 +1,9 @@
 # Agent Bridge
 
+Explicitly selected native CodeSpace Copilot uses the shared
+[`native start/attach/resume/status/stop` hosting contract](docs/native-executions.md).
+It retains bridge/provider infrastructure without an ACP surrogate session.
+
 Persistent inter-agent communication service for Copilot CLI. One instance per
 machine, providing session management, SSE event streaming, live-session
 messaging, and agent subprocess spawning across local, SSH, CodeSpace, and
@@ -30,6 +34,12 @@ session command catalog. That command resolves and, when necessary, provisions
 the runtime from its own payload without searching `PATH` for another
 marketplace's same-named plugin. On Windows the catalog publishes the native
 `.cmd` entry so prompt bodies sent through stdin remain intact.
+
+After an official payload refresh, an attributable bootstrap caller can run
+`<payload-local agent-bridge> provision --current-payload --json` to explicitly
+[converge the selected runtime](docs/getting-started.md#explicit-current-payload-convergence).
+This owner operation updates authorized legacy installations, verifies current
+complete namespaces read-only, and refuses unsupported namespace updates.
 
 The legacy global wrappers remain explicit compatibility and management
 boundaries for callers that do not inherit session catalogs: daemon and service

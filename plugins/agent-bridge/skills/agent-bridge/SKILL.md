@@ -11,6 +11,8 @@ description: >
   - 'agent-bridge send'
   - 'agent-bridge create'
   - 'agent-bridge status'
+  - 'native codespace session'
+  - 'resume native copilot'
   - 'remote agent'
   - 'local bridge agent'
   - 'send to agent'
@@ -25,6 +27,17 @@ description: >
 ---
 
 # Agent-Bridge Control Plane
+
+For explicitly selected native CodeSpace Copilot, use this plugin's `native`
+hosting surface: `native start --codespace NAME --owner OWNER --cwd REMOTE_PATH
+--request-id REQUEST --command-file PATH --no-plugin-staging --require-relay
+--json`, then `native attach EXECUTION_ID --expected-generation GENERATION`.
+`native resume` reattaches; `native stop` requires the same generation. Retain
+the real execution receipt and require `ready: true` plus its real `sessionId`
+before reporting integrated readiness. A missing registration or transport is
+a recoverable blocker, never permission to launch ACP as a replacement. Use
+`send native:EXECUTION_ID` for verified native delivery. Details are owned by
+this plugin's `docs/native-executions.md`.
 
 > **Before you start — use the payload-local session command.**
 > The agent-bridge session command catalog supplies an exact `argv[0]` owned by

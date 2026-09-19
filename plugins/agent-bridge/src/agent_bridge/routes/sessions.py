@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .session_info import _session_info  # noqa: F401 -- compatibility re-export
+
 import asyncio
 import contextlib
 import json
@@ -38,6 +40,7 @@ from ..models import (
     SubmitPromptRequest,
     SubmitPromptResponse,
 )
+from ..native_store import NativeError
 from ..result_snapshot import (
     DEFAULT_MAX_ITEMS,
     DEFAULT_MAX_TEXT_CHARS,
@@ -367,50 +370,6 @@ async def _sse_event_stream(  # noqa: ANN001
     finally:
         if mgr is not None:
             mgr.remove_subscriber(session.session_id)
-
-
-def _session_info(s) -> SessionInfo:  # noqa: ANN001
-    """Convert an internal Session to the public SessionInfo model."""
-    from datetime import datetime, timezone
-
-    status, at_rest, liveness = s.public_state()
-    return SessionInfo(
-        session_id=s.session_id,
-        name=s.name,
-        agent_name=s.agent_name,
-        caller_id=s.caller_id,
-        acp_session_id=s.acp_session_id,
-        target_dir=s.target.cwd,
-        target_type=s.target.type,
-        target_host=s.target.host,
-        project=getattr(s.target, "project", None),
-        worktree_id=s.target.worktree_id,
-        elevated=s.target.elevated,
-        read_only=False,
-        status=status,
-        pid=s.pid,
-        turn_count=s.turn_count,
-        context_size=s.context_size,
-        context_used=s.context_used,
-        context_pct=s.context_pct,
-        usage_model=s.usage_model,
-        last_usage_at=(
-            datetime.fromtimestamp(s.last_usage_at, tz=timezone.utc).isoformat()
-            if s.last_usage_at else None
-        ),
-        created_at=datetime.fromtimestamp(s.created_at, tz=timezone.utc),
-        updated_at=datetime.fromtimestamp(s.updated_at, tz=timezone.utc),
-        last_output_at=(
-            datetime.fromtimestamp(s.last_output_at, tz=timezone.utc).isoformat()
-            if s.last_output_at else None
-        ),
-        last_heartbeat_at=(
-            datetime.fromtimestamp(s.last_heartbeat_at, tz=timezone.utc).isoformat()
-            if s.last_heartbeat_at else None
-        ),
-        liveness=liveness,
-        at_rest=at_rest,
-    )
 
 
 def _persisted_session_info(
@@ -758,6 +717,8 @@ async def start_session(req: StartSessionRequest, request: Request):
             model=req.model, effort=req.effort,
             parity_fault=req.parity_fault,
         )
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except SessionConflictError as exc:
@@ -1079,6 +1040,8 @@ async def submit_prompt(
         else:
             turn_index = await mgr.submit_prompt(session_id, req.prompt)
             result = {"queued": False, "turn_index": turn_index}
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except KeyError:
@@ -1594,6 +1557,8 @@ async def resume_session(session_id: str, request: Request):
     mgr: SessionManager = request.app.state.session_manager
     try:
         session = await mgr.resume_session(session_id)
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     except ValueError as exc:
@@ -1635,6 +1600,8 @@ async def handoff_session(
     mgr: SessionManager = request.app.state.session_manager
     try:
         successor = await mgr.handoff_session(session_id, reason=reason, seed=seed)
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except KeyError:

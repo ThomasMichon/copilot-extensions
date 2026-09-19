@@ -98,6 +98,39 @@ def test_successful_cutover_clears_breadcrumb(tmp_path):
     assert breadcrumb.read_breadcrumb(tmp_path) is None
 
 
+def test_cutover_retires_only_its_root_predecessor(tmp_path):
+    global_root, isolated_root = tmp_path / "global", tmp_path / "isolated"
+    foreign = Endpoint(bind="127.0.0.1", port=45001, pid=1111, version="1.0.0")
+    owned = Endpoint(bind="127.0.0.1", port=45002, pid=2222, version="2.0.0")
+    roots = {global_root: foreign, isolated_root: owned}
+
+    class ScopedRouting:
+        def read_active_endpoint(self, root, *, verify_listener=True):
+            return roots.get(root)
+
+        def publish_active(self, root, **values):
+            roots[root] = Endpoint(
+                bind=values["bind"], port=values["port"], pid=values.get("pid"),
+                version=values.get("version"),
+            )
+            return roots[root]
+
+    clients = {port: FakeClient() for port in (45001, 45002, 45003)}
+    result = CutoverOrchestrator(
+        isolated_root, bind="127.0.0.1", version="3.0.0",
+        spawn_passive=lambda _: FakeHandle(),
+        health_check=lambda *_: True,
+        make_client=lambda url: clients[int(url.rsplit(":", 1)[1])],
+        pick_free_port=lambda: 45003, sleep=lambda _: None,
+        routing_mod=ScopedRouting(),
+    ).run(health_timeout=1, drain_timeout=1)
+    assert result.ok
+    assert clients[45001].calls == []
+    assert "drain" in clients[45002].calls and "shutdown" in clients[45002].calls
+    assert clients[45003].calls == ["adopt_relay"]
+    assert roots[global_root] == foreign
+
+
 def test_drain_failure_rolls_back_and_undrains(tmp_path):
     old = Endpoint(bind="127.0.0.1", port=9281, pid=1234, version="9.9.8")
     routing = FakeRouting(old)

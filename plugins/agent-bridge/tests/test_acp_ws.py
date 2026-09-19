@@ -76,6 +76,18 @@ class TestStatusUi:
             # No Authorization header was sent, yet the page loads.
             assert "/acp/" in resp.text
 
+    def test_console_ui_served_without_auth(self, app):
+        with TestClient(app) as c:
+            resp = c.get("/ui/console")
+            assert resp.status_code == 200
+            assert "text/html" in resp.headers["content-type"]
+            assert "Agent Bridge Console" in resp.text
+            # The console wires the native codespace + live main-session
+            # primitives and streams over the native.v1 terminal WebSocket.
+            assert "/api/v1/native-executions/" in resp.text
+            assert "/api/v1/live-sessions" in resp.text
+            assert "native.v1" in resp.text
+
 
 # ---------------------------------------------------------------------------
 # WebSocket ACP transport

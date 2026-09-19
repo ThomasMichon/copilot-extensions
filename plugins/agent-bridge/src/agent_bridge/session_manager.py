@@ -261,8 +261,7 @@ def _failed_acp_handshake_command() -> str:
 # ``agent-codespaces claim`` exits with this code on a live claim conflict
 # (a different, still-alive worktree already controls the CodeSpace). Kept in
 # sync with ``agent_codespaces.__main__._BUSY_EXIT``.
-_CODESPACE_BUSY_EXIT = 75
-_CODESPACE_COORDINATION_EXIT = 78
+from .execution_admission import _CODESPACE_BUSY_EXIT, _CODESPACE_COORDINATION_EXIT  # noqa: F401 -- compatibility re-export
 
 
 class CodespaceClaimConflictError(Exception):
@@ -336,88 +335,7 @@ def _codespace_claim_key(target: "SpawnTarget") -> tuple[str, str] | None:
     return name, owner
 
 
-def _claim_codespace(
-    codespace_name: str,
-    owner: str,
-    *,
-    holder_ref: str | None = None,
-) -> tuple[str, str]:
-    """Acquire the exclusive, worktree-keyed CodeSpace claim before the
-    Session-Host transport is established (#897 Increment B step 2).
-
-    Session-Host dispatch never runs ``agent-codespaces ssh``, so the
-    direct-path claim enforcement is bypassed for a bridge dispatch -- this is
-    where the daemon closes that gap. Shells the ``agent-codespaces claim`` seam
-    rather than importing ``agent_codespaces`` in the bridge venv (#796), so the
-    two separately-versioned plugin venvs stay decoupled; mirrors
-    ``gh_account``'s shell-out-to-a-sibling-binstub pattern.
-
-    Returns ``("ok", "")`` on success or a degrade-safe skip,
-    ``("conflict", detail)`` for a live owner conflict, or
-    ``("coordination-rejected", detail)`` for a compatible binding rejection.
-    """
-    if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM") and not holder_ref:
-        return "ok", ""
-    if not codespace_name or (not owner and not holder_ref):
-        return "ok", ""
-    binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
-    if not binstub:
-        return "ok", ""
-    creationflags = no_window_flags()
-    command = [binstub, "claim", codespace_name]
-    if owner:
-        command.extend(["--owner", owner])
-    if holder_ref:
-        command.extend(["--holder-ref", holder_ref])
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True, text=True, timeout=30,
-            creationflags=creationflags,
-        )
-    except Exception as exc:
-        log.info("CodeSpace claim skipped for %s: %s", codespace_name, exc)
-        return "ok", ""
-    if result.returncode == _CODESPACE_BUSY_EXIT:
-        return "conflict", (result.stderr or result.stdout or "").strip()
-    if result.returncode == _CODESPACE_COORDINATION_EXIT:
-        return (
-            "coordination-rejected",
-            (result.stderr or result.stdout or "").strip(),
-        )
-    if result.returncode != 0:
-        # Any other non-zero is a bookkeeping error, not a conflict -- never
-        # block the dispatch on it (degrade-safe, mirroring the direct path).
-        log.info(
-            "CodeSpace claim for %s exited %s: %s",
-            codespace_name, result.returncode, (result.stderr or "").strip(),
-        )
-    return "ok", ""
-
-
-def _release_codespace_claim(codespace_name: str, owner: str) -> bool:
-    """Release a Session-Host CodeSpace claim and report success.
-
-    Ordinary teardown remains best-effort, while destructive parity rollback
-    uses the return value to avoid claiming cleanup before ownership is gone.
-    """
-    if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
-        return True
-    if not owner or not codespace_name:
-        return True
-    binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
-    if not binstub:
-        return False
-    creationflags = no_window_flags()
-    try:
-        result = subprocess.run(
-            [binstub, "release-claim", codespace_name, "--owner", owner],
-            capture_output=True, text=True, timeout=30,
-            creationflags=creationflags,
-        )
-    except Exception:
-        return False
-    return result.returncode == 0
+from .execution_admission import _claim_codespace, _release_codespace_claim
 
 
 # Session states that "occupy" a workspace -- a workspace with a session
@@ -4056,6 +3974,17 @@ class SessionManager:
         """
         if self._draining:
             raise DaemonDrainingError("session")
+        native_guard = getattr(self, "native_guard", None)
+        if native_guard is not None:
+            name = (target.codespace or {}).get("name") if isinstance(target.codespace, dict) else None
+            if isinstance(target.container, dict):
+                name = f"container:{target.container['name']}"
+            if name is None and target.spawn_command:
+                from .session_host.codespace_transport import parse_codespace_target
+                parsed = parse_codespace_target(target.spawn_command)
+                name = parsed.get("name") if parsed else None
+            if name:
+                native_guard(name)
         from .protocol import FAILED_ACP_HANDSHAKE_FAULT
 
         if parity_fault not in {None, FAILED_ACP_HANDSHAKE_FAULT}:
@@ -4430,10 +4359,11 @@ class SessionManager:
                 # of clobbering the incumbent. Degrade-safe: no owner / disabled
                 # / binstub absent -> proceed unclaimed, today's behavior.
                 claim_owner = getattr(target, "caller_worktree", None) or caller_id
-                _claim_status, _claim_detail = _claim_codespace(
+                _claim_status, _claim_detail = await asyncio.to_thread(_claim_codespace,
                     cs_target["name"],
                     claim_owner or "",
                     holder_ref=getattr(target, "caller_owner_ref", None),
+                    execution_id=session_id,
                 )
                 if _claim_status == "conflict":
                     raise CodespaceClaimConflictError(
@@ -4547,7 +4477,7 @@ class SessionManager:
                     if not parity_fault:
                         claim_key = _codespace_claim_key(session.target)
                         if claim_key is not None:
-                            _release_codespace_claim(*claim_key)
+                            _release_codespace_claim(*claim_key, execution_id=session_id)
                     raise
             elif self._is_codespace_target(target):
                 # A CodeSpace target MUST run under a Session Host: only then does
@@ -4811,7 +4741,7 @@ class SessionManager:
         claim_removed = (
             True
             if claim_key is None
-            else _release_codespace_claim(*claim_key)
+            else _release_codespace_claim(*claim_key, execution_id=session.session_id)
         )
         result["codespace_claim_removed"] = claim_removed
         if not claim_removed:
@@ -4890,6 +4820,13 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+
+        guard = getattr(self, "native_guard", None)
+        key = _codespace_claim_key(session.target)
+        if guard is not None and key is not None:
+            guard(key[0])
+        if guard is not None and isinstance(session.target.container, dict):
+            guard(f"container:{session.target.container['name']}")
 
         async with session._lifecycle_lock:
             if session.status != SessionStatus.STOPPED:
@@ -6261,7 +6198,7 @@ class SessionManager:
         with contextlib.suppress(Exception):
             claim_key = _codespace_claim_key(session.target)
             if claim_key is not None:
-                _release_codespace_claim(*claim_key)
+                _release_codespace_claim(*claim_key, execution_id=session.session_id)
         with contextlib.suppress(Exception):
             self._db.update_session_status(
                 session_id, SessionStatus.ENDED.value, time.time()

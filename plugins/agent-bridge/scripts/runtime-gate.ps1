@@ -5,6 +5,14 @@ Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 
 $forwardArgs = @($args)
+$converge = $forwardArgs.Count -gt 0 -and $forwardArgs[0] -ceq 'provision'
+if ($converge -and (
+    $forwardArgs.Count -ne 3 -or $forwardArgs[1] -cne '--current-payload' -or
+    $forwardArgs[2] -cne '--json'
+)) {
+    [Console]::Error.WriteLine('[agent-bridge] usage: provision --current-payload --json')
+    exit 2
+}
 $payloadRoot = [Environment]::GetEnvironmentVariable('AGENT_BRIDGE_PAYLOAD_ROOT', 'Process')
 if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
     [Console]::Error.WriteLine('[agent-bridge] owning payload root is unavailable.')
@@ -194,8 +202,68 @@ function Invoke-Runtime {
     exit $LASTEXITCODE
 }
 
+function Assert-ConvergenceAdmission {
+    $probeArgs = @($statusArgs)
+    if (-not $context) {
+        $probeArgs[5] = 'probe-legacy'
+    }
+    $decisionJson = @(& $hostExe @probeArgs)
+    if ($LASTEXITCODE -ne 0) {
+        throw '[agent-bridge] current-payload convergence authorization failed.'
+    }
+    $decision = ($decisionJson -join "`n") | ConvertFrom-Json
+    if ($context) {
+        if (
+            $decision.status -cne 'ready' -or
+            $decision.reason -cne 'namespaced-active' -or
+            $decision.desiredMode -cne 'namespaced' -or
+            $decision.runtimeRoot -cne $runtimeRoot -or
+            $decision.context -cne $context -or
+            [string]$decision.installGeneration -cne $installGeneration
+        ) {
+            throw '[agent-bridge] current-payload convergence requires an active, unchanged namespace.'
+        }
+    } elseif (
+        $decision.allowMutation -isnot [bool] -or -not $decision.allowMutation -or
+        $decision.probeReason -cne 'legacy-active'
+    ) {
+        throw '[agent-bridge] current-payload convergence lacks positive legacy authorization.'
+    }
+}
+
+function Test-CurrentPayload {
+    param([string]$Python, [string]$Action = 'unchanged')
+    if (-not $Python) { return $false }
+    $mode = if ($context) { 'namespaced' } else { 'legacy' }
+    $hash = ''
+    if (-not $context) {
+        . (Join-Path $scriptDir 'payload-hash.ps1')
+        $hash = Get-BridgePayloadHash -Payload $payloadRoot
+    }
+    $verifyArgs = @(
+        '-I', '-B', (Join-Path $scriptDir 'current-payload.py'),
+        '--payload', $payloadRoot, '--root', $runtimeRoot, '--mode', $mode,
+        "--payload-hash=$hash", "--context=$context",
+        "--generation=$installGeneration", "--marketplace=$marketplaceId",
+        '--action', $Action
+    )
+    $receipt = @('' | & $Python @verifyArgs)
+    if ($LASTEXITCODE -ne 0) { return $false }
+    [Console]::Out.WriteLine(($receipt -join "`n"))
+    return $true
+}
+
 $runtimePython = Resolve-RuntimePython
-if ($runtimePython) {
+if ($converge) {
+    Assert-ConvergenceAdmission
+    if (Test-CurrentPayload -Python $runtimePython) { exit 0 }
+    if ($context) {
+        [Console]::Error.WriteLine(
+            '[agent-bridge] namespaced runtime is stale, incomplete, or unsupported; no namespaced bridge update transaction is available. No legacy fallback was attempted.'
+        )
+        exit 126
+    }
+} elseif ($runtimePython) {
     Invoke-Runtime -Python $runtimePython
 }
 
@@ -225,23 +293,49 @@ while (-not $_lock) {
 
 $_provisionedPy = $null
 $_provisionRc = 0
+$_convergenceAction = 'unchanged'
 try {
     $_provisionedPy = Resolve-RuntimePython
-    if (-not $_provisionedPy) {
-        [Console]::Error.WriteLine(
-            '[agent-bridge] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.'
-        )
+    $_installAction = 'provision'
+    if ($converge) {
+        Assert-ConvergenceAdmission
+        if (Test-CurrentPayload -Python $_provisionedPy) { exit 0 }
+        $_convergenceAction = 'provisioned'
+        if ($_provisionedPy) {
+            $_installAction = 'update'
+            $_convergenceAction = 'updated'
+        }
+    }
+    if ($converge -or -not $_provisionedPy) {
+        if ($converge) {
+            [Console]::Error.WriteLine(
+                "[agent-bridge] converging selected legacy runtime through owner $_installAction."
+            )
+        } else {
+            [Console]::Error.WriteLine(
+                '[agent-bridge] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.'
+            )
+        }
         [Console]::Error.WriteLine(
             "::agent-provisioning:: plugin=agent-bridge eta_seconds=120 reason=first-use status=$statusPath"
         )
         "provisioning $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" |
             Set-Content -LiteralPath $statusPath -Encoding utf8
         Set-RuntimeEnvironment
-        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer provision -InstallDir $runtimeRoot 2>&1 |
+        '' | & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer $_installAction -InstallDir $runtimeRoot 2>&1 |
             ForEach-Object { [Console]::Error.WriteLine($_) }
         $_provisionRc = $LASTEXITCODE
         if ($_provisionRc -eq 0) {
             $_provisionedPy = Resolve-RuntimePython
+            if ($converge) {
+                Assert-ConvergenceAdmission
+                if (-not (Test-CurrentPayload -Python $_provisionedPy -Action $_convergenceAction)) {
+                    $_provisionRc = 1
+                    [Console]::Error.WriteLine(
+                        '[agent-bridge] installer returned success without current-payload readiness.'
+                    )
+                }
+            }
         }
     }
 } finally {
@@ -258,6 +352,7 @@ if ($_provisionRc -ne 0) {
 if ($_provisionedPy) {
     "ready $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" |
         Set-Content -LiteralPath $statusPath -Encoding utf8
+    if ($converge) { exit 0 }
     Invoke-Runtime -Python $_provisionedPy
 }
 "failed rc=1 $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" |

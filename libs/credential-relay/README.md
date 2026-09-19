@@ -24,6 +24,15 @@ from every venv — hence a lib installed into each, vendored the same way as
 - `credential_relay.sources.{git_credential,gh_auth,az_login}` — generic
   host-credential sources (shell out to host `git` / `gh` / `az`).
 
+## Listener ownership
+
+The relay binds loopback only. A requested port of `0` selects an OS-assigned
+port. If a positive requested port is occupied, the server logs the collision
+and binds an ephemeral port; consumers must follow the published actual port.
+It never infers process ownership from a port or version and never terminates
+the incumbent. A lifecycle owner must retire its attested predecessor before
+the relay can reuse that predecessor's fixed port.
+
 ## Wire protocol
 
 ```

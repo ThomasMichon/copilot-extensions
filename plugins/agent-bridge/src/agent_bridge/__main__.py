@@ -231,11 +231,7 @@ def _add_stream_args(p: argparse.ArgumentParser) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _cmd_acp_connect(args: argparse.Namespace) -> None:
-    """Relay stdio <-> a remote bridge's ACP-over-WebSocket endpoint."""
-    from .acp_connect import cmd_acp_connect
-
-    cmd_acp_connect(args)
+from .acp_connect import cmd_acp_connect as _cmd_acp_connect
 
 
 def _cmd_elevated(args: argparse.Namespace) -> None:
@@ -383,12 +379,8 @@ def _cmd_start(args: argparse.Namespace) -> None:
     if idle is not None:
         cfg.idle_shutdown_seconds = idle
 
-    # A passive cutover instance never binds the shared credential relay (9857)
-    # -- the active daemon owns it until the flip completes -- mirroring the
-    # elevated sub-daemon's relay-reuse rule.
+    # Passive startup defers binding without changing the installation's policy.
     passive = bool(getattr(args, "passive", False))
-    if passive:
-        cfg.enable_credential_relay = False
 
     # Single-instance guard: refuse to start a duplicate daemon for this config
     # dir + port. Acquired BEFORE binding the port so a racing/duplicate start
@@ -420,6 +412,7 @@ def _cmd_start(args: argparse.Namespace) -> None:
     app = create_app(config=cfg, token=token)
     app.state.single_instance = singleton
     app.state.background_readiness = True
+    app.state.relay_start_deferred = passive
     # A normal start self-publishes the routing table once it is listening so
     # CLI clients discover it; a passive instance stays silent until the deploy
     # orchestrator flips the table after a health check.
@@ -2930,6 +2923,10 @@ def _cmd_send(args: argparse.Namespace) -> None:
     client = _get_client()
     target = args.target
     prompt = _resolve_prompt(args, required=True)
+
+    from .native_cli import send_if_native
+    if send_if_native(client, args, target, prompt):
+        return
 
     # Interactive-CLI target -> deliver via the live-session message queue
     # (attributed + answerable envelope), not the ACP turn path. This is how a
@@ -5817,6 +5814,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     ver_p = sub.add_parser("version", help="Print version")
     ver_p.set_defaults(func=_cmd_version)
+
+    from .native_cli import add_arguments as add_native_arguments
+    add_native_arguments(sub)
 
     carrier_p = sub.add_parser(
         "carrier",

@@ -81,6 +81,7 @@ class CodespaceConfigSource:
             try:
                 result = subprocess.run(
                     args, capture_output=True, text=True, timeout=timeout,
+                    stdin=subprocess.DEVNULL,
                     creationflags=_creation_flags(),
                 )
             except FileNotFoundError:

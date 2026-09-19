@@ -1,0 +1,51 @@
+{
+  "captured_from": {
+    "commit": "f2da1c6471abae3127a606f4e7078d09f6a9a184",
+    "plugin_version": "0.4.0-dev477",
+    "protocol_generation": 15,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+    "source_git_blob": "4ca1f98c260f340204468acccb4f5d9412220b7b",
+    "source_sha256": "cd180cb14094046508d795133bf109839d2f805bffefd70c79e03784ac543654"
+  },
+  "without_resources": {
+    "requestId": "request-example",
+    "codespace": "example-space",
+    "owner": "/workspaces/example",
+    "cwd": "/workspaces/example",
+    "command": "exec copilot",
+    "localForward": [],
+    "reverseForward": [
+      "45123:45123"
+    ],
+    "noPluginStaging": true,
+    "requireRelay": true
+  },
+  "with_resources": {
+    "requestId": "request-example",
+    "codespace": "example-space",
+    "owner": "/workspaces/example",
+    "cwd": "/workspaces/example",
+    "command": "exec copilot",
+    "localForward": [],
+    "reverseForward": [
+      "45123:45123"
+    ],
+    "hostResources": {
+      "schema": "copilot-extensions.native-host-resources",
+      "version": 1,
+      "resources": {
+        "preview": {
+          "argv": [
+            "<local-python>",
+            "provider.py"
+          ],
+          "config": {
+            "listenPort": 45123
+          }
+        }
+      }
+    },
+    "noPluginStaging": true,
+    "requireRelay": true
+  }
+}

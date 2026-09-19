@@ -53,7 +53,7 @@ or extensions.
 | Component | Role in an AHP architecture |
 |-----------|-----------------------------|
 | agent-bridge | AHP host and downstream ACP controller for bridge-owned resources; proxy/federator for native-owned resources |
-| Session Host | Internal lifetime-preserving transport for ACP frames; never advertised as AHP |
+| Session Host | Internal lifetime-preserving transport for ACP frames or bridge-owned native PTYs; never advertised as AHP |
 | workspace provider | Supplies optional project/directory/workspace facts and lifecycle |
 | native local host | Authoritative AHP host for the local sessions and primitives it owns |
 | CLI/UI client | AHP client; presentation and operator interaction, not session authority |
@@ -163,6 +163,51 @@ The desired end state is:
 This follows `visions/native-convergence`: delegate a released native primitive,
 keep the value the bridge uniquely supplies, and never make an unstable surface
 load-bearing.
+
+### Proposed bridge-owned native backend reconciliation
+
+**PROPOSED, pending maintainer confirmation.** The
+[native CLI/PTY backend](../../../plugins/agent-bridge/docs/native-executions.md)
+and its [host resources](../../../plugins/agent-bridge/docs/native-host-resources.md)
+are proposed as bounded interim bridge-owned capabilities, not replacements for
+native-host-owned AHP resources. This does not change the governing vision or
+resolve the architecture review HOLD. The maintainer must agree whether this
+scope may land before the AHP host work or should join that effort.
+
+AHP 0.8 already defines relevant terminal and resource surfaces. The transition
+depends on an actual supported host implementation and equivalent semantics, not
+on waiting for those protocol concepts to be invented.
+
+| Primitive | Current owner/contract | Required equivalence before delegation |
+|---|---|---|
+| Execution and session identity | Remote Session Host/`NativeRuntime` own the child; the controller records its execution identity and the real CLI registration. | Native-host-owned resources keep that host's identity and lifecycle authority; the bridge stores references/projections, not a competing ledger. |
+| Input and control | Session Host enforces writer/observer ownership; the native CLI retains permission interaction. | Preserve ordered input admission, explicit control authority and authorization; unsupported controls remain unavailable. |
+| Observation and replay | Bounded PTY replay and reduced-fidelity, process-lifetime represented snapshots. | Use the selected host's public ordering, cursor and gap semantics; private frame sequences are not AHP `serverSeq`. |
+| Host resources | Local allowlisted providers own resource policy, journals, idempotent ensure/release and cleanup. | Establish equivalent authorization and resource-lifetime ownership before delegating or retiring those mechanisms; resource read/list support alone is insufficient. |
+| Reachability and venue preparation | Venue adapters supply claims/preparation and share a bridge-specific channel over SSH. | Reuse transport/profile providers without transferring session authority into the connectivity layer. |
+
+Proposed transition criteria:
+
+1. Identify the supported native host/version and released public contract.
+   Negotiate its protocol and use that version's defined capabilities and state
+   prerequisites; a successful connection alone is not feature equivalence.
+2. Demonstrate identity, input/control, replay/reconnect, authorization and
+   resource-lifetime behavior for the intended venues. Bind only to released,
+   stable surfaces; do not make private host internals load-bearing.
+3. Preserve explicit opt-in to the AHP provider. A successful probe or an
+   installed plugin must not silently switch an execution's backend.
+4. Existing live or recoverable bridge-owned executions keep one original
+   retirement owner and their cleanup obligations. Retire an overlapping private
+   primitive only after equivalence is demonstrated and no live, recovery or
+   rollback reference requires it. Do not copy a lifecycle ledger to create a
+   second authority or rename a private protocol as AHP.
+
+No new plugin is proposed by this reconciliation. A separate projection plugin
+requires agreement on an independent presentation/enablement boundary, without
+another lifecycle owner. Otherwise retain the existing Session Host and AHP
+provider owners and use the
+[agent-ssh transport-provider contract](../../../plugins/agent-ssh/docs/transport-provider-contract.md)
+for its reachability/profile responsibilities.
 
 ## Target internal architecture
 

@@ -6,6 +6,8 @@ Uses only stdlib (urllib) to avoid adding runtime dependencies.
 
 from __future__ import annotations
 
+from .native_client import NativeClient  # noqa: F401 -- compatibility re-export
+
 import json
 import os
 import sys
@@ -144,7 +146,7 @@ class SseStream(Iterator[dict[str, Any]]):
             response.close()
 
 
-class BridgeClient:
+class BridgeClient(NativeClient):
     """Sync HTTP client for the agent-bridge REST API."""
 
     def __init__(
@@ -638,21 +640,6 @@ class BridgeClient:
     def get_session(self, session_id: str) -> dict[str, Any]:
         """GET /api/v1/sessions/{id}"""
         return self._request("GET", f"/api/v1/sessions/{session_id}") or {}
-
-    def get_live_session(self, session_id: str) -> dict[str, Any]:
-        """GET /api/v1/live-sessions/{id}; {} if not a registered live session.
-
-        Used by ``send`` to detect an interactive-CLI target (delivered via the
-        message queue) vs. a bridge-owned session (delivered as an ACP turn).
-        """
-        try:
-            return self._request(
-                "GET", f"/api/v1/live-sessions/{session_id}"
-            ) or {}
-        except BridgeClientError as exc:
-            if exc.status == 404:
-                return {}
-            raise
 
     def list_live_sessions(
         self, *, worktree_id: str | None = None, include_dead: bool = False

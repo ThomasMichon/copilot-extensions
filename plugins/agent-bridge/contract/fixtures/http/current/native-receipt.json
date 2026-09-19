@@ -1,0 +1,41 @@
+{
+  "response": {
+    "schema": "copilot-extensions.native-execution",
+    "version": 1,
+    "executionId": "execution-example",
+    "generation": "generation-example",
+    "mode": "native",
+    "target": "container:example-container",
+    "provider": "container",
+    "container": "example-container",
+    "owner": "/workspaces/example-controller",
+    "state": "ready",
+    "sessionId": "session-example",
+    "represented": true,
+    "ready": true,
+    "exitCode": null,
+    "phase": null,
+    "error": null,
+    "ports": [],
+    "recovery": null,
+    "remoteCommand": {
+      "schema": "copilot-extensions.remote-command",
+      "version": 1,
+      "argv": [
+        "/selected-payload/bin/agent-bridge"
+      ],
+      "receipt": {
+        "path": "/selected-installation/current-payload.json",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  "captured_from": {
+    "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+    "plugin_version": "0.4.0-dev493",
+    "protocol_generation": 15,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/native_store.py",
+    "source_git_blob": "dac3b58727dcb593bff0e0d7f44255463636f452",
+    "source_sha256": "066d2c99bc2e9fb4ec2fdf8f8839a96889bc7aeb094c157a49d29ded605447d1"
+  }
+}

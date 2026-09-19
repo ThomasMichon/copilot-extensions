@@ -10,9 +10,11 @@ is reaped by staleness rather than relying on a clean deregister.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -168,6 +170,23 @@ async def register_live_session(
     """
     db = _db(request)
     now = time.time()
+    native_bound = False
+    if body.execution_id is not None or body.execution_generation is not None:
+        from ..native_runtime import NativeRuntime
+        from ..native_store import NativeError
+
+        if not body.execution_id or not body.execution_generation or body.pid is None:
+            raise HTTPException(409, detail={"reason": "incomplete_native_identity"})
+        try:
+            root = Path(request.app.state.config.db_path).expanduser().parent / "native-runtime"
+            runtime = NativeRuntime(root)
+            await asyncio.to_thread(
+                runtime.bind_registration, body.execution_id, body.execution_generation,
+                body.session_id, body.pid,
+            )
+            native_bound = True
+        except NativeError as exc:
+            raise HTTPException(exc.status, detail={"reason": exc.code, "detail": exc.detail}) from exc
     prior = db.get_live_session(body.session_id)
     pid_changed = bool(
         prior
@@ -175,7 +194,7 @@ async def register_live_session(
         and body.pid is not None
         and prior.get("pid") != body.pid
     )
-    if pid_changed:
+    if pid_changed and not native_bound:
         raise HTTPException(
             status_code=409,
             detail={

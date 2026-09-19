@@ -51,6 +51,35 @@ def test_provider_management_boundary_stays_explicit():
     assert "marketplace-isolation: allow agent-bridge-management" not in text
 
 
+def test_lifecycle_routes_explicit_terminals_without_acp_fallback():
+    text = _read("codespaces-lifecycle")
+    normalized = " ".join(text.split())
+    assert "explicitly selected caller-owned interactive terminals" in normalized
+    assert "Do not redirect an explicitly selected interactive terminal to ACP dispatch." in normalized
+    assert "Routine **ACP dispatch** goes through **agent-bridge**" in normalized
+    assert "## SSH (Diagnostic Only)" not in text
+    for flag in (
+        "--interactive-command-file", "--local-forward", "--reverse-forward",
+        "--no-plugin-staging", "--require-relay",
+    ):
+        assert flag in text
+    assert "<agent-bridge catalog argv[0]> service start" in text
+    assert "<agent-bridge catalog argv[0]> installer-readiness" in text
+    assert "module `agent-bridge/runtime`, state `ready`" in normalized
+    assert "through their official installation flow" in normalized
+    assert "Keep missing parity visible as a blocker" in normalized
+
+
+def test_lifecycle_preserves_incumbents_and_native_control_identity():
+    normalized = " ".join(_read("codespaces-lifecycle").split())
+    assert "including an idle ACP or native session" in normalized
+    assert "Do not open diagnostic SSH against an active incumbent" in normalized
+    assert "mode choice does not authorize implicit `--force`, `--force-claim`, or disabled claims" in normalized
+    assert "`--expected-session-id`" in normalized
+    assert "missing representation cannot fall through to ACP" in normalized
+    assert "dispatch is **stopped/idle**" not in normalized
+
+
 def test_cleaning_codespaces_skill_contract():
     text = _read("cleaning-codespaces")
     lowered = text.lower()

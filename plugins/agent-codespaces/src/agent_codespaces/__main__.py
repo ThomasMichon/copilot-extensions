@@ -24,12 +24,14 @@ import asyncio
 import functools
 import json
 import logging
+import math
 import os
 import shlex
 import shutil
+import stat
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -57,9 +59,9 @@ from .config import (
     validate_config,
 )
 from .connect import (
-    ConnectStage,
-    ConnectTracker,
-    breadcrumb_prelude,
+    ConnectStage as ConnectStage,
+    ConnectTracker as ConnectTracker,
+    breadcrumb_prelude as breadcrumb_prelude,
 )
 from .lifecycle import (
     cleanup_stale,
@@ -85,6 +87,7 @@ _SSH_BOOT_TIMEOUT = float(os.environ.get("AGENT_CODESPACES_BOOT_TIMEOUT", "180")
 # generic failures (1) and the --remote-cmd timeout (124) so callers can react.
 _BUSY_EXIT = 75
 _COORDINATION_EXIT = 78
+_RELAY_REQUIRED_EXIT = 69
 
 
 def _context_admitted(
@@ -101,6 +104,12 @@ def _context_admitted(
 
     return run
 
+
+@_context_admitted
+def _cmd_ssh(args: argparse.Namespace) -> int:
+    from .ssh_command import _cmd_ssh as execute
+    return execute(args)
+
 # Exit code when the host cannot mint an ADO REST bearer and enforcement is on
 # (credentials.enforce_ado_rest_login) -- the connect aborts cleanly rather than
 # proceeding into a silent mid-dispatch ADO-REST failure (#77).
@@ -115,7 +124,7 @@ _ADO_AUTH_EXIT = 77
 # deliberately excluded -- they must keep working without gh. `doctor` in
 # particular self-reports a missing/mis-authed gh, so it never balks.
 _GH_REQUIRED_COMMANDS = frozenset({
-    "ssh", "list", "delete", "finalize", "stop", "verify",
+    "ssh", "native-transport", "list", "delete", "finalize", "stop", "verify",
     "create", "prune", "wait", "pool", "allocate",
 })
 
@@ -188,6 +197,41 @@ def _normalize_remote_cmd_file(
         pass
 
 
+_STDIN_FILE_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _normalize_stdin_file(
+    parser: argparse.ArgumentParser, args: argparse.Namespace,
+) -> None:
+    """Snapshot diagnostic stdin before acquiring any remote resources."""
+    args.stdin_bytes = None
+    path = getattr(args, "stdin_file", None)
+    if path is None:
+        return
+    if (
+        getattr(args, "stdio", False)
+        or getattr(args, "interactive_command", None) is not None
+        or not (getattr(args, "remote_cmd", None) or "").strip()
+    ):
+        parser.error("--stdin-file requires a non-stdio --remote-cmd or --remote-cmd-file")
+    try:
+        source = Path(path)
+        if not path or not stat.S_ISREG(source.stat().st_mode):
+            raise ValueError("expected a regular file")
+        with source.open("rb") as stream:
+            metadata = os.fstat(stream.fileno())
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("expected a regular file")
+            if metadata.st_size > _STDIN_FILE_MAX_BYTES:
+                raise ValueError("file exceeds the 16 MiB limit")
+            payload = stream.read(_STDIN_FILE_MAX_BYTES + 1)
+        if len(payload) > _STDIN_FILE_MAX_BYTES:
+            raise ValueError("file exceeds the 16 MiB limit")
+    except (OSError, ValueError) as exc:
+        parser.error(f"--stdin-file {path!r} could not be read ({exc})")
+    args.stdin_bytes = payload
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -232,6 +276,32 @@ def main(argv: list[str] | None = None) -> int:
              "Mutually exclusive with --remote-cmd.",
     )
     ssh_parser.add_argument(
+        "--stdin-file", metavar="PATH",
+        help="Send the exact bytes of a regular file (at most 16 MiB) to a "
+             "non-stdio --remote-cmd or --remote-cmd-file, then close stdin. "
+             "Validated before claims or connections; empty files send EOF. "
+             "Not available for interactive or structured stdio sessions.",
+    )
+    ssh_parser.add_argument(
+        "--interactive-command-file", metavar="PATH",
+        help="Read a UTF-8 shell command from PATH and run it with a forced TTY. "
+             "Preserves payload whitespace; cannot combine with diagnostic/stdio mode.",
+    )
+    ssh_parser.add_argument(
+        "--interactive-command", metavar="COMMAND",
+        help="Run a shell command with a forced TTY; prefer the file form for shell quoting.",
+    )
+    ssh_parser.add_argument(
+        "--local-forward", action="append", default=[], metavar="LOCAL:REMOTE",
+        help="Forward a host loopback listener to CodeSpace loopback (ports 1..65535). "
+             "Repeatable; interactive sessions only.",
+    )
+    ssh_parser.add_argument(
+        "--reverse-forward", action="append", default=[], metavar="REMOTE:LOCAL",
+        help="Forward a CodeSpace loopback listener to host loopback (ports 1..65535). "
+             "Repeatable; interactive sessions only.",
+    )
+    ssh_parser.add_argument(
         "--timeout", dest="timeout", type=float, default=60.0, metavar="SECS",
         help="Timeout in seconds for --remote-cmd execution (default: 60). On "
              "expiry the command is terminated and the CLI exits 124. For a "
@@ -251,6 +321,16 @@ def main(argv: list[str] | None = None) -> int:
              "Non-stdio --remote-cmd uses this minimal diagnostic path by "
              "default; --stdio and interactive keep full provisioning unless "
              "this flag is supplied.",
+    )
+    ssh_parser.add_argument(
+        "--no-plugin-staging", action="store_true",
+        help="Skip CodeSpace plugin registration/install and all host plugin payload "
+             "staging, while retaining credential and repository preparation.",
+    )
+    ssh_parser.add_argument(
+        "--require-relay", action="store_true",
+        help="Fail closed (exit 69) unless the host credential relay, reverse forward, "
+             "and remote auth-helper setup are ready before launch. Cannot use with --no-relay.",
     )
     ssh_parser.add_argument(
         "--no-relay", action="store_true",
@@ -307,6 +387,40 @@ def main(argv: list[str] | None = None) -> int:
              "so a genuine claim conflict bounces rather than silently stealing "
              "another worktree's control.",
     )
+
+    # --- native execution infrastructure (bridge-owned process boundary) ---
+    native_p = sub.add_parser("native-transport", help="Serve shared infrastructure for a native execution")
+    native_p.add_argument("name")
+    native_p.add_argument("--owner", dest="effort", required=True)
+    native_p.add_argument("--execution-id", required=True)
+    native_p.add_argument("--generation", required=True)
+    native_p.add_argument("--remote-command-json", type=json.loads)
+    native_p.add_argument("--repo")
+    native_p.add_argument("--no-plugin-staging", action="store_true", default=True)
+    native_p.add_argument("--require-relay", action="store_true", default=True)
+    native_p.add_argument("--local-forward", action="append", default=[])
+    native_p.add_argument("--reverse-forward", action="append", default=[])
+    native_p.add_argument("--resume-infrastructure", dest="no_provision", action="store_true")
+    native_p.add_argument(
+        "--retirement-only", action="store_true",
+        help="Reconnect owned retirement control without application forwards or activation.",
+    )
+    native_p.set_defaults(
+        native_transport=True, native_retired=False, remote_cmd=None, remote_cmd_file=None,
+        interactive_command=None, interactive_command_file=None, no_relay=False,
+        stdio=False, force=False, force_claim=False, stage_plugins=[], timeout=60.0,
+        connect_timeout=None, auth_cache_warmup=None, session_id=None,
+    )
+    abort_p = sub.add_parser("native-abort", help="Release a proven unlaunched native reservation")
+    abort_p.add_argument("name")
+    abort_p.add_argument("--owner", required=True)
+    abort_p.add_argument("--execution-id", required=True)
+    abort_p.add_argument("--generation", required=True)
+    retirement_p = sub.add_parser("native-retirement", help="Read an identity-bound native retirement receipt")
+    retirement_p.add_argument("name")
+    retirement_p.add_argument("--owner", required=True)
+    retirement_p.add_argument("--execution-id", required=True)
+    retirement_p.add_argument("--generation", required=True)
 
     # --- list ---
     list_parser = sub.add_parser("list", help="List active CodeSpaces")
@@ -523,6 +637,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Acquire an EXCLUSIVE, worktree-keyed claim on a CodeSpace (#897)",
     )
     claim_p.add_argument("codespace", help="CodeSpace name to claim")
+    claim_p.add_argument("--interaction-mode", choices=["acp"])
+    claim_p.add_argument("--execution-id")
+    claim_p.add_argument("--generation")
     claim_p.add_argument(
         "--owner", dest="owner", default=None,
         help="Owning worktree (its worktree-dir). Defaults to the calling "
@@ -546,6 +663,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Release this worktree's exclusive claim on a CodeSpace (#897)",
     )
     release_claim_p.add_argument("codespace", help="CodeSpace name")
+    release_claim_p.add_argument("--execution-id")
+    release_claim_p.add_argument("--generation")
     release_claim_p.add_argument(
         "--owner", dest="owner", default=None,
         help="Owning worktree (defaults to the calling worktree). Only releases "
@@ -775,6 +894,18 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    if getattr(args, "interaction_mode", None) and not (
+        getattr(args, "execution_id", None) and getattr(args, "generation", None)
+    ):
+        parser.error("interaction-mode claims require --execution-id and --generation")
+    if getattr(args, "execution_id", None) or getattr(args, "generation", None):
+        from .execution_claims import identifier
+
+        try:
+            identifier(args.execution_id)
+            identifier(args.generation)
+        except (ValueError, AttributeError):
+            parser.error("--execution-id and --generation must both be valid portable identities")
 
     try:
         if args.command and args.command not in {"doctor", "status", "version", "installer-readiness"}:
@@ -783,11 +914,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
         return _COORDINATION_EXIT
 
+    from .interactive import normalize_options
+
+    normalize_options(parser, args)
+    if getattr(args, "retirement_only", False) and (
+        args.local_forward or args.reverse_forward
+    ):
+        parser.error("--retirement-only cannot establish application forwards")
+
     # --remote-cmd-file: the internal bridge-dispatch path passes the ACP launch
     # payload as a file PATH (a clean argv token) rather than a --remote-cmd
     # string, so no shell (cmd.exe %VAR% expansion in particular) can mangle it.
     # Fold it into args.remote_cmd so every downstream consumer is unchanged.
     _normalize_remote_cmd_file(parser, args)
+    _normalize_stdin_file(parser, args)
 
     # Logging setup
     level = logging.DEBUG if args.verbose else logging.INFO
@@ -822,6 +962,21 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
+        if args.command == "native-transport":
+            from .native_transport import command as native_transport_command
+
+            return native_transport_command(args)
+        if args.command == "native-abort":
+            from .execution_claims import abort_unlaunched
+
+            released = abort_unlaunched(args.name, args.owner, (args.execution_id, args.generation))
+            print(json.dumps({"released": released}))
+            return 0
+        if args.command == "native-retirement":
+            from .execution_claims import retirement
+
+            print(json.dumps({"receipt": retirement(args.name, args.owner, (args.execution_id, args.generation))}))
+            return 0
         if args.command == "ssh":
             return _cmd_ssh(args)
         if args.command == "list":
@@ -928,6 +1083,7 @@ async def _start_supervised_relay(
     *,
     context: str,
     host_port_resolver: Callable[[], int] | None = None,
+    serving_probe: Callable[[], Awaitable[bool]] | None = None,
 ) -> SupervisedRelayForward | None:
     """Start the best-effort supervised credential-relay reverse-forward."""
     relay = None
@@ -935,7 +1091,8 @@ async def _start_supervised_relay(
         from ssh_manager import SupervisedRelayForward
 
         relay = SupervisedRelayForward(
-            ssh_config, relay_port, host_port_resolver=host_port_resolver
+            ssh_config, relay_port, host_port_resolver=host_port_resolver,
+            serving_probe=serving_probe,
         )
         await relay.start()
         return relay
@@ -1019,489 +1176,6 @@ async def _preflight_copilot_platform(manager, name: str) -> None:  # noqa: ANN0
             "may fail at LAUNCH_ACP -- see #111.",
             file=sys.stderr,
         )
-
-
-@_context_admitted
-def _cmd_ssh(args: argparse.Namespace) -> int:
-    """SSH into a CodeSpace using ssh-manager."""
-    from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
-
-    from .lifecycle import account_for_codespace
-    from .worktrees import ContextRefused
-
-    source = CodespaceSource(args.name, account=account_for_codespace(args.name))
-    config = load_merged_config()
-    from .relay_launch import effective_relay_port
-    relay_port = effective_relay_port(config)
-
-    # Reusing a box (an explicit ssh connect) clears any prune-lifecycle marker
-    # -- it is active work again, not a recovered/prunable reclaim candidate.
-    # Exclusive, worktree-keyed claim (#897). A CodeSpace is fronted by exactly
-    # one agent-bridge Session Host, so only one worktree may control it at a
-    # time. Resolve the owning worktree -- an explicit ``--effort`` (used by a
-    # dispatched ``ssh`` whose cwd is the daemon's, not the caller's worktree),
-    # else the calling worktree via agent-worktrees -- then acquire the claim,
-    # sweeping existing claims and BOUNCING a live different owner (unless
-    # ``--force``). A claim held by a gone/finalized worktree is auto-released and
-    # taken over. Degrade-safe: when no worktree resolves (not a worktree,
-    # agent-worktrees absent), we skip claiming and connect exactly as before.
-    from .lease import (
-        ClaimConflict,
-        CoordinationRejected,
-        active_worktree_ids,
-        claim,
-        resolve_owner_worktree,
-    )
-
-    # Escape hatch: an operator (or a unit test) can disable exclusive-control
-    # enforcement entirely. --force remains the per-call takeover.
-    if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
-        claim_owner = None
-    else:
-        claim_owner = resolve_owner_worktree(
-            explicit=getattr(args, "effort", None),
-            session_id=getattr(args, "session_id", None),
-        )
-    # Resolve the qualified holder ClaimRef once, for BOTH the cross-machine L2
-    # claim (below) and the cross-harness in-CodeSpace fence (in _run). It is the
-    # marker's holder identity even when L1/L2 claiming is disabled, so hoist it
-    # out of the claim block. Degrade-safe: None when not in a worktree.
-    from . import coordination
-    fence_holder_ref = coordination.owner_ref(
-        session_id=getattr(args, "session_id", None),
-    )
-    if not claim_owner and fence_holder_ref:
-        readiness = coordination.preflight(fence_holder_ref)
-        if readiness.rejected:
-            print(
-                "[BLOCKED] CodeSpace operation requires durable coordination: "
-                f"{readiness.code}: {readiness.detail}",
-                file=sys.stderr,
-            )
-            return _COORDINATION_EXIT
-    if claim_owner:
-        holder_ref = fence_holder_ref
-        try:
-            claim(
-                args.name, claim_owner,
-                force=getattr(args, "force_claim", False),
-                active=active_worktree_ids(),
-                holder_ref=holder_ref,
-            )
-        except ClaimConflict as exc:
-            print(
-                f"[BUSY] {exc}\n"
-                f"       A CodeSpace is fronted by a single bridge, so a second "
-                f"worktree cannot drive it concurrently. Options:\n"
-                f"       - let the owner finish, or dispatch to a different "
-                f"CodeSpace; or\n"
-                f"       - take over with --force-claim (evicts the current "
-                f"owner's claim -- its in-flight work may be disrupted).",
-                file=sys.stderr,
-            )
-            return _BUSY_EXIT
-        except (CoordinationRejected, ContextRefused) as exc:
-            print(
-                f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
-                file=sys.stderr,
-            )
-            return _COORDINATION_EXIT
-        except RuntimeError as exc:
-            # Never let a claim-bookkeeping error block a connect.
-            print(f"[WARN] CodeSpace claim skipped: {exc}", file=sys.stderr)
-
-        # Journal the CodeSpace as an outbound obligation on the BORROWING
-        # worktree so its finalize gate holds it accountable
-        # (resource-obligation-settlement Ph3b-wiring/2). Best-effort +
-        # degrade-safe: resolves the owner by its qualified holder-ref (not the
-        # caller's cwd -- a dispatched ssh runs in the daemon's cwd). Settled to
-        # at-rest on a clean disconnect (below). A missing holder-ref / binstub /
-        # cross-machine owner is a silent no-op. Journaled for any claimed
-        # connect (a clean disconnect immediately settles it to at-rest, so an
-        # ephemeral probe leaves only harmless at-rest provenance).
-        if fence_holder_ref:
-            if coordination.journal_obligation(args.name, fence_holder_ref):
-                log.info(
-                    "Journaled CodeSpace %s as an obligation on %s",
-                    args.name, fence_holder_ref,
-                )
-
-    # Reusing a box clears any prune-lifecycle marker only after coordination
-    # has allowed the operation to proceed.
-    _clear_status_quietly(args.name)
-
-    # Credential relay state. The relay reverse-forward now has its own
-    # supervised ``ssh -N -R`` channel, so it is not piggybacked on the
-    # coordination connection's port_forwards.
-    port_forwards: list[str] = []
-    # Neutralize static PATs the CodeSpace injects (e.g. MS_ADO_PAT) so a
-    # dispatched agent never relies on a stale/expired token instead of the
-    # credential relay (#160/#77). This runs in the launch prelude AFTER the
-    # login-shell profile loads, so it wins even if a profile re-exports the
-    # var, and applies to both the copilot --acp launch and a diagnostic
-    # --remote-cmd (not a human's interactive VS Code shell). Kept unconditional
-    # -- even with --no-relay we never want an injected PAT relied on. Built via
-    # _build_relay_env AFTER the relay token is minted so the scrub is never
-    # clobbered by the relay exports.
-    relay_token: str | None = None
-    if not args.no_relay:
-        # #122: the relay is owned/run by the agent-bridge daemon; this command
-        # only forwards the port. If the relay isn't listening host-side, the
-        # -R forward dead-ends and git auth over the tunnel silently returns
-        # nothing (ADO 'could not read Username', GitHub/dotfiles 403). Probe it
-        # up front and warn LOUDLY with remediation rather than failing silently.
-        if not _relay_listening(relay_port):
-            log.warning(
-                "Credential relay not listening on 127.0.0.1:%d before connecting "
-                "to %s -- git auth over the relay will fail (#122)",
-                relay_port, args.name,
-            )
-            relay_launch.warn_if_relay_unavailable(
-                relay_port, args.name, context="CodeSpace connect",
-            )
-        # Per-codespace relay token: the shared relay gates get-azure-token
-        # (it also serves network-reachable containers), so the codespace path
-        # must present its own secret for the official azure-auth-helper scope
-        # broker. Minted/persisted host-side; injected over SSH as LC_* so it
-        # survives the login shell into the relay client.
-        from .relay_token import token_for
-
-        relay_token = token_for(args.name)
-
-    # Launch prelude: always scrub injected PATs (#160/#77); add the relay
-    # exports only when the relay is in use. Built here (after the token mint)
-    # so the PAT scrub can NEVER be clobbered by the relay exports.
-    relay_env = _build_relay_env(
-        relay_port,
-        relay_token,
-        use_relay=not args.no_relay,
-        ado_host=getattr(config.credentials, "ado_host", None),
-        feed_token_env=getattr(config.credentials, "feed_token_env", None),
-    )
-
-    manager = ConnectionManager()
-    relay_forward = None
-
-    # Connection Owner defer (dotfiles#1345): when the Owner daemon is live and
-    # enabled, this one-off ssh becomes a non-owning tenant -- it places a hold so
-    # the Owner keeps this CodeSpace's relay up and does NOT stand up its own -R
-    # (which would collide, #561). Default-off + fail-safe: if the feature is off,
-    # no daemon is live, or the hold fails, we own the relay exactly as before.
-    # The decision here is side-effect-free; the hold itself is placed only AFTER
-    # the target lock is acquired (below), so a busy-target rejection can't leak a
-    # hold that would linger until its TTL.
-    from . import connection_owner as _owner
-    owner_tenant = f"ssh:{os.getpid()}"
-    defer_to_owner = _owner.should_defer_to_owner(config, no_relay=args.no_relay)
-
-    # The remote command is assembled inside _run() -- AFTER the relay is up and
-    # any --stage-plugin payloads are staged -- so their on-CodeSpace
-    # --plugin-dir paths can be folded into the copilot invocation. See
-    # _finalize_remote_cmd below.
-    diagnostic_remote_cmd = bool(args.remote_cmd and not args.stdio)
-    minimal_provision = bool(getattr(args, "no_provision", False) or diagnostic_remote_cmd)
-    overall_timeout = getattr(args, "connect_timeout", None)
-    if overall_timeout is None and diagnostic_remote_cmd:
-        overall_timeout = args.timeout
-
-    tracker = ConnectTracker(
-        session_id=args.name,
-        emit_stderr=diagnostic_remote_cmd,
-    )
-
-    def _finalize_remote_cmd(plugin_dirs: list[str]) -> str | None:
-        """Wrap args.remote_cmd in a login shell (see _build_launch_command).
-
-        Folds ``--plugin-dir`` args in ONLY for the ``--stdio`` copilot launch,
-        never for a plain diagnostic ``--remote-cmd`` (issue #152).
-        """
-        return _build_launch_command(
-            args.remote_cmd,
-            plugin_dirs,
-            is_stdio=args.stdio,
-            relay_env=relay_env,
-            breadcrumb=breadcrumb_prelude(args.name),
-        )
-
-    async def _run() -> int:
-        nonlocal relay_forward
-
-        # Stage 3 (ssh-to-target): a Shutdown CodeSpace boots on connect, so be
-        # patient -- retry to the boot deadline, then fail fast with a clear,
-        # staged message (never an opaque provider death).
-        tracker.started(ConnectStage.SSH_TO_TARGET, f"codespace={args.name}")
-        deadline = time.monotonic() + _SSH_BOOT_TIMEOUT
-        backoff = 3.0
-        while True:
-            try:
-                connection = await manager.ensure_connected(
-                    args.name, source, port_forwards,
-                )
-                if not args.no_relay and not defer_to_owner and relay_forward is None:
-                    relay_forward = await _start_supervised_relay(
-                        args.name,
-                        connection.config,
-                        relay_port,
-                        context="CodeSpace connect",
-                        host_port_resolver=lambda: relay_launch.effective_relay_port(
-                            config
-                        ),
-                    )
-                tracker.reached(ConnectStage.SSH_TO_TARGET, f"codespace={args.name}")
-                break
-            except (ConnectionError, TimeoutError) as exc:
-                if time.monotonic() + backoff >= deadline:
-                    tracker.failed(
-                        ConnectStage.SSH_TO_TARGET,
-                        f"Failed to reach CodeSpace {args.name}: {exc}",
-                        retryable=True,
-                    )
-                    print(
-                        f"[FAIL] Could not establish SSH to CodeSpace "
-                        f"'{args.name}' within {_SSH_BOOT_TIMEOUT:.0f}s "
-                        f"(stage 3/ssh-to-target): {exc}",
-                        file=sys.stderr,
-                    )
-                    return 1
-                log.info(
-                    "CodeSpace %s not ready (booting?): %s -- retry in %.0fs",
-                    args.name, exc, backoff,
-                )
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 1.5, 20.0)
-
-        # Deferring to the Connection Owner: wait briefly for it to bring up this
-        # CodeSpace's relay before any git-dependent provisioning runs, so auth
-        # over the relay is ready. Best-effort -- a timeout only warns (the Owner
-        # keeps reconciling; the token cache cushions the gap).
-        if defer_to_owner:
-            if await _owner.await_owner_relay(args.name):
-                log.info(
-                    "Connection Owner relay for %s is live; riding it (no own -R).",
-                    args.name,
-                )
-            else:
-                log.warning(
-                    "Connection Owner did not report a live relay for %s within the "
-                    "wait window -- git auth may lag until it reconciles.", args.name,
-                )
-
-        # Cross-harness in-CodeSpace lockfile fence (git-ref-resource-leases
-        # Phase 4). The repo-ref L2 store is same-harness-scoped by construction
-        # -- a *foreign* harness writes to a different store and is invisible to
-        # it. Fence that seam on the resource itself: read ~/.agent-lease inside
-        # the CodeSpace; a fresh marker from a foreign harness refuses the
-        # connect (unless --force-claim), then we drop our own marker. Needs only
-        # the raw SSH channel (a cat/mv), so it runs before relay provisioning
-        # and independent of --no-relay. Degrade-safe: any read/write/identity
-        # failure proceeds.
-        if not await _check_cross_harness_fence(
-            manager, args.name, fence_holder_ref,
-            force=getattr(args, "force_claim", False),
-        ):
-            await manager.disconnect(args.name)
-            return _BUSY_EXIT
-
-        if not args.no_relay:
-            # Stage 4 (target-auth-env): deploy the CodeSpace-side relay helpers
-            # so remote auth resolves over the tunnel. Auth verification later
-            # in this same stage catches missing local credentials up front.
-            tracker.started(ConnectStage.TARGET_AUTH_ENV, "credential relay")
-            await _provision_relay_helpers(manager, args.name)
-
-        cs_plugin_dirs: list[str] = []
-        if minimal_provision:
-            tracker.started(
-                ConnectStage.TARGET_BINSTUB,
-                "heavy provisioning skipped (minimal diagnostic path)",
-            )
-            tracker.reached(
-                ConnectStage.TARGET_BINSTUB,
-                "heavy provisioning skipped",
-            )
-        else:
-            tracker.started(ConnectStage.TARGET_BINSTUB, "provisioning")
-            # Ensure the account dotfiles repo is cloned + current (universal
-            # bootstrap, gated on `dotfiles_repo`). Heals a CodeSpace whose
-            # post-start dotfiles clone hasn't run (e.g. first agent-bridge
-            # connect) and syncs it forward on reconnect. Needs the relay up for
-            # git auth.
-            if not args.no_relay:
-                await _provision_dotfiles(manager, args.name, config)
-                await _provision_harness(manager, args.name, config)
-
-            # Register CodeSpace-scoped plugins (the CodeSpace-scoped axis) via
-            # BOTH lanes: (1) the CodeSpace user settings so they load for
-            # interactive / `copilot -p` launches (incl. a human opening the
-            # CodeSpace in VS Code, where there's no agent-bridge to pass
-            # --plugin-dir); and (2) their on-CodeSpace payload dirs, folded into
-            # the acp launch below as --plugin-dir -- because `copilot --acp`
-            # (the dispatch) ignores enabledPlugins and only surfaces plugin
-            # skills via --plugin-dir. Best-effort; needs the relay up for the
-            # payload pre-install.
-            if not args.no_relay:
-                cs_plugin_dirs = await _register_codespace_plugins(
-                    manager, args.name, getattr(args, "repo", None), config,
-                )
-
-            # Run repo-declared provision hooks (by-convention extras from the
-            # adopted repo's .copilot-extensions/agent-codespaces/config.yaml).
-            # Best-effort, idempotent.
-            await _provision_repo_hooks(
-                manager, args.name, config, getattr(args, "repo", None),
-            )
-            tracker.reached(ConnectStage.TARGET_BINSTUB)
-
-        # Verify the host has local auth for every domain the session's git
-        # remotes use -- the workspace (ADO) AND the dotfiles repo (GitHub).
-        # Surfaces missing auth up front rather than letting it fail mid-fetch.
-        # The ADO REST bearer preflight inside may abort the connect (#77) when
-        # enforcement is on and the host cannot mint the bearer.
-        if not args.no_relay:
-            from .auth_preflight import AdoRestAuthError
-
-            try:
-                await _verify_remote_auth(manager, args.name, config)
-            except AdoRestAuthError as exc:
-                print(f"[ERROR] {exc}", file=sys.stderr)
-                await manager.disconnect(args.name)
-                return _ADO_AUTH_EXIT
-            tracker.reached(ConnectStage.TARGET_AUTH_ENV)
-            if _should_warm_auth_cache(args, minimal_provision):
-                await _warm_remote_auth_cache(
-                    manager, args.name, config, relay_env=relay_env,
-                )
-
-        # Stage related-repo plugins (repo-targeted lane) onto the CodeSpace and
-        # fold their --plugin-dir paths into the launch. Best-effort: a staging
-        # failure drops that plugin but never blocks the dispatch.
-        plugin_dirs: list[str] = list(cs_plugin_dirs)
-        if not args.no_relay and not minimal_provision:
-            plugin_dirs += await _stage_plugins(
-                manager,
-                args.name,
-                getattr(args, "stage_plugins", []),
-                repo_roots=getattr(config, "source_paths", ()) or (),
-            )
-        # NB: the repo-own ``.ai`` lane is intentionally NOT folded here. A
-        # CodeSpace ACP dispatch never runs through this front-owns-stdio ``ssh``
-        # path -- ``session_manager`` refuses a non-Session-Host codespace target
-        # -- so folding ``.ai`` --plugin-dir here would silently no-op for real
-        # dispatches. The canonical repo-own lane lives in the Session-Host path
-        # in agent-bridge, which resolves the dirs itself
-        # (``repo_own_plugins_remote`` over its transport-exec seam,
-        # PR2/dotfiles#1422) and folds them into its own ``acp_command``. This
-        # path keeps only the related-repo staging above, which serves genuine
-        # interactive/diagnostic ``agent-codespaces ssh`` use.
-        remote_cmd = _finalize_remote_cmd(plugin_dirs)
-
-        if args.stdio and remote_cmd:
-            # #111: a fresh CodeSpace can ship copilot's loader stub without its
-            # platform binary, so `copilot --acp` dies at LAUNCH_ACP ("Connection
-            # closed"). Verify + self-repair (public-npm reinstall) up front.
-            await _preflight_copilot_platform(manager, args.name)
-            # Structured stdio mode for agent-bridge
-            tracker.started(ConnectStage.LAUNCH_ACP, "stdio channel")
-            proc = await manager.open_stdio_channel(args.name, remote_cmd)
-            # Pipe through to our own stdio
-            await _pipe_stdio(proc)
-            tracker.reached(ConnectStage.LAUNCH_ACP)
-            return proc.returncode if proc.returncode is not None else 1
-
-        if remote_cmd:
-            # Non-interactive command execution
-            tracker.started(ConnectStage.LAUNCH_ACP, "remote command")
-            result = await manager.exec_command(
-                args.name, remote_cmd, timeout=args.timeout
-            )
-            tracker.reached(ConnectStage.LAUNCH_ACP)
-            return _emit_remote_cmd_result(result, args.timeout)
-
-        # Interactive SSH -- fall through to gh codespace ssh
-        await manager.disconnect(args.name)
-        return _interactive_ssh(
-            args.name,
-            port_forwards,
-            relay_port=relay_port if not args.no_relay else None,
-            relay_token=relay_token,
-        )
-
-    # Serialize SSH access to this CodeSpace across processes. All access funnels
-    # through one credential-relay reverse-forward (one relay port per host), so
-    # a second concurrent connection collides on that port and can collapse a
-    # live agent-bridge dispatch. Hold a per-target lock for the operation's
-    # lifetime; reject a busy target (or take over with --force).
-    op = "stdio" if args.stdio else ("remote-cmd" if args.remote_cmd else "interactive")
-    target_lock = TargetLock(args.name, op=op)
-    try:
-        target_lock.acquire(force=getattr(args, "force", False))
-    except TargetBusyError as busy:
-        print(busy.user_message(), file=sys.stderr)
-        return _BUSY_EXIT
-
-    # Place the Owner hold only AFTER the target lock is held, so a busy-target
-    # rejection above can't leak a hold that would linger until its TTL. The
-    # matching release lives in _run_with_cleanup's finally, which runs iff we
-    # reach it (i.e. iff the lock was acquired and the hold was placed).
-    if defer_to_owner:
-        try:
-            _owner.hold(args.name, owner_tenant)
-            log.info(
-                "Deferring credential relay for %s to the Connection Owner "
-                "(tenant=%s)", args.name, owner_tenant,
-            )
-        except Exception as exc:
-            log.warning(
-                "Owner hold for %s failed (%s) -- owning the relay directly "
-                "instead", args.name, exc,
-            )
-            defer_to_owner = False
-
-    async def _run_with_cleanup() -> int:
-        try:
-            if overall_timeout is not None and overall_timeout > 0:
-                return await asyncio.wait_for(_run(), timeout=overall_timeout)
-            return await _run()
-        except (TimeoutError, asyncio.TimeoutError):
-            print(
-                f"[FAIL] SSH operation for CodeSpace '{args.name}' exceeded "
-                f"{overall_timeout:g}s; disconnected and cleaned up.",
-                file=sys.stderr,
-            )
-            return 124
-        except asyncio.CancelledError:
-            print(
-                f"[CANCEL] SSH operation for CodeSpace '{args.name}' was "
-                "interrupted; disconnecting and cleaning up.",
-                file=sys.stderr,
-            )
-            raise
-        finally:
-            # Settle the CodeSpace obligation on the borrowing worktree if its
-            # work is at-rest (resource-obligation-settlement Ph3b-wiring/2).
-            # Runs while the SSH channel is still up (before disconnect), so the
-            # read-only cleanliness probe can execute. Best-effort + degrade-safe:
-            # un-probeable / dirty / no holder-ref -> the obligation stays active
-            # (never settled blind).
-            if fence_holder_ref:
-                await _settle_codespace_on_disconnect(
-                    manager, args.name, fence_holder_ref,
-                )
-            if relay_forward is not None:
-                await relay_forward.stop()
-            # Release the Connection Owner hold this tenant placed (idempotent;
-            # the Owner tears the relay down only when no tenant holds it).
-            if defer_to_owner:
-                try:
-                    _owner.release(args.name, owner_tenant)
-                except Exception as exc:
-                    log.debug("Owner release for %s failed: %s", args.name, exc)
-            await manager.disconnect(args.name)
-
-    try:
-        return asyncio.run(_run_with_cleanup())
-    finally:
-        target_lock.release()
 
 
 async def _settle_codespace_on_disconnect(
@@ -1632,10 +1306,10 @@ async def _check_cross_harness_fence(
     (pure) + ``coordination.harness_identity`` (the identity shell-out); this is
     the thin SSH-executing wrapper.
 
-    Returns ``True`` to **proceed**, ``False`` to **refuse**. Degrade-safe: no
-    resolvable harness identity, an unreadable marker, or any exec failure all
-    **proceed** -- the fence only *adds* a cross-harness signal, it never becomes
-    a new hard dependency. Disable entirely with
+    Returns ``True`` to **proceed**, ``False`` to **refuse**. An explicit holder
+    must resolve its own harness identity; another cwd is never a fallback.
+    With no holder, preserve legacy best-effort identity discovery. Unreadable
+    markers and remote exec failures retain existing behavior. Disable with
     ``AGENT_CODESPACES_DISABLE_FENCE``.
     """
     if os.environ.get("AGENT_CODESPACES_DISABLE_FENCE"):
@@ -1644,11 +1318,17 @@ async def _check_cross_harness_fence(
     from . import coordination, fence
 
     try:
-        local_harness = coordination.harness_identity()
+        local_harness = coordination.harness_identity(holder_ref)
     except Exception as exc:
         log.debug("Cross-harness fence identity on %s unresolved: %s", name, exc)
+        if holder_ref is not None:
+            print("[BLOCKED] Could not resolve the explicit fence owner's declared lease origin.", file=sys.stderr)
+            return False
         local_harness = None
     if not local_harness:
+        if holder_ref is not None:
+            print("[BLOCKED] The explicit fence owner's declared lease origin is unavailable.", file=sys.stderr)
+            return False
         # No identity -> we cannot tell foreign from own; fence off (proceed).
         return True
 
@@ -1663,13 +1343,28 @@ async def _check_cross_harness_fence(
         )
         return True
 
-    decision = fence.evaluate(local_harness, fence.FenceMarker.parse(text))
+    marker = fence.FenceMarker.parse(text)
+    now = time.time()
+    decision = fence.evaluate(local_harness, marker, now=now)
     if decision.refuse:
         if not force:
+            expiry = ""
+            if marker is not None:
+                try:
+                    deadline = marker.written_at + marker.ttl + fence.FENCE_SKEW
+                    timestamp = datetime.fromtimestamp(deadline, timezone.utc).isoformat()
+                    remaining = max(0, math.ceil(deadline - now))
+                    expiry = (
+                        f"       Marker expires after {timestamp}; {remaining}s remaining "
+                        f"(includes {fence.FENCE_SKEW}s clock-skew allowance).\n"
+                    )
+                except (ValueError, OverflowError, OSError):
+                    expiry = "       Marker expiry cannot be represented; ownership is still retained.\n"
             print(
                 f"[BUSY] CodeSpace '{name}' is held by a DIFFERENT harness "
                 f"(fence marker holder '{decision.foreign_holder or '?'}', "
                 f"harness '{decision.foreign_harness}').\n"
+                f"{expiry}"
                 f"       Our repo-ref lease store cannot arbitrate across "
                 f"harnesses, so the in-CodeSpace lockfile fences it. Options:\n"
                 f"       - let the other harness finish, or use a different "
@@ -1697,13 +1392,13 @@ async def _check_cross_harness_fence(
     return True
 
 
-async def _provision_relay_helpers(manager, name: str) -> None:
+async def _provision_relay_helpers(manager, name: str) -> bool:
     """Deploy the CodeSpace-side relay helper scripts over SSH.
 
     Installs ``ado-auth-helper-relay`` and the smart ``ado-auth-helper``
     wrapper into the CodeSpace so ADO auth resolves over the credential
     relay tunnel. Idempotent and best-effort: logs a warning on failure
-    but never raises, since the SSH command itself should still proceed.
+    but never raises. Required-relay callers use the result to gate launch.
     """
     from .codespace_assets import build_provision_command
     from .config import load_merged_config
@@ -1713,8 +1408,9 @@ async def _provision_relay_helpers(manager, name: str) -> None:
         ado_host = getattr(cfg.credentials, "ado_host", None)
         command = build_provision_command(ado_host=ado_host)
         result = await manager.exec_command(name, command, timeout=30.0)
-        if result.exit_code == 0:
+        if result.exit_code == 0 and not getattr(result, "timed_out", False):
             log.debug("Relay helpers provisioned on %s", name)
+            return True
         else:
             log.warning(
                 "Relay helper provisioning on %s exited %s: %s",
@@ -1722,6 +1418,7 @@ async def _provision_relay_helpers(manager, name: str) -> None:
             )
     except Exception as exc:
         log.warning("Relay helper provisioning on %s failed: %s", name, exc)
+    return False
 
 
 async def _provision_dotfiles(manager, name: str, config) -> None:
@@ -2296,16 +1993,19 @@ async def _pipe_stdio(proc) -> None:
     out_thread.join(timeout=2)
 
 
-def _interactive_ssh(
+async def _interactive_ssh(
     codespace_name: str,
     port_forwards: list[str],
     relay_port: int | None = None,
     relay_token: str | None = None,
+    *,
+    command: str | None = None,
 ) -> int:
     """Fall back to ``gh codespace ssh`` for interactive sessions."""
-    import subprocess as sp
+    from ssh_manager.process import terminate_ssh_process_tree
 
     from . import gh_account, lifecycle
+    from .interactive import foreground_group, process_group_options, restore_foreground
 
     # Pin gh to the account that owns this CodeSpace (multi-account #195/#190),
     # then overlay the relay vars. Start from the account env so GH_TOKEN is set
@@ -2322,11 +2022,28 @@ def _interactive_ssh(
             env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = relay_token
 
     args = ["gh", "codespace", "ssh", "-c", codespace_name]
-    for fwd in port_forwards:
-        # Split "-R port:host:port" into SSH option
-        args.extend(["--", fwd])
+    if command is not None or port_forwards:
+        args.append("--")
+        if command is not None:
+            args.append("-tt")
+        args.extend(port_forwards)
+        if command is not None:
+            args.append(command)
 
-    return sp.call(args, env=env)
+    # Inherit terminal handles, not pipes or detached/windowless flags. Awaiting
+    # the child keeps the supervised credential relay's event loop responsive.
+    proc = await asyncio.create_subprocess_exec(
+        *args, env=env, **process_group_options(),
+    )
+    previous = foreground_group(proc.pid)
+    try:
+        return await proc.wait()
+    finally:
+        try:
+            if proc.returncode is None:
+                await terminate_ssh_process_tree(proc)
+        finally:
+            restore_foreground(previous)
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
@@ -3920,6 +3637,32 @@ def _cmd_leases() -> int:
     return 0
 
 
+async def _check_remote_execution_mode(name: str) -> tuple[int, str]:
+    """Inspect native authority through an isolated control-plane channel."""
+    from ssh_manager import ConnectionManager
+    from .lifecycle import account_for_codespace
+
+    key = f"execution-guard-{os.getpid()}-{name}"
+    manager = ConnectionManager()
+    source = CodespaceSource(name, account=account_for_codespace(name))
+    command = (
+        "if command -v agent-bridge >/dev/null 2>&1; then "  # marketplace-isolation: allow remote CodeSpace-owned native-host probe, not a local sibling launch
+        "agent-bridge native-host guard --requested-mode acp; rc=$?; "
+        "if [ \"$rc\" = 0 ] || [ \"$rc\" = 75 ] || [ \"$rc\" = 78 ]; then exit \"$rc\"; fi; fi; "
+        "for p in \"$HOME\"/.agent-bridge/session-hosts/host-native-*.json; do "
+        "if [ -e \"$p\" ]; then echo 'Native authority requires a compatible hosting runtime'; exit 78; fi; done; "
+        "echo EXECUTION_MODE_CLEAR"
+    )
+    try:
+        await manager.ensure_connected(key, source, [])
+        result = await manager.exec_command(key, "bash -lc " + shlex.quote(command), timeout=30)
+        return result.exit_code, result.stdout
+    except Exception:
+        return 78, "Native mode authority could not be inspected"
+    finally:
+        await manager.disconnect(key)
+
+
 @_context_admitted
 def _cmd_claim(args: argparse.Namespace) -> int:
     """Acquire an exclusive worktree-keyed claim on a CodeSpace (#897).
@@ -3945,6 +3688,27 @@ def _cmd_claim(args: argparse.Namespace) -> int:
         session_id=getattr(args, "session_id", None),
     )
     readiness = coordination.preflight(holder_ref) if holder_ref else None
+    from . import execution_claims
+    from .lease import _lease_lock
+
+    owner = (
+        None if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM")
+        and execution_claims.get(args.codespace) is None
+        else resolve_owner_worktree(explicit=getattr(args, "owner", None))
+    )
+    identity = (
+        (args.execution_id, args.generation)
+        if getattr(args, "execution_id", None) else None
+    )
+    try:
+        with _lease_lock():
+            execution_claims.assert_access(args.codespace, identity, owner)
+    except ClaimConflict as exc:
+        print(f"[BUSY] {exc}", file=sys.stderr)
+        return _BUSY_EXIT
+    except CoordinationRejected as exc:
+        print(f"[BLOCKED] {exc}", file=sys.stderr)
+        return _COORDINATION_EXIT
 
     # This escape hatch disables the local exclusive claim, not authorization
     # for an owner-associated operation. The preflight above still applies.
@@ -3959,7 +3723,6 @@ def _cmd_claim(args: argparse.Namespace) -> int:
         print("[OK] Claim disabled (AGENT_CODESPACES_DISABLE_CLAIM); skipped.")
         return 0
 
-    owner = resolve_owner_worktree(explicit=getattr(args, "owner", None))
     if not owner:
         if readiness and readiness.rejected:
             print(
@@ -3975,17 +3738,29 @@ def _cmd_claim(args: argparse.Namespace) -> int:
         )
         return 0
     try:
+        created_reservation = False
+        if getattr(args, "interaction_mode", None):
+            mode_code, mode_detail = asyncio.run(_check_remote_execution_mode(args.codespace))
+            if mode_code != 0 or "EXECUTION_MODE_CLEAR" not in mode_detail.splitlines():
+                print(f"[BLOCKED] {mode_detail}", file=sys.stderr)
+                return _BUSY_EXIT if mode_code == 75 else _COORDINATION_EXIT
+            created_reservation = execution_claims.reserve(
+                args.codespace, owner, args.execution_id, args.generation, args.interaction_mode,
+            )
         lease = claim(
             args.codespace, owner,
             force=getattr(args, "force_claim", False),
             active=active_worktree_ids(),
             holder_ref=holder_ref,
             preflight_result=readiness,
+            **({"execution_identity": identity} if identity else {}),
         )
     except ClaimConflict as exc:
-        print(f"[BUSY] {exc} Use --force-claim to take over.", file=sys.stderr)
+        print(f"[BUSY] {exc} End the owning execution before changing modes.", file=sys.stderr)
         return _BUSY_EXIT
     except CoordinationRejected as exc:
+        if created_reservation:
+            execution_claims.release(args.codespace, owner, identity)
         print(
             f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
             file=sys.stderr,
@@ -4008,7 +3783,16 @@ def _cmd_release_claim(args: argparse.Namespace) -> int:
         print("[WARN] No owning worktree resolved; nothing to release.",
               file=sys.stderr)
         return 0
-    if release_claim(args.codespace, owner):
+    from . import execution_claims
+
+    identity = (args.execution_id, args.generation) if getattr(args, "execution_id", None) else None
+    mode = execution_claims.get(args.codespace)
+    if mode and mode["mode"] == "native":
+        print("[BLOCKED] Native execution retirement must be verified by agent-bridge native stop.", file=sys.stderr)
+        return _COORDINATION_EXIT
+    if release_claim(args.codespace, owner, **({"execution_identity": identity} if identity else {})):
+        if identity:
+            execution_claims.release(args.codespace, owner, identity)
         print(f"[OK] Released claim on {args.codespace} (owner {owner})")
     else:
         print(f"No claim on {args.codespace} owned by {owner}.")

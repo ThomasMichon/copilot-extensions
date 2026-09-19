@@ -7,6 +7,8 @@ Results are cached in-memory and refreshed periodically.
 
 from __future__ import annotations
 
+from .venue_identity import _is_local_target  # noqa: F401 -- compatibility re-export
+
 import asyncio
 import json
 import logging
@@ -22,6 +24,7 @@ from fastapi import APIRouter, HTTPException, Request
 from ..agent_registry import AgentConfig, AgentResolver
 from ..loop_governance import LoopGovernance
 from ..models import SessionInfo, SessionStatus, WorktreeHandoffRequest
+from ..native_store import NativeError
 from ..session_manager import DaemonDrainingError, ProviderTargetRefreshError
 
 log = logging.getLogger("agent-bridge")
@@ -478,44 +481,6 @@ async def _run_local_ex(
     return await _exec_ex(cmd, timeout=timeout)
 
 
-def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
-    """Check if an SSH host alias resolves to the local machine AND environment.
-
-    Returns True only when the SSH alias points to the same machine key
-    AND the same platform (wsl/windows/linux) as the one we're running on.
-    This avoids treating a Windows agent as "local" when running on WSL
-    (or vice versa), even though they share the same physical machine.
-    """
-    if not ssh_host:
-        return True
-
-    import socket
-    hostname = socket.gethostname().lower()
-    host_lower = ssh_host.lower()
-
-    from ..agent_registry import _detect_local_machine
-    machine, platform = _detect_local_machine(resolver.machines)
-    if not machine:
-        # If we can't identify our own machine, only match exact hostname
-        return host_lower == hostname
-
-    # Check if the SSH alias matches any alias for the local machine's
-    # environments — but only the environment matching our platform
-    for env in machine.ssh_environments:
-        if env.alias and env.alias.lower() == host_lower:
-            # Alias matches — is it our platform?
-            return env.name == platform
-
-    # Direct hostname match only if we can't resolve via aliases
-    if host_lower == hostname or host_lower == machine.key.lower():
-        # Ambiguous — could be any environment. Only treat as local
-        # if there's exactly one environment and it matches our platform.
-        matching = [e for e in machine.ssh_environments if e.name == platform]
-        return len(matching) == 1
-
-    return False
-
-
 async def _run_ssh(
     host: str, user: str | None, project: str, args: list[str] | None = None,
     *, timeout: float | None = None,
@@ -889,6 +854,8 @@ async def _start_fresh_worktree_session(
             fresh = await mgr.start_session(
                 target, agent_name=owner_agent, caller_id=worktree_id,
             )
+        except NativeError as exc:
+            raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
         except DaemonDrainingError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Exception as exc:
@@ -1028,6 +995,8 @@ async def resume_worktree(
     try:
         resumed = await mgr.resume_session(session.session_id)
         return _session_info(resumed)
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except KeyError as exc:
         raise HTTPException(
             status_code=404,
@@ -1055,6 +1024,8 @@ async def resume_worktree(
                 agent_name=session.agent_name,
                 caller_id=session.caller_id,
             )
+        except NativeError as exc:
+            raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
         except Exception as start_exc:
             raise HTTPException(
                 status_code=502,
@@ -1096,6 +1067,8 @@ async def handoff_worktree(
         successor = await mgr.handoff_session(
             session.session_id, reason=reason, seed=seed
         )
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except KeyError:
@@ -1168,6 +1141,8 @@ async def handoff_worktree_request(
             seed_text=handoff.seed_text,
             handoff_token=handoff.handoff_token,
         )
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except KeyError:

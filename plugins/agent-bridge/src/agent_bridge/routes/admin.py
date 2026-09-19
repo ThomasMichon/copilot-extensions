@@ -79,6 +79,9 @@ async def relay_adopt(request: Request):
 
     The post-cutover step: a passive instance started with the relay disabled
     adopts it once the retiring daemon has released the port. Idempotent."""
+    config = getattr(request.app.state, "config", None)
+    if not getattr(config, "enable_credential_relay", True):
+        return {"adopted": False, "reason": "relay disabled by configuration"}
     adopt = getattr(request.app.state, "adopt_relay", None)
     if adopt is None:
         return {"adopted": False, "reason": "relay adoption unavailable"}
@@ -99,5 +102,4 @@ async def shutdown(request: Request):
         return {"shutting_down": False, "reason": "no server handle"}
     server.should_exit = True
     return {"shutting_down": True}
-
 

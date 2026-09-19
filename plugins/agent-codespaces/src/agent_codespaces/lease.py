@@ -248,6 +248,10 @@ def release(target: str, ttl: float = DEFAULT_TTL) -> bool:
         ]
         if not to_remove:
             return False
+        from .execution_claims import assert_access
+
+        for c in to_remove:
+            assert_access(c)
         for c in to_remove:
             del leases[c]
             log.info("Released lease on '%s'", c)
@@ -255,19 +259,21 @@ def release(target: str, ttl: float = DEFAULT_TTL) -> bool:
         return True
 
 
-def heartbeat(codespace: str, ttl: float = DEFAULT_TTL) -> bool:
+def heartbeat(codespace: str, ttl: float = DEFAULT_TTL, *, owner: str | None = None) -> bool:
     """Refresh the heartbeat on a held lease. Returns True if updated.
 
     Also renews the cross-machine L2 lease (best-effort) and rotates the stored
     fencing token when one is held -- so a live holder keeps its distributed grip
-    and a crashed holder's L2 lease expires on the store's timer.
+    and a crashed holder's L2 lease expires on the store's timer. An optional
+    owner assertion prevents a prior operation from renewing a replacement.
     """
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
         lease = leases.get(codespace)
-        if not lease:
+        if not lease or (owner is not None and _claim_owner(lease) != owner):
             return False
         token = lease.lease_token
+        identity = (lease.worktree, lease.effort, lease.acquired_at, token)
     new_token = ""
     if token:
         res = coordination.renew(codespace, token)
@@ -276,7 +282,9 @@ def heartbeat(codespace: str, ttl: float = DEFAULT_TTL) -> bool:
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
         lease = leases.get(codespace)
-        if not lease:
+        if not lease or (
+            lease.worktree, lease.effort, lease.acquired_at, lease.lease_token
+        ) != identity:
             return False
         lease.heartbeat_at = time.time()
         if new_token:
@@ -386,6 +394,7 @@ def resolve_owner_worktree(
     try:
         r = subprocess.run(
             args, capture_output=True, text=True, timeout=10,
+            stdin=subprocess.DEVNULL,
             creationflags=_creation_flags(),
         )
     except Exception:
@@ -416,6 +425,7 @@ def active_worktree_ids() -> set[str] | None:
         try:
             r = subprocess.run(
                 [aw, "list", "--json"], capture_output=True, text=True,
+                stdin=subprocess.DEVNULL,
                 timeout=15, creationflags=_creation_flags(),
             )
         except Exception:
@@ -504,6 +514,7 @@ def claim(
     holder_ref: str | None = None,
     coordinate: bool = True,
     preflight_result: coordination.PreflightResult | None = None,
+    execution_identity: tuple[str, str] | None = None,
 ) -> Lease:
     """Acquire an **exclusive** claim on ``codespace`` for worktree ``owner``.
 
@@ -532,24 +543,32 @@ def claim(
         raise RuntimeError("claim requires a CodeSpace name")
     if not owner:
         raise RuntimeError("claim requires an owner worktree")
+    from .execution_claims import assert_access
+
+    prior_token = ""
+    same_owner = False
+    if coordinate and holder_ref:
+        peek = _read_leases().get(codespace)
+        same_owner = bool(peek and _claim_owner(peek) == owner)
+        prior_token = peek.lease_token if (same_owner and peek) else ""
+        if not (same_owner and prior_token):
+            readiness = preflight_result or coordination.preflight(holder_ref)
+            if readiness.rejected:
+                raise CoordinationRejected(
+                    f"{readiness.code}: {readiness.detail}"
+                )
+    with _lease_lock():
+        assert_access(codespace, execution_identity, owner)
 
     # L2 (cross-machine) acquire/renew, network, *outside* the local lock. Peek
     # the local store lock-free only to choose renew (we already hold it) vs
     # acquire (new/takeover) and to carry the prior fencing token.
     lease_token = ""
     if coordinate and holder_ref:
-        peek = _read_leases().get(codespace)
-        same_owner = bool(peek and _claim_owner(peek) == owner)
-        prior_token = peek.lease_token if (same_owner and peek) else ""
         lease_token = prior_token
         if same_owner and prior_token:
             res = coordination.renew(codespace, prior_token)
         else:
-            readiness = preflight_result or coordination.preflight(holder_ref)
-            if readiness.rejected:
-                raise CoordinationRejected(
-                    f"{readiness.code}: {readiness.detail}"
-                )
             res = coordination.acquire(codespace, holder_ref)
         if res.ok:
             lease_token = res.token
@@ -595,6 +614,7 @@ def claim(
         # unavailable -> keep prior_token (renew) or "" (acquire): L1-only.
 
     with _lease_lock():
+        assert_access(codespace, execution_identity, owner)
         leases = _prune(_read_leases(), ttl)
         held = leases.get(codespace)
         if held and _claim_owner(held) != owner:
@@ -647,12 +667,18 @@ def lease_token_for(codespace: str, ttl: float = DEFAULT_TTL) -> str | None:
         return None
 
 
-def release_claim(codespace: str, owner: str, ttl: float = DEFAULT_TTL) -> bool:
+def release_claim(
+    codespace: str, owner: str, ttl: float = DEFAULT_TTL, *,
+    execution_identity: tuple[str, str] | None = None,
+) -> bool:
     """Release ``codespace``'s claim iff it is owned by ``owner``. Idempotent.
 
     Also tombstones the cross-machine L2 lease (best-effort) when one was held.
     """
     with _lease_lock():
+        from .execution_claims import assert_access
+
+        assert_access(codespace, execution_identity, owner)
         leases = _prune(_read_leases(), ttl)
         held = leases.get(codespace)
         if not held or _claim_owner(held) != owner:
