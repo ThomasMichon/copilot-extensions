@@ -100,7 +100,14 @@ def parse_marker(body: str) -> dict[str, str] | None:
 # ``{worktree_id}`` -- so the fix validates the *effective* resolved head at
 # the publish boundary, not just the scheme default.
 
-_UNRESOLVED_TOKEN_RE = re.compile(r"\{(machine|worktree_id)\}")
+# Matches a bare ``{machine}``/``{worktree_id}`` token AND any valid
+# ``str.format`` conversion/format-spec variant of it (e.g. ``{machine!s}``,
+# ``{machine:>10}``, ``{machine!r:^20}``) -- ``pr_head_name`` renders
+# ``head_pattern`` with ``str.format(**tokens)``, which accepts all of these
+# and substitutes the SAME underlying value, so the static audit
+# (``head_pattern_leak_risk``) must recognize them too or it silently
+# under-reports a pattern that resolves identically to the bare form.
+_UNRESOLVED_TOKEN_RE = re.compile(r"\{(machine|worktree_id)(?:![a-zA-Z])?(?::[^{}]*)?\}")
 
 
 class BranchLeakError(ValueError):

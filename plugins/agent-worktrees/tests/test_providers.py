@@ -372,6 +372,21 @@ class TestValidateEffectiveHead:
                 source_attribution=False,
             )
 
+    def test_unresolved_format_spec_variant_is_blocked(self):
+        # pr_head_name renders head_pattern with str.format(**tokens), which
+        # accepts conversion/format-spec variants like `{machine!s}` and
+        # substitutes the SAME underlying value -- the defensive unresolved-
+        # marker check must recognize these too, not just the bare form.
+        with pytest.raises(
+            attribution.BranchLeakError, match="unresolved template marker"
+        ):
+            attribution.validate_effective_head(
+                "session-{machine!s:>10}-{worktree_id}",
+                worktree_id="wt-abcd",
+                machine="",
+                source_attribution=False,
+            )
+
     def test_blocked_under_codename_mode_too(self):
         # codename mode is still "not true" -- a raw identifier reaching the
         # branch name defeats the whole point of the codename marker.
@@ -409,6 +424,15 @@ class TestAuditSourceAttributionRisk:
         )
         assert len(findings) == 1
         assert "{machine}" in findings[0]
+
+    def test_risky_format_spec_variant_flagged(self):
+        # A pattern using `{machine!s}` or `{machine:>10}` renders to the
+        # SAME leaking value via str.format as the bare `{machine}` form --
+        # the audit must not silently pass it as safe.
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="user/{machine!s:>10}/{slug}",
+        )
+        assert len(findings) == 1
 
     def test_risky_pattern_flagged_when_absent(self):
         # An omitted key parses to None (never seen by attribution.py itself

@@ -617,6 +617,17 @@ reverse lookup, no new registry).
   docs. 2 new unit tests (case-insensitive machine match, case-insensitive
   worktree-id match); full `test_pr_ops.py`/`test_providers.py`/
   `test_config.py` suite: 461 passed.
+- **Review round 6** caught that `_UNRESOLVED_TOKEN_RE` (shared by the
+  runtime defensive check and the static `head_pattern_leak_risk` audit)
+  only matched the bare `{machine}`/`{worktree_id}` token form --
+  `pr_head_name` renders `head_pattern` via `str.format(**tokens)`, which
+  also accepts conversion/format-spec variants (`{machine!s}`,
+  `{machine:>10}`) that substitute the identical leaking value, so the
+  static `attribution-audit` command silently under-reported such a
+  pattern as safe. Broadened the regex to recognize those variants. 2 new
+  tests (one on `validate_effective_head`'s defensive check, one on
+  `head_pattern_leak_risk`/`audit_source_attribution_risk`); full
+  `test_pr_ops.py`/`test_providers.py`/`test_config.py` suite: 463 passed.
 
 Remaining: Phase 3 (descoped SSH-based reverse lookup, not yet
 rewritten/implemented). This effort is not `Done` until Phase 3 lands too.
