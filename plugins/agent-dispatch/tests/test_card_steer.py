@@ -228,6 +228,26 @@ def test_set_card_with_form_marks_awaiting_steer(q):
     assert task.lease_expires_at is None
 
 
+def test_resume_without_a_steer_answer_does_not_clear_awaiting_steer(q):
+    """An ordinary wake-driven resume (a review-loop poll tick, or a false/
+    spurious wake with no real external change) is not an operator response,
+    so it must never silently clear ``awaiting_steer``. Only
+    :meth:`TaskQueue.submit_steer` -- an actual answer -- may do that.
+    Regression for gim-home/odsp-web-harness#62 / #458: a card correctly
+    marked the task blocked, but each of 58+ consecutive false wakes called
+    plain ``resume`` and wiped the flag, so the still-unanswered card
+    silently vanished from Blocked-queue tracking after the very first wake."""
+    t = _held(q)
+    form = steering.parse_request_input("decision:choice[revise,post-approved]")
+    q.set_card(t.id, "w1", card=steering.build_card(request_input=form))
+
+    task = q.resume(t.id, "w1")
+
+    assert task.awaiting_steer is True  # no operator answer -> still blocked
+    assert task.card["request_input"] == form  # card itself is unchanged
+    assert task.status == Status.STARTED
+
+
 def test_set_card_without_form_is_not_awaiting(q):
     t = _held(q)
     card = steering.build_card(status="just an FYI")
