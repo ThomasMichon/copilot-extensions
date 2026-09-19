@@ -130,14 +130,16 @@ def push_changes(
             return False
     branch = _worktree_branch(record, worktree_id)
 
-    # Set title early so it survives even if push fails
-    if title and record:
+    # Set title early so it survives even if push fails. Gate on the
+    # *normalized* value -- a whitespace-only `--title` must not overwrite an
+    # existing, genuinely curated persisted title with `None`.
+    new_title = tracking.normalize_title(title)
+    if new_title and record:
         # Foreground RMW (#4547): persist the title under the blocking record
         # lock. `record` was loaded unlocked above (it drives the whole push
         # flow), so reload fresh inside the lock, apply just the title, and save
         # -- then continue on the fresh snapshot. The window holds no I/O; the
         # heavy fetch/push below runs AFTER the lock is released.
-        new_title = title.replace("\n", " ").strip()
         with tracking._RecordLock(yaml_path):
             record = tracking.load_record(yaml_path)
             record.title = new_title
@@ -241,13 +243,30 @@ def push_changes(
 
         # 4. Pre-squash
         if wt_exists and ahead_count > 1:
-            squash_title = title or (record.title if record else None)
-            # Never fall back to the raw worktree_id in a commit message that
-            # can land on a public default branch (direct-push repos) -- it
-            # embeds the authoring machine name and creation timestamp. Use
-            # only the worktree's short suffix.
-            suffix = git_ops.worktree_suffix(worktree_id)
-            squash_msg = squash_title or f"squash: merge worktree {suffix}"
+            # Normalize each candidate separately before the OR -- a
+            # whitespace-only `title` is truthy and must not shadow a
+            # genuinely usable persisted `record.title`.
+            squash_title = tracking.normalize_title(title) or tracking.normalize_title(
+                record.title if record else None
+            )
+            # Never invent a commit message here -- a synthetic placeholder
+            # (e.g. one built from worktree_id/its suffix) is still not a
+            # real description, and this message can land directly on a
+            # public default branch (direct-push repos). Require an actual
+            # title instead of guessing one. `normalize_title` checks for
+            # whitespace-only (-> None) WITHOUT truncating -- unlike
+            # `cap_title`, this message is the actual commit subject, not a
+            # Picker/status-bar display string.
+            if not squash_title:
+                output.err(
+                    "No usable title could be determined for this squash "
+                    "commit: --title was either omitted or contained only "
+                    "whitespace, and no title is persisted on the worktree. "
+                    "Re-run with an explicit, non-blank --title describing "
+                    "the change."
+                )
+                return False
+            squash_msg = squash_title
             print(f"Squashing {ahead_count} commits into one...")
             squashed, squash_reason = git_ops.squash_branch(
                 upstream, squash_msg, cwd=worktree_path

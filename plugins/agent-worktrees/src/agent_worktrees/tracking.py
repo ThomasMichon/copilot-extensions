@@ -3103,6 +3103,20 @@ def cap_title(title: str | None) -> str | None:
     return t
 
 
+def normalize_title(title: str | None) -> str | None:
+    """Normalize a title for a publication surface (PR title, branch-name
+    slug, commit message) WITHOUT truncating it -- unlike :func:`cap_title`,
+    which is specifically for the mux status bar / Picker's short display
+    limit. Collapses newlines, strips, and returns ``None`` for empty or
+    whitespace-only input, so a whitespace-only ``--title`` can't be
+    mistaken for a real one.
+    """
+    if not title:
+        return None
+    t = re.sub(r"[\t\r\n]+", " ", _strip_control_chars(title)).strip()
+    return t or None
+
+
 def set_disposition(
     record: WorktreeRecord,
     *,

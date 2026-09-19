@@ -182,7 +182,7 @@ def test_push_changes_aborts_on_squash_failure(tmp_path: Path, monkeypatch):
     # A push would only happen far past the squash step; guard it just in case.
     monkeypatch.setattr(finalize.git_ops, "merge_ff", lambda *a, **k: False)
 
-    ok = finalize.push_changes(wt_id, config, allow_unsquashed=False)
+    ok = finalize.push_changes(wt_id, config, title="Test change", allow_unsquashed=False)
 
     assert ok is False
     # original unsquashed commits preserved (still 3 ahead of origin/base),
@@ -203,7 +203,7 @@ def test_push_changes_surfaces_reason_in_output(tmp_path: Path, monkeypatch, cap
     )
     monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
 
-    ok = finalize.push_changes(wt_id, config, allow_unsquashed=False)
+    ok = finalize.push_changes(wt_id, config, title="Test change", allow_unsquashed=False)
 
     assert ok is False
     combined = capsys.readouterr()
@@ -238,7 +238,7 @@ def test_allow_unsquashed_proceeds_past_squash(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(finalize.git_ops, "rebase", _fake_rebase)
 
-    ok = finalize.push_changes(wt_id, config, allow_unsquashed=True)
+    ok = finalize.push_changes(wt_id, config, title="Test change", allow_unsquashed=True)
 
     assert ok is False  # we forced rebase to fail
     assert reached_rebase["hit"] is True, (
@@ -273,7 +273,7 @@ def test_push_changes_fails_fast_and_surfaces_hook_decline(
     monkeypatch.setattr(finalize.git_ops, "fetch",
                         lambda *a, **k: fetch_calls.__setitem__("n", fetch_calls["n"] + 1))
 
-    ok = finalize.push_changes(wt_id, config)
+    ok = finalize.push_changes(wt_id, config, title="Test change")
 
     assert ok is False
     # Fail fast: exactly ONE push attempt (the old code retried 3x). A hook
@@ -305,31 +305,145 @@ def test_push_changes_retries_on_non_fast_forward(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
     monkeypatch.setattr(finalize.git_ops, "rebase", lambda *a, **k: True)
 
-    ok = finalize.push_changes(wt_id, config)
+    ok = finalize.push_changes(wt_id, config, title="Test change")
 
     assert ok is True
     assert push_calls["n"] == 2  # raced once, then succeeded after rebase
 
 
 # ---------------------------------------------------------------------------
-# finalize.push_changes -- untitled squash fallback never leaks worktree_id
+# finalize.push_changes -- untitled squash fallback requires an explicit title
 # ---------------------------------------------------------------------------
 
-def test_untitled_direct_push_squash_never_leaks_worktree_id(tmp_path: Path, monkeypatch):
-    """With no --title, no persisted record title, and >1 commit ahead (the
-    real squash path, not mocked), the squash commit message must never be
-    the raw worktree_id -- it can embed the authoring machine name and
-    creation timestamp, and this path lands directly on a (possibly public)
-    default branch."""
+def test_untitled_direct_push_squash_requires_explicit_title(
+    tmp_path: Path, monkeypatch, capsys,
+):
+    """With no --title, no persisted record title, and >1 commit ahead, the
+    squash step must NOT invent a commit message (e.g. one built from
+    worktree_id or its suffix) -- this message can land directly on a
+    (possibly public) default branch. It must abort and ask for --title
+    instead."""
+    from agent_worktrees import finalize
+
+    repo, wt_id, config = _make_pushable_repo(tmp_path, 3, monkeypatch)
+    monkeypatch.setattr(finalize.git_ops, "push", lambda *a, **k: PushResult(ok=True))
+    monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
+    orig_head = git_ops.git("rev-parse", "HEAD", cwd=str(repo), check=False).stdout.strip()
+
+    ok = finalize.push_changes(wt_id, config)
+
+    assert ok is False
+    combined = capsys.readouterr()
+    text = (combined.out + combined.err).lower()
+    assert "title" in text
+    assert wt_id not in text
+    # Nothing progressed toward a push: still 3 commits ahead, HEAD untouched.
+    head = git_ops.git("rev-parse", "HEAD", cwd=str(repo), check=False).stdout.strip()
+    assert head == orig_head
+    cnt = git_ops.git(
+        "rev-list", "--count", "refs/remotes/origin/base..HEAD",
+        cwd=str(repo), check=False,
+    )
+    assert cnt.stdout.strip() == "3"
+
+
+def test_untitled_direct_push_squash_succeeds_with_explicit_title(
+    tmp_path: Path, monkeypatch,
+):
+    """The same no-title scenario succeeds once --title is supplied."""
     from agent_worktrees import finalize
 
     repo, wt_id, config = _make_pushable_repo(tmp_path, 3, monkeypatch)
     monkeypatch.setattr(finalize.git_ops, "push", lambda *a, **k: PushResult(ok=True))
     monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
 
-    ok = finalize.push_changes(wt_id, config)
+    ok = finalize.push_changes(wt_id, config, title="Add feature")
 
     assert ok is True
     subject = git_ops.git("log", "-1", "--format=%s", cwd=str(repo), check=False).stdout.strip()
-    assert wt_id not in subject
-    assert subject == f"squash: merge worktree {git_ops.worktree_suffix(wt_id)}"
+    assert subject == "Add feature"
+
+
+def test_whitespace_only_title_does_not_bypass_the_requirement(
+    tmp_path: Path, monkeypatch, capsys,
+):
+    """A whitespace-only --title is not a real title -- it must not slip past
+    the requirement and reach the squash commit message as a blank string.
+    The error must also correctly describe a whitespace-only input, not just
+    an omitted one."""
+    from agent_worktrees import finalize
+
+    repo, wt_id, config = _make_pushable_repo(tmp_path, 3, monkeypatch)
+    monkeypatch.setattr(finalize.git_ops, "push", lambda *a, **k: PushResult(ok=True))
+    monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
+    orig_head = git_ops.git("rev-parse", "HEAD", cwd=str(repo), check=False).stdout.strip()
+
+    ok = finalize.push_changes(wt_id, config, title="   \n\t  ")
+
+    assert ok is False
+    combined = capsys.readouterr()
+    text = (combined.out + combined.err).lower()
+    assert "no --title was given" not in text
+    head = git_ops.git("rev-parse", "HEAD", cwd=str(repo), check=False).stdout.strip()
+    assert head == orig_head
+
+
+def test_control_characters_normalized_in_squash_message(tmp_path: Path, monkeypatch):
+    """A --title containing control characters (CR, tabs) must not survive
+    raw into the squash commit message."""
+    from agent_worktrees import finalize
+
+    repo, wt_id, config = _make_pushable_repo(tmp_path, 3, monkeypatch)
+    monkeypatch.setattr(finalize.git_ops, "push", lambda *a, **k: PushResult(ok=True))
+    monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
+
+    ok = finalize.push_changes(wt_id, config, title="Fix\r\tthe\nbug")
+
+    assert ok is True
+    subject = git_ops.git("log", "-1", "--format=%s", cwd=str(repo), check=False).stdout.strip()
+    assert subject == "Fix the bug"
+
+
+def test_whitespace_only_title_does_not_erase_persisted_title(tmp_path: Path, monkeypatch):
+    """A whitespace-only --title must not overwrite an existing, genuinely
+    curated persisted title with a blank one -- it is not a real update."""
+    from agent_worktrees import config as cfg
+    from agent_worktrees import finalize, tracking
+
+    repo, wt_id, config = _make_pushable_repo(tmp_path, 3, monkeypatch)
+    yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+    tracking.create_new_record(
+        wt_id, f"worktree/{wt_id}", str(repo), "repo", "test", "linux",
+        cfg.tracking_dir(),
+    )
+    rec = tracking.load_record(yaml_path)
+    rec.title = "A real curated title"
+    tracking.save_record(rec)
+    monkeypatch.setattr(finalize.git_ops, "push", lambda *a, **k: PushResult(ok=True))
+    monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
+
+    ok = finalize.push_changes(wt_id, config, title="   \n\t  ")
+
+    assert ok is True
+    rec_after = tracking.load_record(yaml_path)
+    assert rec_after.title == "A real curated title"
+    subject = git_ops.git("log", "-1", "--format=%s", cwd=str(repo), check=False).stdout.strip()
+    assert subject == "A real curated title"
+
+
+def test_long_title_is_not_truncated_in_squash_message(tmp_path: Path, monkeypatch):
+    """A long --title must land in the squash commit message verbatim -- the
+    mux/Picker display cap (tracking.TITLE_MAX) is a UI concern for the
+    status bar, not a limit on the actual commit message."""
+    from agent_worktrees import finalize, tracking
+
+    repo, wt_id, config = _make_pushable_repo(tmp_path, 3, monkeypatch)
+    monkeypatch.setattr(finalize.git_ops, "push", lambda *a, **k: PushResult(ok=True))
+    monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
+    long_title = "B" * (tracking.TITLE_MAX + 20)
+
+    ok = finalize.push_changes(wt_id, config, title=long_title)
+
+    assert ok is True
+    subject = git_ops.git("log", "-1", "--format=%s", cwd=str(repo), check=False).stdout.strip()
+    assert subject == long_title

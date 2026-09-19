@@ -84,7 +84,7 @@ class TestPushChangesRecordsLedger:
         monkeypatch.setattr(
             tracking, "record_repo_fetch_confirmed", lambda repo: recorded.append(repo))
 
-        ok = finalize.push_changes(wt_id, config, allow_unsquashed=False)
+        ok = finalize.push_changes(wt_id, config, title="Test change", allow_unsquashed=False)
 
         assert ok is False  # aborted at squash, as before -- unrelated to this
         assert recorded == ["owner/repo"]
@@ -111,7 +111,7 @@ class TestPushChangesRecordsLedger:
         monkeypatch.setattr(
             tracking, "record_repo_fetch_confirmed", lambda repo: recorded.append(repo))
 
-        ok = finalize.push_changes(wt_id, config)
+        ok = finalize.push_changes(wt_id, config, title="Test change")
 
         assert ok is True
         # The initial fetch (1) + the retry fetch (1) = 2 ledger writes.
