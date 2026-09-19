@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from single_instance_lease import is_superseded
+import os
+import sys
+
+import pytest
+
+from single_instance_lease import is_superseded, pid_alive
 
 
 def _table(pid, generation, *, bind="127.0.0.1", port=9281, key="active"):
@@ -51,6 +56,66 @@ def test_missing_or_broken_active_stays_alive():
     assert is_superseded({"active": None}, 1, 0, is_listening=_yes) is False
     assert is_superseded({"active": {"generation": 9}}, 1, 0, is_listening=_yes) is False
     assert is_superseded({"active": "x"}, 1, 0, is_listening=_yes) is False
+
+
+# -- pid_alive: fail-open contract -------------------------------------------
+#
+# Only a definitive "no such process" answer may read as dead. An access-denied
+# answer proves the pid exists (you cannot be denied access to a process that
+# is not there), so it must read alive -- as must any error the platform check
+# cannot interpret. Getting this wrong lets a live-but-protected/other-user
+# successor read as "dead", which a reaper built on this predicate could act on.
+
+
+def test_pid_alive_self_and_dead():
+    assert pid_alive(os.getpid()) is True
+    assert pid_alive(999_999_999) is False
+    assert pid_alive(0) is False
+    assert pid_alive(-1) is False
+    assert pid_alive(None) is False
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only liveness path")
+def test_pid_alive_access_denied_reads_alive_on_windows():
+    # pid 4 is Windows' "System" process: always running, but
+    # PROCESS_QUERY_LIMITED_INFORMATION is typically refused for it from an
+    # unprivileged token -- OpenProcess fails, yet the process is definitely
+    # alive. This is the exact scenario the fail-open contract exists for.
+    assert pid_alive(4) is True
+
+
+def test_pid_alive_permission_denied_reads_alive_on_posix(monkeypatch):
+    if sys.platform == "win32":
+        pytest.skip("POSIX-only liveness path")
+
+    def _raise(*_a, **_k):
+        raise PermissionError()
+
+    monkeypatch.setattr(os, "kill", _raise)
+    assert pid_alive(4242) is True
+
+
+def test_pid_alive_no_such_process_reads_dead_on_posix(monkeypatch):
+    if sys.platform == "win32":
+        pytest.skip("POSIX-only liveness path")
+
+    def _raise(*_a, **_k):
+        raise ProcessLookupError()
+
+    monkeypatch.setattr(os, "kill", _raise)
+    assert pid_alive(4242) is False
+
+
+def test_pid_alive_unknown_oserror_reads_alive_on_posix(monkeypatch):
+    if sys.platform == "win32":
+        pytest.skip("POSIX-only liveness path")
+
+    def _raise(*_a, **_k):
+        raise OSError("nope")
+
+    monkeypatch.setattr(os, "kill", _raise)
+    assert pid_alive(4242) is True
+
 
 
 def test_bad_generation_value_stays_alive():

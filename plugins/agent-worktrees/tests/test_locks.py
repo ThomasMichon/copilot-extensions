@@ -15,7 +15,6 @@ from unittest.mock import patch
 
 from agent_worktrees import locks
 
-
 # ── process_start_time / _pid_alive on the live test process ──
 
 def test_start_time_of_self_is_stable_token():
@@ -41,29 +40,34 @@ def test_pid_alive_is_public_alias():
     assert locks.pid_alive(999_999_999) is False
 
 
-# ── fail-open: only a definitive "no such process" reads as dead ──
+# ── delegates to the shared liveness primitive ──
 #
 # _pid_alive doubles as the launcher-shell reaper's parent-liveness veto, where a
-# false "dead" gets a LIVE process killed. An access-denied answer proves the pid
-# exists (you cannot be denied access to a process that isn't there), so it must
-# read alive -- as must any error we can't interpret.
+# false "dead" gets a LIVE process killed. The actual OS-level probe (and its
+# fail-open contract on an unprovable pid -- an access-denied answer proves the
+# pid exists, so it must read alive) now lives in single_instance_lease, the
+# same primitive the self-retire/reaper backstop uses (process-slot-ownership
+# Phase 4, aperture-labs #5091); its own test suite covers that contract. This
+# module's own guard is the ``pid <= 0`` short-circuit and the delegation itself.
 
-def test_pid_alive_permission_denied_reads_alive():
-    with patch.object(locks.platform, "system", return_value="Linux"), \
-            patch.object(locks.os, "kill", side_effect=PermissionError()):
+def test_pid_alive_non_positive_short_circuits_without_delegating():
+    with patch.object(locks.single_instance_lease, "pid_alive") as mocked:
+        assert locks._pid_alive(0) is False
+        assert locks._pid_alive(-1) is False
+        mocked.assert_not_called()
+
+
+def test_pid_alive_delegates_to_single_instance_lease():
+    with patch.object(
+        locks.single_instance_lease, "pid_alive", return_value=True
+    ) as mocked:
         assert locks._pid_alive(4242) is True
-
-
-def test_pid_alive_no_such_process_reads_dead():
-    with patch.object(locks.platform, "system", return_value="Linux"), \
-            patch.object(locks.os, "kill", side_effect=ProcessLookupError()):
+        mocked.assert_called_once_with(4242)
+    with patch.object(
+        locks.single_instance_lease, "pid_alive", return_value=False
+    ) as mocked:
         assert locks._pid_alive(4242) is False
-
-
-def test_pid_alive_unknown_oserror_reads_alive():
-    with patch.object(locks.platform, "system", return_value="Linux"), \
-            patch.object(locks.os, "kill", side_effect=OSError("nope")):
-        assert locks._pid_alive(4242) is True
+        mocked.assert_called_once_with(4242)
 
 
 # ── write_lock / read_lock round-trip ──
