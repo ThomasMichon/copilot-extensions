@@ -1462,6 +1462,152 @@ class TestPRFinalizeAndPush:
         assert "credentials cannot be resolved safely" in mismatch
         assert publishes["count"] == 1
 
+    def test_refresh_source_attribution_codename_mode_omits_raw_fields(
+        self, pr_repo, monkeypatch,
+    ):
+        """``source_attribution: codename`` on the refresh path (a later
+        push updating an existing PR's head) must publish only the
+        codename -- the same public-safe contract as the initial create-pr
+        body (effort pr-attribution-codenames Phase 4 requires both paths
+        covered identically)."""
+        import dataclasses
+
+        from agent_worktrees.providers import attribution
+
+        config, wid, _wt_path, _ = pr_repo
+        repo = config.repos["ext"]
+        config = dataclasses.replace(
+            config,
+            repos={
+                "ext": dataclasses.replace(
+                    repo,
+                    pr=dataclasses.replace(repo.pr, source_attribution="codename"),
+                )
+            },
+        )
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        record.codename = "harbor-lattice"
+        tracking.save_record(record)
+        pr = tracking.PRRecord(state="open", branch="feature/x", provider="gitea",
+                       repo="example/project", number=42)
+        record.prs = [pr]
+        tracking.save_record(record)
+        captured: dict[str, str] = {}
+
+        class FakeProvider:
+            def publish_source_marker(
+                self, repo, number, marker, *, api_base="", token=None
+            ):
+                captured["marker"] = marker
+                return ""
+
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider",
+            lambda name: FakeProvider(),
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda slug, prcfg: None,
+        )
+
+        error = pr_ops.refresh_source_attribution(
+            wid, config, record, pr, "deadbeef" * 5,
+        )
+
+        assert error == ""
+        fields = attribution.parse_marker(captured["marker"])
+        assert fields == {"codename": "harbor-lattice"}
+
+    def test_refresh_source_attribution_codename_mode_skips_without_codename(
+        self, pr_repo, monkeypatch,
+    ):
+        """No assigned codename -> skip the refresh publish entirely, never
+        downgrade to the raw marker."""
+        import dataclasses
+
+        config, wid, _wt_path, _ = pr_repo
+        repo = config.repos["ext"]
+        config = dataclasses.replace(
+            config,
+            repos={
+                "ext": dataclasses.replace(
+                    repo,
+                    pr=dataclasses.replace(repo.pr, source_attribution="codename"),
+                )
+            },
+        )
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert record.codename is None
+        pr = tracking.PRRecord(state="open", branch="feature/x", provider="gitea",
+                       repo="example/project", number=42)
+        record.prs = [pr]
+        tracking.save_record(record)
+        publishes = {"count": 0}
+
+        class FakeProvider:
+            def publish_source_marker(
+                self, repo, number, marker, *, api_base="", token=None
+            ):
+                publishes["count"] += 1
+                return ""
+
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider",
+            lambda name: FakeProvider(),
+        )
+
+        error = pr_ops.refresh_source_attribution(
+            wid, config, record, pr, "deadbeef" * 5,
+        )
+
+        assert error == ""
+        assert publishes["count"] == 0
+
+    def test_refresh_source_attribution_codename_mode_skips_for_malformed_codename(
+        self, pr_repo, monkeypatch,
+    ):
+        """A tampered/corrupted codename must never be interpolated into
+        the refreshed marker as-is -- skip publishing instead."""
+        import dataclasses
+
+        config, wid, _wt_path, _ = pr_repo
+        repo = config.repos["ext"]
+        config = dataclasses.replace(
+            config,
+            repos={
+                "ext": dataclasses.replace(
+                    repo,
+                    pr=dataclasses.replace(repo.pr, source_attribution="codename"),
+                )
+            },
+        )
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        record.codename = "not a handle --> <script>"
+        pr = tracking.PRRecord(state="open", branch="feature/x", provider="gitea",
+                       repo="example/project", number=42)
+        record.prs = [pr]
+        tracking.save_record(record)
+        publishes = {"count": 0}
+
+        class FakeProvider:
+            def publish_source_marker(
+                self, repo, number, marker, *, api_base="", token=None
+            ):
+                publishes["count"] += 1
+                return ""
+
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider",
+            lambda name: FakeProvider(),
+        )
+
+        error = pr_ops.refresh_source_attribution(
+            wid, config, record, pr, "deadbeef" * 5,
+        )
+
+        assert error == ""
+        assert publishes["count"] == 0
+
     def test_push_changes_from_worktree_branch_snapshot(self, pr_repo):
         # New primary flow: create-pr leaves HEAD on worktree/<id> at the
         # squashed commit, so feedback commits land there. push-changes rebases

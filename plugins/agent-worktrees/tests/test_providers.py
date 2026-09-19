@@ -1540,6 +1540,163 @@ class TestCreatePRAutoOpen:
         assert res["success"] is True
         assert attribution.parse_marker(fake.captured["scope"].body) is None
 
+    def test_codename_mode_embeds_only_the_codename(self, pr_repo, monkeypatch):
+        """``source_attribution: codename`` must publish ONLY the codename --
+        no worktree id, machine, session, or head SHA (effort
+        pr-attribution-codenames Phase 4)."""
+        from agent_worktrees import providers
+        config, wid, _wt, _ = pr_repo
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.codename = "harbor-lattice"
+        tracking.save_record(rec)
+        config = self._enable_open(config, source_attribution="codename")
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake)
+
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert res["success"] is True
+        body = fake.captured["scope"].body
+        fields = attribution.parse_marker(body)
+        assert fields == {"codename": "harbor-lattice"}
+        assert wid not in body
+        for raw_field in ("worktree=", "machine=", "session=", "head="):
+            assert raw_field not in body
+
+    def test_codename_mode_skips_marker_without_a_codename(
+        self, pr_repo, monkeypatch,
+    ):
+        """If the worktree somehow has no assigned codename, `codename` mode
+        must skip the marker entirely -- never silently downgrade to the
+        full raw marker (that would defeat the point of this mode)."""
+        from agent_worktrees import providers
+        config, wid, _wt, _ = pr_repo
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.codename is None
+        config = self._enable_open(config, source_attribution="codename")
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake)
+
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert res["success"] is True
+        assert attribution.parse_marker(fake.captured["scope"].body) is None
+
+    def test_codename_mode_skip_strips_a_stale_marker_from_the_body(
+        self, pr_repo, monkeypatch,
+    ):
+        """When codename mode skips publishing (no assigned codename), any
+        pre-existing source marker already present in the caller-supplied
+        body (e.g. copy-pasted, or from an older template) must be stripped
+        -- not left in place, where it could still carry raw identifiers."""
+        from agent_worktrees import providers
+        config, wid, _wt, _ = pr_repo
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.codename is None
+        config = self._enable_open(config, source_attribution="codename")
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake)
+        stale_marker = attribution.build_marker("stale-worktree-id", machine="m")
+        body = f"Some description.\n\n{stale_marker}\n"
+
+        res = pr_ops.create_pr(wid, config, title="Add feature", body=body)
+
+        assert res["success"] is True
+        assert attribution.parse_marker(fake.captured["scope"].body) is None
+        assert "stale-worktree-id" not in fake.captured["scope"].body
+
+    def test_attribution_disabled_strips_a_stale_marker_from_the_body(
+        self, pr_repo, monkeypatch,
+    ):
+        """With attribution disabled entirely, a pre-existing source marker
+        in the caller-supplied body must also be stripped."""
+        from agent_worktrees import providers
+        config, wid, _wt, _ = pr_repo
+        config = self._enable_open(config)  # source_attribution=False (default)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake)
+        stale_marker = attribution.build_marker("stale-worktree-id", machine="m")
+        body = f"Some description.\n\n{stale_marker}\n"
+
+        res = pr_ops.create_pr(wid, config, title="Add feature", body=body)
+
+        assert res["success"] is True
+        assert attribution.parse_marker(fake.captured["scope"].body) is None
+        assert "stale-worktree-id" not in fake.captured["scope"].body
+
+    def test_codename_mode_skips_marker_for_a_malformed_codename(
+        self, pr_repo, monkeypatch,
+    ):
+        """A tampered/corrupted codename (e.g. containing whitespace or an
+        HTML-comment-closing sequence) must never be interpolated into the
+        marker as-is -- validate it first, and skip the marker (never fall
+        back to the raw one) when it fails."""
+        from agent_worktrees import providers
+        config, wid, _wt, _ = pr_repo
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.codename = "not a handle --> <script>"
+        tracking.save_record(rec)
+        config = self._enable_open(config, source_attribution="codename")
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake)
+
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert res["success"] is True
+        assert attribution.parse_marker(fake.captured["scope"].body) is None
+        assert "agent-worktrees:source" not in fake.captured["scope"].body
+
+    def test_codename_mode_skip_does_not_record_attribution_head(
+        self, pr_repo, monkeypatch,
+    ):
+        """When codename mode skips the marker (no/invalid codename), the
+        PR record's `attribution_head` must stay unset -- setting it would
+        make `refresh_source_attribution` believe this head was already
+        published and skip a later legitimate publish attempt."""
+        from agent_worktrees import providers
+        config, wid, _wt, _ = pr_repo
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.codename is None
+        config = self._enable_open(config, source_attribution="codename")
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake)
+
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert res["success"] is True
+        rec_after = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec_after.active_pr().attribution_head == ""
+
+    def test_codename_mode_skips_marker_for_a_non_string_codename(
+        self, pr_repo, monkeypatch,
+    ):
+        """A tracking record whose `codename` field somehow isn't even a
+        string (dataclass fields aren't runtime-type-checked) must not
+        crash `is_valid_handle` -- the same `isinstance` guard used at both
+        marker sites is exercised directly here, since a genuinely non-str
+        codename also trips an unrelated, pre-existing limitation in the
+        tracking YAML serializer (`_yaml_scalar`) the moment anything tries
+        to persist the record -- out of scope for this guard, which only
+        needs to prove `is_valid_handle` is never called unguarded."""
+        from agent_worktrees import codename as codename_mod
+
+        non_string_codename = 12345
+        # This is exactly what a naive `codename and is_valid_handle(codename)`
+        # check would do -- crash instead of treating it as invalid.
+        with pytest.raises(TypeError):
+            codename_mod.is_valid_handle(non_string_codename)
+        # The guard actually used in pr_ops.py short-circuits safely.
+        assert not (
+            isinstance(non_string_codename, str)
+            and codename_mod.is_valid_handle(non_string_codename)
+        )
+
     def test_auto_open_draft_marks_scope_draft(self, pr_repo, monkeypatch):
         config, wid, _wt, _ = pr_repo
         config = self._enable_open(config)

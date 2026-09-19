@@ -268,6 +268,77 @@ class TestPRConfigParsing:
         assert pr.source_attribution is True
         assert pr.required_body_sections == ("Intent", "Changes", "Validation")
 
+    def test_pr_source_attribution_codename_mode_parsed(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      source_attribution: codename\n",
+        )
+        conf = cfg.load_config(cfgfile)
+        assert conf.repos["ext"].pr.source_attribution == "codename"
+
+    def test_pr_source_attribution_codename_mode_case_insensitive(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      source_attribution: Codename\n",
+        )
+        conf = cfg.load_config(cfgfile)
+        assert conf.repos["ext"].pr.source_attribution == "codename"
+
+    def test_pr_source_attribution_unrecognized_string_falls_back_to_false(
+        self, tmp_path: Path,
+    ):
+        """A typo (or any other string) must not silently become the raw
+        marker mode -- it falls back to the safe default (no marker)."""
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      source_attribution: alwyas\n",
+        )
+        conf = cfg.load_config(cfgfile)
+        assert conf.repos["ext"].pr.source_attribution is False
+
+    def test_pr_source_attribution_quoted_true_does_not_enable_raw_mode(
+        self, tmp_path: Path,
+    ):
+        """A quoted string like `"true"` must NOT be promoted to the raw
+        attribution mode -- only the YAML-native boolean `true` (parsed as
+        a real Python bool before this function runs) may enable it. This
+        is the more dangerous direction than a typo falling back to False,
+        so it gets its own explicit coverage."""
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            '      source_attribution: "true"\n',
+        )
+        conf = cfg.load_config(cfgfile)
+        assert conf.repos["ext"].pr.source_attribution is False
+
+    def test_pr_source_attribution_truthy_non_bool_does_not_enable_raw_mode(
+        self, tmp_path: Path,
+    ):
+        """A truthy non-bool YAML value (e.g. the integer `1`) must not
+        enable raw attribution either -- only an actual YAML boolean `true`
+        may."""
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      source_attribution: 1\n",
+        )
+        conf = cfg.load_config(cfgfile)
+        assert conf.repos["ext"].pr.source_attribution is False
+
     def test_pr_autocomplete_block_parsed(self, tmp_path: Path):
         cfgfile = tmp_path / "config.yaml"
         self._write(
