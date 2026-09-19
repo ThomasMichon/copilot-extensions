@@ -507,6 +507,15 @@ restart does not inherently close the child's pipes.
   fallback after reattachment, including legacy records. Teardown captures its
   forward before awaiting relay shutdown and removes channel-map entries only
   when they still name that owner, preserving replacement channels.
+  Failed reattachment has separate frontend-only ownership for its socket,
+  streams, and ACP client. Stop, resume, failed-attempt cleanup, and shutdown
+  close those handles strictly without reaping the retained host. Failed
+  retired forwards remain in a cleanup backlog even after a replacement
+  becomes the primary forward.
+  A missing ACP identity does not bypass retained host authority: recreation
+  requires confirmed host cleanup first. Passive local pruning requires both
+  host and child death and no remaining frontend ownership; explicit cleanup
+  must settle any old client before permitting a replacement spawn.
   Remote cleanup also checks an in-process HostIndex publication revision,
   protecting equal-value replacement records from an older reap. Descriptor
   removal must persist before pending handles or container ownership are
@@ -563,6 +572,8 @@ restart does not inherently close the child's pipes.
   definitions and status writes live in `db_core.py` and `db_sessions.py`,
   while atomic handoff queue transfers live in `db_prompts.py`.
   `session_host_ownership.py` owns the pre-client Session Host handoff.
+  `session_channels.py` closes captured current and retired forward owners
+  without dropping replacement-channel or failed-cleanup handles.
   `acp_teardown.py` implements retryable strict ACP cleanup while retaining the
   client's best-effort default for callers that do not request strict shutdown.
   These extractions preserve factory injection seams and avoid widening the

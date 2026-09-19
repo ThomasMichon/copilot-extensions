@@ -655,7 +655,7 @@ async def test_host_sweeps_preserve_stopped_or_lifecycle_owned_records(
         reason="expired incompatible host",
     ))
     monkeypatch.setattr(version_mux, "plan_host", plan)
-    monkeypatch.setattr(ctx.manager, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(ctx.manager, "_rec_child_alive", lambda _rec: kind != "dead")
     loop_thread = threading.get_ident()
 
     def assert_off_loop(*_args):
@@ -1081,6 +1081,56 @@ async def test_startup_legacy_remote_cleanup_failure_retains_authority(context, 
     assert ctx.manager._host_index.get(ctx.session.session_id) is not None
     assert ctx.manager._forwards[ctx.session.session_id] is forward
     assert ctx.session.session_id in ctx.manager._remote_recovery_inconclusive
+
+
+@pytest.mark.parametrize("boundary", ["local", "codespace"])
+@pytest.mark.parametrize("failure", ["socket", "streams", "client"])
+async def test_failed_partial_reattach_retains_local_cleanup_handles(
+    context, monkeypatch, boundary, failure,
+):
+    ctx = context
+    sid = ctx.session.session_id
+    ctx.record.boundary = boundary
+    ctx.record.extra = {}
+    ctx.manager._host_index.register(ctx.record)
+    ctx.session.status = SessionStatus.STOPPED
+    ctx.session.restart_status = "idle"
+    ctx.db.update_session_status(sid, "stopped", time.time(), restart_status="idle")
+    monkeypatch.setattr(ctx.manager, "_rec_host_alive", lambda _rec: True)
+    monkeypatch.setattr(ctx.manager, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(ctx.manager, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(ctx.manager, "_ensure_forward", AsyncMock())
+    monkeypatch.setattr(ctx.manager, "_reattach_one", SessionManager._reattach_one.__get__(ctx.manager))
+    monkeypatch.setattr(ctx.manager, "_quiesce_session", SessionManager._quiesce_session.__get__(ctx.manager))
+    monkeypatch.setattr("agent_bridge.session_manager._cleanup_worktree", AsyncMock())
+    sock = SimpleNamespace(attach=AsyncMock(), close=AsyncMock())
+    streams = SimpleNamespace(reader=Mock(), writer=Mock(), child_exit_code=None, aclose=AsyncMock())
+    client = SimpleNamespace(
+        start_streams=AsyncMock(side_effect=ConnectionError("handshake failed")),
+        shutdown=AsyncMock(), mark_transport_lost=Mock(), mark_host_child_exited=Mock(),
+    )
+    if failure == "socket":
+        sock.attach.side_effect = ConnectionError("attach failed")
+    failing = {"socket": sock.close, "streams": streams.aclose, "client": client.shutdown}[failure]
+    failing.side_effect = OSError("frontend cleanup failed")
+    monkeypatch.setattr("agent_bridge.session_host.client.SessionHostClient.connect", AsyncMock(return_value=sock))
+    monkeypatch.setattr("agent_bridge.session_host.acp_adapter.open_acp_streams", AsyncMock(return_value=streams))
+    monkeypatch.setattr("agent_bridge.session_manager.AcpClient", lambda **_kwargs: client)
+    with pytest.raises(RuntimeError, match="Partial reattach cleanup failed"):
+        await ctx.manager.reattach_session_hosts()
+    pending = ctx.session._pending_host_attachment
+    assert pending is not None
+    assert {"socket": pending.sock, "streams": pending.streams, "client": pending.client}[failure] is {
+        "socket": sock, "streams": streams, "client": client,
+    }[failure]
+    assert ctx.session.status == SessionStatus.FAILED
+    assert ctx.manager._host_index.get(sid) is not None
+    failing.side_effect = None
+    await ctx.manager.stop_session(sid)
+    assert ctx.session._pending_host_attachment is None
+    assert ctx.session.client is None
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert ctx.manager._host_index.get(sid) is not None
 
 
 @pytest.mark.parametrize("alive", [False, True])

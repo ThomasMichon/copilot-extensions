@@ -27,6 +27,8 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
             manager._background_recovery_allowed(session)
             or session.client is not None
             or session._owned_process is not None
+            or session._pending_host_attachment is not None
+            or session.session_id in manager._forward_cleanup_backlog
             or session._turn_start_lock.locked()
             or session._lifecycle_lock.locked()
             or manager._remote_reaps_by_session.get(session.session_id)
@@ -50,6 +52,8 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
         session for session in manager.list_sessions()
         if session._owned_process is not None
         or session.client is not None
+        or session._pending_host_attachment is not None
+        or session.session_id in manager._forward_cleanup_backlog
         or session.session_id in manager._forwards
         or session.session_id in manager._relays
         or manager._remote_reap_pending(session.session_id)
@@ -382,6 +386,7 @@ async def end_session_locked(self: SessionManager, session: Session, *, force: b
 
     await self._quiesce_session(session)
     await cleanup_owned_process(session)
+    await self._drop_forward(session_id, strict=True, preserve_ownership=True)
 
     # Session-Host mode: an explicit end is a *sanctioned terminate*, so it
     # must REAP the child -- unlike stop, whose host-mode shutdown only
@@ -403,13 +408,11 @@ async def end_session_locked(self: SessionManager, session: Session, *, force: b
             ):
                 from .session_host_ownership import finish_host_metadata_cleanup
 
-                await self._drop_forward(session_id, strict=True, preserve_ownership=True)
                 if not finish_host_metadata_cleanup(self, session_id, rec):
                     raise RemoteHostRecoveryPendingError(
                         f"Host authority changed during end for {session_id}; ownership retained"
                     )
             elif rec.boundary != "local":
-                await self._drop_forward(session_id, strict=True, preserve_ownership=True)
                 await reap_remote_checked(self, session, rec)
                 self._set_container_launch_pending(session_id, False)
             else:

@@ -78,7 +78,9 @@ async def cleanup_resume_attempt(
     manager: SessionManager, session: Session, client: AcpClient | None,
 ) -> None:
     """Contain failed attempt resources without discarding cleanup retry handles."""
-    from .session_host_ownership import abort_pending_host_launch, has_host_ownership
+    from .session_host_ownership import (
+        abort_pending_host_launch, close_pending_host_attachment, has_host_ownership,
+    )
 
     if client is None:
         client = session.client
@@ -92,6 +94,7 @@ async def cleanup_resume_attempt(
             try:
                 await cleanup_owned_process(session)
                 await abort_pending_host_launch(manager, session.session_id)
+                await close_pending_host_attachment(manager, session)
             finally:
                 await manager._drop_forward(
                     session.session_id, strict=True, preserve_ownership=True,

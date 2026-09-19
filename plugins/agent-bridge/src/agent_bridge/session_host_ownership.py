@@ -1,4 +1,4 @@
-"""Ownership transfer for a Session Host before its ACP client is installed."""
+"""Session Host ownership transfer and retryable frontend cleanup."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from .session_ownership import finish_owned
 if TYPE_CHECKING:
     from .acp_client import AcpClient
     from .session_host.spawner import SpawnedHost
-    from .session_manager import SessionManager
+    from .session_manager import Session, SessionManager
 
 log = logging.getLogger("agent-bridge")
 
@@ -30,6 +30,63 @@ class PendingHostLaunch:
     streams: Any = None
     client: AcpClient | None = None
     durable: bool = False
+
+
+@dataclass
+class PendingHostAttachment:
+    sock: Any = None
+    streams: Any = None
+    client: AcpClient | None = None
+
+
+async def _close_resource(
+    session_id: str, label: str, operation: Awaitable[Any], failures: list[Exception],
+) -> bool:
+    try:
+        await operation
+        return True
+    except Exception as exc:
+        failures.append(exc)
+        log.warning("Host %s failed for %s; cleanup retained", label, session_id, exc_info=True)
+        return False
+
+
+async def _close_frontend(
+    session_id: str, channels: PendingHostLaunch | PendingHostAttachment,
+    failures: list[Exception], *, terminate: bool = False,
+) -> None:
+    if terminate and channels.sock is not None:
+        await _close_resource(session_id, "terminate", channels.sock.terminate(), failures)
+    if channels.streams is not None:
+        if await _close_resource(session_id, "stream close", channels.streams.aclose(), failures):
+            channels.streams = None
+    if channels.sock is not None:
+        if await _close_resource(session_id, "socket close", channels.sock.close(), failures):
+            channels.sock = None
+    if channels.client is not None:
+        if await _close_resource(session_id, "client shutdown", channels.client.shutdown(strict=True), failures):
+            channels.client = None
+
+
+async def close_pending_host_attachment(manager: SessionManager, session: Session) -> None:
+    """Close partial reattach resources without reaping the existing host."""
+    pending = session._pending_host_attachment
+    if pending is None:
+        return
+    client = pending.client
+    failures: list[Exception] = []
+    await finish_owned(_close_frontend(session.session_id, pending, failures), propagate_cancel=False)
+    if client is not None and pending.client is None and session.client is client:
+        session.client = None
+    if failures:
+        manager._remote_recovery_inconclusive.add(session.session_id)
+        manager._mark_session_failed(
+            session, trigger="reattach_cleanup_failed", restart_status=session.restart_status,
+        )
+        raise RuntimeError(
+            f"Partial reattach cleanup failed for {session.session_id}; ownership retained"
+        ) from failures[0]
+    session._pending_host_attachment = None
 
 
 def require_no_pending_host_launch(manager: SessionManager, session_id: str) -> None:
@@ -97,7 +154,23 @@ async def prune_dead_local_host(manager: SessionManager, record: HostRecord) -> 
     revision = index.revision(record.session_id)
     if manager._rec_host_alive(record) or manager._rec_child_alive(record):
         return False
-    await manager._drop_forward(record.session_id, strict=True, preserve_ownership=True)
+    session = manager._sessions.get(record.session_id)
+    manager._remote_recovery_inconclusive.add(record.session_id)
+    try:
+        try:
+            if session is not None:
+                await close_pending_host_attachment(manager, session)
+                if session.client is not None:
+                    await session.client.shutdown(strict=True)
+                    session.client = None
+        finally:
+            await manager._drop_forward(record.session_id, strict=True, preserve_ownership=True)
+    except Exception:
+        if session is not None:
+            manager._mark_session_failed(
+                session, trigger="local_host_cleanup_failed", restart_status=session.restart_status,
+            )
+        raise
     if (
         index.revision(record.session_id) != revision
         or manager._rec_host_alive(record)
@@ -217,29 +290,13 @@ async def rollback_host_launch(
 ) -> bool:
     """Abort a known launch and retain its record if termination is inconclusive."""
     pending = manager._pending_host_launches.get(session_id)
-    local_cleanup_ok = True
+    failures: list[Exception] = []
 
     async def close(label: str, operation: Awaitable[Any]) -> bool:
-        nonlocal local_cleanup_ok
-        try:
-            await operation
-            return True
-        except Exception:
-            local_cleanup_ok = False
-            log.warning("Partial host %s failed for %s; cleanup retained", label, session_id, exc_info=True)
-            return False
+        return await _close_resource(session_id, label, operation, failures)
 
-    if sock is not None:
-        await close("terminate", sock.terminate())
-    if streams is not None:
-        if await close("stream close", streams.aclose()) and pending is not None and pending.streams is streams:
-            pending.streams = None
-    if sock is not None:
-        if await close("socket close", sock.close()) and pending is not None and pending.sock is sock:
-            pending.sock = None
-    if pending is not None and pending.client is not None:
-        if await close("client shutdown", pending.client.shutdown(strict=True)):
-            pending.client = None
+    channels = pending if pending is not None else PendingHostAttachment(sock=sock, streams=streams)
+    await _close_frontend(session_id, channels, failures, terminate=True)
     remote = getattr(spawned, "boundary", "local") != "local"
     confirmed = False
     if remote:
@@ -255,7 +312,7 @@ async def rollback_host_launch(
         confirmed = not manager._rec_host_alive(spawned) and not manager._rec_child_alive(spawned)
     await close("spawned channel close", spawned.aclose())
     await close("forward cleanup", manager._drop_forward(session_id, strict=True, preserve_ownership=True))
-    confirmed = confirmed and local_cleanup_ok
+    confirmed = confirmed and not failures
     if confirmed:
         pending = manager._pending_host_launches.get(session_id)
         if pending is not None:

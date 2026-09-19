@@ -23,7 +23,7 @@ import time
 import uuid
 from dataclasses import is_dataclass, replace
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_procutil import no_window_flags
 
@@ -41,6 +41,9 @@ from .models import (
     SessionStatus,
 )
 from .transport import AgentProcess, SpawnTarget, _agent_worktrees_python, spawn
+
+if TYPE_CHECKING:
+    from .session_host_ownership import PendingHostAttachment
 
 log = logging.getLogger("agent-bridge")
 
@@ -691,6 +694,7 @@ class Session:
         self.target = target
         self.client: AcpClient | None = None
         self._owned_process: AgentProcess | None = None
+        self._pending_host_attachment: PendingHostAttachment | None = None
         self._launch_codespace_claim: tuple[str, str] | None = None
         self.status = SessionStatus.CREATED
         # Status read from durable storage during daemon startup before
@@ -907,6 +911,7 @@ class SessionManager:
         # CodeSpace/mesh Session Host's -L forward can be refreshed on reattach
         # and torn down on teardown. Empty for local hosts.
         self._forwards: dict[str, Any] = {}
+        self._forward_cleanup_backlog: dict[str, list[Any]] = {}
         # Live dedicated credential-relay supervisors (session_id -> relays).
         # These are intentionally separate from the frontend-refreshed -L above:
         # their lifetime follows the remote Session Host/child.
@@ -2077,7 +2082,7 @@ class SessionManager:
         return out
 
     def _prune_dead_hosts(self) -> None:
-        """Drop records whose host is dead (local only -- remote is verified by
+        """Drop records whose host and child are dead (remote is verified by
         the reattach probe, never by a local pid check).
 
         Runs on the lifecycle event loop without yielding; skips records owned
@@ -2091,14 +2096,27 @@ class SessionManager:
             if (getattr(rec, "extra", None) or {}).get("launch_cleanup_pending"):
                 continue
             session = self._sessions.get(rec.session_id)
+            if (
+                rec.session_id in self._forwards
+                or rec.session_id in self._relays
+                or rec.session_id in self._forward_cleanup_backlog
+            ):
+                continue
             if session is not None and (
-                session._lifecycle_lock.locked()
+                session._turn_start_lock.locked()
+                or session._lifecycle_lock.locked()
+                or session.client is not None
+                or session._pending_host_attachment is not None
+                or session._owned_process is not None
                 or not self._background_recovery_allowed(session)
             ):
                 continue
-            if not self._rec_host_alive(rec):
-                with contextlib.suppress(Exception):
+            if not self._rec_host_alive(rec) and not self._rec_child_alive(rec):
+                try:
                     self._host_index.remove(rec.session_id)
+                except Exception:
+                    self._remote_recovery_inconclusive.add(rec.session_id)
+                    log.warning("Dead host metadata cleanup failed for %s; retained for retry", rec.session_id, exc_info=True)
 
     @staticmethod
     def _background_recovery_allowed(session: Session) -> bool:
@@ -3176,7 +3194,7 @@ class SessionManager:
         """Fence new work and release owned channels under admission/lifecycle."""
         self._shutting_down = True
         failed: list[str] = []
-        for session_id in sorted(set(self._forwards) | set(self._relays)):
+        for session_id in sorted(set(self._forwards) | set(self._relays) | set(self._forward_cleanup_backlog)):
             session = self._sessions.get(session_id)
             try:
                 async with contextlib.AsyncExitStack() as locks:
@@ -3202,18 +3220,13 @@ class SessionManager:
         preserve_ownership: bool = False,
     ) -> None:
         """Cancel and forget a session's remote-boundary forwards (if any)."""
-        fwd = self._forwards.get(session_id)
+        from .session_channels import capture_forwards, close_forwards
+
+        owned = capture_forwards(self, session_id)
         try:
             await self._stop_relays(session_id, strict=strict)
         finally:
-            if fwd is not None:
-                if strict:
-                    await fwd.cancel()
-                else:
-                    with contextlib.suppress(Exception):
-                        await fwd.cancel()
-            if self._forwards.get(session_id) is fwd:
-                self._forwards.pop(session_id, None)
+            await close_forwards(self, session_id, owned, strict=strict)
         if not preserve_ownership:
             self._release_container_lock(session_id)
 
@@ -3246,6 +3259,10 @@ class SessionManager:
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
         from .session_host.endpoints import CredentialRelayReadinessError
+        from .session_host_ownership import PendingHostAttachment, close_pending_host_attachment
+
+        await close_pending_host_attachment(self, session)
+        restart_before_attach = session.restart_status
 
         if send_resume and session.restart_status == SessionStatus.STARTING.value:
             current = self._host_index.get(rec.session_id) if self._host_index is not None else None
@@ -3268,23 +3285,22 @@ class SessionManager:
         # relay tasks are freed; host-mode shutdown DETACHES (child survives).
         old = session.client
         if old is not None:
-            with contextlib.suppress(Exception):
-                await old.shutdown()
+            try:
+                await old.shutdown(strict=True)
+            except Exception:
+                self._remote_recovery_inconclusive.add(rec.session_id)
+                raise
+            session.client = None
 
         sock = None
         streams = None
         client = None
+        pending = PendingHostAttachment()
+        session._pending_host_attachment = pending
 
         async def _close_partial_reattach() -> None:
-            if client is not None:
-                with contextlib.suppress(Exception):
-                    await client.shutdown()
-            if streams is not None:
-                with contextlib.suppress(Exception):
-                    await streams.aclose()
-            if sock is not None:
-                with contextlib.suppress(Exception):
-                    await sock.close()
+            session.restart_status = restart_before_attach
+            await close_pending_host_attachment(self, session)
 
         async def _settle_dead_child(exit_code: int) -> None:
             await self._join_exited_child_prompt(session)
@@ -3314,8 +3330,10 @@ class SessionManager:
                 require_relay_ready=require_relay_ready,
             )
             sock = await SessionHostClient.connect(port=rec.port)
+            pending.sock = sock
             await sock.attach(0, nonce=getattr(rec, "nonce", "").encode())
             streams = await open_acp_streams(sock)
+            pending.streams = streams
 
             async def _closer(_streams: Any = streams, _sock: Any = sock) -> None:
                 await _streams.aclose()
@@ -3326,6 +3344,7 @@ class SessionManager:
                 model_override=session.model_override,
                 effort_override=session.effort_override,
             )
+            pending.client = client
             streams.on_transport_lost = client.mark_transport_lost
             streams.on_child_exit = client.mark_host_child_exited
             # Retain the host control channel so the manager can push STATUS
@@ -3351,6 +3370,7 @@ class SessionManager:
             self._db.update_session_status(
                 rec.session_id, new_status.value, time.time(), pid=session.pid,
             )
+            session._pending_host_attachment = None
             self._remote_recovery_inconclusive.discard(rec.session_id)
             log.info(
                 "Reattached session %s to live Session Host (pid=%s, port=%s)",
@@ -3437,9 +3457,19 @@ class SessionManager:
             raise RemoteHostRecoveryPendingError(
                 f"Remote Session Host cleanup is pending for {session.session_id}"
             )
-        if not session.acp_session_id:
-            return False
+        from .session_host_ownership import close_pending_host_attachment, prune_dead_local_host
+
+        await close_pending_host_attachment(self, session)
         rec = self._host_index.get(session.session_id)
+        if not session.acp_session_id:
+            if rec is None:
+                return False
+            if getattr(rec, "boundary", "local") == "local" and await prune_dead_local_host(self, rec):
+                return False
+            raise RemoteHostRecoveryPendingError(
+                f"Session Host authority remains for {session.session_id} without an ACP identity; "
+                "confirm host cleanup before recreating"
+            )
         authority_v2 = bool(
             rec is not None
             and getattr(rec, "boundary", "local") != "local"
@@ -5840,6 +5870,9 @@ class SessionManager:
         # window (#51). Best-effort and pre-cancel: computed from the *current*
         # status before the in-flight prompt below is cancelled.
         await self._detach_host(session)
+        from .session_host_ownership import close_pending_host_attachment
+
+        await close_pending_host_attachment(self, session)
         task = session._prompt_task
         if task and not task.done():
             if session.client and cancel_turn:

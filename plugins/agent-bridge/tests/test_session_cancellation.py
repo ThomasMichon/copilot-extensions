@@ -1790,7 +1790,8 @@ async def test_newly_scheduled_reap_fences_legacy_resume_replacement(owned_conte
         await asyncio.gather(*tasks)
 
 
-async def test_remote_reap_does_not_close_replacement_channels(owned_context, monkeypatch):
+@pytest.mark.parametrize("forward_fails", [False, True])
+async def test_remote_reap_does_not_close_replacement_channels(owned_context, monkeypatch, forward_fails):
     from dataclasses import replace
     from agent_bridge.session_teardown import reap_remote_record
 
@@ -1811,7 +1812,13 @@ async def test_remote_reap_does_not_close_replacement_channels(owned_context, mo
     ctx.manager._forwards[record.session_id] = old_forward
     ctx.manager._relays[record.session_id] = [old_relay]
     monkeypatch.setattr(ctx.manager, "_remote_reap", AsyncMock(return_value=True))
-    assert await reap_remote_record(ctx.manager, record)
+    if forward_fails:
+        old_forward.cancel.side_effect = OSError("old forward close failed")
+        with pytest.raises(OSError, match="old forward close failed"):
+            await reap_remote_record(ctx.manager, record)
+        assert ctx.manager._forward_cleanup_backlog[record.session_id] == [old_forward]
+    else:
+        assert await reap_remote_record(ctx.manager, record)
     old_relay.stop.assert_awaited_once()
     old_forward.cancel.assert_awaited_once()
     new_relay.stop.assert_not_awaited()
@@ -1819,3 +1826,148 @@ async def test_remote_reap_does_not_close_replacement_channels(owned_context, mo
     assert ctx.manager._host_index.get(record.session_id) is replacement
     assert ctx.manager._forwards[record.session_id] is new_forward
     assert ctx.manager._relays[record.session_id] is new_relays
+    if forward_fails:
+        old_forward.cancel.side_effect = None
+        await ctx.manager.close_frontend_transports()
+        assert ctx.manager._forward_cleanup_backlog == {}
+        assert ctx.manager._forwards == {}
+        assert ctx.manager._relays == {}
+        assert ctx.manager._host_index.get(record.session_id) is replacement
+
+
+@pytest.mark.parametrize("alive", [False, True])
+async def test_recreate_without_acp_id_still_respects_local_host_authority(owned_context, monkeypatch, alive):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    record.boundary = "local"
+    ctx.manager._host_index.register(record)
+    ctx.session.target = SpawnTarget(type="local", cwd=".")
+    ctx.session.status = SessionStatus.STOPPED
+    ctx.session.acp_session_id = None
+    ctx.phase = "success"
+    ctx.db.execute_write("UPDATE sessions SET acp_session_id=NULL WHERE id=?", (record.session_id,))
+    monkeypatch.setattr(ctx.manager, "_rec_host_alive", lambda _rec: alive)
+    monkeypatch.setattr(ctx.manager, "_rec_child_alive", lambda _rec: alive)
+    monkeypatch.setattr(
+        ctx.manager, "_try_reattach_live_host",
+        SessionManager._try_reattach_live_host.__get__(ctx.manager),
+    )
+    if alive:
+        with pytest.raises(RemoteHostRecoveryPendingError, match="without an ACP identity"):
+            await ctx.manager.resume_session(record.session_id, allow_recreate=True, drain=False)
+        assert ctx.manager._host_index.get(record.session_id) is not None
+        assert ctx.processes == []
+        ctx.manager._resume_via_new_remote_host.assert_not_awaited()
+    else:
+        await ctx.manager.resume_session(record.session_id, allow_recreate=True, drain=False)
+        assert ctx.manager._host_index.get(record.session_id) is None
+        assert ctx.session.status == SessionStatus.IDLE
+        assert ctx.session.acp_session_id == "new-acp"
+        assert len(ctx.processes) == 1
+        await ctx.manager.stop_session(record.session_id)
+        assert ctx.processes[0].returncode is not None
+
+
+async def test_shutdown_retries_partial_attachment_without_client(owned_context, monkeypatch):
+    from agent_bridge.session_host_ownership import PendingHostAttachment
+    from agent_bridge.session_teardown import detach_for_restart
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    entered, release = asyncio.Event(), asyncio.Event()
+    attempts = 0
+
+    async def close():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("partial socket close failed")
+        entered.set()
+        await release.wait()
+
+    pending = PendingHostAttachment(sock=SimpleNamespace(close=close))
+    ctx.session._pending_host_attachment = pending
+    monkeypatch.setattr("agent_bridge.session_teardown._SHUTDOWN_CLEANUP_RETRY_SECONDS", 0.01)
+    shutdown = asyncio.create_task(detach_for_restart(ctx.manager))
+    await asyncio.wait_for(entered.wait(), 2)
+    assert not shutdown.done()
+    assert ctx.session._pending_host_attachment is pending
+    assert ctx.session.status == SessionStatus.FAILED
+    release.set()
+    await asyncio.wait_for(shutdown, 2)
+    assert ctx.session._pending_host_attachment is None
+    assert ctx.manager._host_index.get(record.session_id) is not None
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert ctx.session.restart_status == "idle"
+
+
+async def test_passive_local_prune_retains_a_surviving_child(owned_context, monkeypatch):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    record.boundary = "local"
+    ctx.manager._host_index.register(record)
+    monkeypatch.setattr(ctx.manager, "_rec_host_alive", lambda _rec: False)
+    monkeypatch.setattr(ctx.manager, "_rec_child_alive", lambda _rec: True)
+    ctx.manager._prune_dead_hosts()
+    assert ctx.manager._host_index.get(record.session_id) == record
+    with pytest.raises(RemoteHostRecoveryPendingError, match="cleanup is pending"):
+        await SessionManager._try_reattach_live_host(ctx.manager, ctx.session)
+    assert ctx.processes == []
+
+
+@pytest.mark.parametrize("owner", ["client", "attachment", "forward", "relay", "backlog"])
+async def test_passive_local_prune_retains_frontend_ownership(owned_context, monkeypatch, owner):
+    from agent_bridge.session_host_ownership import PendingHostAttachment
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    record.boundary = "local"
+    ctx.manager._host_index.register(record)
+    monkeypatch.setattr(ctx.manager, "_rec_host_alive", lambda _rec: False)
+    monkeypatch.setattr(ctx.manager, "_rec_child_alive", lambda _rec: False)
+    if owner == "client":
+        ctx.session.client = SimpleNamespace(shutdown=AsyncMock())
+    elif owner == "attachment":
+        ctx.session._pending_host_attachment = PendingHostAttachment(sock=SimpleNamespace(close=AsyncMock()))
+    elif owner == "forward":
+        ctx.manager._forwards[record.session_id] = SimpleNamespace(cancel=AsyncMock())
+    elif owner == "relay":
+        ctx.manager._relays[record.session_id] = [SimpleNamespace(stop=AsyncMock())]
+    else:
+        ctx.manager._forward_cleanup_backlog[record.session_id] = [SimpleNamespace(cancel=AsyncMock())]
+    ctx.manager._prune_dead_hosts()
+    assert ctx.manager._host_index.get(record.session_id) == record
+
+
+async def test_dead_local_resume_retains_failed_client_before_spawn(owned_context, monkeypatch):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    record.boundary = "local"
+    ctx.manager._host_index.register(record)
+    ctx.session.status = SessionStatus.STOPPED
+    client = SimpleNamespace(
+        shutdown=AsyncMock(side_effect=OSError("old client close failed")),
+        has_active_background_tasks=False, active_background_tasks=[],
+        session_host_client=None,
+    )
+    forward = SimpleNamespace(cancel=AsyncMock())
+    ctx.session.client = client
+    ctx.manager._forwards[record.session_id] = forward
+    monkeypatch.setattr(ctx.manager, "_rec_host_alive", lambda _rec: False)
+    monkeypatch.setattr(ctx.manager, "_rec_child_alive", lambda _rec: False)
+    with pytest.raises(OSError, match="old client close failed"):
+        await SessionManager._try_reattach_live_host(ctx.manager, ctx.session)
+    assert ctx.session.client is client
+    assert ctx.session.status == SessionStatus.FAILED
+    assert ctx.manager._host_index.get(record.session_id) == record
+    forward.cancel.assert_awaited_once()
+    assert ctx.processes == []
+    client.shutdown.side_effect = None
+    await ctx.manager.stop_session(record.session_id)
+    assert await SessionManager._try_reattach_live_host(ctx.manager, ctx.session) is False
+    assert ctx.session.client is None
+    assert ctx.manager._host_index.get(record.session_id) is None
