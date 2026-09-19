@@ -6,8 +6,10 @@ from agent_dispatch.reap import (
     CoordProc,
     ReapResult,
     is_coordinator_cmdline,
+    is_live_coordinator_pid,
     parse_ps_output,
     parse_win_output,
+    reap_abandoned_passive_backstop,
     reap_superseded_coordinators,
     select_superseded_pids,
 )
@@ -151,3 +153,101 @@ def test_reap_fail_soft_on_enumeration_error():
     assert res.reaped == []
     assert not res.ok
     assert any("enumeration failed" in e for e in res.errors)
+
+
+# ---- is_live_coordinator_pid: liveness + identity fused ---------------------
+
+
+def test_is_live_coordinator_pid_true_for_enumerated_pid():
+    assert is_live_coordinator_pid(200, list_procs=_fixed_list([100, 200]))
+
+
+def test_is_live_coordinator_pid_false_when_absent():
+    assert not is_live_coordinator_pid(999, list_procs=_fixed_list([100, 200]))
+
+
+def test_is_live_coordinator_pid_fail_soft_on_enumeration_error():
+    def _boom():
+        raise RuntimeError("enumeration exploded")
+
+    assert not is_live_coordinator_pid(100, list_procs=_boom)
+
+
+# ---- reap_abandoned_passive_backstop (#5195) --------------------------------
+
+
+def test_reap_abandoned_passive_backstop_reaps_stranded_pid(tmp_path, monkeypatch):
+    from zdd import breadcrumb
+
+    breadcrumb.write_breadcrumb(
+        tmp_path, state="started", old=None, new_port=9290, new_pid=4321,
+    )
+    # Age the breadcrumb well past the grace window without waiting.
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    record = breadcrumb.read_breadcrumb(tmp_path)
+    record["updated_at"] = (
+        datetime.now(timezone.utc) - timedelta(seconds=9999)
+    ).isoformat()
+    (tmp_path / "cutover.json").write_text(json.dumps(record), encoding="utf-8")
+
+    from zdd import routing
+
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111,
+                           version="1.0")
+
+    terminated = []
+    # is_live_coordinator_pid / terminate_pid are the real (module-default)
+    # implementations here; monkeypatch them to keep this test hermetic.
+    import agent_dispatch.reap as reap_mod
+
+    monkeypatch.setattr(reap_mod, "is_live_coordinator_pid", lambda pid: True)
+    monkeypatch.setattr(
+        reap_mod, "terminate_pid", lambda pid: terminated.append(pid) or True,
+    )
+    result = reap_abandoned_passive_backstop(
+        tmp_path, record=record, grace_seconds=1.0,
+    )
+    assert result == {"reaped": True, "reason": "terminated", "pid": 4321}
+    assert terminated == [4321]
+
+
+def test_reap_abandoned_passive_backstop_never_touches_promoted_pid(
+    tmp_path, monkeypatch,
+):
+    from zdd import breadcrumb, routing
+
+    # The recorded new_pid IS the confirmed-live active -- it was promoted.
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9290, pid=4321,
+                           version="1.0")
+    breadcrumb.write_breadcrumb(
+        tmp_path, state="flipped", old=None, new_port=9290, new_pid=4321,
+    )
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    record = breadcrumb.read_breadcrumb(tmp_path)
+    record["updated_at"] = (
+        datetime.now(timezone.utc) - timedelta(seconds=9999)
+    ).isoformat()
+    (tmp_path / "cutover.json").write_text(json.dumps(record), encoding="utf-8")
+
+    terminated = []
+    import agent_dispatch.reap as reap_mod
+
+    monkeypatch.setattr(reap_mod, "is_live_coordinator_pid", lambda pid: True)
+    monkeypatch.setattr(
+        reap_mod, "terminate_pid", lambda pid: terminated.append(pid) or True,
+    )
+    result = reap_abandoned_passive_backstop(
+        tmp_path, record=record, grace_seconds=1.0,
+    )
+    assert result["reaped"] is False
+    assert terminated == []
+
+
+def test_reap_abandoned_passive_backstop_is_fail_soft(tmp_path):
+    # No breadcrumb at all -> no-op, never raises.
+    result = reap_abandoned_passive_backstop(tmp_path, record=None)
+    assert result["reaped"] is False

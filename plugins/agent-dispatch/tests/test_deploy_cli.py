@@ -49,3 +49,30 @@ def test_deploy_is_publicly_documented_not_suppressed():
     help_texts = {a.dest: a.help for a in sub._choices_actions}  # noqa: SLF001
     assert "zero-downtime" in (help_texts.get("deploy") or "").lower()
     assert help_texts.get("_cutover") == argparse.SUPPRESS
+
+
+def test_reap_abandoned_passive_delegates_to_reap_module(tmp_path, monkeypatch):
+    """#5195: the CLI-level wrapper is a thin, correctly-anchored delegate to
+    ``agent_dispatch.reap.reap_abandoned_passive_backstop``."""
+    from agent_dispatch import __main__ as main_mod
+
+    monkeypatch.setattr("agent_dispatch.config.routing_dir", lambda: tmp_path)
+
+    seen: dict = {}
+
+    def fake_backstop(config_dir, *, record, grace_seconds=None):
+        seen["config_dir"] = config_dir
+        seen["record"] = record
+        seen["grace_seconds"] = grace_seconds
+        return {"reaped": True, "reason": "terminated", "pid": 4321}
+
+    monkeypatch.setattr(
+        "agent_dispatch.reap.reap_abandoned_passive_backstop", fake_backstop,
+    )
+    result = main_mod._reap_abandoned_passive(
+        {"state": "started", "new_pid": 4321}, grace_seconds=42.0,
+    )
+    assert result == {"reaped": True, "reason": "terminated", "pid": 4321}
+    assert seen["config_dir"] == tmp_path
+    assert seen["record"] == {"state": "started", "new_pid": 4321}
+    assert seen["grace_seconds"] == 42.0

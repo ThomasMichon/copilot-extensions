@@ -75,7 +75,7 @@ pure stdlib and imports nothing from any consuming plugin; **keep it that way.**
 |--------|------|
 | `zdd.routing` | The file-based routing table `active.json` (no front proxy). The daemon `publish_active`s its endpoint on startup and flips `active`/`previous` atomically on cutover; short-lived clients re-read it every invocation and self-heal (dead `active` → `previous` → the caller's static config). API: `Endpoint`, `read_active_endpoint`, `publish_active`, `clear_if_owner`, `routing_table_path`. |
 | `zdd.cutover` | `CutoverOrchestrator` drives one cutover: spawn passive → health-gate → flip → drain → retire, reversible up to an explicit commit point, with **rollback** (pre-commit failure) and **commit-forward** (retire the old even if unreachable, rather than strand clients). |
-| `zdd.breadcrumb` | Recovers a **stranded survivor** left drained by an *aborted* cutover: `recover_stale_cutover` undrains it so it is not stuck closed to new work (agent-bridge `deploy --recover`). |
+| `zdd.breadcrumb` | Recovers a **stranded survivor** left drained by an *aborted* cutover: `recover_stale_cutover` undrains it so it is not stuck closed to new work (agent-bridge `deploy --recover`). `reap_abandoned_passive` is the matching backstop for the *new* side: a `spawn_passive` daemon whose cutover's orchestrator died before promoting it never becomes anyone's "old" (aperture-labs #5195) -- see § Never-Promoted Abandoned Passive below. |
 
 **Why a routing *table*, not a front proxy:** a proxy on a stable port is itself
 a long-lived process you must update — re-introducing the downtime, and demanding
@@ -236,6 +236,42 @@ routing table's `active` entry is *its own pid* before it captures its generatio
 and begins watching. A normal boot daemon satisfies that as soon as it publishes;
 a cutover-promoted daemon satisfies it the moment the orchestrator flips to it; a
 passive daemon that is never promoted never satisfies it and arms nothing.
+
+### Never-Promoted Abandoned Passive (aperture-labs #5195)
+
+Self-retire's active-ness gate is exactly the reason it **cannot** rescue a
+`spawn_passive` daemon whose cutover never reached the flip: if the
+orchestrator process itself dies (crash, `kill -9`, an operator Ctrl-C)
+before flipping the routing table -- or after the flip but before retiring the
+old daemon, in a way `recover_stale_cutover` cannot reconcile because the old
+survivor is also gone -- the freshly spawned passive never observes its own
+pid as `active`. It lingers indefinitely holding a port/pid; two independent
+field sightings (2026-08-19, 2026-08-28) found a `serve --passive`
+`agent-dispatch` coordinator stranded for hours after an aborted cutover.
+
+The fix mirrors the existing old-survivor recovery, but for the *new* side:
+
+- `zdd.cutover.CutoverOrchestrator` records the passive's own pid (`new_pid`)
+  in the breadcrumb the moment `spawn_passive` returns -- before the health
+  gate, flip, or drain even begin -- so a crash anywhere past that point
+  leaves a durable, attributable record naming it.
+- `zdd.breadcrumb.reap_abandoned_passive` is the matching pure decision: it
+  terminates `new_pid` only when the breadcrumb is non-terminal
+  (`is_stale`), aged past a grace window (so a cutover still genuinely in
+  flight -- especially mid-drain -- is never disturbed), and `new_pid` does
+  **not** match the caller's confirmed-live routing-table `active` pid (i.e.
+  it was truly never promoted). Every ambiguous case is a no-op.
+- Each consumer composes it with its own identity-verified liveness check and
+  termination: agent-dispatch's `reap.reap_abandoned_passive_backstop` reuses
+  its coordinator-process enumeration (`is_live_coordinator_pid`); agent-bridge's
+  `_reap_abandoned_passive` reuses its own `_pid_is_agent_bridge` +
+  `_ensure_retired_daemon_exited`. Both run it once at the top of the next
+  `deploy`/cutover attempt (alongside `recover_stale_cutover`, using the
+  breadcrumb read *before* that call rewrites it to a terminal state).
+  agent-dispatch additionally arms a **periodic** sweep in the coordinator
+  itself (`AGENT_DISPATCH_ABANDONED_PASSIVE_REAP`, default-ON, gated the same
+  way as self-retire -- only the confirmed-active coordinator runs it) so a
+  stranded passive is reaped even if no operator ever runs another deploy.
 
 ## Per-plugin adoption
 

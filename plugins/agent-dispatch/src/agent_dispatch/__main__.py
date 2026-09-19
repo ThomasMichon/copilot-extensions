@@ -595,6 +595,27 @@ def _reap_superseded_coordinators(result: Any) -> None:
             pass
 
 
+def _reap_abandoned_passive(
+    record: dict | None, *, grace_seconds: float | None = None,
+) -> dict:
+    """Retire a passive daemon stranded by an abandoned cutover (#5195).
+
+    ``record`` must be the breadcrumb read *before* ``recover_stale_cutover``
+    ran (that call may rewrite the file to a terminal state, after which
+    :func:`zdd.breadcrumb.reap_abandoned_passive`'s own staleness gate would
+    see nothing to do -- see that function's docstring). Thin wrapper over
+    :func:`agent_dispatch.reap.reap_abandoned_passive_backstop` (shared with
+    the coordinator's own periodic sweep) anchored on this process's
+    ``routing_dir()``.
+    """
+    from .config import routing_dir
+    from .reap import reap_abandoned_passive_backstop
+
+    return reap_abandoned_passive_backstop(
+        routing_dir(), record=record, grace_seconds=grace_seconds,
+    )
+
+
 def _add_cutover_flags(p: argparse.ArgumentParser) -> None:
     """Flags shared by the ``deploy`` and ``_cutover`` subparsers.
 
@@ -737,11 +758,24 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     recovery = breadcrumb.recover_stale_cutover(
         routing_dir(), make_client, health_check=liveness_check
     )
+    # #5195: recover_stale_cutover only heals the stranded *old* survivor. The
+    # matching backstop for a passive spawn_passive stood up that never got
+    # promoted (the orchestrator died before/without ever flipping to it) is
+    # reap_abandoned_passive -- but it must see the breadcrumb from BEFORE
+    # recover_stale_cutover rewrote it to a terminal state, so read it first.
+    _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(routing_dir())
+    passive_reap = _reap_abandoned_passive(_pre_recovery_breadcrumb)
     if getattr(args, "recover", False):
+        recovery["passive_reap"] = passive_reap
         _emit(recovery)
         return 0
     if recovery.get("recovered"):
         print(f"[>] Recovered a prior aborted cutover: {recovery.get('reason')}", file=sys.stderr)
+    if passive_reap.get("reaped"):
+        print(
+            f"[>] Reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})",
+            file=sys.stderr,
+        )
 
     orch = CutoverOrchestrator(
         routing_dir(),

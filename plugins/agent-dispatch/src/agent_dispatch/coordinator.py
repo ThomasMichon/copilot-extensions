@@ -127,6 +127,54 @@ def _self_retire_settings() -> tuple[bool, float, int]:
     return enabled, poll, k
 
 
+# Abandoned-passive reap (#5195): the periodic backstop for a passive
+# `spawn_passive` stood up for a cutover whose orchestrator process died
+# before that passive was ever promoted. Self-retire (above) only ever arms
+# for a coordinator that has observed its OWN pid as `active`, so a
+# never-promoted passive never triggers it and would otherwise linger
+# indefinitely. Only the genuinely active coordinator runs this sweep (see
+# the loop's arming phase, shared with self-retire), and it only acts on a
+# breadcrumb aged past `grace_seconds` so a cutover that is still genuinely
+# in flight is never disturbed. Default-ON (opt-out) like self-retire: it is
+# a pure reconciliation of a durable fact (the breadcrumb) against the live
+# routing table, and never touches anything but a stray of its own service.
+_ABANDONED_PASSIVE_REAP_DEFAULT_POLL_S = 120.0
+_ABANDONED_PASSIVE_REAP_DEFAULT_GRACE_S = 600.0
+
+
+def _abandoned_passive_reap_settings() -> tuple[bool, float, float]:
+    """``(enabled, poll_seconds, grace_seconds)`` for the abandoned-passive reap.
+
+    ``enabled`` is True (default-ON / opt-out) unless
+    ``AGENT_DISPATCH_ABANDONED_PASSIVE_REAP`` is explicitly falsy. Poll cadence
+    (``AGENT_DISPATCH_ABANDONED_PASSIVE_REAP_POLL_S``) and the breadcrumb-age
+    grace window (``AGENT_DISPATCH_ABANDONED_PASSIVE_REAP_GRACE_S``) are
+    overridable.
+    """
+    import os
+
+    enabled = os.environ.get(
+        "AGENT_DISPATCH_ABANDONED_PASSIVE_REAP", ""
+    ).strip().lower() not in ("0", "false", "no", "off")
+    try:
+        poll = float(
+            os.environ.get("AGENT_DISPATCH_ABANDONED_PASSIVE_REAP_POLL_S", "")
+            or _ABANDONED_PASSIVE_REAP_DEFAULT_POLL_S
+        )
+        poll = max(1.0, poll)
+    except ValueError:
+        poll = _ABANDONED_PASSIVE_REAP_DEFAULT_POLL_S
+    try:
+        grace = float(
+            os.environ.get("AGENT_DISPATCH_ABANDONED_PASSIVE_REAP_GRACE_S", "")
+            or _ABANDONED_PASSIVE_REAP_DEFAULT_GRACE_S
+        )
+        grace = max(0.0, grace)
+    except ValueError:
+        grace = _ABANDONED_PASSIVE_REAP_DEFAULT_GRACE_S
+    return enabled, poll, grace
+
+
 # Live self-update: a coordinator that notices its own running version has
 # been superseded by a newer, fully-installed one (the ``current-version``
 # marker -- see ``self_update.py``) spawns a self-triggered ``deploy`` and
@@ -1389,6 +1437,85 @@ def create_app(
                 _sr_confirmations, _sr_poll,
             )
 
+        # Abandoned-passive reap (#5195): the periodic backstop for a
+        # `spawn_passive` daemon that was never promoted because its cutover's
+        # orchestrator process died before the flip. Only the genuinely active
+        # coordinator runs this sweep (armed the same way as self-retire: wait
+        # until our own pid is observed as `active`), and it only acts on a
+        # breadcrumb aged past the grace window, so a cutover still genuinely
+        # in flight is never disturbed.
+        abandoned_passive_reap_task = None
+        _apr_enabled, _apr_poll, _apr_grace = _abandoned_passive_reap_settings()
+        if _apr_enabled:
+            async def _abandoned_passive_reap_loop() -> None:
+                import os as _os
+
+                from zdd import routing
+                from zdd.routing import Endpoint
+
+                from .config import routing_dir
+
+                my_pid = _os.getpid()
+                for _ in range(600):  # ~5 min ceiling to see our own publish
+                    await asyncio.sleep(0.5)
+                    if await _governance_backoff(
+                        governance,
+                        "iteration-boundary:abandoned-passive-reap-arm",
+                        loop_name="abandoned-passive-reap",
+                    ):
+                        continue
+                    data = await asyncio.to_thread(routing.read_table, routing_dir())
+                    raw = data.get("active") if isinstance(data, dict) else None
+                    ep = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+                    if ep is not None and ep.pid == my_pid:
+                        break
+                else:
+                    return
+                while True:
+                    await asyncio.sleep(_apr_poll)
+                    if await _governance_backoff(
+                        governance,
+                        "iteration-boundary:abandoned-passive-reap",
+                        loop_name="abandoned-passive-reap",
+                    ):
+                        continue
+                    if await _governance_backoff(
+                        governance,
+                        "pre-mutation:abandoned-passive-reap",
+                        loop_name="abandoned-passive-reap",
+                    ):
+                        continue
+                    try:
+                        from zdd.breadcrumb import read_breadcrumb
+
+                        from .reap import reap_abandoned_passive_backstop
+
+                        record = await asyncio.to_thread(read_breadcrumb, routing_dir())
+                        outcome = await asyncio.to_thread(
+                            reap_abandoned_passive_backstop,
+                            routing_dir(),
+                            record=record,
+                            grace_seconds=_apr_grace,
+                        )
+                        if outcome.get("reaped"):
+                            log.warning(
+                                "abandoned-passive reap: retired pid=%s "
+                                "(never promoted): %s",
+                                outcome.get("pid"), outcome.get("reason"),
+                            )
+                    except Exception:
+                        log.debug(
+                            "abandoned-passive reap cycle failed", exc_info=True
+                        )
+
+            abandoned_passive_reap_task = asyncio.create_task(
+                _abandoned_passive_reap_loop()
+            )
+            log.info(
+                "abandoned-passive-reap armed (poll=%.0fs, grace=%.0fs)",
+                _apr_poll, _apr_grace,
+            )
+
         # Live self-update: periodically checks whether a newer, fully
         # installed version is now published (``current-version`` marker) and,
         # once confirmed stale at a safe cutover point, spawns a self-triggered
@@ -1517,6 +1644,12 @@ def create_app(
                     self_retire_task.cancel()
                     try:
                         await self_retire_task
+                    except asyncio.CancelledError:
+                        pass
+                if abandoned_passive_reap_task is not None:
+                    abandoned_passive_reap_task.cancel()
+                    try:
+                        await abandoned_passive_reap_task
                     except asyncio.CancelledError:
                         pass
                 if self_update_task is not None:

@@ -41,6 +41,7 @@ import os
 import shlex
 import signal
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .procutil import no_window_kwargs
@@ -167,6 +168,26 @@ def iter_coordinator_processes() -> list[CoordProc]:
         return []
 
 
+def is_live_coordinator_pid(
+    pid: int, *, list_procs: Callable[[], list[CoordProc]] = iter_coordinator_processes,
+) -> bool:
+    """True when *pid* is currently a live ``agent_dispatch serve`` process.
+
+    Combines the liveness check and the identity check (the pid must still be
+    *this* service's own coordinator, not some unrelated process pid reuse
+    handed to us) into one enumeration pass -- the same guard
+    :mod:`single_instance_lease`'s reaper documents as necessary before
+    terminating a recorded pid. Used as the injected ``pid_alive`` for
+    :func:`zdd.breadcrumb.reap_abandoned_passive` (aperture-labs #5195).
+    """
+    try:
+        procs = list_procs()
+    except Exception:  # best-effort: enumeration must never raise into a caller
+        log.debug("coordinator enumeration failed", exc_info=True)
+        return False
+    return any(p.pid == pid for p in procs)
+
+
 def select_superseded_pids(
     procs: list[CoordProc], keep_pids: set[int],
 ) -> list[int]:
@@ -222,3 +243,46 @@ def reap_superseded_coordinators(
         log.info("reaped %d superseded coordinator(s): %s",
                  len(result.reaped), result.reaped)
     return result
+
+
+def reap_abandoned_passive_backstop(
+    config_dir,
+    *,
+    record: dict | None,
+    grace_seconds: float | None = None,
+) -> dict:
+    """Retire a passive daemon stranded by an abandoned cutover (#5195).
+
+    Thin composition of :func:`zdd.breadcrumb.reap_abandoned_passive` with
+    this module's own coordinator-identified liveness check
+    (:func:`is_live_coordinator_pid`) and termination
+    (:func:`terminate_pid`), plus the current routing-table ``active`` pid so
+    a genuinely-promoted passive is never touched.
+
+    ``record`` must be the breadcrumb read *before*
+    :func:`zdd.breadcrumb.recover_stale_cutover` ran, if that also runs in the
+    same pass -- see that function's docstring on why. ``grace_seconds``
+    overrides the library default when the caller wants an env-tunable
+    window (the coordinator's periodic sweep does). Best-effort: any failure
+    is caught and reported in the returned dict, never raised.
+    """
+    try:
+        from zdd.breadcrumb import reap_abandoned_passive
+        from zdd.routing import read_table
+
+        table = read_table(config_dir) or {}
+        active = table.get("active") if isinstance(table, dict) else None
+        active_pid = active.get("pid") if isinstance(active, dict) else None
+        kwargs: dict = {}
+        if grace_seconds is not None:
+            kwargs["grace_seconds"] = grace_seconds
+        return reap_abandoned_passive(
+            config_dir,
+            pid_alive=is_live_coordinator_pid,
+            terminate=terminate_pid,
+            active_pid=int(active_pid) if active_pid else None,
+            record=record,
+            **kwargs,
+        )
+    except Exception as exc:  # best-effort: reap must never raise into a caller
+        return {"reaped": False, "reason": f"reap skipped: {exc}", "pid": None}
