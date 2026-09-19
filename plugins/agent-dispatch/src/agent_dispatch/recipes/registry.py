@@ -153,6 +153,23 @@ _EXTERNAL_AUTHOR_CLAUSE = (
     "access this identity does not have."
 )
 
+_STAGNATION_CLAUSE = (
+    "If you find yourself resuming repeatedly with no real forward movement -- "
+    "the same unresolved external state each time, nothing new to reply to, no "
+    "operator answer -- do not keep silently re-suspending indefinitely. After a "
+    "small number of such non-productive cycles (roughly 3-5), stop and set a "
+    "durable steering card summarizing exactly what's blocking you and what "
+    "decision you need, with `--request-input` so the task is correctly marked "
+    "`awaiting_steer` (a card without a `--request-input` form never blocks the "
+    "task, so it silently drops out of Blocked-queue tracking -- this is "
+    "REQUIRED, not optional). If you already carded this exact blocker and a "
+    "later wake finds nothing has changed, re-affirm it (re-run "
+    "`agent-dispatch card set` with the same content) rather than assuming the "
+    "operator still sees your original ask -- restate the situation and how "
+    "long it has now persisted so a delayed operator glance gets the current "
+    "picture, not a stale one."
+)
+
 
 REGISTRY: dict[str, Recipe] = {}
 
@@ -200,6 +217,7 @@ _register(
             "Never merge on the author's behalf in that model. " + _SUSPEND_CLAUSE
             + " When the change updates, resume and re-review only what moved.\n\n"
             + _EXTERNAL_AUTHOR_CLAUSE + "\n\n"
+            + _STAGNATION_CLAUSE + "\n\n"
             + _RESOLUTION_CLAUSE
         ),
         suspend_on=("change-updated", "review-posted"),
@@ -240,7 +258,7 @@ _register(
             "build state.\n\n" + _SUSPEND_CLAUSE + " Resume on the next "
             "review/build/update and iterate until it lands.\n\n"
             "Stay within the intent of the existing change -- you are unblocking it, not "
-            "redesigning it.\n\n" + _RESOLUTION_CLAUSE
+            "redesigning it.\n\n" + _STAGNATION_CLAUSE + "\n\n" + _RESOLUTION_CLAUSE
         ),
         suspend_on=("change-updated", "build-updated", "review-posted"),
         resolution="pull-request-merged-or-abandoned",
@@ -272,6 +290,7 @@ _register(
             "requests, handling conflicts and review feedback as they arise. Stay "
             "within the bounds of the goal -- do not expand scope.\n\n"
             + _SUSPEND_CLAUSE + " Resume when a change you opened moves.\n\n"
+            + _STAGNATION_CLAUSE + "\n\n"
             + _RESOLUTION_CLAUSE
         ),
         suspend_on=("change-updated", "review-posted"),
