@@ -692,6 +692,21 @@ cache. Fixed by warming both modules from the existing background
 pivot-scan thread (`_setup_live_pivots`) instead, via a new
 `tasks.prewarm_optional_modules()`.
 
+**Known residual (accepted, not pursued further):** for the real live-session
+startup path, `_setup_live_pivots` calls `prewarm_optional_modules()` directly
+in its own already-background thread, so the import reliably completes before
+pivots are installed/activated — no race. The shared `setup()` path (non-live
+mount, and the manual `'r'` reload — both of which run synchronously on the
+render/key-handling thread either way) wraps the same call in its own worker
+thread instead, since it's reachable from the UI thread; this closes the
+`data_ssh` cost there too, but `setup()` still imports the small, stdlib-only
+`tasks` module itself before spawning that thread, and a keypress landing
+exactly during that reload's async warm-up could still block briefly on
+Python's per-module import lock. Both edges are narrow, cheap, and far below
+the original bug's severity (a guaranteed ~100ms hit on literally the first
+Tasks switch every session) — not chased further given three rounds of
+otherwise-resolved PR review feedback on this exact trade-off.
+
 ### Phase 5 — Artifacts (claims) surface
 - [ ] Land `artifacts_summary` computation in `board_cli.py` (or wherever
       agent-dispatch tracks claims) and the drill-in claims viewer content
