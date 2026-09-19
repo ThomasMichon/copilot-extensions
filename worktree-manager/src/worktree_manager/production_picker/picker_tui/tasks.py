@@ -140,9 +140,12 @@ def _is_stream_unsupported(stderr: str) -> bool:
 
 
 def prewarm_optional_modules() -> None:
-    """Background-thread warm-up for the modules a registered pivot's first
-    switch/render needs (called from ``engine.py``'s ``_setup_live_pivots``,
-    itself already a background thread).
+    """Fire-and-forget warm-up for the modules a registered pivot's first
+    switch/render needs -- called from ``engine.py``'s ``_setup_live_pivots``
+    (already a background thread) *and* its ``setup()`` (the shared
+    non-live-mount / manual-reload ('r') path, which runs synchronously on
+    the render/key-handling thread either way). Spawns its own daemon
+    thread so it is always safe to call inline, regardless of caller.
 
     ``engine.PickerScreen._machine_key_map`` lazily imports ``data_ssh`` (and,
     transitively, its own ``roster``/``provider_sources``/``source_identity``)
@@ -154,10 +157,13 @@ def prewarm_optional_modules() -> None:
     reported against this pivot (see the Tasks-pane-UX-overhaul effort's own
     bug entry). A pure import has no side effects, so warming it here makes
     that cost disappear from the keypress entirely instead of relocating it."""
-    try:
-        from . import data_ssh  # noqa: F401
-    except Exception:
-        pass
+    def _do() -> None:
+        try:
+            from . import data_ssh  # noqa: F401
+        except Exception:
+            pass
+
+    threading.Thread(target=_do, daemon=True).start()
 
 
 def _stream_entry(obj: Mapping) -> dict:

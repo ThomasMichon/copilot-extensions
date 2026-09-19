@@ -6,6 +6,7 @@ import importlib
 import json
 import sys
 import threading
+import time
 
 import pytest
 
@@ -131,6 +132,15 @@ def test_prewarm_optional_modules_imports_data_ssh(monkeypatch):
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
 
+    class InlineThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(tasks_mod.threading, "Thread", InlineThread)
+
     imported = []
     import builtins
 
@@ -158,6 +168,15 @@ def test_prewarm_optional_modules_survives_import_error(monkeypatch):
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
 
+    class InlineThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(tasks_mod.threading, "Thread", InlineThread)
+
     import builtins
 
     real_import = builtins.__import__
@@ -175,6 +194,40 @@ def test_prewarm_optional_modules_survives_import_error(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", boom)
 
     tasks_mod.prewarm_optional_modules()  # must not raise
+
+
+def test_prewarm_optional_modules_never_blocks_the_calling_thread():
+    """Confirms the fix for a real Copilot-review finding on this same
+    change: calling ``prewarm_optional_modules()`` inline from ``setup()``
+    (the shared non-live-mount / manual-reload ('r') path, which runs
+    synchronously on the render/key-handling thread either way) must not
+    reintroduce the exact freeze it exists to remove elsewhere. The import
+    itself always happens on its own daemon thread, so the call must return
+    near-instantly regardless of how long that import actually takes."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    release = threading.Event()
+    import builtins
+
+    real_import = builtins.__import__
+
+    def slow_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if level and "data_ssh" in fromlist:
+            release.wait(timeout=5)
+        return real_import(name, globals, locals, fromlist, level)
+
+    original = builtins.__import__
+    builtins.__import__ = slow_import
+    try:
+        t0 = time.perf_counter()
+        tasks_mod.prewarm_optional_modules()
+        elapsed = time.perf_counter() - t0
+    finally:
+        builtins.__import__ = original
+        release.set()  # let the background thread's import unblock and finish
+
+    assert elapsed < 1.0
 
 
 def test_skeleton_does_not_touch_src_local():
