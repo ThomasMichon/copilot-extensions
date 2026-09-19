@@ -43,6 +43,7 @@ import subprocess
 import time
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
+from concurrent.futures import wait as _wait_futures
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +95,14 @@ from .supervisor_registration import (  # noqa: F401 -- re-exported below
 
 log = logging.getLogger("agent-dispatch.supervisor-daemon")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
+#: Bounded grace window for shutdown() to wait out an in-flight managed-
+#: runtime task (materialize()/cleanup()) before a self-update hands off to
+#: its successor. Long enough for the common case (a nearly-finished
+#: install); never so long that a genuinely slow build (up to the lock's own
+#: multi-minute budget) blocks the handoff and starves reconciles/
+#: heartbeats -- unlike acquiring an actual lock, this is deliberately
+#: best-effort, not a correctness guarantee.
+_SHUTDOWN_GRACE_SECONDS = 15.0
 
 
 class SupervisorDaemon:
@@ -199,6 +208,13 @@ class SupervisorDaemon:
         self._managed_runtime_failures: dict[str, tuple[str, float, int]] = {}
         self._managed_cleanup_future: Future | None = None
         self._managed_cleanup_after = 0.0
+        #: Every submitted materialize() future stays here until it actually
+        #: completes -- unlike ``_managed_runtime_futures``, cancelling a
+        #: withdrawn/changed registration's future (a no-op when it is
+        #: already running, not merely queued) never removes it early, so
+        #: the self-update handoff barrier (``_await_runtime_pool_idle``)
+        #: keeps seeing it as in flight until it truly finishes.
+        self._managed_runtime_inflight: set[Future] = set()
         self._units: dict[str, ManagedUnit] = {}
         #: Live self-update wiring (see the module-level notes above
         #: ``supervisor_lease_scope``). ``self_update_argv`` is this process's
@@ -456,10 +472,25 @@ class SupervisorDaemon:
             self._runtime_materializer = ManagedRuntimeMaterializer()
         return self._runtime_materializer
 
+    #: A slow first-time managed-runtime build (e.g. an ML-heavy companion
+    #: installing torch/transformers) can run for tens of minutes. The actual
+    #: physical build is serialized per plugin identity by the interprocess
+    #: lock in ``managed_runtime.py`` (``_RootLock``; retention cleanup takes
+    #: the same lock scope in ``managed_retention.py``), so a single-worker
+    #: pool here buys no additional safety -- it only means that one slow
+    #: build occupies the pool's only worker and starves everything else
+    #: routed through it: the periodic retention cleanup
+    #: (``_cleanup_managed_runtimes``, scheduled every 5 minutes) and any
+    #: *other* companion's own materialize() call, for the entire duration of
+    #: the slow build. A small pool keeps that queueing bounded without
+    #: weakening the interprocess lock's own
+    #: single-builder guarantee.
+    _RUNTIME_POOL_WORKERS = 4
+
     def _runtime_pool(self) -> Executor:
         if self._runtime_executor is None:
             self._runtime_executor = ThreadPoolExecutor(
-                max_workers=1,
+                max_workers=self._RUNTIME_POOL_WORKERS,
                 thread_name_prefix="agent-dispatch-runtime",
             )
         return self._runtime_executor
@@ -481,7 +512,13 @@ class SupervisorDaemon:
                 self._companion().cleanup_managed
             )
 
+    def _prune_managed_runtime_inflight(self) -> None:
+        self._managed_runtime_inflight = {
+            future for future in self._managed_runtime_inflight if not future.done()
+        }
+
     def _harvest_managed_runtime_futures(self) -> None:
+        self._prune_managed_runtime_inflight()
         for rid, (authority, future) in list(self._managed_runtime_futures.items()):
             if not future.done():
                 continue
@@ -528,6 +565,10 @@ class SupervisorDaemon:
             self._managed_runtime_failures.pop(rid, None)
         for rid, (authority, future) in list(self._managed_runtime_futures.items()):
             if rid not in present or authority != companion_authority_fingerprint(desired[rid]):
+                # cancel() is a no-op once the task is already running (not
+                # merely queued) -- it stays in _managed_runtime_inflight
+                # regardless, so the self-update handoff barrier still waits
+                # for it to actually finish rather than losing track of it.
                 future.cancel()
                 self._managed_runtime_futures.pop(rid, None)
         self._harvest_managed_runtime_futures()
@@ -552,6 +593,7 @@ class SupervisorDaemon:
                 copy.deepcopy(registration),
             )
             self._managed_runtime_futures[rid] = (authority, future)
+            self._managed_runtime_inflight.add(future)
         self._harvest_managed_runtime_futures()
 
     # -- unit lifecycle ------------------------------------------------------
@@ -1395,11 +1437,41 @@ class SupervisorDaemon:
         except Exception:  # pragma: no cover -- best-effort
             log.exception("error releasing supervisor lock")
 
+    def _await_runtime_pool_idle(self, timeout: float) -> bool:
+        """Wait up to ``timeout`` seconds for in-flight managed runtime work.
+
+        Returns ``True`` once every tracked materialize()/cleanup() future has
+        finished (or none were in flight), ``False`` if any is still running
+        when the timeout elapses. Uses ``_managed_runtime_inflight`` (not
+        ``_managed_runtime_futures``) for materialize() futures: a withdrawn
+        or changed registration's future is cancelled and dropped from the
+        latter even when still actually running (cancel() is a no-op once a
+        task has started), so only the former is guaranteed to keep tracking
+        it until it truly completes.
+        """
+        pending = list(self._managed_runtime_inflight)
+        if self._managed_cleanup_future is not None:
+            pending.append(self._managed_cleanup_future)
+        if not pending:
+            return True
+        _done, not_done = _wait_futures(pending, timeout=timeout)
+        return not not_done
+
     def shutdown(self) -> None:
         """Wind down every running unit (best-effort)."""
         for rid in list(self._units):
             self._stop(rid)
         if self._runtime_executor is not None and self._owns_runtime_executor:
+            # Give any in-flight materialize()/cleanup() task a bounded grace
+            # window (long enough for the common near-finished case), then
+            # proceed regardless -- this must never block indefinitely, since
+            # a plain daemon exit needs to actually exit. cancel_futures=True
+            # still drops anything not yet started. Self-update itself
+            # requires a *real* drain-or-defer decision (see
+            # _maybe_self_update's own _await_runtime_pool_idle call before
+            # ever reaching this method), since a build still running here
+            # would otherwise race the successor it hands off to.
+            self._await_runtime_pool_idle(_SHUTDOWN_GRACE_SECONDS)
             self._runtime_executor.shutdown(wait=False, cancel_futures=True)
 
     def _maybe_self_update(self) -> bool:
@@ -1443,6 +1515,22 @@ class SupervisorDaemon:
                 before_spawn.get("status"),
             )
             return False
+        # A managed runtime build/cleanup still in flight must fully drain
+        # before handing off: the successor's _legacy_lock_handshake() only
+        # samples the legacy lock once, so it cannot by itself force a wait
+        # for an old-process worker that has not yet reached its own lock
+        # acquisition. Rather than spawn a successor that might race an
+        # old-version build still running in this process, defer this
+        # self-update cycle entirely and retry on the next poll -- this is
+        # not itself a spawn attempt, so it must not arm the cooldown below.
+        if not self._await_runtime_pool_idle(_SHUTDOWN_GRACE_SECONDS):
+            log.info(
+                "supervisor self-update: deferred at %s -- a managed runtime "
+                "build or cleanup is still in flight; retrying next poll "
+                "rather than risk an overlapping old/new build",
+                target,
+            )
+            return False
         self._self_update_last_spawn = now
         # Every reconcile tick already runs to completion before the next one
         # starts, so this is always a safe cutover point (unlike the
@@ -1466,6 +1554,12 @@ class SupervisorDaemon:
                     "reclaim %s -- this host now has no supervisor daemon",
                     supervisor_lease_scope(self.machine, self.env),
                 )
+            # shutdown() above already shut down our owned runtime executor
+            # in anticipation of the handoff; since we are staying up, drop
+            # the dead reference so the next _runtime_pool() call lazily
+            # rebuilds a live one instead of raising on every submit().
+            if self._owns_runtime_executor:
+                self._runtime_executor = None
             return False
         log.info(
             "supervisor self-update: detected a newer installed version at "
