@@ -40,6 +40,19 @@ def test_parse_manifest_with_description():
     assert manifest.description == "Facility Gitea"
 
 
+def test_parse_manifest_strips_trailing_colon():
+    """A trailing ':' would register a prefix that never matches
+    get_connector()'s hierarchical 'source.startswith(prefix + \":\")' lookup --
+    normalize it away, mirroring agent-bridge's own namespace manifests."""
+    manifest = parse_manifest({"source_name": "gitea:", "command": ["/abs/provider"]})
+    assert manifest.source_name == "gitea"
+
+
+def test_parse_manifest_rejects_colon_only_source_name():
+    with pytest.raises(ValueError):
+        parse_manifest({"source_name": "::", "command": ["/abs/provider"]})
+
+
 @pytest.mark.parametrize(
     "data",
     [

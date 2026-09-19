@@ -161,6 +161,14 @@ def parse_manifest(data: object, *, source_path: str = "") -> ProviderManifest:
     name = data.get("source_name")
     if not isinstance(name, str) or not name.strip():
         raise ManifestError("`source_name` is required and must be a non-empty string")
+    # Normalize a trailing ':' the same way agent-bridge's namespace manifests
+    # do -- an unstripped trailing colon would register a prefix that never
+    # matches get_connector()'s hierarchical "source.startswith(prefix + ':')"
+    # lookup (every real hierarchical source would need a literal double
+    # colon to match), silently making the provider unreachable.
+    normalized_name = name.strip().rstrip(":")
+    if not normalized_name:
+        raise ManifestError("`source_name` must contain more than just ':' characters")
 
     cmd = data.get("command")
     if (
@@ -175,7 +183,7 @@ def parse_manifest(data: object, *, source_path: str = "") -> ProviderManifest:
         raise ManifestError("`description` must be a string when present")
 
     return ProviderManifest(
-        source_name=name.strip(), command=tuple(cmd), description=desc, source_path=source_path
+        source_name=normalized_name, command=tuple(cmd), description=desc, source_path=source_path
     )
 
 
