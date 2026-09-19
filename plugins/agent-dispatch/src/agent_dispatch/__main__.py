@@ -2684,7 +2684,25 @@ def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | No
 
     reason = f"hibernating: {' '.join(spec.command)}"
     claim = hibernation_claims.add_hibernation_claim(spec.task_id, note=reason)
-    worker_id = _resolve_owner(args, verb="run --detach")
+    # Resolve the owner FROM THE TASK ITSELF, not from CWD/machine-worktree
+    # identity: a headless-embodied worker's actual claim identity is a
+    # `headless-<hash>` worker id, never `machine/worktree`, so composing from
+    # CWD here always 409'd for headless workers ("owned by 'headless-xxx',
+    # not 'machine/worktree'") -- leaving the task `started` (never actually
+    # suspended) for the task's entire wait and continuing to occupy its
+    # pool's concurrency slot the whole time (ThomasMichon/copilot-extensions
+    # #2576's remaining scope; gim-home/odsp-web-harness#458 comment thread).
+    # The task's own `owner` field is always correct for whichever kind of
+    # worker actually holds it, so prefer that and fall back to CWD-derived
+    # identity only if the lookup itself fails.
+    worker_id = None
+    try:
+        with _client(args) as c:
+            worker_id = c.get(spec.task_id).get("owner")
+    except Exception:  # noqa: BLE001 -- owner lookup is best-effort, never fatal here
+        worker_id = None
+    if not worker_id:
+        worker_id = _resolve_owner(args, verb="run --detach")
     if worker_id is None:
         return {"error": "could not resolve the owning worker for suspend", "claim": claim}
     try:
@@ -2693,6 +2711,7 @@ def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | No
     except DispatchError as exc:
         return {"error": str(exc), "worker_id": worker_id, "claim": claim}
     return {"status": task.get("status"), "worker_id": worker_id, "claim": claim}
+
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
