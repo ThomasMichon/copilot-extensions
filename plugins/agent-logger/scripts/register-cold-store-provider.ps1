@@ -1,0 +1,79 @@
+# register-cold-store-provider -- drop this plugin's agent-bridge
+# cold-store-provider manifest into the cold-store-providers.d registry so
+# agent-bridge discovers it DECLARATIVELY (no imperative "bridge register"
+# call). Windows twin of the .sh; see it for the contract.
+#
+# Generic + self-locating: byte-identical across cold-store-provider plugins.
+# Safe + best-effort: exit 0 (never block/raise) if anything is missing.
+$ErrorActionPreference = 'SilentlyContinue'
+$script:SessionStartJsonEmitted = $false
+function Write-SessionStartJson {
+    if (-not $script:SessionStartJsonEmitted) {
+        [Console]::Out.Write('{}')
+        $script:SessionStartJsonEmitted = $true
+    }
+}
+function Exit-SessionStart {
+    Write-SessionStartJson
+    exit 0
+}
+
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$PluginDir = Split-Path -Parent $ScriptDir
+
+try {
+    $name = (Get-Content (Join-Path $PluginDir 'plugin.json') -Raw | ConvertFrom-Json).name
+} catch { $name = $null }
+if (-not $name) { $name = Split-Path -Leaf $PluginDir }
+if (-not $name) { Exit-SessionStart }
+
+$template = Join-Path $PluginDir 'references\cold-store-provider.json'
+if (-not (Test-Path $template)) { Exit-SessionStart }
+
+# Use the payload-local shim, not the mutable machine-global compatibility
+# binstub, so providers stay bound to the exact payload root the current
+# installation context selected.
+$binstub = Join-Path $PluginDir "bin\$name.cmd"
+if (-not (Test-Path $binstub)) { Exit-SessionStart }
+
+if ($env:AGENT_BRIDGE_COLD_STORE_PROVIDERS_DIR) {
+    $dir = $env:AGENT_BRIDGE_COLD_STORE_PROVIDERS_DIR
+} elseif ($env:AGENT_BRIDGE_CONFIG_DIR) {
+    $dir = Join-Path $env:AGENT_BRIDGE_CONFIG_DIR 'cold-store-providers.d'
+} else {
+    $dir = Join-Path $env:USERPROFILE '.agent-bridge\cold-store-providers.d'
+}
+try { New-Item -ItemType Directory -Force -Path $dir | Out-Null } catch { Exit-SessionStart }
+
+try {
+    $data = Get-Content $template -Raw | ConvertFrom-Json
+} catch { Exit-SessionStart }
+$data | Add-Member -NotePropertyName command -NotePropertyValue @($binstub) -Force
+$data | Add-Member -NotePropertyName plugin_root -NotePropertyValue ([IO.Path]::GetFullPath($PluginDir)) -Force
+
+$payload = ($data | ConvertTo-Json -Depth 10)
+$out = Join-Path $dir "$name.json"
+
+try {
+    $existing = if (Test-Path $out) { [System.IO.File]::ReadAllText($out) } else { $null }
+    if ($existing -ne $payload) {
+        $tmp = "$out.$PID.tmp"
+        $backup = "$out.$PID.bak"
+        [System.IO.File]::WriteAllText($tmp, $payload)
+        try {
+            if (Test-Path $out) {
+                [System.IO.File]::Replace($tmp, $out, $backup, $true)
+            } else {
+                try {
+                    [System.IO.File]::Move($tmp, $out)
+                } catch [System.IO.IOException] {
+                    if (-not (Test-Path $out)) { throw }
+                    [System.IO.File]::Replace($tmp, $out, $backup, $true)
+                }
+            }
+        } finally {
+            Remove-Item -LiteralPath $tmp, $backup -Force -ErrorAction SilentlyContinue
+        }
+    }
+} catch { Exit-SessionStart }
+Exit-SessionStart

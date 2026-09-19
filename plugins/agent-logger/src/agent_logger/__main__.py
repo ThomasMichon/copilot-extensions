@@ -208,6 +208,22 @@ def _cmd_chronicle_tick(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_session_fetch(args: argparse.Namespace) -> int:
+    """agent-bridge cold-store-provider verb: resolve one session by id.
+
+    Exit ``0`` with a JSON ``{"session": {...}, "events": [...]}`` payload on
+    stdout when found, ``cold_store.NOT_FOUND_EXIT_CODE`` (never an error) when
+    this host has no evidence of the session at all. See
+    ``agent_logger.cold_store`` for the resolution order.
+    """
+    from agent_logger.cold_store import fetch_session_json
+
+    code, payload = fetch_session_json(args.session_id)
+    if payload:
+        print(payload)
+    return code
+
+
 def _cmd_origin_backfill_local(args: argparse.Namespace) -> int:
     """Backfill origin.json across the LOCAL session store (this machine)."""
     from pathlib import Path
@@ -353,6 +369,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="show repository organization config as manifest-ready JSON",
     )
     p_organization.set_defaults(func=_cmd_organization)
+
+    p_session_fetch = sub.add_parser(
+        "session-fetch",
+        help="agent-bridge cold-store-provider verb: resolve one session by id",
+    )
+    p_session_fetch.add_argument("session_id", help="session id to resolve")
+    p_session_fetch.add_argument(
+        "--json", action="store_true",
+        help="present for contract parity with agent-bridge's invocation "
+        "(output is always JSON)",
+    )
+    p_session_fetch.set_defaults(func=_cmd_session_fetch)
 
     p_migrate = sub.add_parser(
         "config-migrate", help="migrate machine-local config.yaml schema (idempotent)"

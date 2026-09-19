@@ -199,6 +199,36 @@ The generic skills populate location, naming/template, and optional voice
 fields from repository organization config, so no wrapper is required merely
 to inject those choices. See [manifest-contract.md](manifest-contract.md).
 
+### Cold-store provider (`agent_logger.cold_store`)
+
+agent-logger is the **reference cold-store provider** for agent-bridge's
+`session-fetch` capability (see `docs/architecture.md`'s cold-store-provider
+subsection in the repo root and this effort's Phase 2c): agent-bridge's
+daemon drives `agent-logger session-fetch <session-id> --json` over a process
+boundary whenever its own live session ledger has nothing for the requested
+ID, and this module answers with whatever archival content this host holds.
+
+Resolution walks three tiers, reusing the same `agent_logger.sessions`
+archive-aware seam every other consumer (`collate-session`,
+`ramp-up-session`, the chronicler) already goes through:
+
+1. **Local live directory** — `~/.copilot/session-state/<id>/`.
+2. **On-device compact archive** — `<home>/archived-sessions/<id>.tar.gz`
+   (a session compacted before ever being pushed off this machine).
+3. **The locally synced corpus** — `session-sync`'s local target root,
+   scanned per `<machine>/session-state/<id>/` (synced but not yet
+   compacted) and `<machine>/archived/<id>.tar.gz` (packed at the sync
+   destination), across every machine subtree, exactly as
+   `SyncedSessionSource` does for the chronicler's settle-gated scan.
+
+The registration side (`scripts/register-cold-store-provider.sh` /
+`.ps1`, run from `sessionStart`) drops
+`~/.agent-bridge/cold-store-providers.d/agent-logger.json` following the same
+`references/<template>.json` + payload-local-shim pattern
+`agent-codespaces`/`agent-containers` use for their own `providers.d/`
+namespace-provider registration — a distinct, capability-keyed manifest
+directory, never the namespace one.
+
 ## Configuration
 
 Layered: built-in defaults → `$AGENT_LOGGER_HOME/config.yaml`
