@@ -339,6 +339,21 @@ through its adapter; neither answers, and a cold-store provider is asked
 instead), never *whether* one is attempted. The caller is never required to
 already know a session is dead before asking for it.
 
+### resolve-by-any-origin-reference
+
+A caller rarely starts with a session ID in hand — it has a worktree ID, or a
+delegated task's own reference (an agent-dispatch task id, a queue entry, any
+other origin's durable handle on the work). The fabric resolves **any** of
+these to the same session the same way: derive the worktree, then apply
+*any-session-any-registered-worktree-regardless-of-liveness* to it. No caller
+invents its own naming convention or per-consumer lookup to get there — a
+Neuron Forge deep-link, a Dampener review-status link, an Adjudication Board
+run record, and a human reading agent-dispatch's own history all resolve
+through the identical primitive. Where the reference is a delegated task,
+resolution consults the delegation layer's own durable attachment history
+(not only its current live owner) so a caller can still resolve a task whose
+current session has since moved on or ended.
+
 ### satellite-exposure-and-federation
 
 A field or otherwise one-way-reachable machine can expose its local bridge to
@@ -623,6 +638,14 @@ machine may deliberately gate outbound reach until policy allows it.
 
 ## Provenance
 
+- **2026-09-19** — Added *resolve-by-any-origin-reference*: a caller resolves
+  a session from any durable origin handle (worktree ID, an agent-dispatch
+  task reference, etc.), not only a session ID directly — through the same
+  primitive `any-session-any-registered-worktree-regardless-of-liveness`
+  already provides, extended to consult the delegation layer's own durable
+  attachment history when resolving a delegated task. Prompted by a Dampener
+  UI link reaching for a bespoke, per-consumer worktree-naming convention
+  instead of a shared resolution primitive.
 - **2026-09-12** — Added `cache-is-a-hint-never-authority`: a cache miss or
   ambiguity must trigger a live probe before a consequential decision, and the
   live result backfills the cache. Extends the vision to hold the bridge's own

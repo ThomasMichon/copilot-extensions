@@ -256,6 +256,20 @@ the live transcript (the coordination layer's *summary-status-is-first-class*,
 seen from the delegation side). A caller or operator surveys the fleet's progress
 at a glance without reading each session.
 
+### durable-attachment-history
+A task's **current** owner session and worktree are only its latest chapter —
+the coordinator also retains a **queryable, append-only history** of every
+session and worktree that has ever attached to it: when each attachment began,
+when (and why) it ended, across every claim, suspend, resume, release, and
+re-embodiment the task lived through. Releasing a task for a fresh embodiment,
+or resuming it after a worker vanished, **never discards** the record of who
+held it before — only the mutable single-slot "current owner" a caller asks
+for by default. A consumer that needs the full lineage (an audit trail, a
+debugging session, a durable link to a specific past attempt) asks for the
+history explicitly; one that only needs "who has it now" is unaffected. This is
+the delegation-side counterpart of *terminal-worktree-reclamation*'s ownership
+bookkeeping — extended from "who owns it now" to "who has ever owned it."
+
 ### terminal-worktree-reclamation
 When the delegation layer causes a worker worktree to be allocated, that
 allocation remains an **owned obligation of the creating host and supervisor**
@@ -844,6 +858,14 @@ does **not** quietly undo it.
 
 ## Provenance
 
+- **2026-09-19** — Added *durable-attachment-history*: a task's queryable
+  history of every session/worktree that has ever attached to it, distinct
+  from its mutable current-owner fields. Prompted by a stuck-review incident
+  (aperture-labs, Intelligence Dampener) where releasing a task for a fresh
+  embodiment twice discarded the prior sessions' identities entirely, and by
+  a would-be consumer (a Dampener UI link) reaching for a bespoke,
+  per-consumer naming convention instead of a shared resolution primitive
+  because no durable history existed to resolve through.
 - **2026-09-05** — Extracted the repository-issue-loop archetype's declarative
   adoption, provider-neutral capability, and declarative worker-identity intent
   into its own child vision, as a fourth named archetype alongside reviewer,
