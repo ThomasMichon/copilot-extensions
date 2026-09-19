@@ -1706,6 +1706,61 @@ def test_jump_to_worktree_unknown_id_is_safe(tmp_path):
     asyncio.run(run())
 
 
+def test_jump_to_worktree_clears_a_hiding_filter(tmp_path):
+    """PR #2911 review: "Jump to host"/"Jump to caller" must resolve the
+    target by stable id against the FULL set, then clear an active "/"
+    filter that would otherwise hide it -- not silently fail/land on a
+    default just because the destination doesn't match the current query."""
+    src = _bridge_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.t0 = 0
+            scr.show_hidden = True
+            scr.machine_idx = 0            # All
+            await pilot.pause()
+            # A query matching only "Local wt" -- "Bridge wt" (the jump
+            # target) would otherwise be hidden by it.
+            scr.list_view.query = "local"
+            ok, _msg = scr._jump_to_worktree("emancipation-cube-win-bridge-2222")
+            assert ok is True
+            assert scr.list_view.query == ""   # the hiding filter was cleared
+            assert scr.sel[0] == "L"
+            landed = scr._wt_visible_records()[scr.sel[1]]
+            assert (landed.get("raw") or {}).get("id") == "emancipation-cube-win-bridge-2222"
+
+    asyncio.run(run())
+
+
+def test_jump_to_worktree_keeps_filter_when_target_already_visible(tmp_path):
+    """PR #2911 review: a jump whose target already matches the active "/"
+    filter must NOT clear the operator's query out from under them -- only a
+    query that actually HIDES the target justifies clearing it."""
+    src = _bridge_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.t0 = 0
+            scr.show_hidden = True
+            scr.machine_idx = 0            # All
+            await pilot.pause()
+            # "bridge" matches the jump target itself -- it is already
+            # visible under this query, so the query must survive the jump.
+            scr.list_view.query = "bridge"
+            ok, _msg = scr._jump_to_worktree("emancipation-cube-win-bridge-2222")
+            assert ok is True
+            assert scr.list_view.query == "bridge"   # untouched
+            assert scr.sel[0] == "L"
+            landed = scr._wt_visible_records()[scr.sel[1]]
+            assert (landed.get("raw") or {}).get("id") == "emancipation-cube-win-bridge-2222"
+
+    asyncio.run(run())
+
+
 def test_open_worktree_cli_exits_with_resume_decision():
     """#2253: the ``open-cli`` internal action opens the entry's target worktree
     into a CLI session -- it exits the picker with a standard resume decision for
@@ -4550,6 +4605,683 @@ def test_native_list_multiselect_and_activation(monkeypatch):
     asyncio.run(run())
 
 
+async def _focus_wt_list(app, pilot, scr):
+    """Shared test helper: Tab until the native Worktrees list body has focus,
+    landing ``scr.sel`` in the ``"L"`` zone."""
+    nl = scr.query_one("#nf-body-data")
+    for _ in range(len(scr.region_heads()) + 1):
+        await pilot.press("tab")
+        await pilot.pause()
+        if app.focused is nl:
+            break
+    return nl
+
+
+def test_wt_row_always_visible_covers_every_live_signal():
+    """PR #2911 review: the record-shape-contract predicate must recognize
+    EVERY live-session signal ``_state()``/``_sess()`` treat as ACTIVE, not
+    just a subset -- a row live only via one of the less-common signals
+    (e.g. ``session_bound_live``, the cache path in test_picker_cache.py)
+    must still survive a non-matching filter query."""
+    for field in ("mux_live", "session_lock_live", "session_bound_live",
+                  "session_bridge_live", "session_ahp_live",
+                  "execution_leg_live", "session_bare_orphan"):
+        assert derive.wt_row_always_visible({field: True}) is True
+    assert derive.wt_row_always_visible({}) is False
+    assert derive.wt_row_always_visible({"mux_live": False}) is False
+
+
+def test_wt_row_always_visible_covers_classified_active_state():
+    """PR #2911 review: a row can classify ``state == "ACTIVE"`` (e.g. a
+    canonical raw ``state: "active"``) with none of the live-signal booleans
+    set -- the Active section's trustworthiness is this predicate's whole
+    point, not just its literal live-signal subset."""
+    assert derive.wt_row_always_visible({"state": "ACTIVE"}) is True
+    assert derive.wt_row_always_visible({"state": "WIP"}) is False
+
+
+def test_command_bar_filters_the_worktrees_list(monkeypatch):
+    """#2228 Phase 4: "/" opens the command bar, typed characters narrow the
+    Worktrees list by title (case-insensitive substring), and Enter commits
+    the filter (leaves compose mode) without activating a row -- the native
+    OptionList's own Enter binding must NOT fire while composing (it would
+    otherwise open the focused row's submenu instead)."""
+    from worktree_manager.production_picker.picker_tui.engine import SubMenuScreen
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert len(scr._wt_visible_records()) == 3
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            await pilot.pause()
+            assert scr.cmd_mode is True
+            for ch in "fix":
+                await pilot.press(ch)
+                await pilot.pause()
+            assert scr.list_view.query == "fix"
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix the thing"]
+            await pilot.press("enter")
+            await pilot.pause()
+            assert scr.cmd_mode is False
+            # Enter committed the filter -- it did NOT also activate the row.
+            assert not any(isinstance(s, SubMenuScreen) for s in app.screen_stack)
+            # The query itself survives leaving compose mode (Enter commits,
+            # it doesn't clear -- only Escape clears).
+            assert scr.list_view.query == "fix"
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix the thing"]
+
+    asyncio.run(run())
+
+
+def test_command_bar_escape_clears_filter_before_backing_out(monkeypatch):
+    """"Esc clears the filter, then backs out" (README interaction model):
+    the first Esc after a committed filter clears it and stays on the list;
+    only a second Esc (nothing left to clear/collapse) reaches quit-confirm."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert len(scr._wt_visible_records()) == 1
+            await pilot.press("escape")
+            await pilot.pause()
+            assert scr.list_view.query == ""
+            assert len(scr._wt_visible_records()) == 3
+            assert not _quit_modal_open(scr)
+
+    asyncio.run(run())
+
+
+def test_command_bar_idle_escape_preserves_focus_by_key(monkeypatch):
+    """PR #2911 review: the idle-Escape filter-clear path (distinct from the
+    composing-Escape path in `_dispatch_key`'s cmd_mode branch) must ALSO
+    remap focus by the row's stable key -- clearing the filter re-expands
+    the list, and a plain index-out-of-range check would leave `sel`
+    pointing at whatever row now sits at the old index instead of the one
+    actually focused."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Alt match",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-bbbb", "title": "Zzz match",
+         "status": "active", "started_at": "2026-06-27T16:00:00",
+         "turn_count": 1, "state": "wip"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            for ch in "zzz":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Zzz match"]
+            assert scr.sel == ("L", 0)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert scr.list_view.query == ""
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Alt match", "Zzz match"]
+            # Zzz match moved from index 0 (filtered) to index 1 (unfiltered) --
+            # focus must have followed it there, not stayed at index 0.
+            focused = scr._wt_visible_records()[scr.sel[1]]
+            assert focused["title"] == "Zzz match"
+
+    asyncio.run(run())
+
+
+def test_command_bar_never_hides_a_live_worktree(monkeypatch):
+    """Cross-effort record-shape contract (README, Phase 4): a filter must
+    never silently drop a live worktree just because its title doesn't match
+    the query -- an operator mid-session on it must never see it vanish."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-live", "title": "Unrelated title",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 3, "state": "wip",
+         "mux_session": True, "mux_attached": True, "mux_clients": 1},
+        {"id": "anomalous-potato-win-20260627-fixx", "title": "Fix the thing",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 1, "state": "wip"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+            titles = {w["title"] for w in scr._wt_visible_records()}
+            assert titles == {"Unrelated title", "Fix the thing"}
+
+    asyncio.run(run())
+
+
+def test_command_bar_filter_never_narrows_list_records_or_selection(monkeypatch):
+    """PR #2911 review: the filter/sort narrowing must apply ONLY to the
+    render/navigation view (`current_list_visible`/`_wt_visible_records`) --
+    `list_records()` (and everything built on it: selection reconciliation,
+    cleanup/sync scope, action menus) must keep seeing the FULL unfiltered
+    set. A worktree selected before typing a non-matching query must not be
+    silently dropped from `wt_sel` by a reload/reconcile pass just because
+    it's currently hidden by the filter."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            nl = await _focus_wt_list(app, pilot, scr)
+            # Select "Old idle wt" (a Recent-section row not matched by "fix").
+            idx = next(i for i, w in enumerate(scr.list_records())
+                       if w["title"] == "Old idle wt")
+            scr.wt_sel.toggle(scr._row_key(scr.list_records()[idx]))
+            assert len(scr.wt_sel) == 1
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+            # The full set is unaffected by the filter...
+            assert len(scr.list_records()) == 3
+            # ...and the reload-time reconciliation pass (#2258 P3-7) must not
+            # drop the selection just because its row is currently hidden.
+            scr._reconcile_wt_sel()
+            assert len(scr.wt_sel) == 1
+            _ = nl
+
+    asyncio.run(run())
+
+
+def test_command_bar_space_toggles_the_visible_row_not_a_full_list_index(monkeypatch):
+    """PR #2911 review: `Space` (``_toggle_wt``) receives a VISIBLE-list
+    index (``sel[1]``) -- it must resolve that index against
+    ``_wt_visible_records()``, not the full ``list_records()``, or a filter
+    that reorders the index space would toggle the WRONG row."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+            # Only "Fix the thing" is visible now, at visible-index 0.
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix the thing"]
+            scr.sel = ("L", 0)
+            await pilot.press("space")
+            await pilot.pause()
+            selected = [w for w in scr.list_records()
+                        if scr._row_key(w) in scr.wt_sel.ids]
+            assert [w["title"] for w in selected] == ["Fix the thing"]
+            # And _selected_record() (Enter's per-row target) must agree.
+            assert scr._selected_record()["title"] == "Fix the thing"
+
+    asyncio.run(run())
+
+
+def test_command_bar_owns_ctrl_arrow_keys_while_composing(monkeypatch):
+    """PR #2911 review: ``BINDING_KEYS`` (Ctrl+Left/Right, the machine-switch
+    shortcut) was checked before ``cmd_mode``, so it still bubbled to
+    Textual's own binding system while composing -- switching the machine
+    tab mid-query instead of the key landing in the command bar. The
+    composing check must run first everywhere ``BINDING_KEYS``/native-key
+    bubbling is checked."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            machine_idx_before = scr.machine_idx
+            await pilot.press("ctrl+left")
+            await pilot.pause()
+            assert scr.cmd_mode is True
+            assert scr.machine_idx == machine_idx_before
+
+    asyncio.run(run())
+
+
+def test_command_bar_sort_cycles_worktrees_order(monkeypatch):
+    """"s" cycles the Worktrees list's sort key (#2228 Phase 4). The fixture's
+    Active section holds one row, so this exercises the Recent section (two
+    rows sorted by age by default; alpha by title once cycled)."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260620-bbbb", "title": "Zeta idle",
+         "status": "active", "started_at": "2026-06-20T10:00:00",
+         "turn_count": 0, "state": "unused"},
+        {"id": "anomalous-potato-win-20260619-cccc", "title": "Alpha idle",
+         "status": "active", "started_at": "2026-06-19T10:00:00",
+         "turn_count": 0, "state": "unused"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            # Default (age): most-recent-first -> Zeta (newer) before Alpha.
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Zeta idle", "Alpha idle"]
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("s")
+            await pilot.pause()
+            assert scr.list_view.sort_label(derive.WT_SORT_KEYS) == "title"
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Alpha idle", "Zeta idle"]
+
+    asyncio.run(run())
+
+
+def test_command_bar_sort_cycle_preserves_focus_and_anchor(monkeypatch):
+    """PR #2911 review: cycling the sort key reorders the rows, so a
+    focused/anchored row's numeric INDEX would otherwise point at a
+    different row after the reorder. `s` must remap `sel`/`last_l`/
+    `wt_anchor` by the row's stable key, not leave them as stale indices."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260620-bbbb", "title": "Zeta idle",
+         "status": "active", "started_at": "2026-06-20T10:00:00",
+         "turn_count": 0, "state": "unused"},
+        {"id": "anomalous-potato-win-20260619-cccc", "title": "Alpha idle",
+         "status": "active", "started_at": "2026-06-19T10:00:00",
+         "turn_count": 0, "state": "unused"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            # Default (age) order: Zeta (index 0), Alpha (index 1). Focus and
+            # anchor Zeta -- it will move to index 1 once sorted by title.
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Zeta idle", "Alpha idle"]
+            scr.sel = ("L", 0)
+            scr.wt_anchor = 0
+            scr.refresh()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            scr.sel = ("L", 0)
+            scr.wt_anchor = 0
+            await pilot.press("s")
+            await pilot.pause()
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Alpha idle", "Zeta idle"]
+            focused = scr._wt_visible_records()[scr.sel[1]]
+            assert focused["title"] == "Zeta idle"
+            assert scr.last_l == scr.sel[1]
+            assert scr._wt_visible_records()[scr.wt_anchor]["title"] == "Zeta idle"
+
+    asyncio.run(run())
+
+
+def test_command_bar_sort_cycle_remaps_last_l_from_outside_the_list(monkeypatch):
+    """PR #2911 review follow-up: ``last_l`` (the Tab-out/in remembered row)
+    must remap by stable key even when focus is NOT currently on the list
+    (e.g. on a machine/button row) when ``s`` cycles the sort -- it was
+    previously only refreshed inside the "focus is in the list" branch."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260620-bbbb", "title": "Zeta idle",
+         "status": "active", "started_at": "2026-06-20T10:00:00",
+         "turn_count": 0, "state": "unused"},
+        {"id": "anomalous-potato-win-20260619-cccc", "title": "Alpha idle",
+         "status": "active", "started_at": "2026-06-19T10:00:00",
+         "turn_count": 0, "state": "unused"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            # Zeta remembered as the last-focused row, but focus is now on
+            # the machine row -- not "L" -- when the sort cycles.
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Zeta idle", "Alpha idle"]
+            scr.last_l = 0
+            scr.sel = ("M", 0)
+            scr.refresh()
+            await pilot.pause()
+            scr._dispatch_key("s")
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Alpha idle", "Zeta idle"]
+            assert scr._wt_visible_records()[scr.last_l]["title"] == "Zeta idle"
+
+    asyncio.run(run())
+
+
+def test_command_bar_filter_preserves_focused_row_by_key(monkeypatch):
+    """PR #2911 review follow-up: typing into the filter reorders/shrinks the
+    list, so a focused row's numeric index can end up pointing at a
+    DIFFERENT row that happens to now sit at the same position. Focus must
+    follow the row's stable key, not the stale index."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Alt match",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-bbbb", "title": "Zzz match",
+         "status": "active", "started_at": "2026-06-27T16:00:00",
+         "turn_count": 1, "state": "wip"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            # Both are Active (state wip), age order -> Alt match (0), Zzz
+            # match (1). Focus Zzz match (index 1).
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Alt match", "Zzz match"]
+            await _focus_wt_list(app, pilot, scr)
+            scr.sel = ("L", 1)
+            scr.refresh()
+            await pilot.pause()
+            await pilot.press("/")
+            # "match" keeps both rows, but "zzz" narrows to Zzz match alone --
+            # exercising the id-based remap without ever hitting the
+            # index-out-of-range fallback.
+            for ch in "zzz":
+                await pilot.press(ch)
+                await pilot.pause()
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Zzz match"]
+            focused = scr._wt_visible_records()[scr.sel[1]]
+            assert focused["title"] == "Zzz match"
+
+    asyncio.run(run())
+
+
+def test_command_bar_filter_lands_at_equivalent_index_when_row_vanishes(monkeypatch):
+    """PR #2911 review: when the focused row itself is filtered OUT (not
+    merely moved), focus lands at the equivalent index in the shrunk list
+    -- Phase 3's own rule for a deleted row ("focus stays at the equivalent
+    index") -- rather than either a stale index naming a different row, or
+    jumping off the list entirely while rows still remain."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Alt row",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-bbbb", "title": "Fix row",
+         "status": "active", "started_at": "2026-06-27T16:00:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-cccc", "title": "Fix again",
+         "status": "active", "started_at": "2026-06-27T15:00:00",
+         "turn_count": 1, "state": "wip"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Alt row", "Fix row", "Fix again"]
+            await _focus_wt_list(app, pilot, scr)
+            scr.sel = ("L", 0)  # focused on "Alt row"
+            scr.refresh()
+            await pilot.pause()
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+                await pilot.pause()
+            # "Alt row" is filtered OUT entirely -- the equivalent index (0)
+            # in the shrunk two-row list is "Fix row", not a reset off the list.
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix row", "Fix again"]
+            assert scr.sel == ("L", 0)
+            assert scr._wt_visible_records()[scr.sel[1]]["title"] == "Fix row"
+
+    asyncio.run(run())
+
+
+def test_command_bar_last_l_clamps_to_equivalent_index_when_row_vanishes(monkeypatch):
+    """PR #2911 review follow-up: when the REMEMBERED (last_l, Tab-out/in)
+    row is filtered out entirely, it must clamp to the equivalent index in
+    the shrunk visible list -- not reset to 0 regardless of where it was."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Fix first",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-bbbb", "title": "Alt row",
+         "status": "active", "started_at": "2026-06-27T16:30:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-cccc", "title": "Fix third",
+         "status": "active", "started_at": "2026-06-27T16:00:00",
+         "turn_count": 1, "state": "wip"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix first", "Alt row", "Fix third"]
+            # Remember "Alt row" (index 1) as last_l without it being focused.
+            scr.last_l = 1
+            await _focus_wt_list(app, pilot, scr)
+            scr.sel = ("M", 0)
+            scr.refresh()
+            await pilot.pause()
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+                await pilot.pause()
+            # "Alt row" is filtered out -- the shrunk two-row list's
+            # equivalent index (clamped 1) is "Fix third", not index 0.
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix first", "Fix third"]
+            assert scr._wt_visible_records()[scr.last_l]["title"] == "Fix third"
+
+    asyncio.run(run())
+
+
+def test_command_bar_anchor_clamps_to_equivalent_index_when_row_vanishes(monkeypatch):
+    """PR #2911 review: when the ANCHORED row (wt_anchor, the Shift+arrow
+    range-select origin) is filtered out entirely, it must clamp to the
+    equivalent index -- not drop to None, which would silently re-seed the
+    range from current focus on the next Shift+arrow (changing the
+    selected range unexpectedly)."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Fix first",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-bbbb", "title": "Alt row",
+         "status": "active", "started_at": "2026-06-27T16:30:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-cccc", "title": "Fix third",
+         "status": "active", "started_at": "2026-06-27T16:00:00",
+         "turn_count": 1, "state": "wip"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix first", "Alt row", "Fix third"]
+            scr.wt_anchor = 1   # "Alt row"
+            await _focus_wt_list(app, pilot, scr)
+            scr.sel = ("M", 0)
+            scr.refresh()
+            await pilot.pause()
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+                await pilot.pause()
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix first", "Fix third"]
+            assert scr.wt_anchor is not None
+            assert scr._wt_visible_records()[scr.wt_anchor]["title"] == "Fix third"
+
+    asyncio.run(run())
+
+
+def test_command_bar_appends_named_printable_keys(monkeypatch):
+    """PR #2911 review: a NAMED printable key token (Textual's "slash" for
+    "/" is the one this module already documents) must still land in the
+    query -- the composer must not silently drop any printable character
+    just because its Textual key NAME isn't a bare one-character string."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            # A second literal "/" while composing: Textual delivers it as
+            # the named "slash" token, not a bare "/" key -- must still
+            # append via event.character, not be silently dropped.
+            scr._dispatch_key("slash", "/")
+            assert scr.list_view.query == "/"
+
+    asyncio.run(run())
+
+
 def test_describe_status_marker_expands_known_tokens():
     """Bug-fix phase: raw ``status_markers`` wire tokens must expand to a
     short human phrase for rendering (derive.py's ``status_markers`` string
@@ -4922,6 +5654,65 @@ def test_native_list_no_rowwrap_and_incremental_repaint(monkeypatch):
             assert _prompts(nl) == incremental
             # ...and still no wrap after the rebuild.
             assert len(nl._lines) == nl.option_count
+
+    asyncio.run(run())
+
+
+def test_native_list_refreshes_on_same_count_content_swap():
+    """PR #2911 review: a same-cardinality reload that swaps a row's content
+    (title/state) must still rebuild the native list -- ``nrows`` alone can't
+    see it, so the signature needs a content fingerprint too."""
+    import datetime
+    import types
+
+    from worktree_manager.production_picker.picker_tui import derive
+
+    def _src():
+        derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+        local = ("anomalous-potato", "Win")
+        raws = [{"id": "anomalous-potato-win-20260627-r00", "title": "Original title",
+                 "status": "idle", "started_at": "2026-06-27T17:00:00",
+                 "turn_count": 0, "state": "idle"}]
+        s = types.SimpleNamespace()
+        s.LOCAL = local
+        s.LOCAL_LABEL = "lc"
+        s.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+        s.bucket = derive.bucket
+        s.for_machine = derive.for_machine
+        s.load = lambda: [derive.norm(w, *local) for w in raws]
+        return s
+
+    def _find_row(nl, needle):
+        for i in range(nl.option_count):
+            p = nl.get_option_at_index(i).prompt
+            text = p.plain if hasattr(p, "plain") else str(p)
+            if needle in text:
+                return text
+        return None
+
+    async def run():
+        app = PickerApp(_src(), live=False)
+        async with app.run_test(size=(100, 14)) as pilot:
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.sel = ("L", 0)
+            scr.refresh()
+            await pilot.pause()
+            nl = scr.query_one("#nf-body-data")
+            assert _find_row(nl, "Original title") is not None
+
+            # Simulate a same-cardinality reload in place: the row count is
+            # unchanged (still 1), but its content (title/state) is swapped --
+            # exactly the case the signature's nrows-only probe used to miss.
+            for rec in scr.data:
+                rec["title"] = "Renamed title"
+                rec["state"] = "active"
+            scr.refresh()
+            await pilot.pause()
+
+            assert _find_row(nl, "Renamed title") is not None
+            assert _find_row(nl, "Original title") is None
 
     asyncio.run(run())
 

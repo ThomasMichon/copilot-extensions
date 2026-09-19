@@ -615,6 +615,36 @@ def _sessionless(w):
     return True
 
 
+#: (label, key_fn) pairs the Worktrees list's `s` cycles through (#2228
+#: Phase 4). "age" (default, each section's own most-recent-first order) is
+#: index 0 so cycling always starts from the familiar order.
+WT_SORT_KEYS = [
+    ("age", lambda w: w.get("age_secs", 0)),
+    ("title", lambda w: (w.get("title") or "").casefold()),
+    ("state", lambda w: w.get("state") or ""),
+]
+
+
+def wt_row_always_visible(w):
+    """True for a worktree row the "/" command-bar filter must never hide
+    (#2228 Phase 4) -- the cross-effort record-shape-contract: a live or
+    bare-orphan worktree, or one classified ``ACTIVE``, stays visible
+    regardless of query match, since an operator mid-session on it (or one
+    the Active section itself vouches for) must never simply vanish from
+    the list. Mirrors EVERY live-session signal `_state()`/`_sess()` treat
+    as ACTIVE (``mux_live`` stands in for their raw ``mux_session``/
+    ``mux_attached`` -- this runs on the already-normalized record, where
+    those two are already folded into it), PLUS the normalized ``state``
+    itself: a row can classify ``ACTIVE`` (e.g. a canonical raw
+    ``state: "active"``) with none of those live-signal booleans set
+    (review finding -- the Active section's trustworthiness is this
+    contract's whole point, not just its literal live-signal subset)."""
+    return bool(w.get("state") == "ACTIVE" or w.get("mux_live")
+                or w.get("session_lock_live") or w.get("session_bound_live")
+                or w.get("session_bridge_live") or w.get("session_ahp_live")
+                or w.get("execution_leg_live") or w.get("session_bare_orphan"))
+
+
 def norm(
     w,
     machine,
@@ -699,6 +729,7 @@ def norm(
         has_controllers=bool(w.get("controllers") or w.get("controller_revision")),
     )
     return {
+        "id": w["id"],
         "id4": id4,
         "selection_id": f"{source_id}\x1f{w['id']}",
         "machine": machine,

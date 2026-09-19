@@ -103,6 +103,32 @@ def test_grid_renders_state_vocabulary(monkeypatch, tmp_path):
     assert "UNUSED" in text
 
 
+def test_command_bar_renders_the_filter_and_narrows_the_grid(monkeypatch, tmp_path):
+    """#2228 Phase 4: the "/" command bar's chrome row is legible in the
+    deterministic character grid while composing, and the list itself narrows
+    to the matching title -- an end-to-end capture proof alongside the
+    behavioral tests in ``test_picker_tui.py``."""
+    _isolate_pivots(monkeypatch, tmp_path)
+
+    async def type_filter(scr, pilot):
+        nl = scr.query_one("#nf-body-data")
+        for _ in range(len(scr.region_heads()) + 1):
+            await pilot.press("tab")
+            await pilot.pause()
+            if scr.app.focused is nl:
+                break
+        for key in ("/", "f", "i", "x"):
+            await pilot.press(key)
+            await pilot.pause()
+
+    caps = pcap.capture(_fixture_source(), live=False, prepare=type_filter)
+    text = caps["text"]
+    assert "/ fix" in text
+    assert "Fix the thing" in text
+    assert "Old idle wt" not in text
+    assert "Done work" not in text
+
+
 def test_ansi_capture_encodes_semantic_state_colour(monkeypatch, tmp_path):
     _isolate_pivots(monkeypatch, tmp_path)
     ansi = pcap.capture(_fixture_source(), live=False)["ansi"]
