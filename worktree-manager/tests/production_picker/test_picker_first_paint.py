@@ -6,6 +6,7 @@ import importlib
 import json
 import sys
 import threading
+import time
 
 import pytest
 
@@ -57,6 +58,204 @@ def test_picker_init_skips_pivot_scan(monkeypatch):
     screen = eng.PickerScreen(Src(), live=True)
     kinds = [d["kind"] for d in screen.pivots]
     assert "worktrees" in kinds
+
+
+def test_setup_live_pivots_prewarms_optional_modules(monkeypatch):
+    """``_setup_live_pivots`` (already a background thread, alongside the
+    pivot filesystem scan) must warm ``tasks.prewarm_optional_modules`` --
+    see that function's own docstring for why: a registered pivot's first
+    switch/render previously paid a real, synchronous multi-module import
+    hitch on the render/key-handling thread, profiled at roughly 40% of the
+    total switch latency -- exactly the momentary freeze reported against
+    the Tasks pivot."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    calls = []
+    monkeypatch.setattr(tasks_mod, "prewarm_optional_modules", lambda: calls.append(1))
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+    screen = eng.PickerScreen(Src(), live=True)
+    monkeypatch.setattr(screen, "_scan_pivot_payload", lambda: None)
+    screen._setup_live_pivots()
+
+    assert calls == [1]
+
+
+def test_setup_prewarms_optional_modules_too(monkeypatch):
+    """``setup()`` -- the shared non-live-mount / manual-reload ('r') path --
+    must warm the same modules as ``_setup_live_pivots``: a registered pivot
+    can be *first discovered* here too (e.g. a plugin installed after the
+    picker started, picked up on the next 'r' reload), and unlike
+    ``_setup_live_pivots`` this path already runs synchronously either way
+    (pre-existing pivot filesystem scan), so it must not be the one place
+    left paying the import hitch on the UI thread."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    calls = []
+    monkeypatch.setattr(tasks_mod, "prewarm_optional_modules", lambda: calls.append(1))
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+        @staticmethod
+        def machines():
+            return [("host Win", "host", "Win", True)]
+
+        @staticmethod
+        def load():
+            return []
+
+    screen = eng.PickerScreen(Src(), live=False)
+    calls.clear()  # __init__/on_mount may already have called setup() once
+    screen.setup()
+
+    assert calls == [1]
+
+
+def test_prewarm_optional_modules_imports_data_ssh(monkeypatch):
+    """Unlike the call-count test above (which spies on the seam so
+    ``_setup_live_pivots`` stays independently testable), this exercises the
+    real function to confirm it actually imports ``data_ssh`` -- not merely
+    *some* import. Spies on ``builtins.__import__`` (the function uses
+    ``from . import data_ssh``) rather than popping the module from
+    ``sys.modules``: popping doesn't clear the parent package's own cached
+    attribute, so a subsequent ``from . import x`` can silently rebind the
+    stale attribute without ever re-registering the module in
+    ``sys.modules`` -- an import-system quirk that made an earlier version
+    of this test spuriously fail."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    class InlineThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(tasks_mod.threading, "Thread", InlineThread)
+
+    imported = []
+    import builtins
+
+    real_import = builtins.__import__
+
+    def import_spy(name, globals=None, locals=None, fromlist=(), level=0):
+        mod = real_import(name, globals, locals, fromlist, level)
+        if level and fromlist:
+            for item in fromlist:
+                if item == "data_ssh":
+                    imported.append(item)
+        return mod
+
+    monkeypatch.setattr(builtins, "__import__", import_spy)
+
+    tasks_mod.prewarm_optional_modules()
+
+    assert "data_ssh" in imported
+
+
+def test_prewarm_optional_modules_survives_import_error(monkeypatch):
+    """Best-effort: a broken/uninstallable optional module must not crash
+    the background pivot-scan thread it shares with (#B pivot filesystem
+    scan)."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    class InlineThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(tasks_mod.threading, "Thread", InlineThread)
+
+    import builtins
+
+    real_import = builtins.__import__
+
+    def boom(name, globals=None, locals=None, fromlist=(), level=0):
+        # ``from . import data_ssh`` calls ``__import__('', ..., ('data_ssh',),
+        # 1)`` -- the relative-import ``name`` is empty and the submodule
+        # shows up in ``fromlist``, not appended to ``name`` (an earlier
+        # version of this test checked ``name.endswith(".data_ssh")``, which
+        # never matched, so the simulated failure was never exercised).
+        if level and "data_ssh" in fromlist:
+            raise ImportError("simulated broken optional module")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", boom)
+
+    tasks_mod.prewarm_optional_modules()  # must not raise
+
+
+def test_prewarm_optional_modules_spawns_no_thread_of_its_own(monkeypatch):
+    """``prewarm_optional_modules()`` itself must import inline (no nested
+    thread of its own): ``_setup_live_pivots`` (already a background thread)
+    relies on this call completing *before* it schedules the UI-thread
+    ``apply()`` that installs/activates registered pivots -- spawning a
+    second, independent thread here would race a keypress that lands on a
+    registered pivot while that inner thread is still mid-import (CPython's
+    per-module import lock would then block the render thread on the same
+    import anyway, only shrinking the freeze window instead of closing it).
+    A caller reachable from the UI thread (``setup()``) is responsible for
+    wrapping this call in its own worker thread instead -- see the sibling
+    test below."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    def boom(*_a, **_k):
+        raise AssertionError("prewarm_optional_modules must not spawn a thread")
+
+    monkeypatch.setattr(tasks_mod.threading, "Thread", boom)
+
+    tasks_mod.prewarm_optional_modules()  # must not raise
+
+
+def test_setup_prewarm_call_does_not_block_the_calling_thread(monkeypatch):
+    """``setup()`` -- the shared non-live-mount / manual-reload ('r') path,
+    which runs synchronously on the render/key-handling thread either way --
+    must wrap ``tasks.prewarm_optional_modules()`` in its own worker thread,
+    so a slow/cold import there cannot reintroduce the exact freeze the fix
+    exists to remove."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    release = threading.Event()
+
+    def slow_prewarm():
+        release.wait(timeout=5)
+
+    monkeypatch.setattr(tasks_mod, "prewarm_optional_modules", slow_prewarm)
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+        @staticmethod
+        def machines():
+            return [("host Win", "host", "Win", True)]
+
+        @staticmethod
+        def load():
+            return []
+
+    screen = eng.PickerScreen(Src(), live=False)
+    try:
+        t0 = time.perf_counter()
+        screen.setup()
+        elapsed = time.perf_counter() - t0
+    finally:
+        release.set()  # let the worker thread's slow_prewarm unblock and finish
+
+    assert elapsed < 1.0
 
 
 def test_skeleton_does_not_touch_src_local():
