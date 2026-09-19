@@ -137,7 +137,15 @@ Intelligence Dampener)
       not a separate one.
 
 ### Phase 2 — agent-bridge: resolve by dispatch-task reference
-- [ ] Extend the existing session/worktree resolver
+> **2026-09-19 progress note:** the *ranking* logic (which session IDs to try,
+> in what order) shipped as a pure, dependency-free module. The live
+> HTTP-route wiring (fetching the task + attachment history from
+> agent-dispatch, looping candidates through the existing
+> live-then-cold-store resolver, and a worktree-level "latest session"
+> fallback when nothing resolves) is the concrete next slice — deliberately
+> not rushed into a shared repo's live FastAPI app without settling the
+> agent-dispatch URL/token config shape first (see below).
+- [x] Extend the existing session/worktree resolver
       (`any-session-any-registered-worktree-regardless-of-liveness`'s
       implementation) to accept a dispatch-task reference as an additional
       resolution key, not only a session ID or worktree ID directly.
@@ -145,20 +153,35 @@ Intelligence Dampener)
       already exposes this — e.g. `target_worktree`/payload fields consumers
       like `neuron-forge`'s `task_worktree()` already read), then applies the
       existing any-session-any-worktree resolution to that worktree.
-- [ ] When the task's *current* owner has nothing live, consult Phase 1's
+      **Delivered (ranking half):** `dispatch_task_resolution.
+      candidate_session_ids()` / `task_worktree_id()` — pure functions
+      given a task JSON + its attachment history, testable with no HTTP or
+      SessionManager dependency.
+- [x] When the task's *current* owner has nothing live, consult Phase 1's
       attachment history (not just the cold-store providers) before giving
       up — a task's most recent **detached** session may still be
       individually resolvable even if the worktree itself is gone, if a
-      cold-store provider still has that exact session.
+      cold-store provider still has that exact session. **Delivered:**
+      `candidate_session_ids()` orders the current owner session first,
+      then every attachment history entry newest-first, deduped.
 - [ ] New/extended REST surface mirroring the existing worktree-scoped
       routes' shape (so consumers' interface doesn't change shape, only
       gains a new valid key) — exact route design TBD at implementation
       time; keep consistent with `docs/architecture.md`'s existing
-      provider-registration and resolver documentation.
+      provider-registration and resolver documentation. **Remaining:** wire
+      a route (e.g. `GET /api/v1/dispatch-tasks/{id}/session`) that fetches
+      the task + attachments from agent-dispatch (needs an `AGENT_DISPATCH
+      _URL`/`AGENT_DISPATCH_TOKEN` config surface on agent-bridge, mirroring
+      `neuron-forge`'s own established pattern for the same optional
+      dependency) and loops `candidate_session_ids()` through
+      `SessionManager.get_session()` / `fetch_cold_store_session()`.
 - [ ] Tests: resolving a live dispatch task, a suspended one, a fully
       terminal/released one whose worktree is gone but whose last session
       is still cold-store-resolvable, and one with no resolvable session at
-      all (graceful 404, never an error).
+      all (graceful 404, never an error). **Delivered so far:** unit tests
+      for the ranking module (current-owner-first, dedup, empty/malformed
+      input). **Remaining:** integration tests for the actual route once it
+      exists.
 
 ### Phase 3 — consumers: adopt the shared resolver
 - [ ] `aperture-labs` Intelligence Dampener: re-attempt the "View reviewer"
@@ -195,6 +218,21 @@ Intelligence Dampener)
 _Pending — Phase 1's schema/API design is the first concrete artifact._
 
 ## Journal
+
+### 2026-09-19 — Phase 2 ranking logic landed
+- `agent_bridge.dispatch_task_resolution`: pure `candidate_session_ids()` /
+  `task_worktree_id()` — given a task JSON + attachment history JSON (Phase
+  1's `GET /tasks/{id}/attachments` shape), rank which session IDs to try,
+  current owner first then history newest-first, deduped. No HTTP client or
+  SessionManager dependency, so fully unit-tested (6 tests) without mocking
+  agent-dispatch.
+- Deliberately did NOT wire the live HTTP route this session — that needs a
+  new `AGENT_DISPATCH_URL`/`AGENT_DISPATCH_TOKEN` config surface on
+  agent-bridge (mirroring `neuron-forge`'s own established pattern for the
+  same dependency), which is a real design decision worth its own reviewed
+  slice rather than rushing into a shared repo's live app under time
+  pressure. Documented as the concrete next step in Phase 2's checklist.
+- Full `agent-bridge` suite: 343 passed, 10 skipped, no regressions.
 
 ### 2026-09-19 — Phase 1 landed
 - `task_attachments` table + `TaskQueue._record_attachment`/`attachment_history`,
