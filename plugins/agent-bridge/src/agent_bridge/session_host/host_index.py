@@ -10,8 +10,9 @@ SQLite schema, so it is additive and carries no migration. The cutover
 (Phase 2) reads it on startup: for each record whose host process is still
 alive, reconnect via ``SessionHostClient``; prune the rest.
 
-Records are transport addressing only -- no ACP semantics, no conversation
-state (that stays in the frontend event log). ``host_version`` (the agent-bridge
+Records contain transport addressing and minimal frontend recovery/cleanup
+intent, not conversation content (that stays in the frontend event log).
+``host_version`` (the agent-bridge
 build) and ``protocol_version`` (the wire-envelope generation) are carried so the
 Phase-4 version-mux can route a session to the host generation that owns it and
 tell whether this frontend can still speak its wire (see ``version_mux``).
@@ -27,6 +28,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 RESUME_NUDGE_TURN_INDEX = "resume_nudge_turn_index"
+REAP_CLEANUP_PENDING = "reap_cleanup_pending"
 
 
 @dataclass
@@ -147,6 +149,22 @@ class HostIndex:
             self._revision += 1
             self._record_revisions[session_id] = self._revision
         return previous is not None
+
+    def mark_reap_pending(self, session_id: str) -> bool:
+        """Persist explicit cleanup intent without inferring it from retention."""
+        record = self._records.get(session_id)
+        if record is None or record.extra.get(REAP_CLEANUP_PENDING):
+            return False
+        previous = record.extra
+        record.extra = {**previous, REAP_CLEANUP_PENDING: True}
+        try:
+            self._flush()
+        except Exception:
+            record.extra = previous
+            raise
+        self._revision += 1
+        self._record_revisions[session_id] = self._revision
+        return True
 
     def set_resume_flag(self, session_id: str, value: bool) -> bool:
         """Mark (or clear) a session to receive a 'Resume' nudge on reattach.

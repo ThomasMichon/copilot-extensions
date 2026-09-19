@@ -62,7 +62,10 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
         or has_pending_host_launch(manager, session.session_id)
     ]:
         for session in pending:
-            if session.session_id not in manager._pending_host_launches:
+            if (
+                session.session_id not in manager._pending_host_launches
+                and not manager._remote_reap_pending(session.session_id)
+            ):
                 require_no_pending_host_launch(manager, session.session_id)
             if manager._remote_reap_pending(session.session_id):
                 _remote_retry_record(manager, session.session_id)
@@ -108,6 +111,7 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
 def _remote_retry_record(manager: SessionManager, session_id: str) -> HostRecord:
     """Fail an unaddressable retry instead of spinning during shutdown."""
     from .session_manager import RemoteHostRecoveryPendingError
+    from .session_host.host_index import REAP_CLEANUP_PENDING
 
     record = manager._host_index.get(session_id) if manager._host_index is not None else None
     if record is None:
@@ -118,6 +122,10 @@ def _remote_retry_record(manager: SessionManager, session_id: str) -> HostRecord
         raise RemoteHostRecoveryPendingError(
             f"Remote reap for {session_id} has no cleanup endpoint; cleanup remains unconfirmed"
         )
+    if not record.extra.get(REAP_CLEANUP_PENDING):
+        raise RemoteHostRecoveryPendingError(
+            f"Retained reap no longer owns current authority for {session_id}; cleanup remains unconfirmed"
+        )
     return record
 
 
@@ -126,9 +134,17 @@ async def retry_orphan_reaps(manager: SessionManager) -> None:
     import copy
 
     from .session_manager import asyncio, log
+    from .session_host.host_index import REAP_CLEANUP_PENDING
 
     while orphan_ids := [
-        sid for sid in manager._remote_reaps_by_session
+        sid for sid in (
+            set(manager._remote_reaps_by_session)
+            | {
+                record.session_id for record in (
+                    manager._host_index.all() if manager._host_index is not None else []
+                ) if record.extra.get(REAP_CLEANUP_PENDING)
+            }
+        )
         if sid not in manager._sessions and manager._remote_reap_pending(sid)
     ]:
         for session_id in orphan_ids:
@@ -152,10 +168,20 @@ async def reap_remote_record(
     record_revision: int | None = None,
 ) -> bool:
     """Keep authority until termination is confirmed; never forget a replacement."""
+    import copy
+
     from .session_manager import log
 
-    if record_revision is None and manager._host_index is not None:
-        record_revision = manager._host_index.revision(record.session_id)
+    index = manager._host_index
+    if record_revision is None and index is not None:
+        record_revision = index.revision(record.session_id)
+    current = index.get(record.session_id) if index is not None else None
+    if current != record or index is None or index.revision(record.session_id) != record_revision:
+        log.warning("Remote reap candidate changed for %s; refusing stale cleanup", record.session_id)
+        return False
+    index.mark_reap_pending(record.session_id)
+    record = copy.deepcopy(current)
+    record_revision = index.revision(record.session_id)
     endpoint = getattr(record, "endpoint", None) or {}
     if endpoint:
         confirmed = await manager._remote_reap(record, endpoint)
@@ -311,6 +337,10 @@ async def complete_stop(
             raise RemoteHostRecoveryPendingError(
                 f"Pending remote reap is inconclusive for {session_id}; ownership retained"
             )
+    if manager._remote_reap_pending(session_id):
+        raise RemoteHostRecoveryPendingError(
+            f"Durable remote reap is pending for {session_id}; ownership retained"
+        )
     from .session_host_ownership import has_host_ownership, require_no_pending_host_launch
 
     require_no_pending_host_launch(manager, session_id)

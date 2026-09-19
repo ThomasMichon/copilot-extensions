@@ -527,6 +527,11 @@ restart does not inherently close the child's pipes.
   A requested host reap also refuses an absent record with inconclusive
   authority, without guessing a provider endpoint. Ordinary pause can remain
   dormant in that case, but it does not claim that remote termination occurred.
+  Explicit remote reap intent is durably recorded before its remote side effect.
+  Failed direct reaps therefore remain cleanup obligations even with no task
+  handle, including after restart and for orphan records. Shutdown retries that
+  accepted intent; retained stopped-host metadata alone never grants permission
+  to reap. Pending reap intent also fences recovery until cleanup is confirmed.
   Remote cleanup also checks an in-process HostIndex publication revision,
   protecting equal-value replacement records from an older reap. Descriptor
   removal must persist before pending handles or container ownership are

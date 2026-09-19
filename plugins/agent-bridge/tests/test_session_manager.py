@@ -2100,6 +2100,7 @@ async def test_startup_reattach_resumes_session_stopped_while_starting(
         created_at=time.time(),
         resume_on_reattach=False,
         boundary="local",
+        extra={},
     )
     attach = AsyncMock(return_value=True)
     monkeypatch.setattr(manager, "_recover_remote_host_records", AsyncMock(return_value=0))
@@ -2133,6 +2134,7 @@ async def test_startup_reattach_leaves_prior_idle_session_idle(
         created_at=time.time(),
         resume_on_reattach=False,
         boundary="local",
+        extra={},
     )
     attach = AsyncMock(return_value=True)
     monkeypatch.setattr(manager, "_recover_remote_host_records", AsyncMock(return_value=0))

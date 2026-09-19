@@ -722,6 +722,7 @@ async def test_stop_waits_for_its_pending_remote_reap_only(context, monkeypatch,
     monkeypatch.setattr(ctx.manager, "_remote_reap", remote_reap)
     ctx.manager._schedule_remote_reap(ctx.record, "prior maintenance")
     other = replace(ctx.record, session_id="other-session")
+    ctx.manager._host_index.register(other)
     ctx.manager._schedule_remote_reap(other, "independent maintenance")
     other_task = next(iter(ctx.manager._remote_reaps_by_session[other.session_id]))
     try:

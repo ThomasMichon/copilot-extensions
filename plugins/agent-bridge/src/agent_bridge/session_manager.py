@@ -2056,7 +2056,10 @@ class SessionManager:
 
     def _remote_reap_pending(self, session_id: str) -> bool:
         """Whether an existing cleanup operation still owns this host's fate."""
-        return any(
+        from .session_host.host_index import REAP_CLEANUP_PENDING
+
+        record = self._host_index.get(session_id) if self._host_index is not None else None
+        return bool(record and record.extra.get(REAP_CLEANUP_PENDING)) or any(
             not task.done() or task.cancelled() or task.exception() is not None or not task.result()
             for task in self._remote_reaps_by_session.get(session_id, ())
         )
@@ -2091,6 +2094,8 @@ class SessionManager:
         if self._host_index is None:
             return
         for rec in self._host_index.all():
+            if self._remote_reap_pending(rec.session_id):
+                continue
             if rec.session_id in self._remote_recovery_inconclusive:
                 continue
             if (getattr(rec, "extra", None) or {}).get("launch_cleanup_pending"):
@@ -4102,6 +4107,9 @@ class SessionManager:
         touched. An explicit stop joins this session's scheduled reaps before
         acknowledging.
         """
+        if any(not task.done() for task in self._remote_reaps_by_session.get(rec.session_id, ())):
+            log.info("Remote reap already active for %s; retaining its owner", rec.session_id)
+            return
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
