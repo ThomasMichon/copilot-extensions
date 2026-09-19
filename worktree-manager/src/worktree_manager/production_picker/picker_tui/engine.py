@@ -3058,8 +3058,11 @@ class PickerScreen(Widget):
     def _toggle_wt(self, i):
         """Space on a Worktrees row toggles it in the list selection (#2258
         P3-3: additive, independent of the rest) and re-seats the range anchor
-        there so a following Shift+arrow extends from this row."""
-        recs = self.list_records()
+        there so a following Shift+arrow extends from this row. ``i`` is a
+        VISIBLE-list index (the render/navigation index space, #2228 Phase 4
+        review) -- resolved against ``_wt_visible_records()``, not the full
+        ``list_records()``."""
+        recs = self._wt_visible_records()
         if 0 <= i < len(recs):
             rec = recs[i]
             key = self._row_key(rec)
@@ -4350,7 +4353,10 @@ class PickerScreen(Widget):
         elif self.sel[0] == "L" and self.sel not in self.stops():
             self.sel = self.default_sel()
         if refs["anchor"] is not None:
-            self.wt_anchor = ids.index(refs["anchor"]) if refs["anchor"] in ids else None
+            if refs["anchor"] in ids:
+                self.wt_anchor = ids.index(refs["anchor"])
+            else:
+                self.wt_anchor = min(self.wt_anchor, max(0, len(ids) - 1)) if ids else None
 
     def _wt_cycle_sort(self):
         """Cycle the Worktrees list's sort key, then remap the focus/anchor/
@@ -4861,7 +4867,7 @@ class PickerScreen(Widget):
     def _selected_record(self):
         zone, i = self.sel
         if zone == "L":
-            arr = self.list_records()
+            arr = self._wt_visible_records()
         elif zone == "C":
             arr = self.maint_records()
         else:
@@ -5682,6 +5688,15 @@ class PickerScreen(Widget):
         if row.get("hidden") if "hidden" in row else (
                 (row.get("kind") or "session") in ("system", "bridge")):
             self.show_hidden = True
+        # Resolve by stable id against the FULL set (#2228 Phase 4 review): an
+        # active "/" filter/query must never make an explicit internal jump
+        # silently fail just because the destination doesn't currently match
+        # it. Clear the query first so the target is guaranteed visible,
+        # THEN resolve its render-order index.
+        full_match = any(
+            (r.get("raw") or {}).get("id") == wid for r in self.list_records())
+        if full_match and self.list_view.query:
+            self.list_view.clear()
         records = self._wt_visible_records()
         target_i = next(
             (i for i, r in enumerate(records)

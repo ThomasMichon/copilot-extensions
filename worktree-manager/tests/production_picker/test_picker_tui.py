@@ -1706,6 +1706,34 @@ def test_jump_to_worktree_unknown_id_is_safe(tmp_path):
     asyncio.run(run())
 
 
+def test_jump_to_worktree_clears_a_hiding_filter(tmp_path):
+    """PR #2911 review: "Jump to host"/"Jump to caller" must resolve the
+    target by stable id against the FULL set, then clear an active "/"
+    filter that would otherwise hide it -- not silently fail/land on a
+    default just because the destination doesn't match the current query."""
+    src = _bridge_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.t0 = 0
+            scr.show_hidden = True
+            scr.machine_idx = 0            # All
+            await pilot.pause()
+            # A query matching only "Local wt" -- "Bridge wt" (the jump
+            # target) would otherwise be hidden by it.
+            scr.list_view.query = "local"
+            ok, _msg = scr._jump_to_worktree("emancipation-cube-win-bridge-2222")
+            assert ok is True
+            assert scr.list_view.query == ""   # the hiding filter was cleared
+            assert scr.sel[0] == "L"
+            landed = scr._wt_visible_records()[scr.sel[1]]
+            assert (landed.get("raw") or {}).get("id") == "emancipation-cube-win-bridge-2222"
+
+    asyncio.run(run())
+
+
 def test_open_worktree_cli_exits_with_resume_decision():
     """#2253: the ``open-cli`` internal action opens the entry's target worktree
     into a CLI session -- it exits the picker with a standard resume decision for
@@ -4790,6 +4818,41 @@ def test_command_bar_filter_never_narrows_list_records_or_selection(monkeypatch)
     asyncio.run(run())
 
 
+def test_command_bar_space_toggles_the_visible_row_not_a_full_list_index(monkeypatch):
+    """PR #2911 review: `Space` (``_toggle_wt``) receives a VISIBLE-list
+    index (``sel[1]``) -- it must resolve that index against
+    ``_wt_visible_records()``, not the full ``list_records()``, or a filter
+    that reorders the index space would toggle the WRONG row."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+            # Only "Fix the thing" is visible now, at visible-index 0.
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix the thing"]
+            scr.sel = ("L", 0)
+            await pilot.press("space")
+            await pilot.pause()
+            selected = [w for w in scr.list_records()
+                        if scr._row_key(w) in scr.wt_sel.ids]
+            assert [w["title"] for w in selected] == ["Fix the thing"]
+            # And _selected_record() (Enter's per-row target) must agree.
+            assert scr._selected_record()["title"] == "Fix the thing"
+
+    asyncio.run(run())
+
+
 def test_command_bar_owns_ctrl_arrow_keys_while_composing(monkeypatch):
     """PR #2911 review: ``BINDING_KEYS`` (Ctrl+Left/Right, the machine-switch
     shortcut) was checked before ``cmd_mode``, so it still bubbled to
@@ -5109,6 +5172,58 @@ def test_command_bar_last_l_clamps_to_equivalent_index_when_row_vanishes(monkeyp
             # equivalent index (clamped 1) is "Fix third", not index 0.
             assert [w["title"] for w in scr._wt_visible_records()] == ["Fix first", "Fix third"]
             assert scr._wt_visible_records()[scr.last_l]["title"] == "Fix third"
+
+    asyncio.run(run())
+
+
+def test_command_bar_anchor_clamps_to_equivalent_index_when_row_vanishes(monkeypatch):
+    """PR #2911 review: when the ANCHORED row (wt_anchor, the Shift+arrow
+    range-select origin) is filtered out entirely, it must clamp to the
+    equivalent index -- not drop to None, which would silently re-seed the
+    range from current focus on the next Shift+arrow (changing the
+    selected range unexpectedly)."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Fix first",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-bbbb", "title": "Alt row",
+         "status": "active", "started_at": "2026-06-27T16:30:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-cccc", "title": "Fix third",
+         "status": "active", "started_at": "2026-06-27T16:00:00",
+         "turn_count": 1, "state": "wip"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix first", "Alt row", "Fix third"]
+            scr.wt_anchor = 1   # "Alt row"
+            await _focus_wt_list(app, pilot, scr)
+            scr.sel = ("M", 0)
+            scr.refresh()
+            await pilot.pause()
+            await pilot.press("/")
+            for ch in "fix":
+                await pilot.press(ch)
+                await pilot.pause()
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Fix first", "Fix third"]
+            assert scr.wt_anchor is not None
+            assert scr._wt_visible_records()[scr.wt_anchor]["title"] == "Fix third"
 
     asyncio.run(run())
 
