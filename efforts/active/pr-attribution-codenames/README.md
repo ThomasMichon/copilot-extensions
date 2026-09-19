@@ -231,7 +231,10 @@ kill, no encoding-from-a-subprocess concern, no zombie/leak risk.
   from `finalize.push_changes`'s two publish paths (`_push_changes_pr`,
   `_push_changes_pr_refspec`), which republish `record.pr.branch` on every
   re-push independent of `create_pr` and needed the same guard (review
-  round 2 caught this second boundary).
+  round 2 caught this second boundary). Checks both the LIVE `config.machine`
+  and the worktree's originally RECORDED `record.machine` at every call site
+  (review round 3 caught that a machine rename/migration otherwise left an
+  old identifying branch unchecked against the live name alone).
 - [x] **Hard error, not a warning.** A warning still lets the push proceed
   with an identifying ref. When `source_attribution` isn't `true` and the
   effective head would carry a private identifier, this must be a hard
@@ -574,6 +577,18 @@ reverse lookup, no new registry).
   `push-changes` either. 2 new tests (`TestPRFinalizeAndPush`-adjacent,
   snapshot + refspec modes); full `test_pr_ops.py`/`test_providers.py`/
   `test_config.py` suite: 453 passed.
+- **Review round 3** caught that `validate_effective_head` only checked the
+  LIVE `config.machine`, never the worktree's originally RECORDED
+  `record.machine` (frozen at registration). After a machine rename or
+  record migration, a reused-existing-PR head or a stale recorded branch
+  embedding the OLD machine name would pass the check against the new live
+  name. Widened `validate_effective_head`'s `machine` parameter to accept a
+  tuple, and pass `(config.machine, record.machine)` from all three call
+  sites (`create_pr`, and both `finalize.push_changes` publish paths). 5 new
+  tests (2 unit on the tuple form in `test_providers.py`, 1 empty-string
+  guard, 2 integration in `test_pr_ops.py` covering create_pr and
+  push_changes after a simulated rename); full `test_pr_ops.py`/
+  `test_providers.py`/`test_config.py` suite: 458 passed.
 
 Remaining: Phase 3 (descoped SSH-based reverse lookup, not yet
 rewritten/implemented). This effort is not `Done` until Phase 3 lands too.

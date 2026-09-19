@@ -712,8 +712,11 @@ def _push_changes_pr(
     # either.
     from .providers.attribution import BranchLeakError, validate_effective_head
     try:
+        # Both the LIVE config machine and the worktree's originally
+        # RECORDED machine -- see the matching comment in pr_ops.create_pr.
         validate_effective_head(
-            feature, worktree_id=worktree_id, machine=config.machine,
+            feature, worktree_id=worktree_id,
+            machine=(config.machine, record.machine),
             source_attribution=repo.pr.source_attribution,
         )
     except BranchLeakError as exc:
@@ -884,8 +887,11 @@ def _push_changes_pr_refspec(
 
     from .providers.attribution import BranchLeakError, validate_effective_head
     try:
+        # Both the LIVE config machine and the worktree's originally
+        # RECORDED machine -- see the matching comment in pr_ops.create_pr.
         validate_effective_head(
-            feature, worktree_id=worktree_id, machine=config.machine,
+            feature, worktree_id=worktree_id,
+            machine=(config.machine, record.machine),
             source_attribution=repo.pr.source_attribution,
         )
     except BranchLeakError as exc:

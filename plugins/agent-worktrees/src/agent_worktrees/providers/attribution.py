@@ -116,7 +116,7 @@ def validate_effective_head(
     head: str,
     *,
     worktree_id: str,
-    machine: str,
+    machine: str | tuple[str, ...],
     source_attribution: "SourceAttribution",
 ) -> None:
     """Block an effective PR head that would leak a private identifier.
@@ -125,13 +125,16 @@ def validate_effective_head(
     however it was chosen (an explicit ``--branch``, a reused existing-PR
     branch, or a rendered ``head_pattern`` template). When
     *source_attribution* is not exactly ``True`` (i.e. it is ``False`` or
-    ``"codename"``), ``head`` must not contain the raw *worktree_id*, the
-    *machine* name, or an unresolved ``{machine}``/``{worktree_id}`` template
-    marker (a defensive check: neither token should ever survive
-    unsubstituted into a published ref, but a config bug must not silently
-    leak one). Raises :class:`BranchLeakError` naming the offending
-    reason(s); callers must surface this as a hard error and refuse to push,
-    never warn-and-continue.
+    ``"codename"``), ``head`` must not contain the raw *worktree_id*, any of
+    the given *machine* name(s) (a single string, or a tuple to cover both
+    the *current* config machine and a worktree's originally-*recorded*
+    machine -- a renamed/migrated machine can otherwise leave an old
+    identifying branch name unchecked against the live config alone), or an
+    unresolved ``{machine}``/``{worktree_id}`` template marker (a defensive
+    check: neither token should ever survive unsubstituted into a published
+    ref, but a config bug must not silently leak one). Raises
+    :class:`BranchLeakError` naming the offending reason(s); callers must
+    surface this as a hard error and refuse to push, never warn-and-continue.
 
     A repo that has opted into the full raw marker
     (``source_attribution: true``) already accepts machine/worktree/session
@@ -140,11 +143,13 @@ def validate_effective_head(
     """
     if source_attribution is True or not head:
         return
+    machines = (machine,) if isinstance(machine, str) else tuple(machine)
     reasons: list[str] = []
     if worktree_id and worktree_id in head:
         reasons.append(f"raw worktree id {worktree_id!r}")
-    if machine and machine in head:
-        reasons.append(f"machine name {machine!r}")
+    for candidate in dict.fromkeys(m for m in machines if m):
+        if candidate in head:
+            reasons.append(f"machine name {candidate!r}")
     unresolved = list(dict.fromkeys(_UNRESOLVED_TOKEN_RE.findall(head)))
     if unresolved:
         reasons.append(

@@ -1130,6 +1130,23 @@ class TestCreatePRBranchLeakGuard:
         res = pr_ops.create_pr(wid, config, title="Add feature")
         assert res["success"] is True, res
 
+    def test_renamed_machine_still_blocks_the_recorded_identity(self, pr_repo):
+        # config.machine (live) can differ from record.machine (frozen at
+        # registration, e.g. after a machine rename/migration). An explicit
+        # --branch embedding the OLD recorded machine name must still be
+        # blocked even though the live config machine no longer matches it.
+        config, wid, wt_path, _ = pr_repo
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.machine == "test"
+        import dataclasses
+        renamed_config = dataclasses.replace(config, machine="new-machine-name")
+        res = pr_ops.create_pr(
+            wid, renamed_config, title="Add feature", branch="user/test/reused-head",
+        )
+        assert res["success"] is False
+        assert "machine name" in res["error"]
+        assert "'test'" in res["error"]
+
 
 # ---------------------------------------------------------------------------
 # set_pr / pr_status
@@ -1595,6 +1612,31 @@ class TestPRFinalizeAndPush:
         assert ok is False
         assert not git_ops.remote_branch_exists(
             "origin", leaking_branch, cwd=str(wt_path)
+        )
+
+    def test_push_changes_blocks_recorded_machine_after_rename(self, pr_repo):
+        # config.machine (live) vs record.machine (frozen) -- push-changes
+        # must check both, exactly like create_pr (review round 3).
+        import dataclasses
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _remote_dir = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.machine == "test"
+        rec.pr.branch = "user/test/reused-head"
+        tracking.save_record(rec)
+
+        renamed_config = dataclasses.replace(config, machine="new-machine-name")
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        ok = fin.push_changes(wid, renamed_config)
+        assert ok is False
+        assert not git_ops.remote_branch_exists(
+            "origin", "user/test/reused-head", cwd=str(wt_path)
         )
 
     def test_push_changes_refreshes_marker_and_preserves_body(

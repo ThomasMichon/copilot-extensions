@@ -311,6 +311,38 @@ class TestValidateEffectiveHead:
                 source_attribution=False,
             )
 
+    def test_recorded_machine_in_head_is_blocked_even_if_live_machine_differs(
+        self,
+    ):
+        # A renamed/migrated machine: the live config machine no longer
+        # matches the head's embedded identity, but the worktree's originally
+        # RECORDED machine still does -- both must be checked.
+        with pytest.raises(attribution.BranchLeakError, match="machine name"):
+            attribution.validate_effective_head(
+                "user/old-machine-name/my-change",
+                worktree_id="wt-abcd",
+                machine=("new-machine-name", "old-machine-name"),
+                source_attribution=False,
+            )
+
+    def test_multi_machine_tuple_with_no_match_passes(self):
+        attribution.validate_effective_head(
+            "pr/my-change-abcd",
+            worktree_id="wt-abcd",
+            machine=("new-machine-name", "old-machine-name"),
+            source_attribution=False,
+        )
+
+    def test_empty_machine_in_tuple_is_ignored(self):
+        # A record with no machine recorded yet (or in tests, an empty
+        # string) must not accidentally match every branch name.
+        attribution.validate_effective_head(
+            "pr/my-change-abcd",
+            worktree_id="wt-abcd",
+            machine=("lambda-core", ""),
+            source_attribution=False,
+        )
+
     def test_unresolved_template_marker_is_blocked(self):
         with pytest.raises(
             attribution.BranchLeakError, match="unresolved template marker"
