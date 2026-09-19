@@ -43,12 +43,16 @@ agent-chat-driven flow).
 ## Coordination
 
 - **Topology:** independent per-phase PRs once the design is approved (each
-  Plan phase below is a self-contained, reviewable slice).
+  Plan phase below is a self-contained, reviewable slice). **Phases 0-3
+  landed as one combined PR (#2913)** rather than split retroactively —
+  see the Journal's "single PR" decision entry; going forward, **land each
+  remaining phase's implementation PR before starting the next phase** —
+  do not begin the next phase's implementation while the current phase's
+  PR is unopened or unlanded, unless a session explicitly journals why and
+  for how long that is deferred (see `ThomasMichon/copilot-extensions#2908`,
+  filed to get upstream `efforts` guidance enforcing exactly this gate).
 - **Host (owns PRs):** whichever worktree lands each phase.
-- **Delegates:** none yet — this worktree owns design + preview + Phase 1
-  implementation so far (no worktree split yet; see the Runbook below for
-  why, and split into per-phase worktrees/PRs once a phase is ready to
-  submit for review).
+- **Delegates:** none yet.
 - **Handoff:** the preview tooling and captured screenshots in this worktree
   are the artifact an operator reviews before any implementation PR opens.
   Implementation work follows a **manual sequenced-session handoff loop**
@@ -64,12 +68,21 @@ kept up to date at the end of every session (or handoff point) so a fresh
 session never has to re-derive "what's already done" from the Journal alone.
 
 - **Worktree:** `C:\Data\Src\copilot-extensions.worktrees\tmichon-cloud1-win-20260917-003059-332c`
-  (`cd` here — do not create a new worktree; all Phase 0/1 context, the
-  preview tooling, and the uncommitted-to-main design docs only exist on
-  this branch).
-- **Current phase:** **Phase 3 is now COMPLETE** (the manifest + column
-  fields, and the "+N more" column-drop indicator, all landed -- see
-  below). Phases 4-9 remain (see the Plan section).
+  is the effort's established driving worktree. **Phases 0-3 are merged to
+  `main`** (PR #2913, squash-merged 2026-09-19), so a fresh session should
+  pick explicitly rather than default: (a) resume in that worktree,
+  rebasing it onto current `main` before continuing Phase 4, or (b) create
+  a fresh worktree off current `main` when only landing an isolated,
+  already-committed doc/fix — never both, and never treat "resume Phase 4
+  in the established worktree" and "spin up a new worktree" as
+  interchangeable. Whichever worktree is driving Phase 4 carries several
+  unrelated stash entries that pre-date this effort — never run
+  `git stash pop`/`git stash apply` without an explicit `stash@{N}` naming
+  the entry you intend, and never clear the stash list.
+- **Current phase:** **Phase 3 is now COMPLETE and MERGED to `main`** (the
+  manifest + column fields, the "+N more" column-drop indicator, and all
+  16 PR-review findings from #2913 -- see below). Phases 4-9 remain (see
+  the Plan section).
 - **Build/test commands** (agent-dispatch package):
   ```powershell
   cd plugins\agent-dispatch
@@ -1387,4 +1400,72 @@ this session -- a quick look confirmed `RegisteredPivotRuntime.ensure`/
 async/in-memory on inspection), narrowing the search for whoever picks this
 up next to `_machine_key_map`'s first-call cost and the tab-switch
 keypress's own call path. Not yet reproduced/root-caused; no fix attempted.
+
+### 2026-09-18/19 — PR #2913 opened, reviewed, and MERGED (Phases 0-3 landed to `main`)
+Operator asked to push the accumulated work. This branch had drifted 66
+commits behind `main` since Phase 0 (never landed incrementally -- see the
+new Coordination note and `ThomasMichon/copilot-extensions#2908`, filed
+upstream against the `efforts` plugin to get guidance that actually
+enforces per-phase PR landing going forward). Rebasing surfaced two real
+conflicts, both resolved by hand: `origin/main` had independently landed
+an equivalent OptionList scroll-preservation fix (this branch's redundant
+copy was dropped); `pivots.py`'s `Column`/`RegisteredPivot` classes had
+moved to a new `pivot_manifest.py` module upstream (`Column.priority` was
+re-applied there instead). Operator chose a single combined PR rather than
+splitting retroactively into per-phase PRs.
+
+**PR #2913 opened**, then Copilot's automated review returned 16 findings
+(5 High/Critical, 7 Medium, 4 Low) -- all real, all fixed in this session:
+- **Backend correctness:** `start()` now honors held-task fencing;
+  `reset()` releases any active spawn reservation instead of orphaning a
+  live session; `suspend()` gained `reject_pending_steer=False` so
+  force-stop can deliberately override a pending card instead of failing
+  after already killing the session; `reserve_spawn` gained
+  `allow_suspended_reembodiment` (deriving the carried worktree from a
+  suspended task's own `owner` when no reservation carries it) and
+  `interactive_embody.py` now actually checks the `reserved` flag it was
+  previously ignoring (a real "steal an active reservation" bug);
+  `force_end_session`/`prepare_reusable_worktree` callers now catch
+  `OSError`/`TimeoutExpired`; auto-suspend clears stale `activity` fields;
+  supervisor excludes held tasks from spawn eligibility; `--expected-status`
+  wired through `reset`/`abandon`/`steer submit`.
+- **Manifest scope correction (the one Critical finding needing a design
+  call, not just a bugfix):** the manifest's `open-cli` action reused the
+  Worktrees pane's GENERIC internal verb, which has no idea about Phase 1
+  item 3's ownership transaction and would mis-handle Proposed/Queued/
+  Suspended tasks. Rather than rushing a dedicated internal verb (real
+  Phase 7 scope), `board_cli.py` now computes `has_worktree`/`embodied`/
+  `held` from real task fields, while `cli_openable`/`has_charter` stay
+  honestly hard-`False` with an explanatory comment each -- schema-visible,
+  never actually reachable, until their owning phases (7/5) land the real
+  wiring. Also added the missing `unpause` action.
+- **Housekeeping:** version bump; the preview screenshots' synthetic
+  fixture identifiers (org/repo/host placeholders) were replaced with
+  clearly-generic ones so no personal or internal identifier appears in
+  captured evidence; README count fix.
+
+**CI unblocking (two more real issues, neither review findings):** a
+pre-existing, unrelated `agent-index` version-drift test was already
+broken on `main` before this PR touched anything (synced its stale
+declaration, which itself needed `agent-index`'s own version bump per
+`check-version-bump.py`); and this effort's own commits pushed 6 files
+further past their shrink-only module-size ceilings plus 2 new files
+(`embody.py`, `queue_spawn_reservations.py`) past the flat 1000-line hard
+cap for the first time -- widened deliberately via the tool's own
+documented `--refresh-baseline --allow-widen` escape hatch (existing
+entries) plus 2 manual new entries (new crossings aren't eligible for the
+automated ratchet). Splitting these modules remains real, separate
+follow-on work, not attempted here.
+
+Survived two more `main`-drift rebases while landing (once for an
+unrelated agent-worktrees PR, once for the module-size baseline lagging
+behind main's own widen automation).
+
+**Final validation:** 2961 passed / 2 known pre-existing unrelated failed
+(`test_bootstrap_check_reconcile_opt_in.py::test_sh_*`) / 1 known occasional
+flake (`test_supervisor.py::test_requeued_task_is_not_double_spawned`,
+reconfirmed passing in isolation) / 9 skipped. All CI green,
+`mergeStateStatus: CLEAN`.
+
+**PR #2913 squash-merged 2026-09-19.** Phases 0-3 are now on `main`.
 
