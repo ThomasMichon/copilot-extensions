@@ -468,6 +468,12 @@ Verbatim from the operator:
   both the predecessor and successor pane, with `pane_terminate` cleanly
   retiring the predecessor and leaving the successor and the operator's own
   session untouched.
+  **Update 2026-09-18:** the actual `agent-worktrees handoff-cutover`
+  command (not just the standalone primitives) is now also live-validated
+  end-to-end -- spawn (real seeded Copilot successor) + retire (predecessor)
+  against a disposable session -- surfacing and fixing a fifth live bug (a
+  false `identity-mismatch-skip` in retire mode's own pre-flight check; see
+  the Journal entry below).
 
 ## Proposal
 
@@ -1076,4 +1082,60 @@ gate land._
   session loaded and responded normally to its seeded prompt — then
   retired it cleanly via `pane_terminate` (`gone: true`, graceful),
   leaving the operator's own pane untouched throughout.
+
+### 2026-09-18 — Fifth bug: full `handoff-cutover` command live-validated end-to-end, one real retire-mode bug found + fixed
+
+- All four bugs above were found by live-testing the two **primitives**
+  (`pane-create`/`pane-terminate`) in isolation. Nobody had yet live-tested
+  the actual `agent-worktrees handoff-cutover` command itself (spawn mode →
+  real seeded successor → retire mode) — the thing operators and the
+  extension actually invoke. Per the operator's direction, ran it
+  end-to-end against a disposable `--system` worktree: bootstrapped a
+  placeholder predecessor pane via `pane-create`, ran `handoff-cutover`
+  spawn mode with a real seed (a genuine interactive Copilot process
+  launched, seeded, and responded correctly — `ok: true`,
+  `foregrounded: true`, `seeded: true`), then ran `handoff-cutover` retire
+  mode on the predecessor pane.
+- **Bug found:** retire mode reported `identity-mismatch-skip` even though
+  the predecessor pane genuinely was in the expected session — a false
+  positive that would silently no-op a legitimate retire. Root cause:
+  `_handoff_cutover_retire_result`'s own pre-flight identity check called
+  `sessions.mux_session_for_pane()` (→ `current_mux_session()`), which runs
+  a **bare** `display-message -t <pane_id>` unqualified by session — the
+  exact unsafe pattern already fixed elsewhere (#2890/#2892/#2896) for
+  `pane_terminate`/`mux_focus_pane`, but never fixed here. Reproduced
+  directly (`psmux display-message -p -t "%1" "#{session_name}"` returned
+  the *caller's own* attached session, not the session that actually owned
+  pane `%1`) with **no genuine id collision present** — a stricter failure
+  mode than #2886's collision case: an unqualified `-t <pane_id>` can
+  silently resolve to a default/current-session context when run from
+  outside the target pane (e.g. an orchestrator retiring a predecessor on
+  its behalf, not a predecessor self-retiring), independent of whether any
+  other session happens to share that bare id.
+- Fixed by adding `_resolve_retire_pane_mux_session()`: checks membership in
+  the *expected* session first via the already-safe, session-scoped
+  `list-panes -a` filter (`sessions_pane_retire._list_matching_pane_targets`),
+  falling back to the (also safe) unscoped resolver only when the pane
+  isn't there — never the bare `display-message` lookup. Re-ran the live
+  test after the fix: retire mode correctly resolved and retired the
+  predecessor (`ok: true`, `gone: true`), while the real successor Copilot
+  pane and the operator's own attached session were both confirmed
+  untouched.
+- **Incidental fix**: found and repaired a pre-existing, unrelated test-file
+  defect while adding regression coverage —
+  `test_execute_retires_every_stale_predecessor_in_one_pass` in
+  `test_handoff_cutover.py` was accidentally nested *inside* another test
+  function's body (a stray indentation mistake from an earlier edit),
+  making it a dead nested function pytest never collected or ran. Restored
+  it as a proper `TestCmdHandoffsCheck` method; it passes.
+- Added three focused unit tests for `_resolve_retire_pane_mux_session`
+  (scoped-match preferred, unscoped fallback, ambiguous-raises-None) plus a
+  precise `tools/module-size-baseline.json` widen (28601 → 28635) for
+  `__main__.py`'s net size. Full targeted suite
+  (`handoff_cutover or pane_lifecycle or restart_copilot`): 141 passed. Full
+  `agent-worktrees` suite: 613 passed, 10 pre-existing `test_doctor.py`
+  failures confirmed reproducing identically on a clean `origin/main`
+  checkout (unrelated to this change).
+- Cleaned up: disposable successor/predecessor panes and the `--system`
+  worktree used for the live test were all removed after validation.
 
