@@ -1102,9 +1102,20 @@ def _open_via_provider(
             # object-identity concern with `target_pr` (a separate
             # parameter this function mutates directly and appends onto
             # `record.prs` upstream).
-            codename_tracking.ensure_codename(
-                record, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config),
-            )
+            #
+            # Best-effort: `ensure_codename` can raise (notably
+            # `TimeoutError` if its cross-process allocation lock can't be
+            # acquired in time). This whole path is opening a PR -- a
+            # codename-backfill failure must degrade to "no marker on this
+            # PR" (the pre-existing skip behavior), never crash the
+            # provider-open flow and abort the PR entirely.
+            try:
+                codename_tracking.ensure_codename(
+                    record, cfg.tracking_dir(),
+                    codename_tracking.wordlist_for_repo(config),
+                )
+            except Exception:
+                pass
             codename = record.codename
         marker_published = bool(
             isinstance(codename, str) and codename_mod.is_valid_handle(codename)

@@ -1852,6 +1852,35 @@ class TestCreatePRAutoOpen:
         rec_after = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec_after.codename == fields["codename"]
 
+    def test_codename_backfill_failure_degrades_to_skip_not_crash(
+        self, pr_repo, monkeypatch,
+    ):
+        """`ensure_codename` can raise (notably `TimeoutError` if its
+        cross-process allocation lock can't be acquired in time) -- this is
+        opening a PR, so a backfill failure must degrade to "no marker on
+        this PR" (the pre-existing skip behavior), never crash the
+        provider-open flow and abort the whole PR."""
+        from agent_worktrees import codename_tracking, providers
+        config, wid, _wt, _ = pr_repo
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.codename is None
+        config = self._enable_open(config, source_attribution="codename")
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake)
+
+        def _boom(*a, **k):
+            raise TimeoutError("lock contended")
+        monkeypatch.setattr(codename_tracking, "ensure_codename", _boom)
+
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert res["success"] is True
+        assert res.get("pr_opened") is True
+        assert attribution.parse_marker(fake.captured["scope"].body) is None
+        rec_after = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec_after.codename is None
+
     def test_codename_mode_skip_strips_a_stale_marker_from_the_body(
         self, pr_repo, monkeypatch,
     ):
