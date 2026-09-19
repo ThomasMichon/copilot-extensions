@@ -6921,6 +6921,34 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             ctx.__exit__(None, None, None)
 
 
+def cmd_attribution_audit(args: argparse.Namespace) -> int:
+    """Migration audit (pr-attribution-codenames Phase 5): flag this repo's
+    ``pr.head_pattern`` for the branch-name leak class.
+
+    Config-only -- never touches git or a provider. Exits non-zero when a
+    finding is present in plain mode, so it composes into a CI/pre-flight
+    check. ``--json`` exits 0 whenever it can report findings (empty or
+    not) in the payload; a configuration-load failure is a separate
+    condition and exits 1 in BOTH modes (JSON emits ``{"error": ...}``
+    instead of the findings envelope).
+    """
+    use_json = getattr(args, "json", False)
+    try:
+        config = cfg.load_config(Path(args.config) if args.config else None)
+    except Exception as e:
+        return _json_error(str(e)) if use_json else (output.err(str(e)) or 1)
+    findings = pr_ops.audit_attribution_risk(config)
+    if use_json:
+        _json_output({"success": True, "findings": findings})
+        return 0
+    if not findings:
+        output.ok("No branch-name leak-class risk found in this repo's PR config.")
+        return 0
+    for finding in findings:
+        output.warn(finding)
+    return 1
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # set-pr / pr-status
 # ═══════════════════════════════════════════════════════════════════════════
@@ -22915,6 +22943,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
     p.add_argument("--config", default=None)
 
+    # attribution-audit (pr-attribution-codenames Phase 5 migration audit)
+    p = sub.add_parser(
+        "attribution-audit",
+        help="Flag this repo's pr.head_pattern for the branch-name leak class "
+        "(config-only; does not touch git or a provider)",
+    )
+    p.add_argument("--json", action="store_true", help="JSON output mode")
+    p.add_argument("--config", default=None)
+
     # set-pr (record PR metadata from the provider sub-agent)
     p = sub.add_parser("set-pr", help="Record PR metadata (URL/number/state) on a worktree")
     p.add_argument("worktree_id", nargs="?", default=None)
@@ -26919,6 +26956,7 @@ COMMAND_MAP = {
     "push-changes": cmd_push_changes,
     "create-pr": cmd_create_pr,
     "pr-create": cmd_create_pr,  # pr-* family alias (also rewritten pre-argparse)
+    "attribution-audit": cmd_attribution_audit,
     "set-pr": cmd_set_pr,
     "pr-ready": cmd_pr_ready,
     "pr-status": cmd_pr_status,

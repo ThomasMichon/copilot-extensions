@@ -704,6 +704,25 @@ def _push_changes_pr(
         output.err("PR mode: no tracked PR feature branch to update.")
         return False
 
+    # Branch-name leak class (pr-attribution-codenames Phase 5): create-pr
+    # validates a NEW feature branch name, but push-changes republishes a
+    # branch recorded earlier -- including one set via `set-pr --branch`, or
+    # one that predates this guard. Re-validate the effective head here too,
+    # so a leaking branch can never be (re)published through this path
+    # either.
+    from .providers.attribution import BranchLeakError, validate_effective_head
+    try:
+        # Both the LIVE config machine and the worktree's originally
+        # RECORDED machine -- see the matching comment in pr_ops.create_pr.
+        validate_effective_head(
+            feature, worktree_id=worktree_id,
+            machine=(config.machine, record.machine),
+            source_attribution=repo.pr.source_attribution,
+        )
+    except BranchLeakError as exc:
+        output.err(str(exc))
+        return False
+
     if not git_ops.is_clean(cwd=worktree_path):
         dirty = git_ops.get_dirty_files(cwd=worktree_path)
         detail = "\n".join(f"    {ln}" for ln in dirty)
@@ -864,6 +883,19 @@ def _push_changes_pr_refspec(
     feature = pushed_pr.branch if (pushed_pr and pushed_pr.branch) else ""
     if not feature:
         output.err("PR mode (refspec): no tracked PR head ref to update.")
+        return False
+
+    from .providers.attribution import BranchLeakError, validate_effective_head
+    try:
+        # Both the LIVE config machine and the worktree's originally
+        # RECORDED machine -- see the matching comment in pr_ops.create_pr.
+        validate_effective_head(
+            feature, worktree_id=worktree_id,
+            machine=(config.machine, record.machine),
+            source_attribution=repo.pr.source_attribution,
+        )
+    except BranchLeakError as exc:
+        output.err(str(exc))
         return False
 
     if not git_ops.is_clean(cwd=worktree_path):
