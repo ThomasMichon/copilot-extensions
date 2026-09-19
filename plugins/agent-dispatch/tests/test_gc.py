@@ -197,6 +197,14 @@ def test_reconcile_gone_cli_embodied_task_is_suspended_not_requeued(q):
     b = q.create("b", now=1001.0)
     _claim_and_start(q, a.id, wt="wtA", session="SA", now=1002.0)
     _claim_and_start(q, b.id, wt="wtB", session="SB", now=1003.0)
+    # A stale headless-style beat left on the row (PR #2913 review: without
+    # the fix, auto-suspend leaves this untouched, so a confirmed-gone task
+    # can keep showing LIVE via the Tasks pane's `wt_live` column).
+    with q._connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET activity = 'ACTIVE', activity_updated_at = ? WHERE id = ?",
+            (1002.0, a.id),
+        )
 
     def resolver(wt, mc, sid):
         return {"wtA": "gone", "wtB": "live"}[wt]
@@ -211,6 +219,10 @@ def test_reconcile_gone_cli_embodied_task_is_suspended_not_requeued(q):
     # Owner/owner-session identity is retained (unlike the headless requeue
     # path) so a fresh interactive-embodiment session can resume + rebind it.
     assert gone_task.owner == "m/wtA" and gone_task.owner_session_id == "SA"
+    # Activity fields are cleared -- matching manual TaskQueue.suspend()'s own
+    # behavior (via `_transition`'s "leaving the held lifecycle" rule).
+    assert gone_task.activity is None
+    assert gone_task.activity_updated_at is None
     assert q.get(b.id).status == Status.STARTED  # a live owner is never disturbed
 
 

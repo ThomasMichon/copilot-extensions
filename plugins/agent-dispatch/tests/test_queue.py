@@ -420,6 +420,23 @@ def test_set_hold_blocks_resume_release_and_reclaim(q):
     assert resumed.status == Status.STARTED
 
 
+def test_set_hold_on_claimed_task_blocks_start(q):
+    """PR #2913 review finding: a hold set while `claimed` must also block the
+    claimed -> started transition, not just resume/release_suspended -- a
+    worker must not be able to advance a task past an operator's durable
+    pause."""
+    t = q.create("investigate the flaky runner")
+    q.claim_one("w1", task_id=t.id)
+    q.set_hold(t.id, reason="operator paused before start", actor="tmichon")
+
+    with pytest.raises(TaskError, match="held"):
+        q.start(t.id, "w1")
+
+    q.clear_hold(t.id, actor="tmichon")
+    started = q.start(t.id, "w1")
+    assert started.status == Status.STARTED
+
+
 def test_set_hold_on_queued_task_prevents_claim(q):
     t = q.create("queued task an operator wants held")
     q.set_hold(t.id, reason="hold before anyone claims it", actor="tmichon")
@@ -553,6 +570,27 @@ def test_reset_discards_embodiment_state_preserves_goal(q):
     assert back.goal == "ship the thing"
     assert back.done_criteria == "tests pass"
     assert len(q.progress_log(t.id)) == 1
+
+
+def test_reset_releases_active_spawn_reservation(q):
+    """PR #2913 review: resetting a task with an active spawn reservation
+    must release it -- otherwise the old attempt's session/reservation
+    stays live with no task owning it, free to keep running and race a
+    fresh attempt. Reuses the same `release_spawn` mechanism
+    `yield_task`/`release_suspended` already rely on."""
+    t = q.create("task")
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn(reservation.key, session_handle="s1", worktree="wt")
+    q.claim_one("m/wt", task_id=t.id, machine="m", worktree="wt")
+    q.start(t.id, "m/wt", owner_session_id="s1")
+    assert q.latest_reservation(t.id).state == "spawned"
+
+    q.reset(t.id, reason="not like this")
+
+    released = q.latest_reservation(t.id)
+    assert released.key == reservation.key
+    assert released.state == "releasing"
+    assert released.release_requested is True
 
 
 @pytest.mark.parametrize(

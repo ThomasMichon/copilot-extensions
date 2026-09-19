@@ -60,26 +60,26 @@ def _demo_worktrees_source():
     from worktree_manager.production_picker.picker_tui import derive
 
     derive.NOW = datetime.datetime(2026, 9, 16, 23, 0, 0)
-    local = ("tmichon-cloud1", "Win")
+    local = ("build-host-1", "Win")
     raws = [
-        {"id": "tmichon-cloud1-win-20260916-140200-a1c4",
+        {"id": "build-host-1-20260916-140200-a1c4",
          "title": "Review draft: harden the relay reconnect path",
          "status": "active", "started_at": "2026-09-16T14:02:00",
          "turn_count": 18, "state": "dirty"},
-        {"id": "tmichon-cloud1-win-20260916-090000-88de",
+        {"id": "build-host-1-20260916-090000-88de",
          "title": "Fix agent-mcp decorator ordering regression",
          "status": "active", "started_at": "2026-09-16T09:00:00",
          "turn_count": 34, "state": "wip",
          "mux_session": True, "mux_attached": True, "mux_clients": 1},
-        {"id": "tmichon-cloud1-win-20260915-100000-c72e",
+        {"id": "build-host-1-20260915-100000-c72e",
          "title": "Investigate augloop-workflows flaky scenario runner",
          "status": "active", "started_at": "2026-09-15T10:00:00",
          "turn_count": 9, "state": "wip"},
     ]
     s = types.SimpleNamespace()
     s.LOCAL = local
-    s.LOCAL_LABEL = "tmichon-cloud1 \u00b7 win"
-    s.machines = lambda: [("tmichon-cloud1 Win", "tmichon-cloud1", "Win", True)]
+    s.LOCAL_LABEL = "build-host-1 \u00b7 win"
+    s.machines = lambda: [("build-host-1 Win", "build-host-1", "Win", True)]
     s.bucket = derive.bucket
     s.for_machine = derive.for_machine
     s.load = lambda: [derive.norm(w, *local) for w in raws]

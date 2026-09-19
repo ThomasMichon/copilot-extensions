@@ -49,6 +49,7 @@ class _Client(Protocol):
         expected_status: str | None = None,
         expected_generation: int | None = None,
         expected_owner_session_id: str | None = None,
+        reject_pending_steer: bool = True,
     ) -> dict: ...
 
 
@@ -100,6 +101,12 @@ def force_stop(
         expected_status=status,
         expected_generation=generation,
         expected_owner_session_id=session_id,
+        # Force-stop's whole point is a forceful override: the live session is
+        # already being terminated above regardless of any pending steer card
+        # (a Blocked task offers this action too), so the state transition
+        # must not itself refuse on the very card force-stop is trying to get
+        # past. The card row is untouched either way (never marked "taken").
+        reject_pending_steer=False,
     )
     return {
         "task_id": task_id,

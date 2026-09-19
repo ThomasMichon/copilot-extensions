@@ -32,7 +32,8 @@
       "title_from": "card.title",
       "body_from": "card.body",
       "run": [
-        "agent-dispatch", "steer", "submit", "{task_id}", "{fields}"
+        "agent-dispatch", "steer", "submit", "{task_id}", "{fields}",
+        "--expected-status", "{status}"
       ],
       "when": {"group": "Blocked"},
       "description": "Read the card prose and answer its form, then wake the worker. The agent acts on your answer only — including casting a PR verdict solely when a card's form asks for one and you pick it (review cards), never autonomously."
@@ -45,7 +46,8 @@
       "status_from": "charter.status",
       "link_from": "charter.link",
       "body_from": "charter.body",
-      "description": "Read this task's charter: a short description plus structured metadata (registrar, source, linked artifacts). Read-only — never mutates the task."
+      "when": {"has_charter": "true"},
+      "description": "Read this task's charter: a short description plus structured metadata (registrar, source, linked artifacts). Read-only — never mutates the task. Not yet populated by the real board (see `board_cli._build`'s `has_charter` note) — gated off rather than shown blank until it is."
     },
     {
       "key": "worktree-status",
@@ -64,7 +66,7 @@
       "kind": "internal",
       "verb": "open-cli",
       "when": {"cli_openable": "true"},
-      "description": "Opens (or, for Proposed/Queued, creates) this task's worktree into an interactive Copilot CLI session, seeded via --interactive with a succinct prompt: the task's charter, current phase, and its own tooling to move the task's state (complete/suspend/abandon) as the operator wraps up. The operator drives; the agent's job is to advance the task toward its next phase and keep the task's recorded state honest when the operator is done — never to keep working unattended after the session ends. Never spawns through the pool or a dedicated worker identity — those apply rails (a fixed acting theme/focus/rules) to keep an unattended headless agent on target, which is exactly what the operator does NOT want here: this is deliberately direct, open-ended, user-driven control. Never offered for an embodied task with a LIVE headless agent (Blocked/Started) — CLI and ACP cannot co-drive one session — nor for a Queued task already claimed by a pool."
+      "description": "PROPOSED — not yet wired. Would open (or, for Proposed/Queued, create) this task's worktree into an interactive Copilot CLI session via Phase 1 item 3's ownership transaction (`agent-dispatch embody --interactive`). Currently gated off (`board_cli`'s `cli_openable` is hard-`False`): the generic Worktrees `open-cli` internal verb this action currently names has no `target_worktree` to find for a Proposed/Queued task and bypasses the ownership transaction for a Suspended one. Needs its own dedicated internal verb before this can be safely enabled -- Phase 7's own scope (pure UI wiring onto Phase 2's now-landed CLI verbs)."
     },
     {
       "key": "kick",
@@ -76,10 +78,18 @@
     {
       "key": "pause",
       "label": "Pause the agent (user hold — blocks re-queue)",
-      "run": ["agent-dispatch", "pause", "{task_id}", "--reason", "paused from picker"],
-      "when": {"embodied": "true"},
+      "run": ["agent-dispatch", "pause", "{task_id}", "--reason", "paused from picker", "--expected-status", "{status}"],
+      "when": {"embodied": "true", "held": "false"},
       "confirm": true,
       "description": "Suspends the assigned agent's re-queue eligibility AND blocks agent-dispatch from re-queuing this task until you explicitly unpause it. Distinct from anything an agent would do on its own; remember to come back and unpause it."
+    },
+    {
+      "key": "unpause",
+      "label": "Unpause the agent",
+      "run": ["agent-dispatch", "unpause", "{task_id}", "--expected-status", "{status}"],
+      "when": {"held": "true"},
+      "confirm": true,
+      "description": "Clears a hold set by Pause, re-admitting the task to re-queue/resume eligibility on its normal schedule."
     },
     {
       "key": "force-stop",
@@ -92,7 +102,7 @@
     {
       "key": "reset-proposed",
       "label": "Reset to Proposed",
-      "run": ["agent-dispatch", "reset", "{task_id}", "--to", "proposed"],
+      "run": ["agent-dispatch", "reset", "{task_id}", "--to", "proposed", "--expected-status", "{status}"],
       "when": {"group": ["Blocked", "Suspended", "Started", "Queued"]},
       "confirm": true,
       "description": "Sends the task back to Proposed (unapproved) — the gentler way to say \"not like this\" without terminally abandoning the idea. Preserves the task's durable goal/done-criteria/progress log for a fresh attempt."
@@ -100,7 +110,7 @@
     {
       "key": "abandon",
       "label": "Force-abandon the task",
-      "run": ["agent-dispatch", "abandon", "{task_id}", "--permit", "--reason", "abandoned from picker"],
+      "run": ["agent-dispatch", "abandon", "{task_id}", "--permit", "--reason", "abandoned from picker", "--expected-status", "{status}"],
       "when": {"group": ["Blocked", "Proposed", "Queued", "Started", "Suspended"]},
       "confirm": true,
       "description": "Terminally abandon this task — the user's way to say \"No\"."

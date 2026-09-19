@@ -42,7 +42,7 @@ worktree-manager\.venv\Scripts\python.exe `
   --out-dir worktree-manager\scripts\picker-snapshot\tasks-preview\out
 ```
 
-Writes nine PNGs to `--out-dir`:
+Writes ten PNGs to `--out-dir`:
 
 | File | What it shows |
 |------|----------------|

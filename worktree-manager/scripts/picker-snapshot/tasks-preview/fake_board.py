@@ -45,8 +45,8 @@ ROWS = [
         "status": "suspended",
         "group": "Blocked",
         "awaiting_steer": True,
-        "repo": "git@github.com:gim-home/copilot-extensions.git",
-        "repo_name": "copilot-extensions",
+        "repo": "git@github.com:acme-org/sample-repo.git",
+        "repo_name": "sample-repo",
         "target_worktree": "a1c4",
         "turn_count": 18,
         "activity": "STALLED",
@@ -60,7 +60,7 @@ ROWS = [
         "card": {
             "title": "Review draft: PR 2481 — harden the relay reconnect path",
             "status": "Recommended verdict: Approve",
-            "link": "https://github.com/gim-home/copilot-extensions/pull/2481",
+            "link": "https://github.com/acme-org/sample-repo/pull/2481",
             "body": (
                 "# Review of PR 2481 — harden the relay reconnect path\n\n"
                 "> *Recommended verdict:* **APPROVE**\n\n"
@@ -87,7 +87,7 @@ ROWS = [
             "title": "Charter — task-9f21",
             "body": (
                 "# Review draft: harden the relay reconnect path\n\n"
-                "**Repo:** copilot-extensions · **Registrar:** "
+                "**Repo:** sample-repo · **Registrar:** "
                 "`pr-review-webhook` · **Phase:** Blocked (awaiting steer)\n\n"
                 "## Description\n"
                 "A GitHub PR-review webhook proposed this task after "
@@ -95,7 +95,7 @@ ROWS = [
                 "drafted a review and is waiting for the operator's verdict.\n\n"
                 "## Structured metadata\n"
                 "- `source`: github-pr-review-webhook\n"
-                "- `pr`: gim-home/copilot-extensions#2481\n"
+                "- `pr`: acme-org/sample-repo#2481\n"
                 "- `max_attempts`: 3 (1 used)\n"
                 "- `created`: 2026-09-16T14:02:00Z\n"
             ),
@@ -104,7 +104,7 @@ ROWS = [
             "title": "Worktree a1c4 — session status",
             "body": (
                 "# Worktree a1c4\n\n"
-                "**Branch:** `worktree/tmichon-cloud1-win-20260916-140200-a1c4`"
+                "**Branch:** `worktree/build-host-1-20260916-140200-a1c4`"
                 "  ·  **Disposition:** DIRTY (uncommitted changes)\n\n"
                 "## Session lineage\n"
                 "1. `0f4b6106…` (spawned by task-9f21, headless bridge agent)\n\n"
@@ -114,8 +114,8 @@ ROWS = [
                 "- Claims: 2 (`pr#2481`, `issue#2455` follow-up)\n"
                 "- Live: idle 6m (last tool call: `gh pr view`)\n\n"
                 "## Claims\n"
-                "- `pr` → gim-home/copilot-extensions#2481 (open, review requested)\n"
-                "- `issue` → gim-home/copilot-extensions#2455 (follow-up filed)\n"
+                "- `pr` → acme-org/sample-repo#2481 (open, review requested)\n"
+                "- `issue` → acme-org/sample-repo#2455 (follow-up filed)\n"
             ),
         },
     },
@@ -125,8 +125,8 @@ ROWS = [
         "status": "started",
         "group": "Started",
         "awaiting_steer": False,
-        "repo": "git@github.com:gim-home/copilot-extensions.git",
-        "repo_name": "copilot-extensions",
+        "repo": "git@github.com:acme-org/sample-repo.git",
+        "repo_name": "sample-repo",
         "target_worktree": "88de",
         "turn_count": 34,
         "activity": "ACTIVE",
@@ -141,7 +141,7 @@ ROWS = [
             "title": "Charter — task-7b03",
             "body": (
                 "# Fix agent-mcp decorator ordering regression\n\n"
-                "**Repo:** copilot-extensions · **Registrar:** "
+                "**Repo:** sample-repo · **Registrar:** "
                 "`repository-issue-loop` · **Phase:** Started\n\n"
                 "## Description\n"
                 "Filed from issue #2410 (decorator stack applies handlers "
@@ -153,7 +153,7 @@ ROWS = [
             "title": "Worktree 88de — session status",
             "body": (
                 "# Worktree 88de\n\n"
-                "**Branch:** `worktree/tmichon-cloud1-win-20260916-090000-88de`"
+                "**Branch:** `worktree/build-host-1-20260916-090000-88de`"
                 "  ·  **Disposition:** WIP\n\n"
                 "## Session lineage\n"
                 "1. `3ac910f2…` (spawned by task-7b03)\n"
@@ -172,8 +172,8 @@ ROWS = [
         "status": "queued",
         "group": "Queued",
         "awaiting_steer": False,
-        "repo": "git@github.com:gim-home/copilot-extensions.git",
-        "repo_name": "copilot-extensions",
+        "repo": "git@github.com:acme-org/sample-repo.git",
+        "repo_name": "sample-repo",
         "target_worktree": None,
         "turn_count": 0,
         "activity": None,
@@ -186,7 +186,7 @@ ROWS = [
             "title": "Charter — task-4410",
             "body": (
                 "# Nightly agent-index corpus reindex\n\n"
-                "**Repo:** copilot-extensions · **Registrar:** "
+                "**Repo:** sample-repo · **Registrar:** "
                 "`agent-index-schedule` · **Phase:** Queued\n\n"
                 "## Description\n"
                 "A scheduled (cron) registration; approved and waiting for a "
@@ -203,7 +203,7 @@ ROWS = [
         "status": "proposed",
         "group": "Proposed",
         "awaiting_steer": False,
-        "repo": "git@github.com:tmichon_microsoft/dotfiles.git",
+        "repo": "git@github.com:alex-operator/dotfiles.git",
         "repo_name": "dotfiles",
         "target_worktree": None,
         "turn_count": 0,
@@ -235,8 +235,8 @@ ROWS = [
         "status": "suspended",
         "group": "Suspended",
         "awaiting_steer": False,
-        "repo": "git@github.com:gim-home/odsp-web-harness.git",
-        "repo_name": "odsp-web-harness",
+        "repo": "git@github.com:acme-org/sample-harness.git",
+        "repo_name": "sample-harness",
         "target_worktree": "c72e",
         "turn_count": 9,
         "activity": None,
@@ -252,7 +252,7 @@ ROWS = [
             "title": "Charter — task-6650",
             "body": (
                 "# Investigate augloop-workflows flaky scenario runner\n\n"
-                "**Repo:** odsp-web-harness · **Registrar:** "
+                "**Repo:** sample-harness · **Registrar:** "
                 "`repository-issue-loop` · **Phase:** Suspended (user-paused)\n\n"
                 "## Description\n"
                 "The operator explicitly **paused** this task from the "
@@ -282,8 +282,8 @@ ROWS = [
         "status": "completed",
         "group": "Completed",
         "awaiting_steer": False,
-        "repo": "git@github.com:gim-home/copilot-extensions.git",
-        "repo_name": "copilot-extensions",
+        "repo": "git@github.com:acme-org/sample-repo.git",
+        "repo_name": "sample-repo",
         "target_worktree": None,
         "turn_count": 22,
         "activity": None,
@@ -302,8 +302,8 @@ ROWS = [
         "status": "abandoned",
         "group": "Abandoned",
         "awaiting_steer": False,
-        "repo": "git@github.com:gim-home/copilot-extensions.git",
-        "repo_name": "copilot-extensions",
+        "repo": "git@github.com:acme-org/sample-repo.git",
+        "repo_name": "sample-repo",
         "target_worktree": None,
         "turn_count": 4,
         "activity": None,

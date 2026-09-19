@@ -75,6 +75,7 @@ claims it first" race to close:
 
 from __future__ import annotations
 
+import subprocess
 import uuid
 from typing import Any, Protocol
 
@@ -110,7 +111,10 @@ class _Client(Protocol):
 
     def approve(self, task_id: str) -> dict: ...
 
-    def reserve_spawn(self, task_id: str, *, reserved_by: str | None = None) -> dict: ...
+    def reserve_spawn(
+        self, task_id: str, *, reserved_by: str | None = None,
+        allow_suspended_reembodiment: bool = False,
+    ) -> dict: ...
 
     def record_spawn_worktree(self, key: str, worktree: str, **kwargs: Any) -> dict: ...
 
@@ -155,13 +159,15 @@ class _Client(Protocol):
     ) -> dict: ...
 
 
-def _reservation_of(reserved: Any) -> dict:
-    """Unwrap a ``reserve_spawn`` result -- ``{"reserved": bool, "reservation":
-    {...}}`` (the real client's shape) or a bare reservation dict (a minimal
-    test double) -- to the reservation dict either way."""
-    if isinstance(reserved, dict) and "reservation" in reserved:
-        return reserved["reservation"]
-    return reserved
+def _unwrap_reservation(result: Any) -> tuple[dict, bool]:
+    """Unwrap a ``reserve_spawn`` result to ``(reservation, reserved)``.
+
+    Accepts the real client's ``{"reserved": bool, "reservation": {...}}``
+    shape or a bare reservation dict (a minimal test double that always owns
+    what it returns, so it degrades to ``reserved=True``)."""
+    if isinstance(result, dict) and "reservation" in result:
+        return result["reservation"], bool(result.get("reserved"))
+    return result, True
 
 
 def _release_prelaunch_claim(
@@ -224,7 +230,23 @@ def launch_interactive_embodiment(
     expected_owner_session_id = task.get("owner_session_id")
     resuming = status == Status.SUSPENDED
 
-    reservation = _reservation_of(client.reserve_spawn(task_id))
+    reservation, reserved = _unwrap_reservation(
+        client.reserve_spawn(
+            task_id, reserved_by=supervisor,
+            allow_suspended_reembodiment=resuming,
+        )
+    )
+    if not reserved:
+        # An active reservation already exists for this task (another
+        # concurrent open, or a not-yet-settled prior attempt) -- the
+        # client contract is explicit that the caller must NOT spawn in
+        # this case. Proceeding would overwrite/steal that reservation's
+        # own session handle out from under whatever owns it.
+        raise InteractiveEmbodimentError(
+            f"task {task_id!r} already has an active spawn reservation "
+            f"({reservation.get('key')!r}, state {reservation.get('state')!r}); "
+            "refusing to spawn a second session"
+        )
     key = reservation["key"]
 
     resolved_project = project or embody.project_for_task(task)
@@ -238,7 +260,13 @@ def launch_interactive_embodiment(
             supervisor=supervisor,
             timeout=timeout,
         )
-    except embody.EmbodyUnavailable as exc:
+    except (embody.EmbodyUnavailable, OSError, subprocess.TimeoutExpired) as exc:
+        # `create_worktree`/`resolve_worktree` (unlike embody's own launch
+        # helpers) don't wrap a raw subprocess failure into
+        # `EmbodyUnavailable` themselves -- catch the underlying exceptions
+        # too so a missing/unlaunchable `agent-worktrees` binary or a stuck
+        # subprocess still releases the reservation instead of leaving it
+        # stuck `reserving` (PR #2913 review).
         client.fail_spawn(key, detail=str(exc)[:200])
         raise InteractiveEmbodimentError(str(exc)) from exc
 

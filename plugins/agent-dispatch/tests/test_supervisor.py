@@ -81,8 +81,11 @@ class QueueBackedClient:
         )
         return [asdict(r) for r in rows]
 
-    def reserve_spawn(self, task_id, *, reserved_by=None):
-        res, ok = self._q.reserve_spawn(task_id, reserved_by=reserved_by)
+    def reserve_spawn(self, task_id, *, reserved_by=None, allow_suspended_reembodiment=False):
+        res, ok = self._q.reserve_spawn(
+            task_id, reserved_by=reserved_by,
+            allow_suspended_reembodiment=allow_suspended_reembodiment,
+        )
         return {"reserved": ok, "reservation": asdict(res)}
 
     def record_spawn(self, key, *, session_handle=None, worktree=None):
@@ -367,6 +370,25 @@ def test_poll_spawns_eligible_task_once(q, client):
     # a second cycle does NOT spawn again (active spawned reservation)
     assert sup.poll_once() == []
     assert spawn.calls == [t.id]
+
+
+def test_poll_skips_a_held_queued_task(q, client):
+    """PR #2913 review finding: `Supervisor._eligible()` must exclude a
+    queued task with a durable operator hold (Phase 1's Pause primitive) --
+    otherwise a spawn reservation is minted for it, its follow-up
+    `claim_one` fails on the hold, and the stray reservation is left
+    behind."""
+    t = q.create("work")
+    q.set_hold(t.id, reason="operator paused before spawn", actor="tmichon")
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert q.latest_reservation(t.id) is None
+
+    q.clear_hold(t.id, actor="tmichon")
+    assert sup.poll_once() == [t.id]
 
 
 def test_poll_treats_a_sessionless_success_as_a_failure(q, client):

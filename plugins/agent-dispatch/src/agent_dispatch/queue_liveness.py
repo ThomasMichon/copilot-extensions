@@ -223,11 +223,17 @@ class LivenessMixin:
                 elif to_status == Status.SUSPENDED:
                     # auto-suspend: preserve owner/owner-session identity (a
                     # resume -- e.g. a fresh interactive-embodiment session --
-                    # rebinds it) but clear the now-meaningless lease/liveness,
-                    # exactly like the manual TaskQueue.suspend() path.
+                    # rebinds it) but clear the now-meaningless lease/liveness
+                    # AND activity fields, exactly like the manual
+                    # TaskQueue.suspend() path (which clears them for free via
+                    # `_transition`'s generic "leaving the held lifecycle"
+                    # rule -- this raw-SQL auto-suspend path must match it
+                    # explicitly, or a stale headless beat can keep a
+                    # confirmed-gone CLI task showing LIVE, PR #2913 review).
                     set_sql = (
                         "status = ?, updated_at = ?, lease_expires_at = NULL,"
-                        " last_liveness = NULL"
+                        " last_liveness = NULL, activity = NULL,"
+                        " activity_updated_at = NULL"
                     )
                 else:
                     set_sql = "status = ?, updated_at = ?"

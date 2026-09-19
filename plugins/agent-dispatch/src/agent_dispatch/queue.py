@@ -2398,6 +2398,7 @@ class TaskQueue(
             stamp="started_at",
             extra=extra,
             idempotent_replay=True,
+            reject_if_held=True,
         )
 
     def complete(
@@ -2581,6 +2582,7 @@ class TaskQueue(
         expected_status: str | None = None,
         expected_generation: int | None = None,
         expected_owner_session_id: str | None = None,
+        reject_pending_steer: bool = True,
         now: float | None = None,
     ) -> Task:
         """Park a ``started`` task as dormant while preserving its owner.
@@ -2597,6 +2599,14 @@ class TaskQueue(
         `force-stop` verb suspends onto -- terminating the live
         session/reservation is that verb's own job; this fences only the
         state transition.
+
+        ``reject_pending_steer`` defaults to ``True`` (an ordinary suspend
+        must not silently discard a card the operator hasn't answered yet).
+        Phase 2's `force-stop` passes ``False``: its whole point is a forceful
+        override -- the live session is already being terminated regardless
+        of any pending steer, so the state transition must not itself refuse
+        on the very card force-stop is trying to get past. The card row
+        itself is untouched either way (never marked "taken").
         """
         meaningful = _clip(reason, PROGRESS_SUMMARY_MAX)
         if meaningful is None:
@@ -2637,7 +2647,7 @@ class TaskQueue(
             extra={"lease_expires_at": None, "last_liveness": None},
             expected_generation=expected_generation,
             expected_owner_session_id=expected_owner_session_id,
-            reject_pending_steer=True,
+            reject_pending_steer=reject_pending_steer,
         )
 
     def resume(
@@ -3014,6 +3024,13 @@ class TaskQueue(
         as ``abandon``): ``expected_status`` rejects a stale UI row;
         ``expected_generation``/``expected_owner_session_id`` fence on the
         exact owning incarnation.
+
+        Also releases any active spawn reservation for this task
+        (``release_spawn=True``, the same mechanism ``yield_task``/
+        ``release_suspended`` already use) -- discarding ownership while
+        leaving the old attempt's reservation/session active would let it
+        keep running (and racing a fresh attempt) with no task owning it
+        (PR #2913 review).
         """
         allowed, to = _task_transition_spec("reset")
         return self._transition(
@@ -3040,6 +3057,8 @@ class TaskQueue(
             expected_status=expected_status,
             reject_if_held=True,
             idempotent_replay=True,
+            release_spawn=True,
+            release_spawn_detail="task reset to proposed",
         )
 
     def heartbeat(self, task_id: str, worker_id: str, *, now: float | None = None) -> Task:

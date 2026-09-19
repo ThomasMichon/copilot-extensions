@@ -336,6 +336,45 @@ def test_end_worker_requires_atomic_idle_state(monkeypatch):
     ]
 
 
+def test_force_end_session_runs_unconditional_end(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+
+    def fake_run(cmd, **kwargs):
+        calls["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    assert bridge.force_end_session("session-1") is True
+    assert calls["cmd"] == ["/usr/bin/agent-bridge", "end", "session-1", "--force"]
+
+
+def test_force_end_session_returns_false_without_bridge(monkeypatch):
+    monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: None)
+    assert bridge.force_end_session("session-1") is False
+
+
+@pytest.mark.parametrize(
+    "raised", [OSError("no such file"), subprocess.TimeoutExpired(cmd="agent-bridge", timeout=20)]
+)
+def test_force_end_session_degrades_to_false_on_subprocess_exception(monkeypatch, raised):
+    """PR #2913 review: the docstring promises this never raises -- a missing
+    binary (OSError) or a stuck process (TimeoutExpired) must degrade to
+    `False` like every other failure mode, since `force_stop` calls this
+    before its own fenced `suspend` and must not itself blow up mid-call."""
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+
+    def fake_run(cmd, **kwargs):
+        raise raised
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    assert bridge.force_end_session("session-1") is False
+
+
 def test_resume_worker_sends_to_existing_session(monkeypatch):
     calls = {}
     monkeypatch.setattr(

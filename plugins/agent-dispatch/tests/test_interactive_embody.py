@@ -253,6 +253,13 @@ def test_suspended_task_resumes_and_reuses_worktree(q, client, monkeypatch):
     q.claim_one("m/wt-existing", task_id=t.id, machine="m", worktree="wt-existing")
     q.start(t.id, "m/wt-existing", owner_session_id="stale-dead-session")
     q.suspend(t.id, "m/wt-existing", reason="owner-gone: auto-suspended")
+    # PR #2913 review: `reserve_spawn` must not be able to steal an
+    # ACTIVE reservation out from under whatever owns it. Auto-suspend
+    # itself does not yet settle the reservation it leaves behind (a
+    # related, tracked-but-out-of-scope-here gap in Phase 1 item 2's own
+    # liveness reconciliation) -- simulate that settlement here so this
+    # test exercises interactive-embodiment's OWN contract, not that gap.
+    q.settle_spawn(reservation.key, detail="superseded by re-embodiment")
     gen_before = q.get(t.id).generation
 
     # prepare_reusable_worktree's real reuse branch reports the ALREADY
@@ -273,6 +280,54 @@ def test_suspended_task_resumes_and_reuses_worktree(q, client, monkeypatch):
     assert back.generation != gen_before  # adopt bumps the generation
 
 
+def test_suspended_task_with_no_prior_reservation_mints_one_from_owner(q, client, monkeypatch):
+    """PR #2913 review: a suspended task with NO prior reservation at all
+    (e.g. force-stopped, never auto-suspended through a headless reservation)
+    must still be re-embodiable -- `reserve_spawn`'s ordinary queued-and-
+    unowned gate would otherwise reject it outright (a suspended task always
+    retains its owner). `allow_suspended_reembodiment` derives the carried
+    worktree straight from the task's own `owner` (`machine/worktree`) rather
+    than requiring a pre-existing reservation to carry it."""
+    t = q.create("work")
+    q.claim_one("m/wt-direct", task_id=t.id, machine="m", worktree="wt-direct")
+    q.start(t.id, "m/wt-direct", owner_session_id="s1")
+    q.suspend(t.id, "m/wt-direct", reason="force-stopped")
+    assert q.latest_reservation(t.id) is None  # nothing to carry forward
+
+    _mock_prepare(monkeypatch, worktree_id="wt-direct", ownership="reused")
+    _mock_spawn_ok(monkeypatch, session_id="fresh-session-4", worktree_id="wt-direct")
+
+    result = launch_interactive_embodiment(client, t.id, machine="m")
+
+    assert result["worktree"] == "wt-direct"  # the task's OWN worktree, not a fresh one
+    assert result["session"] == "fresh-session-4"
+    assert q.get(t.id).status == Status.STARTED
+
+
+def test_suspended_task_with_active_reservation_refuses_to_steal_it(q, client, monkeypatch):
+    """PR #2913 review (Critical): `reserve_spawn` returning `reserved=False`
+    means an active reservation already exists and the caller must NOT
+    spawn -- `launch_interactive_embodiment` must refuse rather than reuse
+    that reservation's key and overwrite its session handle."""
+    t = q.create("work")
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn_worktree(reservation.key, "wt-existing", ownership="created")
+    q.record_spawn(reservation.key, session_handle="still-live-session", worktree="wt-existing")
+    q.claim_one("m/wt-existing", task_id=t.id, machine="m", worktree="wt-existing")
+    q.start(t.id, "m/wt-existing", owner_session_id="still-live-session")
+    q.suspend(t.id, "m/wt-existing", reason="test")
+    # Deliberately do NOT settle the reservation -- it's still `spawned`
+    # (active), as if the prior session were not actually confirmed gone.
+
+    with pytest.raises(InteractiveEmbodimentError, match="already has an active spawn reservation"):
+        launch_interactive_embodiment(client, t.id, machine="m")
+
+    # The untouched original reservation is proof nothing was stolen.
+    still = q.latest_reservation(t.id)
+    assert still.key == reservation.key
+    assert still.session_handle == "still-live-session"
+
+
 def test_suspended_task_resume_generation_race_releases_reservation(q, client, monkeypatch):
     t = q.create("work")
     reservation, _ = q.reserve_spawn(t.id)
@@ -281,6 +336,7 @@ def test_suspended_task_resume_generation_race_releases_reservation(q, client, m
     q.claim_one("m/wt-existing", task_id=t.id, machine="m", worktree="wt-existing")
     q.start(t.id, "m/wt-existing", owner_session_id="stale")
     q.suspend(t.id, "m/wt-existing", reason="test")
+    q.settle_spawn(reservation.key, detail="superseded by re-embodiment")
     stale_generation = q.get(t.id).generation - 1  # deliberately wrong
 
     _mock_prepare(monkeypatch, worktree_id="wt-existing", ownership="created")

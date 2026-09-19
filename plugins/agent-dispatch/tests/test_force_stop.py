@@ -28,6 +28,7 @@ class _QueueBackedClient:
     def suspend(
         self, task_id, worker_id, *, reason, expected_status=None,
         expected_generation=None, expected_owner_session_id=None,
+        reject_pending_steer=True,
     ):
         return asdict(
             self._q.suspend(
@@ -35,6 +36,7 @@ class _QueueBackedClient:
                 expected_status=expected_status,
                 expected_generation=expected_generation,
                 expected_owner_session_id=expected_owner_session_id,
+                reject_pending_steer=reject_pending_steer,
             )
         )
 

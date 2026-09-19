@@ -1807,7 +1807,13 @@ def _cmd_reset(args: argparse.Namespace) -> int:
         )
         return 2
     with _client(args) as c:
-        return _emit(c.reset(args.task_id, reason=args.reason))
+        return _emit(
+            c.reset(
+                args.task_id,
+                reason=args.reason,
+                expected_status=args.expected_status,
+            )
+        )
 
 
 def _cmd_progress(args: argparse.Namespace) -> int:
@@ -1916,6 +1922,7 @@ def _cmd_steer(args: argparse.Namespace) -> int:
             sender=sender,
             wake=args.wake,
             message=args.message,
+            expected_status=args.expected_status,
         )
         woken = result.pop("steer_woken", None)
         wake_status = result.pop("steer_wake_status", None)
@@ -3588,6 +3595,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --resolve, the base branch the worktree unwinds onto "
         "(default: the branch's tracked upstream)",
     )
+    p.add_argument(
+        "--expected-status",
+        dest="expected_status",
+        help="reject with 'task changed; refresh and retry' if the task's "
+        "current status doesn't match this (a stale cached row)",
+    )
     from . import reattach as _reattach
     _reattach.add_abandon_override_live_argument(p)
     p.set_defaults(func=_cmd_abandon)
@@ -3677,6 +3690,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="target state (only 'proposed' is implemented today)",
     )
     p.add_argument("--reason", help="optional note recorded in the audit trail")
+    p.add_argument(
+        "--expected-status",
+        dest="expected_status",
+        help="reject with 'task changed; refresh and retry' if the task's "
+        "current status doesn't match this (a stale cached row)",
+    )
     p.set_defaults(func=_cmd_reset)
 
     p = sub.add_parser("heartbeat", help="extend the lease on a held task")
@@ -3811,6 +3830,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ssm.add_argument("--sender", help="who is answering (default: resolved identity)")
     ssm.add_argument("--message", help="override the wake nudge text")
+    ssm.add_argument(
+        "--expected-status",
+        dest="expected_status",
+        help="reject with 'task changed; refresh and retry' if the task's "
+        "current status doesn't match this (a stale cached row)",
+    )
     ssm.add_argument(
         "--no-wake",
         dest="wake",

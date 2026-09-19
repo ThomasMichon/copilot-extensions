@@ -318,14 +318,21 @@ def force_end_session(session_id: str, *, timeout: float | None = 20.0) -> bool:
     exe = _agent_bridge_launch_prefix()
     if exe is None:
         return False
-    completed = subprocess.run(  # noqa: S603 -- fixed argv + validated id
-        [*exe, "end", session_id, "--force"],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        **no_window_kwargs(),
-    )
+    try:
+        completed = subprocess.run(  # noqa: S603 -- fixed argv + validated id
+            [*exe, "end", session_id, "--force"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **no_window_kwargs(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        # The docstring promises this never raises -- an unlaunchable binary
+        # or a stuck/timed-out process is exactly the "transport error"
+        # case callers (force-stop's fenced suspend) already expect to
+        # degrade to `False` (PR #2913 review).
+        return False
     return completed.returncode == 0
 
 

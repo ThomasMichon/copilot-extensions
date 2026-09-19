@@ -174,6 +174,46 @@ def _build(tasks: list[dict], *, machine: str, recent_mins: int) -> list[dict]:
         row["group"] = group
         row["activity"] = _activity(task, now)
         row["wt_live"] = _wt_live(row["activity"], task, now)
+        # PR #2913 review: the manifest's mutating/card actions gate on these
+        # booleans -- an unpopulated field degrades to falsy in the picker's
+        # `when` matcher, so leaving one out doesn't crash anything, but it
+        # DOES silently hide (or, worse, wrongly show) the action it gates.
+        # Populate every field the manifest actually depends on today from
+        # data already on the task; only `cli_openable` and `has_charter`
+        # stay hard-`False` pending their own follow-on phases (see the two
+        # comments below for exactly why).
+        row["has_worktree"] = bool(task.get("target_worktree"))
+        # `embodied` gates Pause/Force-stop: true only for a task with a
+        # genuinely LIVE session (`started`). A "Blocked" task's real status
+        # is `suspended` (see `set_card`'s own docstring: posting a card with
+        # a form atomically suspends the task so its worker process CAN be
+        # stopped) -- so `embodied` must NOT include Blocked, or force-stop
+        # would be offered on a task with no live session to stop.
+        row["embodied"] = task.get("status") == "started"
+        row["held"] = bool(task.get("hold_reason"))
+        # `cli_openable` is deliberately hard-`False` for now: the manifest's
+        # `open-cli` action is `kind: internal, verb: open-cli`, which the
+        # Picker dispatches to `_open_worktree_cli` -- the GENERIC Worktrees
+        # open-into-CLI handler. That handler assumes an already-existing
+        # worktree row and has no idea about Phase 1 item 3's ownership
+        # transaction (`launch_interactive_embodiment` / `agent-dispatch
+        # embody --interactive`): a Proposed/Queued task has no
+        # `target_worktree` yet (nothing for the generic handler to find),
+        # and a Suspended task's re-embodiment needs the fenced
+        # claim/adopt-owner-session dance the generic handler bypasses
+        # entirely. Wiring a dedicated internal verb that calls
+        # `agent-dispatch embody --interactive` is Phase 7's own scope
+        # ("pure UI wiring, no new backend logic") -- until that lands,
+        # keeping this `False` keeps the action schema-visible (a reviewer
+        # or operator can see it's designed-for) but never actually
+        # reachable, rather than reachable-and-wrong.
+        row["cli_openable"] = False
+        # `has_charter` similarly stays `False`: nothing today populates a
+        # real `charter.*` object (title/status/link/body), so leaving the
+        # action ungated would render an empty card. Gating it behind this
+        # field (mirroring `worktree-status`'s own `has_worktree` gate)
+        # keeps it schema-visible without showing a broken empty card.
+        row["has_charter"] = False
         # Phase 3 lands the column *plumbing* only; Phase 5 owns the real
         # claims/artifacts-tracking computation (see the Plan's own note that
         # the two phases must not both claim this field). Always None today

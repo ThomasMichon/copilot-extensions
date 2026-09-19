@@ -1975,7 +1975,8 @@ def test_abandon_duplicate_of_implies_permit_and_records_ref(monkeypatch):
         def get(self, task_id):
             return {"id": task_id, "spawn_reservation": None}
 
-        def abandon(self, task_id, *, worker_id=None, permitted=False, reason=None):
+        def abandon(self, task_id, *, worker_id=None, permitted=False, reason=None,
+                    expected_status=None):
             seen.update(task_id=task_id, worker_id=worker_id, permitted=permitted, reason=reason)
             return {"id": task_id, "status": "abandoned"}
 
@@ -2179,8 +2180,8 @@ def test_reset_cli_runs(monkeypatch):
     seen = {}
 
     class _C:
-        def reset(self, task_id, *, reason=None):
-            seen.update(task_id=task_id, reason=reason)
+        def reset(self, task_id, *, reason=None, expected_status=None):
+            seen.update(task_id=task_id, reason=reason, expected_status=expected_status)
             return {"id": task_id, "status": "proposed"}
 
         def __enter__(self):
@@ -2193,7 +2194,7 @@ def test_reset_cli_runs(monkeypatch):
 
     args = build_parser().parse_args(["reset", "t1", "--reason", "not like this"])
     assert args.func(args) == 0
-    assert seen == {"task_id": "t1", "reason": "not like this"}
+    assert seen == {"task_id": "t1", "reason": "not like this", "expected_status": None}
 
 
 def test_reset_cli_rejects_unsupported_target():

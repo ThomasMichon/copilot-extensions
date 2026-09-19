@@ -246,6 +246,7 @@ class DispatchClient(RegistrationClientMixin):
         expected_status: str | None = None,
         expected_generation: int | None = None,
         expected_owner_session_id: str | None = None,
+        reject_pending_steer: bool = True,
     ) -> dict:
         return self._unwrap(
             self._http.post(
@@ -256,6 +257,7 @@ class DispatchClient(RegistrationClientMixin):
                     "expected_status": expected_status,
                     "expected_generation": expected_generation,
                     "expected_owner_session_id": expected_owner_session_id,
+                    "reject_pending_steer": reject_pending_steer,
                 },
             )
         )
@@ -664,17 +666,30 @@ class DispatchClient(RegistrationClientMixin):
 
     # -- spawn reservations --------------------------------------------------
 
-    def reserve_spawn(self, task_id: str, *, reserved_by: str | None = None) -> dict:
+    def reserve_spawn(
+        self, task_id: str, *, reserved_by: str | None = None,
+        allow_suspended_reembodiment: bool = False,
+    ) -> dict:
         """Atomically reserve the right to spawn an embody worker for a task.
 
         Returns ``{"reserved": bool, "reservation": {...}}``. When ``reserved``
         is ``False`` an active reservation already exists and the caller must
         **not** spawn.
+
+        ``allow_suspended_reembodiment`` additionally accepts a ``suspended``
+        task (interactive re-embodiment's own case -- see
+        :meth:`agent_dispatch.queue.TaskQueue.reserve_spawn`'s docstring);
+        every other caller leaves this ``False`` (the default, ordinary
+        queued-and-unowned gate).
         """
         return self._unwrap(
             self._http.post(
                 "/spawn-reservations",
-                json={"task_id": task_id, "reserved_by": reserved_by},
+                json={
+                    "task_id": task_id,
+                    "reserved_by": reserved_by,
+                    "allow_suspended_reembodiment": allow_suspended_reembodiment,
+                },
             )
         )
 

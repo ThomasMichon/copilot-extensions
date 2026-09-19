@@ -814,6 +814,7 @@ class SuspendBody(BaseModel):
     expected_status: str | None = None
     expected_generation: int | None = None
     expected_owner_session_id: str | None = None
+    reject_pending_steer: bool = True
 
 
 class ResumeBody(BaseModel):
@@ -927,6 +928,7 @@ class UnholdBody(BaseModel):
 class ReserveSpawnBody(BaseModel):
     task_id: str
     reserved_by: str | None = None
+    allow_suspended_reembodiment: bool = False
 
 
 class RoutingAssignmentBody(BaseModel):
@@ -2033,6 +2035,7 @@ def create_app(
                 expected_status=body.expected_status,
                 expected_generation=body.expected_generation,
                 expected_owner_session_id=body.expected_owner_session_id,
+                reject_pending_steer=body.reject_pending_steer,
             ),
             "task.suspended",
         )
@@ -2300,7 +2303,9 @@ def create_app(
         _require(queue.get(body.task_id))
         try:
             reservation, reserved = queue.reserve_spawn(
-                body.task_id, reserved_by=body.reserved_by
+                body.task_id,
+                reserved_by=body.reserved_by,
+                allow_suspended_reembodiment=body.allow_suspended_reembodiment,
             )
         except TaskError as exc:
             msg = str(exc)
