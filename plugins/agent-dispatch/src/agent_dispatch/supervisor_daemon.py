@@ -737,7 +737,20 @@ class SupervisorDaemon:
             selected, rollback, pending = record
             if set(selected) == set(rids):
                 return selected, rollback, pending
-            raise CompanionError("managed transition group membership changed")
+            if pending is None and set(selected) <= set(rids):
+                # A newly-declared member joined this transition group (e.g. a
+                # sibling companion that was previously invalid/undeclared and
+                # has now become valid -- the exact sequence that regressed
+                # agent-index-service alongside agent-index-engine: dotfiles
+                # #2111). There is no confirmed running snapshot for a
+                # brand-new member to roll back to, and no in-flight
+                # transition (`pending`) to protect, so this is safe to treat
+                # like the "no persisted record" case below and rebuild fresh
+                # -- rather than permanently wedging the whole group behind a
+                # manual state-file deletion every time membership grows.
+                record = None
+            else:
+                raise CompanionError("managed transition group membership changed")
         selected: dict[str, ManagedLaunchSnapshot] = {}
         for rid in rids:
             unit = self._units.get(rid)

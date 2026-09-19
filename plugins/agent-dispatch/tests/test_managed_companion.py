@@ -801,6 +801,54 @@ def test_uncertain_restart_adopts_exact_live_posix_process(harness):
     assert len(h.processes) == 1
 
 
+def test_transition_group_new_member_self_heals_stale_membership(
+    transition_group_harness,
+):
+    # Regression for dotfiles#2111: the group was first reconciled and
+    # persisted with only ONE of its two declared members (the exact
+    # sequence hit in production, where agent-index-service was
+    # invalid/undeclared until a later fix made it valid). A previously
+    # smaller, persisted membership joining a larger one must self-heal by
+    # rebuilding the group fresh -- not raise CompanionError forever and
+    # require someone to delete the state file by hand.
+    h = transition_group_harness
+    engine_reg, service_reg = h.registrations
+    h.registrations = [engine_reg]
+
+    assert h.daemon.reconcile_once().started == [h.engine_id]
+    h.daemon.reconcile_once()  # persists the group record from the launched unit
+    record = h.group_record()
+    assert set(record["selected"]) == {h.engine_id}
+    assert record["pending"] is None
+
+    h.registrations = [engine_reg, service_reg]
+    summary = h.daemon.reconcile_once()
+
+    assert set(summary.started) == {h.service_id}
+    h.daemon.reconcile_once()
+    record = h.group_record()
+    assert set(record["selected"]) == {h.engine_id, h.service_id}
+    assert h.daemon._units[h.engine_id].proc is not None
+    assert h.daemon._units[h.service_id].proc is not None
+
+
+def test_transition_group_shrunk_membership_still_raises(
+    transition_group_harness,
+):
+    # The self-heal above must stay narrow: a member DISAPPEARING from a
+    # group (not merely a new one joining) still raises, since blindly
+    # discarding an existing running companion's confirmed snapshot is not
+    # safe to do silently.
+    h = transition_group_harness
+    assert set(h.daemon.reconcile_once().started) == {h.engine_id, h.service_id}
+    h.daemon.reconcile_once()  # persist the group record with both members
+    assert set(h.group_record()["selected"]) == {h.engine_id, h.service_id}
+
+    with pytest.raises(CompanionError, match="membership changed"):
+        h.daemon._selected_group_snapshots(h.group_id, (h.engine_id,))
+
+
+
 def test_transition_group_service_only_release_keeps_warm_engine(
     transition_group_harness,
 ):
