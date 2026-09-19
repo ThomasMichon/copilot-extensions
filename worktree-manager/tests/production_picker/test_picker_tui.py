@@ -4550,6 +4550,70 @@ def test_native_list_multiselect_and_activation(monkeypatch):
     asyncio.run(run())
 
 
+def test_describe_status_marker_expands_known_tokens():
+    """Bug-fix phase: raw ``status_markers`` wire tokens must expand to a
+    short human phrase for rendering (derive.py's ``status_markers`` string
+    itself stays the compact wire format; only the tile's render layer
+    prettifies it)."""
+    assert derive.describe_status_marker("C1") == ("1 held claim", False)
+    assert derive.describe_status_marker("C3") == ("3 held claims", False)
+    assert derive.describe_status_marker("F1") == ("1 follow-up", False)
+    assert derive.describe_status_marker("F2") == ("2 follow-ups", False)
+    assert derive.describe_status_marker("U*") == ("merge unconfirmed", True)
+    assert derive.describe_status_marker("OC*") == ("claims unconfirmed", True)
+    # An unrecognized future token degrades to itself, still flagged a
+    # warning if it carries the unconfirmed-fact ``*`` suffix.
+    assert derive.describe_status_marker("NEW*") == ("NEW*", True)
+    assert derive.describe_status_marker("NEW") == ("NEW", False)
+
+
+def test_describe_status_marker_handles_oversized_numeric_token():
+    """PR #2897 review: ``compact`` (the source of these tokens) is only
+    validated as a ``str`` by ``prune.interpret_descriptor_payload`` -- a
+    malformed/remote descriptor could hand a ``C``/``F`` token an absurdly
+    long digit run. The numeric suffix is length-bounded before conversion
+    (not just wrapped in a ``try``/``except``), so an over-length run
+    degrades to the verbatim fallback on every supported Python version, not
+    only on 3.11+ where ``int()`` itself would raise."""
+    huge = "C" + "9" * 5000
+    text, is_warn = derive.describe_status_marker(huge)
+    assert text == huge
+    assert is_warn is False
+
+
+def test_truncate_text_is_cell_width_aware():
+    """PR #2897 review: budgeting must measure DISPLAY cells, not characters
+    -- a double-width character (e.g. a wide CJK glyph, counted as 2 cells by
+    a real terminal) must not be undercounted, or the asset-priority
+    guarantee in ``status_line_segments`` silently breaks for any wide
+    fallback asset-hint code."""
+    # "界" is a double-width character: 2 of them are 4 cells, not 2.
+    assert derive.truncate_text("界界界", 4) == "界…"
+    assert derive.truncate_text("abcdef", 4) == "abc…"
+    # No truncation needed -- returned as-is either way.
+    assert derive.truncate_text("ab", 4) == "ab"
+    from rich.cells import cell_len
+    # A 1-cell budget that can't even fit a double-width first character must
+    # still respect the budget (review follow-up) -- degrade to the ellipsis
+    # (itself exactly 1 cell) rather than returning 2 cells' worth.
+    assert cell_len(derive.truncate_text("界界", 1)) <= 1
+    assert derive.truncate_text("abc", 1) == "a"
+    assert derive.truncate_text("x", 0) == ""
+
+
+def test_status_line_segments_reserve_wide_asset_width_correctly():
+    """PR #2897 review: a wide-character asset-hint fallback code (e.g. an
+    unrecognized resource ``kind`` whose 4-char fallback code happens to be
+    double-width) must still get its FULL display width reserved -- a
+    ``len()``-based reservation would undercount it and let the marker text
+    truncate it away anyway, defeating the asset-priority guarantee."""
+    segs = derive.status_line_segments("C1 U* OC*", ["界界界界"], 0, 10)
+    rendered = "".join(t for t, _ in segs)
+    assert "界界界界" in rendered
+    from rich.cells import cell_len
+    assert cell_len(rendered) <= 10
+
+
 def test_native_list_sticky_header(monkeypatch):
     """NF5-5 (#88): the native list pins the current section header above the list
     once that section's own header row has scrolled off the top; it is hidden at
