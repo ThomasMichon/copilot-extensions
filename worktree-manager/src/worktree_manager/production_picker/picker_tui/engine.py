@@ -2042,7 +2042,7 @@ class PickerScreen(Widget):
         # Re-scan the pivot registry so a refresh ('r') picks up a newly
         # installed (or removed) contributed pivot without a picker restart.
         self._load_pivots()
-        from . import tasks as _tasks_mod; _tasks_mod.prewarm_optional_modules()
+        from . import tasks as _tasks_mod; threading.Thread(target=_tasks_mod.prewarm_optional_modules, daemon=True).start()
         # A manual reload ('r') must also refresh the registered Tasks pivot, not
         # just the worktree lists (the pivot runtime is separate + has no TTL):
         # clear each pivot runtime's cache so the next frame's ensure() refetches,

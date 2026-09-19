@@ -196,36 +196,64 @@ def test_prewarm_optional_modules_survives_import_error(monkeypatch):
     tasks_mod.prewarm_optional_modules()  # must not raise
 
 
-def test_prewarm_optional_modules_never_blocks_the_calling_thread():
-    """Confirms the fix for a real Copilot-review finding on this same
-    change: calling ``prewarm_optional_modules()`` inline from ``setup()``
-    (the shared non-live-mount / manual-reload ('r') path, which runs
-    synchronously on the render/key-handling thread either way) must not
-    reintroduce the exact freeze it exists to remove elsewhere. The import
-    itself always happens on its own daemon thread, so the call must return
-    near-instantly regardless of how long that import actually takes."""
+def test_prewarm_optional_modules_spawns_no_thread_of_its_own(monkeypatch):
+    """``prewarm_optional_modules()`` itself must import inline (no nested
+    thread of its own): ``_setup_live_pivots`` (already a background thread)
+    relies on this call completing *before* it schedules the UI-thread
+    ``apply()`` that installs/activates registered pivots -- spawning a
+    second, independent thread here would race a keypress that lands on a
+    registered pivot while that inner thread is still mid-import (CPython's
+    per-module import lock would then block the render thread on the same
+    import anyway, only shrinking the freeze window instead of closing it).
+    A caller reachable from the UI thread (``setup()``) is responsible for
+    wrapping this call in its own worker thread instead -- see the sibling
+    test below."""
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
 
+    def boom(*_a, **_k):
+        raise AssertionError("prewarm_optional_modules must not spawn a thread")
+
+    monkeypatch.setattr(tasks_mod.threading, "Thread", boom)
+
+    tasks_mod.prewarm_optional_modules()  # must not raise
+
+
+def test_setup_prewarm_call_does_not_block_the_calling_thread(monkeypatch):
+    """``setup()`` -- the shared non-live-mount / manual-reload ('r') path,
+    which runs synchronously on the render/key-handling thread either way --
+    must wrap ``tasks.prewarm_optional_modules()`` in its own worker thread,
+    so a slow/cold import there cannot reintroduce the exact freeze the fix
+    exists to remove."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
     release = threading.Event()
-    import builtins
 
-    real_import = builtins.__import__
+    def slow_prewarm():
+        release.wait(timeout=5)
 
-    def slow_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if level and "data_ssh" in fromlist:
-            release.wait(timeout=5)
-        return real_import(name, globals, locals, fromlist, level)
+    monkeypatch.setattr(tasks_mod, "prewarm_optional_modules", slow_prewarm)
 
-    original = builtins.__import__
-    builtins.__import__ = slow_import
+    class Src:
+        LOCAL = ("host", "Win")
+
+        @staticmethod
+        def machines():
+            return [("host Win", "host", "Win", True)]
+
+        @staticmethod
+        def load():
+            return []
+
+    screen = eng.PickerScreen(Src(), live=False)
     try:
         t0 = time.perf_counter()
-        tasks_mod.prewarm_optional_modules()
+        screen.setup()
         elapsed = time.perf_counter() - t0
     finally:
-        builtins.__import__ = original
-        release.set()  # let the background thread's import unblock and finish
+        release.set()  # let the worker thread's slow_prewarm unblock and finish
 
     assert elapsed < 1.0
 

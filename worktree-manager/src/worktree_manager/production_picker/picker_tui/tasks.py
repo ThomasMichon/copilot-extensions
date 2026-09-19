@@ -140,12 +140,8 @@ def _is_stream_unsupported(stderr: str) -> bool:
 
 
 def prewarm_optional_modules() -> None:
-    """Fire-and-forget warm-up for the modules a registered pivot's first
-    switch/render needs -- called from ``engine.py``'s ``_setup_live_pivots``
-    (already a background thread) *and* its ``setup()`` (the shared
-    non-live-mount / manual-reload ('r') path, which runs synchronously on
-    the render/key-handling thread either way). Spawns its own daemon
-    thread so it is always safe to call inline, regardless of caller.
+    """Import the modules a registered pivot's first switch/render needs,
+    synchronously in the caller's own thread.
 
     ``engine.PickerScreen._machine_key_map`` lazily imports ``data_ssh`` (and,
     transitively, its own ``roster``/``provider_sources``/``source_identity``)
@@ -156,14 +152,21 @@ def prewarm_optional_modules() -> None:
     roughly 40% of the total switch latency, exactly the momentary freeze
     reported against this pivot (see the Tasks-pane-UX-overhaul effort's own
     bug entry). A pure import has no side effects, so warming it here makes
-    that cost disappear from the keypress entirely instead of relocating it."""
-    def _do() -> None:
-        try:
-            from . import data_ssh  # noqa: F401
-        except Exception:
-            pass
+    that cost disappear from the keypress entirely instead of relocating it.
 
-    threading.Thread(target=_do, daemon=True).start()
+    Call this directly from a thread that is *already* off the UI thread
+    (e.g. ``engine.py``'s ``_setup_live_pivots``) so the import reliably
+    finishes before pivots are installed/activated -- spawning ANOTHER
+    background thread here instead would only shrink the freeze window
+    rather than close it: CPython's per-module import lock would still make
+    a render-thread caller block on the same import if a keypress landed
+    mid-warm-up. A caller reachable from the UI thread (``setup()``, the
+    shared non-live-mount / manual-reload ('r') path) must wrap this call in
+    its own worker thread itself instead."""
+    try:
+        from . import data_ssh  # noqa: F401
+    except Exception:
+        pass
 
 
 def _stream_entry(obj: Mapping) -> dict:
