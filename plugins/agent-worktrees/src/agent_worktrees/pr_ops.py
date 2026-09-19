@@ -47,6 +47,7 @@ HOLD_LABEL = "do-not-merge"
 
 __all__ = [
     "HOLD_LABEL",
+    "audit_attribution_risk",
     "create_pr",
     "feature_branch_name",
     "pr_head_name",
@@ -210,6 +211,27 @@ def resolve_head_pattern(prcfg) -> str:
     if getattr(prcfg, "head_scheme", "snapshot") == "refspec":
         return "pr/{slug}-{suffix}"
     return "{prefix}/{slug}-{suffix}"
+
+
+def audit_attribution_risk(config: Config) -> list[str]:
+    """Migration audit (pr-attribution-codenames Phase 5): flag this repo's
+    configured ``pr.head_pattern`` for the branch-name leak class.
+
+    Config-only: it does not run ``create-pr`` or touch git. A repo is at
+    risk when ``pr.source_attribution`` is not exactly ``true`` -- ``false``
+    **or omitted entirely** (the key defaults to ``false``, so an absent key
+    is just as much at risk as an explicit one) -- and its configured
+    ``head_pattern`` embeds ``{machine}``/``{worktree_id}``, which could carry
+    a private identifier into a published branch name. Returns a list of
+    human-readable findings (empty when this repo's config is not at risk).
+    """
+    from .providers.attribution import audit_source_attribution_risk
+
+    prcfg = config.default_repo.pr
+    return audit_source_attribution_risk(
+        source_attribution=prcfg.source_attribution,
+        head_pattern=getattr(prcfg, "head_pattern", "") or "",
+    )
 
 
 def pr_head_name(
@@ -662,6 +684,27 @@ def create_pr(
             prcfg, eff_title, worktree_id,
             cwd=worktree_path, machine=config.machine,
         )
+
+    # Branch-name leak class (pr-attribution-codenames Phase 5): whichever way
+    # the head above was resolved (explicit --branch, a reused existing-PR
+    # branch, or a rendered head_pattern), it must never carry a private
+    # identifier into a public branch name unless this repo has explicitly
+    # opted into the full raw marker (source_attribution: true). This is a
+    # hard, publish-blocking error -- never a warning -- and is checked before
+    # the dry-run response too, so a dry run surfaces the same block.
+    effective_attribution = (
+        prcfg.source_attribution if attribution is None else attribution
+    )
+    try:
+        from .providers.attribution import validate_effective_head
+        validate_effective_head(
+            feature_branch,
+            worktree_id=worktree_id,
+            machine=config.machine,
+            source_attribution=effective_attribution,
+        )
+    except ValueError as exc:
+        return {**base, "error": str(exc)}
 
     if dry_run:
         return {

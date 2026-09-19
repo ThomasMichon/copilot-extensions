@@ -266,6 +266,123 @@ class TestAttribution:
         assert attribution.parse_marker("no marker here") is None
 
 
+class TestValidateEffectiveHead:
+    """pr-attribution-codenames Phase 5: branch-name leak class."""
+
+    def test_true_attribution_is_always_a_noop(self):
+        # source_attribution: true already accepts full raw exposure -- any
+        # head is fine, including one containing the worktree id.
+        attribution.validate_effective_head(
+            "worktree/lambda-core-20260101-abcd",
+            worktree_id="lambda-core-20260101-abcd",
+            machine="lambda-core",
+            source_attribution=True,
+        )
+
+    def test_safe_default_pattern_passes(self):
+        attribution.validate_effective_head(
+            "pr/my-change-abcd",
+            worktree_id="lambda-core-20260101-abcd",
+            machine="lambda-core",
+            source_attribution=False,
+        )
+        attribution.validate_effective_head(
+            "pr/my-change-abcd",
+            worktree_id="lambda-core-20260101-abcd",
+            machine="lambda-core",
+            source_attribution="codename",
+        )
+
+    def test_raw_worktree_id_in_head_is_blocked(self):
+        with pytest.raises(attribution.BranchLeakError, match="raw worktree id"):
+            attribution.validate_effective_head(
+                "worktree/lambda-core-20260101-abcd",
+                worktree_id="lambda-core-20260101-abcd",
+                machine="lambda-core",
+                source_attribution=False,
+            )
+
+    def test_machine_name_in_head_is_blocked(self):
+        with pytest.raises(attribution.BranchLeakError, match="machine name"):
+            attribution.validate_effective_head(
+                "user/lambda-core/my-change",
+                worktree_id="wt-abcd",
+                machine="lambda-core",
+                source_attribution=False,
+            )
+
+    def test_unresolved_template_marker_is_blocked(self):
+        with pytest.raises(
+            attribution.BranchLeakError, match="unresolved template marker"
+        ):
+            attribution.validate_effective_head(
+                "session-{machine}-{worktree_id}",
+                worktree_id="wt-abcd",
+                machine="",
+                source_attribution=False,
+            )
+
+    def test_blocked_under_codename_mode_too(self):
+        # codename mode is still "not true" -- a raw identifier reaching the
+        # branch name defeats the whole point of the codename marker.
+        with pytest.raises(attribution.BranchLeakError):
+            attribution.validate_effective_head(
+                "worktree/wt-abcd",
+                worktree_id="wt-abcd",
+                machine="lambda-core",
+                source_attribution="codename",
+            )
+
+    def test_empty_head_is_a_noop(self):
+        attribution.validate_effective_head(
+            "", worktree_id="wt-abcd", machine="lambda-core",
+            source_attribution=False,
+        )
+
+
+class TestAuditSourceAttributionRisk:
+    """pr-attribution-codenames Phase 5: config-only migration audit."""
+
+    def test_true_attribution_has_no_findings(self):
+        assert attribution.audit_source_attribution_risk(
+            source_attribution=True, head_pattern="user/{machine}/{slug}",
+        ) == []
+
+    def test_safe_pattern_has_no_findings(self):
+        assert attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="pr/{slug}-{suffix}",
+        ) == []
+
+    def test_risky_pattern_flagged_when_false(self):
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="user/{machine}/{slug}",
+        )
+        assert len(findings) == 1
+        assert "{machine}" in findings[0]
+
+    def test_risky_pattern_flagged_when_absent(self):
+        # An omitted key parses to None (never seen by attribution.py itself
+        # once a Config normalizes it), but the audit must flag it exactly
+        # like an explicit false, with a distinguishing message.
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=None, head_pattern="{worktree_id}/{slug}",
+        )
+        assert len(findings) == 1
+        assert "absent" in findings[0]
+
+    def test_risky_pattern_flagged_under_codename_mode(self):
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution="codename", head_pattern="{machine}/{slug}",
+        )
+        assert len(findings) == 1
+
+    def test_both_risky_tokens_each_flagged(self):
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="{machine}/{worktree_id}",
+        )
+        assert len(findings) == 2
+
+
 # ---------------------------------------------------------------------------
 # Gitea provider (curl seam mocked)
 # ---------------------------------------------------------------------------

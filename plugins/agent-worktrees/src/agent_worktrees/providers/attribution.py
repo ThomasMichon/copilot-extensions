@@ -26,6 +26,10 @@ own tracking store.
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..config import SourceAttribution
 
 _MARKER_RE = re.compile(
     r"<!--\s*agent-worktrees:source\s+(?P<fields>.*?)\s*-->",
@@ -81,4 +85,125 @@ def parse_marker(body: str) -> dict[str, str] | None:
     if not m:
         return None
     return dict(_FIELD_RE.findall(m.group("fields")))
+
+
+# ── Branch-name leak class (effort ``pr-attribution-codenames`` Phase 5) ────
+#
+# The hidden PR-body marker above is not the only way a private identifier can
+# reach a public repo: the PR HEAD's *branch name itself* is public, and one
+# has been observed published as the literal ``worktree/<id>`` name -- the raw
+# worktree id (which embeds the authoring machine and a creation timestamp)
+# landing directly in a public branch name. Neither ``head_scheme`` default
+# publishes that name on its own (see the effort README's Context section);
+# the leak comes from an override -- an explicit ``--branch``, an
+# existing-PR-reuse, or a ``head_pattern`` containing ``{machine}``/
+# ``{worktree_id}`` -- so the fix validates the *effective* resolved head at
+# the publish boundary, not just the scheme default.
+
+_UNRESOLVED_TOKEN_RE = re.compile(r"\{(machine|worktree_id)\}")
+
+
+class BranchLeakError(ValueError):
+    """An effective PR head branch would leak a private identifier.
+
+    Raised by :func:`validate_effective_head`. The caller must treat this as
+    a hard, publish-blocking error -- never downgrade it to a warning that
+    lets the push proceed.
+    """
+
+
+def validate_effective_head(
+    head: str,
+    *,
+    worktree_id: str,
+    machine: str,
+    source_attribution: "SourceAttribution",
+) -> None:
+    """Block an effective PR head that would leak a private identifier.
+
+    ``head`` is the fully-resolved branch name about to be published --
+    however it was chosen (an explicit ``--branch``, a reused existing-PR
+    branch, or a rendered ``head_pattern`` template). When
+    *source_attribution* is not exactly ``True`` (i.e. it is ``False`` or
+    ``"codename"``), ``head`` must not contain the raw *worktree_id*, the
+    *machine* name, or an unresolved ``{machine}``/``{worktree_id}`` template
+    marker (a defensive check: neither token should ever survive
+    unsubstituted into a published ref, but a config bug must not silently
+    leak one). Raises :class:`BranchLeakError` naming the offending
+    reason(s); callers must surface this as a hard error and refuse to push,
+    never warn-and-continue.
+
+    A repo that has opted into the full raw marker
+    (``source_attribution: true``) already accepts machine/worktree/session
+    identifiers reaching the PR, so this check is a no-op for it -- it exists
+    to protect repos that have NOT opted in.
+    """
+    if source_attribution is True or not head:
+        return
+    reasons: list[str] = []
+    if worktree_id and worktree_id in head:
+        reasons.append(f"raw worktree id {worktree_id!r}")
+    if machine and machine in head:
+        reasons.append(f"machine name {machine!r}")
+    unresolved = list(dict.fromkeys(_UNRESOLVED_TOKEN_RE.findall(head)))
+    if unresolved:
+        reasons.append(
+            "unresolved template marker "
+            + ", ".join(f"{{{tok}}}" for tok in unresolved)
+        )
+    if reasons:
+        raise BranchLeakError(
+            f"PR head {head!r} would leak " + "; ".join(reasons) +
+            f" to a public branch name while source_attribution is "
+            f"{source_attribution!r}. Set pr.source_attribution: true if "
+            f"this repo accepts that exposure, or choose a --branch/"
+            f"head_pattern that does not embed a private identifier."
+        )
+
+
+def head_pattern_leak_risk(head_pattern: str) -> list[str]:
+    """Static, config-only risk check for a repo's configured ``head_pattern``.
+
+    Used by the migration audit (Phase 5) to flag repos whose
+    ``pr.head_pattern`` embeds ``{machine}``/``{worktree_id}`` while
+    ``pr.source_attribution`` isn't ``true`` -- a risk that is visible from
+    config alone, without needing a live ``create-pr`` run. Returns the list
+    of risky tokens found (empty when the pattern is safe); does not itself
+    know the repo's ``source_attribution`` setting -- callers pair this with
+    that check (see ``audit_source_attribution_risk``).
+    """
+    return list(dict.fromkeys(_UNRESOLVED_TOKEN_RE.findall(head_pattern or "")))
+
+
+def audit_source_attribution_risk(
+    *,
+    source_attribution: object,
+    head_pattern: str = "",
+) -> list[str]:
+    """Flag a repo PR config combination that risks the branch-name leak class.
+
+    Migration-audit helper (Phase 5): a repo is at risk when
+    ``source_attribution`` is not exactly ``True`` (``False`` **or absent** --
+    the key defaults to ``False``, so a config that omits it entirely is
+    just as much at risk as one that sets it explicitly) *and* its
+    ``head_pattern`` embeds a token (``{machine}``/``{worktree_id}``) that
+    could carry a private identifier into a published branch name. Returns a
+    list of human-readable findings (empty when the config is not at risk).
+    """
+    if source_attribution is True:
+        return []
+    risky_tokens = head_pattern_leak_risk(head_pattern)
+    if not risky_tokens:
+        return []
+    attribution_desc = (
+        "absent (defaults to false)" if source_attribution is None
+        else f"{source_attribution!r}"
+    )
+    return [
+        f"pr.head_pattern {head_pattern!r} embeds {{{tok}}} while "
+        f"pr.source_attribution is {attribution_desc} -- migrate to "
+        f"source_attribution: true or codename, or drop {{{tok}}} from "
+        f"head_pattern."
+        for tok in risky_tokens
+    ]
 

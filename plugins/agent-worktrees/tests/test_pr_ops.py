@@ -762,6 +762,44 @@ class TestCreatePRRoleResolution:
 # create_pr -- refspec head scheme (#1815)
 # ---------------------------------------------------------------------------
 
+class TestAuditAttributionRisk:
+    """pr-attribution-codenames Phase 5: audit_attribution_risk (config-only)."""
+
+    def _config(self, config, **pr_overrides):
+        import dataclasses
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(repo.pr, **pr_overrides)
+        return dataclasses.replace(config, repos={"ext": dataclasses.replace(repo, pr=pr)})
+
+    def test_no_findings_for_default_config(self, pr_repo):
+        config, _wid, _wt, _ = pr_repo
+        assert pr_ops.audit_attribution_risk(config) == []
+
+    def test_no_findings_when_attribution_true(self, pr_repo):
+        config, _wid, _wt, _ = pr_repo
+        config = self._config(
+            config, source_attribution=True, head_pattern="user/{machine}/{slug}",
+        )
+        assert pr_ops.audit_attribution_risk(config) == []
+
+    def test_finding_for_risky_head_pattern_with_absent_attribution(self, pr_repo):
+        config, _wid, _wt, _ = pr_repo
+        # source_attribution defaults to False when absent from config --
+        # PRConfig's own default already models "absent" the same as "false".
+        config = self._config(config, head_pattern="{worktree_id}/{slug}")
+        findings = pr_ops.audit_attribution_risk(config)
+        assert len(findings) == 1
+        assert "{worktree_id}" in findings[0]
+
+    def test_finding_under_codename_mode(self, pr_repo):
+        config, _wid, _wt, _ = pr_repo
+        config = self._config(
+            config, source_attribution="codename", head_pattern="{machine}/{slug}",
+        )
+        findings = pr_ops.audit_attribution_risk(config)
+        assert len(findings) == 1
+
+
 class TestCreatePRRefspec:
     def _refspec_config(self, config, **pr_overrides):
         import dataclasses
@@ -946,6 +984,70 @@ class TestCreatePRRefspec:
         assert {p.branch for p in rec.prs} == {
             "pr/add-feature-aaaa", "pr/second-thing-aaaa",
         }
+
+
+class TestCreatePRBranchLeakGuard:
+    """pr-attribution-codenames Phase 5: hard-block a leaking effective head."""
+
+    def _config(self, config, **pr_overrides):
+        import dataclasses
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(repo.pr, **pr_overrides)
+        return dataclasses.replace(config, repos={"ext": dataclasses.replace(repo, pr=pr)})
+
+    def test_explicit_branch_with_raw_worktree_id_is_blocked(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        res = pr_ops.create_pr(
+            wid, config, title="Add feature", branch=f"worktree/{wid}",
+        )
+        assert res["success"] is False
+        assert "leak" in res["error"]
+        assert wid in res["error"]
+        # Nothing was pushed -- the branch never exists on the remote.
+        assert not git_ops.remote_branch_exists(
+            "origin", f"worktree/{wid}", cwd=str(wt_path)
+        )
+
+    def test_head_pattern_with_machine_token_is_blocked(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        config = self._config(config, head_pattern="user/{machine}/{slug}")
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+        assert res["success"] is False
+        assert "leak" in res["error"]
+        assert "machine name" in res["error"]
+
+    def test_source_attribution_true_allows_the_raw_head(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        config = self._config(config, source_attribution=True)
+        res = pr_ops.create_pr(
+            wid, config, title="Add feature", branch=f"worktree/{wid}",
+        )
+        assert res["success"] is True, res
+
+    def test_codename_mode_still_blocks_a_leaking_branch(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        config = self._config(config, source_attribution="codename")
+        res = pr_ops.create_pr(
+            wid, config, title="Add feature", branch=f"worktree/{wid}",
+        )
+        assert res["success"] is False
+        assert "leak" in res["error"]
+
+    def test_dry_run_still_reports_the_block(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        res = pr_ops.create_pr(
+            wid, config, title="Add feature", branch=f"worktree/{wid}",
+            dry_run=True,
+        )
+        assert res["success"] is False
+        assert "leak" in res["error"]
+
+    def test_safe_default_head_pattern_is_unaffected(self, pr_repo):
+        # Regression: the ordinary snapshot/refspec default patterns never
+        # embed a private identifier, so they must still succeed unchanged.
+        config, wid, wt_path, _ = pr_repo
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+        assert res["success"] is True, res
 
 
 # ---------------------------------------------------------------------------

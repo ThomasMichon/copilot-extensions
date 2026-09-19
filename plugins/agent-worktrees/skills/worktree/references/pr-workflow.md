@@ -341,6 +341,16 @@ automated cross-machine lookup yet). Useful flags: `--no-open` (push only),
 the result carries `pr_open_error` so you can fall back to Steps 2-3 below. A
 repo **without** provider credentials configured uses the manual flow unchanged.
 
+**Branch-name leak class.** The hidden marker above is not the only surface
+that can carry a private identifier -- the PR head's *branch name* is public
+too. Whenever `pr.source_attribution` isn't exactly `true`, `create-pr` hard-
+blocks (never warns) publishing an effective head -- however resolved: the
+scheme default, an explicit `--branch`, an existing-PR reuse, or a rendered
+`pr.head_pattern` -- that contains the raw worktree id, the machine name, or
+an unresolved `{machine}`/`{worktree_id}` template marker. Run
+`agent-worktrees attribution-audit` to check a repo's configured
+`head_pattern` for this risk ahead of time.
+
 `push-changes` and an idempotent `create-pr` re-run publish the final pushed
 head as a dedicated hidden PR comment. Consumers use the newest source marker
 across the initial body and managed comments. Mutable attribution never
