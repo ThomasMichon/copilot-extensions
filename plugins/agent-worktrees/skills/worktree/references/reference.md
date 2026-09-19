@@ -152,7 +152,7 @@ locks can be reclaimed with the `reclaim` flow.
 A worktree that accumulates extra mux panes after a series of handoffs (a
 predecessor whose successor was spawned but whose own retirement was never
 confirmed) is a handoff-lifecycle bug, not something to fix by hand. Run
-`agent-worktrees handoffs-check --worktree-id <id>` (read-only) or add
+`agent-worktrees handoffs-check --worktree-id <id>` <!-- marketplace-isolation: allow diagnostic-tooling --> (read-only) or add
 `--execute` to retire what it finds. The read-only report does not itself
 confirm the pane is still alive -- it lists every unretired candidate it
 finds; `--execute` runs the same live-check choreography the resident
