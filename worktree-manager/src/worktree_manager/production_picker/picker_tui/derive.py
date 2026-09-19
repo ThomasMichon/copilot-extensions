@@ -262,8 +262,13 @@ def truncate_text(s, w):
     s = str(s)
     if cell_len(s) <= w:
         return s
-    if w <= 1:
-        return s[:w]
+    if w <= 0:
+        return ""
+    if w == 1:
+        # A double-width first character still exceeds a 1-cell budget even
+        # unclipped (e.g. a wide CJK glyph) -- degrade to the ellipsis
+        # (itself exactly 1 cell) rather than returning 2 cells' worth.
+        return s[0] if cell_len(s[0]) <= 1 else "…"
     # Binary-search the longest prefix whose cell width leaves room for the
     # ellipsis -- cheap and exact for the short strings this renders (marker
     # phrases, asset-hint runs), unlike slicing by character count.

@@ -4592,6 +4592,13 @@ def test_truncate_text_is_cell_width_aware():
     assert derive.truncate_text("abcdef", 4) == "abc…"
     # No truncation needed -- returned as-is either way.
     assert derive.truncate_text("ab", 4) == "ab"
+    from rich.cells import cell_len
+    # A 1-cell budget that can't even fit a double-width first character must
+    # still respect the budget (review follow-up) -- degrade to the ellipsis
+    # (itself exactly 1 cell) rather than returning 2 cells' worth.
+    assert cell_len(derive.truncate_text("界界", 1)) <= 1
+    assert derive.truncate_text("abc", 1) == "a"
+    assert derive.truncate_text("x", 0) == ""
 
 
 def test_status_line_segments_reserve_wide_asset_width_correctly():
