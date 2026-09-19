@@ -813,3 +813,28 @@ item and every Phase 3 Validation Plan item -- including the pre-existing
 Phase 4 item this session's verification pass caught and fixed -- is
 checked off.
 
+### 2026-09-19 — Phase 3 PR review round 1 (PR #2922)
+
+- **Command injection (high severity):** `resolve_codename_cross_machine`
+  passed the caller-supplied `codename` straight into `_remote_probe_cmd`,
+  which interpolates it into a remote `bash -lc '...'` string (and a pwsh
+  EncodedCommand payload) -- an unvalidated codename containing quotes or
+  shell metacharacters could inject arbitrary commands on every scanned
+  machine. Fixed: validate against `codename.is_valid_handle` (the same
+  lowercase-alnum-plus-hyphens shape every legitimately-assigned codename
+  already satisfies) BEFORE any SSH fan-out, returning `[]` for a
+  malformed value -- exactly like "not found," never reaching the shell
+  construction at all. 1 new test
+  (`test_malformed_codename_never_reaches_ssh`, five injection-shaped
+  payloads, asserts `_probe_machine` is never called).
+- **Misleading comment (low severity):** the backfill fix's comment
+  claimed `ensure_codename` "may return a freshly-reloaded object from
+  disk" as the reason for mutating `record.codename` in place rather than
+  reassigning `record`. That is factually wrong -- `ensure_codename`
+  always mutates and returns the SAME `record` object it was given, never
+  a different one. Simplified the code (dropped the now-pointless
+  intermediate `backfilled` variable) and corrected the comment to
+  describe the actual contract.
+- Full plugin suite: 640 passed (same 10 pre-existing `test_doctor.py`
+  failures, unrelated).
+

@@ -1096,17 +1096,15 @@ def _open_via_provider(
         from . import codename_tracking
         codename = record.codename if record else None
         if record is not None and not codename:
-            # Mutate `record.codename` IN PLACE -- never reassign `record`
-            # itself here. `ensure_codename` may return a freshly-reloaded
-            # object from disk; swapping `record` to that copy would silently
-            # detach it from `target_pr` (a separate parameter this function
-            # mutates directly and appends onto `record.prs` upstream), so a
-            # later `tracking.save_record(record)` would drop those
-            # mutations entirely.
-            backfilled = codename_tracking.ensure_codename(
+            # `ensure_codename` mutates `record` in place and returns that
+            # same object (never a different/reloaded one), so this is
+            # simply "backfill record.codename, then re-read it" -- no
+            # object-identity concern with `target_pr` (a separate
+            # parameter this function mutates directly and appends onto
+            # `record.prs` upstream).
+            codename_tracking.ensure_codename(
                 record, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config),
             )
-            record.codename = backfilled.codename
             codename = record.codename
         marker_published = bool(
             isinstance(codename, str) and codename_mod.is_valid_handle(codename)
