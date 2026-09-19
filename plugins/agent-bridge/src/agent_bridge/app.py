@@ -24,6 +24,7 @@ from .routes import (
     acp_ws,
     admin,
     agents,
+    dispatch_tasks,
     health,
     live_sessions,
     remote,
@@ -1107,5 +1108,6 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:
     app.include_router(agents.router)
     app.include_router(worktrees.router)
     app.include_router(admin.router)
+    app.include_router(dispatch_tasks.router)
 
     return app

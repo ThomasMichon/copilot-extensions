@@ -123,6 +123,47 @@ def _repo_config_layers(repo_root: Path) -> list[Path]:
     return layers
 
 
+def _read_agent_dispatch_token() -> str:
+    """Best-effort read of ``AGENT_DISPATCH_TOKEN`` from the agent-dispatch
+    coordinator's service env file (``~/.agent-dispatch/service.env``).
+
+    Mirrors ``neuron-forge``'s own helper of the same name and shape -- both
+    are optional consumers of the same loopback coordinator and should agree
+    on the same discovery convention rather than inventing a second one.
+    Returns "" when the file is absent or the token is unset (the loopback
+    coordinator commonly runs unauthenticated).
+    """
+    path = Path.home() / ".agent-dispatch" / "service.env"
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if line.startswith("AGENT_DISPATCH_TOKEN="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def _apply_agent_dispatch_env_defaults(data: dict[str, object]) -> dict[str, object]:
+    """Fill ``agent_dispatch_url``/``agent_dispatch_token`` from the environment
+    when config.yaml leaves them **unset entirely**, so ``AGENT_DISPATCH_URL``/
+    ``AGENT_DISPATCH_TOKEN`` (and the coordinator's own service env file) work
+    the same way they do for ``neuron-forge`` without requiring a YAML edit. An
+    explicit YAML value -- including an explicit empty string, the documented
+    way to disable the coordinator lookup -- always wins over the environment;
+    only a genuinely absent key falls through to it.
+    """
+    if "agent_dispatch_url" not in data:
+        env_url = os.environ.get("AGENT_DISPATCH_URL")
+        if env_url:
+            data["agent_dispatch_url"] = env_url
+    if "agent_dispatch_token" not in data:
+        token = os.environ.get("AGENT_DISPATCH_TOKEN") or _read_agent_dispatch_token()
+        if token:
+            data["agent_dispatch_token"] = token
+    return data
+
+
 def load_config() -> ServiceConfig:
     """Load config from YAML, falling back to defaults."""
     root = config_dir()
@@ -138,10 +179,14 @@ def load_config() -> ServiceConfig:
             data = config_migrations.migrate_loaded(data)
             if isinstance(data, dict):
                 data = _normalize_service_config(data, root=root)
+                data = _apply_agent_dispatch_env_defaults(data)
             return ServiceConfig(**data)
         except Exception:
             log.warning("Failed to parse %s, using defaults", cfg_path)
-    return ServiceConfig(db_path=str(default_db_path(root)))
+    return ServiceConfig(
+        db_path=str(default_db_path(root)),
+        **_apply_agent_dispatch_env_defaults({}),
+    )
 
 
 def load_repo_bridge_config(repo_root: Path) -> RepoBridgeConfig | None:
