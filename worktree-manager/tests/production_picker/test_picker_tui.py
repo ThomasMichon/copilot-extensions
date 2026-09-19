@@ -4562,6 +4562,20 @@ async def _focus_wt_list(app, pilot, scr):
     return nl
 
 
+def test_wt_row_always_visible_covers_every_live_signal():
+    """PR #2911 review: the record-shape-contract predicate must recognize
+    EVERY live-session signal ``_state()``/``_sess()`` treat as ACTIVE, not
+    just a subset -- a row live only via one of the less-common signals
+    (e.g. ``session_bound_live``, the cache path in test_picker_cache.py)
+    must still survive a non-matching filter query."""
+    for field in ("mux_live", "session_lock_live", "session_bound_live",
+                  "session_bridge_live", "session_ahp_live",
+                  "execution_leg_live", "session_bare_orphan"):
+        assert derive.wt_row_always_visible({field: True}) is True
+    assert derive.wt_row_always_visible({}) is False
+    assert derive.wt_row_always_visible({"mux_live": False}) is False
+
+
 def test_command_bar_filters_the_worktrees_list(monkeypatch):
     """#2228 Phase 4: "/" opens the command bar, typed characters narrow the
     Worktrees list by title (case-insensitive substring), and Enter commits
@@ -4675,6 +4689,34 @@ def test_command_bar_never_hides_a_live_worktree(monkeypatch):
     asyncio.run(run())
 
 
+def test_command_bar_owns_ctrl_arrow_keys_while_composing(monkeypatch):
+    """PR #2911 review: ``BINDING_KEYS`` (Ctrl+Left/Right, the machine-switch
+    shortcut) was checked before ``cmd_mode``, so it still bubbled to
+    Textual's own binding system while composing -- switching the machine
+    tab mid-query instead of the key landing in the command bar. The
+    composing check must run first everywhere ``BINDING_KEYS``/native-key
+    bubbling is checked."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            machine_idx_before = scr.machine_idx
+            await pilot.press("ctrl+left")
+            await pilot.pause()
+            assert scr.cmd_mode is True
+            assert scr.machine_idx == machine_idx_before
+
+    asyncio.run(run())
+
+
 def test_command_bar_sort_cycles_worktrees_order(monkeypatch):
     """"s" cycles the Worktrees list's sort key (#2228 Phase 4). The fixture's
     Active section holds one row, so this exercises the Recent section (two
@@ -4712,6 +4754,58 @@ def test_command_bar_sort_cycles_worktrees_order(monkeypatch):
             await pilot.pause()
             assert scr.list_view.sort_label(derive.WT_SORT_KEYS) == "title"
             assert [w["title"] for w in scr.list_records()] == ["Alpha idle", "Zeta idle"]
+
+    asyncio.run(run())
+
+
+def test_command_bar_sort_cycle_preserves_focus_and_anchor(monkeypatch):
+    """PR #2911 review: cycling the sort key reorders the rows, so a
+    focused/anchored row's numeric INDEX would otherwise point at a
+    different row after the reorder. `s` must remap `sel`/`last_l`/
+    `wt_anchor` by the row's stable key, not leave them as stale indices."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260620-bbbb", "title": "Zeta idle",
+         "status": "active", "started_at": "2026-06-20T10:00:00",
+         "turn_count": 0, "state": "unused"},
+        {"id": "anomalous-potato-win-20260619-cccc", "title": "Alpha idle",
+         "status": "active", "started_at": "2026-06-19T10:00:00",
+         "turn_count": 0, "state": "unused"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            # Default (age) order: Zeta (index 0), Alpha (index 1). Focus and
+            # anchor Zeta -- it will move to index 1 once sorted by title.
+            assert [w["title"] for w in scr.list_records()] == ["Zeta idle", "Alpha idle"]
+            scr.sel = ("L", 0)
+            scr.wt_anchor = 0
+            scr.refresh()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            scr.sel = ("L", 0)
+            scr.wt_anchor = 0
+            await pilot.press("s")
+            await pilot.pause()
+            assert [w["title"] for w in scr.list_records()] == ["Alpha idle", "Zeta idle"]
+            focused = scr.list_records()[scr.sel[1]]
+            assert focused["title"] == "Zeta idle"
+            assert scr.last_l == scr.sel[1]
+            assert scr.list_records()[scr.wt_anchor]["title"] == "Zeta idle"
 
     asyncio.run(run())
 

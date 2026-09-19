@@ -630,8 +630,16 @@ def wt_row_always_visible(w):
     (#2228 Phase 4) -- the cross-effort record-shape-contract: a live or
     bare-orphan worktree stays visible regardless of query match, since an
     operator mid-session on it (or one flagged as needing attention) must
-    never simply vanish from the list."""
+    never simply vanish from the list. Mirrors EVERY live-session signal
+    `_state()`/`_sess()` treat as ACTIVE (``mux_live`` stands in for their
+    raw ``mux_session``/``mux_attached`` -- this runs on the already-
+    normalized record, where those two are already folded into it), not
+    just the subset the first cut of this predicate checked (review
+    finding: a `session_bound_live`-only row, e.g. the cache path in
+    `test_picker_cache.py`, was falling through)."""
     return bool(w.get("mux_live") or w.get("session_lock_live")
+                or w.get("session_bound_live") or w.get("session_bridge_live")
+                or w.get("session_ahp_live") or w.get("execution_leg_live")
                 or w.get("session_bare_orphan"))
 
 

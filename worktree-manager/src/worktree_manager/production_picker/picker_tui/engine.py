@@ -621,7 +621,10 @@ class _FocusRegion(Widget):
         # them bubble (do NOT stop) so the action_* fires, exactly as
         # PickerScreen.on_key does. Everything else runs through the manual
         # dispatcher, then we mirror focus back onto whatever region sel names.
-        if key in scr.BINDING_KEYS:
+        # While composing the "/" command bar (#2228 Phase 4) it owns EVERY
+        # key -- checked first, so Ctrl+Left/Right etc. don't switch the
+        # machine/pivot mid-composition instead of landing in the query.
+        if not scr.cmd_mode and key in scr.BINDING_KEYS:
             return
         event.stop()
         event.prevent_default()
@@ -1018,12 +1021,14 @@ class _PickerNativeData(OptionList):
     def on_key(self, event) -> None:
         scr = self._screen
         key = event.key
-        # Global pivot/machine shortcuts stay owned by the picker's BINDINGS.
-        if key in scr.BINDING_KEYS:
+        # Global pivot/machine shortcuts stay owned by the picker's BINDINGS --
+        # except while composing the "/" command bar (#2228 Phase 4), which
+        # owns EVERY key (checked first) so Ctrl+Left/Right etc. can't switch
+        # the machine/pivot mid-composition, and Enter can't activate a row
+        # instead of committing the filter (OptionList would otherwise claim
+        # both natively).
+        if not scr.cmd_mode and key in scr.BINDING_KEYS:
             return
-        # While composing the "/" command bar (#2228 Phase 4), it owns EVERY
-        # key -- including ones OptionList would otherwise claim natively
-        # (Enter would activate a row instead of committing the filter).
         if not scr.cmd_mode and key in self._NATIVE_KEYS:
             return
         # Everything else (Tab region cycle, [ ] pivots, ←/→, etc.) routes
@@ -4136,7 +4141,7 @@ class PickerScreen(Widget):
             self.cmd_mode = True
             return
         if key == "s" and self._kind() == "worktrees":
-            self.list_view.cycle_sort(derive.WT_SORT_KEYS)
+            self._wt_cycle_sort()
             return
 
         zone = self.sel[0]
@@ -4253,6 +4258,30 @@ class PickerScreen(Widget):
             self.list_view.query += key
         if self.sel not in self.stops():
             self.sel = self.default_sel()
+
+    def _wt_cycle_sort(self):
+        """Cycle the Worktrees list's sort key, then remap ``sel``/``last_l``/
+        ``wt_anchor`` from row KEYS back to their new indices (#2228 Phase 4
+        review): sorting reorders every row's position, so the numeric
+        indices those three track would otherwise silently keep pointing at
+        whatever row now sits at the old index -- not the one the operator
+        was actually focused/anchored on."""
+        ids_before = self._l_ids()
+        focus_key = (ids_before[self.sel[1]]
+                     if self.sel[0] == "L" and 0 <= self.sel[1] < len(ids_before)
+                     else None)
+        anchor_key = (ids_before[self.wt_anchor]
+                      if self.wt_anchor is not None
+                      and 0 <= self.wt_anchor < len(ids_before) else None)
+        self.list_view.cycle_sort(derive.WT_SORT_KEYS)
+        ids_after = self._l_ids()
+        if focus_key is not None and focus_key in ids_after:
+            self.sel = ("L", ids_after.index(focus_key))
+            self.last_l = self.sel[1]
+        elif self.sel[0] == "L" and self.sel not in self.stops():
+            self.sel = self.default_sel()
+        if anchor_key is not None and anchor_key in ids_after:
+            self.wt_anchor = ids_after.index(anchor_key)
 
     def _wt_view(self, rows):
         """Apply the Worktrees list's filter/sort state to one bucket. Never
@@ -6297,8 +6326,10 @@ class PickerScreen(Widget):
         # top-level views -- every modal is a native ModalScreen (#88 F4) that
         # sits above this widget on the screen stack and consumes keys itself --
         # so there is no overlay-active case to guard against. Everything else
-        # goes to the manual dispatcher.
-        if key in self.BINDING_KEYS:
+        # goes to the manual dispatcher. While composing the "/" command bar
+        # (#2228 Phase 4) it owns EVERY key -- checked first, same as the
+        # region widgets' own ``on_key``.
+        if not self.cmd_mode and key in self.BINDING_KEYS:
             return
         event.stop()
         event.prevent_default()
