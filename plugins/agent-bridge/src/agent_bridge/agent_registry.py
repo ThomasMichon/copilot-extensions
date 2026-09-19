@@ -37,6 +37,7 @@ from typing import Any
 from agent_procutil import no_window_flags
 from dropin_registry import Finding, WarningTracker
 
+from .cold_store_sources import ColdStoreProviderRegistry
 from .provider_sources import ProviderManifest, scan_provider_registry
 from .topology import MachineConfig, SshEnvironment
 from .transport import PluginRef, SpawnTarget
@@ -1943,6 +1944,7 @@ class AgentResolver:
         self._provider_manifests: dict[str, ProviderManifest] = {}
         self._provider_namespaces: set[str] = set()
         self._provider_warning_tracker = WarningTracker()
+        self.cold_store = ColdStoreProviderRegistry()  # capability-keyed providers
         # Build alias -> (machine, env) index for fast lookup
         self._alias_index: dict[str, tuple[MachineConfig, SshEnvironment]] = {}
         for machine in machines.values():

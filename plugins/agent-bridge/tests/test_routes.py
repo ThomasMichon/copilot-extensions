@@ -355,6 +355,43 @@ class TestSessionRoutes:
         resp = client.get("/api/v1/sessions/nonexistent")
         assert resp.status_code == 404
 
+    def test_get_session_falls_through_to_cold_store_provider(
+        self, client, app
+    ) -> None:
+        """A session absent from the live ledger is answered by a registered
+        cold-store provider instead of an immediate 404 (Phase 2b)."""
+        from agent_bridge.cold_store import ColdStoreSession
+
+        mgr = app.state.session_manager
+        cold = ColdStoreSession(
+            session_id="archived-1",
+            status="ended",
+            cwd="/repo",
+            worktree_id="wt-1",
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-02T00:00:00+00:00",
+        )
+        with patch.object(
+            mgr, "fetch_cold_store_session", AsyncMock(return_value=cold)
+        ):
+            resp = client.get("/api/v1/sessions/archived-1")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["session_id"] == "archived-1"
+        assert body["worktree_id"] == "wt-1"
+        assert body["read_only"] is True
+        assert body["at_rest"] is True
+
+    def test_get_session_404s_when_no_cold_store_answer(
+        self, client, app
+    ) -> None:
+        mgr = app.state.session_manager
+        with patch.object(
+            mgr, "fetch_cold_store_session", AsyncMock(return_value=None)
+        ):
+            resp = client.get("/api/v1/sessions/nowhere")
+        assert resp.status_code == 404
+
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session(self, mock_acp_cls, mock_spawn, client) -> None:

@@ -5577,37 +5577,48 @@ def _cmd_config_migrate(args: argparse.Namespace) -> None:
     print(config_migrations.summarize(config_migrations.run_migrations()))
 
 
+def _print_registry_findings(name: str, report, unit: str) -> None:
+    """Human-readable summary for one drop-in registry scan report."""
+    if not report.findings:
+        print(f"[OK] {name} is {report.snapshot.authority.value}; "
+              f"{len(report.manifests)} {unit} active.")
+        return
+    print(f"[WARN] {name} has {len(report.findings)} finding(s); "
+          "valid entries remain available:")
+    for finding in report.findings:
+        target = f" -> {finding.target}" if finding.target else ""
+        print(f"  - {finding.reason}: {finding.entry}{target}")
+        if finding.detail:
+            print(f"    {finding.detail}")
+        if finding.remedy:
+            print(f"    {finding.remedy}")
+
+
 def _cmd_doctor(args: argparse.Namespace) -> None:
-    """Audit providers.d without activating provider commands."""
+    """Audit providers.d and cold-store-providers.d without activating provider
+    commands."""
+    from .cold_store_sources import scan_cold_store_registry
     from .provider_sources import scan_provider_registry
 
     report = scan_provider_registry()
-    payload = {
-        "registry": "providers.d",
-        "authority": report.snapshot.authority.value,
-        "active": sorted(report.manifests),
-        "findings": [finding.to_dict() for finding in report.findings],
-    }
+    cold_report = scan_cold_store_registry()
     if args.json:
-        _json_out(payload)
-    elif not report.findings:
-        print(
-            f"[OK] providers.d is {report.snapshot.authority.value}; "
-            f"{len(report.manifests)} provider namespace(s) active."
-        )
+        _json_out({
+            "registry": "providers.d",
+            "authority": report.snapshot.authority.value,
+            "active": sorted(report.manifests),
+            "findings": [f.to_dict() for f in report.findings],
+            "cold_store_registry": "cold-store-providers.d",
+            "cold_store_authority": cold_report.snapshot.authority.value,
+            "cold_store_active": sorted(cold_report.manifests),
+            "cold_store_findings": [f.to_dict() for f in cold_report.findings],
+        })
     else:
-        print(
-            f"[WARN] providers.d has {len(report.findings)} finding(s); "
-            "valid providers remain available:"
+        _print_registry_findings("providers.d", report, "provider namespace(s)")
+        _print_registry_findings(
+            "cold-store-providers.d", cold_report, "capability/capabilities"
         )
-        for finding in report.findings:
-            target = f" -> {finding.target}" if finding.target else ""
-            print(f"  - {finding.reason}: {finding.entry}{target}")
-            if finding.detail:
-                print(f"    {finding.detail}")
-            if finding.remedy:
-                print(f"    {finding.remedy}")
-    if report.findings:
+    if report.findings or cold_report.findings:
         sys.exit(1)
 
 

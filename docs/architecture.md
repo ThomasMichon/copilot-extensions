@@ -284,6 +284,28 @@ version skew. agent-mcp is standalone: no bridge integration or resolver. Its
 agent-facing skills use the payload command glossary; static `mcp-servers`
 startup remains an explicit compatibility boundary during migration.
 
+**Cold-store providers** are a second, sibling provider *kind* (see
+`visions/plugins/agent-bridge` §Concepts/*cold-store providers*), keyed by
+**capability** rather than address namespace: they answer "give me this
+session's content" when the daemon's own live session ledger has nothing for
+a requested ID. A cold-store provider drops its manifest into
+`~/.agent-bridge/cold-store-providers.d/<name>.json` (schema: `capability`,
+`command`, plus the same `plugin`/`plugin_root` attribution fields as a
+namespace provider) and the daemon drives `<command> session-fetch
+<session-id> --json` over the same process-boundary discipline. The verb's
+exit-code contract: `0` = found (stdout is `{"session": {...}, "events":
+[...]}`, with `session.session_id` required and matched against the request),
+`3` = not found (a legitimate miss, never an error), anything else = a
+provider error that is logged and treated as "this provider could not
+answer" — never raised to the caller. `GET /api/v1/sessions/{id}` falls
+through to a registered `session-fetch` provider only after the live ledger
+returns nothing, marking the result `read_only`/`at_rest` in the unchanged
+`SessionInfo` shape (the worktree-scoped session-listing and transcript
+routes do not yet fall through to a cold-store provider — a follow-up slice).
+agent-logger is the reference cold-store provider (see its own plugin docs);
+`agent-bridge doctor` reports findings for both `providers.d` and
+`cold-store-providers.d`.
+
 ## Ports
 
 Steady-state, **a service adds zero fixed listening ports**: it binds an
