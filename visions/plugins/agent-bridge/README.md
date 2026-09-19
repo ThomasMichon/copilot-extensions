@@ -148,7 +148,13 @@ flows read when they need to know what happened.
 The resolver layer turns a caller's target into a reachable session or agent by
 combining project context, worktree context, machine topology, agent profiles,
 namespace providers, and capability hints. The caller names the target; the
-bridge determines which route can honestly serve it.
+bridge determines which route can honestly serve it. This is what
+*resolve-by-any-origin-reference* (see Features) rides on top of when the
+caller's reference is a delegated task rather than a session or worktree
+directly — concretely, `GET /api/v1/dispatch-tasks/{id}/session`
+(`routes/dispatch_tasks.py`), which consults the agent-dispatch coordinator's
+task record and durable attachment history before applying this same layer's
+any-session-any-registered-worktree resolution.
 
 ### peer bridges
 
