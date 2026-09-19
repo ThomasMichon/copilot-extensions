@@ -2671,6 +2671,17 @@ class TaskQueue(
         generation so wakes and liveness observations from the prior
         incarnation become stale.
 
+        Deliberately does **not** clear ``awaiting_steer``: only
+        :meth:`submit_steer` (an actual operator answer) may do that. An
+        ordinary wake-driven resume (e.g. a review-loop poll tick, or a false/
+        spurious wake with no real external change) is not itself an operator
+        response, so a still-unanswered card must stay visibly blocked --
+        otherwise a task genuinely awaiting operator input silently drops out
+        of Blocked-queue tracking on its very next wake, however long the
+        operator's answer is still pending (observed in production: dozens of
+        consecutive false wakes each cleared ``awaiting_steer`` despite the
+        card never being answered).
+
         Refuses when the task carries an operator hold (:meth:`set_hold`) --
         clear it first via :meth:`clear_hold`. A pause must actually block
         resume, not just hide the button.
@@ -2680,7 +2691,6 @@ class TaskQueue(
             "lease_expires_at": ts + self.lease_seconds,
             "last_seen_at": ts,
             "last_liveness": None,
-            "awaiting_steer": 0,
             "resume_requested": 0,
         }
         if adopt_owner_session_id is not None:
@@ -4020,7 +4030,6 @@ class TaskQueue(
                 extra = {
                     "lease_expires_at": None,
                     "last_liveness": None,
-                    "awaiting_steer": 0,
                     "resume_requested": 1,
                 }
                 wake_requested = False

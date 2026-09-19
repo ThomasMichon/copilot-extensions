@@ -228,6 +228,54 @@ def test_set_card_with_form_marks_awaiting_steer(q):
     assert task.lease_expires_at is None
 
 
+def test_resume_without_a_steer_answer_does_not_clear_awaiting_steer(q):
+    """An ordinary wake-driven resume (a review-loop poll tick, or a false/
+    spurious wake with no real external change) is not an operator response,
+    so it must never silently clear ``awaiting_steer``. Only
+    :meth:`TaskQueue.submit_steer` -- an actual answer -- may do that.
+    Regression for a real production incident: a card correctly
+    marked the task blocked, but each of 58+ consecutive false wakes called
+    plain ``resume`` and wiped the flag, so the still-unanswered card
+    silently vanished from Blocked-queue tracking after the very first wake."""
+    t = _held(q)
+    form = steering.parse_request_input("decision:choice[revise,post-approved]")
+    q.set_card(t.id, "w1", card=steering.build_card(request_input=form))
+
+    task = q.resume(t.id, "w1")
+
+    assert task.awaiting_steer is True  # no operator answer -> still blocked
+    assert task.card["request_input"] == form  # card itself is unchanged
+    assert task.status == Status.STARTED
+
+
+def test_headless_cold_wake_resume_does_not_clear_awaiting_steer(q):
+    """The exact code path a real review-loop headless worker hits: a wake
+    resumes a *cold* headless owner (no live ``owner_session_id``, a
+    ``fleet-body:``/``local-body:`` spawn reservation) via the
+    ``reembody_headless_on_wake`` branch inside ``_transition``, which builds
+    its own ``extra`` dict independent of the one ``resume()`` passes in.
+    That branch must not clear ``awaiting_steer`` either -- this is the
+    branch a real review-loop's false-wake loop actually hit, distinct from
+    (and not covered by) the plain-resume regression above."""
+    t = q.create("review PR 42")
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="fleet-body:worker-host:bridge-session-1",
+    )
+    q.claim_one("fleet-owner", task_id=t.id)
+    q.start(t.id, "fleet-owner")
+    form = steering.parse_request_input("decision:choice[revise,post-approved]")
+    q.set_card(t.id, "fleet-owner", card=steering.build_card(request_input=form))
+
+    task = q.resume(t.id, "fleet-owner")
+
+    assert task.awaiting_steer is True  # no operator answer -> still blocked
+    assert task.status == Status.SUSPENDED  # cold headless owner re-parked
+    assert task.resume_requested is True
+
+
+
 def test_set_card_without_form_is_not_awaiting(q):
     t = _held(q)
     card = steering.build_card(status="just an FYI")
