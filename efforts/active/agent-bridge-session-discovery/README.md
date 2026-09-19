@@ -156,14 +156,24 @@ merge happens.
 - [ ] Add `--all-projects` to the `sessions` subparser and to
       `live-sessions list` (mirroring `agents`/`machines`), wired through
       `_listing_project()`.
-- [ ] Filter (only when `--project` is given) against the session/
-      live-session's existing `project` field, applied **after** the
+- [ ] Filter (only when `--project` is given), applied **after** the
       existing primary+elevated merge — no new server-side filtering route
-      needed since the field is already returned.
+      needed since the fields are already returned. **Field-name note
+      (resolves review finding: `LiveSessionInfo` has no `project` field):**
+      `SessionInfo.project` (regular ACP sessions) and
+      `LiveSessionInfo.repo` (live interactive sessions, `models.py`) are two
+      differently-named fields for the same "which repo" concept — there is
+      no single literal `project` attribute shared by both registries.
+      `sessions` filters/compares against `SessionInfo.project`;
+      `live-sessions list` filters/compares against `LiveSessionInfo.repo`;
+      both accept the same `--project <repo>` CLI value on the caller side
+      (the flag name is a user-facing convenience, not a literal field-name
+      passthrough).
 - [ ] Surface the owning project/repo in both the human-readable and JSON
       output for `sessions` and `live-sessions list` (the field already exists
-      server-side; only display is missing) — needed so an any-repo listing
-      is actually useful rather than an undifferentiated dump.
+      server-side under each registry's own name above; only display is
+      missing) — needed so an any-repo listing is actually useful rather
+      than an undifferentiated dump.
 - [ ] Tests: **no-flag default unchanged** (mixed-project fixture: sessions
       from 2+ distinct projects registered, no-flag call returns all of
       them including a merged elevated-sub-daemon row, unchanged from
@@ -251,6 +261,24 @@ _Pending — Phase 2's exact wire shape needs a short design pass before
 implementation (see Phase 2's first checklist item)._
 
 ## Journal
+
+### 2026-09-19 — Address remaining review finding; drive to merge
+
+Resumed after a worktree closeout sweep. Reconciled the review thread against
+the live PR state: CI is green (`mergeStateStatus: CLEAN`,
+`mergeable: MERGEABLE`), 5 of 7 file-scoped review findings from prior rounds
+are already addressed inline in the Plan text (unfiltered-default contract,
+`--project` syntax, elevated sub-daemon coverage, protocol-version gating,
+`send` deliverability — see the "resolves review finding" call-outs above)
+and were simply awaiting a fresh re-review to clear. The remaining
+genuinely-new finding (`LiveSessionInfo` has no `project` field, only
+`repo`) is fixed above. The review UI also surfaced several comments against
+`plugins/agent-worktrees/...` files that are not part of this PR's actual
+diff (`gh pr view --json files` confirms only the two effort README files
+changed, across all 3 commits) — those are a stale review-tool artifact, not
+real findings; a fresh review should drop them. Umbrella issue #2530 remains
+open and unclaimed by any other PR — this plan is still the sole vehicle for
+it and remains relevant. Requesting a fresh review next.
 
 ### 2026-09-12 — Kickoff (operator-directed split)
 
