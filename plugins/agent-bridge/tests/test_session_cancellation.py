@@ -1335,6 +1335,36 @@ async def test_resync_refuses_inconclusive_authority_without_record(owned_contex
     assert ctx.processes == []
 
 
+@pytest.mark.parametrize("index_enabled", [False, True])
+@pytest.mark.parametrize("reap_host", [False, True])
+async def test_reaping_stop_requires_conclusive_authority_when_index_is_absent(
+    owned_context, monkeypatch, index_enabled, reap_host,
+):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    sid = ctx.session.session_id
+    if not index_enabled:
+        ctx.manager._host_index = None
+    ctx.manager._remote_recovery_inconclusive.add(sid)
+    remote = AsyncMock(side_effect=AssertionError("missing authority must not be guessed"))
+    inspect = AsyncMock(side_effect=AssertionError("stop must not implicitly wake a provider"))
+    monkeypatch.setattr(ctx.manager, "_remote_reap", remote)
+    monkeypatch.setattr(ctx.manager, "_recover_remote_host_records", inspect)
+    if reap_host:
+        with pytest.raises(RemoteHostRecoveryPendingError, match="reap is unconfirmed"):
+            await ctx.manager.stop_session(sid, reap_host=True)
+        assert ctx.session.status == SessionStatus.FAILED
+        assert ctx.db.get_session(sid)["status"] == "failed"
+    else:
+        await ctx.manager.stop_session(sid)
+        assert ctx.session.status == SessionStatus.STOPPED
+        assert not ctx.manager._background_recovery_allowed(ctx.session)
+    assert sid in ctx.manager._remote_recovery_inconclusive
+    remote.assert_not_awaited()
+    inspect.assert_not_awaited()
+
+
 @pytest.mark.parametrize("failure_stage", ["marker", "index"])
 async def test_dead_authority_metadata_failure_retains_container_lock(
     owned_context, monkeypatch, failure_stage,

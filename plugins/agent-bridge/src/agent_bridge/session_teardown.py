@@ -294,8 +294,12 @@ async def complete_stop(
         from .session_host_ownership import abort_pending_host_launch
 
         await abort_pending_host_launch(manager, session_id)
-    if reap_host and manager._host_index is not None:
-        record = manager._host_index.get(session_id)
+    if reap_host:
+        record = manager._host_index.get(session_id) if manager._host_index is not None else None
+        if record is None and session_id in manager._remote_recovery_inconclusive:
+            raise RemoteHostRecoveryPendingError(
+                f"Host reap is unconfirmed for {session_id}; authority inspection remains inconclusive"
+            )
         if record is not None:
             if getattr(record, "boundary", "local") == "local":
                 manager._reap_host_record(record, "idle reap (#1826)")
