@@ -23,6 +23,32 @@ from agent_bridge.transport import AgentProcess, SpawnTarget
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.mark.parametrize("failure", ["client", "process", "launch", "attachment", "channels"])
+async def test_resume_cleanup_attempts_every_independent_owner(owned_context, monkeypatch, failure):
+    from agent_bridge.session_ownership import cleanup_resume_attempt
+
+    ctx = owned_context
+    operations = {name: AsyncMock() for name in ("client", "process", "launch", "attachment", "channels")}
+    operations[failure].side_effect = OSError(f"{failure} cleanup failed")
+    client = SimpleNamespace(shutdown=operations["client"])
+    ctx.session.client = client
+    monkeypatch.setattr("agent_bridge.session_ownership.cleanup_owned_process", operations["process"])
+    monkeypatch.setattr("agent_bridge.session_host_ownership.abort_pending_host_launch", operations["launch"])
+    monkeypatch.setattr("agent_bridge.session_host_ownership.close_pending_host_attachment", operations["attachment"])
+    monkeypatch.setattr(ctx.manager, "_drop_forward", operations["channels"])
+    release = AsyncMock()
+    monkeypatch.setattr("agent_bridge.session_ownership.release_unowned_launch_claim", release)
+    with pytest.raises(OSError, match=f"{failure} cleanup failed"):
+        await cleanup_resume_attempt(ctx.manager, ctx.session, client)
+    for operation in operations.values():
+        operation.assert_awaited_once()
+    operations["client"].assert_awaited_once_with(strict=True)
+    assert ctx.session.status == SessionStatus.FAILED
+    if failure == "client":
+        assert ctx.session.client is client
+    release.assert_not_awaited()
+
+
 @pytest.mark.parametrize("restart", [False, True])
 async def test_claim_cleanup_survives_failed_release_and_shutdown(owned_context, monkeypatch, restart):
     from agent_bridge.session_teardown import detach_for_restart

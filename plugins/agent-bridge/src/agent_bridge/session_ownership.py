@@ -84,21 +84,33 @@ async def cleanup_resume_attempt(
 
     if client is None:
         client = session.client
+    async def close_client() -> None:
+        if client is not None:
+            session.client = client
+            await client.shutdown(strict=True)
+            session.client = None
+
     try:
-        try:
-            if client is not None:
-                session.client = client
-                await client.shutdown(strict=True)
-                session.client = None
-        finally:
+        failures: list[BaseException] = []
+        for label, operation in (
+            ("ACP client", close_client()),
+            ("process", cleanup_owned_process(session)),
+            ("partial launch", abort_pending_host_launch(manager, session.session_id)),
+            ("partial attachment", close_pending_host_attachment(manager, session)),
+            ("channels", manager._drop_forward(
+                session.session_id, strict=True, preserve_ownership=True,
+            )),
+        ):
             try:
-                await cleanup_owned_process(session)
-                await abort_pending_host_launch(manager, session.session_id)
-                await close_pending_host_attachment(manager, session)
-            finally:
-                await manager._drop_forward(
-                    session.session_id, strict=True, preserve_ownership=True,
+                await operation
+            except (Exception, asyncio.CancelledError) as exc:
+                failures.append(exc)
+                log.error(
+                    "Resume %s cleanup failed for %s; continuing independent cleanup",
+                    label, session.session_id, exc_info=True,
                 )
+        if failures:
+            raise failures[0]
         await release_unowned_launch_claim(manager, session, include_target=False)
         if not has_host_ownership(manager, session.session_id):
             manager._release_container_lock(session.session_id)

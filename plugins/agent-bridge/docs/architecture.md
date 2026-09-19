@@ -475,6 +475,9 @@ restart does not inherently close the child's pipes.
   Reap scheduling treats failed completions and durable pending intent as
   existing owners, not just running tasks; only the explicit revision-fenced
   cleanup retry path can consume that ownership.
+  Failed resume cleanup attempts each independent client, process, partial
+  launch, partial attachment, and channel owner even when an earlier stage
+  fails; it reports the failure before releasing any venue claim.
   Direct resync refuses pending remote reaps before mutating session state.
   Confirmed remote reap clears container markers and target locks only if the
   current host record still equals the reaped snapshot; replacement records
