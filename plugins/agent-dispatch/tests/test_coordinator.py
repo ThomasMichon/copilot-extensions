@@ -571,6 +571,51 @@ def test_abandon_requires_permission_over_http(api):
     assert ok.status_code == 200 and ok.json()["status"] == Status.ABANDONED
 
 
+def test_hold_and_unhold_over_http(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    held = api.post(f"/tasks/{tid}/hold", json={"reason": "pause", "actor": "op"})
+    assert held.status_code == 200
+    assert held.json()["hold_reason"] == "pause"
+    unheld = api.post(f"/tasks/{tid}/unhold", json={"actor": "op"})
+    assert unheld.status_code == 200
+    assert unheld.json()["hold_reason"] is None
+
+
+def test_hold_rejects_stale_expected_status_over_http(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    stale = api.post(
+        f"/tasks/{tid}/hold",
+        json={"reason": "pause", "actor": "op", "expected_status": "queued"},
+    )
+    assert stale.status_code == 409
+    ok = api.post(
+        f"/tasks/{tid}/hold",
+        json={"reason": "pause", "actor": "op", "expected_status": "claimed"},
+    )
+    assert ok.status_code == 200
+
+
+def test_reset_over_http(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    reset = api.post(f"/tasks/{tid}/reset", json={"reason": "not like this"})
+    assert reset.status_code == 200
+    body = reset.json()
+    assert body["status"] == Status.PROPOSED
+    assert body["owner"] is None
+
+
+def test_reset_refuses_terminal_and_held_over_http(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/tasks/" + tid + "/abandon", json={"permitted": True})
+    assert api.post(f"/tasks/{tid}/reset", json={}).status_code == 409
+
+    tid2 = api.post("/tasks", json={"title": "y"}).json()["id"]
+    api.post(f"/tasks/{tid2}/hold", json={"reason": "pause", "actor": "op"})
+    assert api.post(f"/tasks/{tid2}/reset", json={}).status_code == 409
+
+
 def test_proposed_not_claimable_then_approved(api):
     tid = api.post("/tasks", json={"title": "draft", "proposed": True}).json()["id"]
     assert api.post(

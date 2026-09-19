@@ -151,7 +151,8 @@ class _FakeClient:
         self.bind_calls.append((task_id, worker_id, session_id))
         return {"id": task_id}
 
-    def abandon(self, task_id, *, worker_id=None, permitted=False, reason=None):
+    def abandon(self, task_id, *, worker_id=None, permitted=False, reason=None,
+                expected_status=None):
         return {"id": task_id, "status": "abandoned"}
 
 

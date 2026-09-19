@@ -134,6 +134,16 @@ class Column:
     #: The renderer maps the cell value through the palette; ``style`` is the
     #: fallback when the value isn't in the palette.
     palette: str | None = None
+    #: Optional drop priority for the column-fit algorithm (the same ``fit()``
+    #: helper the Worktrees list uses): when the declared columns are wider
+    #: than the render width, the column with the HIGHEST priority number is
+    #: dropped first, repeating until the row fits (or nothing is left to
+    #: drop). ``None`` defaults to declaration order (later columns drop
+    #: first); the flex column -- ``key == "title"`` if present, else the
+    #: last declared column -- is never dropped, only grown or shrunk to
+    #: absorb the remaining width. This keeps a declarative pivot's row from
+    #: ever exceeding its render width and silently line-wrapping.
+    priority: int | None = None
 
 
 @dataclass(frozen=True)
@@ -631,6 +641,13 @@ def _parse_columns(raw: object) -> tuple[Column, ...]:
         palette = c.get("palette")
         if palette is not None and not isinstance(palette, str):
             raise ManifestError(f"`columns[{i}].palette` must be a string")
+        priority_raw = c.get("priority")
+        if priority_raw is None:
+            priority: int | None = None
+        elif isinstance(priority_raw, bool) or not isinstance(priority_raw, int):
+            raise ManifestError(f"`columns[{i}].priority` must be an integer")
+        else:
+            priority = priority_raw
         cols.append(
             Column(
                 key=key.strip(),
@@ -639,6 +656,7 @@ def _parse_columns(raw: object) -> tuple[Column, ...]:
                 align=align,
                 style=style,
                 palette=palette,
+                priority=priority,
             )
         )
     return tuple(cols)

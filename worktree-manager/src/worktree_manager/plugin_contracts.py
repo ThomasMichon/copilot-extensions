@@ -41,6 +41,7 @@ class ColumnContract:
     align: str = "l"
     style: str | None = None
     palette: str | None = None
+    priority: int | None = None
 
 
 @dataclass(frozen=True)
@@ -212,6 +213,11 @@ def _parse_columns(raw: object) -> tuple[ColumnContract, ...]:
             raise ContractError(f"`columns[{i}].style` must be a string")
         if palette is not None and not isinstance(palette, str):
             raise ContractError(f"`columns[{i}].palette` must be a string")
+        priority = item.get("priority")
+        if priority is not None and (
+            isinstance(priority, bool) or not isinstance(priority, int)
+        ):
+            raise ContractError(f"`columns[{i}].priority` must be an integer")
         out.append(ColumnContract(
             key=key.strip(),
             header=header,
@@ -219,6 +225,7 @@ def _parse_columns(raw: object) -> tuple[ColumnContract, ...]:
             align=align,
             style=style,
             palette=palette,
+            priority=priority,
         ))
     return tuple(out)
 

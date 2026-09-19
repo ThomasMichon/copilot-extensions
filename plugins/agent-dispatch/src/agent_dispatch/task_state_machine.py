@@ -185,6 +185,21 @@ TRANSITIONS: tuple[Transition, ...] = (
         recovery_mode=RecoveryMode.SAFE_RETRY,
         implemented_by="TaskQueue.abandon (requires permitted=True)",
     ),
+    Transition(
+        name="reset",
+        #: Phase 2's gentler "not like this": discard the current
+        #: attempt's embodiment state (owner/session/lease/card) while
+        #: preserving the task's identity, prompt, and durable
+        #: goal/done_criteria/progress_log, and re-admit it for a fresh
+        #: attempt. Never from a terminal state (already exited the
+        #: lifecycle) or from PROPOSED itself (already there).
+        from_states=frozenset(
+            {Status.QUEUED, Status.CLAIMED, Status.STARTED, Status.SUSPENDED}
+        ),
+        to_state=Status.PROPOSED,
+        recovery_mode=RecoveryMode.SAFE_RETRY,
+        implemented_by="TaskQueue.reset",
+    ),
 )
 
 #: Lookup by name, for callers (Phase 10's live-wiring: ``queue.py``'s own

@@ -104,7 +104,8 @@ class SpawnReservationMixin:
     # -- spawn reservations --------------------------------------------------
 
     def reserve_spawn(
-        self, task_id: str, *, reserved_by: str | None = None, now: float | None = None
+        self, task_id: str, *, reserved_by: str | None = None, now: float | None = None,
+        allow_suspended_reembodiment: bool = False,
     ) -> tuple[SpawnReservation, bool]:
         """Atomically reserve the right to spawn an embody worker for ``task_id``.
 
@@ -130,6 +131,17 @@ class SpawnReservationMixin:
 
         A prior ``failed``/``settled`` reservation therefore does not block a
         retry: the next attempt gets a fresh key.
+
+        ``allow_suspended_reembodiment`` (PR #2913 review finding): the default
+        eligibility gate requires ``queued`` and unowned -- the normal
+        pool-spawn shape. A **suspended** task is never claimable (``claim``
+        only ever picks from ``queued``) and always retains its owner from
+        before suspension, so it can never satisfy that gate at all -- yet
+        interactive re-embodiment (:mod:`agent_dispatch.interactive_embody`)
+        legitimately needs to mint a reservation for exactly this case. Set
+        ``True`` to additionally accept a ``suspended`` task regardless of
+        owner; every other check (active-reservation dedupe, exclusive-key
+        carry-forward) is unchanged.
         """
         ts = self._now(now)
         with self._connect() as conn:
@@ -163,7 +175,10 @@ class SpawnReservationMixin:
                     if row["state"] in SpawnState.ACTIVE:
                         conn.execute("COMMIT")
                         return SpawnReservation._from_row(row), False
-            if task.status != Status.QUEUED or task.owner is not None:
+            eligible = task.status == Status.QUEUED and task.owner is None
+            if allow_suspended_reembodiment and task.status == Status.SUSPENDED:
+                eligible = True
+            if not eligible:
                 conn.execute("COMMIT")
                 raise TaskError(
                     f"task {task_id!r} is {task.status!r} with owner "
@@ -174,6 +189,20 @@ class SpawnReservationMixin:
             carried_worktree = task.affinity.get("worktree")
             worktree_ownership = "targeted" if carried_worktree else None
             carried_session = None
+            if (
+                carried_worktree is None
+                and task.status == Status.SUSPENDED
+                and task.owner
+                and "/" in task.owner
+            ):
+                # A suspended task retains its owner (`machine/worktree`) from
+                # before suspension -- unlike a fresh queued spawn, this is a
+                # REAL, already-checked-out worktree to reuse, not a
+                # first-time creation. Without this, `prepare_reusable_worktree`
+                # would see an empty `reservation["worktree"]` and create a
+                # brand-new worktree, discarding the task's actual context.
+                carried_worktree = task.owner.split("/", 1)[1]
+                worktree_ownership = "reused"
             if task.exclusive_key is not None:
                 prior = conn.execute(
                     "SELECT session_handle, worktree FROM spawn_reservations "

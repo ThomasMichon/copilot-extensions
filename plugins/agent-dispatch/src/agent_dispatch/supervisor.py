@@ -383,6 +383,8 @@ class Supervisor:
                 continue  # deferred: not due yet
             if t.get("awaiting_steer"):
                 continue  # blocked on the operator; Confirm clears this to wake
+            if t.get("hold_reason"):
+                continue  # operator hold (Phase 1's Pause primitive) blocks re-queue
             if not self._matches_pool(t):
                 continue  # not opted in
             out.append(t)

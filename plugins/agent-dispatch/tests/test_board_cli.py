@@ -50,6 +50,39 @@ def test_build_groups_and_expires_activity(monkeypatch):
     assert by_id["dormant"]["group"] == "Suspended"
 
 
+def test_build_wt_live_reflects_headless_activity_only(monkeypatch):
+    """Phase 3: `wt_live` reuses the already-computed `activity`/
+    `activity_updated_at` (a headless self-report) -- it is blank, not a
+    confirmed "not live", for a CLI-embodied task with no such signal."""
+    monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
+    rows = board_cli._build(
+        [
+            {"id": "active", "status": "started", "activity": "ACTIVE",
+             "activity_updated_at": 990.0},
+            {"id": "stalled", "status": "started", "activity": "STALLED",
+             "activity_updated_at": 940.0},
+            {"id": "cli-embodied", "status": "started"},  # no activity ever set
+        ],
+        machine="m1",
+        recent_mins=120,
+    )
+    by_id = {row["id"]: row for row in rows}
+    assert by_id["active"]["wt_live"] == "active"
+    assert by_id["stalled"]["wt_live"] == "stalled 1m"
+    assert by_id["cli-embodied"]["wt_live"] is None
+
+
+def test_build_artifacts_summary_is_a_phase3_placeholder(monkeypatch):
+    """Phase 3 lands the column plumbing only; Phase 5 owns the real
+    claims/artifacts computation (see the Plan's own note against the two
+    phases both claiming this field)."""
+    monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
+    rows = board_cli._build(
+        [{"id": "t1", "status": "queued"}], machine="m1", recent_mins=120
+    )
+    assert rows[0]["artifacts_summary"] is None
+
+
 def test_main_reads_local_coordinator(monkeypatch, tmp_path, capsys):
     (tmp_path / "active.json").write_text(
         json.dumps({"active": {"bind": "127.0.0.1", "port": 1234}}),

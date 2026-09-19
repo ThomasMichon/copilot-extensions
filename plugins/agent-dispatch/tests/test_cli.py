@@ -1975,7 +1975,8 @@ def test_abandon_duplicate_of_implies_permit_and_records_ref(monkeypatch):
         def get(self, task_id):
             return {"id": task_id, "spawn_reservation": None}
 
-        def abandon(self, task_id, *, worker_id=None, permitted=False, reason=None):
+        def abandon(self, task_id, *, worker_id=None, permitted=False, reason=None,
+                    expected_status=None):
             seen.update(task_id=task_id, worker_id=worker_id, permitted=permitted, reason=reason)
             return {"id": task_id, "status": "abandoned"}
 
@@ -1991,6 +1992,214 @@ def test_abandon_duplicate_of_implies_permit_and_records_ref(monkeypatch):
     args.func(args)
     assert seen["permitted"] is True
     assert "duplicate of pr/42" in seen["reason"]
+
+
+def test_pause_and_unpause_cli(monkeypatch):
+    from agent_dispatch import __main__
+
+    seen = {}
+
+    class _C:
+        def set_hold(self, task_id, *, reason, actor, expected_status=None):
+            seen["set_hold"] = dict(
+                task_id=task_id, reason=reason, actor=actor, expected_status=expected_status
+            )
+            return {"id": task_id, "hold_reason": reason}
+
+        def clear_hold(self, task_id, *, actor=None, expected_status=None):
+            seen["clear_hold"] = dict(
+                task_id=task_id, actor=actor, expected_status=expected_status
+            )
+            return {"id": task_id, "hold_reason": None}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    monkeypatch.setattr(__main__, "_owner_from_identity", lambda args: None)
+
+    pause_args = build_parser().parse_args(
+        ["pause", "t1", "--reason", "waiting on review", "--actor", "alice"]
+    )
+    assert pause_args.func(pause_args) == 0
+    assert seen["set_hold"] == {
+        "task_id": "t1", "reason": "waiting on review", "actor": "alice",
+        "expected_status": None,
+    }
+
+    unpause_args = build_parser().parse_args(
+        ["unpause", "t1", "--actor", "bob", "--expected-status", "started"]
+    )
+    assert unpause_args.func(unpause_args) == 0
+    assert seen["clear_hold"] == {
+        "task_id": "t1", "actor": "bob", "expected_status": "started",
+    }
+
+
+def test_pause_defaults_actor_to_resolved_identity(monkeypatch):
+    from agent_dispatch import __main__
+
+    seen = {}
+
+    class _C:
+        def set_hold(self, task_id, *, reason, actor, expected_status=None):
+            seen["actor"] = actor
+            return {"id": task_id, "hold_reason": reason}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    monkeypatch.setattr(__main__, "_owner_from_identity", lambda args: "m/wt")
+
+    args = build_parser().parse_args(["pause", "t1", "--reason", "waiting"])
+    args.func(args)
+    assert seen["actor"] == "m/wt"
+
+
+def test_embody_interactive_cli_runs_transaction(monkeypatch):
+    from agent_dispatch import __main__
+
+    seen = {}
+
+    def fake_launch(client, task_id, *, machine, project=None, **kwargs):
+        seen.update(task_id=task_id, machine=machine, project=project)
+        return {"task_id": task_id, "worktree": "wt-1", "session": "s1"}
+
+    monkeypatch.setattr(
+        "agent_dispatch.interactive_embody.launch_interactive_embodiment", fake_launch
+    )
+    monkeypatch.setattr("agent_dispatch.identity.resolve_machine", lambda: "m1")
+
+    class _C:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+
+    args = build_parser().parse_args(["embody", "t1", "--interactive"])
+    assert args.func(args) == 0
+    assert seen == {"task_id": "t1", "machine": "m1", "project": None}
+
+
+def test_embody_interactive_cli_reports_transaction_error(monkeypatch, capsys):
+    from agent_dispatch import __main__
+    from agent_dispatch.interactive_embody import InteractiveEmbodimentError
+
+    def fake_launch(*_a, **_k):
+        raise InteractiveEmbodimentError("task t1 is started; not eligible")
+
+    monkeypatch.setattr(
+        "agent_dispatch.interactive_embody.launch_interactive_embodiment", fake_launch
+    )
+    monkeypatch.setattr("agent_dispatch.identity.resolve_machine", lambda: "m1")
+
+    class _C:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+
+    args = build_parser().parse_args(["embody", "t1", "--interactive"])
+    assert args.func(args) == 1
+    assert "not eligible" in capsys.readouterr().err
+
+
+def test_embody_interactive_cli_requires_machine(monkeypatch):
+    monkeypatch.setattr("agent_dispatch.identity.resolve_machine", lambda: None)
+
+    args = build_parser().parse_args(["embody", "t1", "--interactive"])
+    assert args.func(args) == 2
+
+
+def test_force_stop_cli_runs(monkeypatch):
+    from agent_dispatch import __main__
+
+    seen = {}
+
+    def fake_force_stop(client, task_id, *, local_machine, actor):
+        seen.update(task_id=task_id, local_machine=local_machine, actor=actor)
+        return {"task_id": task_id, "session_stopped": True}
+
+    monkeypatch.setattr("agent_dispatch.force_stop.force_stop", fake_force_stop)
+    monkeypatch.setattr("agent_dispatch.identity.resolve_machine", lambda: "m1")
+
+    class _C:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+
+    args = build_parser().parse_args(["force-stop", "t1", "--actor", "alice"])
+    assert args.func(args) == 0
+    assert seen == {"task_id": "t1", "local_machine": "m1", "actor": "alice"}
+
+
+def test_force_stop_cli_reports_error(monkeypatch, capsys):
+    from agent_dispatch import __main__
+    from agent_dispatch.force_stop import ForceStopError
+
+    def fake_force_stop(*_a, **_k):
+        raise ForceStopError("task t1 is queued; force-stop requires started")
+
+    monkeypatch.setattr("agent_dispatch.force_stop.force_stop", fake_force_stop)
+    monkeypatch.setattr("agent_dispatch.identity.resolve_machine", lambda: "m1")
+
+    class _C:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+
+    args = build_parser().parse_args(["force-stop", "t1"])
+    assert args.func(args) == 1
+    assert "requires started" in capsys.readouterr().err
+
+
+def test_reset_cli_runs(monkeypatch):
+    from agent_dispatch import __main__
+
+    seen = {}
+
+    class _C:
+        def reset(self, task_id, *, reason=None, expected_status=None):
+            seen.update(task_id=task_id, reason=reason, expected_status=expected_status)
+            return {"id": task_id, "status": "proposed"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+
+    args = build_parser().parse_args(["reset", "t1", "--reason", "not like this"])
+    assert args.func(args) == 0
+    assert seen == {"task_id": "t1", "reason": "not like this", "expected_status": None}
+
+
+def test_reset_cli_rejects_unsupported_target():
+    args = build_parser().parse_args(["reset", "t1", "--to", "started"])
+    assert args.func(args) == 2
 
 
 def test_parser_progress_owner_optional_and_fields():

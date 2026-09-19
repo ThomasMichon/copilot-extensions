@@ -460,7 +460,11 @@ def cli_abandon(client: DispatchClient, args: argparse.Namespace) -> dict[str, A
         dedup_note = f"duplicate of {duplicate_of}"
         reason = f"{reason}; {dedup_note}" if reason else dedup_note
     result = client.abandon(
-        args.task_id, worker_id=args.worker_id, permitted=permitted, reason=reason
+        args.task_id,
+        worker_id=args.worker_id,
+        permitted=permitted,
+        reason=reason,
+        expected_status=getattr(args, "expected_status", None),
     )
     if getattr(args, "resolve", False):
         # Surface the drive-the-worktree-to-resolution plan alongside the abandon

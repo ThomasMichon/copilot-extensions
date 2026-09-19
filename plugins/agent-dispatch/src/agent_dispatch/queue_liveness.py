@@ -12,9 +12,10 @@ usable standalone.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 
-from .queue_records import Status
+from .queue_records import SpawnState, Status
 
 
 class LivenessMixin:
@@ -41,42 +42,84 @@ class LivenessMixin:
     #: retired to the terminal ``dead_letter`` state instead of churning forever.
     DEFAULT_MAX_ATTEMPTS = 5
 
+    @staticmethod
+    def _active_headless_handle(conn: sqlite3.Connection, task_id: str) -> str | None:
+        """The ``session_handle`` of the task's live headless spawn reservation,
+        or ``None`` when the task has no active/cold headless reservation.
+
+        Mirrors :meth:`agent_dispatch.queue.TaskQueue._has_headless_reservation`'s
+        query, but returns the handle itself (not a boolean) so the caller can
+        decode it into a local- or fleet-body liveness probe. A task with no
+        headless reservation at all (e.g. a manually/interactively embodied one,
+        once the interactive-embodiment transaction lands) falls through to the
+        worktree-keyed CLI resolver below instead.
+        """
+        row = conn.execute(
+            "SELECT session_handle FROM spawn_reservations"
+            " WHERE task_id = ? AND state IN (?, ?) AND"
+            " (session_handle LIKE 'local-body:%' OR"
+            " session_handle LIKE 'fleet-body:%')"
+            " ORDER BY attempt DESC LIMIT 1",
+            (task_id, SpawnState.SPAWNED, SpawnState.COLD),
+        ).fetchone()
+        return row["session_handle"] if row is not None else None
+
     def reconcile_liveness(
         self,
         resolver: Callable[[str, str | None, str | None], str] | None = None,
         *,
         max_attempts: int | None = None,
         now: float | None = None,
+        headless_local_verdict: Callable[[str], str] | None = None,
+        headless_fleet_verdict: Callable[[str, str], str] | None = None,
     ) -> dict[str, int]:
         """Garbage-collect held tasks by reconciling them against **owner-session
         liveness** -- the recovery mechanism that replaces time-based lease expiry.
 
         For each ``claimed``/``started`` task the owner's liveness is resolved to a
-        tri-state verdict (keyed on the task's captured ``owner_session_id`` -- not
-        mere worktree occupancy) and acted on:
+        tri-state verdict and acted on:
 
         - ``live``    -> leave it (the *same* owner still holds it, no matter how
           long -- there is **no** wall-clock expiry).
-        - ``gone``    -> **fenced** requeue (owner confirmed gone). Past
-          ``max_attempts`` requeues the task is retired to ``dead_letter`` instead.
+        - ``gone``    -> **fenced** transition (owner confirmed gone). A
+          **headless** body (a fleet/local spawn-reservation owns it -- see
+          :meth:`_active_headless_handle`) keeps the pre-existing behavior
+          unchanged: requeue, or ``dead_letter`` past ``max_attempts``. A
+          **CLI-embodied** ``started`` task (no headless reservation owns it) is
+          instead auto-transitioned to ``suspended`` -- it never silently
+          requeues/dead-letters out from under a durable interactive worktree,
+          and an operator (or the interactive-embodiment transaction) can
+          :meth:`resume` it into a fresh session. A ``claimed`` (not yet
+          ``started``) CLI-embodied task has no ``suspend`` transition defined
+          (see ``task_state_machine.py``), so it keeps the pre-existing
+          requeue/dead-letter behavior too.
         - ``unknown`` -> leave it (resolver couldn't tell, or identity not captured
           yet -- degrade safe; never requeue on ignorance).
 
         The last verdict is persisted to ``last_liveness`` so the buildup metric
         can classify held tasks without re-probing the bridge.
 
-        ``resolver`` is ``(worktree, machine, owner_session_id) -> verdict``; the
-        default shells :func:`tracking.liveness_verdict`. Injecting it keeps the
-        engine subprocess-free and lets tests drive verdicts deterministically.
+        ``resolver`` is ``(worktree, machine, owner_session_id) -> verdict``, used
+        only for a task with **no** headless reservation (a CLI-embodied or
+        not-yet-identifiable owner); the default shells
+        :func:`tracking.liveness_verdict` (worktree-keyed, against the bridge's
+        interactive live-sessions registry). ``headless_local_verdict`` /
+        ``headless_fleet_verdict`` probe a headless body directly by its captured
+        bridge session id; the defaults shell :func:`agent_dispatch.embody
+        .local_body_verdict` / :func:`agent_dispatch.embody.fleet_body_verdict` --
+        the same direct body-liveness probes the supervisor's own headless
+        recovery paths already use, so this introduces no new liveness
+        vocabulary. All are injectable so tests drive verdicts deterministically
+        and the engine itself stays subprocess-free.
 
         **Fencing:** liveness is probed **outside** the write lock, then each gone
-        task is requeued under a short transaction with a conditional update on
-        ``(id, status, owner_session_id, generation)`` -- so if the owner
+        task is transitioned under a short transaction with a conditional update
+        on ``(id, status, owner_session_id, generation)`` -- so if the owner
         registered, resumed, completed, or the task was re-claimed between probe
         and write, the update **no-ops** (no double-execution, no clobber).
 
         Returns counts: ``checked``/``live``/``gone``/``unknown``/``requeued``/
-        ``dead_lettered``.
+        ``dead_lettered``/``suspended``.
         """
         if resolver is None:
             from . import tracking
@@ -85,6 +128,15 @@ class LivenessMixin:
                 return tracking.liveness_verdict(
                     worktree, machine=machine, owner_session_id=owner_session_id
                 )
+        if headless_local_verdict is None:
+            from .spawn_factories import _default_local_body_verdict
+
+            headless_local_verdict = _default_local_body_verdict
+        if headless_fleet_verdict is None:
+            from .spawn_factories import _default_fleet_verdict
+
+            headless_fleet_verdict = _default_fleet_verdict
+        from .spawn_factories import _parse_fleet_body_handle, _parse_local_body_handle
 
         cap = self.DEFAULT_MAX_ATTEMPTS if max_attempts is None else max_attempts
         ts = self._now(now)
@@ -95,31 +147,52 @@ class LivenessMixin:
             "unknown": 0,
             "requeued": 0,
             "dead_lettered": 0,
+            "suspended": 0,
         }
         with self._connect() as conn:
             held = conn.execute(
-                "SELECT id, owner, owner_session_id, generation, attempts"
+                "SELECT id, owner, owner_session_id, generation, attempts, status"
                 " FROM tasks WHERE status IN (?, ?)",
                 (Status.CLAIMED, Status.STARTED),
             ).fetchall()
-        # (task_id, verdict, owner_session_id, generation, attempts) per held task.
-        probed: list[tuple[str, str, str | None, int, int]] = []
-        for row in held:
-            counts["checked"] += 1
-            machine, _sep, worktree = (row["owner"] or "").partition("/")
-            if not worktree:
-                verdict = self.LIVENESS_UNKNOWN
-            else:
-                verdict = resolver(worktree, machine or None, row["owner_session_id"])
-            counts[verdict] = counts.get(verdict, 0) + 1
-            probed.append(
-                (row["id"], verdict, row["owner_session_id"], row["generation"], row["attempts"])
-            )
+            # (task_id, verdict, owner_session_id, generation, attempts, status,
+            #  cli_embodied) per held task -- probed inside the same connection
+            # (read-only, no write lock) so the headless-reservation lookup sees
+            # a consistent snapshot alongside the held-task read above.
+            probed: list[tuple[str, str, str | None, int, int, str, bool]] = []
+            for row in held:
+                counts["checked"] += 1
+                machine, _sep, worktree = (row["owner"] or "").partition("/")
+                handle = self._active_headless_handle(conn, row["id"])
+                local_sid = _parse_local_body_handle(handle)
+                fleet = _parse_fleet_body_handle(handle)
+                if local_sid is not None:
+                    verdict = headless_local_verdict(local_sid)
+                    cli_embodied = False
+                elif fleet is not None:
+                    host, bridge_sid = fleet
+                    verdict = headless_fleet_verdict(host, bridge_sid)
+                    cli_embodied = False
+                elif not worktree:
+                    verdict = self.LIVENESS_UNKNOWN
+                    cli_embodied = True
+                else:
+                    verdict = resolver(worktree, machine or None, row["owner_session_id"])
+                    cli_embodied = True
+                counts[verdict] = counts.get(verdict, 0) + 1
+                probed.append(
+                    (
+                        row["id"], verdict, row["owner_session_id"], row["generation"],
+                        row["attempts"], row["status"], cli_embodied,
+                    )
+                )
         if not probed:
             return counts
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            for task_id, verdict, owner_session_id, generation, attempts in probed:
+            for (
+                task_id, verdict, owner_session_id, generation, attempts, status, cli_embodied,
+            ) in probed:
                 # Persist the last verdict for the buildup metric (fenced on the
                 # generation so a re-claim mid-pass isn't tagged with a stale beat).
                 conn.execute(
@@ -129,7 +202,11 @@ class LivenessMixin:
                 )
                 if verdict != self.LIVENESS_GONE:
                     continue
-                to_status = Status.DEAD_LETTER if attempts >= cap else Status.QUEUED
+                suspend = cli_embodied and status == Status.STARTED
+                if suspend:
+                    to_status = Status.SUSPENDED
+                else:
+                    to_status = Status.DEAD_LETTER if attempts >= cap else Status.QUEUED
                 owner_clause = (
                     "owner_session_id = ?"
                     if owner_session_id is not None
@@ -143,6 +220,21 @@ class LivenessMixin:
                         " owner_session_id = NULL, lease_expires_at = NULL,"
                         " attempts = attempts + 1"
                     )
+                elif to_status == Status.SUSPENDED:
+                    # auto-suspend: preserve owner/owner-session identity (a
+                    # resume -- e.g. a fresh interactive-embodiment session --
+                    # rebinds it) but clear the now-meaningless lease/liveness
+                    # AND activity fields, exactly like the manual
+                    # TaskQueue.suspend() path (which clears them for free via
+                    # `_transition`'s generic "leaving the held lifecycle"
+                    # rule -- this raw-SQL auto-suspend path must match it
+                    # explicitly, or a stale headless beat can keep a
+                    # confirmed-gone CLI task showing LIVE, PR #2913 review).
+                    set_sql = (
+                        "status = ?, updated_at = ?, lease_expires_at = NULL,"
+                        " last_liveness = NULL, activity = NULL,"
+                        " activity_updated_at = NULL"
+                    )
                 else:
                     set_sql = "status = ?, updated_at = ?"
                 sql = (
@@ -154,18 +246,24 @@ class LivenessMixin:
                     params.append(owner_session_id)
                 cur = conn.execute(sql, params)
                 if cur.rowcount:
+                    if to_status == Status.QUEUED:
+                        note = "owner-gone"
+                    elif to_status == Status.SUSPENDED:
+                        note = "owner-gone: auto-suspended (CLI-embodied session ended)"
+                    else:
+                        note = "owner-gone (dead-letter: max attempts)"
                     self._audit(
                         conn,
                         task_id,
                         ts=ts,
                         from_status=Status.STARTED,
                         to_status=to_status,
-                        note="owner-gone"
-                        if to_status == Status.QUEUED
-                        else "owner-gone (dead-letter: max attempts)",
+                        note=note,
                     )
                     if to_status == Status.QUEUED:
                         counts["requeued"] += 1
+                    elif to_status == Status.SUSPENDED:
+                        counts["suspended"] += 1
                     else:
                         counts["dead_lettered"] += 1
             conn.execute("COMMIT")

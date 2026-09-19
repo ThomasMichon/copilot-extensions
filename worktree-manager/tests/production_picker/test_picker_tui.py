@@ -6566,6 +6566,136 @@ def test_banner_line_helper_levels():
     assert "\u2139" in info.plain
 
 
+def _column_render_holder():
+    """Resolve the render component owning ``_fitted_columns``/``_column_header``
+    (see ``test_banner_line_helper_levels`` for the same resolve-by-shape
+    pattern -- avoids hardcoding the exact class name)."""
+    import worktree_manager.production_picker.picker_tui.engine as eng_mod
+    for obj in vars(eng_mod).values():
+        if isinstance(obj, type) and hasattr(obj, "_fitted_columns") and hasattr(obj, "_column_header"):
+            return obj.__new__(obj)
+    raise AssertionError("no _fitted_columns/_column_header holder found")
+
+
+def test_fitted_columns_drops_low_priority_when_narrow():
+    """Phase 3 follow-up (#agent-dispatch-tasks-pane-ux-overhaul): narrowing the
+    render width below the declared columns' total drops the highest-priority-
+    number column(s) first, keeping the flex (``title``) column."""
+    from worktree_manager.production_picker.picker_tui.pivots import Column
+
+    inst = _column_render_holder()
+    reg = types.SimpleNamespace(columns=(
+        Column(key="title", header="TITLE", width=None, priority=1),
+        Column(key="id", header="ID", width=8, priority=2),
+        Column(key="artifacts", header="ARTIFACTS", width=20, priority=8),
+    ))
+    wide = inst._fitted_columns(reg, 80)
+    assert [c.key for c in wide] == ["title", "id", "artifacts"]
+
+    narrow = inst._fitted_columns(reg, 20)
+    keys = [c.key for c in narrow]
+    assert "title" in keys
+    assert "artifacts" not in keys  # highest priority number drops first
+    assert len(narrow) < len(reg.columns)
+
+
+def test_column_header_renders_dropped_count_indicator():
+    """``_column_header``'s ``dropped`` param renders a compact ``+N`` at the
+    end of the header row -- distinguishing a genuinely empty column from one
+    the fit algorithm merely dropped at a narrow viewport -- and is silently
+    omitted when there isn't spare width (never wraps the header)."""
+    from worktree_manager.production_picker.picker_tui.pivots import Column
+
+    inst = _column_render_holder()
+    cols = (Column(key="title", header="TITLE", width=10),)
+
+    no_drop = inst._column_header(cols, 40, 0)
+    assert "+" not in no_drop.plain
+
+    with_drop = inst._column_header(cols, 40, 2)
+    assert "+2" in with_drop.plain
+    assert with_drop.cell_len == 40  # still fills the full row width
+
+    # No spare width for the indicator: omitted rather than truncated/wrapped.
+    tight = inst._column_header(cols, 11, 2)
+    assert "+" not in tight.plain
+    assert tight.cell_len == 11
+
+
+def test_fitted_columns_reserves_room_for_drop_indicator():
+    """Regression: the flex (``title``) column absorbs 100% of any remaining
+    width by design, so a caller that simply computed
+    ``dropped = len(reg.columns) - len(fitted)`` and rendered ``_column_header``
+    with it would ALWAYS get zero spare width when anything was dropped --
+    the ``+N`` indicator would never actually be visible in practice. When a
+    column is dropped, ``_fitted_columns`` must leave the caller's later
+    ``_column_header`` call room to show it."""
+    from worktree_manager.production_picker.picker_tui.pivots import Column
+
+    inst = _column_render_holder()
+    reg = types.SimpleNamespace(columns=(
+        Column(key="title", header="TITLE", width=None, priority=1),
+        Column(key="id", header="ID", width=8, priority=2),
+        Column(key="artifacts", header="ARTIFACTS", width=20, priority=8),
+    ))
+    width = 20
+    fitted = inst._fitted_columns(reg, width)
+    dropped = len(reg.columns) - len(fitted)
+    assert dropped > 0
+
+    header = inst._column_header(fitted, width, dropped)
+    assert f"+{dropped}" in header.plain
+    assert header.cell_len == width
+
+
+def test_registered_pivot_narrow_width_renders_drop_indicator(tmp_path, monkeypatch):
+    """End-to-end: a real ``PickerApp`` render of a columns pivot at a width too
+    narrow for every declared column shows the ``+N`` drop indicator in the
+    rendered header row -- not just in the two unit tests above."""
+    import json as _json
+
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    manifest = {
+        "label": "CodeSpaces",
+        "after": "Worktrees",
+        "list": [sys.executable],
+        "entry": {"id": "id", "title": "display"},
+        "columns": [
+            {"key": "display", "header": "TITLE"},
+            {"key": "id", "header": "ID", "width": 8},
+            {"key": "status", "header": "STATE", "width": 10},
+            {"key": "cores", "header": "CORES", "width": 10},
+        ],
+    }
+    (d / "agent-codespaces.json").write_text(_json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [{"id": "cs1", "display": "my-feature", "status": "RUNNING", "cores": 32}]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        # A narrow render width forces the fit algorithm to drop columns.
+        async with app.run_test(size=(40, 30)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            reg = scr.registered_pivots[0]
+            scr._pivot_runtimes[reg.name] = _FakeRuntime(rows)
+            scr.htab = scr.htabs.index("CodeSpaces")
+            scr.sel = scr.default_sel()
+            scr.refresh()
+            await pilot.pause()
+
+            plain = pcap.screen_to_text(scr)
+            assert "TITLE" in plain
+            assert "+" in plain  # the column-drop indicator rendered somewhere
+
+    asyncio.run(run())
+
+
 def test_screenshot_pivot_selection_and_wait(tmp_path, monkeypatch):
     """The snapshot tool can target a specific pivot and wait for its registered
     ``list`` to load, so a headless capture shows the CodeSpaces tab with real
