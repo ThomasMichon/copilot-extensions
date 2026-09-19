@@ -130,19 +130,25 @@ created or resumed. The operator never launches unsure of where or how the
 agent will run.
 
 ### fleet-recovery-relaunch
-When a session-host provider loses many worktrees' execution legs at once — the
-same underlying host (a terminal multiplexer process, a mux server) died or was
-replaced, rather than one worktree's session quietly ending on its own — the
-Picker recognizes that **correlated** pattern and offers a single, explicit
-**bulk-resume** action: reopen every affected worktree's current head, in one
-confirmed gesture, instead of making the operator resume each one by hand. This
-extends the ordinary single-worktree resume the Picker already performs; it adds
-no new resume mechanism, only a batched invocation of it, driven by
-agent-worktrees' own durable record of which worktrees had a live head before the
-host was lost (`§Behaviors/observation-loss-degrades-honestly` on the
-agent-worktrees vision — the record survives even though the live host did not).
-A handful of worktrees resuming near-simultaneously through unrelated causes
-(the operator closing several terminals deliberately, say) is not this pattern;
+When the underlying session-host process itself dies or is replaced — a
+terminal multiplexer server, say — every execution leg it hosted is lost
+together, not one worktree's session quietly ending on its own. The **provider
+that owns that host** is the only party that can honestly know this happened:
+it publishes a bounded, attributable observation naming its own host instance as
+ended and listing the execution legs it was hosting
+(`§Concepts/provider-observation-ingestion` /
+`§Behaviors/observation-loss-degrades-honestly` on the agent-worktrees vision).
+The Picker never infers correlated loss itself from worktree-side staleness
+alone — that would cross the render-derive-not-own boundary and requires
+guessing at causation the durable worktree record was never meant to carry. It
+only **renders** that provider-supplied signal and offers a single, explicit
+**bulk-resume** action gated on it: reopen every named worktree's current head,
+in one confirmed gesture, instead of making the operator resume each one by
+hand. This extends the ordinary single-worktree resume the Picker already
+performs — a batched invocation of it, never a new resume mechanism. Worktrees
+resuming near-simultaneously **without** such a provider-published host-loss
+observation (the operator closing several terminals deliberately, say) is not
+this pattern; the Picker offers the bulk action only on the explicit signal, never
 the Picker distinguishes genuine correlated host loss from ordinary independent
 resumes before offering the bulk action, so it is never presented as a routine
 choice.
