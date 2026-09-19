@@ -327,6 +327,20 @@ def test_resolve_repo_opt_in_forwards_to_bound_knowledge_repo(
     assert origin.resolve_repo_opt_in(harness) is True
 
 
+def test_resolve_repo_opt_in_non_boolean_value_treated_as_no_opinion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # A string like "false" must not truthy-cast into an accidental opt-in.
+    repo = tmp_path / "test-chamber"
+    repo.mkdir()
+    path = repo.joinpath(*origin._OPT_IN_CONFIG_RELATIVE)
+    path.parent.mkdir(parents=True)
+    path.write_text("sync:\n  opt_in: \"false\"\n", encoding="utf-8")
+    monkeypatch.setattr(origin, "_bound_knowledge_repo", lambda _p: None)
+    assert origin._declared_opt_in(repo) is None
+    assert origin.resolve_repo_opt_in(repo) is False  # falls through, fails closed
+
+
 def test_classify_for_sync_require_repo_opt_in_gates_allowlisted_repo(
     tmp_path: Path,
 ) -> None:

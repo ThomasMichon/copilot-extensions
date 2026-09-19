@@ -102,17 +102,22 @@ def _declared_opt_in(repo_path: Path) -> bool | None:
 
     Returns ``True``/``False`` for an explicit ``sync: {opt_in: <bool>}`` in
     either the canonical or legacy config location (canonical wins when both
-    are present), or ``None`` when neither file exists or neither declares
-    the key -- "no opinion", letting the caller fall through (e.g. to a bound
-    knowledge repo).
+    are present). Only an actual boolean activates or deactivates; any other
+    scalar (a string like ``"false"``, a number, null, ...) is treated the
+    same as the key being absent -- "no opinion", letting the caller fall
+    through (e.g. to a bound knowledge repo) rather than silently truthy-cast
+    an invalid declaration into an accidental opt-in.
     """
     for relative in (_OPT_IN_CONFIG_RELATIVE, _LEGACY_OPT_IN_CONFIG_RELATIVE):
         data = _load_opt_in_config(repo_path.joinpath(*relative))
         if data is None:
             continue
         sync_block = data.get("sync")
-        if isinstance(sync_block, dict) and "opt_in" in sync_block:
-            return bool(sync_block["opt_in"])
+        if not isinstance(sync_block, dict) or "opt_in" not in sync_block:
+            continue
+        value = sync_block["opt_in"]
+        if isinstance(value, bool):
+            return value
     return None
 
 
