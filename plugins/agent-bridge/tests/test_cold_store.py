@@ -97,6 +97,46 @@ async def test_fetch_session_malformed_events_falls_back_to_empty():
 
 
 @pytest.mark.asyncio
+async def test_fetch_session_missing_session_id_key_is_none():
+    """A provider that omits `session_id` must not be treated as a match for
+    the requested ID (the identity field is required, never defaulted)."""
+    payload = json.dumps({"session": {"status": "ended"}, "events": []})
+    with patch("subprocess.run", return_value=_cp(0, payload)):
+        client = ColdStoreClient(("/abs/agent-logger",))
+        assert await client.fetch_session("x") is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_session_non_string_session_id_is_none():
+    payload = json.dumps({"session": {"session_id": 12345}, "events": []})
+    with patch("subprocess.run", return_value=_cp(0, payload)):
+        client = ColdStoreClient(("/abs/agent-logger",))
+        assert await client.fetch_session("x") is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_session_malformed_optional_fields_normalize_to_none():
+    """Wrong-typed optional fields (a provider bug) never fail the whole
+    lookup -- they normalize to None just like an absent field would."""
+    payload = json.dumps({
+        "session": {
+            "session_id": "x",
+            "status": 42,
+            "cwd": ["not", "a", "string"],
+            "created_at": None,
+        },
+        "events": [],
+    })
+    with patch("subprocess.run", return_value=_cp(0, payload)):
+        client = ColdStoreClient(("/abs/agent-logger",))
+        result = await client.fetch_session("x")
+    assert result is not None
+    assert result.status is None
+    assert result.cwd is None
+    assert result.created_at is None
+
+
+@pytest.mark.asyncio
 async def test_fetch_session_spawn_failure_is_none():
     with patch("subprocess.run", side_effect=FileNotFoundError()):
         client = ColdStoreClient(("/abs/does-not-exist",))

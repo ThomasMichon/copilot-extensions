@@ -21,10 +21,11 @@ def parse_cold_store_timestamp(value: str | None) -> datetime:
     """Best-effort parse of a cold-store provider's timestamp field.
 
     A provider's archival timestamps may not be strict ISO-8601 (or may be
-    absent for older records); this never raises -- an unparseable/missing
-    value falls back to the current time so the response always validates.
+    absent/non-string for older/malformed records); this never raises -- an
+    unparseable/missing/wrong-typed value falls back to the current time so
+    the response always validates.
     """
-    if value:
+    if isinstance(value, str) and value:
         try:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:

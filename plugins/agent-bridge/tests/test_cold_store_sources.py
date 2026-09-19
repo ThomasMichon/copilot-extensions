@@ -286,3 +286,35 @@ def test_refresh_throttled_without_force(monkeypatch, tmp_path):
     resolver.cold_store.refresh()
     assert resolver.cold_store.get_client("session-fetch") is None
 
+
+# -- `agent-bridge doctor` includes cold-store-providers.d -----------------------
+
+
+def test_doctor_reports_cold_store_registry(monkeypatch, tmp_path, capsys):
+    from types import SimpleNamespace
+
+    from agent_bridge import __main__ as cli
+
+    missing = tmp_path / "gone"
+    _write(tmp_path, "stale.json",
+           {"capability": "session-fetch", "command": [str(missing)]})
+    monkeypatch.setenv("AGENT_BRIDGE_COLD_STORE_PROVIDERS_DIR", str(tmp_path))
+    with pytest.raises(SystemExit) as exc:
+        cli._cmd_doctor(SimpleNamespace(json=True))
+    assert exc.value.code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["cold_store_registry"] == "cold-store-providers.d"
+    assert payload["cold_store_findings"][0]["reason"] == "missing-target"
+
+
+def test_doctor_ok_when_cold_store_registry_empty(monkeypatch, tmp_path, capsys):
+    from types import SimpleNamespace
+
+    from agent_bridge import __main__ as cli
+
+    monkeypatch.setenv("AGENT_BRIDGE_COLD_STORE_PROVIDERS_DIR", str(tmp_path))
+    cli._cmd_doctor(SimpleNamespace(json=True))
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["cold_store_active"] == []
+    assert payload["cold_store_findings"] == []
+

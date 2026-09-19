@@ -137,10 +137,10 @@ class ColdStoreClient:
             )
             return None
 
-        returned_id = session_data.get("session_id", session_id)
-        if returned_id != session_id:
+        returned_id = session_data.get("session_id")
+        if not isinstance(returned_id, str) or returned_id != session_id:
             log.warning(
-                "cold-store provider %s returned session_id=%s for requested %s",
+                "cold-store provider %s returned session_id=%r for requested %s",
                 self._command[0], returned_id, session_id,
             )
             return None
@@ -155,14 +155,17 @@ class ColdStoreClient:
             )
             events = []
 
+        def _str_or_none(value: object) -> str | None:
+            return value if isinstance(value, str) else None
+
         return ColdStoreSession(
             session_id=session_id,
-            status=session_data.get("status"),
-            cwd=session_data.get("cwd"),
-            worktree_id=session_data.get("worktree_id"),
-            project=session_data.get("project"),
-            created_at=session_data.get("created_at"),
-            updated_at=session_data.get("updated_at"),
+            status=_str_or_none(session_data.get("status")),
+            cwd=_str_or_none(session_data.get("cwd")),
+            worktree_id=_str_or_none(session_data.get("worktree_id")),
+            project=_str_or_none(session_data.get("project")),
+            created_at=_str_or_none(session_data.get("created_at")),
+            updated_at=_str_or_none(session_data.get("updated_at")),
             events=tuple(events),
             raw=session_data,
         )
