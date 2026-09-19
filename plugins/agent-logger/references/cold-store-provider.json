@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "plugin": "agent-logger@copilot-extensions",
+  "capability": "session-fetch",
+  "description": "agent-logger cold-store retrieval (archived/synced Copilot sessions)"
+}
