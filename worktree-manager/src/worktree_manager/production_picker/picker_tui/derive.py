@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import datetime as _dt
 
+from rich.cells import cell_len
+
 from .. import prune
 from . import reciprocal
 from . import source_identity
@@ -247,18 +249,32 @@ def _status_markers(w):
 
 
 def truncate_text(s, w):
-    """Truncate ``s`` to at most ``w`` cells, ellipsizing when clipped -- used
-    when concatenating several variable-length segments onto one detail line
-    (the Worktree tile's status_markers/asset_hints run) so no single segment
-    can overflow the row and crowd out the ones after it. Deliberately
-    non-padding (unlike ``engine.py``'s column-fitting ``_clip``, which always
-    pads its result out to exactly ``w``): padding mid-line here would insert
-    unwanted blank space between segments instead of just bounding this one's
-    length."""
+    """Truncate ``s`` to at most ``w`` display cells, ellipsizing when
+    clipped -- used when concatenating several variable-length segments onto
+    one detail line (the Worktree tile's status_markers/asset_hints run) so
+    no single segment can overflow the row and crowd out the ones after it.
+    Deliberately non-padding (unlike ``engine.py``'s column-fitting
+    ``_clip``, which always pads its result out to exactly ``w``): padding
+    mid-line here would insert unwanted blank space between segments instead
+    of just bounding this one's length. Uses Rich's ``cell_len`` throughout
+    (not ``len()``) so a wide/double-width character is measured by its
+    actual display width, not counted as one cell."""
     s = str(s)
-    if len(s) <= w:
+    if cell_len(s) <= w:
         return s
-    return s[: max(0, w - 1)] + "…" if w > 1 else s[:w]
+    if w <= 1:
+        return s[:w]
+    # Binary-search the longest prefix whose cell width leaves room for the
+    # ellipsis -- cheap and exact for the short strings this renders (marker
+    # phrases, asset-hint runs), unlike slicing by character count.
+    lo, hi = 0, len(s)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if cell_len(s[:mid]) <= w - 1:
+            lo = mid
+        else:
+            hi = mid - 1
+    return s[:lo] + "…"
 
 
 #: The raw ``status_markers`` tokens above (``C<N>``/``F<N>``/``U*``/``OC*``)
@@ -315,21 +331,22 @@ def status_marker_segments(markers, width):
     ``width`` cells -- the human-readable expansion is longer than the
     compact wire tokens it replaces, so this segment must never be allowed to
     crowd out whatever the picker's render layer appends after it (asset
-    hints, the live-pulse line)."""
+    hints, the live-pulse line). Cell-width measured throughout, matching
+    ``truncate_text``."""
     segments = []
     used = 0
     for j, tok in enumerate(markers.split()):
         prefix = ", " if j else ""
-        budget = max(0, width - used) - len(prefix)
+        budget = max(0, width - used) - cell_len(prefix)
         if budget <= 0:
             break
         if prefix:
             segments.append((prefix, False))
-            used += len(prefix)
+            used += cell_len(prefix)
         text, is_warn = describe_status_marker(tok)
         clipped = truncate_text(text, budget)
         segments.append((clipped, is_warn))
-        used += len(clipped)
+        used += cell_len(clipped)
     return segments
 
 
@@ -345,11 +362,11 @@ def status_line_segments(markers, asset_hints, overflow, width):
         asset_text = " ".join(asset_hints) + (f" +{overflow}" if overflow else "")
     segments = []
     if markers:
-        reserve = len(asset_text) + 2 if asset_text else 0
+        reserve = cell_len(asset_text) + 2 if asset_text else 0
         segments = status_marker_segments(markers, max(0, width - reserve))
     if asset_text:
         prefix = "  " if segments else ""
-        used = sum(len(t) for t, _ in segments)
+        used = sum(cell_len(t) for t, _ in segments)
         segments.append((truncate_text(prefix + asset_text, max(0, width - used)), False))
     return segments
 

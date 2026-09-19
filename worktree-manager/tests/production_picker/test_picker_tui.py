@@ -4581,6 +4581,32 @@ def test_describe_status_marker_handles_oversized_numeric_token():
     assert is_warn is False
 
 
+def test_truncate_text_is_cell_width_aware():
+    """PR #2897 review: budgeting must measure DISPLAY cells, not characters
+    -- a double-width character (e.g. a wide CJK glyph, counted as 2 cells by
+    a real terminal) must not be undercounted, or the asset-priority
+    guarantee in ``status_line_segments`` silently breaks for any wide
+    fallback asset-hint code."""
+    # "界" is a double-width character: 2 of them are 4 cells, not 2.
+    assert derive.truncate_text("界界界", 4) == "界…"
+    assert derive.truncate_text("abcdef", 4) == "abc…"
+    # No truncation needed -- returned as-is either way.
+    assert derive.truncate_text("ab", 4) == "ab"
+
+
+def test_status_line_segments_reserve_wide_asset_width_correctly():
+    """PR #2897 review: a wide-character asset-hint fallback code (e.g. an
+    unrecognized resource ``kind`` whose 4-char fallback code happens to be
+    double-width) must still get its FULL display width reserved -- a
+    ``len()``-based reservation would undercount it and let the marker text
+    truncate it away anyway, defeating the asset-priority guarantee."""
+    segs = derive.status_line_segments("C1 U* OC*", ["界界界界"], 0, 10)
+    rendered = "".join(t for t, _ in segs)
+    assert "界界界界" in rendered
+    from rich.cells import cell_len
+    assert cell_len(rendered) <= 10
+
+
 def test_native_list_sticky_header(monkeypatch):
     """NF5-5 (#88): the native list pins the current section header above the list
     once that section's own header row has scrolled off the top; it is hidden at
