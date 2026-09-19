@@ -32,7 +32,7 @@ already gates.
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from agent_logger import sessions
 from agent_logger.config import Config, load_config
@@ -64,13 +64,39 @@ def _resolve_from_synced_corpus(session_id: str, corpus_root: Path) -> SessionRe
     return None
 
 
+def _is_safe_session_id(session_id: str) -> bool:
+    """Whether ``session_id`` is a single safe path component.
+
+    ``session_id`` ultimately reaches ``Path`` composition in
+    :mod:`agent_logger.sessions` (live-dir join, archive-store join), and the
+    daemon forwards an unvalidated request-path parameter as-is (see
+    ``agent_bridge`` ``GET /api/v1/sessions/{session_id}``). A value
+    containing a path separator, ``..``, or an absolute-path anchor could
+    otherwise escape the session roots and read arbitrary files -- reject
+    anything that is not exactly one normal path segment, on either POSIX or
+    Windows syntax.
+    """
+    if not session_id or session_id in (".", ".."):
+        return False
+    normalized = session_id.replace("\\", "/")
+    if "/" in normalized:
+        return False
+    if PureWindowsPath(session_id).anchor or PurePosixPath(session_id).is_absolute():
+        return False
+    return True
+
+
 def resolve_session(session_id: str, cfg: Config | None = None) -> SessionRef | None:
     """Resolve ``session_id`` across every tier this host knows about.
 
     Order: local live directory -> on-device compact archive -> the locally
     synced corpus (packed or unpacked). Returns ``None`` when this host has
-    no evidence of the session at all.
+    no evidence of the session at all, or when ``session_id`` is not a
+    single safe path component (never raises -- an unsafe id is simply
+    treated as "not found").
     """
+    if not _is_safe_session_id(session_id):
+        return None
     state_root = _local_state_root()
     if state_root is not None:
         ref = sessions.resolve_ref(session_id, state_root, *session_archive_stores())
