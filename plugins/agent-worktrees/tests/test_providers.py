@@ -1825,12 +1825,15 @@ class TestCreatePRAutoOpen:
         for raw_field in ("worktree=", "machine=", "session=", "head="):
             assert raw_field not in body
 
-    def test_codename_mode_skips_marker_without_a_codename(
+    def test_codename_mode_backfills_a_missing_codename(
         self, pr_repo, monkeypatch,
     ):
-        """If the worktree somehow has no assigned codename, `codename` mode
-        must skip the marker entirely -- never silently downgrade to the
-        full raw marker (that would defeat the point of this mode)."""
+        """If the worktree has no assigned codename yet (a pre-Phase-2 or
+        never-touched record), `codename` mode must backfill one via the
+        same `ensure_codename` first-touch path `resolve`/`resume`/
+        `status --write` use, then publish it -- never silently skip the
+        marker just because `create-pr` happens to be the first thing to
+        touch this record."""
         from agent_worktrees import providers
         config, wid, _wt, _ = pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
@@ -1843,19 +1846,55 @@ class TestCreatePRAutoOpen:
         res = pr_ops.create_pr(wid, config, title="Add feature")
 
         assert res["success"] is True
+        fields = attribution.parse_marker(fake.captured["scope"].body)
+        assert fields is not None
+        assert fields["codename"]
+        rec_after = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec_after.codename == fields["codename"]
+
+    def test_codename_backfill_failure_degrades_to_skip_not_crash(
+        self, pr_repo, monkeypatch,
+    ):
+        """`ensure_codename` can raise (notably `TimeoutError` if its
+        cross-process allocation lock can't be acquired in time) -- this is
+        opening a PR, so a backfill failure must degrade to "no marker on
+        this PR" (the pre-existing skip behavior), never crash the
+        provider-open flow and abort the whole PR."""
+        from agent_worktrees import codename_tracking, providers
+        config, wid, _wt, _ = pr_repo
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.codename is None
+        config = self._enable_open(config, source_attribution="codename")
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake)
+
+        def _boom(*a, **k):
+            raise TimeoutError("lock contended")
+        monkeypatch.setattr(codename_tracking, "ensure_codename", _boom)
+
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert res["success"] is True
+        assert res.get("pr_opened") is True
         assert attribution.parse_marker(fake.captured["scope"].body) is None
+        rec_after = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec_after.codename is None
 
     def test_codename_mode_skip_strips_a_stale_marker_from_the_body(
         self, pr_repo, monkeypatch,
     ):
-        """When codename mode skips publishing (no assigned codename), any
-        pre-existing source marker already present in the caller-supplied
-        body (e.g. copy-pasted, or from an older template) must be stripped
-        -- not left in place, where it could still carry raw identifiers."""
+        """When codename mode skips publishing (a MALFORMED, not merely
+        missing, codename -- a missing one is now backfilled and
+        published), any pre-existing source marker already present in the
+        caller-supplied body (e.g. copy-pasted, or from an older template)
+        must be stripped -- not left in place, where it could still carry
+        raw identifiers."""
         from agent_worktrees import providers
         config, wid, _wt, _ = pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
-        assert rec.codename is None
+        rec.codename = "not a handle --> <script>"
+        tracking.save_record(rec)
         config = self._enable_open(config, source_attribution="codename")
         monkeypatch.setenv("EXT_TOKEN", "tok")
         fake = _FakeProvider()
@@ -1915,14 +1954,16 @@ class TestCreatePRAutoOpen:
     def test_codename_mode_skip_does_not_record_attribution_head(
         self, pr_repo, monkeypatch,
     ):
-        """When codename mode skips the marker (no/invalid codename), the
-        PR record's `attribution_head` must stay unset -- setting it would
+        """When codename mode skips the marker (a MALFORMED codename -- a
+        missing one is now backfilled and published instead), the PR
+        record's `attribution_head` must stay unset -- setting it would
         make `refresh_source_attribution` believe this head was already
         published and skip a later legitimate publish attempt."""
         from agent_worktrees import providers
         config, wid, _wt, _ = pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
-        assert rec.codename is None
+        rec.codename = "not a handle --> <script>"
+        tracking.save_record(rec)
         config = self._enable_open(config, source_attribution="codename")
         monkeypatch.setenv("EXT_TOKEN", "tok")
         fake = _FakeProvider()

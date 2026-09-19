@@ -1081,8 +1081,42 @@ def _open_via_provider(
         # HTML comment as-is (it could break the marker or inject visible
         # PR-body content) -- `is_valid_handle` gates it the same as the
         # missing-codename case.
+        #
+        # A pre-Phase-2 (or newly-migrated) record may genuinely have NO
+        # codename yet if it was never touched by `resolve`/`resume`/
+        # `status --write` (each of which lazily backfills one). Backfill it
+        # here too, on first use by `create-pr` itself, rather than silently
+        # skipping the marker on this PR -- the same `ensure_codename`
+        # first-touch path those other verbs use. Deliberately narrower than
+        # "any invalid codename": only a genuinely MISSING (falsy) codename
+        # is backfilled -- a present-but-MALFORMED one (tampered/corrupted
+        # data) is never auto-regenerated/overwritten here, preserving the
+        # existing skip-the-marker safety behavior for that case.
         from . import codename as codename_mod
+        from . import codename_tracking
         codename = record.codename if record else None
+        if record is not None and not codename:
+            # `ensure_codename` mutates `record` in place and returns that
+            # same object (never a different/reloaded one), so this is
+            # simply "backfill record.codename, then re-read it" -- no
+            # object-identity concern with `target_pr` (a separate
+            # parameter this function mutates directly and appends onto
+            # `record.prs` upstream).
+            #
+            # Best-effort: `ensure_codename` can raise (notably
+            # `TimeoutError` if its cross-process allocation lock can't be
+            # acquired in time). This whole path is opening a PR -- a
+            # codename-backfill failure must degrade to "no marker on this
+            # PR" (the pre-existing skip behavior), never crash the
+            # provider-open flow and abort the PR entirely.
+            try:
+                codename_tracking.ensure_codename(
+                    record, cfg.tracking_dir(),
+                    codename_tracking.wordlist_for_repo(config),
+                )
+            except Exception:
+                pass
+            codename = record.codename
         marker_published = bool(
             isinstance(codename, str) and codename_mod.is_valid_handle(codename)
         )

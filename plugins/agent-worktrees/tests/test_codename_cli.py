@@ -203,6 +203,40 @@ class TestCodenameSelectorWiring:
             raise AssertionError("expected cmd_resolve to reach cfg.load_config")
         assert args.worktree_id == "wt-a"
 
+    def test_cmd_embody_matched_codename_sets_raw_id_before_launch_logic(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        # pr-attribution-codenames Phase 3: embody --codename must resolve
+        # to the SAME local worktree_id via the identical local-match path
+        # resolve uses (no cross-machine SSH call for a local hit) and
+        # proceed into embody's normal flow.
+        monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+        tracking.create_new_record(
+            "wt-a", "worktree/wt-a", "/tmp/wt-a", "repo", "machine", "wsl",
+            tmp_path, codename="rusty-gizmo",
+        )
+        called = []
+        import agent_worktrees.codename_reverse_lookup as crl
+        monkeypatch.setattr(
+            crl, "resolve_codename_cross_machine_unique",
+            lambda *a, **k: called.append(1),
+        )
+
+        def _boom():
+            raise SystemExit(98)
+
+        monkeypatch.setattr(m.cfg, "load_config", _boom)
+        args = argparse.Namespace(
+            codename="rusty-gizmo", worktree_id=None, new=False,
+        )
+        try:
+            m.cmd_embody(args)
+        except SystemExit as exc:
+            assert exc.code == 98
+        else:
+            raise AssertionError("expected cmd_embody to reach cfg.load_config")
+        # A local match never invokes the cross-machine scan.
+        assert called == []
 
 class TestLegacyRecordBackfillEndToEnd:
     """A pre-Phase-2 record (no codename at all) gets one lazily assigned and
