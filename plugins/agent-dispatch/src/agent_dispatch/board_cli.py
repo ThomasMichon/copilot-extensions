@@ -113,6 +113,33 @@ def _activity(task: dict, now: float) -> str | None:
     return value if now - observed <= ACTIVITY_TTL_SECONDS else None
 
 
+def _wt_live(activity: str | None, task: dict, now: float) -> str | None:
+    """The Tasks pane's ``LIVE`` column (Phase 3): a compact, at-a-glance
+    liveness string reusing ``activity``/``activity_updated_at`` -- fields
+    already computed above, self-reported by a **headless** worker via
+    ``agent-dispatch activity`` -- rather than a fresh subprocess/bridge probe
+    (this board client is stdlib-only and re-runs on every Picker refresh, so
+    a per-row liveness probe was ruled out; see the effort's Runbook).
+
+    Returns ``"active"`` / ``"stalled Nm"`` (elapsed minutes since the last
+    beat) for a headless body with a fresh signal, else ``None`` (blank) --
+    including for a CLI-embodied task (item 3), which never calls
+    ``set_activity`` and so has no cheap liveness signal available here. A
+    blank cell is therefore "no headless liveness signal", not a confirmed
+    "not live" -- a real interactive session may still be running.
+    """
+    if activity == "ACTIVE":
+        return "active"
+    if activity == "STALLED":
+        try:
+            observed = float(task.get("activity_updated_at"))
+        except (TypeError, ValueError):
+            return "stalled"
+        minutes = max(0, int((now - observed) // 60))
+        return f"stalled {minutes}m"
+    return None
+
+
 def _repo_name(value: object) -> str | None:
     text = str(value or "").rstrip("/")
     return text.rsplit("/", 1)[-1].removesuffix(".git") if text else None
@@ -146,6 +173,13 @@ def _build(tasks: list[dict], *, machine: str, recent_mins: int) -> list[dict]:
         row = dict(task)
         row["group"] = group
         row["activity"] = _activity(task, now)
+        row["wt_live"] = _wt_live(row["activity"], task, now)
+        # Phase 3 lands the column *plumbing* only; Phase 5 owns the real
+        # claims/artifacts-tracking computation (see the Plan's own note that
+        # the two phases must not both claim this field). Always None today
+        # -- a placeholder so the manifest/column-fit path is exercised now
+        # without duplicating Phase 5's ownership.
+        row["artifacts_summary"] = None
         row.setdefault("repo_name", _repo_name(task.get("repo")))
         progress = row.get("latest_progress")
         if isinstance(progress, str) and progress:

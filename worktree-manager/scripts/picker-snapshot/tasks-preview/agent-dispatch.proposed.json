@@ -9,17 +9,17 @@
     "worktree": "target_worktree",
     "subtitle": "repo_name",
     "group": "group",
-    "badges": ["activity", "labels"]
+    "badges": ["activity"]
   },
   "columns": [
-    {"key": "id", "header": "ID", "width": 9, "priority": 2},
-    {"key": "group", "header": "PHASE", "width": 10, "palette": "task_phase", "priority": 3},
-    {"key": "repo_name", "header": "REPO", "width": 15, "priority": 6},
-    {"key": "title", "header": "TITLE", "width": 40, "priority": 1},
-    {"key": "target_worktree", "header": "WT", "width": 5, "priority": 4},
-    {"key": "turn_count", "header": "T", "width": 4, "align": "r", "priority": 7},
-    {"key": "wt_live", "header": "LIVE", "width": 13, "priority": 5},
-    {"key": "artifacts_summary", "header": "ARTIFACTS", "width": 18, "priority": 8}
+    {"key": "id", "header": "ID", "width": 9},
+    {"key": "group", "header": "PHASE", "width": 10, "palette": "task_phase"},
+    {"key": "repo_name", "header": "REPO", "width": 15},
+    {"key": "title", "header": "TITLE", "width": 40},
+    {"key": "target_worktree", "header": "WT", "width": 5},
+    {"key": "turn_count", "header": "T", "width": 4, "align": "r"},
+    {"key": "wt_live", "header": "LIVE", "width": 13},
+    {"key": "artifacts_summary", "header": "ARTIFACTS", "width": 18}
   ],
   "group_field": "group",
   "empty_hint": "No active or recently-finished tasks for this machine.",
@@ -64,7 +64,7 @@
       "kind": "internal",
       "verb": "open-cli",
       "when": {"cli_openable": "true"},
-      "description": "Opens (or, for Proposed/Queued, creates) this task's worktree into an interactive Copilot CLI session, seeded via --interactive with a succinct prompt: the task's charter, current phase, and its own tooling to move the task's state (complete/suspend/abandon) as the operator wraps up. The operator drives; the agent's job is to advance the task toward its next phase and keep the task's recorded state honest when the operator is done — never to keep working unattended after the session ends. Never spawns through the pool or a dedicated worker identity — those apply rails (a fixed acting theme/focus/rules) to keep an unattended headless agent on target, which is exactly what the operator does NOT want here: this is deliberately direct, open-ended, user-driven control. Never offered for an embodied task with a LIVE headless agent (Blocked/Started) — CLI and ACP cannot co-drive one session — nor for a Queued task already claimed by a pool."
+      "description": "PROPOSED — semantics not yet implemented. Opens (or, for Proposed/Queued, creates) this task's worktree into an interactive Copilot CLI session, seeded via --interactive with a succinct prompt: the task's charter, current phase, and its own tooling to move the task's state (complete/abandon/reset-to-proposed/re-queue) as the operator wraps up. The operator drives; the agent's job is to advance the task toward its next phase and keep the task's recorded state honest when the operator is done — never to keep working unattended after the session ends. Never spawns through the pool or a dedicated worker identity — those apply rails (a fixed acting theme/focus/rules) to keep an unattended headless agent on target, which is exactly what the operator does NOT want here: this is deliberately direct, open-ended, user-driven control. Never offered for an embodied task with a LIVE headless agent (Blocked/Started) — CLI and ACP cannot co-drive one session — nor for a Queued task already claimed by a pool."
     },
     {
       "key": "kick",
@@ -79,7 +79,7 @@
       "run": ["agent-dispatch", "pause", "{task_id}", "--reason", "paused from picker"],
       "when": {"embodied": "true"},
       "confirm": true,
-      "description": "Suspends the assigned agent's re-queue eligibility AND blocks agent-dispatch from re-queuing this task until you explicitly unpause it. Distinct from anything an agent would do on its own; remember to come back and unpause it."
+      "description": "PROPOSED — not yet implemented. Suspends the assigned agent AND blocks agent-dispatch from re-queuing this task until you explicitly unpause it. Distinct from anything an agent would do on its own; remember to come back and unpause it."
     },
     {
       "key": "force-stop",
@@ -87,7 +87,7 @@
       "run": ["agent-dispatch", "force-stop", "{task_id}"],
       "when": {"embodied": "true"},
       "confirm": true,
-      "description": "Immediately terminates the process embodying this task (best-effort) and parks it Suspended. The task itself is not abandoned — it becomes eligible for resume/re-embodiment on the normal schedule."
+      "description": "PROPOSED — not yet implemented. Immediately terminates the process embodying this task. The task itself is not abandoned — it becomes eligible for re-queue on the normal schedule."
     },
     {
       "key": "reset-proposed",
@@ -95,7 +95,7 @@
       "run": ["agent-dispatch", "reset", "{task_id}", "--to", "proposed"],
       "when": {"group": ["Blocked", "Suspended", "Started", "Queued"]},
       "confirm": true,
-      "description": "Sends the task back to Proposed (unapproved) — the gentler way to say \"not like this\" without terminally abandoning the idea. Preserves the task's durable goal/done-criteria/progress log for a fresh attempt."
+      "description": "PROPOSED — not yet implemented. Sends the task back to Proposed (unapproved) — the gentler way to say \"not like this\" without terminally abandoning the idea."
     },
     {
       "key": "abandon",

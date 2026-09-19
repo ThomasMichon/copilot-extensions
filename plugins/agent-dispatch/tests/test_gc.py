@@ -41,7 +41,29 @@ def _bridge_ok(monkeypatch):
 
 
 def _claim_and_start(q, task_id, *, wt, session, now):
-    """Claim + start a task so it carries a captured owner_session_id."""
+    """Claim + start a task so it carries a captured owner_session_id.
+
+    No headless spawn reservation is attached, so :meth:`TaskQueue
+    .reconcile_liveness` treats this as the CLI-embodied/generic path (see
+    ``test_reconcile_gone_cli_embodied_started_task_is_suspended`` below) --
+    use :func:`_claim_and_start_headless` instead for the pre-existing
+    headless-body requeue/dead-letter tests.
+    """
+    q.claim_one(f"m/{wt}", machine="m", worktree=wt, task_id=task_id, now=now)
+    q.start(task_id, f"m/{wt}", owner_session_id=session, now=now + 1)
+
+
+def _claim_and_start_headless(q, task_id, *, wt, session, now):
+    """Claim + start a task behind a local headless spawn reservation.
+
+    Mirrors :func:`_claim_and_start`, but first reserves+records a
+    ``local-body:<session>`` spawn reservation so
+    :meth:`TaskQueue.reconcile_liveness` classifies it as a **headless** body
+    (probed via ``headless_local_verdict``, never the worktree-keyed CLI
+    resolver) -- the "headless dead-session behavior stays UNCHANGED" case.
+    """
+    reservation, _ = q.reserve_spawn(task_id, now=now)
+    q.record_spawn(reservation.key, session_handle=f"local-body:{session}", now=now)
     q.claim_one(f"m/{wt}", machine="m", worktree=wt, task_id=task_id, now=now)
     q.start(task_id, f"m/{wt}", owner_session_id=session, now=now + 1)
 
@@ -167,7 +189,10 @@ def test_verdict_still_uses_ssh_for_a_genuine_peer_machine(monkeypatch):
 # -- reconcile_liveness: fenced, identity-keyed GC ---------------------------
 
 
-def test_reconcile_requeues_only_gone_by_identity(q):
+def test_reconcile_gone_cli_embodied_task_is_suspended_not_requeued(q):
+    """A gone owner with **no** headless spawn reservation is treated as the
+    CLI-embodied/generic path: it is auto-suspended (Phase 1 item 2), never
+    silently requeued/dead-lettered out from under a durable worktree."""
     a = q.create("a", now=1000.0)
     b = q.create("b", now=1001.0)
     _claim_and_start(q, a.id, wt="wtA", session="SA", now=1002.0)
@@ -179,10 +204,29 @@ def test_reconcile_requeues_only_gone_by_identity(q):
     counts = q.reconcile_liveness(resolver, now=5000.0)
     assert counts["checked"] == 2
     assert counts["gone"] == 1 and counts["live"] == 1
-    assert counts["requeued"] == 1 and counts["dead_lettered"] == 0
-    assert q.get(a.id).status == Status.QUEUED
-    assert q.get(a.id).owner is None and q.get(a.id).owner_session_id is None
+    assert counts["suspended"] == 1
+    assert counts["requeued"] == 0 and counts["dead_lettered"] == 0
+    gone_task = q.get(a.id)
+    assert gone_task.status == Status.SUSPENDED
+    # Owner/owner-session identity is retained (unlike the headless requeue
+    # path) so a fresh interactive-embodiment session can resume + rebind it.
+    assert gone_task.owner == "m/wtA" and gone_task.owner_session_id == "SA"
     assert q.get(b.id).status == Status.STARTED  # a live owner is never disturbed
+
+
+def test_reconcile_gone_headless_task_still_requeues(q):
+    """Headless dead-session behavior is UNCHANGED by the new CLI-embodied
+    auto-suspend branch: a headless body confirmed gone still requeues exactly
+    as before (fenced, ownership cleared)."""
+    t = q.create("headless", now=1000.0)
+    _claim_and_start_headless(q, t.id, wt="wt", session="S1", now=1002.0)
+
+    counts = q.reconcile_liveness(headless_local_verdict=lambda sid: "gone", now=5000.0)
+    assert counts["checked"] == 1 and counts["gone"] == 1
+    assert counts["requeued"] == 1 and counts["suspended"] == 0
+    back = q.get(t.id)
+    assert back.status == Status.QUEUED
+    assert back.owner is None and back.owner_session_id is None
 
 
 def test_reconcile_unknown_never_requeues(q):
@@ -202,32 +246,40 @@ def test_reconcile_persists_last_liveness_for_metric(q):
 
 def test_reconcile_fence_no_ops_when_owner_reclaimed_midpass(q):
     """If the task is re-claimed (new generation) between the probe and the write,
-    the fenced requeue must no-op -- no clobber of the new owner."""
+    the fenced requeue must no-op -- no clobber of the new owner. Uses a
+    headless reservation so the outcome under test is the (still-requeuing)
+    headless path -- a suspended task cannot be plainly re-claimed like a
+    queued one, so this fencing scenario doesn't translate to the CLI path."""
     t = q.create("x", now=1000.0)
-    _claim_and_start(q, t.id, wt="wt", session="S1", now=1001.0)
+    _claim_and_start_headless(q, t.id, wt="wt", session="S1", now=1001.0)
     gen_before = q.get(t.id).generation
 
-    # A resolver that, after being asked, requeues + reclaims the task under a new
-    # generation -- simulating the probe->write race window.
-    def racing_resolver(wt, mc, sid):
-        q.reconcile_liveness(lambda *a: "gone", now=1002.0)  # requeue under S1...
+    # A verdict fn that, after being asked, requeues + reclaims the task under
+    # a new generation -- simulating the probe->write race window.
+    def racing_verdict(sid):
+        q.reconcile_liveness(headless_local_verdict=lambda _sid: "gone", now=1002.0)  # requeue under S1...
         q.claim_one("m/wt2", machine="m", worktree="wt2", task_id=t.id, now=1003.0)  # ...reclaimed
         return "gone"
 
-    counts = q.reconcile_liveness(racing_resolver, now=1004.0)
+    counts = q.reconcile_liveness(headless_local_verdict=racing_verdict, now=1004.0)
     assert counts["requeued"] == 0  # outer write fenced out by the generation change
     assert q.get(t.id).generation != gen_before
 
 
 def test_reconcile_dead_letters_past_attempt_cap(q):
     t = q.create("poison", now=1000.0)
+    reservation, _ = q.reserve_spawn(t.id, now=1000.0)
+    q.record_spawn(reservation.key, session_handle="local-body:S1", now=1000.0)
     for i in range(10):
         st = q.get(t.id)
         if st.status == Status.DEAD_LETTER:
             break
         if st.status in (Status.QUEUED, Status.PROPOSED):
-            _claim_and_start(q, t.id, wt="wt", session="S1", now=1100.0 + i)
-        q.reconcile_liveness(lambda wt, mc, sid: "gone", max_attempts=3, now=1200.0 + i)
+            q.claim_one("m/wt", machine="m", worktree="wt", task_id=t.id, now=1100.0 + i)
+            q.start(t.id, "m/wt", owner_session_id="S1", now=1100.0 + i + 0.5)
+        q.reconcile_liveness(
+            headless_local_verdict=lambda sid: "gone", max_attempts=3, now=1200.0 + i
+        )
     assert q.get(t.id).status == Status.DEAD_LETTER
 
 
@@ -246,9 +298,14 @@ def test_reconcile_default_resolver_safe_without_bridge(q, monkeypatch):
 
 
 def test_recover_expired_leases_shim_delegates(q, monkeypatch):
-    monkeypatch.setattr(tracking, "liveness_verdict", lambda *a, **k: "gone")
+    from agent_dispatch import spawn_factories
+
+    # Headless: the shim's "requeued" contract (`recover_expired_leases`'s
+    # docstring) is exercised on the path whose behavior is unchanged by the
+    # new CLI-embodied auto-suspend branch.
+    monkeypatch.setattr(spawn_factories, "_default_local_body_verdict", lambda *a, **k: "gone")
     t = q.create("x", now=1000.0)
-    _claim_and_start(q, t.id, wt="wt", session="S1", now=1001.0)
+    _claim_and_start_headless(q, t.id, wt="wt", session="S1", now=1001.0)
     assert q.recover_expired_leases() == 1  # back-compat int return
     assert q.get(t.id).status == Status.QUEUED
 

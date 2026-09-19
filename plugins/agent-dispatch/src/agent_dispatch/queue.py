@@ -161,6 +161,27 @@ def _clip(text: str | None, limit: int) -> str | None:
     return text
 
 
+def _check_expected_status(task: "Task", expected_status: str | None) -> None:
+    """Fence a mutating action against a caller-supplied ``expected_status``.
+
+    Phase 1 item 4 (``efforts/active/agent-dispatch-tasks-pane-ux-overhaul``):
+    a UI's action menu (e.g. the Picker's Tasks pane) is built from a cached
+    row that can be stale by the time an operator commits to an action --
+    ``pause``/``unpause``/``abandon``/a steer submission must reject a status
+    that no longer matches what the operator was looking at, rather than
+    silently acting on a since-changed task. Raised as the same clear,
+    reusable outcome every one of these actions surfaces: **"task changed;
+    refresh and retry"**. A ``None`` ``expected_status`` (the default) skips
+    the check entirely -- every existing caller that never passes it is
+    unaffected.
+    """
+    if expected_status is not None and task.status != expected_status:
+        raise TaskError(
+            f"task {task.id!r} changed; refresh and retry (expected status "
+            f"{expected_status!r}, now {task.status!r})"
+        )
+
+
 def _progress_snapshot(
     phase: str,
     summary: str,
@@ -335,6 +356,18 @@ class Task:
     #: releases it for re-embodiment only after the prior body is confirmed
     #: stopped, preventing overlapping workers.
     resume_requested: bool = False
+    #: A durable, OPERATOR-set hold -- distinct from ``SUSPENDED`` (a
+    #: system-recoverable state normal resume/recovery paths reopen on their
+    #: own schedule) and from ``awaiting_steer``/Blocked (waiting on a card
+    #: answer). ``hold_reason`` non-``None`` means every claim/resume/release/
+    #: wake/spawn path must refuse to move this task forward until the
+    #: operator explicitly clears it (see :meth:`TaskQueue.set_hold` /
+    #: :meth:`TaskQueue.clear_hold`) -- a held task can be in ANY status
+    #: (most commonly ``suspended``), so this is an orthogonal field, never a
+    #: ``Status`` value itself.
+    hold_reason: str | None = None
+    hold_actor: str | None = None
+    hold_at: float | None = None
     #: Latest durable wake outbox operation for this task. ``wake_status`` is
     #: pending/delivering/delivered/failed/stale; ``wake_operation_id`` is the
     #: deterministic idempotency key used across retries and restarts.
@@ -395,6 +428,9 @@ class Task:
             card_draft=json.loads(row["card_draft"]) if row["card_draft"] else None,
             awaiting_steer=bool(row["awaiting_steer"]),
             resume_requested=bool(row["resume_requested"]),
+            hold_reason=(row["hold_reason"] if "hold_reason" in columns else None),
+            hold_actor=(row["hold_actor"] if "hold_actor" in columns else None),
+            hold_at=(row["hold_at"] if "hold_at" in columns else None),
             wake_seq=row["wake_seq"],
             wake_status=row["wake_status"],
             wake_operation_id=row["wake_operation_id"],
@@ -517,6 +553,13 @@ _COLUMNS: dict[str, str] = {
     "card_draft": "TEXT",
     "awaiting_steer": "INTEGER NOT NULL DEFAULT 0",
     "resume_requested": "INTEGER NOT NULL DEFAULT 0",
+    # A durable, operator-set hold (see the ``hold_reason`` field docstring on
+    # ``Task``) -- orthogonal to ``status``, so a held task keeps whatever
+    # status it was in (most commonly ``suspended``) rather than adopting a
+    # new one.
+    "hold_reason": "TEXT",
+    "hold_actor": "TEXT",
+    "hold_at": "REAL",
     "wake_seq": "INTEGER NOT NULL DEFAULT 0",
     "wake_status": "TEXT",
     "wake_operation_id": "TEXT",
@@ -2112,16 +2155,18 @@ class TaskQueue(
     ) -> Task | ClaimOutcome | None:
         """Atomically lease the best eligible ``queued`` task, or ``None``.
 
-        Eligible = ``status='queued'``, ``not_before <= now``, in the claimer's
-        ``repo`` **lane** (when given -- a worker only claims its own repo's
-        tasks), every token in the task's ``requires`` present in
-        ``capabilities``, and — the **targeting gate** — the task's
-        ``target_machine`` / ``target_worktree`` are unset or match the claiming
-        agent's ``machine`` / ``worktree``. So an agent only claims work in its
-        lane that is unassigned *or* assigned to it. A claimer that leaves
-        ``machine`` / ``worktree`` unset can therefore only take *untargeted*
-        tasks. The winning row is flipped to ``claimed`` under a write lock, so
-        concurrent callers never double-claim.
+        Eligible = ``status='queued'``, ``not_before <= now``, no operator hold
+        (``hold_reason IS NULL`` -- see :meth:`set_hold`; a released-to-queued
+        held task is still never claimable), in the claimer's ``repo`` **lane**
+        (when given -- a worker only claims its own repo's tasks), every token
+        in the task's ``requires`` present in ``capabilities``, and — the
+        **targeting gate** — the task's ``target_machine`` / ``target_worktree``
+        are unset or match the claiming agent's ``machine`` / ``worktree``. So
+        an agent only claims work in its lane that is unassigned *or* assigned
+        to it. A claimer that leaves ``machine`` / ``worktree`` unset can
+        therefore only take *untargeted* tasks. The winning row is flipped to
+        ``claimed`` under a write lock, so concurrent callers never
+        double-claim.
 
         If ``task_id`` is given, only that task is considered (a spawned worker
         deterministically claiming *its* task) — still subject to the same gates,
@@ -2159,13 +2204,13 @@ class TaskQueue(
             if task_id is not None:
                 rows = conn.execute(
                     f"SELECT {_TASK_BULK_SELECT}, producer_request_hash FROM tasks "
-                    "WHERE id = ? AND status = ? AND not_before <= ?",
+                    "WHERE id = ? AND status = ? AND not_before <= ? AND hold_reason IS NULL",
                     (task_id, Status.QUEUED, ts),
                 ).fetchall()
             else:
                 rows = conn.execute(
                     f"SELECT {_TASK_BULK_SELECT}, producer_request_hash FROM tasks "
-                    "WHERE status = ? AND not_before <= ?"
+                    "WHERE status = ? AND not_before <= ? AND hold_reason IS NULL"
                     " ORDER BY created_at ASC",
                     (Status.QUEUED, ts),
                 ).fetchall()
@@ -2533,6 +2578,9 @@ class TaskQueue(
         worker_id: str,
         *,
         reason: str,
+        expected_status: str | None = None,
+        expected_generation: int | None = None,
+        expected_owner_session_id: str | None = None,
         now: float | None = None,
     ) -> Task:
         """Park a ``started`` task as dormant while preserving its owner.
@@ -2541,6 +2589,14 @@ class TaskQueue(
         the audit trail. Durable task context and owner/session/generation
         identity remain intact; active lease, activity, and liveness observation
         are cleared because no worker is running while suspended.
+
+        Phase 1 item 4 fencing: ``expected_status`` rejects a stale UI row
+        ("task changed; refresh and retry"); ``expected_generation``/
+        ``expected_owner_session_id`` reuse ``_transition``'s existing
+        identity fencing verbatim. Notably the primitive Phase 2's
+        `force-stop` verb suspends onto -- terminating the live
+        session/reservation is that verb's own job; this fences only the
+        state transition.
         """
         meaningful = _clip(reason, PROGRESS_SUMMARY_MAX)
         if meaningful is None:
@@ -2551,6 +2607,11 @@ class TaskQueue(
             if current is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            try:
+                _check_expected_status(current, expected_status)
+            except TaskError:
+                conn.execute("COMMIT")
+                raise
             if current.status == Status.SUSPENDED and current.owner == worker_id:
                 self._audit(
                     conn,
@@ -2574,6 +2635,8 @@ class TaskQueue(
             now=now,
             note=f"suspend: {meaningful}",
             extra={"lease_expires_at": None, "last_liveness": None},
+            expected_generation=expected_generation,
+            expected_owner_session_id=expected_owner_session_id,
             reject_pending_steer=True,
         )
 
@@ -2597,6 +2660,10 @@ class TaskQueue(
         atomically adopt the task into its current session; that advances the
         generation so wakes and liveness observations from the prior
         incarnation become stale.
+
+        Refuses when the task carries an operator hold (:meth:`set_hold`) --
+        clear it first via :meth:`clear_hold`. A pause must actually block
+        resume, not just hide the button.
         """
         ts = self._now(now)
         extra: dict[str, object] = {
@@ -2623,6 +2690,7 @@ class TaskQueue(
             reembody_headless_on_wake=not reuse_session,
             wake_requested=wake_requested,
             wake_message=wake_message,
+            reject_if_held=True,
             #: Only the plain "wake me again" resume is idempotent-safe.
             #: A handoff-adoption resume (``adopt_owner_session_id`` set)
             #: must always bump the generation and adopt the new owner
@@ -2644,6 +2712,10 @@ class TaskQueue(
         reservation for the former embodiment receives a durable release
         request in the same transaction. The supervisor settles it only after
         liveness-safe teardown.
+
+        Refuses when the task carries an operator hold (:meth:`set_hold`) --
+        releasing to ``queued`` would make it claimable again, defeating the
+        hold.
         """
         note = _clip(reason, PROGRESS_SUMMARY_MAX) or "release suspended task"
         allowed, to = _task_transition_spec("release_suspended")
@@ -2664,8 +2736,132 @@ class TaskQueue(
             },
             release_spawn=True,
             release_spawn_detail="task released from suspension",
+            reject_if_held=True,
             idempotent_replay=True,
         )
+
+    # -- operator hold (Tasks-pane-UX "Pause") -------------------------------
+
+    def set_hold(
+        self,
+        task_id: str,
+        *,
+        reason: str,
+        actor: str,
+        expected_status: str | None = None,
+        now: float | None = None,
+    ) -> Task:
+        """Set a durable, OPERATOR-owned hold on ``task_id`` -- the Tasks-pane
+        UX overhaul's "Pause" primitive (see
+        ``efforts/active/agent-dispatch-tasks-pane-ux-overhaul``).
+
+        Distinct from ``SUSPENDED`` (a system-recoverable state normal
+        resume/recovery paths reopen on their own schedule) and from
+        ``awaiting_steer``/Blocked (waiting on a card answer): a hold is a
+        deliberate operator decision that nothing else in the system may
+        override. It does NOT itself change ``status`` -- callers that want
+        "pause" to also stop a live agent call :meth:`suspend` (or a
+        force-stop primitive) separately; this method only sets the gate that
+        :meth:`claim_one`, :meth:`resume`, and :meth:`release_suspended`
+        (and, going forward, wake-delivery and supervisor spawning) must
+        check and honor.
+
+        ``expected_status`` (Phase 1 item 4) fences against a stale UI row --
+        e.g. the Picker's action menu built from a cached snapshot -- by
+        rejecting with a clear "task changed; refresh and retry" outcome
+        (:func:`_check_expected_status`) if the task's status no longer
+        matches what the caller was looking at. ``None`` (the default) skips
+        the check.
+
+        Idempotent: holding an already-held task refreshes the
+        reason/actor/timestamp (audited as a new event) rather than raising --
+        an operator re-stating why should never be an error.
+
+        Refuses on a terminal task (``COMPLETED``/``ABANDONED``/
+        ``DEAD_LETTER``): a hold nobody can ever clear is a footgun, not a
+        feature.
+        """
+        meaningful = _clip(reason, PROGRESS_SUMMARY_MAX)
+        if meaningful is None:
+            raise TaskError("set_hold requires a non-empty reason")
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            _check_expected_status(task, expected_status)
+            if task.status in Status.TERMINAL:
+                conn.execute("COMMIT")
+                raise TaskError(f"cannot hold a {task.status!r} task {task_id!r}")
+            conn.execute(
+                "UPDATE tasks SET hold_reason = ?, hold_actor = ?, hold_at = ?,"
+                " updated_at = ? WHERE id = ?",
+                (meaningful, actor, ts, ts, task_id),
+            )
+            self._audit(
+                conn,
+                task_id,
+                ts=ts,
+                from_status=task.status,
+                to_status=task.status,
+                worker=actor,
+                note=f"hold: {meaningful}",
+            )
+            result = self._fetch(conn, task_id)
+            conn.execute("COMMIT")
+        return result  # type: ignore[return-value]
+
+    def clear_hold(
+        self,
+        task_id: str,
+        *,
+        actor: str | None = None,
+        expected_status: str | None = None,
+        now: float | None = None,
+    ) -> Task:
+        """Clear a hold set by :meth:`set_hold` -- the "Unpause" primitive.
+
+        ``expected_status`` (Phase 1 item 4) fences a real unhold against a
+        stale UI row exactly like :meth:`set_hold`'s -- but only when there is
+        actual work to do: an already-unheld task's idempotent no-op return
+        below is a harmless "already true", never blocked by a status
+        mismatch (the operator's intent -- "make sure it's unpaused" -- is
+        already satisfied either way).
+
+        Idempotent: clearing an already-unheld task is a harmless no-op
+        (still audited), not an error -- an operator retrying a flaky unpause
+        should never be surprised by an exception.
+        """
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            if task.hold_reason is None:
+                conn.execute("COMMIT")
+                return task
+            _check_expected_status(task, expected_status)
+            conn.execute(
+                "UPDATE tasks SET hold_reason = NULL, hold_actor = NULL,"
+                " hold_at = NULL, updated_at = ? WHERE id = ?",
+                (ts, task_id),
+            )
+            self._audit(
+                conn,
+                task_id,
+                ts=ts,
+                from_status=task.status,
+                to_status=task.status,
+                worker=actor,
+                note=f"unhold (was: {task.hold_reason})",
+            )
+            result = self._fetch(conn, task_id)
+            conn.execute("COMMIT")
+        return result  # type: ignore[return-value]
 
     def yield_task(
         self,
@@ -2753,12 +2949,24 @@ class TaskQueue(
         worker_id: str | None = None,
         permitted: bool = False,
         reason: str | None = None,
+        expected_status: str | None = None,
+        expected_generation: int | None = None,
+        expected_owner_session_id: str | None = None,
         now: float | None = None,
     ) -> Task:
         """Move a task to terminal ``abandoned`` -- requires ``permitted=True``.
 
         Abandonment is permission-gated (human/policy), never a unilateral agent
         action; callers pass ``permitted=True`` once that gate is satisfied.
+
+        Phase 1 item 4 fencing (both delegated to ``_transition``, checked
+        atomically inside its own transaction): ``expected_status`` rejects a
+        stale UI row ("task changed; refresh and retry", even when the
+        current status is still legally abandonable).
+        ``expected_generation``/``expected_owner_session_id`` reuse
+        ``_transition``'s existing identity-fencing verbatim -- useful when
+        the caller wants to fence on the exact owning incarnation (e.g. a
+        handoff-adopted session), not just status.
         """
         if not permitted:
             raise TaskError("abandon requires permission (permitted=True)")
@@ -2772,6 +2980,65 @@ class TaskQueue(
             now=now,
             note=reason or "abandon",
             extra={"owner": None, "lease_expires_at": None},
+            expected_generation=expected_generation,
+            expected_owner_session_id=expected_owner_session_id,
+            expected_status=expected_status,
+            idempotent_replay=True,
+        )
+
+    def reset(
+        self,
+        task_id: str,
+        *,
+        reason: str | None = None,
+        expected_status: str | None = None,
+        expected_generation: int | None = None,
+        expected_owner_session_id: str | None = None,
+        now: float | None = None,
+    ) -> Task:
+        """Phase 2's gentler "not like this": reset a task back to
+        ``proposed`` for a fresh attempt.
+
+        Discards the current attempt's embodiment state (owner, owner-session
+        identity, lease, activity, card/steer-block state) while preserving
+        the task's identity, prompt, and durable
+        goal/done_criteria/progress_log -- an operator resetting a task wants
+        a fresh attempt at the SAME task, not to delete and recreate it. Not
+        owner-gated (an operator action, like ``abandon``); refuses on a
+        terminal task (nothing to reset) and on a held task (mirrors
+        ``resume``/``release_suspended``'s own ``reject_if_held`` gate --
+        clear the hold first, an explicit decision should not be silently
+        overridden by a reset).
+
+        Phase 1 item 4 fencing (delegated to ``_transition`` verbatim, same
+        as ``abandon``): ``expected_status`` rejects a stale UI row;
+        ``expected_generation``/``expected_owner_session_id`` fence on the
+        exact owning incarnation.
+        """
+        allowed, to = _task_transition_spec("reset")
+        return self._transition(
+            task_id,
+            allowed=allowed,
+            to=to,
+            require_owner=False,
+            now=now,
+            note=f"reset: {reason}" if reason else "reset",
+            extra={
+                "owner": None,
+                "owner_session_id": None,
+                "lease_expires_at": None,
+                "claimed_at": None,
+                "started_at": None,
+                "last_liveness": None,
+                "card": None,
+                "card_draft": None,
+                "awaiting_steer": 0,
+                "resume_requested": 0,
+            },
+            expected_generation=expected_generation,
+            expected_owner_session_id=expected_owner_session_id,
+            expected_status=expected_status,
+            reject_if_held=True,
             idempotent_replay=True,
         )
 
@@ -3060,6 +3327,7 @@ class TaskQueue(
         sender: str | None = None,
         wake_requested: bool = False,
         wake_message: str | None = None,
+        expected_status: str | None = None,
         now: float | None = None,
     ) -> Task:
         """Submit an operator's answer (a **steer**) to a task's card.
@@ -3078,6 +3346,13 @@ class TaskQueue(
         :meth:`take_steer` when it resumes. A steer is **never** a verdict -- it
         carries operator *guidance*, and the coordinator has no path to set an
         Approve/Reject outcome from it.
+
+        ``expected_status`` (Phase 1 item 4) fences against a stale UI row --
+        e.g. an operator answering a card the Picker showed as Blocked, when
+        the task has since resolved some other way -- rejecting with "task
+        changed; refresh and retry" (:func:`_check_expected_status`) rather
+        than silently appending guidance to a task the operator is no longer
+        actually looking at. ``None`` (the default) skips the check.
         """
         ts = self._now(now)
         payload = json.dumps(fields, separators=(",", ":"))
@@ -3088,6 +3363,11 @@ class TaskQueue(
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            try:
+                _check_expected_status(task, expected_status)
+            except TaskError:
+                conn.execute("COMMIT")
+                raise
             if task.status in Status.TERMINAL:
                 conn.execute("COMMIT")
                 raise TaskError(f"cannot steer a {task.status!r} task")
@@ -3617,8 +3897,10 @@ class TaskQueue(
         bump_generation: bool = False,
         expected_owner_session_id: str | None = None,
         expected_generation: int | None = None,
+        expected_status: str | None = None,
         reembody_headless_on_wake: bool = False,
         reject_pending_steer: bool = False,
+        reject_if_held: bool = False,
         idempotent_replay: bool = False,
     ) -> Task:
         """``idempotent_replay=True`` (Phase 10's live-wiring of
@@ -3633,6 +3915,16 @@ class TaskQueue(
         the caller explicitly fenced on) still raises exactly as before.
         Defaults to ``False`` so untouched call sites keep today's
         behavior; opted into per call site, not globally.
+
+        ``expected_status`` (Phase 1 item 4) is a Picker-staleness fence
+        distinct from the identity fences above: rejects with "task
+        changed; refresh and retry" (:func:`_check_expected_status`) when
+        the task's CURRENT status (read inside this same transaction, so
+        the check is atomic with the rest of the write) no longer matches
+        what the caller's UI row showed -- even when that current status is
+        still within ``allowed`` (e.g. Blocked -> Started is a status change
+        an operator's stale menu would never have anticipated, but both may
+        legally reach ``to``). ``None`` (the default) skips the check.
         """
         ts = self._now(now)
         allowed_set = set(allowed)
@@ -3643,6 +3935,11 @@ class TaskQueue(
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            try:
+                _check_expected_status(task, expected_status)
+            except TaskError:
+                conn.execute("COMMIT")
+                raise
             if task.status not in allowed_set:
                 if idempotent_replay and task.status == to:
                     owner_ok = (
@@ -3682,6 +3979,12 @@ class TaskQueue(
                     raise TaskError(
                         f"cannot suspend task {task_id!r}: pending steer; take it and continue"
                     )
+            if reject_if_held and task.hold_reason is not None:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"task {task_id!r} is held ({task.hold_reason!r}); "
+                    "clear_hold() before resuming/releasing it"
+                )
             if expected_generation is not None and (
                 task.generation != expected_generation
                 or task.owner_session_id != expected_owner_session_id

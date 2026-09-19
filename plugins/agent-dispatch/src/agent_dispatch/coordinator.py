@@ -811,6 +811,9 @@ class YieldBody(BaseModel):
 class SuspendBody(BaseModel):
     worker_id: str
     reason: str
+    expected_status: str | None = None
+    expected_generation: int | None = None
+    expected_owner_session_id: str | None = None
 
 
 class ResumeBody(BaseModel):
@@ -818,6 +821,7 @@ class ResumeBody(BaseModel):
     wake: bool = True
     message: str | None = None
     adopt_session: bool = False
+    adopt_owner_session_id: str | None = None
     reuse_session: bool = False
     expected_owner_session_id: str | None = None
     expected_generation: int | None = None
@@ -862,6 +866,7 @@ class SteerBody(BaseModel):
     sender: str | None = None
     wake: bool = True
     message: str | None = None
+    expected_status: str | None = None
 
 
 class CardDraftBody(BaseModel):
@@ -888,6 +893,35 @@ class AbandonBody(BaseModel):
     worker_id: str | None = None
     permitted: bool = False
     reason: str | None = None
+    expected_status: str | None = None
+    expected_generation: int | None = None
+    expected_owner_session_id: str | None = None
+
+
+class ResetBody(BaseModel):
+    """Phase 2's gentler "not like this" request body."""
+
+    reason: str | None = None
+    expected_status: str | None = None
+    expected_generation: int | None = None
+    expected_owner_session_id: str | None = None
+
+
+class HoldBody(BaseModel):
+    """The Phase 1 durable operator "Pause" primitive request body."""
+
+    reason: str
+    actor: str
+    expected_status: str | None = None
+
+
+class UnholdBody(BaseModel):
+    """The "Unpause" request body -- ``actor`` is informational (audit-only);
+    unlike :class:`HoldBody`'s ``reason``, it is optional since clearing a
+    hold needs no justification."""
+
+    actor: str | None = None
+    expected_status: str | None = None
 
 
 class ReserveSpawnBody(BaseModel):
@@ -1992,7 +2026,14 @@ def create_app(
     @app.post("/tasks/{task_id}/suspend")
     def suspend(task_id: str, body: SuspendBody) -> dict:
         return _guard(
-            lambda: queue.suspend(task_id, body.worker_id, reason=body.reason),
+            lambda: queue.suspend(
+                task_id,
+                body.worker_id,
+                reason=body.reason,
+                expected_status=body.expected_status,
+                expected_generation=body.expected_generation,
+                expected_owner_session_id=body.expected_owner_session_id,
+            ),
             "task.suspended",
         )
 
@@ -2002,7 +2043,12 @@ def create_app(
             f"Task {task_id} has been resumed. Continue toward its goal "
             "from the durable progress already recorded."
         )
-        adopt_owner_session_id = None
+        if body.adopt_session and body.adopt_owner_session_id:
+            raise HTTPException(
+                status_code=422,
+                detail="resume accepts adopt_session or adopt_owner_session_id, not both",
+            )
+        adopt_owner_session_id = body.adopt_owner_session_id
         if body.adopt_session:
             adopt_owner_session_id = _resolve_owner_session_id(body.worker_id)
             if adopt_owner_session_id is None:
@@ -2061,9 +2107,57 @@ def create_app(
     def abandon(task_id: str, body: AbandonBody) -> dict:
         return _guard(
             lambda: queue.abandon(
-                task_id, worker_id=body.worker_id, permitted=body.permitted, reason=body.reason
+                task_id,
+                worker_id=body.worker_id,
+                permitted=body.permitted,
+                reason=body.reason,
+                expected_status=body.expected_status,
+                expected_generation=body.expected_generation,
+                expected_owner_session_id=body.expected_owner_session_id,
             ),
             "task.abandoned",
+        )
+
+    @app.post("/tasks/{task_id}/hold")
+    def hold(task_id: str, body: HoldBody) -> dict:
+        """The Phase 1 durable operator "Pause" primitive
+        (:meth:`agent_dispatch.queue.TaskQueue.set_hold`)."""
+        return _guard(
+            lambda: queue.set_hold(
+                task_id,
+                reason=body.reason,
+                actor=body.actor,
+                expected_status=body.expected_status,
+            ),
+            "task.held",
+        )
+
+    @app.post("/tasks/{task_id}/unhold")
+    def unhold(task_id: str, body: UnholdBody) -> dict:
+        """The "Unpause" primitive (:meth:`agent_dispatch.queue.TaskQueue
+        .clear_hold`)."""
+        return _guard(
+            lambda: queue.clear_hold(
+                task_id,
+                actor=body.actor,
+                expected_status=body.expected_status,
+            ),
+            "task.unheld",
+        )
+
+    @app.post("/tasks/{task_id}/reset")
+    def reset(task_id: str, body: ResetBody) -> dict:
+        """Phase 2's gentler "not like this"
+        (:meth:`agent_dispatch.queue.TaskQueue.reset`)."""
+        return _guard(
+            lambda: queue.reset(
+                task_id,
+                reason=body.reason,
+                expected_status=body.expected_status,
+                expected_generation=body.expected_generation,
+                expected_owner_session_id=body.expected_owner_session_id,
+            ),
+            "task.reset",
         )
 
     @app.post("/tasks/{task_id}/heartbeat")
@@ -2133,6 +2227,7 @@ def create_app(
                 sender=body.sender,
                 wake_requested=body.wake,
                 wake_message=message,
+                expected_status=body.expected_status,
             ),
             "task.steer",
         )

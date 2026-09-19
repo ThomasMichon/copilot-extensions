@@ -165,7 +165,25 @@ _STATE_PALETTE = {
     "FAILED": C_WARN,
 }
 _STATE_PALETTE.update(C_STATE)      # also honour raw worktree state names
-_PALETTES = {"state": _STATE_PALETTE}
+# agent-dispatch-tasks-pane-ux-overhaul: the Tasks pivot's own phase vocabulary
+# (agent_dispatch.task_state_machine.Status, projected through
+# agent-dispatch-board's Blocked/Proposed/Queued/Started/Suspended/Completed/
+# Abandoned grouping) mapped onto the SAME C_STATE colours Worktrees uses, so a
+# task's phase reads with the same at-a-glance meaning as a worktree's state
+# (blue = actively worked, amber = needs attention, green = done, grey = not
+# yet started, dark grey = terminal/irrelevant) -- a distinct palette name
+# (not "state") because the two vocabularies are not 1:1 and must not drift
+# into each other if either changes independently.
+_TASK_PHASE_PALETTE = {
+    "PROPOSED": C_STATE["UNUSED"],   # not yet approved -> UNUSED grey
+    "QUEUED": C_STATE["UNUSED"],     # approved, awaiting a worker -> same grey
+    "STARTED": C_STATE["ACTIVE"],    # an agent is actively working it -> blue
+    "BLOCKED": C_STATE["WIP"],       # awaiting operator steer -> WIP amber
+    "SUSPENDED": C_STATE["CONVO"],   # user/system paused, mid-conversation -> teal
+    "COMPLETED": C_STATE["FINAL"],   # done and settled -> FINAL green
+    "ABANDONED": C_STATE["GONE"],    # terminal, no longer relevant -> dark grey
+}
+_PALETTES = {"state": _STATE_PALETTE, "task_phase": _TASK_PHASE_PALETTE}
 
 
 def _palette_style(name, value):
@@ -7948,6 +7966,68 @@ class TasksView:
         width-less column still renders sanely."""
         return col.width if col.width else max(6, len(col.header))
 
+    #: Minimum width the flex column is guaranteed to keep when other columns
+    #: are being dropped to make the row fit (mirrors the Worktrees list's own
+    #: ``fit(..., "title", 14)`` / ``fit(..., "title", 12)`` calls).
+    _FLEX_MIN = 12
+
+    #: Reserved trailing width for the "+N" column-drop indicator
+    #: (``_column_header``'s ``dropped`` param) when at least one column was
+    #: dropped: a leading space plus up to 3 glyphs (``+99``). Without this
+    #: reservation the flex column always absorbs 100% of the remaining
+    #: width -- leaving zero spare for the indicator on every real render, so
+    #: it would never actually show up.
+    _DROP_INDICATOR_RESERVE = 4
+
+    def _fitted_columns(self, reg, width):
+        """``reg.columns`` fit to the render ``width`` via the SAME column-fit
+        algorithm the Worktrees list uses (module-level ``fit()``), so a
+        declarative pivot's row can never exceed its render width and silently
+        line-wrap.
+
+        The flex column is whichever declares ``key == "title"`` (falling back
+        to the last declared column when none does) -- it never disappears,
+        only shrinks or grows to absorb the remaining width. Every other
+        column is dropped, highest-``priority``-number first, until the row
+        fits; ``Column.priority`` defaults to declaration order (later columns
+        drop before earlier ones) when the manifest doesn't set it explicitly.
+        Returns a tuple of :class:`~.pivots.Column` (dropped columns excluded,
+        the flex column's ``width`` replaced with its fitted value) in their
+        original declared order -- a drop-in replacement for ``reg.columns``
+        everywhere a fitted render is wanted.
+
+        Two-pass: an unreserved trial fit first decides whether anything gets
+        dropped at all. Only when it does is a second fit run against a
+        narrower ``width`` (minus ``_DROP_INDICATOR_RESERVE``), so the flex
+        column leaves the trailing room ``_column_header``'s ``+N`` indicator
+        needs instead of silently consuming it. A trial fit that drops
+        nothing returns as-is -- no reservation, no wasted space."""
+        from dataclasses import replace
+
+        cols = reg.columns
+        if not cols:
+            return cols
+        flex_idx = next(
+            (i for i, c in enumerate(cols) if c.key == "title"), len(cols) - 1
+        )
+        specs = [
+            (
+                c.key, c.header, self._col_width(c), c.align,
+                c.priority if c.priority is not None
+                else (1 if i == flex_idx else i + 2),
+            )
+            for i, c in enumerate(cols)
+        ]
+        flex_key = cols[flex_idx].key
+        flex_min = min(self._FLEX_MIN, self._col_width(cols[flex_idx]))
+        avail = max(1, width - 1)
+        fitted = fit(specs, avail, flex_key, flex_min)
+        if len(fitted) < len(specs):
+            reserved = max(1, avail - self._DROP_INDICATOR_RESERVE)
+            fitted = fit(specs, reserved, flex_key, flex_min)
+        by_key = {c.key: c for c in cols}
+        return tuple(replace(by_key[k], width=w) for k, _h, w, _a in fitted)
+
     def _summary_line(self, reg, summary, width):
         """The D1 ``summary`` header line: ``reg.summary_template`` with
         ``{token}``s filled from the provider's summary dict. Missing tokens
@@ -7992,21 +8072,39 @@ class TasksView:
         t.append(" " * max(0, width - t.cell_len))
         return t
 
-    def _column_header(self, reg, width):
-        """The column-header row for a columns-declaring pivot."""
+    def _column_header(self, cols, width, dropped=0):
+        """The column-header row for a columns-declaring pivot. ``cols`` is the
+        already-fitted column set (see ``_fitted_columns``) -- never
+        ``reg.columns`` directly, or a wide manifest silently line-wraps.
+
+        ``dropped`` is the count of declared columns the fit algorithm removed
+        to make the row fit (``len(reg.columns) - len(cols)``, the caller's to
+        compute -- see ``_fitted_columns``). When positive, a compact ``+N``
+        indicator is right-aligned at the end of the row, spare width
+        permitting, so a genuinely empty column can be told apart from one the
+        fit algorithm merely dropped at a narrow viewport. Silently omitted
+        when there isn't room; the header row never wraps."""
         t = Text(" ")
-        for i, col in enumerate(reg.columns):
+        for i, col in enumerate(cols):
             if i:
                 t.append(PAD)
             w = self._col_width(col)
             t.append(_clip(col.header.upper(), w, col.align), style=C_HEADER)
-        t.append(" " * max(0, width - t.cell_len))
+        pad = max(0, width - t.cell_len)
+        if dropped > 0:
+            indicator = f"+{dropped}"
+            if pad > len(indicator):
+                t.append(" " * (pad - len(indicator)))
+                t.append(indicator, style=C_DIM)
+                return t
+        t.append(" " * pad)
         return t
 
-    def _column_row(self, reg, rec, width, selected):
-        """One entry rendered across the pivot's declarative columns."""
+    def _column_row(self, cols, rec, width, selected):
+        """One entry rendered across the pivot's declarative columns. ``cols``
+        is the already-fitted column set (see ``_fitted_columns``)."""
         t = Text(" ")
-        for i, col in enumerate(reg.columns):
+        for i, col in enumerate(cols):
             if i:
                 t.append(PAD)
             w = self._col_width(col)
@@ -8081,7 +8179,13 @@ class TasksView:
             # sections (``── repo @ account ──``). An optional dim subtitle line
             # follows each row.
             eng._enrich_pivot_rows(reg, rows)
-            add(self._column_header(reg, width), kind="section")
+            # D1 follow-up: fit the declared columns to `width` (the same
+            # column-fit algorithm the Worktrees list uses) so a manifest whose
+            # columns sum wider than the render viewport shrinks/drops columns
+            # instead of silently line-wrapping the whole row.
+            cols = self._fitted_columns(reg, width)
+            dropped = len(reg.columns) - len(cols)
+            add(self._column_header(cols, width, dropped), kind="section")
             if reg.group_field:
                 groups: dict[str, list] = {}
                 order: list[str] = []
@@ -8096,14 +8200,14 @@ class TasksView:
                     sec.append("─" * max(0, width - sec.cell_len), style=C_DIM)
                     add(sec, kind="section", new_section=g)
                     for li, rec in groups[g]:
-                        add(self._column_row(reg, rec, width, sel == ("T", li)),
+                        add(self._column_row(cols, rec, width, sel == ("T", li)),
                             stop=("T", li), data=rec)
                         sub = self._column_subtitle(reg, rec, width)
                         if sub is not None:
                             add(sub)
                 return
             for li, rec in enumerate(rows):
-                add(self._column_row(reg, rec, width, sel == ("T", li)),
+                add(self._column_row(cols, rec, width, sel == ("T", li)),
                     stop=("T", li), data=rec)
                 sub = self._column_subtitle(reg, rec, width)
                 if sub is not None:

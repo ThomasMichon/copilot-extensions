@@ -237,11 +237,26 @@ class DispatchClient(RegistrationClientMixin):
             )
         )
 
-    def suspend(self, task_id: str, worker_id: str, *, reason: str) -> dict:
+    def suspend(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        reason: str,
+        expected_status: str | None = None,
+        expected_generation: int | None = None,
+        expected_owner_session_id: str | None = None,
+    ) -> dict:
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/suspend",
-                json={"worker_id": worker_id, "reason": reason},
+                json={
+                    "worker_id": worker_id,
+                    "reason": reason,
+                    "expected_status": expected_status,
+                    "expected_generation": expected_generation,
+                    "expected_owner_session_id": expected_owner_session_id,
+                },
             )
         )
 
@@ -253,10 +268,21 @@ class DispatchClient(RegistrationClientMixin):
         wake: bool = True,
         message: str | None = None,
         adopt_session: bool = False,
+        adopt_owner_session_id: str | None = None,
         reuse_session: bool = False,
         expected_owner_session_id: str | None = None,
         expected_generation: int | None = None,
     ) -> dict:
+        """Resume a suspended task under ``worker_id``.
+
+        ``adopt_session`` resolves and adopts the CALLER's own currently-live
+        session for ``worker_id`` (a handoff successor resuming into itself).
+        ``adopt_owner_session_id`` instead adopts an explicitly-named session
+        id, known to the caller ahead of time (e.g.
+        :mod:`agent_dispatch.interactive_embody`'s transaction, which resumes
+        a task into a session it just launched but is not itself running
+        inside of) -- mutually exclusive with ``adopt_session``.
+        """
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/resume",
@@ -265,6 +291,7 @@ class DispatchClient(RegistrationClientMixin):
                     "wake": wake,
                     "message": message,
                     "adopt_session": adopt_session,
+                    "adopt_owner_session_id": adopt_owner_session_id,
                     "reuse_session": reuse_session,
                     "expected_owner_session_id": expected_owner_session_id,
                     "expected_generation": expected_generation,
@@ -331,11 +358,77 @@ class DispatchClient(RegistrationClientMixin):
         worker_id: str | None = None,
         permitted: bool = False,
         reason: str | None = None,
+        expected_status: str | None = None,
+        expected_generation: int | None = None,
+        expected_owner_session_id: str | None = None,
     ) -> dict:
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/abandon",
-                json={"worker_id": worker_id, "permitted": permitted, "reason": reason},
+                json={
+                    "worker_id": worker_id,
+                    "permitted": permitted,
+                    "reason": reason,
+                    "expected_status": expected_status,
+                    "expected_generation": expected_generation,
+                    "expected_owner_session_id": expected_owner_session_id,
+                },
+            )
+        )
+
+    def set_hold(
+        self,
+        task_id: str,
+        *,
+        reason: str,
+        actor: str,
+        expected_status: str | None = None,
+    ) -> dict:
+        """Set the Phase 1 durable, operator-owned hold -- the "Pause" primitive
+        (:meth:`agent_dispatch.queue.TaskQueue.set_hold`)."""
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/hold",
+                json={"reason": reason, "actor": actor, "expected_status": expected_status},
+            )
+        )
+
+    def clear_hold(
+        self,
+        task_id: str,
+        *,
+        actor: str | None = None,
+        expected_status: str | None = None,
+    ) -> dict:
+        """Clear a hold set by :meth:`set_hold` -- the "Unpause" primitive."""
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/unhold",
+                json={"actor": actor, "expected_status": expected_status},
+            )
+        )
+
+    def reset(
+        self,
+        task_id: str,
+        *,
+        reason: str | None = None,
+        expected_status: str | None = None,
+        expected_generation: int | None = None,
+        expected_owner_session_id: str | None = None,
+    ) -> dict:
+        """Phase 2's gentler "not like this" -- reset a task back to
+        ``proposed`` for a fresh attempt (:meth:`agent_dispatch.queue
+        .TaskQueue.reset`)."""
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/reset",
+                json={
+                    "reason": reason,
+                    "expected_status": expected_status,
+                    "expected_generation": expected_generation,
+                    "expected_owner_session_id": expected_owner_session_id,
+                },
             )
         )
 
@@ -433,6 +526,7 @@ class DispatchClient(RegistrationClientMixin):
         sender: str | None = None,
         wake: bool = True,
         message: str | None = None,
+        expected_status: str | None = None,
     ) -> dict:
         """Submit an answer and ask the coordinator to resume the task owner."""
         return self._unwrap(
@@ -443,6 +537,7 @@ class DispatchClient(RegistrationClientMixin):
                     "sender": sender,
                     "wake": wake,
                     "message": message,
+                    "expected_status": expected_status,
                 },
             )
         )

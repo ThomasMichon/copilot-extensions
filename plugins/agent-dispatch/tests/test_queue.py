@@ -390,6 +390,228 @@ def test_suspend_resume_are_owner_gated_and_state_checked(q):
         q.complete(t.id, "w2")
 
 
+# -- operator hold ("Pause") -------------------------------------------------
+
+
+def test_set_hold_blocks_resume_release_and_reclaim(q):
+    t = q.create("investigate the flaky runner")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+    q.suspend(t.id, "w1", reason="waiting on an external decision")
+
+    held = q.set_hold(t.id, reason="operator paused from the picker", actor="tmichon")
+    assert held.hold_reason == "operator paused from the picker"
+    assert held.hold_actor == "tmichon"
+    assert held.hold_at is not None
+    # A hold does not itself change status -- the task is still suspended.
+    assert held.status == Status.SUSPENDED
+
+    with pytest.raises(TaskError, match="held"):
+        q.resume(t.id, "w1")
+    with pytest.raises(TaskError, match="held"):
+        q.release_suspended(t.id, "w1")
+
+    unheld = q.clear_hold(t.id, actor="tmichon")
+    assert unheld.hold_reason is None
+    assert unheld.hold_actor is None
+    assert unheld.hold_at is None
+    # Now the normal paths work again.
+    resumed = q.resume(t.id, "w1")
+    assert resumed.status == Status.STARTED
+
+
+def test_set_hold_on_queued_task_prevents_claim(q):
+    t = q.create("queued task an operator wants held")
+    q.set_hold(t.id, reason="hold before anyone claims it", actor="tmichon")
+    assert q.claim_one("w1") is None
+    assert q.claim_one("w1", task_id=t.id) is None
+
+    q.clear_hold(t.id, actor="tmichon")
+    claimed = q.claim_one("w1", task_id=t.id)
+    assert claimed is not None
+    assert claimed.id == t.id
+
+
+def test_set_hold_requires_a_reason(q):
+    t = q.create("task")
+    with pytest.raises(TaskError, match="non-empty reason"):
+        q.set_hold(t.id, reason="   ", actor="tmichon")
+
+
+def test_set_hold_refuses_terminal_task(q):
+    t = q.create("task")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+    q.complete(t.id, "w1")
+    with pytest.raises(TaskError, match="completed"):
+        q.set_hold(t.id, reason="too late", actor="tmichon")
+
+
+def test_set_hold_is_idempotent_and_clear_hold_is_a_noop_when_unheld(q):
+    t = q.create("task")
+    first = q.set_hold(t.id, reason="first reason", actor="alice")
+    assert first.hold_reason == "first reason"
+    second = q.set_hold(t.id, reason="updated reason", actor="bob")
+    assert second.hold_reason == "updated reason"
+    assert second.hold_actor == "bob"
+
+    q.clear_hold(t.id, actor="bob")
+    # Clearing an already-unheld task is a harmless no-op, not an error.
+    again = q.clear_hold(t.id, actor="bob")
+    assert again.hold_reason is None
+
+
+# -- Phase 1 item 4: universal mutating-action fencing -----------------------
+
+
+def test_set_hold_rejects_stale_expected_status(q):
+    t = q.create("task")
+    q.claim_one("w1", task_id=t.id)
+    with pytest.raises(TaskError, match="changed; refresh and retry"):
+        q.set_hold(t.id, reason="pause", actor="op", expected_status=Status.QUEUED)
+    # the mismatch must not have applied the hold
+    assert q.get(t.id).hold_reason is None
+    # the matching status succeeds
+    held = q.set_hold(t.id, reason="pause", actor="op", expected_status=Status.CLAIMED)
+    assert held.hold_reason == "pause"
+
+
+def test_clear_hold_rejects_stale_expected_status_only_when_actually_held(q):
+    t = q.create("task")
+    q.claim_one("w1", task_id=t.id)
+    q.set_hold(t.id, reason="pause", actor="op")
+    with pytest.raises(TaskError, match="changed; refresh and retry"):
+        q.clear_hold(t.id, actor="op", expected_status=Status.QUEUED)
+    assert q.get(t.id).hold_reason == "pause"
+    cleared = q.clear_hold(t.id, actor="op", expected_status=Status.CLAIMED)
+    assert cleared.hold_reason is None
+
+    # already-unheld is a no-op regardless of a stale expected_status -- the
+    # operator's intent ("make sure it's unpaused") is already satisfied.
+    noop = q.clear_hold(t.id, actor="op", expected_status=Status.QUEUED)
+    assert noop.hold_reason is None
+
+
+def test_abandon_rejects_stale_expected_status(q):
+    t = q.create("task")
+    q.claim_one("w1", task_id=t.id)
+    with pytest.raises(TaskError, match="changed; refresh and retry"):
+        q.abandon(t.id, permitted=True, reason="stale", expected_status=Status.QUEUED)
+    assert q.get(t.id).status == Status.CLAIMED
+    done = q.abandon(t.id, permitted=True, reason="ok", expected_status=Status.CLAIMED)
+    assert done.status == Status.ABANDONED
+
+
+def test_abandon_still_honors_expected_generation_fencing(q):
+    """expected_generation/expected_owner_session_id reuse `_transition`'s
+    existing identity fencing verbatim -- distinct from expected_status."""
+    t = q.create("continue after handoff")
+    q.claim_one("m/wt", task_id=t.id, machine="m", worktree="wt")
+    q.start(t.id, "m/wt", owner_session_id="s1")
+    q.suspend(t.id, "m/wt", reason="test")
+    q.resume(t.id, "m/wt", adopt_owner_session_id="s2")
+    gen = q.get(t.id).generation
+    with pytest.raises(TaskError, match="ownership incarnation changed"):
+        q.abandon(
+            t.id, permitted=True, reason="stale identity",
+            expected_generation=gen - 1, expected_owner_session_id="s2",
+        )
+    ok = q.abandon(
+        t.id, permitted=True, reason="fresh identity",
+        expected_generation=gen, expected_owner_session_id="s2",
+    )
+    assert ok.status == Status.ABANDONED
+
+
+def test_submit_steer_rejects_stale_expected_status(q):
+    t = q.create("task")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+    with pytest.raises(TaskError, match="changed; refresh and retry"):
+        q.submit_steer(t.id, fields={"a": 1}, expected_status=Status.SUSPENDED)
+    back = q.submit_steer(t.id, fields={"a": 1}, expected_status=Status.STARTED)
+    assert back.status == Status.STARTED
+
+
+# -- Phase 2: reset (the gentler "not like this") ----------------------------
+
+
+def test_reset_discards_embodiment_state_preserves_goal(q):
+    t = q.create(
+        "task", goal="ship the thing", done_criteria="tests pass"
+    )
+    q.claim_one("m/wt", task_id=t.id, machine="m", worktree="wt")
+    q.start(t.id, "m/wt", owner_session_id="s1")
+    q.record_progress(t.id, "m/wt", phase="impl", summary="did a thing")
+    back = q.reset(t.id, reason="wrong approach")
+    assert back.status == Status.PROPOSED
+    assert back.owner is None
+    assert back.owner_session_id is None
+    assert back.claimed_at is None
+    assert back.started_at is None
+    # durable goal/done-criteria/progress log survive a reset
+    assert back.goal == "ship the thing"
+    assert back.done_criteria == "tests pass"
+    assert len(q.progress_log(t.id)) == 1
+
+
+@pytest.mark.parametrize(
+    "setup",
+    ["queued", "claimed", "started", "suspended"],
+)
+def test_reset_allowed_from_every_non_terminal_working_state(q, setup):
+    t = q.create("task")
+    if setup in ("claimed", "started", "suspended"):
+        q.claim_one("m/wt", task_id=t.id, machine="m", worktree="wt")
+    if setup in ("started", "suspended"):
+        q.start(t.id, "m/wt")
+    if setup == "suspended":
+        q.suspend(t.id, "m/wt", reason="test")
+    assert q.reset(t.id).status == Status.PROPOSED
+
+
+def test_reset_refuses_terminal_task(q):
+    t = q.create("task")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+    q.complete(t.id, "w1")
+    with pytest.raises(TaskError):
+        q.reset(t.id)
+
+
+def test_reset_refuses_held_task(q):
+    t = q.create("task")
+    q.claim_one("m/wt", task_id=t.id, machine="m", worktree="wt")
+    q.start(t.id, "m/wt")
+    q.set_hold(t.id, reason="pause", actor="op")
+    with pytest.raises(TaskError, match="held"):
+        q.reset(t.id)
+    q.clear_hold(t.id, actor="op")
+    assert q.reset(t.id).status == Status.PROPOSED
+
+
+def test_reset_rejects_stale_expected_status(q):
+    t = q.create("task")
+    q.claim_one("w1", task_id=t.id)
+    with pytest.raises(TaskError, match="changed; refresh and retry"):
+        q.reset(t.id, expected_status=Status.QUEUED)
+    assert q.reset(t.id, expected_status=Status.CLAIMED).status == Status.PROPOSED
+
+
+def test_reset_honors_expected_generation_fencing(q):
+    t = q.create("task")
+    q.claim_one("m/wt", task_id=t.id, machine="m", worktree="wt")
+    q.start(t.id, "m/wt", owner_session_id="s1")
+    q.suspend(t.id, "m/wt", reason="test")
+    q.resume(t.id, "m/wt", adopt_owner_session_id="s2")
+    gen = q.get(t.id).generation
+    with pytest.raises(TaskError, match="ownership incarnation changed"):
+        q.reset(t.id, expected_generation=gen - 1, expected_owner_session_id="s2")
+    assert q.reset(
+        t.id, expected_generation=gen, expected_owner_session_id="s2"
+    ).status == Status.PROPOSED
+
+
 def test_suspended_successor_adopts_session_and_advances_generation(q):
     t = q.create("continue after handoff")
     claimed = q.claim_one("host-a/wt-1", task_id=t.id)
