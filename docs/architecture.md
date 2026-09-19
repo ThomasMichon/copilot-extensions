@@ -307,10 +307,23 @@ session-state has nothing for that session (its `session-transcript` verb
 answers an absent session with an empty list, not an error). Both mark the
 cold-store answer `read_only`/`at_rest` in their existing response shape.
 `GET /api/v1/worktrees/{id}/sessions` (the worktree-scoped *listing*) does
-**not** fall through yet — the cold-store contract is session-ID-keyed
-(`session-fetch <id>`), not worktree-keyed, so there is no provider verb to
-enumerate a worktree's sessions; adding one is a follow-up slice, not a
-wiring gap in the existing mechanism.
+**not** fall through to a cold-store provider yet — the cold-store contract
+is session-ID-keyed (`session-fetch <id>`), not worktree-keyed, so there is
+no provider verb to enumerate a worktree's sessions; adding one is a
+follow-up slice, not a wiring gap in the existing mechanism.
+
+A separate `GET /api/v1/worktrees/{id}/lineage` route shells to
+`<project> worktree-lineage --worktree <id> --json` and forwards its graph
+verbatim: the current head, every session with its predecessor/successor,
+the head-transition history, and the handoff ledger (each entry carries its
+own `state`, so a caller can tell a genuine **fork** — more than one
+simultaneously `pending` handoff — from ordinary resolved/cancelled
+history). This reuses agent-worktrees' own already-bounded, already-tested
+`lineage_surfaces.worktree_lineage` surface rather than re-deriving
+fork/lineage semantics in the bridge from the plain session list (an
+earlier draft of this route tried exactly that, using the unfiltered
+`handoffs` history instead of the `pending`-filtered/`state`-aware view —
+caught by review before merge).
 agent-logger is the reference cold-store provider (see its own plugin docs);
 `agent-bridge doctor` reports findings for both `providers.d` and
 `cold-store-providers.d`.
