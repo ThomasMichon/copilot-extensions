@@ -855,3 +855,21 @@ checked off.
   successfully with no marker). Full plugin suite: 640 passed (same 10
   pre-existing `test_doctor.py` failures, unrelated).
 
+### 2026-09-19 — Phase 3 PR review round 3 (PR #2922)
+
+- **Explicit `project` argument also unvalidated (medium severity):**
+  round 1's command-injection fix validated `codename` before the SSH
+  fan-out, but an explicitly-supplied `project` argument to
+  `resolve_codename_cross_machine` is interpolated into the same remote
+  shell command and was left unvalidated -- a footgun for any future
+  caller that threads untrusted project input into this API (the
+  DEFAULT path, `project=None` resolved via the already-trusted
+  `cfg.project_name()`, was never at risk). Fixed: validate an explicit
+  `project` against `cfg._PROJECT_NAME_RE` (the same shape
+  `cfg.project_name()`'s own resolution already enforces), degrading to
+  `[]` on a malformed value -- consistent with the existing fail-soft
+  contract. 2 new tests (malformed explicit `project` never reaches
+  `_probe_machine`; a valid explicit `project` is still accepted). Full
+  plugin suite: 642 passed (same 10 pre-existing `test_doctor.py`
+  failures, unrelated).
+

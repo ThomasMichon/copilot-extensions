@@ -201,7 +201,12 @@ def resolve_codename_cross_machine(
     metacharacters would otherwise let a caller-supplied value inject
     commands on every scanned machine. An invalid codename can never
     legitimately match anything, so failing this check returns ``[]``
-    exactly like "not found."
+    exactly like "not found." An explicitly supplied ``project`` is
+    interpolated into the same remote command and is validated the same
+    way, against ``cfg._PROJECT_NAME_RE`` (the same shape
+    ``cfg.project_name()``'s own resolution enforces) -- the default
+    (``project=None``, resolved via ``cfg.project_name()``) is already
+    trusted and is not re-validated.
     """
     if not codename or os.environ.get(NO_REMOTE_ENV):
         return []
@@ -213,6 +218,8 @@ def resolve_codename_cross_machine(
             project = cfg.project_name()
         except Exception:
             return []
+    elif not cfg._PROJECT_NAME_RE.fullmatch(project):
+        return []
     try:
         self_machine = cfg.load_config().machine
     except Exception:
