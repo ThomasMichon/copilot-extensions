@@ -1411,6 +1411,88 @@ class TestWorktreeRoutes:
         assert by_id["s2"]["is_head"] is True
         assert by_id["s1"]["state"] == "handed-off"
 
+    def test_get_worktree_lineage_proxies(self, client, app) -> None:
+        """The bridge shells to ``worktree-lineage`` (the already-bounded,
+        fork-aware ground-layer surface) and forwards its graph verbatim,
+        not the plain session list -- fork detection stays owned by
+        agent-worktrees, not re-derived here."""
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "anomalous-potato-wsl-20250101-191500-fork"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        payload = json.dumps({
+            "surface": "worktree-lineage",
+            "surface_version": 1,
+            "worktree_id": wt_id,
+            "head_session": "s3",
+            "revisions": {"lifecycle": 5, "head": 4, "controller": 1},
+            "sessions": [
+                {"session_id": "s3", "is_head": True, "predecessor": "s2"},
+                {"session_id": "s2", "is_head": False, "predecessor": "s1"},
+            ],
+            "handoffs": [
+                {
+                    "ordinal": 1,
+                    "predecessor": "s1",
+                    "state": "linked",
+                    "candidate": "s2",
+                },
+                {
+                    "ordinal": 2,
+                    "predecessor": "s2",
+                    "state": "pending",
+                    "candidate": "s3",
+                },
+                {
+                    "ordinal": 3,
+                    "predecessor": "s2",
+                    "state": "pending",
+                    "candidate": "s4",
+                },
+            ],
+            "controllers": [{"controller_session_id": "s0"}],
+        })
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ) as mock_run:
+            resp = client.get(f"/api/v1/worktrees/{wt_id}/lineage")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["agent_name"] == "test-agent"
+        assert data["surface"] == "worktree-lineage"
+        assert data["head_session"] == "s3"
+        # The fork signal lives in `state`, not raw handoff count -- two
+        # simultaneously-`pending` handoffs off the same predecessor.
+        pending = [h for h in data["handoffs"] if h["state"] == "pending"]
+        assert len(pending) == 2
+        assert {h["candidate"] for h in pending} == {"s3", "s4"}
+        args = mock_run.call_args.args[-1]
+        assert args == ["worktree-lineage", "--worktree", wt_id, "--json"]
+
+    def test_get_worktree_lineage_unknown_worktree_404s(self, client) -> None:
+        resp = client.get("/api/v1/worktrees/does-not-exist/lineage")
+        assert resp.status_code == 404
+
+    def test_get_worktree_lineage_502_on_command_failure(
+        self, client, app,
+    ) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "anomalous-potato-wsl-20250101-191700-fail"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=None),
+        ):
+            resp = client.get(f"/api/v1/worktrees/{wt_id}/lineage")
+        assert resp.status_code == 502
+
     def test_list_worktree_sessions_head_absent_is_none(self, client, app) -> None:
         # A legacy ground-layer envelope without head_session -> null, not a KeyError.
         from unittest.mock import AsyncMock, patch
