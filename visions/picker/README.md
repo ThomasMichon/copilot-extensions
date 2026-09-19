@@ -5,7 +5,7 @@
   worktree-backed agents of a project.
 - **Scope:** leaf (concrete component; child of the agent-fabric vision)
 - **Status:** Active
-- **Last revised:** 2026-09-04
+- **Last revised:** 2026-09-18
 - **Home:** delivered by the **Installer & Configurator** (the optional worktree-
   and agent-control-plane) — see [installer](../installer/README.md). It is an
   **optional** surface: the plugins provide the in-session tools agents use and
@@ -128,6 +128,30 @@ Whenever the Picker is about to kick an agent off into a worktree, it makes the
 session-host provider owns the interaction, and whether a session will be
 created or resumed. The operator never launches unsure of where or how the
 agent will run.
+
+### fleet-recovery-relaunch
+When the underlying session-host process itself dies or is replaced — a
+terminal multiplexer server, say — every execution leg it hosted is lost
+together, not one worktree's session quietly ending on its own. The **provider
+that owns that host** is the only party that can honestly know this happened:
+it publishes a bounded, attributable observation naming its own host instance as
+ended and listing the execution legs it was hosting
+(`§Concepts/provider-observation-ingestion` /
+`§Behaviors/observation-loss-degrades-honestly` on the agent-worktrees vision).
+The Picker never infers correlated loss itself from worktree-side staleness
+alone — that would cross the render-derive-not-own boundary and requires
+guessing at causation the durable worktree record was never meant to carry. It
+only **renders** that provider-supplied signal and offers a single, explicit
+**bulk-resume** action gated on it: reopen every named worktree's current head,
+in one confirmed gesture, instead of making the operator resume each one by
+hand. This extends the ordinary single-worktree resume the Picker already
+performs — a batched invocation of it, never a new resume mechanism. Worktrees
+resuming near-simultaneously **without** such a provider-published host-loss
+observation (the operator closing several terminals deliberately, say) is not
+this pattern. The Picker offers the bulk action only on the explicit
+provider-published signal, never on its own inference, so genuine correlated
+host loss is never confused with ordinary independent resumes, and the bulk
+action is never presented as a routine choice.
 
 ### consequential-vs-browsing-clarity
 The Picker visibly distinguishes **browsing** (free, reversible, no side effects)
@@ -407,3 +431,14 @@ regression is something a test can catch before an operator does.
   multiplexer-backed terminal to a selected session-host provider. The Picker
   remains the provider-neutral decision and presentation surface; CLI/mux, ACP,
   SDK, App, and third-party hosts own their own execution mechanics.
+- **2026-09-18** — Added §Features/*fleet-recovery-relaunch*: a bulk-resume
+  action for when a session-host provider loses many worktrees' execution legs
+  at once (the host process itself died or was replaced), rather than one
+  worktree's session ending on its own. Prompted by a real facility incident —
+  an operator's terminal multiplexer was lost machine-wide, taking down eight
+  concurrently active worktree sessions at once, and every one of them had to
+  be resumed by hand because no bulk recovery affordance existed. Deliberately
+  scoped as a batched invocation of the existing single-worktree resume, driven
+  by agent-worktrees' own durable head-lineage record — no new resume mechanism,
+  and explicitly gated on recognizing *correlated* loss (many legs going stale
+  together) rather than firing on ordinary, unrelated single-session endings.
