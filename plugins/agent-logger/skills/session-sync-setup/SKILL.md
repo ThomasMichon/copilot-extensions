@@ -74,9 +74,61 @@ Optional sync controls:
   cannot be classified instead of keeping metadata-less sessions.
 - `sync.harness_repos` — repo names used to stamp each session's `origin.json`
   sidecar for downstream chronicle routing.
+- `sync.require_repo_opt_in` — an additional, opt-in activation gate (default
+  `false`, fully backward compatible). When `true`, a session only syncs if
+  the repo it was matched against (or that repo's bound knowledge repo, see
+  below) *also* durably declares itself in — mirroring the `agent-index`
+  repo-owned activation convention, so being `enabledPlugins`-enabled on a
+  machine never by itself causes sessions to sync.
 - `sync.notify` — target-independent best-effort HTTP `POST` after any
   successful push (`url`, optional `bearer_token_file`, `timeout`). Notify
   failures are logged only in verbose runs and do not fail the sync.
+
+### Repo-owned sync opt-in (`sync.require_repo_opt_in`)
+
+With `sync.require_repo_opt_in: true` set in `~/.agent-logger/config.yaml`, a
+repo commits its own activation declaration at
+`.copilot-extensions/agent-logger/config.yaml` (legacy:
+`.agent-logger/config.yaml`):
+
+```yaml
+sync:
+  opt_in: true    # or false, to explicitly stay out
+```
+
+Resolution per matched session, filesystem-backed against the session's own
+recorded `git_root`/`cwd` (never guessed):
+
+1. The matched repo's own config wins when present and it states an opinion
+   (`opt_in: true` or `false`).
+2. A repo with **no** opinion (no config, or a config silent on `opt_in`)
+   that requires external state (bound to a knowledge repo, per
+   `agent-worktrees`) forwards the check to that knowledge repo's own config.
+3. Anything still unresolved — no config anywhere in the chain, no bound
+   knowledge repo, or the recorded path no longer exists on this machine —
+   **fails closed** (excluded). Being enabled everywhere never implies
+   syncing; only an explicit, checked-in `opt_in: true` does.
+
+This is an *additional* requirement layered on top of
+`repo_allowlist`/`repo_denylist`, not a replacement — both still apply.
+
+> **Enabling the gate does not retroactively purge prior compaction
+> archives.** `sync.compact` (below) already applies this same gate to which
+> *new* cold sessions it selects, but sessions compacted into
+> `sync.compact.archive_root` **before** the gate was turned on (or while an
+> opted-out repo's cutover was still pending) remain on disk and are still
+> shipped wholesale by `compact-hub`. If you enable `require_repo_opt_in`
+> after compaction has already run, manually prune
+> `sync.compact.archive_root` for any repo that stays opted out, or clear it
+> and let compaction rebuild it under the new policy.
+
+> **`rescue-push` fails closed entirely when this gate is on.** A rescued
+> session (see [Provider rescue ingestion](#provider-rescue-ingestion) below)
+> carries only a provider-reported repo *name*, never a resolvable local
+> path -- there is nothing on disk for the opt-in check to read. Rather than
+> silently ignore `require_repo_opt_in` for rescue publication, it is
+> intentionally treated as unresolvable and every rescued session is
+> rejected while the gate is enabled, regardless of `repo_allowlist`.
 
 ## Repo-local log organization
 

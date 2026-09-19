@@ -582,3 +582,52 @@ def test_repo_config_tenant_only_no_log(tmp_path):
     )
     cfg = load_config(home=tmp_path / "home", repo_start=repo)
     assert cfg.repo_config_path == repo / ".agent-logger.yaml"
+
+
+# --------------------------------------------------------------------------- #
+# repo-owned sync opt-in gate propagated to the tenancy preflight               #
+# --------------------------------------------------------------------------- #
+
+
+def test_source_include_honors_require_repo_opt_in(tmp_path):
+    """`_source_include` (the tenancy conflict preflight) must apply the same
+    require_repo_opt_in gate as run_sync -- otherwise it can report a false
+    source overlap/clearance for a repo that opted itself out."""
+    from agent_logger.config import Config
+
+    opted_in_repo = tmp_path / "srcroot" / "test-chamber"
+    opted_out_repo = tmp_path / "srcroot" / "dotfiles"
+    opted_in_repo.mkdir(parents=True)
+    opted_out_repo.mkdir(parents=True)
+    (opted_in_repo / ".copilot-extensions" / "agent-logger").mkdir(parents=True)
+    (opted_in_repo / ".copilot-extensions" / "agent-logger" / "config.yaml").write_text(
+        "sync:\n  opt_in: true\n", encoding="utf-8"
+    )
+
+    copilot = tmp_path / "copilot"
+    _make_session(copilot, "sess-in", str(opted_in_repo))
+    _make_session(copilot, "sess-out", str(opted_out_repo))
+
+    cfg = Config(
+        {
+            "sync": {
+                "source": str(copilot),
+                "harness_repos": ["test-chamber", "dotfiles"],
+                "require_repo_opt_in": True,
+            }
+        },
+        tmp_path / "home",
+    )
+    tenant = tenancy.ResolvedTenant(
+        tenant_id="t",
+        repo_name="t",
+        repo_path=tmp_path,
+        roles=("source",),
+        enabled=True,
+        config=cfg,
+        config_path=tmp_path / "tenant.yaml",
+    )
+
+    _source_path, include = tenancy._source_include(tenant)
+    assert include == {"sess-in"}
+

@@ -59,6 +59,15 @@ DEFAULTS: dict[str, Any] = {
         # matches none is marked machine-only. Superset of repo_allowlist
         # (which governs what syncs); this governs what the origin mark records.
         "harness_repos": [],
+        # When true, a session's matched repo (or its bound knowledge repo)
+        # must ALSO durably declare itself in via a checked-in
+        # `.copilot-extensions/agent-logger/config.yaml` (`sync: {opt_in:
+        # true}`) -- mirroring agent-index's repo-owned activation-gate
+        # convention -- as an additional requirement on top of
+        # repo_allowlist/repo_denylist. Off by default (this machine-scoped
+        # config remains sufficient on its own, as today) so enabling it is
+        # an explicit, opt-in behavior change, not a silent one.
+        "require_repo_opt_in": False,
         # Retention for destination pruning. None/<=0 -> retain everything.
         "retention_days": None,
         "lock_timeout_sec": 10,
@@ -612,6 +621,15 @@ class Config:
         if isinstance(raw, str):
             return [s.strip() for s in raw.split(",") if s.strip()]
         return [str(s).strip() for s in raw if str(s).strip()]
+
+    @property
+    def sync_require_repo_opt_in(self) -> bool:
+        """When true, a session only syncs if its matched repo (or that
+        repo's bound knowledge repo) durably declares
+        ``sync: {opt_in: true}`` in a checked-in
+        ``.copilot-extensions/agent-logger/config.yaml``, on top of whatever
+        repo_allowlist/repo_denylist otherwise decide. Off by default."""
+        return bool(self._data.get("sync", {}).get("require_repo_opt_in", False))
 
     @property
     def sync_notify(self) -> dict[str, Any]:

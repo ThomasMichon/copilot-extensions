@@ -49,17 +49,20 @@ def _included_sessions(source, allowlist: list[str],
                        fail_closed: bool = False,
                        effective: list[str] | None = None,
                        machine: str = "",
-                       denylist: list[str] | None = None) -> set[str] | None:
+                       denylist: list[str] | None = None,
+                       require_repo_opt_in: bool = False) -> set[str] | None:
     """Resolve the per-repo sync policy to a set of included session ids.
 
     Returns ``None`` when there is **no** filter at all (empty allowlist *and*
-    empty denylist -- sync everything). Otherwise a session is included per
-    :func:`~agent_logger.sync.origin.classify_for_sync`: denylist excludes,
-    allowlist gates (when present), and an empty allowlist with a denylist is a
-    catch-all for everything not denied. ``effective`` is the origin-derivation
-    set (allowlist + denylist + harness repos).
+    empty denylist *and* no repo opt-in gate -- sync everything). Otherwise a
+    session is included per :func:`~agent_logger.sync.origin.classify_for_sync`:
+    denylist excludes, allowlist gates (when present), an empty allowlist with
+    a denylist is a catch-all for everything not denied, and (when
+    ``require_repo_opt_in``) the matched repo must additionally carry a
+    checked-in sync opt-in. ``effective`` is the origin-derivation set
+    (allowlist + denylist + harness repos).
     """
-    if not allowlist and not denylist:
+    if not allowlist and not denylist and not require_repo_opt_in:
         return None
     ss = source / "session-state"
     if not ss.is_dir():
@@ -71,7 +74,8 @@ def _included_sessions(source, allowlist: list[str],
             continue
         include, _ = classify_for_sync(d, machine, allowlist, eff,
                                        fail_closed=fail_closed,
-                                       denylist=denylist)
+                                       denylist=denylist,
+                                       require_repo_opt_in=require_repo_opt_in)
         if include:
             included.add(d.name)
     return included
@@ -94,10 +98,12 @@ def run_sync(
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
     allowlist = cfg.sync_repo_allowlist
     denylist = cfg.sync_repo_denylist
+    require_repo_opt_in = cfg.sync_require_repo_opt_in
     effective = effective_harness(allowlist, cfg.sync_harness_repos, denylist)
     include = _included_sessions(source, allowlist,
                                  cfg.sync_repo_allowlist_fail_closed,
-                                 effective, machine, denylist)
+                                 effective, machine, denylist,
+                                 require_repo_opt_in)
 
     if verbose:
         print(f"machine:   {machine}")
@@ -105,6 +111,8 @@ def run_sync(
         print(f"target:    {target.describe()}")
         if include is not None:
             scope = f"allowlist={allowlist} denylist={denylist}"
+            if require_repo_opt_in:
+                scope += " require_repo_opt_in=True"
             print(f"filter:    {scope} -> {len(include)} session(s) included")
 
     if not source.is_dir():
@@ -281,6 +289,8 @@ def do_status(cfg: Config) -> int:
     print(f"retention_days: {cfg.sync_retention_days}")
     allowlist = cfg.sync_repo_allowlist
     print(f"repo_allowlist: {allowlist or '(all)'}")
+    print(f"repo_denylist:  {cfg.sync_repo_denylist or '(none)'}")
+    print(f"require_repo_opt_in: {cfg.sync_require_repo_opt_in}")
     notify = cfg.sync_notify
     print(f"notify:         {notify['url'] or '(none)'}")
     latest = target.sync_status(machine)

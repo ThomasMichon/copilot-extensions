@@ -319,11 +319,12 @@ def select_compactable(
     so an archived session is never one the picker needs.
 
     The selection also honors the **sync repo scope** (``repo_allowlist`` /
-    ``repo_denylist``): only sessions that sync itself would publish are
-    compacted. This is a hard requirement, not a nicety -- the archive store is
-    pushed to the hub wholesale by ``push_archives`` (Pair B), so compacting an
-    out-of-scope session would leak it to the hub past the allowlist that
-    excludes it from the uncompressed push.
+    ``repo_denylist`` / ``require_repo_opt_in``): only sessions that sync
+    itself would publish are compacted. This is a hard requirement, not a
+    nicety -- the archive store is pushed to the hub wholesale by
+    ``push_archives`` (Pair B), so compacting an out-of-scope session would
+    leak it to the hub past the policy that excludes it from the
+    uncompressed push.
 
     Sessions that cannot be classified (no timestamp, or an undecidable worktree
     state under fail-closed) are skipped, never compacted.
@@ -339,7 +340,9 @@ def select_compactable(
     # Same repo-scope gate as run_sync: None => no filter (sync everything).
     allowlist = cfg.sync_repo_allowlist
     denylist = cfg.sync_repo_denylist
-    in_scope = _in_scope_ids(cfg, state_root, allowlist, denylist)
+    require_repo_opt_in = cfg.sync_require_repo_opt_in
+    in_scope = _in_scope_ids(cfg, state_root, allowlist, denylist,
+                             require_repo_opt_in)
 
     result = CompactResult()
     selected: list[SessionRef] = []
@@ -377,14 +380,15 @@ def select_compactable(
 
 
 def _in_scope_ids(
-    cfg: Config, state_root: Path, allowlist: list[str], denylist: list[str]
+    cfg: Config, state_root: Path, allowlist: list[str], denylist: list[str],
+    require_repo_opt_in: bool = False,
 ) -> set[str] | None:
     """Session ids the sync repo policy would publish, or ``None`` for "all".
 
     Mirrors ``engine._included_sessions`` so compaction never archives a session
     that sync would not publish (which Pair B would then leak to the hub).
     """
-    if not allowlist and not denylist:
+    if not allowlist and not denylist and not require_repo_opt_in:
         return None
     if not state_root.is_dir():
         return set()
@@ -397,7 +401,7 @@ def _in_scope_ids(
             continue
         include, _ = classify_for_sync(
             d, machine, allowlist, effective, fail_closed=fail_closed,
-            denylist=denylist,
+            denylist=denylist, require_repo_opt_in=require_repo_opt_in,
         )
         if include:
             included.add(d.name)
