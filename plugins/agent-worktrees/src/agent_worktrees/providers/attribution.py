@@ -200,15 +200,35 @@ def audit_source_attribution_risk(
     risky_tokens = head_pattern_leak_risk(head_pattern)
     if not risky_tokens:
         return []
-    attribution_desc = (
-        "absent (defaults to false)" if source_attribution is None
-        else f"{source_attribution!r}"
-    )
+    if source_attribution is None:
+        attribution_desc = "absent (defaults to false)"
+        remedy = (
+            "migrate to source_attribution: true (if this repo accepts "
+            "full exposure) or codename (public-safe body marker), and "
+            "either way drop {tok} from head_pattern"
+        )
+    elif source_attribution == "codename":
+        # Already in codename mode -- telling this repo to "migrate to
+        # codename" is a no-op that leaves the risky token in place.
+        # codename mode is a body-marker concern only; it does nothing to
+        # protect a branch NAME, so the only real remedies are accepting
+        # full exposure (true) or removing the token from head_pattern.
+        attribution_desc = "'codename'"
+        remedy = (
+            "codename mode only protects the PR-body marker, not the "
+            "branch name itself -- set source_attribution: true if this "
+            "repo accepts full exposure, or drop {tok} from head_pattern"
+        )
+    else:
+        attribution_desc = f"{source_attribution!r}"
+        remedy = (
+            "migrate to source_attribution: true or codename, or drop "
+            "{tok} from head_pattern"
+        )
     return [
         f"pr.head_pattern {head_pattern!r} embeds {{{tok}}} while "
-        f"pr.source_attribution is {attribution_desc} -- migrate to "
-        f"source_attribution: true or codename, or drop {{{tok}}} from "
-        f"head_pattern."
+        f"pr.source_attribution is {attribution_desc} -- "
+        + remedy.format(tok=f"{{{tok}}}") + "."
         for tok in risky_tokens
     ]
 

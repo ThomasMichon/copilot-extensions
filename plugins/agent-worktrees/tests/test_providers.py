@@ -407,6 +407,12 @@ class TestAuditSourceAttributionRisk:
             source_attribution="codename", head_pattern="{machine}/{slug}",
         )
         assert len(findings) == 1
+        # codename mode only protects the PR-body marker, never the branch
+        # NAME -- the remedy must not tell an already-codename repo to
+        # "migrate to codename" (a no-op that leaves the risky token in
+        # place); it must point at `true` or removing the token instead.
+        assert "migrate to source_attribution: true or codename" not in findings[0]
+        assert "true" in findings[0]
 
     def test_both_risky_tokens_each_flagged(self):
         findings = attribution.audit_source_attribution_risk(

@@ -589,6 +589,24 @@ reverse lookup, no new registry).
   guard, 2 integration in `test_pr_ops.py` covering create_pr and
   push_changes after a simulated rename); full `test_pr_ops.py`/
   `test_providers.py`/`test_config.py` suite: 458 passed.
+- **Review round 4** caught two more real gaps: (1)
+  `PRConfig.source_attribution_configured`'s dataclass default of `True` was
+  wrong for `_parse_pr`'s missing-`pr`-block early return (`PRConfig()`),
+  which meant a repo with NO `pr:` block at all was reported as
+  "explicitly false" instead of "absent" by the audit -- flipped the
+  default to `False` (the safe/conservative reading for any manually
+  constructed `PRConfig`, matching `_parse_pr`'s actual per-key behavior).
+  (2) The audit's remedy text for `codename` mode told a repo already in
+  codename mode to "migrate to codename" -- a no-op that leaves the risky
+  `head_pattern` token in place, since codename mode only ever protects the
+  PR-body marker, never the branch name. Reworded the remedy to distinguish
+  absent / codename / other-false cases. 3 new/adjusted tests (1 config
+  test for the missing-block path, a codename-remedy-wording assertion,
+  and 3 existing audit tests updated to explicitly set
+  `source_attribution_configured=True` where they exercise a genuinely
+  "configured" scenario via direct dataclass construction rather than
+  `_parse_pr`); full `test_pr_ops.py`/`test_providers.py`/`test_config.py`
+  suite: 459 passed.
 
 Remaining: Phase 3 (descoped SSH-based reverse lookup, not yet
 rewritten/implemented). This effort is not `Done` until Phase 3 lands too.

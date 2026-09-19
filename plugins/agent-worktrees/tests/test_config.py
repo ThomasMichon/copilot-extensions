@@ -297,6 +297,19 @@ class TestPRConfigParsing:
         assert pr.source_attribution is False
         assert pr.source_attribution_configured is False
 
+    def test_pr_source_attribution_configured_false_when_pr_block_absent(
+        self, tmp_path: Path,
+    ):
+        # Review round 4: `_parse_pr` early-returns `PRConfig()` when the
+        # whole `pr:` block is missing entirely -- must not fall back to a
+        # `True` default for `source_attribution_configured` there either.
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile)
+        conf = cfg.load_config(cfgfile)
+        pr = conf.repos["ext"].pr
+        assert pr.source_attribution is False
+        assert pr.source_attribution_configured is False
+
     def test_pr_source_attribution_codename_mode_parsed(self, tmp_path: Path):
         cfgfile = tmp_path / "config.yaml"
         self._write(

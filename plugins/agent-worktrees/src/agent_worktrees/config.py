@@ -239,7 +239,7 @@ class PRConfig:
     # `providers.attribution.audit_source_attribution_risk`) needs this
     # distinction to report "absent (defaults to false)" accurately rather
     # than always describing an omitted key as an explicit `false`.
-    source_attribution_configured: bool = True
+    source_attribution_configured: bool = False
     # Markdown headings whose sections must contain visible text before
     # create-pr may auto-open a PR. Empty keeps the generic default permissive.
     required_body_sections: tuple[str, ...] = ()

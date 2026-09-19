@@ -781,12 +781,16 @@ class TestAuditAttributionRisk:
         config, _wid, _wt, _ = pr_repo
         config = self._config(
             config, source_attribution=True, head_pattern="user/{machine}/{slug}",
+            source_attribution_configured=True,
         )
         assert pr_ops.audit_attribution_risk(config) == []
 
     def test_finding_for_risky_head_pattern_with_explicit_false(self, pr_repo):
         config, _wid, _wt, _ = pr_repo
-        config = self._config(config, head_pattern="{worktree_id}/{slug}")
+        config = self._config(
+            config, head_pattern="{worktree_id}/{slug}",
+            source_attribution_configured=True,
+        )
         findings = pr_ops.audit_attribution_risk(config)
         assert len(findings) == 1
         assert "{worktree_id}" in findings[0]
@@ -810,9 +814,11 @@ class TestAuditAttributionRisk:
         config, _wid, _wt, _ = pr_repo
         config = self._config(
             config, source_attribution="codename", head_pattern="{machine}/{slug}",
+            source_attribution_configured=True,
         )
         findings = pr_ops.audit_attribution_risk(config)
         assert len(findings) == 1
+        assert "true" in findings[0]
 
 
 class TestAttributionAuditCLI:
