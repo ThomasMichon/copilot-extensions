@@ -132,6 +132,24 @@ def test_unknown_task_is_404(app, client, monkeypatch):
     assert resp.status_code == 404
 
 
+def test_malformed_task_fetch_is_502_not_leaking_exception_text(
+    app, client, monkeypatch,
+):
+    """A malformed (non-object) task payload is an upstream error, not a
+    404 -- and the response body must not leak the raw exception string."""
+    monkeypatch.setattr(
+        routes.dispatch_tasks, "fetch_task",
+        AsyncMock(side_effect=ValueError("secret-connection-detail://x")),
+    )
+    monkeypatch.setattr(
+        routes.dispatch_tasks, "fetch_attachments", AsyncMock(return_value=[]),
+    )
+
+    resp = client.get("/api/v1/dispatch-tasks/task-6/session")
+    assert resp.status_code == 502
+    assert "secret-connection-detail" not in resp.text
+
+
 def test_missing_agent_dispatch_url_is_503(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "AGENT_WORKTREES_PROJECTS_YAML",

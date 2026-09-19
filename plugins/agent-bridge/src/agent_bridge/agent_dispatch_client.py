@@ -10,9 +10,10 @@ identical optional dependency, so the two consumers agree on the same shape).
 
 Deliberately small: fetch one task, fetch its durable attachment history
 (``agent-dispatch-session-worktree-history`` Phase 1). Both raise on a
-genuine transport/HTTP error (the caller decides how to degrade -- this
-route treats an unreachable coordinator as "cannot resolve", never as
-"resolved to nothing"), except a 404 task fetch, which is a legitimate
+genuine transport/HTTP error or a malformed (non-object/non-list) coordinator
+payload -- the caller decides how to degrade (this route treats an
+unreachable or misbehaving coordinator as "cannot resolve", never as
+"resolved to nothing") -- except a 404 task fetch, which is a legitimate
 "task does not exist" answer, not an error.
 """
 
@@ -38,7 +39,13 @@ def _base(url: str) -> str:
 async def fetch_task(
     url: str, token: str, task_id: str, *, timeout: float = DEFAULT_TIMEOUT
 ) -> dict[str, Any] | None:
-    """Fetch one dispatch task, preserving 404 as an absent task (``None``)."""
+    """Fetch one dispatch task, preserving 404 as an absent task (``None``).
+
+    Raises :class:`ValueError` on a malformed (non-object) 200 payload --
+    that is a bad-upstream condition the caller must surface as a 502, never
+    silently reinterpreted as "task not found" (a 404 must mean the
+    coordinator genuinely has no such task).
+    """
     task_url = f"{_base(url)}/tasks/{task_id}"
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.get(task_url, headers=_headers(token))
@@ -46,7 +53,11 @@ async def fetch_task(
         return None
     resp.raise_for_status()
     data = resp.json()
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"agent-dispatch task response is not an object: {task_url}"
+        )
+    return data
 
 
 async def fetch_attachments(

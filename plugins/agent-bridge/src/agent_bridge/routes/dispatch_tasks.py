@@ -64,10 +64,15 @@ async def get_dispatch_task_session(task_id: str, request: Request) -> SessionIn
 
     try:
         task = await fetch_task(base_url, token, task_id)
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning(
+            "dispatch task %s: coordinator fetch failed: %s", task_id, exc,
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=502,
-            detail=f"agent-dispatch coordinator unreachable: {exc}",
+            detail="agent-dispatch coordinator is unreachable or returned "
+            "an unexpected response",
         ) from exc
     if task is None:
         raise HTTPException(
@@ -76,7 +81,7 @@ async def get_dispatch_task_session(task_id: str, request: Request) -> SessionIn
 
     try:
         attachments = await fetch_attachments(base_url, token, task_id)
-    except httpx.HTTPError:
+    except (httpx.HTTPError, ValueError):
         # Attachment history is an enrichment, not a hard requirement -- the
         # current owner session (from the task record itself) is still a
         # valid candidate without it.
