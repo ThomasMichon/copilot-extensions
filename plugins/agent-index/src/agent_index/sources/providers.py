@@ -18,17 +18,30 @@ Manifest schema (``<providers-dir>/<name>.json``)::
       "description": "Facility Gitea connector"    # optional: human label
     }
 
-The engine drives ``<command...> content-<verb>`` as a subprocess for each
-connector operation -- it never imports or vendors the provider's code. Each
-verb's response is a small JSON object on stdout; a non-zero exit or malformed
-JSON **fails closed** (raises :class:`ProviderError`) rather than being
-silently treated as empty or trusted as-is:
+The engine drives ``<command...> content-<verb> --source <source>`` as a
+subprocess for each connector operation -- it never imports or vendors the
+provider's code. ``--source`` carries the **exact** source string the engine
+resolved the connector for (the manifest's ``source_name``, or a hierarchical
+sub-source such as ``"gitea:owner/repo"`` when the engine looked it up via
+prefix match) -- a single provider manifest can serve a whole connector
+*family*, distinguishing which member is being requested the same way a
+built-in connector's own ``source`` constructor argument does. Each verb's
+response is a small JSON object on stdout; a non-zero exit or malformed JSON
+**fails closed** (raises :class:`ProviderError`) rather than being silently
+treated as empty or trusted as-is:
 
-- ``content-discover`` -> ``{"entries": [{"path", "content", "language",
-  "source", "metadata"}, ...]}``
-- ``content-discover-changed [--last-commit <sha>]`` -> same ``entries`` shape
-- ``content-list-paths`` -> ``{"paths": {"<source>": ["<path>", ...], ...}}``
-- ``content-current-commit`` -> ``{"commit": "<sha>" | null}``
+- ``content-discover --source <source>`` -> ``{"entries": [{"path", "content",
+  "language", "source", "metadata"}, ...]}``
+- ``content-discover-changed --source <source> [--last-commit <sha>]`` -> same
+  ``entries`` shape
+- ``content-list-paths --source <source>`` -> ``{"paths": {"<source>":
+  ["<path>", ...], ...}}``
+- ``content-current-commit --source <source>`` -> ``{"commit": "<sha>" |
+  null}``
+
+A manifest whose ``source_name`` collides with an already-registered prefix
+(a built-in connector, or another provider) is skipped with a warning finding
+-- it never silently overwrites the existing registration.
 
 Not yet implemented in this first slice (tracked as follow-up, not a silent
 gap): mid-call cancellation of a running provider subprocess (``cancel_check``
@@ -42,7 +55,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 import stat
 import subprocess
 from collections.abc import Callable
@@ -143,19 +155,27 @@ def parse_manifest(data: object, *, source_path: str = "") -> ProviderManifest:
 
 
 def _resolve_command(command: tuple[str, ...]) -> tuple[str, ...]:
+    """Validate the provider's argv prefix.
+
+    Deliberately requires an **absolute** ``command[0]`` -- no ``PATH``
+    resolution (``shutil.which``) is attempted. The manifest contract is an
+    absolute path by design (mirroring agent-bridge's resolved-argv
+    manifests): a bare command name resolved via the *engine's* ``PATH`` could
+    silently execute a different binary than the manifest author intended if
+    ``PATH`` ever changes underneath it.
+    """
     first = command[0]
     candidate = Path(first).expanduser()
-    has_path = candidate.is_absolute() or candidate.parent != Path(".")
-    resolved = str(candidate) if has_path else shutil.which(first)
-    if not resolved:
-        raise FileNotFoundError(first)
-    target = Path(resolved)
-    info = target.stat()
+    if not candidate.is_absolute():
+        raise TargetUnusableError(
+            f"provider command must be an absolute path, got {first!r}"
+        )
+    info = candidate.stat()
     if not stat.S_ISREG(info.st_mode):
         raise TargetUnusableError("provider command is not a regular file")
-    if os.name != "nt" and not os.access(target, os.X_OK):
+    if os.name != "nt" and not os.access(candidate, os.X_OK):
         raise TargetUnusableError("provider command is not executable")
-    return (str(target), *command[1:])
+    return (str(candidate), *command[1:])
 
 
 def _classify_manifest(path: Path) -> EntryDecision[ProviderManifest]:
@@ -344,7 +364,7 @@ class CliSourceConnector:
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         if cancel_check is not None:
             cancel_check()
-        data = self._run("content-discover")
+        data = self._run("content-discover", "--source", self._source)
         return self._entries(data, "content-discover")
 
     def discover_changed(
@@ -355,7 +375,7 @@ class CliSourceConnector:
         if cancel_check is not None:
             cancel_check()
         args = ("--last-commit", last_commit) if last_commit else ()
-        data = self._run("content-discover-changed", *args)
+        data = self._run("content-discover-changed", "--source", self._source, *args)
         return self._entries(data, "content-discover-changed")
 
     def list_paths(
@@ -363,7 +383,7 @@ class CliSourceConnector:
     ) -> dict[str, set[str]]:
         if cancel_check is not None:
             cancel_check()
-        data = self._run("content-list-paths")
+        data = self._run("content-list-paths", "--source", self._source)
         if not isinstance(data, dict) or not isinstance(data.get("paths"), dict):
             raise ProviderError(
                 f"content-domain provider {self._manifest.source_name!r} "
@@ -382,7 +402,7 @@ class CliSourceConnector:
         return result
 
     def current_commit(self) -> str | None:
-        data = self._run("content-current-commit")
+        data = self._run("content-current-commit", "--source", self._source)
         if not isinstance(data, dict) or "commit" not in data:
             raise ProviderError(
                 f"content-domain provider {self._manifest.source_name!r} "
@@ -402,18 +422,38 @@ def discover_and_register_providers(
 ) -> ProviderRegistryReport:
     """Scan ``providers.d`` and register a :class:`CliSourceConnector` factory
     per active manifest into the connector registry (additive; never touches
-    built-in in-process connectors). Findings for skipped/malformed entries are
-    logged as warnings, never raised -- one bad manifest never blocks startup
-    or the other, valid providers.
+    built-in in-process connectors -- a manifest whose ``source_name`` collides
+    with an already-registered prefix, built-in or otherwise, is skipped with a
+    warning finding rather than silently overwriting it). Findings for
+    skipped/malformed/colliding entries are logged as warnings, never raised --
+    one bad manifest never blocks startup or the other, valid providers.
     """
-    from agent_index.sources import register_connector
+    from agent_index.sources import register_connector, registered_source_prefixes
 
     report = scan_provider_registry(directory)
+    findings = list(report.findings)
+    already_registered = registered_source_prefixes()
     for name, manifest in report.manifests.items():
+        if name in already_registered:
+            findings.append(
+                Finding(
+                    registry=REGISTRY_NAME,
+                    entry=manifest.source_path,
+                    status="inactive",
+                    reason="prefix-collision",
+                    target=name,
+                    remedy=(
+                        f"Choose a source_name that doesn't collide with an "
+                        f"already-registered connector, or remove {manifest.source_path}."
+                    ),
+                    detail=f"{name!r} is already registered by a built-in or another provider",
+                )
+            )
+            continue
         register_connector(
             name,
             lambda *, source, _manifest=manifest, **_kwargs: CliSourceConnector(source, _manifest),
         )
-    for finding in report.findings:
+    for finding in findings:
         log.warning("content-domain provider issue: %s", finding.to_dict())
-    return report
+    return ProviderRegistryReport(manifests=report.manifests, findings=tuple(findings))

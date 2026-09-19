@@ -242,7 +242,7 @@ downstream product layers additional sources, a human search experience, and
 branding **on top of** the engine, consuming it rather than re-implementing it.
 Two extension shapes exist: an **in-process connector** (vendored/linked
 directly into whichever process runs the engine) and an **external
-content-domain provider** (an unvendored CLI, discovered via `providers.d`)
+content-domain provider** (an unvendored CLI, discovered via `providers.d/`)
 — a downstream picks whichever fits its deployment without the engine caring
 which.
 
@@ -499,11 +499,11 @@ generic is what lets many different products reuse it.
 - **2026-09-18** — Added **external content-domain providers**: a source domain
   may join as an unvendored CLI, discovered via a `providers.d/` manifest and
   driven by the engine over a process boundary — mirroring agent-bridge's
-  namespace-resolver `providers.d` pattern, additive to the existing in-process
+  namespace-resolver `providers.d/` pattern, additive to the existing in-process
   connector interface. Sharpened `pluggable-source-connectors` into a
   dedicated new `external-content-domain-providers` Feature and extended
   `reusable-engine-extension-seam` to name both extension shapes. Mined from
-  operator direction authoring the aperture-labs `agent-index-content-domain-providers`
-  effort (a facility deployment's need to reach parity with a richer, in-process
-  consumer's content breadth without a build-time or data-migration coupling;
-  vision-extending, preceding execution).
+  operator direction on a downstream facility-scale deployment's need to reach
+  parity with a richer, in-process consumer's content breadth without a
+  build-time or data-migration coupling (vision-extending, preceding
+  execution).

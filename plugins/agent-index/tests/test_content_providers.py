@@ -111,6 +111,13 @@ def test_scan_finds_valid_manifest(tmp_path):
     assert report.findings == ()
 
 
+def test_scan_rejects_relative_command(tmp_path):
+    _write_manifest(tmp_path, "gitea", source_name="gitea", command=["provider-cli"])
+    report = scan_provider_registry(tmp_path)
+    assert report.manifests == {}
+    assert report.findings[0].reason == "target-unusable"
+
+
 def test_scan_dedupes_duplicate_source_name(tmp_path):
     provider = _write_script(tmp_path / "provider.py", "pass\n")
     _write_manifest(tmp_path, "a", source_name="gitea", command=[sys.executable, str(provider)])
@@ -140,6 +147,20 @@ def test_discover_and_register_providers_registers_connector(tmp_path, monkeypat
         # own module-level registration) -- clean up so this test can't leak
         # a "gitea" prefix into any other test in the same process.
         sources_mod._CONNECTORS.pop("gitea", None)
+
+
+def test_discover_and_register_providers_skips_builtin_collision(tmp_path):
+    """A manifest reusing a built-in prefix (``git``) must never overwrite it."""
+    from agent_index import sources as sources_mod
+
+    provider = _write_script(tmp_path / "provider.py", "pass\n")
+    _write_manifest(tmp_path, "git", source_name="git", command=[sys.executable, str(provider)])
+    original_type = type(sources_mod.get_connector("git"))
+    report = discover_and_register_providers(tmp_path)
+    resolved = sources_mod.get_connector("git")
+    assert isinstance(resolved, original_type)
+    assert not isinstance(resolved, CliSourceConnector)
+    assert any(f.reason == "prefix-collision" for f in report.findings)
 
 
 # ---------------------------------------------------------------------------
