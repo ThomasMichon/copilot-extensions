@@ -191,8 +191,22 @@ def resolve_codename_cross_machine(
     codename I have locally" is only meaningful against the SAME project name
     on the other machine. Set ``AGENT_WORKTREES_NO_REMOTE_CODENAME`` to
     disable the scan entirely (returns ``[]`` without any network call).
+
+    ``codename`` is validated against :func:`codename.is_valid_handle`
+    before any SSH fan-out. Every valid codename is already constrained to
+    that shape (lowercase alnum + hyphens), so this is a defense-in-depth
+    gate: ``codename`` is interpolated into a remote shell command
+    (``_remote_probe_cmd``'s ``bash -lc '...'``/pwsh EncodedCommand
+    payload), and an unvalidated string containing quotes or shell
+    metacharacters would otherwise let a caller-supplied value inject
+    commands on every scanned machine. An invalid codename can never
+    legitimately match anything, so failing this check returns ``[]``
+    exactly like "not found."
     """
     if not codename or os.environ.get(NO_REMOTE_ENV):
+        return []
+    from . import codename as codename_mod
+    if not codename_mod.is_valid_handle(codename):
         return []
     if project is None:
         try:

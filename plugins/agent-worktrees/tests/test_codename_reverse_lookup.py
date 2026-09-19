@@ -156,6 +156,27 @@ class TestResolveCodenameCrossMachine:
         monkeypatch.setattr(cfg, "project_name", _raise)
         assert crl.resolve_codename_cross_machine("sturdy-crate") == []
 
+    def test_malformed_codename_never_reaches_ssh(self, monkeypatch):
+        # Defense-in-depth against command injection: `codename` is
+        # interpolated into a remote shell command by `_remote_probe_cmd`
+        # (`bash -lc '...'` / a pwsh EncodedCommand payload); an invalid
+        # codename (quotes, shell metacharacters) must never reach that
+        # code path at all -- validated and rejected before any SSH call,
+        # not merely escaped.
+        monkeypatch.delenv(crl.NO_REMOTE_ENV, raising=False)
+        called = []
+        monkeypatch.setattr(crl, "_probe_machine",
+                            lambda *a, **k: called.append(1))
+        for malformed in (
+            "not a handle",
+            "'; rm -rf / #",
+            "$(whoami)",
+            "handle`touch pwned`",
+            "handle;evil",
+        ):
+            assert crl.resolve_codename_cross_machine(malformed) == []
+        assert called == []
+
     def test_scans_every_known_machine_and_collects_matches(self, monkeypatch):
         monkeypatch.delenv(crl.NO_REMOTE_ENV, raising=False)
         monkeypatch.setattr(cfg, "project_name", lambda: "test-chamber")
