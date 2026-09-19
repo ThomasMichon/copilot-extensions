@@ -100,27 +100,41 @@ Intelligence Dampener)
       cover at least: `completed`, `suspended`, `released`, `superseded`
       (context-exhaustion handoff to a successor session per
       *suspend-idle-resume-same-session*).
-- [ ] Add an append-only `task_attachments` table (or equivalent), written
+- [x] Add an append-only `task_attachments` table (or equivalent), written
       by the existing lifecycle transition points that already touch
       `owner_session_id`/`target_worktree` (`bind_owner_session`, `suspend`,
       `resume`, `release`, `reattach`) — every write to the mutable
       current-owner fields gets a paired history append, never a
-      current-owner mutation without one.
-- [ ] New read API: `GET /tasks/{id}/attachments` (or CLI
+      current-owner mutation without one. **Delivered:** `task_attachments`
+      table + `TaskQueue._record_attachment` (a single choke point hooked
+      into both `bind_owner_session` and the generic `_transition`, so
+      every current call site that ever sets `owner_session_id` — release,
+      yield, reset-to-proposed, a handoff-adopting `resume` — is covered
+      without per-call-site duplication). A same-session suspend/resume is
+      correctly a no-op (compares old vs. new session id before writing).
+- [x] New read API: `GET /tasks/{id}/attachments` (or CLI
       `agent-dispatch show <id> --history`) returning the full ledger,
-      newest-first.
+      newest-first. **Delivered:** both — the REST route, a
+      `DispatchClient.attachments()` method, and `show --history`.
 - [ ] Backfill consideration: audit-log entries already carry
       "owner session bound (...)" notes for some transitions — evaluate
       whether a one-time backfill can reconstruct partial history for
       already-existing tasks, or whether it's acceptable for history to
       start from this effort's landing forward only (flag-don't-guess, per
       the facility's own reconstruction-honesty convention — no fabricated
-      timestamps for genuinely unknown transitions).
-- [ ] Tests: every lifecycle transition that changes the current owner
+      timestamps for genuinely unknown transitions). **Deferred** — history
+      starts from this landing forward; no backfill attempted this phase.
+- [x] Tests: every lifecycle transition that changes the current owner
       correctly appends to history; a chain of release→claim→release→claim
       preserves every prior session's record; concurrent-writer safety
       (the existing `BEGIN IMMEDIATE` transaction pattern already used by
       `bind_owner_session` extends naturally to the paired write).
+      **Delivered:** a queue-level test walking bind→suspend/resume(same
+      session, no-op)→suspend→release→re-bind(session-b)→handoff(session-c),
+      plus HTTP-level coordinator tests for the new route. Concurrent-writer
+      safety is inherited for free — the write happens inside the SAME
+      `BEGIN IMMEDIATE` transaction as the existing owner-session mutation,
+      not a separate one.
 
 ### Phase 2 — agent-bridge: resolve by dispatch-task reference
 - [ ] Extend the existing session/worktree resolver
@@ -181,6 +195,20 @@ Intelligence Dampener)
 _Pending — Phase 1's schema/API design is the first concrete artifact._
 
 ## Journal
+
+### 2026-09-19 — Phase 1 landed
+- `task_attachments` table + `TaskQueue._record_attachment`/`attachment_history`,
+  hooked into `bind_owner_session` and the generic `_transition` (single
+  choke point covering every current owner-session-clearing call site:
+  `release_suspended`, `yield`, reset-to-proposed, a handoff-adopting
+  `resume`). `GET /tasks/{id}/attachments` route, `DispatchClient.
+  attachments()`, and `agent-dispatch show <id> --history`.
+- Full plugin suite: 667 tests, 666 passed, 1 pre-existing unrelated failure
+  (`test_requeued_task_is_not_double_spawned`, confirmed identical with and
+  without this change via `git stash`). `ruff` error count (32) also
+  unchanged before/after.
+- Backfill (partial history reconstruction from existing `task_events` audit
+  notes) deferred — history starts from this landing forward.
 
 ### 2026-09-19 — Kickoff
 - Effort created from an aperture-labs session's operator request (verbatim

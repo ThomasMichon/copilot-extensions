@@ -479,6 +479,22 @@ class CompletionOutcome:
 
 
 @dataclass(frozen=True)
+class AttachmentRecord:
+    """One entry in a task's durable attachment history
+    (*durable-attachment-history*): a session that attached to the task,
+    when, and (if it has since ended) when and why it detached.
+    ``detached_at is None`` means this is the task's current owner session.
+    """
+
+    session_id: str
+    worktree_id: str | None
+    machine: str | None
+    attached_at: float
+    detached_at: float | None
+    detach_reason: str | None
+
+
+@dataclass(frozen=True)
 class CreationOutcome:
     """A create result plus whether it inserted a new lifecycle row."""
 
@@ -780,6 +796,30 @@ class TaskQueue(
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_task_progress_task ON task_progress(task_id)"
+            )
+            # Durable attachment history (*durable-attachment-history*,
+            # effort agent-dispatch-session-worktree-history): an append-only
+            # record of every session that has ever attached to a task,
+            # distinct from the single mutable `owner_session_id` on `tasks`.
+            # A row's `detached_at IS NULL` means that session is the task's
+            # CURRENT owner session; `bind_owner_session` opens a row and
+            # `_transition`/`release_suspended`/a handoff-adopting `resume`
+            # close it (never delete it) before opening the next one.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS task_attachments ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  task_id TEXT NOT NULL,"
+                "  session_id TEXT NOT NULL,"
+                "  worktree_id TEXT,"
+                "  machine TEXT,"
+                "  attached_at REAL NOT NULL,"
+                "  detached_at REAL,"
+                "  detach_reason TEXT"
+                ")"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_task_attachments_task "
+                "ON task_attachments(task_id, attached_at)"
             )
             # Append-only steer inbox -- the operator's answers to a task's card
             # (the human-in-the-loop counterpart of ``task_progress``). Each
@@ -1291,6 +1331,72 @@ class TaskQueue(
             "VALUES (?, ?, ?, ?, ?, ?)",
             (task_id, ts, from_status, to_status, worker, note),
         )
+
+    @staticmethod
+    def _record_attachment(
+        conn: sqlite3.Connection,
+        task_id: str,
+        *,
+        ts: float,
+        old_session_id: str | None,
+        new_session_id: str | None,
+        worktree_id: str | None,
+        machine: str | None,
+        detach_reason: str,
+    ) -> None:
+        """Append to the task's durable attachment history (
+        *durable-attachment-history*) whenever ``owner_session_id`` actually
+        changes. A no-op when it doesn't -- an ordinary suspend/resume of the
+        SAME session (*suspend-idle-resume-same-session*) never touches this
+        table; only a genuine attach (a new session bound) or detach (the
+        current session released, or superseded by a handoff successor)
+        does. Idempotent against a replayed no-change call: comparing
+        old/new session ids before writing means calling this with
+        ``old_session_id == new_session_id`` is always a safe no-op.
+        """
+        if old_session_id == new_session_id:
+            return
+        if old_session_id is not None:
+            conn.execute(
+                "UPDATE task_attachments SET detached_at = ?, detach_reason = ? "
+                "WHERE task_id = ? AND session_id = ? AND detached_at IS NULL",
+                (ts, detach_reason, task_id, old_session_id),
+            )
+        if new_session_id is not None:
+            conn.execute(
+                "INSERT INTO task_attachments "
+                "(task_id, session_id, worktree_id, machine, attached_at, detached_at) "
+                "VALUES (?, ?, ?, ?, ?, NULL)",
+                (task_id, new_session_id, worktree_id, machine, ts),
+            )
+
+    def attachment_history(self, task_id: str) -> list[AttachmentRecord]:
+        """Every session that has ever attached to ``task_id``, newest first.
+
+        The origin-agnostic resolver (agent-bridge's
+        *resolve-by-any-origin-reference*) consults this when a task's
+        current owner session has nothing live -- a detached session may
+        still be individually resolvable through a cold-store provider even
+        after the worktree itself is gone.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT session_id, worktree_id, machine, attached_at, detached_at, "
+                "detach_reason FROM task_attachments WHERE task_id = ? "
+                "ORDER BY attached_at DESC",
+                (task_id,),
+            ).fetchall()
+        return [
+            AttachmentRecord(
+                session_id=row["session_id"],
+                worktree_id=row["worktree_id"],
+                machine=row["machine"],
+                attached_at=row["attached_at"],
+                detached_at=row["detached_at"],
+                detach_reason=row["detach_reason"],
+            )
+            for row in rows
+        ]
 
     @staticmethod
     def _completion_event_workers(conn: sqlite3.Connection, task_id: str) -> list[str]:
@@ -3129,6 +3235,16 @@ class TaskQueue(
                 "UPDATE tasks SET owner_session_id=?, updated_at=? WHERE id=?",
                 (owner_session_id, ts, task_id),
             )
+            self._record_attachment(
+                conn,
+                task_id,
+                ts=ts,
+                old_session_id=task.owner_session_id,
+                new_session_id=owner_session_id,
+                worktree_id=task.target_worktree,
+                machine=task.target_machine,
+                detach_reason="rebound",
+            )
             self._audit(
                 conn,
                 task_id,
@@ -4052,6 +4168,17 @@ class TaskQueue(
             params.append(task_id)
             # Column names are internal constants; values are bound parameters.
             conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params)  # noqa: S608
+            if "owner_session_id" in (extra or {}):
+                self._record_attachment(
+                    conn,
+                    task_id,
+                    ts=ts,
+                    old_session_id=task.owner_session_id,
+                    new_session_id=extra["owner_session_id"],  # type: ignore[index]
+                    worktree_id=task.target_worktree,
+                    machine=task.target_machine,
+                    detach_reason=note or to,
+                )
             if release_spawn:
                 conn.execute(
                     "UPDATE spawn_reservations SET state = ?, "

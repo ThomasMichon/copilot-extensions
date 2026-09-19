@@ -551,6 +551,39 @@ def test_progress_log_missing_task_is_404(api):
     assert api.get("/tasks/nope/progress-log").status_code == 404
 
 
+def test_attachment_history_over_http(api):
+    """durable-attachment-history over the wire: owner-session route ("
+    "/tasks/{id}/owner-session) records durably queryable via GET
+    /tasks/{id}/attachments, surviving a release that clears the current
+    owner-session field."""
+    r = api.post("/tasks", json={"title": "reviewed"})
+    tid = r.json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    api.post(
+        f"/tasks/{tid}/owner-session",
+        json={"worker_id": "w1", "owner_session_id": "session-a"},
+    )
+    history = api.get(f"/tasks/{tid}/attachments").json()
+    assert len(history) == 1
+    assert history[0]["session_id"] == "session-a"
+    assert history[0]["detached_at"] is None
+
+    api.post(f"/tasks/{tid}/suspend", json={"worker_id": "w1", "reason": "stuck"})
+    api.post(f"/tasks/{tid}/release", json={"worker_id": "w1", "reason": "reset"})
+    history = api.get(f"/tasks/{tid}/attachments").json()
+    assert len(history) == 1
+    assert history[0]["session_id"] == "session-a"
+    assert history[0]["detached_at"] is not None
+    task = api.get(f"/tasks/{tid}").json()
+    assert task["owner_session_id"] is None  # current owner cleared...
+    # ...but the prior session's record is NOT discarded (the whole point).
+
+
+def test_attachment_history_missing_task_is_404(api):
+    assert api.get("/tasks/nope/attachments").status_code == 404
+
+
 def test_claim_empty_returns_null(api):
     assert api.post(
         "/claim", json={"worker_id": "w1", "repo": TEST_REPO}

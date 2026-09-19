@@ -1892,6 +1892,15 @@ def create_app(
         _require(queue.get(task_id))
         return queue.progress_log(task_id)
 
+    @app.get("/tasks/{task_id}/attachments")
+    def get_attachments(task_id: str) -> list[dict]:
+        """The task's durable attachment history (*durable-attachment
+        -history*): every session that has ever attached, newest first.
+        Distinct from the task's current (mutable) ``owner_session_id`` --
+        a release, resume, or handoff never discards a prior entry here."""
+        _require(queue.get(task_id))
+        return [asdict(record) for record in queue.attachment_history(task_id)]
+
     @app.get("/tasks/{task_id}/payload")
     def get_payload(task_id: str) -> dict:
         task = _require(queue.get(task_id))
