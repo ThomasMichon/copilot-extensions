@@ -1441,6 +1441,138 @@ def test_loser_release_removes_only_its_distinct_label():
     assert edit[-2:] == ["--remove-label", "reserved-beta"]
 
 
+def test_claim_reuses_same_loops_comment_across_occurrences():
+    """A loop's second (and later) occurrence on the same issue edits its own
+    prior marker comment in place instead of posting a fresh one -- the fix
+    for the observed "continuous claims and releases" churn where an issue
+    (e.g. one stuck at a terminal judgment stage like `stage:needs-vision`)
+    keeps getting swept every cadence tick forever."""
+    calls = []
+    prior_claim = {
+        "loop": "backlog",
+        "occurrence": 100,
+        "state": "claimed",
+        "at": 150,
+        "label": "agent-reserved",
+        "issue": 7,
+        "task_id": "task-1",
+    }
+    responses = iter(
+        [
+            SimpleNamespace(returncode=0, stdout="issue-bot\n", stderr=""),
+            SimpleNamespace(
+                returncode=0, stdout="example/project\n", stderr=""
+            ),
+            SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "comments": [
+                            {
+                                "author": {"login": "issue-bot"},
+                                "body": _marker(prior_claim),
+                                "id": "comment-node-1",
+                            },
+                        ]
+                    }
+                ),
+                stderr="",
+            ),
+            SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ]
+    )
+
+    def runner(*args, **kwargs):
+        del kwargs
+        calls.append(args[0])
+        return next(responses)
+
+    provider = GitHubProvider("issue-bot", runner=runner)
+    provider.claim(
+        "example/project",
+        _issue(7),
+        {
+            "loop": "backlog",
+            "occurrence": 200,
+            "state": "reserved",
+            "at": 250,
+            "label": "agent-reserved",
+        },
+        "task-2",
+    )
+
+    # No new-comment call was made; the prior occurrence's own comment for
+    # this same loop was edited in place via the GraphQL mutation instead.
+    assert not any(args[1:3] == ["issue", "comment"] for args in calls)
+    graphql_call = next(args for args in calls if args[1:3] == ["api", "graphql"])
+    assert "updateIssueComment" in graphql_call[4]
+
+
+def test_claim_does_not_reuse_a_different_loops_comment():
+    """A different loop racing for the same issue must never edit another
+    loop's own comment -- each loop keeps its own persistent, evolving
+    comment so a losing/finishing loop's transition can't clobber a
+    different, still-active loop's claim state."""
+    calls = []
+    other_loops_claim = {
+        "loop": "alpha",
+        "occurrence": 100,
+        "state": "claimed",
+        "at": 150,
+        "label": "agent-reserved",
+        "issue": 7,
+        "task_id": "task-alpha",
+    }
+    responses = iter(
+        [
+            SimpleNamespace(returncode=0, stdout="issue-bot\n", stderr=""),
+            SimpleNamespace(
+                returncode=0, stdout="example/project\n", stderr=""
+            ),
+            SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "comments": [
+                            {
+                                "author": {"login": "issue-bot"},
+                                "body": _marker(other_loops_claim),
+                                "id": "comment-node-alpha",
+                            },
+                        ]
+                    }
+                ),
+                stderr="",
+            ),
+            SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ]
+    )
+
+    def runner(*args, **kwargs):
+        del kwargs
+        calls.append(args[0])
+        return next(responses)
+
+    provider = GitHubProvider("issue-bot", runner=runner)
+    provider.claim(
+        "example/project",
+        _issue(7),
+        {
+            "loop": "beta",
+            "occurrence": 100,
+            "state": "reserved",
+            "at": 150,
+            "label": "agent-reserved",
+        },
+        "task-beta",
+    )
+
+    # beta has no comment of its own yet, so it must post a new one rather
+    # than editing alpha's still-active claim comment.
+    assert any(args[1:3] == ["issue", "comment"] for args in calls)
+    assert not any(args[1:3] == ["api", "graphql"] for args in calls)
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [

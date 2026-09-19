@@ -656,14 +656,22 @@ class GitHubProvider:
         )
         body = f"{summary}\n\n{_marker(payload)}"
         self._verify_identity(repo, allow_cache=False)
-        existing_id = self._find_own_occurrence_comment(repo, issue, payload)
+        existing_id = self._find_own_loop_comment(repo, issue, payload)
         if existing_id is not None:
-            # Edit the same occurrence's own prior comment in place
-            # (reserved -> claimed -> released) instead of always posting a
-            # new one: one evolving, clearly-marked comment per occurrence
-            # is exactly as visible/distinguishable as three separate ones
+            # Edit this loop's own single prior claims-management comment
+            # on this issue in place -- across occurrences, not just within
+            # one occurrence -- instead of always posting a new one: one
+            # evolving, clearly-marked comment per (issue, loop) is exactly
+            # as visible/distinguishable as a fresh comment per transition
             # (reservation.comment's own validated requirement), just far
-            # less noisy in the issue's visible history and notifications.
+            # less noisy in the issue's visible history and notifications
+            # over the issue's whole (potentially indefinite, e.g. a
+            # terminal-judgment stage:needs-vision issue) lifetime. Scoped
+            # to this loop specifically (not just our own authorship) so a
+            # losing loop's own `released` transition can never overwrite a
+            # different, concurrently-racing loop's still-active `reserved`/
+            # `claimed` comment -- each of the (up to 4) lanes racing for the
+            # same issue keeps its own persistent, evolving comment.
             self._gh(
                 "api",
                 "graphql",
@@ -686,16 +694,28 @@ class GitHubProvider:
             body,
         )
 
-    def _find_own_occurrence_comment(
+    def _find_own_loop_comment(
         self, repo: str, issue: Issue, payload: dict[str, Any]
     ) -> str | None:
-        """Return the GraphQL node id of this exact occurrence's own prior
-        marker comment (same ``loop`` + ``occurrence``, authored by us), if
-        one exists -- so ``_comment`` edits it instead of posting a new one.
-        A fresh fetch (not ``issue.reservations``, which may already be
-        stale by the time a later transition like ``claim``/``release``
-        runs) since another transition may have landed a comment since the
-        caller last discovered this issue.
+        """Return the GraphQL node id of this loop's own most recent
+        claims-management marker comment on this issue (same ``loop``,
+        authored by us), regardless of ``occurrence``, if one exists -- so
+        ``_comment`` edits it instead of posting a new one. Scoped to
+        ``loop`` (not just our own authorship) so a losing loop's own
+        ``released`` transition never overwrites a different, concurrently-
+        racing loop's still-active ``reserved``/``claimed`` comment. This
+        intentionally spans the issue's whole lifetime for a given loop
+        (not just one occurrence), so an issue that keeps getting reserved/
+        claimed/released by the same loop across many cadence ticks (e.g. a
+        terminal-judgment ``stage:needs-vision``/``needs-architecture-
+        triage`` issue swept again every cycle) accumulates exactly one
+        evolving comment per loop, not one per occurrence. A fresh fetch
+        (not ``issue.reservations``, which may already be stale by the time
+        a later transition like ``claim``/``release`` runs) since another
+        transition may have landed a comment since the caller last
+        discovered this issue. ``gh issue view --json comments`` returns
+        comments oldest-first, so the last match encountered is our most
+        recent one -- the one to keep editing forward.
         """
         viewed = self._gh(
             "issue",
@@ -707,6 +727,7 @@ class GitHubProvider:
             "comments",
         )
         comments = json.loads(viewed.stdout or "{}").get("comments") or []
+        found_id: str | None = None
         for comment in comments:
             marker = _parse_marker(
                 str(comment.get("body") or ""),
@@ -714,15 +735,12 @@ class GitHubProvider:
                 expected_author=self.expected_login,
                 issue_number=issue.number,
             )
-            if (
-                marker is not None
-                and marker.get("loop") == payload.get("loop")
-                and marker.get("occurrence") == payload.get("occurrence")
-            ):
-                comment_id = comment.get("id")
-                if isinstance(comment_id, str) and comment_id:
-                    return comment_id
-        return None
+            if marker is None or marker.get("loop") != payload.get("loop"):
+                continue
+            comment_id = comment.get("id")
+            if isinstance(comment_id, str) and comment_id:
+                found_id = comment_id
+        return found_id
 
     def reserve(
         self, repo: str, issue: Issue, reservation: dict[str, Any]
