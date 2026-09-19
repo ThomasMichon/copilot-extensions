@@ -4810,6 +4810,129 @@ def test_command_bar_sort_cycle_preserves_focus_and_anchor(monkeypatch):
     asyncio.run(run())
 
 
+def test_command_bar_sort_cycle_remaps_last_l_from_outside_the_list(monkeypatch):
+    """PR #2911 review follow-up: ``last_l`` (the Tab-out/in remembered row)
+    must remap by stable key even when focus is NOT currently on the list
+    (e.g. on a machine/button row) when ``s`` cycles the sort -- it was
+    previously only refreshed inside the "focus is in the list" branch."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260620-bbbb", "title": "Zeta idle",
+         "status": "active", "started_at": "2026-06-20T10:00:00",
+         "turn_count": 0, "state": "unused"},
+        {"id": "anomalous-potato-win-20260619-cccc", "title": "Alpha idle",
+         "status": "active", "started_at": "2026-06-19T10:00:00",
+         "turn_count": 0, "state": "unused"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            # Zeta remembered as the last-focused row, but focus is now on
+            # the machine row -- not "L" -- when the sort cycles.
+            assert [w["title"] for w in scr.list_records()] == ["Zeta idle", "Alpha idle"]
+            scr.last_l = 0
+            scr.sel = ("M", 0)
+            scr.refresh()
+            await pilot.pause()
+            scr._wt_cycle_sort()
+            assert [w["title"] for w in scr.list_records()] == ["Alpha idle", "Zeta idle"]
+            assert scr.list_records()[scr.last_l]["title"] == "Zeta idle"
+
+    asyncio.run(run())
+
+
+def test_command_bar_filter_preserves_focused_row_by_key(monkeypatch):
+    """PR #2911 review follow-up: typing into the filter reorders/shrinks the
+    list, so a focused row's numeric index can end up pointing at a
+    DIFFERENT row that happens to now sit at the same position. Focus must
+    follow the row's stable key, not the stale index."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Alt match",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-bbbb", "title": "Zzz match",
+         "status": "active", "started_at": "2026-06-27T16:00:00",
+         "turn_count": 1, "state": "wip"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            # Both are Active (state wip), age order -> Alt match (0), Zzz
+            # match (1). Focus Zzz match (index 1).
+            assert [w["title"] for w in scr.list_records()] == ["Alt match", "Zzz match"]
+            await _focus_wt_list(app, pilot, scr)
+            scr.sel = ("L", 1)
+            scr.refresh()
+            await pilot.pause()
+            await pilot.press("/")
+            # "match" keeps both rows, but "zzz" narrows to Zzz match alone --
+            # exercising the id-based remap without ever hitting the
+            # index-out-of-range fallback.
+            for ch in "zzz":
+                await pilot.press(ch)
+                await pilot.pause()
+            assert [w["title"] for w in scr.list_records()] == ["Zzz match"]
+            focused = scr.list_records()[scr.sel[1]]
+            assert focused["title"] == "Zzz match"
+
+    asyncio.run(run())
+
+
+def test_command_bar_appends_named_printable_keys(monkeypatch):
+    """PR #2911 review: a NAMED printable key token (Textual's "slash" for
+    "/" is the one this module already documents) must still land in the
+    query -- the composer must not silently drop any printable character
+    just because its Textual key NAME isn't a bare one-character string."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            # A second literal "/" while composing: Textual delivers it as
+            # the named "slash" token, not a bare "/" key -- must still
+            # append via event.character, not be silently dropped.
+            scr._dispatch_cmd_key("slash", "/")
+            assert scr.list_view.query == "/"
+
+    asyncio.run(run())
+
+
 def test_describe_status_marker_expands_known_tokens():
     """Bug-fix phase: raw ``status_markers`` wire tokens must expand to a
     short human phrase for rendering (derive.py's ``status_markers`` string

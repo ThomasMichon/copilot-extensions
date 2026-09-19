@@ -630,7 +630,7 @@ class _FocusRegion(Widget):
         event.prevent_default()
         if event.character in ("[", "]"):
             key = event.character
-        scr._dispatch_key(key)
+        scr._dispatch_key(key, event.character)
         scr._sync_focus_to_sel()
         scr.refresh()
 
@@ -1038,7 +1038,7 @@ class _PickerNativeData(OptionList):
         event.prevent_default()
         if event.character in ("[", "]"):
             key = event.character
-        scr._dispatch_key(key)
+        scr._dispatch_key(key, event.character)
         scr._sync_focus_to_sel()
         scr.refresh()
 
@@ -4098,7 +4098,7 @@ class PickerScreen(Widget):
                 out.append(cur)
         return out or [""]
 
-    def _dispatch_key(self, key):
+    def _dispatch_key(self, key, character=None):
         # NOTE: this MUST NOT be named ``handle_key`` -- Textual's
         # ``Widget.handle_key`` is an ``async`` coroutine its ``_on_key``
         # awaits to run the BINDINGS system. Shadowing it with this synchronous
@@ -4108,11 +4108,13 @@ class PickerScreen(Widget):
         # Keeping a distinct name lets Textual's native binding dispatch run.
         # Fold framework key-name aliases to canonical tokens once, up front, so
         # every downstream match is declarative and alias-free (#88 F2).
+        # ``character`` (raw ``event.character``, only sourced by ``on_key``
+        # callers, #2228 Phase 4 review) is the printable text a NAMED key
+        # token (e.g. Textual's "slash") represents -- passed through so the
+        # command bar composer can append it, not just a bare one-char ``key``.
         key = canonical_key(key)
-        # The "/" command bar (#2228 Phase 4) owns every key while composing --
-        # checked first, before any of the picker's own navigation/actions.
         if self.cmd_mode:
-            return self._dispatch_cmd_key(key)
+            return self._dispatch_cmd_key(key, character)
         # Remember the grid row before any navigation, so Tab out/in restores it.
         if self.sel and self.sel[0] == "PR":
             self.last_pr = self.sel[1]
@@ -4237,14 +4239,22 @@ class PickerScreen(Widget):
                 return
             self._open_quit_confirm()
 
-    def _dispatch_cmd_key(self, key):
+    def _dispatch_cmd_key(self, key, character=None):
         """Compose the "/" command-bar's free-text filter (#2228 Phase 4).
         Owns every key while ``cmd_mode`` is set; Enter/Escape leave compose
         mode (Escape also clears the query), Backspace edits, Space (Textual
         names the bar itself "space", not a literal " ") appends a literal
-        space, and any other single printable character is appended.
+        space, and any other printable character is appended -- preferring
+        ``character`` (``event.character``) over ``key`` so a NAMED printable
+        token (Textual's "slash" for ``/``, and others like it) still lands
+        in the query instead of being silently dropped (review finding).
         Non-printable navigation keys are ignored while composing -- the
-        command bar owns input until the operator leaves it."""
+        command bar owns input until the operator leaves it. Every
+        query-changing branch remaps the focused/anchored/remembered
+        Worktrees row by stable key across the resulting reorder/re-filter
+        (review finding: a plain index-out-of-range check let filtering
+        silently reassign focus to a different row at the same position)."""
+        refs = self._wt_capture_row_refs()
         if key == "enter":
             self.cmd_mode = False
         elif key == "escape":
@@ -4254,34 +4264,59 @@ class PickerScreen(Widget):
             self.list_view.query = self.list_view.query[:-1]
         elif key == "space":
             self.list_view.query += " "
-        elif len(key) == 1 and key.isprintable():
-            self.list_view.query += key
-        if self.sel not in self.stops():
-            self.sel = self.default_sel()
+        else:
+            ch = character if (character and len(character) == 1
+                                and character.isprintable()) else key
+            if len(ch) == 1 and ch.isprintable():
+                self.list_view.query += ch
+        self._wt_restore_row_refs(refs)
 
-    def _wt_cycle_sort(self):
-        """Cycle the Worktrees list's sort key, then remap ``sel``/``last_l``/
-        ``wt_anchor`` from row KEYS back to their new indices (#2228 Phase 4
-        review): sorting reorders every row's position, so the numeric
-        indices those three track would otherwise silently keep pointing at
-        whatever row now sits at the old index -- not the one the operator
-        was actually focused/anchored on."""
-        ids_before = self._l_ids()
-        focus_key = (ids_before[self.sel[1]]
-                     if self.sel[0] == "L" and 0 <= self.sel[1] < len(ids_before)
-                     else None)
-        anchor_key = (ids_before[self.wt_anchor]
-                      if self.wt_anchor is not None
-                      and 0 <= self.wt_anchor < len(ids_before) else None)
-        self.list_view.cycle_sort(derive.WT_SORT_KEYS)
-        ids_after = self._l_ids()
-        if focus_key is not None and focus_key in ids_after:
-            self.sel = ("L", ids_after.index(focus_key))
+    def _wt_capture_row_refs(self):
+        """Snapshot the Worktrees list's focused/anchored/remembered rows by
+        their STABLE key (#2228 Phase 4 review), to be handed to
+        :meth:`_wt_restore_row_refs` after an operation that reorders or
+        re-filters the list -- ``sel``/``wt_anchor``/``last_l`` are plain
+        numeric indices, which silently point at a DIFFERENT row once the
+        list changes shape."""
+        ids = self._l_ids()
+
+        def key_at(i):
+            return ids[i] if i is not None and 0 <= i < len(ids) else None
+
+        return {
+            "focus": key_at(self.sel[1]) if self.sel[0] == "L" else None,
+            "anchor": key_at(self.wt_anchor),
+            "last_l": key_at(self.last_l),
+        }
+
+    def _wt_restore_row_refs(self, refs):
+        """Remap the snapshot from :meth:`_wt_capture_row_refs` onto the
+        (now reordered/re-filtered) list's new indices. ``last_l`` is
+        remapped independently of current focus (review finding: it was
+        previously only refreshed inside the focus branch, leaving it stale
+        when the operator cycled sort/filtered from outside the list, e.g.
+        focus on a machine/button row) -- the focus branch's own update
+        still wins when focus IS in the list."""
+        ids = self._l_ids()
+        if refs["last_l"] is not None and refs["last_l"] in ids:
+            self.last_l = ids.index(refs["last_l"])
+        if refs["focus"] is not None and refs["focus"] in ids:
+            self.sel = ("L", ids.index(refs["focus"]))
             self.last_l = self.sel[1]
         elif self.sel[0] == "L" and self.sel not in self.stops():
             self.sel = self.default_sel()
-        if anchor_key is not None and anchor_key in ids_after:
-            self.wt_anchor = ids_after.index(anchor_key)
+        if refs["anchor"] is not None and refs["anchor"] in ids:
+            self.wt_anchor = ids.index(refs["anchor"])
+
+    def _wt_cycle_sort(self):
+        """Cycle the Worktrees list's sort key, then remap the focus/anchor/
+        remembered rows across the reorder (#2228 Phase 4 review): sorting
+        moves every row's position, so those three plain numeric indices
+        would otherwise silently keep pointing at whatever row now sits at
+        the old index."""
+        refs = self._wt_capture_row_refs()
+        self.list_view.cycle_sort(derive.WT_SORT_KEYS)
+        self._wt_restore_row_refs(refs)
 
     def _wt_view(self, rows):
         """Apply the Worktrees list's filter/sort state to one bucket. Never
@@ -6335,7 +6370,7 @@ class PickerScreen(Widget):
         event.prevent_default()
         if event.character in ("[", "]"):
             key = event.character
-        self._dispatch_key(key)
+        self._dispatch_key(key, event.character)
         self.refresh()
 
 

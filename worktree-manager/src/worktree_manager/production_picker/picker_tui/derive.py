@@ -727,6 +727,7 @@ def norm(
         has_controllers=bool(w.get("controllers") or w.get("controller_revision")),
     )
     return {
+        "id": w["id"],
         "id4": id4,
         "selection_id": f"{source_id}\x1f{w['id']}",
         "machine": machine,
