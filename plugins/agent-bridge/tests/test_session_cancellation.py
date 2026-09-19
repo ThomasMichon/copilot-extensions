@@ -1657,6 +1657,36 @@ async def test_repeated_scheduling_keeps_one_active_reap_owner(owned_context, mo
     remote.assert_awaited_once()
 
 
+@pytest.mark.parametrize("failure", ["false", "exception", "restart"])
+async def test_repeated_scheduling_preserves_failed_reap_owner(owned_context, monkeypatch, failure):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    remote = AsyncMock(return_value=False)
+    if failure == "exception":
+        remote.side_effect = OSError("transport cleanup failed")
+    monkeypatch.setattr(ctx.manager, "_remote_reap", remote)
+    ctx.manager._schedule_remote_reap(record, "first cleanup")
+    task = next(iter(ctx.manager._remote_reaps_by_session[record.session_id]))
+    await asyncio.gather(task, return_exceptions=True)
+    manager = (
+        SessionManager(ctx.db, session_host_state_dir=str(ctx.manager._host_index._path.parent))
+        if failure == "restart" else ctx.manager
+    )
+    monkeypatch.setattr(manager, "_remote_reap", remote)
+    manager._schedule_remote_reap(manager._host_index.get(record.session_id), "duplicate cleanup")
+    await asyncio.sleep(0)
+    remote.assert_awaited_once()
+    if failure != "restart":
+        assert manager._remote_reaps_by_session[record.session_id] == {task}
+    else:
+        assert manager._remote_reaps_by_session == {}
+    remote.side_effect = None
+    remote.return_value = True
+    await manager.stop_session(record.session_id, reap_host=True)
+    assert remote.await_count == 2
+    assert not manager._remote_reap_pending(record.session_id)
+
+
 @pytest.mark.parametrize("mode", ["retry", "recreate", "no_retry"])
 async def test_resume_never_respawns_committed_host_after_persistence_failure(
     owned_context, monkeypatch, mode,

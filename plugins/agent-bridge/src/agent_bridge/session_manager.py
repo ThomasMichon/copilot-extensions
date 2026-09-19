@@ -4088,8 +4088,8 @@ class SessionManager:
         touched. An explicit stop joins this session's scheduled reaps before
         acknowledging.
         """
-        if any(not task.done() for task in self._remote_reaps_by_session.get(rec.session_id, ())):
-            log.info("Remote reap already active for %s; retaining its owner", rec.session_id)
+        if self._remote_reap_pending(rec.session_id):
+            log.info("Remote reap already owned for %s; use explicit cleanup retry", rec.session_id)
             return
         try:
             loop = asyncio.get_running_loop()

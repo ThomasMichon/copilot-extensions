@@ -472,6 +472,9 @@ restart does not inherently close the child's pipes.
   Child-exit settlement uses strict ACP cleanup and confirmed reaping before
   reporting STOPPED; synchronous remote-reap entry points delegate all channel
   teardown to the tracked strict cleanup job.
+  Reap scheduling treats failed completions and durable pending intent as
+  existing owners, not just running tasks; only the explicit revision-fenced
+  cleanup retry path can consume that ownership.
   Direct resync refuses pending remote reaps before mutating session state.
   Confirmed remote reap clears container markers and target locks only if the
   current host record still equals the reaped snapshot; replacement records
