@@ -667,6 +667,49 @@ without it.
       review flagged this as promised-but-unowned; do not leave it silently
       unresolved.
 
+### Bug (filed, unscheduled) — navigating into the Tasks pivot freezes the Picker UI
+Reported by the operator 2026-09-18 (during PR #2913 review triage), not yet
+investigated to root cause. Symptom: switching the machine-tab focus onto
+Tasks blocks/freezes the whole Manager UX momentarily, rather than switching
+immediately and showing a loading state — suggesting somewhere in the
+Tasks-pivot render/switch path is doing blocking I/O on the UI thread instead
+of going through the pivot's own background-thread runtime.
+
+**What's already confirmed NOT the cause** (checked while triaging where to
+file this, so a follow-up session doesn't re-tread the same ground):
+- `RegisteredPivotRuntime.ensure`/`.repoll` (`tasks.py`) already spawn a
+  background `threading.Thread` for the `list` subprocess and return
+  immediately; `PickerScreen._task_state()` only reads whatever's already
+  cached (`idle|loading|ready|error`) — this is the *intended* async path and
+  looks correct on inspection.
+- `_enrich_pivot_rows`/`_worktree_title_map` (`engine.py`) are pure in-memory
+  dict lookups over already-loaded worktree records — no I/O.
+
+**Where to look next:**
+- `_pivot_machine_id`/`_machine_key_map` (`engine.py`) — reads
+  `machines.yaml` via `data_ssh.machine_key_map()` and is cached, but the
+  *first* call per session isn't; confirm it's cheap/local and not doing
+  anything SSH-shaped synchronously.
+- Whatever runs on the actual tab-switch keypress that lands on Tasks
+  (`self.htab = ...` call sites) — confirm nothing there calls
+  `pivots_mod.scan_pivot_registry()`/`ensure_pivots()` or any other
+  filesystem/subprocess scan synchronously outside the already-async
+  `on_mount` skeleton path.
+- Whether `agent-dispatch-board`'s own subprocess (invoked inside the
+  background thread) is itself slow enough on first run (cold coordinator
+  discovery, `_endpoint()`'s file probes) that the *thread* takes a while —
+  which wouldn't freeze the UI by itself (it's backgrounded) but would
+  explain a prolonged "loading" state if something else *is* blocking
+  waiting on it.
+- Confirm the Tasks tab actually paints its `state == "loading"` row
+  (`_status_row`) immediately on first switch, rather than the whole screen
+  waiting on `_task_state()`'s first non-idle result before rendering
+  anything at all.
+
+Not scheduled into a numbered Plan phase yet — triage and fix (or fold into
+whichever phase turns out to own the real cause) before this effort's
+Validation Plan can claim a smooth pivot switch.
+
 ### Phase 5 — Artifacts (claims) surface
 - [ ] Land `artifacts_summary` computation in `board_cli.py` (or wherever
       agent-dispatch tracks claims) and the drill-in claims viewer content
@@ -1331,4 +1374,17 @@ reservation, no wasted space, unaffected by this change.
   `tasks-preview` tooling (or an app-level render test) whenever a change
   touches the column-fit/header path again, not just direct unit tests
   against the helpers.
+
+### 2026-09-18 — Bug filed (unscheduled): Tasks pivot navigation freezes the UI
+Operator report: switching machine-tab focus onto Tasks freezes/blocks the
+whole Picker UX momentarily instead of switching immediately with a loading
+state -- suggesting a blocking-I/O call somewhere in the Tasks-pivot
+render/switch path rather than going through the pivot's own background
+runtime. Filed as a Plan item (see the new "Bug (filed, unscheduled)" entry
+above, between Phase 4 and Phase 5) rather than investigated to completion
+this session -- a quick look confirmed `RegisteredPivotRuntime.ensure`/
+`.repoll` and the row-enrichment helpers are NOT the cause (already
+async/in-memory on inspection), narrowing the search for whoever picks this
+up next to `_machine_key_map`'s first-call cost and the tab-switch
+keypress's own call path. Not yet reproduced/root-caused; no fix attempted.
 
