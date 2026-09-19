@@ -192,6 +192,9 @@ def test_discover_and_register_providers_skips_builtin_collision(tmp_path):
     assert isinstance(resolved, original_type)
     assert not isinstance(resolved, CliSourceConnector)
     assert any(f.reason == "prefix-collision" for f in report.findings)
+    # The collision-skipped manifest must not appear as "active" in the
+    # returned report -- manifests and the live registry must stay consistent.
+    assert "git" not in report.manifests
 
 
 def test_discover_and_register_providers_skips_hierarchical_collision(tmp_path):

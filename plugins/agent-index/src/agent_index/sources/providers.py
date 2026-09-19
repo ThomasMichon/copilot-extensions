@@ -504,9 +504,13 @@ def discover_and_register_providers(
     built-in in-process connectors -- a manifest whose ``source_name``
     **overlaps** an already-registered prefix -- exactly, or hierarchically in
     either direction (``"git"`` vs. ``"git:foo"``) -- is skipped with a
-    warning finding rather than silently shadowing part of it). Findings for
-    skipped/malformed/colliding entries are logged as warnings, never raised --
-    one bad manifest never blocks startup or the other, valid providers.
+    warning finding rather than silently shadowing part of it). The returned
+    report's ``manifests`` reflects only what was actually registered --
+    a collision-skipped manifest appears in ``findings``, never in
+    ``manifests``, so the two stay consistent with the live registry. Findings
+    for skipped/malformed/colliding entries are logged as warnings, never
+    raised -- one bad manifest never blocks startup or the other, valid
+    providers.
     """
     from agent_index.sources import register_connector, registered_source_prefixes
 
@@ -518,6 +522,7 @@ def discover_and_register_providers(
     # hierarchically overlap each other are caught too, not just overlaps
     # against pre-existing registrations.
     claimed = set(registered_source_prefixes())
+    registered: dict[str, ProviderManifest] = {}
     for name, manifest in sorted(report.manifests.items()):
         colliding = next(
             (existing for existing in claimed if _prefixes_overlap(name, existing)), None
@@ -546,6 +551,7 @@ def discover_and_register_providers(
             lambda *, source, _manifest=manifest, **_kwargs: CliSourceConnector(source, _manifest),
         )
         claimed.add(name)
+        registered[name] = manifest
     for finding in findings:
         log.warning("content-domain provider issue: %s", finding.to_dict())
-    return ProviderRegistryReport(manifests=report.manifests, findings=tuple(findings))
+    return ProviderRegistryReport(manifests=registered, findings=tuple(findings))
