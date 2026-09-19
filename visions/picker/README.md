@@ -138,9 +138,16 @@ it publishes a bounded, attributable observation naming its own host instance as
 ended and listing the execution legs it was hosting
 (`§Concepts/provider-observation-ingestion` /
 `§Behaviors/observation-loss-degrades-honestly` on the agent-worktrees vision).
-The Picker never infers correlated loss itself from worktree-side staleness
-alone — that would cross the render-derive-not-own boundary and requires
-guessing at causation the durable worktree record was never meant to carry. It
+That observation stays honest even across the provider's own full restart — not
+only a graceful one — because the provider keeps a **durable liveness snapshot**
+of what it was hosting, independent of any one process's memory
+(`§Concepts/Durable liveness snapshot` / `§Features/recoverable-across-full
+-restart` on the session-hosting vision); the Picker never needs to distinguish
+"the host process died" from "the whole machine restarted," since both surface
+through the identical provider-published signal. The Picker never infers
+correlated loss itself from worktree-side staleness alone — that would cross
+the render-derive-not-own boundary and requires guessing at causation the
+durable worktree record was never meant to carry. It
 only **renders** that provider-supplied signal and offers a single, explicit
 **bulk-resume** action gated on it: reopen every named worktree's current head,
 in one confirmed gesture, instead of making the operator resume each one by
@@ -438,7 +445,18 @@ regression is something a test can catch before an operator does.
   an operator's terminal multiplexer was lost machine-wide, taking down eight
   concurrently active worktree sessions at once, and every one of them had to
   be resumed by hand because no bulk recovery affordance existed. Deliberately
-  scoped as a batched invocation of the existing single-worktree resume, driven
-  by agent-worktrees' own durable head-lineage record — no new resume mechanism,
-  and explicitly gated on recognizing *correlated* loss (many legs going stale
-  together) rather than firing on ordinary, unrelated single-session endings.
+  scoped as a batched invocation of the existing single-worktree resume, gated
+  on the owning session-host provider itself publishing an explicit host-loss
+  observation — never on the Picker inferring correlation from worktree-side
+  staleness, which would cross the render-derive-not-own boundary (refined
+  after initial review flagged that gap). Not offered for ordinary, unrelated
+  single-session endings that merely land near each other in time.
+- **2026-09-18** — Cross-linked *fleet-recovery-relaunch* to the
+  session-hosting vision's new *Durable liveness snapshot* /
+  *recoverable-across-full-restart*: a direct operator follow-up observed that
+  the provider-published host-loss observation this feature depends on is only
+  honest if the provider can still name what it was hosting after its own
+  restart — which requires the provider to persist that record durably, not
+  just detect loss while some part of it happens to still be running. That
+  guarantee now lives on session-hosting, generalizing recovery from "the mux
+  process died" to "the machine it ran on rebooted entirely."
