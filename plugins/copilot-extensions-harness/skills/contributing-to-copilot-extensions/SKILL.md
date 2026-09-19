@@ -175,33 +175,14 @@ installer. Know which kind you are changing.
 
 ## The fix-path bridge (a review flagged an external plugin)
 
-When `reviewing-customizations` (the `customizing-copilot` plugin) reviews a
-consumer harness with `--from-settings`, a **trigger collision** — or any
-finding — that lands on a plugin from **this** suite is *outside that repo's
-control*: it can't be fixed in the consumer repo, only here. This skill is the
-**fix path** that review points at (via the `<repo>-harness → contributing-to-<repo>`
-bridge). When you arrive here from such a finding:
-
-1. **Confirm it's a copilot-extensions plugin.** The review tags each collision
-   owner `skill [marketplace/plugin]`; a `[copilot-extensions/<plugin>]` origin
-   (or a `source:` of `github.com/ThomasMichon/copilot-extensions`) is ours.
-2. **Reproduce against the repo source, never the installed payload.** Resolve
-   the anchor and read the offending skill/agent in `plugins/<plugin>/…` — do
-   **not** inspect or edit `~/.copilot/installed-plugins/…` (overwritten on
-   update).
-3. **Fix it through the normal flow above** — worktree, edit, **bump the
-   version**, gates, PR/self-merge, deploy. A trigger collision is usually
-   resolved by sharpening or de-duplicating the phrase in the owning skill's
-   `description` / `Trigger phrases include:` list.
-4. **Can't/shouldn't fix it now?** File a GitHub issue on
-   `ThomasMichon/copilot-extensions` describing the collision (both skills, the
-   shared phrase) in generic, world-readable terms (see *Coordinating concurrent
-   drivers* below) so it's tracked for a maintainer.
-
-The consumer repo's own options (an in-repo authority-override skill that
-reclaims the phrase, or disabling the plugin there) live on the *consumer* side
-and are documented by `customizing-copilot:reviewing-customizations`; **this** skill covers the
-upstream half — landing the real fix in the plugin.
+If `reviewing-customizations` (the `customizing-copilot` plugin) flags a
+trigger collision or other finding on a plugin from **this** suite, it's
+outside that consumer repo's control — this skill is the fix path review
+points at. Confirm the `[copilot-extensions/<plugin>]` origin, reproduce
+against the repo source (never the installed payload), and fix it through the
+normal flow above (worktree, edit, bump, gates, PR). Full steps, including the
+file-an-issue fallback:
+[`references/fix-path-bridge.md`](../../references/fix-path-bridge.md).
 
 ## What NOT to do
 
@@ -314,24 +295,12 @@ comments, docs, `AGENTS.md`. Never put downstream-private material in them.
 - **Do** describe changes in self-contained, general-purpose terms — as if for a
   stranger who has only this repo ("add a `--json` flag to `list`", *not* "so the
   internal dashboard can parse it").
-- **Abstract every attached artifact — examples, traces, repros, and
-  references are the easy leaks.** Anything you paste to illustrate a change
-  tends to smuggle consumer-side detail:
-  - **Error output / stack traces / logs** carry internal paths, hostnames,
-    usernames, and IPs — replace them with neutral placeholders
-    (`/path/to/repo`, `HOST`, `user`, `192.0.2.10`) and drop lines that don't
-    bear on the issue. *E.g.* `at C:\Users\jdoe\src\internal-app\...` →
-    `at <repo>/...`.
-  - **Reproductions** must reduce to the **minimal, generic steps** that repro
-    on a bare checkout — not "run it inside <private system> with <private
-    config>". Strip the private setup; keep only what a stranger needs.
-  - **Example / sample data** must be synthetic, never real internal values
-    (record IDs, tokens, topic roots, private URLs). Use `example.com` and
-    obviously-fake values.
-  - **References** must point only at **public** anchors (a repo issue/PR/commit
-    in this repo) — never an internal tracker, private doc, or session/task ID.
-    Attach the concrete internal artifact to the driver's **private** plan and
-    link the public issue to that; never the reverse.
+- **Abstract every attached artifact** — examples, traces, repros, and
+  references are the easy leaks; anything pasted to illustrate a change tends
+  to smuggle consumer-side detail (internal paths/hostnames in error output,
+  private setup in repros, real internal values in sample data, non-public
+  anchors in references). Worked examples per category:
+  [`references/sanitization-examples.md`](../../references/sanitization-examples.md).
 - The proprietary "why" lives in the **driver's private effort/plan**, which
   *links to* the public issue. The public artifact stays generic; the private
   artifact stays private.
