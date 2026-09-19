@@ -89,17 +89,22 @@ async def close_pending_host_attachment(manager: SessionManager, session: Sessio
     session._pending_host_attachment = None
 
 
-def require_no_pending_host_launch(manager: SessionManager, session_id: str) -> None:
-    """Refuse another launch until partial-host cleanup is resolved."""
+def has_pending_host_launch(manager: SessionManager, session_id: str) -> bool:
+    """Include durable-only partial-launch ownership after frontend restart."""
     record = manager._host_index.get(session_id) if manager._host_index is not None else None
     session = manager._sessions.get(session_id)
     container = session.target.container if session is not None else None
-    if (
+    return bool((
         isinstance(container, dict)
         and container.get("launch_pending_session_id") == session_id
     ) or session_id in manager._pending_host_launches or (
         record is not None and (record.extra or {}).get("launch_cleanup_pending")
-    ):
+    ))
+
+
+def require_no_pending_host_launch(manager: SessionManager, session_id: str) -> None:
+    """Refuse another launch until partial-host cleanup is resolved."""
+    if has_pending_host_launch(manager, session_id):
         raise RemoteSpawnCleanupPendingError(
             f"Session Host launch cleanup is pending for {session_id}; "
             "retained authority must be cleaned up before another launch"

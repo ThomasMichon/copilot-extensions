@@ -520,6 +520,10 @@ restart does not inherently close the child's pipes.
   is empty. Every stop checks durable partial-launch markers before reporting
   STOPPED, not only explicit reaps. Shutdown fails explicitly for pending reaps
   with no record or cleanup endpoint instead of retrying unaddressable work.
+  Durable-only partial-launch markers also participate in shutdown checks.
+  Without a live launch handle, shutdown surfaces the cleanup-pending error
+  and requires explicit authority cleanup; it does not wake a dormant provider
+  or silently treat the persisted marker as settled.
   Remote cleanup also checks an in-process HostIndex publication revision,
   protecting equal-value replacement records from an older reap. Descriptor
   removal must persist before pending handles or container ownership are

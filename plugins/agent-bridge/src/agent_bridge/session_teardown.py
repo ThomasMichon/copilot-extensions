@@ -21,6 +21,7 @@ async def detach_for_restart(manager: SessionManager) -> None:
 
 async def _detach_for_restart_owned(manager: SessionManager) -> None:
     """Detach active sessions and close owned channels at frontend shutdown."""
+    from .session_host_ownership import has_pending_host_launch, require_no_pending_host_launch
     from .session_manager import asyncio, log
 
     for session in manager.list_sessions():
@@ -33,7 +34,7 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
             or session._turn_start_lock.locked()
             or session._lifecycle_lock.locked()
             or manager._remote_reaps_by_session.get(session.session_id)
-            or session.session_id in manager._pending_host_launches
+            or has_pending_host_launch(manager, session.session_id)
         ):
             try:
                 log.info("Detaching session %s on shutdown", session.session_id)
@@ -58,9 +59,11 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
         or session.session_id in manager._forwards
         or session.session_id in manager._relays
         or manager._remote_reap_pending(session.session_id)
-        or session.session_id in manager._pending_host_launches
+        or has_pending_host_launch(manager, session.session_id)
     ]:
         for session in pending:
+            if session.session_id not in manager._pending_host_launches:
+                require_no_pending_host_launch(manager, session.session_id)
             if manager._remote_reap_pending(session.session_id):
                 _remote_retry_record(manager, session.session_id)
         log.error(

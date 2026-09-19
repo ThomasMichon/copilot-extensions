@@ -587,3 +587,47 @@ async def test_shutdown_retries_durable_partial_launch_until_abort_confirmed(tmp
     assert manager._pending_host_launches == {}
     assert manager._host_index.get(session.session_id) is None
     assert session.status == SessionStatus.STOPPED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("marker", ["target", "index", "both"])
+async def test_shutdown_detects_durable_only_partial_launch_without_waking_provider(
+    tmp_db, tmp_path, monkeypatch, marker,
+):
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_teardown import detach_for_restart
+
+    sid = "example-session"
+    target = SpawnTarget(type="command", container={"name": "example-container"})
+    if marker != "index":
+        target.container["launch_pending_session_id"] = sid
+    tmp_db.create_session(
+        sid, "example-agent", None, ".", "command", "stopped",
+        time.time(), target_json=target.to_json(),
+    )
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path / "hosts"))
+    if marker != "target":
+        manager._host_index.register(HostRecord(
+            session_id=sid, port=51000, host_pid=123, child_pid=456,
+            boundary="container", endpoint={"kind": "container", "container": "example-container"},
+            extra={"launch_cleanup_pending": True},
+        ))
+    probe = Mock(side_effect=AssertionError("dormant provider must not be awakened"))
+    remote = AsyncMock(side_effect=AssertionError("shutdown must not infer permission to reap"))
+    monkeypatch.setattr("agent_bridge.session_host.container_transport.build_container_spawner", probe)
+    monkeypatch.setattr("agent_bridge.session_manager._cleanup_worktree", AsyncMock())
+    monkeypatch.setattr(manager, "_remote_reap", remote)
+    with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is pending"):
+        await detach_for_restart(manager)
+    probe.assert_not_called()
+    remote.assert_not_awaited()
+    assert manager.get_session(sid).status == SessionStatus.FAILED
+    assert manager.get_session(sid).restart_status is None
+    assert manager._pending_host_launches == {}
+    if marker != "target":
+        remote.side_effect = None
+        remote.return_value = True
+        await manager.stop_session(sid, reap_host=True)
+        await detach_for_restart(manager)
+        remote.assert_awaited_once()
+        assert manager._host_index.get(sid) is None
