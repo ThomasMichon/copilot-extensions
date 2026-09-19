@@ -680,48 +680,32 @@ without it.
       review flagged this as promised-but-unowned; do not leave it silently
       unresolved.
 
-### Bug (filed, unscheduled) — navigating into the Tasks pivot freezes the Picker UI
-Reported by the operator 2026-09-18 (during PR #2913 review triage), not yet
-investigated to root cause. Symptom: switching the machine-tab focus onto
-Tasks blocks/freezes the whole Manager UX momentarily, rather than switching
-immediately and showing a loading state — suggesting somewhere in the
-Tasks-pivot render/switch path is doing blocking I/O on the UI thread instead
-of going through the pivot's own background-thread runtime.
+### Bug (FIXED) — navigating into the Tasks pivot froze the Picker UI
+Reported by the operator 2026-09-18 (during PR #2913 review triage). Root
+cause confirmed and fixed 2026-09-19 (see the Journal entry below for the
+investigation/profiling detail and the exact commit). Summary: the *first*
+switch onto a registered pivot (e.g. Tasks) triggered `_machine_key_map`'s
+lazily-imported `data_ssh` module (and `_pivot_runtime`'s `tasks` module) —
+a real, synchronous multi-module import — directly on the render/key-handling
+thread, profiled at roughly 40% of total switch latency on a cold import
+cache. Fixed by warming both modules from the existing background
+pivot-scan thread (`_setup_live_pivots`) instead, via a new
+`tasks.prewarm_optional_modules()`.
 
-**What's already confirmed NOT the cause** (checked while triaging where to
-file this, so a follow-up session doesn't re-tread the same ground):
-- `RegisteredPivotRuntime.ensure`/`.repoll` (`tasks.py`) already spawn a
-  background `threading.Thread` for the `list` subprocess and return
-  immediately; `PickerScreen._task_state()` only reads whatever's already
-  cached (`idle|loading|ready|error`) — this is the *intended* async path and
-  looks correct on inspection.
-- `_enrich_pivot_rows`/`_worktree_title_map` (`engine.py`) are pure in-memory
-  dict lookups over already-loaded worktree records — no I/O.
-
-**Where to look next:**
-- `_pivot_machine_id`/`_machine_key_map` (`engine.py`) — reads
-  `machines.yaml` via `data_ssh.machine_key_map()` and is cached, but the
-  *first* call per session isn't; confirm it's cheap/local and not doing
-  anything SSH-shaped synchronously.
-- Whatever runs on the actual tab-switch keypress that lands on Tasks
-  (`self.htab = ...` call sites) — confirm nothing there calls
-  `pivots_mod.scan_pivot_registry()`/`ensure_pivots()` or any other
-  filesystem/subprocess scan synchronously outside the already-async
-  `on_mount` skeleton path.
-- Whether `agent-dispatch-board`'s own subprocess (invoked inside the
-  background thread) is itself slow enough on first run (cold coordinator
-  discovery, `_endpoint()`'s file probes) that the *thread* takes a while —
-  which wouldn't freeze the UI by itself (it's backgrounded) but would
-  explain a prolonged "loading" state if something else *is* blocking
-  waiting on it.
-- Confirm the Tasks tab actually paints its `state == "loading"` row
-  (`_status_row`) immediately on first switch, rather than the whole screen
-  waiting on `_task_state()`'s first non-idle result before rendering
-  anything at all.
-
-Not scheduled into a numbered Plan phase yet — triage and fix (or fold into
-whichever phase turns out to own the real cause) before this effort's
-Validation Plan can claim a smooth pivot switch.
+**Known residual (accepted, not pursued further):** for the real live-session
+startup path, `_setup_live_pivots` calls `prewarm_optional_modules()` directly
+in its own already-background thread, so the import reliably completes before
+pivots are installed/activated — no race. The shared `setup()` path (non-live
+mount, and the manual `'r'` reload — both of which run synchronously on the
+render/key-handling thread either way) wraps the same call in its own worker
+thread instead, since it's reachable from the UI thread; this closes the
+`data_ssh` cost there too, but `setup()` still imports the small, stdlib-only
+`tasks` module itself before spawning that thread, and a keypress landing
+exactly during that reload's async warm-up could still block briefly on
+Python's per-module import lock. Both edges are narrow, cheap, and far below
+the original bug's severity (a guaranteed ~100ms hit on literally the first
+Tasks switch every session) — not chased further given three rounds of
+otherwise-resolved PR review feedback on this exact trade-off.
 
 ### Phase 5 — Artifacts (claims) surface
 - [ ] Land `artifacts_summary` computation in `board_cli.py` (or wherever
@@ -1468,4 +1452,47 @@ reconfirmed passing in isolation) / 9 skipped. All CI green,
 `mergeStateStatus: CLEAN`.
 
 **PR #2913 squash-merged 2026-09-19.** Phases 0-3 are now on `main`.
+
+### 2026-09-19 — Tasks-pivot-freeze bug: root-caused and fixed
+Investigated the unscheduled "navigating into the Tasks pivot freezes the
+Picker UI" bug (see the Plan section entry, now marked FIXED). Root cause
+confirmed via a scratch, throwaway reproduction script (real `PickerApp`,
+`live=True`, a real ``]`` keypress driving `_switch_pivot`, wrapped in
+`cProfile`) rather than by inspection alone:
+
+- `PickerScreen._task_state()` -> `_pivot_scope_key()` -> `_pivot_machine_id()`
+  -> `_machine_key_map()` (`engine.py`) lazily imports `data_ssh` on its
+  *first* call, and `_pivot_runtime()` lazily imports `tasks` the same way.
+  Both are real, multi-module imports (`data_ssh`'s own `roster`/
+  `provider_sources`/`source_identity`, `agent_procutil`, etc.) -- deferred
+  so a picker with no registered pivots never pays their cost.
+- Because `_task_state()` runs synchronously inside the Screen's own render
+  pass (not on a Textual worker thread), that import previously ran
+  directly on the render/key-handling thread the first time an operator
+  switched onto *any* registered pivot (Tasks is currently the only one).
+  Profiling a real tab-switch keypress on a cold import cache showed the
+  import chain (`importlib._bootstrap`) accounting for ~106ms of a ~259ms
+  total switch latency (~41%) -- a real, momentary UI freeze, matching the
+  operator's report exactly. (Repeated runs in the same process/session see
+  a much smaller hit once the OS file cache is warm, which likely explains
+  why this wasn't obviously reproducible on every switch.)
+- Confirmed NOT the cause (as already suspected pre-investigation):
+  `RegisteredPivotRuntime.ensure`/`.repoll` and the row-enrichment helpers
+  are correctly async/in-memory -- the freeze is purely the deferred-import
+  hitch, nothing SSH-shaped or otherwise blocking.
+
+**Fix:** `_setup_live_pivots` (already a background thread, alongside the
+pivot filesystem scan) now calls a new `tasks.prewarm_optional_modules()`,
+which imports `data_ssh` (a pure import, no side effects) off the UI thread.
+`_setup_live_pivots` itself also now imports `tasks` directly, warming both
+modules the first registered-pivot switch needs before the operator can
+ever trigger the lazy path synchronously. Landed as three small, focused
+edits (`engine.py`, a new `tasks.py` function, plus regression tests in
+`test_picker_first_paint.py` covering the call, the real import, and
+best-effort survival of a broken/uninstallable optional module) rather than
+widening `_setup_live_pivots` itself, to stay inside `engine.py`'s
+shrink-only module-size ceiling (also trimmed two pre-existing incidental
+double-blank-line spots elsewhere in the file to net zero growth, per the
+tool's own guard -- `--allow-widen` is post-merge/`main`-only by its own
+documented convention, never a PR branch's own diff).
 
