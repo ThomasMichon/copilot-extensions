@@ -2678,9 +2678,9 @@ class TaskQueue(
         response, so a still-unanswered card must stay visibly blocked --
         otherwise a task genuinely awaiting operator input silently drops out
         of Blocked-queue tracking on its very next wake, however long the
-        operator's answer is still pending (observed on
-        gim-home/odsp-web-harness#62 / #458: 58+ consecutive false wakes each
-        cleared ``awaiting_steer`` despite the card never being answered).
+        operator's answer is still pending (observed in production: dozens of
+        consecutive false wakes each cleared ``awaiting_steer`` despite the
+        card never being answered).
 
         Refuses when the task carries an operator hold (:meth:`set_hold`) --
         clear it first via :meth:`clear_hold`. A pause must actually block
@@ -4030,7 +4030,6 @@ class TaskQueue(
                 extra = {
                     "lease_expires_at": None,
                     "last_liveness": None,
-                    "awaiting_steer": 0,
                     "resume_requested": 1,
                 }
                 wake_requested = False
