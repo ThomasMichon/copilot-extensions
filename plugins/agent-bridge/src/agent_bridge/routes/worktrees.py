@@ -27,7 +27,6 @@ from ..session_manager import (
     ProviderTargetRefreshError,
     SessionManager,
 )
-from ..worktree_sessions_views import lineage_fields
 
 log = logging.getLogger("agent-bridge")
 
@@ -1259,11 +1258,9 @@ async def list_worktree_sessions(
     agent-worktrees -- it counts sessions launched by the picker *and* by
     agent-bridge / Mission Control (which carry no ``branch`` field).
 
-    Also forwards the ledger's head-succession/fork-lineage data (see
-    :func:`_lineage_fields`) so a caller can render not just the current
-    head but the full handoff chain -- including a genuine fork (more than
-    one pending handoff opened off the same/different predecessors, the
-    exact shape a stuck-or-forked handoff bug produces).
+    For the worktree's full head-succession/fork-lineage graph (including
+    fork detection), see ``GET /api/v1/worktrees/{id}/lineage`` instead --
+    this route intentionally stays a plain session list.
     """
     cache = get_cache()
     await cache.crawl_if_empty()
@@ -1301,14 +1298,68 @@ async def list_worktree_sessions(
     # Phase 4). Derived straight from the ground-layer envelope -- the bridge
     # keeps no head of its own (derive-dont-duplicate).
     head_session = data.get("head_session") if isinstance(data, dict) else None
-    envelope = data if isinstance(data, dict) else {}
     return {
         "worktree_id": worktree_id,
         "agent_name": agent_name,
         "head_session": head_session if isinstance(head_session, str) else None,
         "sessions": sessions if isinstance(sessions, list) else [],
-        **lineage_fields(envelope),
     }
+
+
+@router.get("/api/v1/worktrees/{worktree_id}/lineage")
+async def get_worktree_lineage(
+    worktree_id: str, request: Request,
+) -> dict[str, Any]:
+    """Return a worktree's authoritative, bounded session/handoff/controller
+    lineage graph -- the current head, every session with its
+    predecessor/successor, the head-transition history, and the handoff
+    ledger (each entry carries its own ``state``, so a caller can tell a
+    genuine **fork** -- more than one simultaneously ``pending`` handoff,
+    e.g. a second handoff opened off a predecessor before its first
+    candidate ever consumed it -- from ordinary resolved/cancelled
+    history).
+
+    Shells out to ``<project> worktree-lineage --worktree <id> --json`` on
+    the machine that owns the worktree -- the same purpose-built,
+    already-bounded surface ``agent-worktrees`` itself uses (see
+    ``lineage_surfaces.worktree_lineage`` and its ``test_worktree_lineage_
+    preserves_fork_and_missing_nodes`` regression test), rather than the
+    bridge re-deriving fork/lineage semantics from the plain session list.
+    """
+    cache = get_cache()
+    await cache.crawl_if_empty()
+
+    owner = _owning_agent(worktree_id, request)
+    if owner is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Worktree {worktree_id} not found on any agent",
+        )
+    agent_name, config = owner
+    resolver = request.app.state.resolver
+
+    raw = await _run_for_agent(
+        agent_name, config, resolver,
+        ["worktree-lineage", "--worktree", worktree_id, "--json"],
+    )
+    if raw is None:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to read lineage for worktree {worktree_id}",
+        )
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Invalid lineage JSON for worktree {worktree_id}",
+        ) from exc
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Invalid lineage JSON for worktree {worktree_id}",
+        )
+    return {"agent_name": agent_name, **data}
 
 
 @router.get("/api/v1/worktrees/{worktree_id}/sessions/{session_id}/transcript")
