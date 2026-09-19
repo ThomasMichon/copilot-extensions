@@ -348,7 +348,7 @@ blocks (never warns) publishing an effective head -- however resolved: the
 scheme default, an explicit `--branch`, an existing-PR reuse, or a rendered
 `pr.head_pattern` -- that contains the raw worktree id, the machine name, or
 an unresolved `{machine}`/`{worktree_id}` template marker. Run
-`agent-worktrees attribution-audit` to check a repo's configured
+`<agent-worktrees catalog argv[0]> attribution-audit` to check a repo's configured
 `head_pattern` for this risk ahead of time.
 
 `push-changes` and an idempotent `create-pr` re-run publish the final pushed
