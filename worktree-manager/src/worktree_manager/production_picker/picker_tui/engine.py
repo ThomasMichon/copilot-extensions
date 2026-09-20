@@ -2580,11 +2580,15 @@ class PickerScreen(Widget):
         return out
 
     def _enrich_pivot_rows(self, reg, rows):
-        """Fill each row's ``worktree_title`` from the claiming-worktree
-        correlation (``reg.worktree_field`` value -> owning worktree title), so a
-        columns pivot can show the claimant's TASK. In-place + idempotent;
-        best-effort (no match -> ``""``). A no-op when the pivot declares no
-        ``worktree_field`` or there are no worktree records to match against."""
+        """Fill each row's ``worktree_title`` (claiming-worktree title) and
+        ``_worktree_short`` (trailing 4-char id, matching the Worktrees
+        list's own ``id4``) from ``reg.worktree_field``. In-place +
+        idempotent; a no-op with no ``worktree_field``/rows.
+        ``_worktree_short`` is what ``_column_row`` displays instead of the
+        far-longer raw value (Phase 4 item 1 fix: the generic front-
+        truncating ``_clip`` produced a meaningless prefix fragment on a
+        real id). Kept separate from the raw field: ``_task_action_ctx``
+        needs the real, full id."""
         if not reg or not getattr(reg, "worktree_field", None) or not rows:
             return
         titles = self._worktree_title_map()
@@ -2593,6 +2597,27 @@ class PickerScreen(Widget):
                 continue
             wt = rec.get(reg.worktree_field)
             rec["worktree_title"] = titles.get(str(wt).strip().lower(), "") if wt else ""
+            rec["_worktree_short"] = str(wt)[-4:] if wt else ""
+
+    def _worktree_claiming_task(self, rec):
+        """Phase 4 REVERSE cross-link: ``(row, group_field)`` for the
+        registered-pivot task entry claiming worktree ``rec``, or ``None`` --
+        the mirror of ``_enrich_pivot_rows``' task->worktree correlation.
+        Resolves the machine scope from ``rec``'s OWN ``machine`` field (via
+        ``_machine_key_map``, the same display->registry-key translation
+        ``_pivot_machine_id`` does for the currently selected tab), not the
+        globally selected pivot machine -- so a claiming task shows up for
+        every worktree row while browsing the cross-machine "All" scope,
+        not only ones on whichever machine tab happens to be selected. See
+        ``pivots.find_claiming_task`` for the matching logic."""
+        from . import pivots as pivots_mod
+
+        wid = str(rec.get("id") or "").strip().lower()
+        wid4 = str(rec.get("id4") or "").strip().lower()
+        display = rec.get("machine")
+        machine = self._machine_key_map().get(display, display) if display else None
+        return pivots_mod.find_claiming_task(
+            self.pivots, self._pivot_runtimes, machine, wid, wid4)
 
     def _task_groups(self):
         """Task rows grouped for display. Groups by the pivot's ``group`` entry
@@ -8142,16 +8167,26 @@ class WorktreesView:
         non-empty ``status_markers`` or asset hint) now collapses to a single,
         neutrally-styled ``*`` at the end of the line -- the full claim/asset
         breakdown lives behind the Actions menu's "View details" card
-        instead, so this line never has to fit an unbounded list."""
+        instead, so this line never has to fit an unbounded list.
+
+        Also: a compact `` · <Phase>`` badge (see ``_worktree_claiming_task``,
+        Phase 4 REVERSE cross-link) follows the state text, before `` *``."""
         title = str(rec.get("title") or "").strip() or "(untitled)"
         pulse = rec.get("live_pulse")
         intent = (rec.get("live_intent") or "").strip()
         markers = (rec.get("status_markers") or "").strip()
         assets = rec.get("asset_hints") or {}
         has_claims = bool(markers) or bool(assets.get("hints"))
+        claim = self._eng._worktree_claiming_task(rec)
+        phase_label = ""
+        if claim:
+            claim_row, group_field = claim
+            if group_field:
+                phase_label = str(claim_row.get(group_field) or "").strip()
 
         pline = Text("      ")
-        reserve = 2 if has_claims else 0  # trailing " *"
+        badge_reserve = (3 + len(phase_label)) if phase_label else 0
+        reserve = (2 if has_claims else 0) + badge_reserve  # trailing " *"
         pline.append(derive.truncate_text(title, max(1, width - pline.cell_len - reserve)),
                      style=C_LABEL)
         if pulse and intent:
@@ -8170,6 +8205,9 @@ class WorktreesView:
                 pline.append(": ", style=C_DIM)
                 avail = max(1, width - pline.cell_len - reserve)
                 pline.append(derive.truncate_text(state_label, avail), style=C_DIM)
+        if phase_label and pline.cell_len + 3 + len(phase_label) <= width:
+            pline.append(" · ", style=C_DIM)
+            pline.append(phase_label, style=_palette_style("task_phase", phase_label) or C_DIM)
         if has_claims and pline.cell_len + 2 <= width:
             pline.append(" *", style=C_LABEL)
         # Hard width guarantee: even with the reserve above, truncate once at
@@ -8431,15 +8469,20 @@ class TasksView:
         t.append(" " * pad)
         return t
 
-    def _column_row(self, cols, rec, width, selected):
-        """One entry rendered across the pivot's declarative columns. ``cols``
-        is the already-fitted column set (see ``_fitted_columns``)."""
+    def _column_row(self, cols, rec, width, selected, worktree_field=None):
+        """One entry rendered across the pivot's declarative columns.
+        ``worktree_field``, when given, names the column shown from
+        ``rec["_worktree_short"]`` (see ``_enrich_pivot_rows``) instead of
+        the raw, far-longer real id."""
         t = Text(" ")
         for i, col in enumerate(cols):
             if i:
                 t.append(PAD)
             w = self._col_width(col)
-            val = rec.get(col.key, "")
+            if col.key == worktree_field and "_worktree_short" in rec:
+                val = rec["_worktree_short"]
+            else:
+                val = rec.get(col.key, "")
             cell = _clip("" if val is None else str(val), w, col.align)
             # Per-value palette colouring (reusing the picker's own vocabulary)
             # takes precedence; the column's literal ``style`` is the fallback.
@@ -8531,14 +8574,16 @@ class TasksView:
                     sec.append("─" * max(0, width - sec.cell_len), style=C_DIM)
                     add(sec, kind="section", new_section=g)
                     for li, rec in groups[g]:
-                        add(self._column_row(cols, rec, width, sel == ("T", li)),
+                        add(self._column_row(cols, rec, width, sel == ("T", li),
+                                              reg.worktree_field),
                             stop=("T", li), data=rec)
                         sub = self._column_subtitle(reg, rec, width)
                         if sub is not None:
                             add(sub)
                 return
             for li, rec in enumerate(rows):
-                add(self._column_row(cols, rec, width, sel == ("T", li)),
+                add(self._column_row(cols, rec, width, sel == ("T", li),
+                                      reg.worktree_field),
                     stop=("T", li), data=rec)
                 sub = self._column_subtitle(reg, rec, width)
                 if sub is not None:
