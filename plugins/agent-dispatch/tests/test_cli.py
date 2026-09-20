@@ -3256,7 +3256,7 @@ class TestInboxBoard:
             "agent-dispatch-board", "--machine", "{machine}"
         ]
         assert manifest["entry"]["group"] == "group"
-        assert manifest["entry"]["badges"] == ["activity", "labels"]
+        assert manifest["entry"]["badges"] == ["activity", "wt_badge", "labels"]
 
     def test_sort_orders_by_group_priority(self):
         from agent_dispatch import __main__ as m
@@ -3271,7 +3271,7 @@ class TestInboxBoard:
         ]
         tasks.sort(key=m._board_sort_key)
         assert [m._board_group(t) for t in tasks] == [
-            "Blocked", "Proposed", "Queued", "Started", "Suspended",
+            "Blocked", "Proposed", "Started", "Queued", "Suspended",
             "Completed", "Abandoned",
         ]
 

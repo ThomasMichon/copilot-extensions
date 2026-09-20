@@ -72,6 +72,25 @@ def test_build_wt_live_reflects_headless_activity_only(monkeypatch):
     assert by_id["cli-embodied"]["wt_live"] is None
 
 
+def test_build_wt_badge_reflects_has_worktree(monkeypatch):
+    """Operator feedback 2026-09-20 (item 2): a badge, not just the WT
+    column's raw contents, makes a worktree-bearing Started task
+    unmistakable at a glance."""
+    monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
+    rows = board_cli._build(
+        [
+            {"id": "with-wt", "status": "started",
+             "target_worktree": "some-worktree"},
+            {"id": "without-wt", "status": "started"},
+        ],
+        machine="m1",
+        recent_mins=120,
+    )
+    by_id = {row["id"]: row for row in rows}
+    assert by_id["with-wt"]["wt_badge"] == "WT"
+    assert by_id["without-wt"]["wt_badge"] is None
+
+
 def test_build_artifacts_summary_is_a_phase3_placeholder(monkeypatch):
     """Phase 3 lands the column plumbing only; Phase 5 owns the real
     claims/artifacts computation (see the Plan's own note against the two

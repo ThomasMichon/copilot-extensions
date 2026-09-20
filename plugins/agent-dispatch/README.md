@@ -161,7 +161,7 @@ The installer drops a pivot manifest at
 `~/.agent-worktrees/pivots/agent-dispatch.json` so the agent-worktrees Textual
 picker grows a **Tasks** pivot (between Worktrees and Maintenance). It renders the
 status-grouped board through the stdlib-only `agent-dispatch-board` API client
-(Blocked / Proposed / Queued / Started / Suspended / recently terminal). A separate **ACTIVE** badge appears only
+(Blocked / Proposed / Started / Queued / Suspended / recently terminal). A separate **ACTIVE** badge appears only
 when embodiment tracking reports an assigned agent executing a turn; **STALLED**
 marks a running turn with no recent activity. That execution badge is independent
 from lifecycle phase -- `Started` alone never implies a live agent. The

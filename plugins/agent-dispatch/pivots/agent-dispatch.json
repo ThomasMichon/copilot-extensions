@@ -9,7 +9,7 @@
     "worktree": "target_worktree",
     "subtitle": "repo_name",
     "group": "group",
-    "badges": ["activity", "labels"]
+    "badges": ["activity", "wt_badge", "labels"]
   },
   "columns": [
     {"key": "id", "header": "ID", "width": 9, "priority": 2},

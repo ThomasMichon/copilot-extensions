@@ -2208,16 +2208,21 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
 
 #: The picker Tasks-pivot **board** groups, in the operator's priority order:
-#: what needs your attention first (a task blocked awaiting your steer), then the
-#: pickable/in-flight lifecycle, then recently-finished tasks. The tuple index is
-#: the sort key; the string is the pivot section header. ``--board`` tags each
-#: task with its group and orders by this sequence so the picker's first-seen
-#: grouping renders the sections in exactly this order.
+#: what needs your attention first (a task blocked awaiting your steer), then
+#: what's actually running (more interesting to inspect at a glance than a
+#: task not yet running), then the rest of the pickable/in-flight lifecycle,
+#: then recently-finished tasks. The tuple index is the sort key; the string
+#: is the pivot section header. ``--board`` tags each task with its group and
+#: orders by this sequence so the picker's first-seen grouping renders the
+#: sections in exactly this order. Operator feedback 2026-09-20: Started
+#: moved ahead of Queued -- keep this in sync with `board_cli.py`'s
+#: byte-identical `GROUPS` tuple (used by the Picker's own direct board read,
+#: distinct from this module's delegated `inbox` CLI path).
 _BOARD_GROUPS = (
     "Blocked",
     "Proposed",
-    "Queued",
     "Started",
+    "Queued",
     "Suspended",
     "Completed",
     "Abandoned",
@@ -2331,8 +2336,8 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
     # visible lifecycle (proposed -> in-flight -> recently terminal), tags each
     # task with a display `group`, drops terminal tasks older than the recency
     # window, and orders by group priority so the picker renders the sections
-    # Blocked -> Proposed -> Queued -> Started -> Completed -> Abandoned. Overrides
-    # --awaiting-steer / --status.
+    # Blocked -> Proposed -> Started -> Queued -> Suspended -> Completed ->
+    # Abandoned. Overrides --awaiting-steer / --status.
     if getattr(args, "board", False):
         import time as _time
 
@@ -3993,7 +3998,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="status-grouped board for the picker Tasks pivot: tasks across "
         "proposed/queued/claimed/started/suspended PLUS recently "
         "completed/abandoned, each tagged with a display `group` "
-        "(Blocked/Proposed/Queued/Started/Suspended/Completed/Abandoned) "
+        "(Blocked/Proposed/Started/Queued/Suspended/Completed/Abandoned) "
         "and ordered by that priority. Overrides "
         "--status and --awaiting-steer.",
     )
