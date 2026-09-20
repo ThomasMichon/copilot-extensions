@@ -13,7 +13,7 @@
   "plugins/agent-bridge/src/agent_bridge/agent_registry.py": 2940,
   "plugins/agent-bridge/src/agent_bridge/app.py": 1113,
   "plugins/agent-bridge/src/agent_bridge/client.py": 1684,
-  "plugins/agent-bridge/src/agent_bridge/models.py": 1064,
+  "plugins/agent-bridge/src/agent_bridge/models.py": 1082,
   "plugins/agent-bridge/src/agent_bridge/remote_operations.py": 1230,
   "plugins/agent-bridge/src/agent_bridge/result_snapshot.py": 1099,
   "plugins/agent-bridge/src/agent_bridge/routes/sessions.py": 1676,
