@@ -1724,6 +1724,43 @@ class TestWorktreeRoutes:
         assert all(r == ("test-agent", resolver.agents["test-agent"]) for r in results)
         assert wt_id not in cache._archive_probe_inflight
 
+    @pytest.mark.asyncio
+    async def test_archive_probe_survives_a_cancelled_concurrent_caller(
+        self,
+    ) -> None:
+        # review r4056888749: a cancelled caller (client disconnect/timeout)
+        # must not cancel the shared in-flight task out from under a
+        # concurrent caller still waiting on the same worktree_id.
+        import asyncio as _asyncio
+
+        from agent_bridge.agent_registry import AgentConfig, AgentResolver
+        from agent_bridge.routes import worktrees as wt_routes
+
+        wt_id = "anomalous-potato-wsl-20250101-194600-shielded"
+        resolver = AgentResolver(
+            agents={"test-agent": AgentConfig(name="test-agent", project="test-chamber")},
+            machines={},
+        )
+
+        async def _slow_run_for_agent(agent_name, config, resolver, args):
+            await _asyncio.sleep(0.1)
+            return '{"worktrees": [{"id": "%s", "status": "archived"}]}' % wt_id
+
+        cache = wt_routes.WorktreeDiscoveryCache()
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=_slow_run_for_agent,
+        ):
+            doomed = _asyncio.ensure_future(cache.probe_archived(wt_id, resolver))
+            survivor = _asyncio.ensure_future(cache.probe_archived(wt_id, resolver))
+            await _asyncio.sleep(0.02)  # let both attach to the shared task
+            doomed.cancel()
+            with pytest.raises(_asyncio.CancelledError):
+                await doomed
+            result = await survivor
+
+        assert result == ("test-agent", resolver.agents["test-agent"])
+
     def test_get_worktree_session_transcript_proxies(self, client, app) -> None:
         from unittest.mock import AsyncMock, patch
 

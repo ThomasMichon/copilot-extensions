@@ -97,8 +97,7 @@ class _WorktreeEntry:
           attached (or attachment is unknown): a live interactive Copilot CLI
           owns the worktree and is being actively viewed.  Do-not-disturb.
         - ``at-rest`` -- a wt-<id> mux session exists but is detached (no
-          terminal attached): the interactive Copilot is still running but
-          nobody is watching.  Still a live process -- reclaim via take-over.
+          terminal attached): still a live process -- reclaim via take-over.
         - ``none``    -- no interactive mux session; the worktree is not held
           by an interactive Copilot CLI.
         """
@@ -229,18 +228,22 @@ class WorktreeDiscoveryCache:
         self, worktree_id: str, resolver: AgentResolver,
     ) -> tuple[str, AgentConfig] | None:
         """Single-flight archived-record probe: coalesces concurrent callers
-        for the same ``worktree_id`` onto one in-flight task instead of each
-        fanning its own N-agent subprocess/SSH probe (review r4056857325).
+        for the same ``worktree_id`` onto one in-flight task (review
+        r4056857325), shielded from a cancelled caller (review r4056888749).
         """
         task = self._archive_probe_inflight.get(worktree_id)
         if task is None:
             task = asyncio.create_task(_probe_archived_owner(worktree_id, resolver))
             self._archive_probe_inflight[worktree_id] = task
-        try:
-            return await task
-        finally:
-            if self._archive_probe_inflight.get(worktree_id) is task:
-                del self._archive_probe_inflight[worktree_id]
+
+            def _evict(t: asyncio.Task, wid: str = worktree_id) -> None:
+                if self._archive_probe_inflight.get(wid) is t:
+                    del self._archive_probe_inflight[wid]
+
+            task.add_done_callback(_evict)
+        # Shield: a cancelled caller must never cancel the shared task out
+        # from under other concurrent callers; eviction is done-callback-only.
+        return await asyncio.shield(task)
 
     async def crawl_if_empty(self) -> None:
         """Trigger a crawl only if the cache has no data yet.
@@ -460,9 +463,8 @@ async def _run_local(
 async def _run_local_ex(
     project: str, args: list[str] | None = None, *, timeout: float | None = None,
 ) -> tuple[str | None, str]:
-    """Like :func:`_run_local`, also returning stderr (empty on success) so a
-    caller can distinguish a timeout/crash from a specific rejected flag
-    (see :func:`_is_classify_unsupported`)."""
+    """Like :func:`_run_local`, also returning stderr (empty on success) so
+    a caller can distinguish a timeout/crash from a rejected flag."""
     from pathlib import Path
 
     home = Path.home()
@@ -546,8 +548,7 @@ async def _run_ssh_ex(
 
 def _is_classify_unsupported(stderr: str) -> bool:
     """True if *stderr* is agent-worktrees rejecting an unrecognized
-    ``--classify`` flag (an agent-worktrees runtime older than the
-    worktree-finality-and-obligations closure-descriptor work). Mirrors
+    ``--classify`` flag (an older agent-worktrees runtime). Mirrors
     ``picker_tui.data_ssh._is_classify_unsupported``."""
     s = stderr or ""
     return "unrecognized arguments" in s and "--classify" in s
@@ -562,9 +563,9 @@ async def _exec(cmd: list[str], *, timeout: float | None = None) -> str | None:
 async def _exec_ex(
     cmd: list[str], *, timeout: float | None = None,
 ) -> tuple[str | None, str]:
-    """Like :func:`_exec`, also returning stderr (empty string on success or
-    when unavailable) so a caller can distinguish a timeout/crash from a
-    specific rejected flag (see :func:`_is_classify_unsupported`)."""
+    """Like :func:`_exec`, also returning stderr (empty string on success
+    or when unavailable) so a caller can distinguish a timeout/crash from
+    a rejected flag."""
     proc: asyncio.subprocess.Process | None = None
     eff_timeout = _CMD_TIMEOUT if timeout is None else timeout
     try:
@@ -721,7 +722,7 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
     - ``session_status``: that session's status (idle/running/stopped/...)
     - ``session_turn_count``: number of prompt turns on that session
     - ``session_live``: True if the session is currently running or idle
-      with a live process (i.e. attached/active, not stopped or ended)
+      with a live process (attached/active, not stopped or ended)
 
     Each worktree also carries interactive-mux (``wt-<id>`` tmux/psmux)
     liveness on its owning machine -- the *second ownership* a consumer must
@@ -735,8 +736,8 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
       (detached but running), or ``none`` -- so a consumer can render a
       do-not-disturb badge and route to take-over instead of a blind connect
 
-    When periodic discovery is disabled, the first request triggers an
-    on-demand crawl (subsequent requests return cached results).
+    First request triggers an on-demand crawl when periodic discovery is
+    disabled (subsequent requests return cached results).
     """
     cache = get_cache()
     await cache.crawl_if_empty()
@@ -806,12 +807,11 @@ async def _start_fresh_worktree_session(
     "take over a worktree whose interactive Copilot never persisted a
     session" working instead of 404-ing after the mux Copilot was killed.
 
-    Serialized on a per-worktree lock (local/SSH targets aren't hard-guarded
-    by the SessionManager) so two concurrent resumes can't each spawn a
-    second owned controller. Returns the new (or raced-in) ``Session``, or
-    None when the worktree/agent is unresolvable (caller then 404s). Raises
-    ``HTTPException`` 409 on a raced-in live CLI and 502/503 on spawn
-    failure.
+    Serialized on a per-worktree lock (local/SSH targets aren't
+    hard-guarded by the SessionManager) so two concurrent resumes can't
+    each spawn a second owned controller. Returns the new (or raced-in)
+    ``Session``, or None when unresolvable (caller then 404s). Raises 409
+    on a raced-in live CLI and 502/503 on spawn failure.
     """
     if mgr is None:
         return None
