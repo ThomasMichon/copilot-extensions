@@ -1,8 +1,8 @@
 """Worktree discovery endpoints -- /api/v1/worktrees.
 
 Lists worktrees across all configured agents by running
-``<project> list --json`` locally or via SSH on each machine.
-Results are cached in-memory and refreshed periodically.
+``<project> list --json`` locally or via SSH; cached in-memory and
+refreshed periodically.
 """
 
 from __future__ import annotations
@@ -33,17 +33,15 @@ log = logging.getLogger("agent-bridge")
 router = APIRouter(tags=["worktrees"])
 
 _CMD_TIMEOUT = 30.0
-# Phase-5 (worktree-finality-and-obligations): a longer budget specifically
-# for a `--classify` crawl -- the extra ~5 git calls per worktree can exceed
-# the base _CMD_TIMEOUT on a large/slow target. Mirrors the Picker's own
-# `picker_tui.data_ssh._CLASSIFY_TIMEOUT` (60s) so the two surfaces agree on
-# how patient a classify pass is allowed to be.
+# Phase-5 (worktree-finality-and-obligations): a longer budget for a
+# `--classify` crawl -- the extra ~5 git calls per worktree can exceed
+# _CMD_TIMEOUT on a large/slow target. Mirrors the Picker's own 60s budget.
 _CLASSIFY_CMD_TIMEOUT = 60.0
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 #: Per-worktree locks serializing the fresh-start spawn (#1683) so two
-#: concurrent resumes can't each create a second owned controller in a worktree
-#: the SessionManager doesn't hard-guard (local/SSH targets).
+#: concurrent resumes can't each create a second owned controller in a
+#: worktree the SessionManager doesn't hard-guard (local/SSH targets).
 _fresh_start_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -62,28 +60,23 @@ class _WorktreeEntry:
     resume_count: int = 0
     session_count: int = 0
     turn_count: int = 0
-    # Interactive-mux (wt-<id> tmux/psmux) liveness on the owning machine.
-    # This is the *second ownership* NF must see (#1883): a worktree held by a
-    # live picker-launched Copilot CLI, distinct from a bridge ACP session.
+    # Interactive-mux (wt-<id> tmux/psmux) liveness on the owning machine --
+    # the *second ownership* NF must see (#1883), distinct from a bridge
+    # ACP session.
     mux_session: bool = False
     mux_clients: int | None = None
     mux_attached: bool | None = None
-    # #2668 two-axis taxonomy, surfaced from ``agent-worktrees list --json`` so
-    # NF's cockpit can foreground the operator's own work. ``interface`` is
-    # cli|acp, ``origin`` is user|system|delegate, and ``picker_hidden`` is the
-    # Picker's own visibility verdict (origin in system/delegate). All default
+    # #2668 two-axis taxonomy, surfaced from ``agent-worktrees list --json``.
+    # ``interface`` is cli|acp, ``origin`` is user|system|delegate,
+    # ``picker_hidden`` is the Picker's own visibility verdict. All default
     # to "unknown/shown" for an older agent-worktrees runtime.
     interface: str | None = None
     origin: str | None = None
     picker_hidden: bool = False
     # worktree-status-core (#2917/#2956): the agent-asserted disposition
-    # (follow_up + summary) and the derived live-intent pulse, surfaced from
-    # ``agent-worktrees list --json`` so the cockpit can render "where attention
-    # is owed" and "what each agent is doing now" -- not just liveness. All
-    # default off/empty so an older agent-worktrees runtime degrades cleanly.
-    # ``summary`` is also what ``agent-dispatch focus`` writes (derive-don't-
-    # duplicate). The live pulse is emitted raw; freshness is computed at
-    # render time so a cached value cannot read "fresh" forever.
+    # (follow_up + summary) and the derived live-intent pulse. ``summary``
+    # is also what ``agent-dispatch focus`` writes (derive-don't-
+    # duplicate). Freshness is computed at render time, not cached.
     follow_up: bool = False
     summary: str | None = None
     status_note_at: str | None = None
@@ -91,12 +84,10 @@ class _WorktreeEntry:
     live_intent_at: str | None = None
     live_intent_idle: bool = False
     # worktree-finality-and-obligations (Phase 5): the canonical closure
-    # descriptor (``prune.assemble_closure_descriptor``'s ``to_dict()``
-    # shape), surfaced raw/opaque from ``agent-worktrees list --json
-    # --classify``. This route intentionally does NOT interpret it -- only
-    # the consumer that knows the current ``DESCRIPTOR_VERSION`` (e.g. via
-    # ``prune.interpret_descriptor_payload``) may treat it as authoritative.
-    # Absent on an older runtime or when git classification wasn't run.
+    # descriptor, surfaced raw/opaque from ``agent-worktrees list --json
+    # --classify``. Only the consumer that knows the current
+    # ``DESCRIPTOR_VERSION`` may treat it as authoritative. Absent on an
+    # older runtime or when git classification wasn't run.
     closure: dict[str, Any] | None = None
 
     def interactive_cli_state(self) -> str:
@@ -177,6 +168,11 @@ class WorktreeDiscoveryCache:
         # classify probe on every periodic sweep. Mirrors the Picker's own
         # per-source `use_classify` caching (picker_tui.data_ssh).
         self._classify_unsupported: set[str] = set()
+        # review r4056857325: coalesce concurrent same-id archived probes
+        # onto one in-flight task instead of an N-agent stampede per call.
+        self._archive_probe_inflight: dict[
+            str, asyncio.Task[tuple[str, AgentConfig] | None]
+        ] = {}
 
     def configure(self, *, interval: float) -> None:
         """Update the discovery interval (must be called before start)."""
@@ -209,21 +205,42 @@ class WorktreeDiscoveryCache:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        # Cancel/await any in-flight classify backfills too -- same shutdown
-        # discipline as the periodic loop above (#discussion_r4004943069).
-        pending = [t for t in self._backfill_tasks if not t.done()]
-        for task in pending:
-            task.cancel()
-        for task in pending:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                log.exception("Worktree classify backfill raised during shutdown")
+        # Same shutdown discipline for classify backfills (#discussion_
+        # r4004943069) and in-flight archived-owner probes: cancel/await so
+        # neither outlives the rest of application shutdown.
+        for pending in (
+            [t for t in self._backfill_tasks if not t.done()],
+            [t for t in self._archive_probe_inflight.values() if not t.done()],
+        ):
+            for task in pending:
+                task.cancel()
+            for task in pending:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    log.exception("Worktree background task raised during shutdown")
 
     def get_all(self) -> dict[str, list[_WorktreeEntry]]:
         return dict(self._cache)
+
+    async def probe_archived(
+        self, worktree_id: str, resolver: AgentResolver,
+    ) -> tuple[str, AgentConfig] | None:
+        """Single-flight archived-record probe: coalesces concurrent callers
+        for the same ``worktree_id`` onto one in-flight task instead of each
+        fanning its own N-agent subprocess/SSH probe (review r4056857325).
+        """
+        task = self._archive_probe_inflight.get(worktree_id)
+        if task is None:
+            task = asyncio.create_task(_probe_archived_owner(worktree_id, resolver))
+            self._archive_probe_inflight[worktree_id] = task
+        try:
+            return await task
+        finally:
+            if self._archive_probe_inflight.get(worktree_id) is task:
+                del self._archive_probe_inflight[worktree_id]
 
     async def crawl_if_empty(self) -> None:
         """Trigger a crawl only if the cache has no data yet.
@@ -233,14 +250,11 @@ class WorktreeDiscoveryCache:
 
         worktree-finality-and-obligations (Phase 5): this FIRST, blocking
         crawl never attempts ``--classify`` -- it mirrors the Picker's own
-        fast-then-classify two-phase pattern (``picker_tui.data_ssh``) so a
-        slow or old target never turns "no cache yet" into an ~90s stall for
-        whichever request happens to arrive first (classify's own timeout
-        budget plus a legacy fallback). A classify pass is kicked off as a
-        fire-and-forget background backfill immediately after, so the
-        closure descriptor still populates without blocking this response.
-        The task is tracked in ``_backfill_tasks`` so :meth:`stop` can
-        cancel/await it instead of leaving it running past shutdown.
+        fast-then-classify two-phase pattern so a slow/old target never
+        turns "no cache yet" into an ~90s stall for whichever request
+        arrives first. A classify pass is kicked off as a fire-and-forget
+        background backfill immediately after, tracked in
+        ``_backfill_tasks`` so :meth:`stop` can cancel/await it.
         """
         if self._cache or not self._resolver:
             return
@@ -271,22 +285,17 @@ class WorktreeDiscoveryCache:
     async def crawl(self, resolver: AgentResolver) -> None:
         """Crawl all eligible agents -- **single-flight**.
 
-        Only one crawl runs at a time. If a crawl is already in flight -- a slow
-        periodic tick overlapping the next, or an on-demand request racing the
-        loop -- this **coalesces** onto it (waits for the running crawl and
-        reuses its freshly-updated cache) instead of spawning a second, duplicate
-        set of ``agent-worktrees list`` subprocesses.
-
-        This is the single-owner-slot guard for the discovery crawl: a slow or
-        stuck ``list`` must never be answered by kicking *more* ``list``
-        processes (the owner-tethered spawn discipline -- see the
-        ``process-slot-ownership`` effort). Each individual ``list`` is still
-        bounded by ``_CMD_TIMEOUT``; this bounds their **concurrency** to one.
+        Only one crawl runs at a time; an overlapping caller (a slow
+        periodic tick, an on-demand request) coalesces onto the running
+        crawl instead of spawning a second, duplicate set of
+        ``agent-worktrees list`` subprocesses (the owner-tethered spawn
+        discipline -- see the ``process-slot-ownership`` effort). Each
+        individual ``list`` is still bounded by ``_CMD_TIMEOUT``; this
+        bounds their **concurrency** to one.
         """
         if self._crawl_lock.locked():
-            # A crawl is in flight -- wait for it and reuse its result rather than
-            # starting an overlapping one. (Acquiring then immediately releasing
-            # serializes behind the running crawl without doing a second one.)
+            # A crawl is in flight -- wait for it and reuse its result
+            # rather than starting an overlapping one.
             async with self._crawl_lock:
                 return
         async with self._crawl_lock:
@@ -295,11 +304,10 @@ class WorktreeDiscoveryCache:
     async def _do_crawl(self, resolver: AgentResolver, *, classify: bool = True) -> None:
         """Crawl all eligible agents concurrently (the actual work).
 
-        Callers hold ``_crawl_lock`` around this, so at most one crawl's worth of
-        ``list`` subprocesses is ever in flight. ``classify=False`` is the fast,
-        bounded first-paint pass (:meth:`crawl_if_empty`); ``classify=True`` is
-        the periodic loop and the background backfill, both of which can afford
-        the longer classify budget without blocking a synchronous caller.
+        Callers hold ``_crawl_lock`` around this, so at most one crawl's
+        worth of ``list`` subprocesses is ever in flight. ``classify=False``
+        is the fast, bounded first-paint pass (:meth:`crawl_if_empty`);
+        ``classify=True`` is the periodic loop and the background backfill.
         """
         eligible = [
             (name, cfg) for name, cfg in resolver.agents.items()
@@ -336,10 +344,10 @@ class WorktreeDiscoveryCache:
     ) -> list[_WorktreeEntry]:
         """List worktrees for a single agent via subprocess or SSH.
 
-        ``classify=False`` skips ``--classify`` entirely (a single legacy call
-        bounded by the base ``_CMD_TIMEOUT``) -- used for the fast, blocking
-        first-paint crawl (:meth:`WorktreeDiscoveryCache.crawl_if_empty`) so a
-        synchronous caller is never exposed to the longer classify budget.
+        ``classify=False`` skips ``--classify`` entirely (a single legacy
+        call bounded by ``_CMD_TIMEOUT``) -- used for the fast, blocking
+        first-paint crawl so a synchronous caller is never exposed to the
+        longer classify budget.
         """
         if not config.project:
             return []
@@ -378,26 +386,19 @@ class WorktreeDiscoveryCache:
             return _parse_worktree_list(raw, agent_name)
 
         # worktree-finality-and-obligations (Phase 5): --classify is included
-        # so the crawl carries the canonical closure descriptor (label,
-        # held-claim/follow-up counts, action disposition) through to the
-        # cockpit projection. Two safety nets, both mirroring the Picker's own
-        # (``picker_tui.data_ssh``) classify handling so a slow/old target
-        # never loses discovery entirely:
+        # so the crawl carries the canonical closure descriptor through to
+        # the cockpit projection. Two safety nets so a slow/old target never
+        # loses discovery entirely:
         #   1. a longer, classify-specific timeout budget (the extra ~5 git
-        #      calls per worktree can genuinely exceed the base
-        #      _CMD_TIMEOUT on a large/slow target) -- a timeout here falls
-        #      back to the legacy (unclassified) call rather than dropping
-        #      the whole crawl to []. Only reachable from the periodic loop
-        #      or the background backfill (never the blocking first paint --
-        #      see ``classify=False`` above), so this budget never stalls a
-        #      synchronous caller.
-        #   2. an explicit "--classify unrecognized" stderr check -- an older
-        #      agent-worktrees runtime that doesn't support the flag falls
-        #      back the same way, instead of _exec's generic nonzero-exit
-        #      handling silently emptying the cache for that agent. The
+        #      calls per worktree can exceed the base _CMD_TIMEOUT) -- a
+        #      timeout here falls back to the legacy (unclassified) call
+        #      rather than dropping the whole crawl to []. Only reachable
+        #      from the periodic loop/backfill, never the blocking first
+        #      paint (see ``classify=False`` above).
+        #   2. an explicit "--classify unrecognized" stderr check -- an
+        #      older agent-worktrees runtime falls back the same way. The
         #      verdict is cached per agent (``_classify_unsupported``) so a
-        #      long-lived bridge daemon probes a permanently-old runtime
-        #      exactly once, not on every periodic sweep.
+        #      long-lived daemon probes a permanently-old runtime once.
         classify_args = ["list", "--json", "--mux-details", "--classify"]
 
         raw, stderr = await _run(classify_args, timeout=_CLASSIFY_CMD_TIMEOUT)
@@ -477,12 +478,12 @@ async def _run_local_ex(
 
 
 def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
-    """Check if an SSH host alias resolves to the local machine AND environment.
+    """Check if an SSH host alias resolves to the local machine AND platform.
 
-    Returns True only when the SSH alias points to the same machine key
-    AND the same platform (wsl/windows/linux) as the one we're running on.
-    This avoids treating a Windows agent as "local" when running on WSL
-    (or vice versa), even though they share the same physical machine.
+    Returns True only when the alias points to the same machine key AND
+    the same platform (wsl/windows/linux) we're running on -- avoids
+    treating a Windows agent as "local" when running on WSL (or vice
+    versa), even though they share the same physical machine.
     """
     if not ssh_host:
         return True
@@ -494,20 +495,18 @@ def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
     from ..agent_registry import _detect_local_machine
     machine, platform = _detect_local_machine(resolver.machines)
     if not machine:
-        # If we can't identify our own machine, only match exact hostname
+        # Can't identify our own machine -- only match exact hostname.
         return host_lower == hostname
 
-    # Check if the SSH alias matches any alias for the local machine's
-    # environments — but only the environment matching our platform
+    # Match the SSH alias against the local machine's environments, but
+    # only the environment matching our platform.
     for env in machine.ssh_environments:
         if env.alias and env.alias.lower() == host_lower:
-            # Alias matches — is it our platform?
             return env.name == platform
 
-    # Direct hostname match only if we can't resolve via aliases
     if host_lower == hostname or host_lower == machine.key.lower():
-        # Ambiguous — could be any environment. Only treat as local
-        # if there's exactly one environment and it matches our platform.
+        # Ambiguous -- only treat as local if exactly one environment
+        # matches our platform.
         matching = [e for e in machine.ssh_environments if e.name == platform]
         return len(matching) == 1
 
@@ -617,9 +616,8 @@ async def _exec_ex(
 
 def _kill_process_tree(proc: asyncio.subprocess.Process | None) -> None:
     """SIGKILL the child *and its process group* so no grandchild (e.g. a
-    per-worktree mux probe) orphans and keeps pinning a core -- the #4439
-    accumulation failure mode. Falls back to killing just the child where
-    process groups aren't available (Windows). Best-effort; never raises.
+    mux probe) orphans and keeps pinning a core (#4439). Falls back to
+    the child alone where process groups aren't available. Never raises.
     """
     if proc is None or proc.returncode is not None:
         return
@@ -804,21 +802,16 @@ async def _start_fresh_worktree_session(
     prior bridge session (#1683), or None if it can't be resolved/started.
 
     Resolves the worktree's owning agent + on-disk path from the discovery
-    cache, builds the agent's spawn target scoped to that worktree directory
-    (the same shape a session-roll / new-owned-chat uses), and spawns. This
-    keeps "take over a worktree whose interactive Copilot never persisted a
-    session" working instead of 404-ing after the mux Copilot was already
-    killed.
+    cache and spawns a target scoped to that worktree directory -- keeps
+    "take over a worktree whose interactive Copilot never persisted a
+    session" working instead of 404-ing after the mux Copilot was killed.
 
-    Serialized on a per-worktree lock and re-checked under it: local/SSH
-    worktree targets are **not** hard-guarded by the SessionManager
-    (``_workspace_key`` returns None), so without this two concurrent resumes
-    could each spawn a second owned controller in the same worktree. Returns the
-    new (or raced-in) ``Session``, or None when the worktree is unknown / the
-    agent is unresolvable (the caller then 404s). Raises ``HTTPException`` 409
-    when a live CLI raced in during discovery (the same ``live_cli_holds_worktree``
-    shape as the top-of-resume guard) and 502/503 on an actual spawn failure, so
-    a failed start is not misreported as a healthy 200 or a not-found.
+    Serialized on a per-worktree lock (local/SSH targets aren't hard-guarded
+    by the SessionManager) so two concurrent resumes can't each spawn a
+    second owned controller. Returns the new (or raced-in) ``Session``, or
+    None when the worktree/agent is unresolvable (caller then 404s). Raises
+    ``HTTPException`` 409 on a raced-in live CLI and 502/503 on spawn
+    failure.
     """
     if mgr is None:
         return None
@@ -946,17 +939,15 @@ async def resume_worktree(
       still exists on disk.  This keeps "open existing worktree" robust.
 
     **Atomic ownership guard (#2879).** Before resuming, if a *fresh* live
-    interactive Copilot CLI already holds this worktree, refuse to resume it as
-    an OWNED ACP session and return **409** with a structured
+    interactive Copilot CLI already holds this worktree, refuse to resume it
+    as an OWNED ACP session and return **409** with a structured
     ``reason: live_cli_holds_worktree`` -- owning it would spawn a second
     ``copilot`` child on the same worktree and the two would contend (every
-    prompt then returns "Operation cancelled by user"). This is the race-free
-    enforcement of the one-ACP-controller invariant that a consumer's
-    best-effort represent-if-live preflight cannot guarantee (a CLI that
-    registers between the consumer's check and this call still loses the race
-    client-side, but not here). ``reclaim=true`` (take-over) bypasses the guard:
-    the caller has just terminated the interactive CLI and intends to own the
-    freed worktree, so a not-yet-reaped ``live`` row must not block it.
+    prompt then returns "Operation cancelled by user"). This is the
+    race-free enforcement of the one-ACP-controller invariant that a
+    consumer's best-effort represent-if-live preflight cannot guarantee.
+    ``reclaim=true`` (take-over) bypasses the guard: the caller has just
+    terminated the interactive CLI and intends to own the freed worktree.
 
     Returns 404 if the worktree has no session at all.
     """
@@ -1075,16 +1066,14 @@ async def handoff_worktree(
 ) -> SessionInfo:
     """Hand a worktree's current session off to a fresh successor in place.
 
-    Worktree-level convenience verb -- the mobile-friendly path: a UI consumer
-    that only knows the worktree handle (no session id, and no ``/new`` or
-    ``/clear`` affordance) can request an in-place changeover. Resolves the
-    worktree's current (most-recently-updated) session and hands it off; the
-    returned successor is the worktree's new current session, so a consumer
-    following the worktree follows the baton automatically.
+    Worktree-level convenience verb: a UI consumer that only knows the
+    worktree handle (no session id, no ``/new``/``/clear`` affordance) can
+    request an in-place changeover. Resolves the worktree's current
+    session and hands it off; the returned successor becomes the
+    worktree's new current session.
 
-    Errors: 404 (no session for the worktree), 409 (single-checkout agent or
-    mid-turn), 502 (successor failed to spawn -- predecessor retained), 503
-    (draining).
+    Errors: 404 (no session), 409 (single-checkout agent or mid-turn), 502
+    (successor failed to spawn -- predecessor retained), 503 (draining).
     """
     from .sessions import _session_info
 
@@ -1243,6 +1232,17 @@ async def _owning_agent(
             if config is not None:
                 return agent_name, config
 
+    return await cache.probe_archived(worktree_id, resolver)
+
+
+async def _probe_archived_owner(
+    worktree_id: str, resolver: AgentResolver,
+) -> tuple[str, AgentConfig] | None:
+    """Fan an archived-record probe across every eligible agent.
+
+    Only ever called single-flight via :meth:`WorktreeDiscoveryCache.
+    probe_archived` -- never call directly from a route.
+    """
     eligible = [
         (name, cfg) for name, cfg in resolver.agents.items()
         if cfg.project and cfg.worktree_discovery

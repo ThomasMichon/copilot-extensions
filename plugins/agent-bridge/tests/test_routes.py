@@ -1683,6 +1683,47 @@ class TestWorktreeRoutes:
         assert data["agent_name"] == "test-agent"
         assert data["sessions"][0]["id"] == "s1"
 
+    @pytest.mark.asyncio
+    async def test_archive_probe_single_flight_coalesces_concurrent_lookups(
+        self,
+    ) -> None:
+        # review r4056857325: concurrent callers for the same archived
+        # worktree_id must share one in-flight probe (an N-agent
+        # subprocess/SSH fan-out), not each trigger their own -- the same
+        # stampede _crawl_lock prevents for the main discovery crawl.
+        import asyncio as _asyncio
+
+        from agent_bridge.agent_registry import AgentConfig, AgentResolver
+        from agent_bridge.routes import worktrees as wt_routes
+
+        wt_id = "anomalous-potato-wsl-20250101-194500-coalesce"
+        resolver = AgentResolver(
+            agents={"test-agent": AgentConfig(name="test-agent", project="test-chamber")},
+            machines={},
+        )
+        call_count = 0
+
+        async def _slow_run_for_agent(agent_name, config, resolver, args):
+            nonlocal call_count
+            call_count += 1
+            await _asyncio.sleep(0.05)
+            return '{"worktrees": [{"id": "%s", "status": "archived"}]}' % wt_id
+
+        cache = wt_routes.WorktreeDiscoveryCache()
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=_slow_run_for_agent,
+        ):
+            results = await _asyncio.gather(
+                cache.probe_archived(wt_id, resolver),
+                cache.probe_archived(wt_id, resolver),
+                cache.probe_archived(wt_id, resolver),
+            )
+
+        assert call_count == 1, "concurrent probes for the same id must coalesce"
+        assert all(r == ("test-agent", resolver.agents["test-agent"]) for r in results)
+        assert wt_id not in cache._archive_probe_inflight
+
     def test_get_worktree_session_transcript_proxies(self, client, app) -> None:
         from unittest.mock import AsyncMock, patch
 
