@@ -60,10 +60,21 @@ rule for a file it does consider, and it is meaningless (and rejected) with
 ``--refresh-baseline``, whose whole job is auditing the *entire* tree's
 baseline, never a PR's own diff scope.
 
+**Exception: a diff that touches the baseline JSON itself always falls back
+to the full, unscoped sweep**, regardless of ``--changed-since``. The
+baseline records the ceiling invariant for the *whole* tree, not just the
+``*.py`` files a diff's file list would name -- scoping around a baseline
+edit could let a lowered/removed ceiling silently pass here (nothing else in
+the diff touched the now-over-ceiling file) only to fail the very next
+full-tree sweep on ``main``. A baseline-editing PR is therefore evaluated
+against every tracked module, exactly like a plain, flagless invocation.
+
 Usage::
 
     python tools/check-module-size.py                  # enforce (pre-push/CI push/dispatch)
-    python tools/check-module-size.py --changed-since REF  # enforce, PR-diff-scoped (CI pull_request)
+    python tools/check-module-size.py --changed-since REF  # enforce, PR-diff-scoped (CI pull_request);
+                                                             # falls back to a full sweep if REF's diff
+                                                             # touches tools/module-size-baseline.json
     python tools/check-module-size.py --refresh-baseline  # tighten after shrinking a file
     python tools/check-module-size.py --refresh-baseline --allow-widen  # post-merge only; see above
 

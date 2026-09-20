@@ -582,7 +582,12 @@ binstub in `~/.local/bin/`.
   volume otherwise let one already-merged PR's growth in a shared,
   already-baselined module fail every *other* PR's guard until the widen job
   caught up, even ones that never opened that file; `--changed-since` fixes
-  the attribution, not the underlying growth. Test files (`tests/`, `test_*.py`,
+  the attribution, not the underlying growth. It falls back to a full,
+  unscoped sweep whenever the diff itself touches
+  `tools/module-size-baseline.json` — a baseline edit changes the ceiling
+  invariant for the whole tree, not just the files a diff's own file list
+  would name, so it is always checked against every module, exactly like a
+  plain, flagless invocation. Test files (`tests/`, `test_*.py`,
   `conftest.py`) are exempt — `TESTING.md` already directs splitting those by
   behavioral contract, not arbitrary line count, a different rule for a
   different failure mode.

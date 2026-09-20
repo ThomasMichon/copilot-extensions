@@ -234,7 +234,12 @@ unnoticed, without demanding an immediate rewrite of every legacy file.
 Enforcement must attribute growth to whichever change actually caused it, never
 to an uninvolved bystander: a PR is checked only against the files its own
 diff touches, so it is never blocked by another, already-merged PR's growth in
-a file it never opened. Organic, cumulative drift that no single small PR
+a file it never opened. The one exception is a diff that edits the ceiling
+data itself: because that changes the invariant for the whole tree, not just
+whichever files its own diff otherwise names, it is always checked in full,
+never scoped — attribution-by-diff is a narrowing convenience for ordinary
+changes, not a way to let a ceiling edit go unverified against the modules it
+governs. Organic, cumulative drift that no single small PR
 caused — several individually-reasonable contributions summing past a
 ceiling over time — is a distinct failure mode from a single PR dumping an
 oversized module into the tree; it is swept up and remediated by a dedicated,
