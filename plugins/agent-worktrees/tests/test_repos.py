@@ -637,6 +637,58 @@ def test_add_repo_pin_failure_never_raises(home: Path, tmp_path: Path):
     assert repos.read_registry().repos["still-registers"].name == "still-registers"
 
 
+# --- clone_repo injects cross-account auth before the pin exists ------------
+
+
+def test_clone_repo_injects_auth_args_into_initial_clone(home: Path, tmp_path: Path):
+    """The repo-local credential pin only exists *after* add_repo runs, which
+    is after the clone -- a private repo owned by a different account than
+    gh's active one needs a one-shot override on the clone itself."""
+    home_srcroot = tmp_path / "src"
+    repos.set_srcroot(str(home_srcroot), plat="windows")
+    captured: dict[str, list] = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        (Path(argv[-1])).mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with patch("agent_worktrees.repos._current_platform", return_value="windows"), \
+         patch("agent_worktrees.repos.subprocess.run", side_effect=fake_run), \
+         patch(
+             "agent_worktrees.git_ops._auth_config_args_for_url",
+             return_value=["-c", "http.extraheader=AUTHORIZATION: basic FAKE"],
+         ):
+        entry = repos.clone_repo("https://github.com/example-operator/cloned.git")
+
+    assert entry is not None
+    argv = captured["argv"]
+    assert argv[0] == "git"
+    assert "-c" in argv and "http.extraheader=AUTHORIZATION: basic FAKE" in argv
+    assert argv[argv.index("clone")] == "clone"
+
+
+def test_clone_repo_no_extra_args_for_same_account(home: Path, tmp_path: Path):
+    home_srcroot = tmp_path / "src"
+    repos.set_srcroot(str(home_srcroot), plat="windows")
+    captured: dict[str, list] = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        (Path(argv[-1])).mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with patch("agent_worktrees.repos._current_platform", return_value="windows"), \
+         patch("agent_worktrees.repos.subprocess.run", side_effect=fake_run), \
+         patch("agent_worktrees.git_ops._auth_config_args_for_url", return_value=[]):
+        repos.clone_repo("https://github.com/example-operator/cloned2.git")
+
+    assert captured["argv"] == [
+        "git", "clone", "https://github.com/example-operator/cloned2.git",
+        str(home_srcroot / "cloned2"),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Git hygiene: status + sync
 # ---------------------------------------------------------------------------

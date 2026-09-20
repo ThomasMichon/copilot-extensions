@@ -221,6 +221,20 @@ class TestCrossAccountAuth:
         expected = base64.b64encode(b"x-access-token:ghp_secret").decode()
         assert args[1] == f"http.extraheader=AUTHORIZATION: basic {expected}"
 
+    def test_auth_args_for_url_injects_before_any_checkout_exists(self, monkeypatch):
+        """The URL-based variant backs the initial 'git clone' itself, which
+        runs before any repo/remote exists for _auth_config_args's
+        cwd-based remote-name lookup to resolve."""
+        import base64
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "DifferentUser")
+        monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: "ghp_secret")
+        args = go._auth_config_args_for_url("https://github.com/Owner/r.git")
+        expected = base64.b64encode(b"x-access-token:ghp_secret").decode()
+        assert args == ["-c", f"http.extraheader=AUTHORIZATION: basic {expected}"]
+
+    def test_auth_args_for_url_empty_for_non_github(self, monkeypatch):
+        assert go._auth_config_args_for_url("https://gitlab.com/o/r.git") == []
+
     def test_auth_args_empty_when_owner_is_active_account(self, monkeypatch):
         """#900: when the repo owner *is* the active gh account, skip injection
         so the working credential helper isn't overridden by a possibly
@@ -397,6 +411,49 @@ class TestPinGitCredential:
         monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
         assert go.pin_git_credential(tmp_path, "") is False
         assert go.pin_git_credential(tmp_path, "someone", host="") is False
+
+    @pytest.mark.parametrize("login", [
+        "o'neil",  # single quote breaks out of the helper's '<login>' quoting
+        "a`whoami`",
+        "a$(whoami)",
+        "a; rm -rf /",
+        "a b",
+        "a\nb",
+    ])
+    def test_noop_when_login_has_unsafe_characters(
+        self, tmp_path: Path, monkeypatch, login: str,
+    ):
+        """The helper is a ``!``-prefixed shell script; login/host are never
+        escaped, only allowlisted -- an unsafe character must be rejected
+        outright rather than risk a shell-injected credential helper."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+        assert go.pin_git_credential(repo, login) is False
+
+    @pytest.mark.parametrize("host", ["gh;evil.com", "gh evil.com", "gh$(x).com"])
+    def test_noop_when_host_has_unsafe_characters(
+        self, tmp_path: Path, monkeypatch, host: str,
+    ):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+        assert go.pin_git_credential(repo, "someone", host=host) is False
+
+    def test_allows_underscore_login(self, tmp_path: Path, monkeypatch):
+        """EMU-mapped logins in this codebase use underscores (e.g.
+        'tmichon_microsoft'), which is not a real GitHub username character
+        but must still be allowed -- only shell metacharacters are rejected."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
 
     def test_noop_when_gh_unavailable(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr(go.shutil, "which", lambda _: None)

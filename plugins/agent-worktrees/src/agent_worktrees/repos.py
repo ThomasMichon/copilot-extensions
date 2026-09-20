@@ -681,10 +681,20 @@ def clone_repo(
         # Still register it
         return add_repo(name, target, remote=remote)
 
-    # Clone
+    # Clone. A private repo owned by a different account than gh's currently
+    # active one would otherwise 403/404 on this very first fetch -- the
+    # repo-local credential pin add_repo installs below only exists *after*
+    # a successful clone, so inject the same one-shot cross-account auth
+    # override the fetch/push paths use, resolved directly from the clone
+    # URL (there is no checked-out remote yet to resolve a name against).
+    try:
+        from . import git_ops
+        extra_args = git_ops._auth_config_args_for_url(remote)
+    except Exception:
+        extra_args = []
     try:
         result = subprocess.run(
-            ["git", "clone", remote, str(target_path)],
+            ["git", *extra_args, "clone", remote, str(target_path)],
             capture_output=True,
             text=True,
             timeout=300,

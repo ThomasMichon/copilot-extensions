@@ -1067,11 +1067,16 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
     account.
 
     No-ops (returns ``False``, never raises) when ``repo_path`` is not a git
-    working directory, ``login``/``host`` is empty, or ``gh`` is not on
-    ``PATH`` -- callers treat this as a best-effort convenience, not a
-    required step.
+    working directory, ``login``/``host`` is empty or contains a character
+    outside ``[A-Za-z0-9_.-]`` (the helper is a ``!``-prefixed shell script;
+    a stray quote/backtick/``$``/separator in either would either break the
+    single-quoting around ``login`` or inject a command that runs whenever
+    git invokes this helper -- reject rather than attempt to escape), or
+    ``gh`` is not on ``PATH`` -- callers treat this as a best-effort
+    convenience, not a required step.
     """
-    if not login or not host:
+    _safe = re.compile(r"^[A-Za-z0-9_.-]+$")
+    if not login or not host or not _safe.match(login) or not _safe.match(host):
         return False
     path = Path(repo_path)
     if not path.is_dir() or shutil.which("gh") is None:
@@ -1194,6 +1199,32 @@ def list_gh_accounts() -> list[str]:
     return seen
 
 
+def _auth_config_args_for_url(url: str) -> list[str]:
+    """Build ``-c http.extraheader=...`` args to auth as ``url``'s owner.
+
+    The URL-based core of :func:`_auth_config_args`, usable *before* a repo
+    exists (e.g. the initial ``git clone`` -- there is no checked-out remote
+    to resolve a name against yet). See :func:`_auth_config_args` for the
+    full cross-account rationale and the same-account skip.
+    """
+    owner = _parse_github_owner(url)
+    if not owner:
+        return []
+    try:
+        from . import repos
+        account = repos.account_for_github_owner(owner) or owner
+    except Exception:
+        account = owner
+    active = _active_gh_account()
+    if active and active.casefold() == account.casefold():
+        return []
+    token = _gh_token_for_owner(account)
+    if not token:
+        return []
+    cred = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return ["-c", f"http.extraheader=AUTHORIZATION: basic {cred}"]
+
+
 def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:
     """Build ``-c http.extraheader=...`` args to auth as the remote's owner.
 
@@ -1212,25 +1243,7 @@ def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:
     url = _remote_url(remote, cwd=cwd)
     if not url:
         return []
-    owner = _parse_github_owner(url)
-    if not owner:
-        return []
-    # Honor an explicit repos.yaml ``account:`` override (owner != account is
-    # possible for EMU accounts spanning orgs); absent an override the account
-    # *is* the owner, preserving the derive-from-owner behavior (#29).
-    try:
-        from . import repos
-        account = repos.account_for_github_owner(owner) or owner
-    except Exception:
-        account = owner
-    active = _active_gh_account()
-    if active and active.casefold() == account.casefold():
-        return []
-    token = _gh_token_for_owner(account)
-    if not token:
-        return []
-    cred = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-    return ["-c", f"http.extraheader=AUTHORIZATION: basic {cred}"]
+    return _auth_config_args_for_url(url)
 
 
 def ref_exists(ref: str, *, cwd: str | Path) -> bool:
