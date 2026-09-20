@@ -71,10 +71,10 @@ Only exact JSON
 effort. `{}`, malformed output, an unavailable checkout, and a remote-only
 target keep orchestration host-owned. The probe reads the target's bounded
 adoption data and Git root only; it does not execute target code or infer
-capability from a repository name. If target-owned placement is explicitly
-selected, use one canonical target-local effort with one-way references from
-host efforts. Multiple hosts join that target effort rather than creating
-cyclic or drifting peer copies.
+capability from a repository name. `planning-efforts` (and its
+`references/efforts.md`) owns the resulting placement decision -- the three
+placement models, the one-way-reference rule, and the no-drifting-copies
+guarantee -- follow it rather than duplicating that decision here.
 
 ## Orient before you crawl -- the root `AGENTS.md` is the map
 
@@ -190,16 +190,20 @@ A target repo can require a different git/gh identity, remote host, and
 contribution policy than the one you're already using. Never reuse your home
 repo's account or assume ambient `gh auth` applies:
 
-- **Account** -- `<agent-worktrees catalog argv[0]> repos account-for <owner|owner/name>` prints the
-  resolved `gh` login for that repo (explicit `account:` -> `account_map` ->
-  the remote owner itself -> none/ambient); route every `gh`/API call for it
-  through `<agent-worktrees catalog argv[0]> repos gh <owner|owner/name> -- <args>`, never a bare `gh
-  <cmd>` or a machine-global `gh auth switch`. `related resolve` surfaces the
-  same resolved account (`explicit` vs `derived`) alongside the class/locus
-  facts above.
-- **Source/host** -- a target may live on a different host or provider
-  (GitHub, Gitea, Azure DevOps) than your home repo; `repos find` /
-  `related resolve` name it, don't infer it from habit.
+- **Account -- GitHub targets only.** `<agent-worktrees catalog argv[0]> repos
+  account-for <owner|owner/name>` prints the resolved `gh` login for a GitHub
+  repo (explicit `account:` -> `account_map` -> the remote owner itself ->
+  none/ambient); route every `gh`/API call for it through
+  `<agent-worktrees catalog argv[0]> repos gh <owner|owner/name> -- <args>`,
+  never a bare `gh <cmd>` or a machine-global `gh auth switch`. A non-GitHub
+  remote (Gitea, Azure DevOps) resolves **no** account through this path --
+  `related resolve` still surfaces the resolved account (`explicit` vs
+  `derived`) when one applies, alongside the class/locus facts above.
+- **Source/host** -- check the registry entry's actual `remote` (via
+  `<agent-worktrees catalog argv[0]> repos list` / the repo's `repos.yaml`
+  entry) before assuming a target is on GitHub and the account commands above
+  apply -- `repos find`/`related resolve` name the local path and class, not
+  the provider; don't infer either from habit.
 - **Policy** -- both the PR flow (`get pr-profile`, below) *and* the target's
   own **issue tracker and coordination convention** are repo-specific. Before
   filing a bug or claiming work, read the target's `CONTRIBUTING.md`/`AGENTS.md`
