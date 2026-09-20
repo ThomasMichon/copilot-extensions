@@ -254,6 +254,36 @@ addition, not a replacement, of the config-shape check above.
   does not silently fall back to `false` either — surface this as a
   config validation error so the gap is caught at config-load time, not
   discovered via a leaked marker).
+- [ ] **Persist `codename_source` through serialization** (round-9
+  finding): `WorktreeRecord` is manually round-tripped through YAML, not
+  via a generic dataclass (de)serializer — `tracking.load_record` parses
+  known keys explicitly (`tracking.py`'s `codename=(str(data["codename"])
+  if data.get("codename") else None)`) and `save_record`'s content-builder
+  emits each field explicitly (`if record.codename: content +=
+  f"codename: ..."`). Adding the dataclass field alone does **not**
+  persist it — add a matching explicit parse line in `load_record` and a
+  matching explicit emit line in `save_record`'s content-builder,
+  following the exact same only-emit-when-set pattern the `codename` field
+  itself uses (so a legacy YAML file with no `codename_source` line
+  parses to `None`, not a crash or a silently-wrong default).
+- [ ] **Set `codename_source` at every codename-assignment call site**, not
+  just one: (a) the normal `create` path (`__main__.py`'s
+  `codename_tracking.assign_new_codename` call feeding
+  `create_new_record`'s `codename=` kwarg, ~line 2268); (b) the paired
+  knowledge-repo `create` path (`__main__.py`'s separate
+  `knowledge_codename = codename_tracking.assign_new_codename(...)` call
+  feeding its own `codename=` kwarg, ~line 1948 — a distinct code path
+  from (a), easy to miss); (c) the lazy backfill path
+  (`codename_tracking.ensure_codename`, called from `__main__.py`'s
+  resume/status backfill and `pr_ops.py`'s create-PR path). Each site must
+  compute `codename_source` from `wordlist_for_repo`/the repo's
+  `codename.wordlist_path` config at THAT call's own moment, not share a
+  value computed elsewhere.
+- [ ] **Round-trip test**: assign a codename (setting `codename_source`),
+  `save_record`, `load_record` the same file back, assert
+  `codename_source` survives unchanged — proving the serialization wiring
+  above actually persists the field rather than just existing on the
+  in-memory dataclass.
 - [ ] **Implement per-record codename provenance** (the legacy-record gap
   from Context): add a `codename_source` field (`"built-in"` or
   `"custom"`) to `WorktreeRecord`, populated once at codename-assignment
@@ -381,6 +411,17 @@ addition, not a replacement, of the config-shape check above.
 - [ ] Unit: an existing `WorktreeRecord` with no `codename_source` recorded
   (predates this effort) is treated as `"custom"` (fails closed) until the
   backfill migration runs — never silently treated as `"built-in"`.
+- [ ] Round-trip (round-9 finding): assign a codename with a known
+  `codename_source`, `save_record` it, `load_record` it back, assert
+  `codename_source` is unchanged — proving the manual YAML
+  serialize/deserialize wiring actually persists the field (a dataclass
+  field alone is not sufficient given `WorktreeRecord`'s hand-rolled YAML
+  round-trip).
+- [ ] Unit (round-9 finding): each of the three codename-assignment call
+  sites — normal `create`, paired knowledge-repo `create`, and lazy
+  backfill (`ensure_codename`) — sets `codename_source` correctly from
+  that call's own config read; a regression in any ONE site (e.g. the
+  knowledge-repo path alone) is caught, not just the aggregate behavior.
 - [ ] Unit: `_parse_pr` with an absent `source_attribution` key (both
   "`pr:` block present, key omitted" and "`pr:` block entirely absent")
   parses to `"codename"`, not `False`.
@@ -512,3 +553,24 @@ _Pending._
   publication correctly). Added a matching backfill-migration item: a
   record with no `codename_source` (predates this field) must be treated
   as `"custom"` (fail closed) by default, never silently treated as safe.
+
+### 2026-09-20 — Plan-review round 9 fixes
+
+- Round 8's `codename_source` fix was itself flagged as underspecified:
+  `WorktreeRecord` is manually round-tripped through hand-rolled YAML
+  parsing/emission (`tracking.load_record`/`save_record`'s explicit
+  per-field content-builder), not a generic dataclass serializer — adding
+  the field to the dataclass alone would not persist it across a
+  save/load cycle, silently losing provenance on the very next write.
+  Checked the actual source and confirmed three distinct codename-
+  assignment call sites (normal `create`, a separate paired
+  knowledge-repo `create` path, and lazy backfill via `ensure_codename`),
+  each of which would need to set the new field independently.
+- Added explicit plan items covering: (1) the matching manual
+  parse/emit lines in `load_record`/`save_record`, following the exact
+  only-emit-when-set pattern the `codename` field itself already uses;
+  (2) setting `codename_source` at all three assignment call sites,
+  named explicitly so none is missed; (3) a dedicated round-trip test
+  (assign → save → load → assert unchanged) plus a per-call-site test,
+  rather than relying on the existing provenance tests to catch a
+  serialization gap they don't actually exercise.
