@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "851dfca5a0982a97eff672865648f9cbf0318229",
-    "plugin_version": "0.4.0-dev500",
+    "commit": "30601bc4cbbe82c9f8e42a6c4d507a93a11cf892",
+    "plugin_version": "0.4.0-dev502",
     "protocol_generation": 15,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
-    "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
-    "source_sha256": "729566b0f8865493b91ffcc9ef61a7d4f375c279695f14f05564146f0a00be29"
+    "source_git_blob": "597419228aa8d66fc18d954aa8e889c303ecec86",
+    "source_sha256": "79e82a170d622cfee1ea52d1aee4c43da39dd7581433fb7a802d616d4c47e099"
   },
   "request": {
     "method": "GET",
@@ -16,7 +16,7 @@
     "json": {
       "status": "ok",
       "service": "agent-bridge",
-      "version": "0.4.0-dev500",
+      "version": "0.4.0-dev502",
       "ready": false,
       "topology_ready": false,
       "credential_relay_ready": false,
@@ -32,6 +32,19 @@
         "active_subscriptions": 0,
         "queued_frames": 0,
         "buffered_bytes": 0
+      },
+      "slot": {
+        "pid": 0,
+        "role": "unknown",
+        "active": null,
+        "previous": null,
+        "self_retire": {
+          "enabled": false,
+          "armed": false,
+          "generation": null,
+          "superseded": false,
+          "confirms": 0
+        }
       }
     }
   }

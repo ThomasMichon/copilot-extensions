@@ -99,7 +99,7 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
     }
 
 
-def test_health_fixture_matches_route_serialization(monkeypatch) -> None:
+def test_health_fixture_matches_route_serialization(tmp_path, monkeypatch) -> None:
     fixture = _fixture("fixtures/http/current/health.json")
     expected = fixture["response"]["json"]
 
@@ -109,6 +109,12 @@ def test_health_fixture_matches_route_serialization(monkeypatch) -> None:
 
     monkeypatch.setattr(health_route, "__version__", expected["version"])
     monkeypatch.setattr(health_route, "get_default_manager", CarrierManager)
+    # slot_descriptor reads the routing table via config_dir() -- point it at
+    # an empty directory so the fixture's "slot" value is deterministic
+    # (no routing table anywhere -> role "unknown", active/previous None)
+    # rather than depending on whatever real ~/.agent-bridge happens to hold
+    # on the machine running the test.
+    monkeypatch.setattr(health_route, "config_dir", lambda: tmp_path / "no-routing")
     request = SimpleNamespace(
         app=SimpleNamespace(
             state=SimpleNamespace(
@@ -118,7 +124,15 @@ def test_health_fixture_matches_route_serialization(monkeypatch) -> None:
             )
         )
     )
-    assert asyncio.run(health_route.health(request)) == expected
+    actual = asyncio.run(health_route.health(request))
+    # "slot"."pid" is this test process's real pid (slot_descriptor calls
+    # os.getpid() directly) -- not fixture-comparable byte-for-byte. Verify it
+    # separately, then compare the rest of "slot" (and the whole body) exactly.
+    actual_slot = actual.pop("slot")
+    expected_slot = expected.pop("slot")
+    assert isinstance(actual_slot["pid"], int)
+    assert actual_slot == {**expected_slot, "pid": actual_slot["pid"]}
+    assert actual == expected
 
 
 @pytest.mark.parametrize(
