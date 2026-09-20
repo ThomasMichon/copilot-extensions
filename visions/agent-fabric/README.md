@@ -665,7 +665,7 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   agent is the same in a CodeSpace or a local container;
   [remote-interactive-sessions](../remote-interactive-sessions/README.md) — how a
   human-attended, muxed session in a remote venue becomes a first-class peer of a
-  local one, bound to its Session Host by explicit cwd-keyed discovery rather than
+  local one, bound through explicit worktree-keyed reservation rather than
   ambient self-registration;
   [host-resource-providers](../host-resource-providers/README.md) — how any plugin
   registers a named, locally-reachable capability a coordinated session can

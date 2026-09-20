@@ -281,7 +281,7 @@ continuation.
 - Remote venue extension:
   [remote-interactive-sessions](../remote-interactive-sessions/README.md) — how
   a Session-host-provider's mechanics extend into a remote venue via a CLI mode
-  bound through explicit cwd-keyed discovery, rather than a parallel execution
+  bound through explicit worktree-keyed reservation, rather than a parallel execution
   protocol.
 
 ## Provenance

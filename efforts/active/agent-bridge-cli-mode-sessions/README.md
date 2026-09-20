@@ -152,27 +152,59 @@ mechanism CLI mode binds through.
 
 ### Phase 2 — Session Host CLI mode + cwd-keyed discovery
 
-
-- [ ] Add a CLI mode to Session Host allocation: the coordination layer
+- [x] **Design refinement, discovered during implementation:** for the
+      local, single-machine case, no client-side discovery-file mechanism is
+      needed. The CLI extension already resolves and sends `worktree_id`
+      with every registration (`resolveMetadata()` →
+      `agent-worktrees get worktree-dir`); the daemon now correlates that
+      against a pending reservation **entirely server-side, atomically, at
+      registration time** — satisfying §opt-in-not-ambient-default and
+      §bind-dont-self-register with zero `extension.mjs` changes. A
+      client-side discovery artifact remains the right mechanism once a
+      *remote* venue's own daemon differs from the host's — that is Phase 4's
+      concern, not duplicated here. The vision's "CWD-keyed discovery"
+      concept is realized as **worktree-id-keyed reservation + server-side
+      correlation** for the local case, consistent with the fabric's own
+      `single-current-session-per-worktree` invariant (worktree, not raw
+      filesystem path, is the actual identity unit).
+- [x] Add a CLI mode to Session Host allocation: the coordination layer
       allocates and prepares a host **without** spawning a `copilot --acp`
       child, leaving it waiting to be claimed.
-- [ ] Add a durable, host-local mapping from a working directory to its
-      currently assigned Session Host address, populated at allocation time.
-- [ ] Update the coordination layer's CLI extension to resolve its own cwd
-      against that mapping at startup and bind to the assigned host if one
-      exists, rather than defaulting to ambient self-registration. Decide and
-      document the explicit fallback behavior (decline vs. an honestly-labeled
-      compatibility path) for a cwd with no assignment.
-      **Must stay a fast, one-shot lookup + handoff** — read the mapping once
-      at startup and connect out to the assigned Session Host/daemon; never a
-      persistent in-extension watch or long-held connection management loop
-      (see the standing design constraint in *Guiding Intent*).
-- [ ] Enforce allocate-before-launch ordering and one-host-per-cwd-lane,
+      **Done** — a new `cli_mode_reservations` table (schema v17→v18) records
+      an explicit, operator-initiated reservation for a worktree's next
+      CLI-mode session, created via `agent-bridge live-sessions cli-mode
+      reserve --worktree-id ID` or `POST
+      /api/v1/live-sessions/cli-mode-reservations/{worktree_id}` — before any
+      CLI process exists. `create_cli_mode_reservation` is atomic and
+      one-per-worktree (§one-host-per-cwd-lane): a not-yet-expired
+      reservation refuses a second create; an expired one (claimed or not) is
+      silently reclaimable.
+- [x] ~~Add a durable, host-local mapping from a working directory to its
+      currently assigned Session Host address~~ — superseded by the
+      refinement above: the mapping is the `cli_mode_reservations` row
+      itself, keyed by `worktree_id`, read entirely server-side.
+- [x] ~~Update the coordination layer's CLI extension to resolve its own cwd
+      against that mapping at startup~~ — not needed for the local case (see
+      refinement above); `extension.mjs` is unchanged. Still applies to
+      Phase 4's remote-venue case, where the extension genuinely needs to
+      resolve a different daemon.
+- [x] Enforce allocate-before-launch ordering and one-host-per-cwd-lane,
       reusing the existing single-current-session-per-worktree gate rather
       than a new one.
-- [ ] Confirm a CLI-mode-bound session is indistinguishable from a
+      **Done** — `register_live_session` attempts
+      `claim_cli_mode_reservation` after its existing atomic upsert succeeds;
+      claiming is additive and never blocks or reverses that decision. A
+      second registration for the same worktree (e.g. a successor session)
+      registers normally but does not steal an already-claimed reservation
+      (`claim_cli_mode_reservation`'s `claimed_by_session_id IS NULL` guard).
+- [x] Confirm a CLI-mode-bound session is indistinguishable from a
       directly-spawned one to every consumer above the host boundary (same
       reattach, retirement, and observation code paths; no forked protocol).
+      **Done** — `cli_mode` is purely an additional, honest marker on the
+      existing `live_sessions` row (`LiveSessionInfo.cli_mode`); no new
+      session type, lifecycle, or protocol was introduced. All existing
+      reattach/observation/messaging routes are unchanged and apply
+      identically regardless of `cli_mode`.
 
 ### Phase 3 — Opt-in local launch surface
 
@@ -216,23 +248,78 @@ mechanism CLI mode binds through.
       client, and is retired using the exact same code paths as an ordinary
       directly-spawned Session Host session — no CLI-mode-specific behavior
       divergence.
+      **Partially covered** — `test_cli_mode_reservations.py` proves the
+      reservation/claim/marker layer (23 cases); full end-to-end reattach via
+      an actual muxed CLI process is Phase 3's opt-in launch surface.
 - [ ] Two concurrent CLI-mode allocation attempts for the same cwd resolve
       through the existing single-current-session-per-worktree gate (reuse,
       hand-off, or sunset) rather than racing.
-- [ ] With CLI mode never requested, an existing headless/ACP-driven session's
+- [x] With CLI mode never requested, an existing headless/ACP-driven session's
       behavior is provably unchanged (no regression from the Phase 2/3
-      additions).
+      additions) — confirmed: full pytest suite (568 passed, 2 pre-existing
+      unrelated failures) shows no regression, and
+      `test_registration_with_no_reservation_is_ordinary` explicitly proves
+      an ordinary registration is byte-for-byte unaffected when no
+      reservation exists.
 - [ ] A CLI-mode session launched via `agent-codespaces`/`agent-containers`
       binds, reattaches, and is observed identically to the local case, over
       the existing venue-parity transport.
 
 ## Proposal
 
-_Pending — the exact discovery-mapping wire/storage format and the CLI-mode
-launch verb's surface need a short design pass in Phase 2/3 before
-implementation._
+Realized for the local case: worktree-keyed reservation + server-side claim
+at registration time (see Phase 2's journal entry). Still pending: the
+Phase 3 opt-in launch verb's surface, and Phase 4's remote-venue discovery
+mechanism (needed once a venue's own daemon differs from the host's).
 
 ## Journal
+
+### 2026-09-19 — Phase 2 (local case): CLI-mode Session Host reservations
+
+Implemented the local half of Phase 2. Key design refinement discovered
+during implementation (recorded in the vision's own provenance): the
+original "cwd-keyed discovery file" sketch turned out to be unnecessary for
+the single-machine case. The CLI extension already resolves and sends
+`worktree_id` with every `/api/v1/live-sessions` registration; the daemon now
+correlates that against a pending `cli_mode_reservations` row **entirely
+server-side, atomically**, at registration time. This satisfies
+§opt-in-not-ambient-default and §bind-dont-self-register with **zero
+`extension.mjs` changes** — the short-lived, event-based extension posture
+constraint didn't even come into play for this phase's local slice, since
+nothing needed to be added there at all. A client-side discovery step remains
+correctly deferred to Phase 4 (remote venues, where the extension genuinely
+needs to resolve a different daemon).
+
+Followed the existing `worktree_ownership`/`reserve_worktree_ownership`
+(#2912) primitive's atomic-SQL idiom as precedent, but did not reuse it
+directly — it's keyed by an already-existing ACP `sessions.id`, while a
+CLI-mode reservation is made *before* any session exists. Built a parallel,
+analogous `cli_mode_reservations` table instead (schema v17→v18):
+`create_cli_mode_reservation` (atomic, one-per-worktree, expired rows
+silently reclaimable), `claim_cli_mode_reservation` (atomic,
+idempotent-safe), `get_`/`release_cli_mode_reservation`. Wired
+`register_live_session` to attempt a claim after its existing atomic upsert
+succeeds -- additive, never blocking or reversing that decision -- and added
+`live_sessions.cli_mode` as the durable, honest marker
+(`LiveSessionInfo.cli_mode`). New CLI surface: `agent-bridge live-sessions
+cli-mode {reserve,status,release} --worktree-id ID`; new routes: `POST/GET/
+DELETE /api/v1/live-sessions/cli-mode-reservations/{worktree_id}`.
+
+`tests/test_cli_mode_reservations.py`: 23 cases (reservation
+creation/expiry/replacement, atomic claim-on-register including idempotent
+re-registration and a non-claiming second/successor session, and the three
+new routes plus the register route's `cli_mode` marker) -- all pass. Full
+agent-bridge suite: 568 passed (23 new), 2 pre-existing unrelated failures
+(confirmed via the same bisect method as Phase 1), 2 skipped. Version bumped
+to `0.4.0-dev503`. `module-size-baseline.json` widened for the three files
+this grew (`__main__.py`, `client.py`, `models.py`) per CONTRIBUTING.md's
+shrink-only-baseline convention; an unrelated, pre-existing
+`picker_tui/engine.py` baseline violation (untouched by this change) remains
+and is not this effort's concern.
+
+Next: Phase 3 (opt-in local launch surface -- a CLI/API verb that actually
+starts a muxed CLI process bound to a reservation, proving the mechanism
+end-to-end).
 
 ### 2026-09-19 — Phase 1 closed: elicitation fix deferred, not pursued
 

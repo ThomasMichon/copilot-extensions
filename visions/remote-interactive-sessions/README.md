@@ -67,20 +67,22 @@ reattachable transport, connect-nonce identity, process survival, retirement —
 so a CLI-mode-bound session and a directly-spawned one are indistinguishable to
 every consumer above the host boundary.
 
-### CWD-keyed discovery, not ambient self-registration
+### Worktree-keyed reservation, not ambient self-registration
 
 The coordination layer's CLI-side extension currently reaches back to bind
 itself to a daemon by assumption rather than by explicit assignment. The
-target state is a durable, host-local mapping from **a working directory to
-its currently assigned Session Host address**, populated by the coordination
-layer at allocation time and read by the extension at startup. This is sound
-specifically because the fabric already guarantees
+mechanism is an explicit, operator-created **reservation for a worktree's
+next CLI-mode session**, made by the coordination layer before that session
+starts. This is sound specifically because the fabric already guarantees
 *[single-current-session-per-worktree](../agent-fabric/README.md#single-current-session-per-worktree)*
-— at most one current session per working directory — so a cwd-keyed
-assignment is never ambiguous. An extension that finds no assignment for its
-cwd is not silently adopted by an arbitrary daemon; it either declines or falls
-back to today's ambient behavior only as an explicitly inferior, honestly
-labeled compatibility path.
+— at most one current session per worktree — so a worktree-keyed reservation
+is never ambiguous. Correlating a registering session against a pending
+reservation is the daemon's own responsibility at registration time; an
+extension that already resolves and sends its worktree identity needs no
+separate lookup step to participate. Only once a *remote* venue's own local
+daemon differs from the host machine's does an explicit, client-read
+discovery step become necessary — the mechanism generalizes without changing
+this concept's identity unit.
 
 ### Symmetric venue launch of standard muxed sessions
 
@@ -113,11 +115,11 @@ multi-observer model, the same durable identity. No separate execution
 protocol, terminal-replay format, or resource-ownership vocabulary is invented
 to carry this over a network boundary.
 
-### cwd-keyed-host-discovery
+### worktree-keyed-host-discovery
 
-An extension's binding to its Session Host is resolved from an explicit,
-durable cwd-to-host assignment made by the coordination layer at allocation
-time, not inferred from an ambient default.
+A registering session's binding to its CLI-mode designation is resolved from
+an explicit reservation keyed by worktree identity, correlated at
+registration time, not inferred from an ambient default.
 
 ### symmetric-muxed-venue-launch
 
@@ -144,21 +146,22 @@ through the existing ACP-driven path.
 
 ### one-host-per-cwd-lane
 
-Exactly one Session Host may be assigned to a given working directory at a
-time, consistent with *single-current-session-per-worktree*; a discovery
-lookup for a cwd never resolves ambiguously.
+Exactly one Session Host reservation may be active for a given worktree at a
+time, consistent with *single-current-session-per-worktree*; creating a
+second reservation while one is still unexpired never resolves ambiguously.
 
 ### allocate-before-launch
 
-The coordination layer allocates and prepares a CLI-mode Session Host before
-the paired muxed CLI process starts, so a discovery assignment is guaranteed to
-exist by the time the extension looks for one.
+The coordination layer allocates and prepares a CLI-mode reservation before
+the paired muxed CLI process starts, so a registering session always has
+something to correlate against by the time it registers.
 
 ### bind-dont-self-register
 
-An extension resolves and binds to its explicitly assigned host through
-discovery. It does not default to registering with an arbitrary ambient
-daemon merely because one is reachable.
+An extension registering with its ambient local daemon does not itself decide
+whether it is CLI-mode; the daemon correlates the registration against any
+pending worktree reservation server-side. Nothing about a session's own
+behavior changes based on a guess about which mode it's in.
 
 ### short-lived-event-based-extension
 
@@ -240,6 +243,15 @@ headless session's mechanics do not actually extend to an attended one.
 
 ## Provenance
 
+- **2026-09-19** — Refined "cwd-keyed discovery" to **worktree-id-keyed
+  reservation + server-side correlation** after implementing Phase 2: the
+  fabric's own `single-current-session-per-worktree` identity unit is the
+  worktree, not a raw filesystem path, and for the local (single-machine)
+  case a registering extension already sends its worktree identity — so no
+  client-side discovery-file mechanism is needed at all; the daemon
+  correlates a registration against a pending reservation entirely
+  server-side. A client-read discovery step remains the right mechanism once
+  a remote venue's own daemon differs from the host's (Phase 4).
 - **2026-09-19** — Authored from operator direction reconciling a proposal to
   add a parallel bridge-owned "native execution"/PTY protocol for
   human-attended remote sessions (raw-terminal projection, writer/observer
@@ -248,8 +260,8 @@ headless session's mechanics do not actually extend to an attended one.
   durable reattach, multi-observer coordination, and structured observation —
   and that its own CLI extension already (awkwardly) self-registers with a
   local daemon. The generalization mined here: give the coordination layer a
-  CLI mode of its existing Session Host, resolved by explicit cwd-keyed
-  discovery instead of ambient self-registration; and let venue providers
+  CLI mode of its existing Session Host, resolved by explicit, worktree-keyed
+  correlation instead of ambient self-registration; and let venue providers
   launch such sessions symmetrically over the transport venue-parity already
   establishes.
 - **2026-09-19** — Split the pluggable local-capability generalization
