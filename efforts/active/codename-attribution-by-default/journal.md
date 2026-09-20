@@ -366,3 +366,24 @@ Part of the [codename-attribution-by-default effort](README.md).
      journal history into **journal.md**, leaving this README as a
      navigable summary with links — reduced from 1,137 to 746 lines.
 
+
+### 2026-09-20 — Plan-review round 19 fixes
+
+- Two findings on the round-18 head, verified against actual repo
+  convention:
+  1. The round-18 typing-fix bullet asked for a "type-check assertion,"
+     but checked `TESTING.md`: this repo's documented Python validation is
+     `ruff check --select F,E9` (pyflakes/syntax only) plus pytest — no
+     mypy/pyright gate exists, so that acceptance criterion was
+     unverifiable as written. Reworded to name the actual gate (and note
+     it does NOT itself catch this class of mismatch) and replaced the
+     criterion with a concrete runtime integration test: `create_pr` with
+     no explicit override, against a `"codename"`-resolved repo, must
+     propagate the string through `_finish_auto_open`/
+     `_push_existing_feature` and produce a published marker.
+  2. The round-18 journal entry's own finding count was wrong ("Four
+     findings" against a five-item list, including the structural
+     doc-split finding) — corrected to "Five." Also moved the round-18
+     journal entry itself into **journal.md** at this pass (it had been
+     left in the README as the "most recent" entry per the established
+     one-entry-in-README pattern; this entry now takes that place).

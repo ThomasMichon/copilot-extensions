@@ -494,9 +494,16 @@ these decisions directly and assumes this design is understood.
   true` (if this repo accepts full exposure) or removing the risky token
   from `head_pattern` — drop the now-inapplicable "or codename" clause
   from the `None` branch entirely.
-- [ ] Re-examine whether an absent-key repo with a SAFE `head_pattern`
-  should be flagged by the audit at all now that its default is inherently
-  safe — decide explicitly and document the reasoning either way.
+- [ ] **Preserve existing no-finding behavior for a safe `head_pattern`
+  (round-20 finding)** — this is not an open design question:
+  `audit_source_attribution_risk` already returns `[]` immediately
+  whenever `head_pattern_leak_risk(head_pattern)` is empty, regardless of
+  `source_attribution`'s value (`providers/attribution.py:275-279` —
+  verified in source), so an absent-key repo with a SAFE `head_pattern` is
+  already NOT flagged today and must continue not being flagged after this
+  effort's label/remedy-text changes above. Add a regression test proving
+  this: an absent-key repo with a safe (non-leaking) `head_pattern`
+  produces zero findings both before and after this effort's changes.
 - [ ] Update `docs/config-reference.md`, `docs/cli-reference.md`,
   `skills/worktree/references/pr-workflow.md`, and
   `providers/attribution.py`'s module docstring: all describe `false` as
@@ -730,26 +737,19 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-18 history lives in **[journal.md](journal.md)** to keep this
+> round-19 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 19 fixes
+### 2026-09-20 — Plan-review round 20 fixes
 
-- Two findings on the round-18 head, verified against actual repo
-  convention:
-  1. The round-18 typing-fix bullet asked for a "type-check assertion,"
-     but checked `TESTING.md`: this repo's documented Python validation is
-     `ruff check --select F,E9` (pyflakes/syntax only) plus pytest — no
-     mypy/pyright gate exists, so that acceptance criterion was
-     unverifiable as written. Reworded to name the actual gate (and note
-     it does NOT itself catch this class of mismatch) and replaced the
-     criterion with a concrete runtime integration test: `create_pr` with
-     no explicit override, against a `"codename"`-resolved repo, must
-     propagate the string through `_finish_auto_open`/
-     `_push_existing_feature` and produce a published marker.
-  2. The round-18 journal entry's own finding count was wrong ("Four
-     findings" against a five-item list, including the structural
-     doc-split finding) — corrected to "Five." Also moved the round-18
-     journal entry itself into **journal.md** at this pass (it had been
-     left in the README as the "most recent" entry per the established
-     one-entry-in-README pattern; this entry now takes that place).
+- One "previously missed" finding on the round-19 head, verified
+  against actual source: the Phase 2 bullet asking to "re-examine
+  whether an absent-key repo with a safe `head_pattern` should be
+  flagged" posed this as an open design question, but
+  `providers/attribution.py`'s `audit_source_attribution_risk` already
+  returns `[]` immediately whenever `head_pattern_leak_risk` finds no
+  risky token, regardless of `source_attribution`'s value — a safe
+  `head_pattern` is already never flagged today, for any config. Fixed
+  by replacing the open question with a decisive "preserve this
+  existing behavior, add a regression test" requirement, removing the
+  only remaining undecided item in the Phase 2 checklist.
