@@ -105,12 +105,32 @@ session never has to re-derive "what's already done" from the Journal alone.
   (needs a real backend field: today's task list has no per-task signal
   distinguishing the two without a `spawn_reservations` join, which is Phase
   1/3/4-sized work of its own — see the Journal for the concrete next step).
-  **Phase 8 (Worktree Status card) is confirmed real and
-  current** — cards come up empty beyond title against the live
-  coordinator; do this phase properly, verified against an actually
-  embodied task, not just the preview fixture. Phase 5 (Artifacts/claims)
-  remains next in Plan order but the CLI-vs-headless badge and Phase 8 are the
-  operator's stated priority — triage/sequence them explicitly with the
+  **Phase 8 (Worktree Status card) is BLOCKED on real architecture work,
+  not a quick fix** — investigated 2026-09-20 (see the Journal entry): a
+  `kind:"card"` action and the Tasks-board's own render path (dispatched
+  through `board_cli.py`) are both documented subprocess-free (or
+  probe-free) on their hot paths, and agent-dispatch tracks only
+  task-scoped liveness signals (`last_liveness`, `activity`/
+  `activity_updated_at`) — it has no worktree/session/git-state/claims
+  authority. Resolved direction (operator decision, same date):
+  `agent-worktrees`'s resident accelerator becomes the coalesced,
+  cached-projection read path for this data — now recorded in its own
+  vision (`visions/plugins/agent-worktrees/README.md`'s new
+  *external-status-consumer-contract* Feature) — but agent-dispatch's own
+  consumer of that cache is still undesigned. **Next step for whoever picks
+  this up:** design agent-dispatch's read side once `agent-worktrees`
+  actually exposes the cache the vision now promises; it must stay a
+  non-authoritative, transient view (never a persisted task-row copy of
+  worktree state — a real ownership conflict a Copilot review already
+  flagged once). Do not start Phase 8 by reaching for a per-render
+  subprocess. **Phase 5 (Artifacts/claims) is now BLOCKED on the same
+  prerequisite** (its own claims computation must consume this same
+  not-yet-built projection, per its 2026-09-20 reconciliation note) — it is
+  no longer simply "next in Plan order" until that lands; Phase 6 (Repo
+  filter, independent of claims) is the next unblocked phase if Phase 5
+  can't proceed. The CLI-vs-headless badge, Phase 6, and (once unblocked)
+  Phase 5/Phase 8 are the operator's stated priority — triage/sequence
+  them explicitly with the
   operator rather than silently defaulting to strict Plan order.
 - **Build/test commands** (agent-dispatch package):
   ```powershell
@@ -851,12 +871,36 @@ first time since Phase 4 landed.
    the original note anticipated; scope and implement as its own follow-up
    rather than folded into this session's item 1-2 fix.
 
-### Phase 5 — Artifacts (claims) surface
+### Phase 5 — Artifacts (claims) surface — BLOCKED on the agent-worktrees accelerator
 - [ ] Land `artifacts_summary` computation in `board_cli.py` (or wherever
       agent-dispatch tracks claims) and the drill-in claims viewer content
       for the Worktree Status card. (Not duplicated with Phase 3 — Phase 3
       only lands the column plumbing/manifest; the actual claims-tracking
-      computation is owned here.)
+      computation is owned here.) **Reconciled 2026-09-20 (see the
+      `agent-worktrees` vision's new *external-status-consumer-contract*):**
+      the worktree's own claims graph (PRs/issues/environments/sessions it
+      owns or adopts) is `agent-worktrees`' durable ledger, per that
+      vision's *Claims, leases, and obligations* concept — a duplicate,
+      independently-computed claims model here would conflict with
+      *derive-dont-duplicate*. This phase's `artifacts_summary` must
+      **consume** that ledger (via the same coalesced projection read path
+      Phase 8 uses), not recompute claims from scratch; if a genuinely
+      distinct, agent-dispatch-owned notion of "claims" is ever needed
+      (e.g. task-level, not worktree-level), name and scope that as an
+      explicitly different concept before implementing it, rather than
+      reusing the word for two different ownership boundaries.
+- [ ] **Explicit prerequisite (Copilot review, 2026-09-20):** this phase now
+      depends on the same not-yet-built projection path Phase 8 depends on
+      (an `agent-worktrees` accelerator exposing worktree/claims state, plus
+      agent-dispatch's own consumer of it — neither exists yet). Per this
+      effort's own sequencing rule (land each phase before starting the
+      next), **do not start Phase 5's implementation until that
+      prerequisite work lands** — starting it earlier either produces
+      nothing executable or invites exactly the duplicate-claims-computation
+      fallback this reconciliation forbids. If Phase 5 is picked up before
+      the prerequisite lands, treat Phase 6 (independent of claims) as the
+      next unblocked phase instead, and say so explicitly rather than
+      silently reordering.
 
 ### Phase 6 — Source-repo grouping/filtering
 - [ ] The REPO column ships in Phase 3. A dedicated repo filter chip
@@ -891,6 +935,67 @@ no lifecycle-control logic invented at this layer.
       descriptor, claims), the vision's own stated purpose for this card —
       verify against a real embodied task before calling this phase done,
       not just the preview fixture.
+- [ ] **Design constraint discovered 2026-09-20 (blocks a naive
+      implementation) — see the Journal entry of the same date for the
+      full investigation.** A `kind:"card"` action is documented as
+      read-only against data already present on the entry ("No subprocess
+      is run" at click time), and the Tasks-board's own render path
+      (`__main__.py`'s `inbox --board`, which `board_cli.py` dispatches to
+      on the local machine) is documented as "Pure coordinator-state
+      rendering: no agent-worktrees/agent-bridge subprocesses on the Picker
+      read path" (it re-runs on every Picker refresh). Neither can probe
+      git/agent-worktrees per row or per click (`board_cli.py`'s own
+      `subprocess.run` is an unrelated cross-machine forwarding path, not a
+      git/agent-worktrees probe), and agent-dispatch's own coordinator
+      tracks only task-scoped
+      liveness (`last_liveness`, `activity`/`activity_updated_at`) — it has
+      no worktree/session/git-state/claims authority of its own. Note also:
+      agent-dispatch is a **separate plugin in its own venv**
+      (`pivots.py`'s own contract: "data flows only through the
+      contributing plugin's CLI on `PATH`, never a cross-venv import") — it
+      cannot fall back to importing and directly recomputing
+      `agent-worktrees`' facts itself the way a same-process
+      `agent-worktrees` caller can. **Resolved direction (operator decision
+      2026-09-20):** `agent-worktrees`'s resident accelerator becomes the
+      coalesced, cached-projection read path for this data (worktree/session
+      mapping, lineage + lifecycle event history, liveness, git state, the
+      claims graph — see the `agent-worktrees` vision's new
+      *external-status-consumer-contract* Feature and
+      *force-refresh-is-opt-in-not-implicit*/*a-full-health-check-leaves-
+      nothing-stale* Behaviors, added the same date). Phase 8's own
+      implementation therefore needs an **agent-dispatch-side consumer**
+      of that cache — read on a cadence/trigger that keeps board rows
+      populated without a per-render subprocess, reporting a fact it
+      cannot confirm as stale/unknown rather than blocking the render or
+      the click. **Ownership constraint (Copilot review, 2026-09-20):** the
+      earlier idea of writing the accelerator's projection into an
+      agent-dispatch task row as a background-supervisor poll was flagged
+      as a real second, independently-aging copy of worktree state —
+      conflicting with `provider-owned-worktrees-surface` (a control plane
+      renders without persisting a second copy) and `derive-dont-duplicate`
+      (agent-worktrees owns this state). Any read-side design must stay a
+      **non-authoritative, transient view** — read fresh from the
+      accelerator (or a short-lived in-memory cache scoped to a single
+      board render, never a durable task-row column or other persisted
+      copy) — not yet designed or scoped into concrete steps; do that as
+      the next step before writing any Phase 8 code. **Open cold-start
+      question (Copilot review, 2026-09-20):** a subprocess-free consumer
+      still needs the accelerator warm to answer inside its own bounded
+      render/click wait — whether that means an explicit prewarm trigger
+      (e.g. on Picker/Tasks-pivot startup) or a background lifecycle
+      distinct from the render path itself is a real, unresolved
+      implementation question, not something this design pass or the
+      vision (deliberately "Not a specification") settles; scope it
+      explicitly as part of the next step above rather than assuming
+      boot-on-demand alone is fast enough for a render/click deadline.
+      Recent-message
+      history is explicitly NOT part of this cache (pulled on demand from
+      the owning session host instead, per the vision's existing *Not a
+      transcript or event warehouse* non-goal) — Phase 8's card body should
+      treat any "last messages" content, if wanted at all, as a separate
+      on-demand fetch, not a cached field. **Claims specifically are Phase
+      5's own field** (see that phase's 2026-09-20 note) — Phase 8 renders
+      whatever Phase 5 exposes rather than computing claims itself.
 
 ### Phase 9 — Configuration → Registrars viewer/editor (implementation)
 - [ ] Build the Configuration-menu view listing every registration
@@ -1938,4 +2043,94 @@ Runbook's own instructions.
   whether the manifest declares `columns` before reaching for
   `entry.badges` — the two are mutually exclusive render paths, and this
   pivot has used `columns` since Phase 3.
+
+### 2026-09-20 — Phase 8 investigated: real blocker found, vision updated, code deferred
+Picked Phase 8 up next (operator's choice after PR #3008 merged). Fresh
+worktree via `agent-worktrees -p copilot-extensions create`.
+
+- **Investigated before writing code** (per the effort's own established
+  pattern: confirm design with the operator when a real decision is
+  involved) and found this is genuinely blocked on a real architectural
+  gap, not just unimplemented plumbing:
+  - `pivot_manifest.py`'s own docstring for a `kind:"card"` action: "No
+    subprocess is run" — it renders strictly from data already present on
+    the entry when the operator opens it, so `worktree_status.body` cannot
+    be fetched live at click time.
+  - `__main__.py`'s own header comment on the `inbox --board` path (the
+    Tasks-board render, dispatched to by `board_cli.py` on the local
+    machine): "Pure coordinator-state rendering: no agent-worktrees/
+    agent-bridge subprocesses on the Picker read path" — it re-runs on
+    every Picker refresh (sub-second), so it cannot shell out to
+    git/agent-worktrees per row. (The narrower guarantee: no
+    agent-worktrees/agent-bridge *probes* specifically — `board_cli.py`
+    itself does run its own `subprocess.run` for a real machine, but only
+    to re-dispatch to `agent_dispatch inbox` on a **remote** machine, an
+    unrelated cross-machine forwarding path, not a git/agent-worktrees
+    probe.)
+  - agent-dispatch's own coordinator tracks only task-scoped liveness
+    (`last_liveness`, `activity`/`activity_updated_at` — see
+    `queue.py`/`queue_liveness.py`); it has no worktree/session/git-commit/
+    claims-graph authority of its own — that all lives in git and in
+    `agent-worktrees`' own state, outside any agent-dispatch task row.
+  - Real "Claims" content is Phase 5's own scope (not landed yet), so even
+    a partial Phase 8 slice can't show real claims without it — and Phase
+    5's own claims computation must consume the same `agent-worktrees`
+    projection rather than independently recompute the worktree's claims
+    ledger (see Phase 5's own 2026-09-20 reconciliation note).
+  - **agent-dispatch cannot fall back to importing/recomputing
+    `agent-worktrees`' facts itself** — it is a separate plugin in its own
+    venv (`pivots.py`'s own contract: cross-plugin data flows only through
+    the contributing plugin's CLI, never a cross-venv import), so the
+    "direct in-process computation" fallback the vision's *Derived status*
+    already grants a same-process caller isn't available here; an
+    unreachable accelerator must degrade to an explicit stale/unknown
+    outcome for this consumer, never a silent recompute.
+- **Surfaced this to the operator rather than guessing a workaround.**
+  Resolved direction: `agent-worktrees`'s **resident accelerator concept**
+  (already documented in its vision as the one-per-host freshness/status
+  computer — "warmth, not truth" per `docs/patterns/work-coalescing-
+  singleton.md`) becomes the coalesced, cached-projection read path for
+  exactly this data — worktree/session mapping, session lineage +
+  lifecycle event history, last-known liveness, last-known git state, and
+  the claims graph. **Not yet landed as an available service**: per that
+  same pattern doc's own Sequencing section, `#2323` (the concrete
+  classify/list accelerator this generalizes from) is still in progress —
+  vendored and unit-tested, but "deliberately not yet wired into any
+  command" — and it doesn't yet cover worktree/session/git-state/claims
+  facts at all, only classify/list. This vision update records the
+  *contract* a future implementation must honor; it does not itself make
+  the cache reachable today. A cross-venv consumer like agent-dispatch
+  would boot the accelerator on demand and subscribe like any other
+  reader once it exists; if it can't reach it within its own bounded wait,
+  it reports the affected facts as stale/unknown rather than blocking its
+  render/click path or guessing. Force-refresh is available strictly at
+  explicit user/agent discretion (queued to coalesce, never triggered by
+  an ordinary read). Message/conversation history stays explicitly out of
+  this cache — pulled on demand from the owning session host instead
+  (agent-bridge for a bridge-hosted session; another provider for a
+  non-bridge one), matching the vision's pre-existing *Not a transcript or
+  event warehouse* non-goal.
+- **Updated the `agent-worktrees` vision** (`visions/plugins/agent-worktrees/
+  README.md`) to make this explicit and durable rather than leaving it as
+  an unrecorded intention: added *external-status-consumer-contract*
+  (Features) and *force-refresh-is-opt-in-not-implicit* /
+  *a-full-health-check-leaves-nothing-stale* (Behaviors), plus a Provenance
+  entry recording the operator directive and its origin in this effort.
+  Deliberately did **not** invent new commands/schemas in the vision itself
+  (it's explicitly "Not a specification") — that's still open design work.
+- **Filed the remaining Phase 8 design gap into the Plan** (see the new
+  bullet under Phase 8 above) rather than starting to code against an
+  unresolved architecture: agent-dispatch still needs its own consumer of
+  this soon-to-exist cache — a non-authoritative, transient view, never a
+  persisted task-row copy of worktree state (a real
+  `provider-owned-worktrees-surface`/`derive-dont-duplicate` conflict a
+  later Copilot review pass caught in an earlier draft of this idea) — not
+  yet scoped into concrete steps, and it depends on `agent-worktrees`
+  actually building the cache the vision now promises.
+- **Not implemented this session** (operator's own chosen scope: "write a
+  design proposal... then stop for your review before coding"). No
+  agent-dispatch/worktree-manager code changed this pass; only the
+  `agent-worktrees` vision, `docs/patterns/work-coalescing-singleton.md`
+  (the shared fallback invariant + validation scenarios), and this
+  effort's own Plan/Journal.
 
