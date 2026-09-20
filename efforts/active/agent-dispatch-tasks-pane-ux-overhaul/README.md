@@ -107,8 +107,9 @@ session never has to re-derive "what's already done" from the Journal alone.
   1/3/4-sized work of its own — see the Journal for the concrete next step).
   **Phase 8 (Worktree Status card) is BLOCKED on real architecture work,
   not a quick fix** — investigated 2026-09-20 (see the Journal entry): a
-  `kind:"card"` action and `board_cli.py` are both documented as
-  subprocess-free on their hot paths, and agent-dispatch tracks only
+  `kind:"card"` action and the Tasks-board's own render path (dispatched
+  through `board_cli.py`) are both documented subprocess-free (or
+  probe-free) on their hot paths, and agent-dispatch tracks only
   task-scoped liveness signals (`last_liveness`, `activity`/
   `activity_updated_at`) — it has no worktree/session/git-state/claims
   authority. Resolved direction (operator decision, same date):
@@ -938,11 +939,15 @@ no lifecycle-control logic invented at this layer.
       implementation) — see the Journal entry of the same date for the
       full investigation.** A `kind:"card"` action is documented as
       read-only against data already present on the entry ("No subprocess
-      is run" at click time), and `board_cli.py` is documented as "Pure
-      coordinator-state rendering: no agent-worktrees/agent-bridge
-      subprocesses on the Picker read path" (it re-runs on every Picker
-      refresh). Neither can shell out to git/agent-worktrees per row or per
-      click, and agent-dispatch's own coordinator tracks only task-scoped
+      is run" at click time), and the Tasks-board's own render path
+      (`__main__.py`'s `inbox --board`, which `board_cli.py` dispatches to
+      on the local machine) is documented as "Pure coordinator-state
+      rendering: no agent-worktrees/agent-bridge subprocesses on the Picker
+      read path" (it re-runs on every Picker refresh). Neither can probe
+      git/agent-worktrees per row or per click (`board_cli.py`'s own
+      `subprocess.run` is an unrelated cross-machine forwarding path, not a
+      git/agent-worktrees probe), and agent-dispatch's own coordinator
+      tracks only task-scoped
       liveness (`last_liveness`, `activity`/`activity_updated_at`) — it has
       no worktree/session/git-state/claims authority of its own. Note also:
       agent-dispatch is a **separate plugin in its own venv**
@@ -973,7 +978,17 @@ no lifecycle-control logic invented at this layer.
       accelerator (or a short-lived in-memory cache scoped to a single
       board render, never a durable task-row column or other persisted
       copy) — not yet designed or scoped into concrete steps; do that as
-      the next step before writing any Phase 8 code. Recent-message
+      the next step before writing any Phase 8 code. **Open cold-start
+      question (Copilot review, 2026-09-20):** a subprocess-free consumer
+      still needs the accelerator warm to answer inside its own bounded
+      render/click wait — whether that means an explicit prewarm trigger
+      (e.g. on Picker/Tasks-pivot startup) or a background lifecycle
+      distinct from the render path itself is a real, unresolved
+      implementation question, not something this design pass or the
+      vision (deliberately "Not a specification") settles; scope it
+      explicitly as part of the next step above rather than assuming
+      boot-on-demand alone is fast enough for a render/click deadline.
+      Recent-message
       history is explicitly NOT part of this cache (pulled on demand from
       the owning session host instead, per the vision's existing *Not a
       transcript or event warehouse* non-goal) — Phase 8's card body should
@@ -2041,10 +2056,17 @@ worktree via `agent-worktrees -p copilot-extensions create`.
     subprocess is run" — it renders strictly from data already present on
     the entry when the operator opens it, so `worktree_status.body` cannot
     be fetched live at click time.
-  - `board_cli.py`'s own header comment: "Pure coordinator-state
-    rendering: no agent-worktrees/agent-bridge subprocesses on the Picker
-    read path" — it re-runs on every Picker refresh (sub-second), so it
-    cannot shell out to git/agent-worktrees per row either.
+  - `__main__.py`'s own header comment on the `inbox --board` path (the
+    Tasks-board render, dispatched to by `board_cli.py` on the local
+    machine): "Pure coordinator-state rendering: no agent-worktrees/
+    agent-bridge subprocesses on the Picker read path" — it re-runs on
+    every Picker refresh (sub-second), so it cannot shell out to
+    git/agent-worktrees per row. (The narrower guarantee: no
+    agent-worktrees/agent-bridge *probes* specifically — `board_cli.py`
+    itself does run its own `subprocess.run` for a real machine, but only
+    to re-dispatch to `agent_dispatch inbox` on a **remote** machine, an
+    unrelated cross-machine forwarding path, not a git/agent-worktrees
+    probe.)
   - agent-dispatch's own coordinator tracks only task-scoped liveness
     (`last_liveness`, `activity`/`activity_updated_at` — see
     `queue.py`/`queue_liveness.py`); it has no worktree/session/git-commit/
