@@ -731,6 +731,31 @@ can't silently reintroduce it. This is additive to, not a re-litigation of,
 the accepted residual above (which remains about the negligible `tasks`
 import cost, not the scan).
 
+**Follow-up 2 (2026-09-19, same day) — the real closure: `_machine_key_map()`
+now never blocks, period.** The operator then measured the freeze directly
+at ~7 seconds -- far beyond what the ordering fix's import-lock race alone
+could explain. Root cause: `_machine_key_map()`'s underlying
+`data_ssh.machine_key_map()` -> `agent_worktrees.config.load_config()` call
+is completely uncached at that layer, and on the operator's real machine
+(many registered repos; `load_config()`'s control-plane related-PR discovery
+walks every one of their anchors) took 2-8+ seconds on EVERY call. Neither
+prior fix touched this: `prewarm_optional_modules` only warms the `data_ssh`
+*module import*, not this *function's computed result*. Fixed properly this
+time: `_machine_key_map()` no longer calls `data_ssh.machine_key_map()`
+directly at all -- it returns the cached map once resolved, or `{}`
+immediately while unresolved (every caller already tolerates and documents
+this exact display-name fallback as harmless). A new
+`_prewarm_machine_key_map()` computes the real map on its own background
+thread and installs it (triggering a repaint) once it lands; `setup()`,
+`_setup_live_pivots`, and `_machine_key_map()` itself (as a safety net) all
+call it. Verified end-to-end on the operator's own real environment: the
+call now returns in 0.0000s on the exact machine that previously took 7+
+seconds. See the Journal entry below for the full investigation, and
+`worktree-manager-control-plane`'s Phase 3c doc for why the pivot-registry
+scan itself (a separate, still-open blocking-I/O gap) is tracked there
+rather than folded into this bug.
+
+
 ### Phase 5 — Artifacts (claims) surface
 - [ ] Land `artifacts_summary` computation in `board_cli.py` (or wherever
       agent-dispatch tracks claims) and the drill-in claims viewer content
@@ -1556,3 +1581,48 @@ the call happens) so a future edit can't silently reintroduce the gap. Full
 were pre-existing, unrelated flakes (`test_native_list_sticky_no_reflow_flicker`,
 confirmed via `git stash` to fail identically without these changes, and 3
 Windows-path failures in `test_data_ssh_sources.py`, likewise pre-existing).
+
+### 2026-09-19 (later same day) — the ordering fix was not enough: the operator measured a 7s freeze, and the real cost was the CALL, not the import
+The operator reported a *measured* ~7 second freeze navigating Worktrees ->
+Tasks, well beyond what an import-lock race could explain even in the worst
+case. Root-caused with a direct timing probe against the operator's own real
+environment (not a synthetic fixture): `_machine_key_map()`'s underlying
+`data_ssh.machine_key_map()` -> `agent_worktrees.config.load_config()` call
+is **completely uncached at that layer** and, on this machine (many
+registered repos; `load_config()`'s control-plane related-PR discovery walks
+every one of their anchors), took **2-8+ seconds on every single call** --
+not just the first. The ordering fix above only ever addressed the ~100ms
+`data_ssh` MODULE IMPORT cost (via `prewarm_optional_modules`); it never
+touched this far larger COMPUTE cost, because nothing was warming the
+computed *result* of `machine_key_map()`, only the import of the module
+that defines it. So even with maximum prewarm head start, a `setup()` that
+itself takes 2+ seconds (the pivot-registry scan, tracked as
+`worktree-manager-control-plane`'s Phase 3c) leaves the background prewarm
+barely any time before the operator's very next keypress -- and on this
+machine, the compute is slow enough that it usually loses that race
+regardless of ordering.
+
+**Fix (this is the real closure, not another mitigation):** `_machine_key_map()`
+no longer calls `data_ssh.machine_key_map()` directly at all -- it NEVER
+blocks. It returns the cached `self._mkey_map` once resolved, or `{}`
+immediately while unresolved (every caller -- `_pivot_machine_id()` etc. --
+already tolerates and documents this exact fallback: the display name
+instead of the canonical registry key, "harmless: a downstream that
+casefolds still matches"). A new `_prewarm_machine_key_map()` computes the
+real map on its own background thread (guarded against duplicate concurrent
+compute via `self._mkey_map_inflight`) and installs it into `self._mkey_map`
+once it lands, triggering a repaint so an already-open registered-pivot view
+upgrades from the fallback to the real identity in place. `setup()` and
+`_setup_live_pivots` both call it (alongside the existing import prewarm);
+`_machine_key_map()` itself also calls it as a safety net, so even a caller
+that runs before `setup()` ever kicked it off still converges once the
+compute lands, without ever blocking to get there. Verified end-to-end on
+the operator's own real environment: `_machine_key_map()` returns
+`{}` in 0.0000s immediately after `setup()`, on the exact machine where the
+uninstrumented call previously took 7+ seconds. Six new/updated regression
+tests in `test_picker_first_paint.py`, including one that calls
+`_machine_key_map()` against a `data_ssh.machine_key_map` mock that
+deliberately never returns within the test, asserting the call still
+completes in well under a second. Full suite re-run twice, same two classes
+of pre-existing unrelated failures as before, nothing new.
+

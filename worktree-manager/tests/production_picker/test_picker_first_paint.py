@@ -116,6 +116,189 @@ def test_setup_live_pivots_prewarm_starts_before_the_pivot_scan(monkeypatch):
         "prewarm_optional_modules must start before _scan_pivot_payload, not after")
 
 
+def test_setup_live_pivots_prewarms_machine_key_map(monkeypatch):
+    """``_setup_live_pivots`` must also warm the machine-key-map RESULT (not
+    just the ``data_ssh`` import): ``_machine_key_map()``'s underlying
+    ``agent_worktrees.config.load_config()`` call is uncached and was
+    profiled at several seconds on a machine with many registered repos --
+    far more than the import cost alone. ``_prewarm_machine_key_map`` runs
+    the actual compute on its own background thread (inlined here via a
+    monkeypatched ``threading.Thread`` for a deterministic assertion) and
+    applies the result via ``_apply_from_worker``."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    class InlineThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(eng.threading, "Thread", InlineThread)
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+    screen = eng.PickerScreen(Src(), live=True)
+    monkeypatch.setattr(screen, "_scan_pivot_payload", lambda: None)
+
+    from worktree_manager.production_picker.picker_tui import data_ssh
+    monkeypatch.setattr(data_ssh, "machine_key_map", lambda: {"Host": "host"})
+
+    assert screen._mkey_map is None
+    screen._setup_live_pivots()
+
+    assert screen._mkey_map == {"Host": "host"}
+
+
+def test_prewarm_machine_key_map_does_not_block_the_calling_thread(monkeypatch):
+    """``setup()`` must run ``_prewarm_machine_key_map``'s compute on a
+    background thread, not inline -- a slow/cold ``load_config()`` call
+    there must never reintroduce the freeze this exists to remove."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    monkeypatch.setattr(tasks_mod, "prewarm_optional_modules", lambda: None)
+
+    release = threading.Event()
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+        @staticmethod
+        def machines():
+            return [("host Win", "host", "Win", True)]
+
+        @staticmethod
+        def load():
+            return []
+
+    screen = eng.PickerScreen(Src(), live=False)
+
+    from worktree_manager.production_picker.picker_tui import data_ssh
+
+    def slow_machine_key_map():
+        release.wait(timeout=5)
+        return {"Host": "host"}
+
+    monkeypatch.setattr(data_ssh, "machine_key_map", slow_machine_key_map)
+    try:
+        t0 = time.perf_counter()
+        screen.setup()
+        elapsed = time.perf_counter() - t0
+    finally:
+        release.set()  # let the worker thread's slow call unblock and finish
+
+    assert elapsed < 1.0
+
+
+def test_prewarm_machine_key_map_is_a_noop_once_already_resolved(monkeypatch):
+    """A second call (e.g. a later 'r' reload) must not recompute the map
+    once it's already resolved -- avoids paying the expensive
+    ``load_config()`` call again for no reason."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+    screen = eng.PickerScreen(Src(), live=True)
+    screen._mkey_map = {"already": "resolved"}
+
+    calls = []
+    from worktree_manager.production_picker.picker_tui import data_ssh
+    monkeypatch.setattr(data_ssh, "machine_key_map", lambda: calls.append(1))
+
+    screen._prewarm_machine_key_map()
+
+    assert calls == []
+    assert screen._mkey_map == {"already": "resolved"}
+
+
+def test_machine_key_map_never_blocks_even_on_a_stuck_compute(monkeypatch):
+    """``_machine_key_map()`` itself must NEVER call ``data_ssh.machine_key_map``
+    (and its uncached, multi-second ``load_config()``) directly, even when
+    nothing has prewarmed the result yet -- it degrades to ``{}`` immediately
+    and only kicks the background prewarm as a safety net. This is the core
+    of the fix: previously, an operator's pivot-switch keypress landing before
+    the prewarm finished would still block on a fresh, uncached compute --
+    reproduced here with a ``data_ssh.machine_key_map`` that never returns
+    within the test's lifetime."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+    screen = eng.PickerScreen(Src(), live=True)
+
+    stuck = threading.Event()
+    from worktree_manager.production_picker.picker_tui import data_ssh
+
+    def never_returns():
+        stuck.wait()  # blocks until the test itself releases it (or times out)
+        return {"Host": "host"}
+
+    monkeypatch.setattr(data_ssh, "machine_key_map", never_returns)
+    try:
+        t0 = time.perf_counter()
+        result = screen._machine_key_map()
+        elapsed = time.perf_counter() - t0
+    finally:
+        stuck.set()  # let the background thread unblock and finish
+
+    assert elapsed < 1.0
+    assert result == {}
+
+
+def test_prewarm_machine_key_map_does_not_spawn_a_second_thread_while_inflight(
+        monkeypatch):
+    """Calling ``_prewarm_machine_key_map`` again while a previous call's
+    background compute is still running must not spawn a second thread
+    (and therefore not run the expensive compute twice concurrently)."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+    screen = eng.PickerScreen(Src(), live=True)
+
+    thread_starts = []
+    real_thread = eng.threading.Thread
+
+    class TrackedThread:
+        def __init__(self, target, **kwargs):
+            thread_starts.append(1)
+            self._real = real_thread(target=target, **kwargs)
+
+        def start(self):
+            self._real.start()
+
+        def join(self, *a, **k):
+            self._real.join(*a, **k)
+
+    monkeypatch.setattr(eng.threading, "Thread", TrackedThread)
+
+    release = threading.Event()
+    from worktree_manager.production_picker.picker_tui import data_ssh
+
+    def slow_machine_key_map():
+        release.wait(timeout=5)
+        return {"Host": "host"}
+
+    monkeypatch.setattr(data_ssh, "machine_key_map", slow_machine_key_map)
+    try:
+        screen._prewarm_machine_key_map()
+        screen._prewarm_machine_key_map()  # must be a no-op: already in flight
+        assert thread_starts == [1]
+    finally:
+        release.set()
+
+
+
 def test_setup_prewarms_optional_modules_too(monkeypatch):
     """``setup()`` -- the shared non-live-mount / manual-reload ('r') path --
     must warm the same modules as ``_setup_live_pivots``: a registered pivot

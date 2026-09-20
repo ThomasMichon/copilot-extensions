@@ -1100,6 +1100,8 @@ class PickerScreen(Widget):
         # no self.cfgmenu / cfgmenu_idx state attrs -- see CfgMenuScreen and
         # _open_cfgmenu. (The overlay left the manual registry entirely.)
         self._pivot_runtimes = {}     # pivot name -> RegisteredPivotRuntime (lazy)
+        self._mkey_map = None         # machines.yaml display-name -> registry-key map (lazy/prewarmed)
+        self._mkey_map_inflight = False  # guards against duplicate concurrent prewarms
         self._last_pivot_poll = 0.0   # registered-pivot repoll gate (#staleness)
         self._roster_ready = True     # False only during live chrome-first paint
         # Built-ins only here: scanning the pivot registry is I/O and must not
@@ -1400,20 +1402,88 @@ class PickerScreen(Widget):
         as the SSH-alias base) -- the value ``agent-worktrees get machine`` returns
         and that other multi-machine system tools (agent-dispatch, agent-bridge) match against.
         Tab labels carry the *display* name, so registered-pivot commands need
-        this translation. Delegates to :func:`data_ssh.machine_key_map` and caches
-        it for the session; any failure degrades to ``{}`` so the caller falls
-        back to the display name."""
+        this translation.
+
+        NEVER blocks the calling thread. Once :meth:`_prewarm_machine_key_map`
+        (started from ``setup()``/``_setup_live_pivots``) has resolved
+        ``self._mkey_map``, this returns that cached map. Until then it
+        degrades to ``{}`` -- harmless, since every caller (``_pivot_machine_id``
+        etc.) already tolerates an empty/unresolved map by falling back to the
+        display name -- rather than calling the underlying
+        :func:`data_ssh.machine_key_map` (and its ``load_config()``) directly:
+        that call is UNCACHED and, on a machine with many registered repos, was
+        profiled well into multiple seconds -- a real, reproduced UI freeze the
+        first time an operator switched onto any registered pivot, even with the
+        background prewarm already given a head start. Also kicks the prewarm
+        here as a safety net (idempotent/no-op if already running or resolved),
+        in case something calls this before ``setup()`` ever ran it."""
         cached = getattr(self, "_mkey_map", None)
         if cached is not None:
             return cached
-        try:
-            from . import data_ssh
+        self._prewarm_machine_key_map()
+        return {}
 
-            mapping = data_ssh.machine_key_map()
-        except Exception:
-            mapping = {}
-        self._mkey_map = mapping
-        return mapping
+    def _prewarm_machine_key_map(self):
+        """Compute ``machines.yaml``'s display-name -> registry-key map on a
+        background thread and cache it into ``self._mkey_map`` ahead of time.
+
+        ``_machine_key_map()``'s first real call -- triggered synchronously on
+        the render thread the first time an operator switches onto ANY
+        registered pivot -- used to call ``agent_worktrees.config.load_config()``
+        directly, which is UNCACHED at that layer: on a machine with many
+        registered repos (the control-plane related-PR discovery
+        ``load_config()`` performs walks every repo's anchor), this profiled
+        at several seconds on EVERY call, not just the first -- on top of the
+        ~100ms ``data_ssh`` import cost ``prewarm_optional_modules`` already
+        avoids. That import prewarm alone does not help here: it only avoids
+        re-paying the module IMPORT, not the (uncached) function CALL.
+        ``_machine_key_map()`` itself now never blocks on this call at all
+        (see its own docstring); this method is what eventually fills in the
+        real, canonical map once it lands, so a pivot's ``{machine}`` value
+        upgrades from the display-name fallback to the registry key in place.
+        A no-op if the map is already resolved, or a previous call to this
+        method is still in flight (guarded by ``self._mkey_map_inflight``) --
+        callable repeatedly and cheaply from ``_machine_key_map()`` itself.
+
+        Uses raw ``threading.Thread`` + :meth:`_apply_from_worker` rather
+        than :meth:`_run_bg`: this is a quiet infra prewarm with no
+        user-facing label/spinner, and (unlike ``_run_bg``, which resolves
+        ``self.app`` eagerly) ``_apply_from_worker`` degrades safely when
+        called outside a mounted app -- e.g. a unit test that constructs a
+        bare ``PickerScreen`` and calls ``setup()`` directly."""
+        if getattr(self, "_mkey_map", None) is not None:
+            return
+        if getattr(self, "_mkey_map_inflight", False):
+            return
+        self._mkey_map_inflight = True
+
+        def _work():
+            try:
+                from . import data_ssh
+
+                return data_ssh.machine_key_map()
+            except Exception:
+                return {}
+
+        def _apply(mapping):
+            self._mkey_map_inflight = False
+            if getattr(self, "_mkey_map", None) is None:
+                self._mkey_map = mapping
+                # The map upgraded in place after at least one caller already
+                # rendered against the empty-map fallback -- repaint so any
+                # already-open registered-pivot view picks up the corrected
+                # {machine} identity rather than waiting for the next
+                # unrelated refresh.
+                self.refresh()
+
+
+        def _worker():
+            mapping = _work()
+            self._apply_from_worker(lambda: _apply(mapping))
+
+        threading.Thread(
+            target=_worker, name="machine-key-map-prewarm", daemon=True,
+        ).start()
 
     def _pivot_machine_id(self):
         """The **canonical machine identity** (``machines.yaml`` registry key) for
@@ -1626,6 +1696,14 @@ class PickerScreen(Widget):
         # keypress, and every second spent scanning before the import even
         # starts is a second less of head start against that keypress.
         from . import tasks as _tasks_mod; _tasks_mod.prewarm_optional_modules()
+        # Also prewarm the machine-key-map RESULT (not just the data_ssh
+        # import): see _prewarm_machine_key_map's own docstring -- the
+        # underlying agent_worktrees.config.load_config() call is uncached
+        # and was profiled at several seconds on a machine with many
+        # registered repos. _machine_key_map() itself never blocks on this
+        # (it degrades to an empty/fallback map immediately), so this is
+        # purely a head start, not a correctness requirement here.
+        self._prewarm_machine_key_map()
         pivot_payload = self._scan_pivot_payload()
 
         def apply():
@@ -2078,6 +2156,12 @@ class PickerScreen(Widget):
         # first lets it run concurrently with the scan instead of after it,
         # maximizing its lead time over the operator's next keypress.
         from . import tasks as _tasks_mod; threading.Thread(target=_tasks_mod.prewarm_optional_modules, daemon=True).start()
+        # Also prewarm the (uncached, and far more expensive -- 2+ seconds on
+        # a machine with many registered repos) machine-key-map RESULT, not
+        # just the data_ssh import -- see _prewarm_machine_key_map's own
+        # docstring. Started here too, for the same maximize-the-head-start
+        # reason as the import prewarm above.
+        self._prewarm_machine_key_map()
         # Re-scan the pivot registry so a refresh ('r') picks up a newly
         # installed (or removed) contributed pivot without a picker restart.
         self._load_pivots()
