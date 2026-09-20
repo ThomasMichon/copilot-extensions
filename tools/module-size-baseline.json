@@ -19,7 +19,7 @@
   "plugins/agent-bridge/src/agent_bridge/routes/sessions.py": 1676,
   "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py": 1541,
   "plugins/agent-bridge/src/agent_bridge/session_host/spawner.py": 1028,
-  "plugins/agent-bridge/src/agent_bridge/session_manager.py": 6731,
+  "plugins/agent-bridge/src/agent_bridge/session_manager.py": 6734,
   "plugins/agent-bridge/src/agent_bridge/transport.py": 1257,
   "plugins/agent-codespaces/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/agent-codespaces/libs/ssh-manager/src/ssh_manager/carrier.py": 1313,
@@ -105,5 +105,5 @@
   "worktree-manager/src/worktree_manager/__main__.py": 1428,
   "worktree-manager/src/worktree_manager/_installation_context.py": 9169,
   "worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py": 2078,
-  "worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py": 9159
+  "worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py": 9176
 }
