@@ -8,10 +8,14 @@ confirmed gone).
 **Exemplars:** `libs/single-instance-lease` (vendored into agent-bridge,
 agent-dispatch, agent-mcp, agent-vault, agent-worktrees) — `SingleInstance`
 (the lease), `is_superseded` + `pid_alive` (the fail-safe supersession
-decision), `reconcile_set_reap` (the reap-set backstop); each plugin's
-`libs/zdd` generation self-retire loop and abandoned-passive reap
-(`zdd.breadcrumb.reap_abandoned_passive`); agent-worktrees' `status-updater`
-`@aw_updater` token election (the original proof of both pillars together).
+decision), `reconcile_set_reap` (the reap-set backstop); the `libs/zdd`
+generation self-retire loop and abandoned-passive reap
+(`zdd.breadcrumb.reap_abandoned_passive`) vendored into the cutover-capable
+plugins — agent-bridge, agent-dispatch, agent-index, agent-mcp, agent-vault
+(agent-worktrees vendors `single-instance-lease` but not `zdd`; its
+single-owner-slot exemplar is the token election below); agent-worktrees'
+`status-updater` `@aw_updater` token election (the original proof of both
+pillars together).
 
 ## Problem
 
@@ -134,6 +138,3 @@ of a wrong reap (killing a live, in-flight owner) is not.
   discipline for *cheap, idempotent, shareable work* (coalesce many callers
   onto one warm worker); this pattern is about *roles that must have at most
   one live occupant*, a related but distinct property from work coalescing.
-- aperture-labs `efforts/active/process-slot-ownership/README.md` — the
-  originating effort's phase-by-phase adoption record and Phase 0 audit of
-  every spawn site this consolidates.
