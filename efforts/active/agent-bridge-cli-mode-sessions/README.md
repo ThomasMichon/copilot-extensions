@@ -208,13 +208,34 @@ mechanism CLI mode binds through.
 
 ### Phase 3 — Opt-in local launch surface
 
-- [ ] Add an explicit, per-request CLI/API surface to start a CLI-mode
+- [x] Add an explicit, per-request CLI/API surface to start a CLI-mode
       session locally first — proves the mechanism end-to-end before adding
       any remote venue.
-- [ ] Confirm this is purely additive: no existing headless/ACP-driven default
+      **Done** — `agent-bridge live-sessions cli-mode launch --worktree-id ID
+      [--cwd DIR] [-- extra copilot args]`. A thin, testable
+      `_launch_cli_mode_session` helper: reserves the worktree (reusing
+      `create_cli_mode_reservation`, so a 409-active conflict surfaces
+      identically to `reserve`), then runs a standard `copilot` process in
+      the foreground with inherited stdio at `cwd` — no Session Host
+      pre-spawn, no new terminal/execution protocol. The already-existing,
+      unchanged `extension.mjs` ambient self-registration and the daemon's
+      Phase 2 server-side claim are what actually bind the resulting session;
+      this verb only automates the two manual steps (reserve, then run
+      `copilot`) an operator could already do by hand.
+- [x] Confirm this is purely additive: no existing headless/ACP-driven default
       path changes behavior when CLI mode is never requested.
-- [ ] Mark a CLI-mode-bound session with its durable human-attended marker
+      **Confirmed** — the new code path lives entirely in a new helper +
+      a new `cli-mode launch` argparse branch; `_connect_via_session_host`,
+      `spawn_local`, `resolve_local_launch`, and every ACP-driven route are
+      untouched. Full suite: 2584 passed (4 new), 28 skipped, the same 3
+      pre-existing unrelated failures confirmed present without this change
+      too (bisected via `git stash`).
+- [x] Mark a CLI-mode-bound session with its durable human-attended marker
       (for later recovery/observation guidance honesty).
+      **Already covered by Phase 2** — `live_sessions.cli_mode` is set by the
+      daemon's own claim-on-registration logic regardless of how the CLI
+      process was started (by hand or via this new `launch` verb), so no
+      separate marking step was needed here.
 
 ### Phase 4 — Symmetric venue launch
 
@@ -248,9 +269,16 @@ mechanism CLI mode binds through.
       client, and is retired using the exact same code paths as an ordinary
       directly-spawned Session Host session — no CLI-mode-specific behavior
       divergence.
-      **Partially covered** — `test_cli_mode_reservations.py` proves the
-      reservation/claim/marker layer (23 cases); full end-to-end reattach via
-      an actual muxed CLI process is Phase 3's opt-in launch surface.
+      **Further covered, not fully closed** — `test_cli_mode_reservations.py`
+      proves the reservation/claim/marker layer (23 cases);
+      `test_cli_mode_launch.py` proves the new `launch` verb's own mechanics
+      (reserve-then-spawn, argv/cwd wiring, 409 propagation, exit-code
+      surfacing — 4 cases, fakes both the client and the process runner).
+      What remains genuinely unautomated: an actual live run where a real
+      `copilot` process launched this way registers, gets observed by a
+      second client, and is retired — this needs a human (or a manual/live
+      validation pass), since the point of CLI mode is a real interactive
+      terminal, not something a unit test should fake end-to-end.
 - [ ] Two concurrent CLI-mode allocation attempts for the same cwd resolve
       through the existing single-current-session-per-worktree gate (reuse,
       hand-off, or sunset) rather than racing.
@@ -261,6 +289,10 @@ mechanism CLI mode binds through.
       `test_registration_with_no_reservation_is_ordinary` explicitly proves
       an ordinary registration is byte-for-byte unaffected when no
       reservation exists.
+      **Reconfirmed with Phase 3's additions in place** — full suite: 2584
+      passed (4 new from `test_cli_mode_launch.py`), 28 skipped, the same 3
+      pre-existing unrelated failures (bisected via `git stash` to confirm
+      they reproduce identically without this change).
 - [ ] A CLI-mode session launched via `agent-codespaces`/`agent-containers`
       binds, reattaches, and is observed identically to the local case, over
       the existing venue-parity transport.
@@ -268,11 +300,70 @@ mechanism CLI mode binds through.
 ## Proposal
 
 Realized for the local case: worktree-keyed reservation + server-side claim
-at registration time (see Phase 2's journal entry). Still pending: the
-Phase 3 opt-in launch verb's surface, and Phase 4's remote-venue discovery
-mechanism (needed once a venue's own daemon differs from the host's).
+at registration time (Phase 2), plus an opt-in local launch verb that
+automates reserve-then-run for a real interactive `copilot` process (Phase
+3). Still pending: Phase 4's remote-venue discovery mechanism and its
+symmetric venue-launch surface (needed once a venue's own daemon differs
+from the host's).
 
 ## Journal
+
+### 2026-09-19 — Phase 3: opt-in local launch surface
+
+Added `agent-bridge live-sessions cli-mode launch --worktree-id ID [--cwd
+DIR] [-- extra copilot args]`. Deliberately the thinnest possible surface: a
+testable `_launch_cli_mode_session(client, worktree_id, cwd, ...)` helper
+calls the existing `create_cli_mode_reservation` (so a 409-active conflict
+surfaces exactly like plain `reserve`), then runs a standard `copilot`
+process in the foreground with **inherited stdio** at `cwd` (reusing
+`transport._find_copilot`/`_wrap_batch_for_windows` for executable
+resolution, matching the existing local-spawn path's own Windows batch-file
+handling). No Session Host is pre-spawned and no new terminal/execution
+protocol is introduced — the already-existing, byte-for-byte-unchanged
+`extension.mjs` ambient self-registration and the daemon's Phase 2
+server-side claim are what actually bind the resulting session. This verb is
+pure automation of two manual steps (`cli-mode reserve`, then run `copilot`)
+an operator could already perform by hand; after `copilot` exits it queries
+and prints the final reservation state so an operator can see the claim in
+one place. `copilot_args` (after a literal `--`) get forwarded so a resumed
+or profiled launch is possible.
+
+Considered and rejected: pre-spawning a real Session Host wrapping the plain
+interactive `copilot` child (mirroring the headless
+`_connect_via_session_host` path byte-for-byte). Rejected because a Session
+Host's own `_spawn_child` pipes the child's stdio (`stdin=PIPE`,
+`stdout=PIPE`) for a program-driven ACP reader, not a human terminal — making
+it actually interactive would need a new raw-terminal relay/protocol, which
+the vision's own Non-Goals section explicitly rules out ("Not a new
+execution or terminal protocol"). The realized design instead reuses exactly
+the one thing that already IS reattachable/multi-observer/retirable without
+any new protocol: the `live_sessions` row itself, via the same registration
+path every interactive session already goes through.
+
+`tests/test_cli_mode_launch.py`: 4 cases (reserve-then-run wiring incl. cwd,
+extra-args forwarding, 409 conflict propagation without ever spawning
+`copilot`, and non-zero exit code surfacing) using a fake client and a fake
+process runner — no real HTTP server or `copilot` process needed. Full
+agent-bridge suite: 2584 passed (4 new), 28 skipped, and the same 3
+pre-existing, unrelated failures from before this change (confirmed
+identical via `git stash`/re-run bisection) —
+`test_bootstrap_check_reconcile_opt_in.py`'s two cases and
+`test_service_dynamic_recovery.py`'s one case, all a pre-existing lambda/
+signature mismatch unrelated to CLI mode. `module-size-baseline.json`
+widened for `__main__.py` (6743 → 6837 lines) per the shrink-only-baseline
+convention, following Phase 2's own precedent.
+
+Remaining honestly open for Phase 3's own validation surface: a truly live
+run (a human, or a manual pass) actually launching a real `copilot` process
+through this verb and confirming reattach/second-observer/retire all work
+identically to a headless session — this is not something a unit test should
+fake end-to-end, since the entire point of CLI mode is a real interactive
+terminal. Left open in the Validation Plan rather than claimed closed.
+
+Next: Phase 4 (symmetric venue launch — `agent-codespaces`/`agent-containers`
+offering the same launch shape over the venue-parity SSH transport, which is
+where the client-side discovery mechanism deferred from Phase 2 becomes
+necessary).
 
 ### 2026-09-19 — Phase 2 (local case): CLI-mode Session Host reservations
 

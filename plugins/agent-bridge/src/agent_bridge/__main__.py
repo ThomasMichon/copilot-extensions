@@ -2170,6 +2170,45 @@ def _live_session_summary_line(s: dict[str, Any]) -> str:
     return f"{s.get('session_id', '?')} [{status}]{turn}{driven}{age}{prog}"
 
 
+def _launch_cli_mode_session(
+    client: Any,
+    worktree_id: str,
+    cwd: str,
+    *,
+    ttl_seconds: float = 300.0,
+    copilot_args: list[str] | None = None,
+    run: Any = None,
+) -> dict[str, Any]:
+    """Reserve ``worktree_id``'s next CLI-mode session, then run a standard,
+    muxed, interactive ``copilot`` process bound to it (Phase 3, the opt-in
+    local launch surface).
+
+    This is deliberately a thin convenience over two steps an operator could
+    run by hand -- ``cli-mode reserve`` then launching ``copilot`` themselves
+    -- so a single command proves the whole local mechanism end-to-end:
+    reserve, launch, the CLI extension's ordinary (unchanged) ambient
+    self-registration, and the daemon's server-side claim (Phase 2). No new
+    execution or terminal protocol is introduced -- ``copilot`` runs directly
+    in the invoking terminal (inherited stdio), exactly as an operator would
+    run it unassisted. Raises ``BridgeClientError`` (status 409) if
+    ``worktree_id`` already holds an active reservation, exactly like
+    ``cli-mode reserve``.
+    """
+    from .transport import _find_copilot, _wrap_batch_for_windows
+
+    reservation = client.create_cli_mode_reservation(
+        worktree_id, ttl_seconds=ttl_seconds,
+    )
+    argv = [_find_copilot(), *(copilot_args or [])]
+    env = os.environ.copy()
+    argv = _wrap_batch_for_windows(argv, env)
+    runner = run or subprocess.run
+    result = runner(argv, cwd=cwd, env=env)
+    exit_code = getattr(result, "returncode", None)
+    final = client.get_cli_mode_reservation(worktree_id) or reservation
+    return {"reservation": final, "exit_code": exit_code}
+
+
 def _cmd_live_sessions(args: argparse.Namespace) -> None:
     """List or resolve registered live interactive CLI sessions.
 
@@ -2270,8 +2309,44 @@ def _cmd_live_sessions(args: argparse.Namespace) -> None:
                 return
             print(f"released {removed} reservation(s) for {worktree_id}")
             return
-        print("usage: agent-bridge live-sessions cli-mode {reserve,status,release}",
-              file=sys.stderr)
+        if cli_mode_action == "launch":
+            cwd = getattr(args, "cwd", None) or os.getcwd()
+            copilot_args = getattr(args, "copilot_args", None) or []
+            if copilot_args and copilot_args[0] == "--":
+                copilot_args = copilot_args[1:]
+            try:
+                outcome = _launch_cli_mode_session(
+                    client, worktree_id, cwd,
+                    ttl_seconds=getattr(args, "ttl_seconds", 300.0),
+                    copilot_args=copilot_args,
+                )
+            except BridgeClientError as exc:
+                if exc.status == 409:
+                    print(
+                        f"(worktree {worktree_id!r} already has an active "
+                        "CLI-mode reservation)",
+                        file=sys.stderr,
+                    )
+                    if args.json:
+                        _json_out({"error": "reservation_active"})
+                    sys.exit(1)
+                raise
+            if args.json:
+                _json_out(outcome)
+                return
+            reservation = outcome.get("reservation") or {}
+            claimed = reservation.get("claimed_by_session_id")
+            state = f"claimed by {claimed}" if claimed else "pending, unclaimed"
+            print(
+                f"CLI-mode session for {worktree_id} exited "
+                f"(code={outcome.get('exit_code')}); reservation {state}"
+            )
+            return
+        print(
+            "usage: agent-bridge live-sessions cli-mode "
+            "{reserve,status,release,launch}",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     # default: list
@@ -6114,6 +6189,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     live_cli_mode_release_p.add_argument("--worktree-id", required=True)
     live_cli_mode_release_p.set_defaults(func=_cmd_live_sessions)
+    live_cli_mode_launch_p = live_cli_mode_sub.add_parser(
+        "launch",
+        help="Reserve, then run a standard, muxed, interactive `copilot` "
+             "bound to this worktree (foreground, inherited stdio) -- proves "
+             "the local CLI-mode mechanism end-to-end (Phase 3)",
+    )
+    live_cli_mode_launch_p.add_argument("--worktree-id", required=True)
+    live_cli_mode_launch_p.add_argument(
+        "--cwd", help="Working directory to launch copilot in (default: cwd)",
+    )
+    live_cli_mode_launch_p.add_argument(
+        "--ttl-seconds", type=float, default=300.0,
+        help="Reservation lifetime before it's reclaimable (default 300)",
+    )
+    live_cli_mode_launch_p.add_argument(
+        "copilot_args", nargs=argparse.REMAINDER,
+        help="Extra args forwarded to `copilot` after `--`",
+    )
+    live_cli_mode_launch_p.set_defaults(func=_cmd_live_sessions)
     live_cli_mode_p.set_defaults(func=_cmd_live_sessions)
     live_p.set_defaults(func=_cmd_live_sessions)
 
