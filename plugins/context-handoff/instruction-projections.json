@@ -9,6 +9,14 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "handoff-fallback",
+      "template": "instructions/handoff-fallback.instructions.md",
+      "destination": ".github/instructions/context-handoff/handoff-fallback.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }
