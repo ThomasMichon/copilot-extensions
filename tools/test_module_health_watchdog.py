@@ -191,3 +191,13 @@ def test_negative_margin_always_qualifies_regardless_of_a_negative_near_cap(
     assert exit_code == 0
     assert "src/legacy.py" in out
     assert "nothing to file" not in out
+
+
+def test_main_returns_nonzero_when_filing_itself_fails(monkeypatch):
+    watchdog = _load_watchdog(SCRIPT.parent)
+
+    monkeypatch.setattr(watchdog, "_existing_issue_number", lambda *_a, **_k: None)
+    monkeypatch.setattr(watchdog, "_file_issue", lambda *_a, **_k: False)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--file-issue", "--near-cap", "100000"])
+
+    assert watchdog.main() == 1

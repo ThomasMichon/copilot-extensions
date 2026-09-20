@@ -28,8 +28,12 @@ Usage::
     python tools/module-health-watchdog.py --file-issue     # actually open the issue (needs gh + GH_TOKEN)
     python tools/module-health-watchdog.py --repo owner/name  # override for local testing
 
-Exit code is always 0 (a report tool; a genuinely new hard-cap violation is
-`check-module-size.py`'s job to fail CI over, not this script's).
+Exit code is 0 for detection/reporting and a successful (or skipped/deduped)
+filing; nonzero only when `--file-issue` was asked to actually file and the
+`gh issue create` call itself failed (so a scheduled run's own CI goes red
+instead of silently reporting success while filing nothing). A genuinely new
+hard-cap violation is `check-module-size.py`'s job to fail CI over, not this
+script's -- this script only ever reports or files, never blocks a build.
 """
 
 from __future__ import annotations
@@ -120,7 +124,10 @@ def _existing_issue_number(repo: str, path: str) -> int | None:
     return matches[0]["number"] if matches else None
 
 
-def _file_issue(repo: str, path: str, lines: int, ceiling: int, margin: int) -> int | None:
+def _file_issue(repo: str, path: str, lines: int, ceiling: int, margin: int) -> bool:
+    """File the tracking issue. Returns True on success, False on failure --
+    the caller must propagate a failure as a nonzero exit so a scheduled run
+    never reports success while silently filing nothing."""
     status = "already over its cap/ceiling" if margin < 0 else "approaching its cap/ceiling"
     body = (
         f"## Summary\n\n"
@@ -160,11 +167,11 @@ def _file_issue(repo: str, path: str, lines: int, ceiling: int, margin: int) -> 
         text=True,
     )
     if out.returncode != 0:
-        print(f"[WARN] gh issue create failed: {out.stderr.strip()}", file=sys.stderr)
-        return None
+        print(f"[ERROR] gh issue create failed: {out.stderr.strip()}", file=sys.stderr)
+        return False
     url = out.stdout.strip()
     print(f"[OK] filed {url}")
-    return None
+    return True
 
 
 def main() -> int:
@@ -223,8 +230,7 @@ def main() -> int:
         print(f"[OK] already tracked: #{existing} -- not filing a duplicate.")
         return 0
 
-    _file_issue(args.repo, path, lines, ceiling, margin)
-    return 0
+    return 0 if _file_issue(args.repo, path, lines, ceiling, margin) else 1
 
 
 if __name__ == "__main__":

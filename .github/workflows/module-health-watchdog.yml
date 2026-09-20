@@ -27,9 +27,16 @@ jobs:
   watchdog:
     name: file a decomposition issue for the worst offender
     runs-on: ubuntu-latest
+    # `workflow_dispatch` can target any ref; without this guard, a manual
+    # run against a PR branch could analyze unreviewed code and file a
+    # public issue from it. `schedule` always runs against the default
+    # branch already; this is belt-and-suspenders for both triggers, the
+    # same pattern `module-size-baseline-widen.yml` already uses.
+    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 1
       - uses: actions/setup-python@v5
         with:
