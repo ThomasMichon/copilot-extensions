@@ -9,7 +9,7 @@
 - **Scope:** leaf (child of the
   [agent-worktrees](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-09-15
+- **Last revised:** 2026-09-20
 - **Reality docs:** the agent-worktrees plugin `docs/`; `providers/base.py`
   (the `PRProvider` protocol and provider registry); `tests/test_pr_*.py`,
   `tests/test_providers.py` (the existing pr-command test suite)
@@ -107,6 +107,19 @@ is held to, so a consumer can exercise realistic PR-shaped interaction —
 diff review, commenting, labeling, merging — without a live forge, sanctioned
 credentials, or a real PR.
 
+### provenance-attribution-without-identifier-leakage
+
+Opening a PR through this capability may attribute it to the originating
+worktree/session, but doing so must never be the mechanism by which a
+private identifier (a machine name, a raw worktree id, a session id) reaches
+a public audience by default. The capability's default attribution posture
+is **informationless to an outside reader** — provenance is still
+traceable to an authorized operator through the capability's own records,
+but a public PR body carries, at most, an opaque, non-identifying handle
+rather than a raw identifier. A repo may opt in to the fuller, raw form of
+attribution explicitly, and may opt out of attribution entirely — both are
+deliberate, explicit configuration choices, never the unconfigured default.
+
 ## Behaviors
 
 ### one-surface-no-forking
@@ -137,6 +150,23 @@ front, rather than left to infer it — consistent with the harness-side
 "stay on the rails" discipline for any disclosed simulation: authoritative
 for the run, not a puzzle to probe for edges.
 
+### unconfigured-attribution-never-leaks
+
+A repo that has not explicitly configured its attribution posture receives
+the safe, non-identifying default described above — an operator who never
+touches this setting never accidentally exposes a private identifier merely
+by omission. A capability that persists provenance across a config change
+(so an operator can later tighten or loosen a repo's policy without
+retroactively exposing or hiding a marker that was already published under
+a prior policy) is expected of any such tracking, not merely a suggestion.
+This guarantee is forward-looking from the point such persistence exists: a
+PR opened before the persistence mechanism itself existed is migrated onto
+it via a one-time freeze at first touch (computing its effective policy from
+whatever config is live at that single moment, then holding it fixed
+exactly like every PR opened after the mechanism shipped) — not perpetually
+re-derived from live config on every later touch, which would silently
+reopen the exact retroactive-exposure gap this guarantee exists to close.
+
 ## Non-Goals / Boundaries
 
 - **Not a forge UI, notification system, or webhook receiver.** This
@@ -165,6 +195,26 @@ for the run, not a puzzle to probe for edges.
 
 ## Provenance
 
+- **2026-09-20** — Round-23 review of the `codename-attribution-by-default`
+  effort (#2977) found this vision silent on the `source_attribution`/
+  codename PR-marker mechanism `pr-attribution-codenames` (Done) already
+  built and this effort further deepens — a genuine blind spot, not a
+  vision-ahead gap. Folded back the mechanism's should-be intent (a Feature
+  and a Behavior) at the detail ceiling: the public-safety
+  informationless-by-default guarantee and its persistence-across-config-
+  change expectation, without pinning the `source_attribution`/
+  `codename_source` field names or exact config keys, which remain
+  reality-doc/effort-level detail.
+- **2026-09-20** — Round-32 review of the same effort found the
+  persistence-across-config-change guarantee, as first worded, implicitly
+  promised protection for PRs published before the persistence mechanism
+  itself existed too — a promise the effort's own legacy-PR migration
+  design could not keep without perpetually re-deriving from live config,
+  reopening the exact gap the guarantee exists to close. Narrowed the
+  guarantee to be explicitly forward-looking from the point persistence
+  exists, migrated via a one-time freeze-at-first-touch rather than an
+  unbounded live-config fallback — this is a clarification of the
+  guarantee's boundary, not a new capability.
 - **2026-09-14** — Authored from an odsp-web-harness clean-room session's
   real finding: a `code-review` scenario-eval run correctly reported a
   `noop`/BLOCKED verdict for "no PR available" rather than fabricate a
