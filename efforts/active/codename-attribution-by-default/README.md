@@ -199,6 +199,18 @@ starting Phase 1.
   all currently say or imply `false` is the default -- an implementation
   that updates only the standalone docs would leave these
   behaviorally-adjacent comments actively misleading.
+- [ ] Update this REPO'S OWN contributor/reviewer policy text, which
+  currently instructs the OLD posture and would otherwise tell future
+  contributors and automated reviewers to reject the very behavior this
+  effort introduces: `AGENTS.md`'s "PR metadata is public too" bullet
+  currently states "This repo keeps `pr.source_attribution: false`";
+  `.github/copilot-instructions.md`'s "Public repo — stay
+  identifier-neutral" bullet says the same; `REVIEW.md`'s "Identifier
+  neutrality" bullet instructs the automated reviewer to "flag any attempt
+  to enable `pr.source_attribution`" at all. Correct all three to
+  distinguish the public-safe `codename` default (expected, not a
+  violation) from the raw `true` mode (still correctly flagged for a
+  public repo).
 - [ ] **Versioning gate (required for this phase's PR):** this phase
   changes `agent-worktrees` runtime source (`providers/attribution.py`,
   `pr_ops.py`) even though most of the diff is documentation -- the same
