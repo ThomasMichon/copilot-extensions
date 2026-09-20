@@ -349,6 +349,21 @@ def _health_responsive(base_url: str, *, timeout: float = 3.0) -> bool:
         return False
 
 
+def _discovered_endpoint_health_responsive(endpoint, *, timeout: float = 3.0) -> bool:
+    """True if a discovered ``rendezvous.Endpoint`` answers ``/health``.
+
+    ``_discover_local_endpoint()`` returns a ``rendezvous.Endpoint`` (already
+    ``connect_probe``-verified live), not a bare URL string -- only its ``tcp``
+    transport maps onto a plain HTTP round trip. A ``unix``/``pipe`` endpoint has
+    no such mapping here, so it's treated as live off the existing connect probe
+    alone (unchanged pre-existing behavior for those transports) rather than
+    guessing at a URL for a socket kind ``_health_responsive`` can't speak to.
+    """
+    if endpoint.transport != "tcp":
+        return True
+    return _health_responsive(f"http://{endpoint.address}")
+
+
 def has_live_local_coordinator() -> bool:
     """True if a local coordinator is discoverable **and** answering its probe.
 
@@ -379,7 +394,7 @@ def has_live_local_coordinator() -> bool:
     if routed is not None:
         return _url_listening(routed) and _health_responsive(routed)
     discovered = _discover_local_endpoint()
-    return discovered is not None and _health_responsive(discovered)
+    return discovered is not None and _discovered_endpoint_health_responsive(discovered)
 
 
 def client_url() -> str:

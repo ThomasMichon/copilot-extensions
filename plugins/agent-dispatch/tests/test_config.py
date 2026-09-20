@@ -308,7 +308,11 @@ def test_has_live_false_when_discovered_endpoint_health_unresponsive(monkeypatch
     # Same wedge scenario, but reached via the legacy discovery ladder rather
     # than the zdd routing table (no routed URL at all).
     monkeypatch.setattr(config_mod, "_routing_url", lambda: None)
-    monkeypatch.setattr(config_mod, "_discover_local_endpoint", lambda: "http://127.0.0.1:59999")
+    monkeypatch.setattr(
+        config_mod,
+        "_discover_local_endpoint",
+        lambda: rendezvous.Endpoint(transport="tcp", address="127.0.0.1:59999"),
+    )
     monkeypatch.setattr(config_mod, "_health_responsive", lambda url, **k: False)
     assert config_mod.has_live_local_coordinator() is False
 
@@ -321,15 +325,49 @@ def test_has_live_false_when_routed_health_fails_even_if_legacy_discovery_health
     monkeypatch.setattr(config_mod, "_routing_url", lambda: "http://127.0.0.1:59999")
     monkeypatch.setattr(config_mod, "_url_listening", lambda url, **k: True)
     monkeypatch.setattr(config_mod, "_health_responsive", lambda url, **k: False)
-    monkeypatch.setattr(config_mod, "_discover_local_endpoint", lambda: "http://127.0.0.1:12345")
+    monkeypatch.setattr(
+        config_mod,
+        "_discover_local_endpoint",
+        lambda: rendezvous.Endpoint(transport="tcp", address="127.0.0.1:12345"),
+    )
     assert config_mod.has_live_local_coordinator() is False
 
 
 def test_has_live_true_when_discovered_endpoint_health_responsive(monkeypatch):
     monkeypatch.setattr(config_mod, "_routing_url", lambda: None)
-    monkeypatch.setattr(config_mod, "_discover_local_endpoint", lambda: "http://127.0.0.1:59999")
+    monkeypatch.setattr(
+        config_mod,
+        "_discover_local_endpoint",
+        lambda: rendezvous.Endpoint(transport="tcp", address="127.0.0.1:59999"),
+    )
     monkeypatch.setattr(config_mod, "_health_responsive", lambda url, **k: True)
     assert config_mod.has_live_local_coordinator() is True
+
+
+def test_discovered_endpoint_health_responsive_probes_tcp_as_http(monkeypatch):
+    captured = {}
+
+    def _fake_health_responsive(url, **_k):
+        captured["url"] = url
+        return True
+
+    monkeypatch.setattr(config_mod, "_health_responsive", _fake_health_responsive)
+    endpoint = rendezvous.Endpoint(transport="tcp", address="127.0.0.1:59999")
+    assert config_mod._discovered_endpoint_health_responsive(endpoint) is True
+    assert captured["url"] == "http://127.0.0.1:59999"
+
+
+def test_discovered_endpoint_health_responsive_true_for_non_tcp_transport(monkeypatch):
+    # No plain-HTTP mapping exists for a unix socket / named pipe here -- trust
+    # the existing connect-probe-verified liveness for those transports rather
+    # than guessing at a URL _health_responsive can't speak to.
+    monkeypatch.setattr(
+        config_mod,
+        "_health_responsive",
+        lambda url, **k: (_ for _ in ()).throw(AssertionError("should not be called")),
+    )
+    endpoint = rendezvous.Endpoint(transport="unix", address="/tmp/agent-dispatch.sock")
+    assert config_mod._discovered_endpoint_health_responsive(endpoint) is True
 
 
 def test_health_responsive_true_on_2xx(monkeypatch):
