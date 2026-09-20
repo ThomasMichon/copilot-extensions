@@ -20,6 +20,62 @@ from . import tracking
 from .codename import DEFAULT_WORDLIST, Wordlist, assign_codename, load_wordlist_or_default
 
 
+class CodenameAttributionPolicyError(Exception):
+    """Raised when a PR-active repo with a custom ``codename.wordlist_path``
+    attempts to allocate a NEW codename under an unconfigured/implicit
+    ``pr.source_attribution`` (effort codename-attribution-by-default).
+
+    A custom wordlist is a separate, independently-configured risk surface
+    from ``source_attribution`` -- it could contain identifying/private
+    terms, so a repo that has one configured must explicitly set
+    ``source_attribution`` (to ``codename``, ``true``, or ``false``) before
+    the new implicit ``"codename"`` default is allowed to draw a NEW
+    codename from that vocabulary. This is an ALLOCATION-time gate only: it
+    never affects publishing an already-assigned codename, which is decided
+    exclusively by that record's own persisted ``codename_source`` (see
+    ``providers.attribution``'s publish-time gating helper).
+    """
+
+
+def classify_codename_source(codename_cfg) -> str:
+    """Classify a repo's codename provenance ("built-in"/"custom") from its
+    PARSED :class:`~agent_worktrees.codename_config.CodenameConfig`, using
+    ``wordlist_path_configured`` -- never ``wordlist_path``'s own
+    truthiness, and never the resolved :class:`Wordlist` (round-11/13/14
+    findings: both are indistinguishable from "no custom wordlist" for a
+    malformed value or an unloadable file, respectively). ``codename_cfg``
+    may be ``None`` (a caller with no codename config at all) -- treated the
+    same as "no custom wordlist configured".
+    """
+    configured = bool(
+        getattr(codename_cfg, "wordlist_path_configured", False)
+    ) if codename_cfg is not None else False
+    return "custom" if configured else "built-in"
+
+
+def check_allocation_policy(
+    *, pr_enabled: bool, codename_source: str, source_attribution_configured: bool,
+) -> None:
+    """Raise :class:`CodenameAttributionPolicyError` when a PR-active repo
+    with a custom wordlist (``codename_source == "custom"``) has not
+    explicitly configured ``pr.source_attribution``. Scoped to PR-active
+    repos only (round-22 finding) -- a repo with ``pr.enabled`` false/unset
+    can never publish a marker, so gating its allocation is pure friction
+    with no safety benefit; the persisted ``codename_source`` already makes
+    publish-time resolution fail-closed regardless, whenever PR mode is
+    later enabled.
+    """
+    if pr_enabled and codename_source == "custom" and not source_attribution_configured:
+        raise CodenameAttributionPolicyError(
+            "This repo has a custom codename.wordlist_path configured and "
+            "PR mode enabled, but pr.source_attribution has not been set "
+            "explicitly. Set pr.source_attribution to \"codename\", "
+            "\"true\", or \"false\" before a new codename may be allocated "
+            "-- the implicit \"codename\" default never draws from a "
+            "custom, unreviewed vocabulary."
+        )
+
+
 def allocation_lock(tracking_path: Path) -> tracking._RecordLock:
     """Cross-process lock serializing the codename read -> pick -> record-write
     sequence for one project's tracking directory.
@@ -73,6 +129,27 @@ def wordlist_for_repo(config) -> Wordlist:
     return load_wordlist_or_default(path)
 
 
+def allocation_policy_kwargs_for_repo(config) -> dict:
+    """Resolve the ``ensure_codename`` allocation-policy kwargs
+    (``codename_source``/``pr_enabled``/``source_attribution_configured``)
+    from a repo's config, defensively degrading to the safe "no PR mode,
+    built-in wordlist" defaults for any config object missing the expected
+    shape (e.g. a minimal test stand-in) -- mirrors :func:`wordlist_for_repo`'s
+    own fail-soft posture, so a caller with an incomplete config never
+    raises here just to determine what to pass through.
+    """
+    repo = getattr(config, "default_repo", None)
+    codename_cfg = getattr(repo, "codename", None)
+    prcfg = getattr(repo, "pr", None)
+    return {
+        "codename_source": classify_codename_source(codename_cfg),
+        "pr_enabled": bool(getattr(prcfg, "enabled", False)),
+        "source_attribution_configured": bool(
+            getattr(prcfg, "source_attribution_configured", False)
+        ),
+    }
+
+
 def existing_codenames(tracking_path: Path) -> set[str]:
     """The set of codenames already assigned within one project's tracking
     directory (local collision check only -- see :mod:`agent_worktrees.codename`
@@ -97,6 +174,10 @@ def ensure_codename(
     record: tracking.WorktreeRecord,
     tracking_path: Path,
     wordlist: Wordlist | None = None,
+    *,
+    codename_source: str = "built-in",
+    pr_enabled: bool = False,
+    source_attribution_configured: bool = False,
 ) -> tracking.WorktreeRecord:
     """Lazily backfill ``record.codename`` if absent, persisting the result.
 
@@ -113,6 +194,17 @@ def ensure_codename(
     per-record lock and then this module's ``allocation_lock`` from the same
     call stack; that reversed order is a real cross-process deadlock hazard
     against a concurrent path holding them in this module's order.
+
+    ``codename_source``/``pr_enabled``/``source_attribution_configured``
+    (codename-attribution-by-default, round-26 finding) centralize the
+    allocation-time policy gate HERE, on the actual-new-allocation branch
+    only -- never on the "a concurrent writer already assigned one, just
+    copy it" branch below, which must never re-validate policy for an
+    already-decided codename. This protects every caller
+    (``resume``/``status --write``'s backfill, ``create-pr``'s backfill,
+    and the ``create``/paired-knowledge preflights, which call this as
+    their actual allocation step after their own early, side-effect-safe
+    preflight) without each one duplicating the check.
     """
     if record.codename:
         return record
@@ -134,11 +226,24 @@ def ensure_codename(
                 return record
             current = tracking.load_record(yaml_path)
             if current.codename:
+                # A concurrent writer already assigned one -- copy its
+                # codename AND provenance (round-12 finding: copying only
+                # `.codename` silently dropped the provenance the winning
+                # writer already recorded). Never re-validate allocation
+                # policy for an already-decided codename.
                 record.codename = current.codename
+                record.codename_source = current.codename_source
                 return record
+            check_allocation_policy(
+                pr_enabled=pr_enabled,
+                codename_source=codename_source,
+                source_attribution_configured=source_attribution_configured,
+            )
             current.codename = assign_new_codename(tracking_path, wordlist)
+            current.codename_source = codename_source
             tracking.save_record(current, yaml_path)
             record.codename = current.codename
+            record.codename_source = current.codename_source
     return record
 
 

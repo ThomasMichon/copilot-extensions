@@ -331,6 +331,63 @@ class TestSaveLoadRoundTrip:
         assert "codename" not in path2.read_text()
         assert load_record(path2).codename is None
 
+    def test_codename_source_round_trip(self, tmp_path: Path):
+        # codename-attribution-by-default: the per-record provenance
+        # classification survives save/load and is omitted (byte-identical
+        # legacy YAML) when unset.
+        rec = self._make_record(codename="rusty-gizmo", codename_source="built-in")
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert "codename_source: built-in" in path.read_text()
+        assert load_record(path).codename_source == "built-in"
+        rec2 = self._make_record(codename="stormy-lantern")
+        path2 = tmp_path / "wt2.yaml"
+        save_record(rec2, path2)
+        assert "codename_source" not in path2.read_text()
+        assert load_record(path2).codename_source is None
+
+    def test_stale_writer_does_not_erase_concurrent_codename_assignment(
+        self, tmp_path: Path,
+    ):
+        # codename-attribution-by-default (round-11 finding): a status/PR
+        # writer holding an in-memory record from BEFORE a concurrent
+        # lazy-backfill assigned a codename must not save over it and
+        # erase the just-assigned codename/codename_source.
+        path = tmp_path / "wt.yaml"
+        stale = self._make_record()  # no codename yet
+        save_record(stale, path)
+        # A concurrent writer assigns a codename directly on disk.
+        current = load_record(path)
+        current.codename = "amber-thicket"
+        current.codename_source = "custom"
+        save_record(current, path)
+        # The stale in-memory snapshot (still codename-less) saves an
+        # unrelated field -- must not erase the concurrent assignment.
+        stale.title = "unrelated update"
+        save_record(stale, path)
+        reloaded = load_record(path)
+        assert reloaded.codename == "amber-thicket"
+        assert reloaded.codename_source == "custom"
+        assert reloaded.title == "unrelated update"
+
+    def test_in_memory_codename_assignment_is_never_discarded(
+        self, tmp_path: Path,
+    ):
+        # The merge rule only protects an ON-DISK assignment from a stale
+        # writer -- it must never go the other direction and discard a
+        # codename the SAME writer just assigned in this call chain merely
+        # because the on-disk copy (loaded before this writer's own
+        # assignment) still shows none.
+        path = tmp_path / "wt.yaml"
+        rec = self._make_record()
+        save_record(rec, path)
+        rec.codename = "quiet-harbor"
+        rec.codename_source = "built-in"
+        save_record(rec, path)
+        reloaded = load_record(path)
+        assert reloaded.codename == "quiet-harbor"
+        assert reloaded.codename_source == "built-in"
+
     def test_owner_ref_round_trip(self, tmp_path: Path):
         # resource-claims: the backward owner link survives save/load, is
         # omitted when unset, and parses into a qualified ClaimRef.
@@ -617,6 +674,134 @@ class TestSaveLoadRoundTrip:
         assert loaded.pr.number == 42
         assert loaded.pr.provider == "gitea"
 
+    def test_pr_record_frozen_attribution_and_identity_round_trip(
+        self, tmp_path: Path,
+    ):
+        from agent_worktrees.tracking import PRRecord
+
+        # codename-attribution-by-default: the frozen attribution pair,
+        # pr_id, and pr_revision survive save/load and are omitted
+        # (byte-identical legacy YAML) when unset.
+        rec = self._make_record(
+            prs=[PRRecord(
+                state="open", branch="feature/x", provider="gitea",
+                attribution_mode="codename", attribution_explicit=True,
+                pr_id="a1b2c3", pr_revision=3,
+            )]
+        )
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        text = path.read_text()
+        assert "attribution_mode: codename" in text
+        assert "attribution_explicit: true" in text
+        assert "pr_id: a1b2c3" in text
+        assert "pr_revision: 3" in text
+        loaded = load_record(path)
+        assert loaded.pr is not None
+        assert loaded.pr.attribution_mode == "codename"
+        assert loaded.pr.attribution_explicit is True
+        assert loaded.pr.pr_id == "a1b2c3"
+        assert loaded.pr.pr_revision == 3
+
+        rec2 = self._make_record(prs=[PRRecord(state="creating", branch="feature/y")])
+        path2 = tmp_path / "wt2.yaml"
+        save_record(rec2, path2)
+        text2 = path2.read_text()
+        assert "attribution_mode" not in text2
+        assert "attribution_explicit" not in text2
+        assert "pr_id" not in text2
+        assert "pr_revision" not in text2
+        loaded2 = load_record(path2)
+        assert loaded2.pr is not None
+        assert loaded2.pr.attribution_mode == ""
+        assert loaded2.pr.attribution_explicit is False
+        assert loaded2.pr.pr_id == ""
+        assert loaded2.pr.pr_revision == 0
+
+    def test_pr_record_attribution_explicit_false_still_round_trips(
+        self, tmp_path: Path,
+    ):
+        from agent_worktrees.tracking import PRRecord
+
+        # round-34 finding: attribution_explicit is emitted whenever
+        # attribution_mode is non-empty, NOT only when attribution_explicit
+        # is itself truthy -- a False explicitness is a legitimately-frozen
+        # state (an IMPLICIT codename decision), and omitting it would
+        # strand attribution_mode without its partner on reload, silently
+        # re-triggering the lazy-backfill freeze.
+        rec = self._make_record(
+            prs=[PRRecord(
+                state="open", branch="feature/x", provider="gitea",
+                attribution_mode="codename", attribution_explicit=False,
+            )]
+        )
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert "attribution_explicit: false" in path.read_text()
+        loaded = load_record(path)
+        assert loaded.pr is not None
+        assert loaded.pr.attribution_mode == "codename"
+        assert loaded.pr.attribution_explicit is False
+
+    def test_pr_record_malformed_attribution_explicit_string_rejected(
+        self, tmp_path: Path,
+    ):
+        # round-30 finding: a hand-edited attribution_explicit: "false"
+        # (a truthy STRING, not the boolean False) must NOT authorize
+        # publication -- strict `is True` check, never truthy coercion.
+        from agent_worktrees.tracking import _parse_pr_mapping
+        parsed = _parse_pr_mapping(
+            {
+                "state": "open", "branch": "feature/x",
+                "attribution_mode": "codename",
+                "attribution_explicit": "false",
+            },
+            "ext",
+        )
+        assert parsed.attribution_explicit is False
+
+    def test_pr_record_unrecognized_attribution_mode_migrated_like_missing(
+        self, tmp_path: Path,
+    ):
+        # round-30 finding, corrected round-33: an unrecognized
+        # attribution_mode value is migrated via the same one-time
+        # lazy-backfill freeze as a missing value -- never read as one of
+        # the three known modes and never perpetually re-derived from live
+        # config.
+        from agent_worktrees.tracking import _parse_pr_mapping
+        parsed = _parse_pr_mapping(
+            {
+                "state": "open", "branch": "feature/x",
+                "attribution_mode": "not-a-real-mode",
+                "attribution_explicit": True,
+            },
+            "ext",
+        )
+        assert parsed.attribution_mode == ""
+        assert parsed.attribution_explicit is False
+
+    def test_pr_record_partial_attribution_pair_treated_as_empty_sentinel(
+        self, tmp_path: Path,
+    ):
+        # round-30 finding: a partial pair (only one field set) must ALSO
+        # be treated as the empty legacy sentinel -- never let a
+        # half-written record produce a mode without its matching
+        # explicitness, or an explicitness without its matching mode.
+        from agent_worktrees.tracking import _parse_pr_mapping
+        only_mode = _parse_pr_mapping(
+            {"state": "open", "branch": "x", "attribution_mode": "codename"},
+            "ext",
+        )
+        assert only_mode.attribution_mode == ""
+        assert only_mode.attribution_explicit is False
+        only_explicit = _parse_pr_mapping(
+            {"state": "open", "branch": "x", "attribution_explicit": True},
+            "ext",
+        )
+        assert only_explicit.attribution_mode == ""
+        assert only_explicit.attribution_explicit is False
+
+
     def test_pr_record_number_optional(self, tmp_path: Path):
         from agent_worktrees.tracking import PRRecord
 
@@ -761,6 +946,284 @@ class TestSaveLoadRoundTrip:
 # ---------------------------------------------------------------------------
 # Session registry â three-state semantics
 # ---------------------------------------------------------------------------
+
+class TestPrAttributionMerge:
+    """codename-attribution-by-default (rounds 26-39): the per-entry PR
+    merge in `_save_record_unlocked` protecting the frozen attribution
+    pair from a stale concurrent writer."""
+
+    def _make(self, tmp_path, **overrides):
+        from agent_worktrees.tracking import (
+            create_new_record, load_record, save_record,
+        )
+        path = tmp_path / "wt.yaml"
+        rec = create_new_record(
+            "wt-a", "worktree/wt-a", "/tmp/wt-a", "repo", "machine", "wsl",
+            tmp_path,
+        )
+        for k, v in overrides.items():
+            setattr(rec, k, v)
+        save_record(rec, path)
+        return path, load_record(path)
+
+    def test_stale_writer_does_not_erase_freshly_frozen_entry(
+        self, tmp_path: Path,
+    ):
+        from agent_worktrees.tracking import PRRecord, load_record, save_record
+
+        path, stale = self._make(tmp_path)
+        stale.prs = [PRRecord(state="open", branch="feature/x", provider="gitea")]
+        save_record(stale, path)
+        # A stale in-memory snapshot, captured BEFORE the stamp below.
+        stale_snapshot = load_record(path)
+
+        current = load_record(path)
+        current.prs[0].attribution_mode = "codename"
+        current.prs[0].attribution_explicit = False
+        current.prs[0].pr_id = "abc123"
+        current.prs[0].pr_revision = 1
+        save_record(current, path)
+
+        # Saving the stale snapshot (unrelated field bump) must not erase
+        # the freshly-frozen entry.
+        stale_snapshot.title = "unrelated update"
+        save_record(stale_snapshot, path)
+
+        reloaded = load_record(path)
+        assert reloaded.prs[0].attribution_mode == "codename"
+        assert reloaded.prs[0].pr_id == "abc123"
+        assert reloaded.prs[0].pr_revision == 1
+        assert reloaded.title == "unrelated update"
+
+    def test_merge_protects_non_active_parallel_pr_entry(self, tmp_path: Path):
+        # round-32 finding: the merge must operate on the full `prs` list,
+        # keyed by identity -- not just the single `.pr` active-PR
+        # accessor, which cannot protect a frozen pair on a non-active
+        # (e.g. merged/closed) entry.
+        from agent_worktrees.tracking import PRRecord, load_record, save_record
+
+        path, rec = self._make(tmp_path)
+        entry_a = PRRecord(
+            state="merged", branch="feature/a", provider="gitea", pr_id="pid-a",
+        )
+        entry_b = PRRecord(
+            state="open", branch="feature/b", provider="gitea", pr_id="pid-b",
+        )
+        rec.prs = [entry_a, entry_b]
+        save_record(rec, path)
+        stale_snapshot = load_record(path)  # holds stale copies of BOTH
+
+        current = load_record(path)
+        # Stamp entry B (the active PR) under the lock.
+        b = next(p for p in current.prs if p.pr_id == "pid-b")
+        b.attribution_mode = "true"
+        b.attribution_explicit = True
+        b.pr_revision = 1
+        save_record(current, path)
+
+        # The stale snapshot's `.pr` (active-PR) accessor resolves to entry
+        # A (merged is non-active... actually active_pr() may resolve
+        # differently; the key assertion is per-entry protection
+        # regardless of which entry the accessor currently points at).
+        stale_snapshot.title = "touch"
+        save_record(stale_snapshot, path)
+
+        reloaded = load_record(path)
+        reloaded_b = next(p for p in reloaded.prs if p.pr_id == "pid-b")
+        assert reloaded_b.attribution_mode == "true"
+        assert reloaded_b.attribution_explicit is True
+
+    def test_matches_across_number_none_to_assigned_transition(
+        self, tmp_path: Path,
+    ):
+        from agent_worktrees.tracking import PRRecord, load_record, save_record
+
+        path, rec = self._make(tmp_path)
+        pr = PRRecord(
+            state="creating", branch="feature/x", provider="gitea",
+            number=None, pr_id="pid-1",
+        )
+        rec.prs = [pr]
+        save_record(rec, path)
+        stale_snapshot = load_record(path)  # still number=None
+
+        current = load_record(path)
+        current.prs[0].number = 7
+        current.prs[0].attribution_mode = "codename"
+        current.prs[0].attribution_explicit = False
+        current.prs[0].pr_revision = 1
+        save_record(current, path)
+
+        # The stale save (an unrelated field bump) must MERGE onto the
+        # matched entry -- proving the identity rule matches across the
+        # number=None -> provider-assigned-number transition via pr_id --
+        # not append a duplicate. (The stale snapshot's own OTHER fields,
+        # like `number`, are not themselves merge-protected -- only the
+        # frozen attribution pair is; this test's assertion is scoped to
+        # that, not to `number` surviving the stale write.)
+        stale_snapshot.title = "touch"
+        save_record(stale_snapshot, path)
+
+        reloaded = load_record(path)
+        assert len(reloaded.prs) == 1  # merged, not duplicate-appended
+        assert reloaded.prs[0].attribution_mode == "codename"
+
+    def test_matches_across_number_reassignment(self, tmp_path: Path):
+        from agent_worktrees.tracking import PRRecord, load_record, save_record
+
+        path, rec = self._make(tmp_path)
+        pr = PRRecord(
+            state="open", branch="feature/x", provider="gitea",
+            number=7, pr_id="pid-1",
+        )
+        rec.prs = [pr]
+        save_record(rec, path)
+        stale_snapshot = load_record(path)  # still number=7
+
+        current = load_record(path)
+        current.prs[0].number = 8  # manual set-pr correction
+        current.prs[0].attribution_mode = "true"
+        current.prs[0].attribution_explicit = True
+        current.prs[0].pr_revision = 1
+        save_record(current, path)
+
+        # Matched via pr_id (not number) -- a number correction alone must
+        # never cause a false non-match/duplicate-append.
+        stale_snapshot.title = "touch"
+        save_record(stale_snapshot, path)
+
+        reloaded = load_record(path)
+        assert len(reloaded.prs) == 1
+        assert reloaded.prs[0].attribution_mode == "true"
+
+    def test_two_independent_blank_entries_never_match(self, tmp_path: Path):
+        # Two independent blank PRRecords (no pr_id, no branch, no number
+        # on either side) must never be treated as the same entry: saving
+        # a second, independently-created blank must not merge into the
+        # first.
+        from agent_worktrees.tracking import PRRecord, load_record, save_record
+
+        path, rec = self._make(tmp_path)
+        blank_a = PRRecord(state="", branch="", provider="")
+        rec.prs = [blank_a]
+        save_record(rec, path)  # on-disk: [blank_a]
+
+        # A separate writer, without having seen blank_a, saves its OWN
+        # independently-created blank_b.
+        fresh = load_record(path)
+        fresh.prs = [PRRecord(state="", branch="", provider="")]
+        save_record(fresh, path)
+
+        reloaded = load_record(path)
+        assert len(reloaded.prs) == 2  # never merged into one
+
+    def test_pr_id_survives_branch_and_number_rename_together(
+        self, tmp_path: Path,
+    ):
+        # round-36/38 finding: pr_id (not branch, not number) is the
+        # identity that survives a rename of EITHER field, so the frozen
+        # attribution pair is still found and merge-protected across the
+        # rename.
+        from agent_worktrees.tracking import PRRecord, load_record, save_record
+
+        path, rec = self._make(tmp_path)
+        pr = PRRecord(
+            state="open", branch="feature/x", provider="gitea",
+            number=7, pr_id="pid-stable",
+        )
+        rec.prs = [pr]
+        save_record(rec, path)
+        stale_snapshot = load_record(path)  # branch=x, number=7
+
+        current = load_record(path)
+        current.prs[0].branch = "feature/y"
+        current.prs[0].number = 8
+        current.prs[0].attribution_mode = "codename"
+        current.prs[0].attribution_explicit = True
+        current.prs[0].pr_revision = 1
+        save_record(current, path)
+
+        stale_snapshot.title = "touch"
+        save_record(stale_snapshot, path)
+
+        reloaded = load_record(path)
+        assert len(reloaded.prs) == 1
+        assert reloaded.prs[0].attribution_mode == "codename"
+
+    def test_legacy_reconciliation_backfills_pr_id_onto_in_memory_entry(
+        self, tmp_path: Path,
+    ):
+        # round-38 finding: a stale in-memory entry with NO pr_id must
+        # reconcile against the on-disk entry via the branch fallback (not
+        # append a duplicate), and the resolved pr_id must be written back
+        # onto the in-memory entry too -- so a SECOND save from that same
+        # in-memory object no longer needs the fallback.
+        from agent_worktrees.tracking import PRRecord, load_record, save_record
+
+        path, rec = self._make(tmp_path)
+        pr = PRRecord(state="open", branch="feature/x", provider="gitea")
+        assert pr.pr_id == ""  # genuinely legacy, no pr_id at all
+        rec.prs = [pr]
+        save_record(rec, path)
+        stale_in_memory = load_record(path)  # also has no pr_id yet
+        assert stale_in_memory.prs[0].pr_id == ""
+
+        # A concurrent save backfills a fresh pr_id onto the on-disk entry
+        # (same branch) and stamps the frozen pair.
+        current = load_record(path)
+        current.prs[0].pr_id = "backfilled-id"
+        current.prs[0].attribution_mode = "codename"
+        current.prs[0].attribution_explicit = False
+        current.prs[0].pr_revision = 1
+        save_record(current, path)
+
+        # The stale save must reconcile onto that entry via the branch
+        # fallback, not append a duplicate.
+        stale_in_memory.title = "touch"
+        save_record(stale_in_memory, path)
+        reloaded = load_record(path)
+        assert len(reloaded.prs) == 1
+        assert reloaded.prs[0].pr_id == "backfilled-id"
+        assert reloaded.prs[0].attribution_mode == "codename"
+        # The in-memory object itself came away carrying the SAME
+        # backfilled pr_id.
+        assert stale_in_memory.prs[0].pr_id == "backfilled-id"
+
+        # A SECOND save from that same in-memory object (now pr_id-bearing)
+        # must not re-append either.
+        stale_in_memory.title = "touch again"
+        save_record(stale_in_memory, path)
+        reloaded2 = load_record(path)
+        assert len(reloaded2.prs) == 1
+        assert reloaded2.title == "touch again"
+
+    def test_no_identity_established_never_merges_with_a_pr_id_entry(
+        self, tmp_path: Path,
+    ):
+        # A genuinely unrelated blank entry (no branch, no number, no
+        # pr_id) must never accidentally match an entry that DOES have an
+        # identity established.
+        from agent_worktrees.tracking import PRRecord, load_record, save_record
+
+        path, rec = self._make(tmp_path)
+        identified = PRRecord(
+            state="open", branch="feature/x", provider="gitea", pr_id="pid-1",
+        )
+        rec.prs = [identified]
+        save_record(rec, path)
+        stale_snapshot = load_record(path)
+
+        current = load_record(path)
+        blank = PRRecord(state="", branch="", provider="")
+        current.prs.append(blank)
+        save_record(current, path)
+
+        stale_snapshot.title = "touch"
+        save_record(stale_snapshot, path)
+
+        reloaded = load_record(path)
+        assert len(reloaded.prs) == 2
+
 
 class TestSessionsField:
     """Verify None vs [] vs populated sessions semantics."""

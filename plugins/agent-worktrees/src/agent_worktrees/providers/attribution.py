@@ -67,6 +67,54 @@ def build_codename_marker(codename: str) -> str:
     return f"<!-- agent-worktrees:source codename={codename} -->"
 
 
+def may_publish_codename(
+    *, codename_source: str | None, source_attribution_configured: bool,
+) -> bool:
+    """Decide whether an ALREADY-ASSIGNED codename is safe to publish, given
+    its record's own persisted provenance (codename-attribution-by-default,
+    rounds 8/14/17/22/32/34).
+
+    Both codename-marker publish call sites (``_open_via_provider``'s
+    initial-PR-body branch and ``refresh_source_attribution``'s
+    managed-comment branch, used on every later push) must apply this
+    IDENTICAL check before treating an already-assigned codename as safe to
+    publish, factored into this one shared helper so the two paths cannot
+    drift out of sync (round-17 finding: only one of them originally
+    checked provenance at all).
+
+    Callers already gate on ``attribution == "codename"`` before invoking
+    this helper -- it decides ONLY the two remaining codename-mode cases:
+
+    * ``codename_source == "built-in"`` always publishes -- always safe,
+      whether the ``codename`` default is implicit or explicit
+      (``source_attribution_configured`` doesn't matter here).
+    * ``codename_source == "custom"`` publishes ONLY when
+      ``source_attribution_configured`` is ``True`` -- an operator who has
+      explicitly opted in has reviewed this repo's current custom
+      vocabulary; the bare implicit default never does (the exact
+      silent-leak scenario this whole effort exists to prevent).
+    * Anything else -- a missing/unrecognized/malformed ``codename_source``
+      (a legacy record predating this field, or hand-edited YAML) -- NEVER
+      publishes, explicit opt-in or not (round-32 finding, narrows the
+      original round-14/22 rule: explicit opt-in only ever bypasses the
+      built-in/custom ALLOCATION distinction, never provenance itself).
+      Checked as ``codename_source == "built-in"``, never the inverted
+      ``codename_source != "custom"`` shape (round-12 finding): an
+      unrecognized stored value must never be silently treated as safe.
+
+    This helper does NOT decide whether ``attribution`` itself resolves to
+    ``"codename"``, nor does it handle the independent raw-marker
+    (``source_attribution: True``) path, which never consults
+    ``codename_source`` and is unaffected by this function entirely (round-34
+    finding: scoped to codename markers only).
+    """
+    if codename_source == "built-in":
+        return True
+    if codename_source == "custom" and source_attribution_configured:
+        return True
+    return False
+
+
 def append_marker(body: str, marker: str) -> str:
     """Append *marker* to a PR *body*, replacing any existing source marker."""
     stripped = _MARKER_RE.sub("", body or "").rstrip()

@@ -375,6 +375,38 @@ class PRRecord:
     repo: str = ""           # target repo "owner/name"; default = worktree repo
     opened_at: str = ""      # ISO timestamp the PR record was opened
     closed_at: str = ""      # ISO timestamp the PR reached a terminal state
+    # codename-attribution-by-default (rounds 26-39): this PR's attribution
+    # decision, FROZEN once at creation time and never re-derived from live
+    # config afterward -- see design.md § Per-PR attribution freeze for the
+    # full rationale. `attribution_mode` is one of the closed set
+    # {"", "false", "true", "codename"} ("" is the empty legacy sentinel:
+    # unset, predates this mechanism, OR a partial/malformed persisted
+    # pair -- never treated as authorizing publication).
+    # `attribution_explicit` records whether the frozen decision came from
+    # an EXPLICIT per-call override/config key, versus the bare implicit
+    # default -- itself frozen alongside the mode, since a `False` explicit
+    # value is a legitimate frozen state (e.g. an implicit codename
+    # decision) that must not be confused with the unset sentinel.
+    attribution_mode: str = ""
+    attribution_explicit: bool = False
+    # A random UUID assigned ONCE when this entry is first created, and
+    # NEVER touched by any later branch/number/provider/state correction
+    # (round-36/37/38 findings: neither `branch` nor `number` is actually
+    # immutable -- a manual `set-pr` correction can reassign either -- so
+    # this is the SOLE stable per-entry merge identity `_save_record_unlocked`
+    # uses to protect the frozen attribution pair across concurrent saves).
+    # Backfilled INLINE by `_save_record_unlocked` itself for any entry that
+    # predates this field, not via a separate migration pass (round-37
+    # finding: this repo's config-migration framework explicitly excludes
+    # tracking YAML, so no such pass has an actual entry point).
+    pr_id: str = ""
+    # Bumped every time this entry's attribution_mode/attribution_explicit
+    # are (re)stamped -- following the `profile_assignment_revision`
+    # pattern already established elsewhere in this file. Guards
+    # `_save_record_unlocked`'s per-entry merge: a stale in-memory snapshot
+    # never overwrites a matching on-disk entry whose `pr_revision` is
+    # already at least as high.
+    pr_revision: int = 0
 
 
 # PR lifecycle states that are still live (the PR can still receive pushes).
@@ -385,6 +417,47 @@ _PR_NON_TERMINAL = ("", "creating", "open")
 def _pr_is_terminal(pr: PRRecord) -> bool:
     """Return True when a PR has reached a terminal (merged/closed) state."""
     return pr.state not in _PR_NON_TERMINAL
+
+
+def _attribution_mode_str(attribution: object) -> str:
+    """Normalize an effective ``SourceAttribution`` value to one of the
+    closed persisted ``attribution_mode`` strings
+    (``_VALID_ATTRIBUTION_MODES``)."""
+    if attribution == "codename":
+        return "codename"
+    return "true" if attribution is True else "false"
+
+
+def stamp_frozen_attribution(
+    pr: PRRecord, *, attribution: object, explicit: bool,
+) -> None:
+    """Freeze this PR's attribution decision ONCE, at creation time (design.md
+    § Per-PR attribution freeze, rounds 26-39). Must be called at every
+    FRESH-construction site (``create_pr``, ``_push_existing_feature``'s
+    fresh-target construction, manual ``set-pr``'s bare construction) --
+    NEVER at deserialization (``_parse_pr_mapping`` stays strict read-only,
+    round-33 finding).
+
+    ``attribution`` is the caller's already-computed EFFECTIVE attribution
+    (want_attribution) -- stamped VERBATIM, never re-derived from live
+    config (round-31 finding: an override may itself be a ``SourceAttribution``
+    value, not just a bool, once round-18's typing widening lands).
+    ``explicit`` records whether that value came from an EXPLICIT per-call
+    override or config key, versus the bare implicit default -- itself
+    frozen alongside the mode (a ``False`` explicitness is a legitimate
+    frozen state, e.g. an implicit ``codename`` decision).
+
+    Also assigns a fresh ``pr_id`` (a random token, unique per entry, NEVER
+    reassigned by this or any later call -- round-36 finding) if the entry
+    doesn't already have one, and bumps ``pr_revision`` -- the same
+    `_save_record_unlocked`-guarded counter a later re-stamp (e.g. a
+    retroactive-change migration touch) also bumps.
+    """
+    pr.attribution_mode = _attribution_mode_str(attribution)
+    pr.attribution_explicit = bool(explicit)
+    if not pr.pr_id:
+        pr.pr_id = secrets.token_hex(16)
+    pr.pr_revision += 1
 
 
 # ---------------------------------------------------------------------------
@@ -992,6 +1065,17 @@ class WorktreeRecord:
     # ``codename_tracking.py``); emitted only when set, so a legacy YAML
     # stays byte-identical.
     codename: str | None = None
+    # codename-attribution-by-default: which vocabulary `codename` was
+    # drawn from at ASSIGNMENT time -- "built-in" (the plugin's own
+    # organization-neutral generator) or "custom" (the owning repo's
+    # `codename.wordlist_path`), captured once and never re-derived from
+    # the repo's CURRENT config (which may have changed since). Absent on
+    # a record predating this field -- treated PERMANENTLY as unsafe
+    # ("custom") by every publish-time gate, never inferred from current
+    # config (round-10 finding: no automated backfill, only a manual,
+    # explicit, per-record operator edit ever promotes it). Emitted only
+    # when set, so a legacy/pre-Phase-1 YAML stays byte-identical.
+    codename_source: str | None = None
 
     @property
     def owner_claim_ref(self) -> ClaimRef | None:
@@ -1400,6 +1484,13 @@ def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
             num_val = int(num)
         except (TypeError, ValueError):
             num_val = None
+    pr_id_raw = raw.get("pr_id", "")
+    try:
+        pr_revision = _bounded_nonnegative_int(
+            raw.get("pr_revision", 0), field="pr_revision",
+        )
+    except (TypeError, ValueError, OverflowError):
+        pr_revision = 0
     return PRRecord(
         state=str(raw.get("state", "")),
         branch=str(raw.get("branch", "")),
@@ -1416,7 +1507,57 @@ def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
         repo=str(raw.get("repo", "")) or default_repo,
         opened_at=str(raw.get("opened_at", "")),
         closed_at=str(raw.get("closed_at", "")),
+        **_parse_frozen_attribution_pair(raw),
+        pr_id=pr_id_raw if isinstance(pr_id_raw, str) else "",
+        pr_revision=pr_revision,
     )
+
+
+#: The closed set of valid persisted ``attribution_mode`` values -- this is
+#: STRICT READ-ONLY validation (round-30 finding), never round-tripped
+#: as-is: anything outside this set (a hand-edited typo, a future value
+#: this code doesn't know about) is migrated exactly like a missing value,
+#: never accepted as authorizing publication.
+_VALID_ATTRIBUTION_MODES = frozenset({"", "false", "true", "codename"})
+
+
+def _parse_frozen_attribution_pair(raw: dict) -> dict[str, object]:
+    """Strictly validate the persisted ``attribution_mode``/
+    ``attribution_explicit`` pair (round-30 finding, corrected round-33)
+    -- the same never-treat-unknown-as-safe discipline round-12
+    established for ``codename_source``, applied here to a PAIR of fields
+    that must migrate together:
+
+    * ``attribution_explicit`` is read via a STRICT boolean check (``is
+      True``), never a truthy/falsy coercion -- a hand-edited
+      ``attribution_explicit: "false"`` (a truthy STRING) must not
+      silently authorize publication.
+    * ``attribution_mode`` is validated against the closed
+      ``_VALID_ATTRIBUTION_MODES`` set -- an unrecognized value is
+      migrated exactly like a missing one (never read as one of the
+      three known modes, never perpetually re-derived from live config
+      on every load).
+    * A PARTIAL pair (only one of the two fields present) is ALSO treated
+      as the empty legacy sentinel -- never let a half-written record
+      produce a mode without its matching explicitness, or an
+      explicitness without its matching mode.
+
+    Returns a dict of the two fields' constructor kwargs (empty-string
+    mode + ``False`` explicitness for every "not a clean, complete,
+    known-valid pair" case), for the empty-legacy-sentinel migration path
+    ``refresh_source_attribution``/``_open_via_provider`` lazily freezes
+    on first touch.
+    """
+    mode_present = "attribution_mode" in raw
+    explicit_present = "attribution_explicit" in raw
+    if not (mode_present and explicit_present):
+        return {"attribution_mode": "", "attribution_explicit": False}
+    mode_raw = raw.get("attribution_mode")
+    mode = mode_raw if isinstance(mode_raw, str) else ""
+    if mode not in _VALID_ATTRIBUTION_MODES:
+        return {"attribution_mode": "", "attribution_explicit": False}
+    explicit = raw.get("attribution_explicit") is True
+    return {"attribution_mode": mode, "attribution_explicit": explicit}
 
 
 def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
@@ -1445,7 +1586,21 @@ def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
         d["opened_at"] = pr.opened_at
     if pr.closed_at:
         d["closed_at"] = pr.closed_at
+    # codename-attribution-by-default: emit `attribution_explicit` whenever
+    # `attribution_mode` is non-empty, NOT only when `attribution_explicit`
+    # is itself truthy (round-34 finding) -- a `False` explicitness is a
+    # legitimately-frozen state (e.g. an implicit `codename` decision), and
+    # omitting it would strand `attribution_mode` without its partner on
+    # reload, silently re-triggering the lazy-backfill freeze.
+    if pr.attribution_mode:
+        d["attribution_mode"] = pr.attribution_mode
+        d["attribution_explicit"] = pr.attribution_explicit
+    if pr.pr_id:
+        d["pr_id"] = pr.pr_id
+    if pr.pr_revision:
+        d["pr_revision"] = pr.pr_revision
     return d
+
 
 
 def _parse_claim_mapping(raw: dict) -> ResourceClaim:
@@ -2152,6 +2307,8 @@ def load_record(path: Path) -> WorktreeRecord:
                    if data.get("pair_kind") in ("worktree", "anchor") else None),
         reaped_at=(str(data["reaped_at"]) if data.get("reaped_at") else None),
         codename=(str(data["codename"]) if data.get("codename") else None),
+        codename_source=(str(data["codename_source"])
+                         if data.get("codename_source") else None),
     )
     record._loaded_from = path
     return record
@@ -2201,6 +2358,100 @@ def _yaml_scalar(v: str) -> str:
     if v and v[0] in "@`-?:,[]{}#&*!|>%'\" ":
         return "'" + v.replace("'", "''") + "'"
     return v
+
+
+def _pr_identity_match(record_pr: PRRecord, current_pr: PRRecord) -> bool:
+    """Is ``record_pr`` (in-memory, possibly stale) the SAME tracked PR as
+    ``current_pr`` (on-disk)? (codename-attribution-by-default, rounds
+    36-38.)
+
+    ``pr_id`` is the canonical identity once both sides have one -- a
+    random token assigned ONCE at creation and never mutated by any later
+    ``branch``/``number``/``provider``/``state`` correction, unlike EITHER
+    of those fields (a manual ``set-pr`` correction can reassign either
+    one). If either side lacks a ``pr_id`` (a legacy in-memory snapshot
+    predating this field, mid-migration), fall back to the round-35
+    identity rule as a ONE-TIME bridging match: equal NON-EMPTY ``branch``,
+    or -- only when ``branch`` is empty on both sides -- equal ``number``.
+    Two entries with NO identity established at all (no ``pr_id``, no
+    non-empty ``branch``, no ``number`` on either side) never match.
+    """
+    if record_pr.pr_id and current_pr.pr_id:
+        return record_pr.pr_id == current_pr.pr_id
+    if record_pr.branch and current_pr.branch:
+        return record_pr.branch == current_pr.branch
+    if not record_pr.branch and not current_pr.branch:
+        if record_pr.number is not None and current_pr.number is not None:
+            return record_pr.number == current_pr.number
+    return False
+
+
+def _merge_pr_attribution_state(
+    record: WorktreeRecord, current: WorktreeRecord,
+) -> None:
+    """Merge the frozen attribution fields (and ``pr_id``/``pr_revision``)
+    PER-ENTRY across the full ``prs`` list, protecting a concurrently-
+    stamped frozen pair from a stale in-memory writer (design.md § Per-PR
+    attribution freeze, rounds 26-39).
+
+    Runs as part of every locked ``save_record`` call (this function's
+    caller already holds the record lock), so it also backfills a
+    ``pr_id``-less on-disk entry INLINE here rather than via a separate
+    migration mechanism (round-37 finding: this repo's config-migration
+    framework explicitly excludes tracking YAML, so no such mechanism has
+    an actual entry point to invoke it).
+
+    For each ``current.prs`` (on-disk) entry:
+
+    1. Backfill a fresh ``pr_id`` if it doesn't have one yet.
+    2. Find the matching ``record.prs`` (in-memory) entry via
+       :func:`_pr_identity_match`.
+    3. If matched and ``current``'s ``pr_revision`` is STRICTLY HIGHER than
+       the matched entry's, overwrite that entry's frozen fields
+       (``attribution_mode``/``attribution_explicit``/``pr_id``/
+       ``pr_revision``) from ``current``'s copy -- never the reverse (a
+       lower-or-equal ``current`` revision never overwrites an in-memory
+       entry that is already at least as fresh). If the match came via the
+       legacy branch/number fallback (record's entry had no ``pr_id``),
+       write the resolved ``pr_id`` back onto it regardless of the
+       revision comparison, so the in-memory object is no longer legacy on
+       a later save from the same caller.
+    4. If UNMATCHED (a concurrent writer created this PR after the stale
+       snapshot was taken), append ``current``'s entry into
+       ``record.prs`` unchanged.
+    """
+    for current_pr in current.prs:
+        match = next(
+            (rp for rp in record.prs if _pr_identity_match(rp, current_pr)),
+            None,
+        )
+        if match is None:
+            # A concurrent writer created this PR after the stale snapshot
+            # was taken -- append it unchanged (backfilling pr_id first if
+            # it's a legacy entry with none).
+            if not current_pr.pr_id:
+                current_pr.pr_id = secrets.token_hex(16)
+            record.prs.append(current_pr)
+            continue
+        # Reconcile pr_id onto whichever side is missing it -- this is the
+        # bridging step for a legacy match (identity was established via
+        # the branch/number fallback because one or both sides lacked a
+        # pr_id): both sides converge on the SAME id, so a later save from
+        # either the in-memory object or a fresh on-disk load no longer
+        # needs the fallback (round-38 finding).
+        if match.pr_id and not current_pr.pr_id:
+            current_pr.pr_id = match.pr_id
+        elif current_pr.pr_id and not match.pr_id:
+            match.pr_id = current_pr.pr_id
+        elif not match.pr_id and not current_pr.pr_id:
+            fresh_id = secrets.token_hex(16)
+            match.pr_id = fresh_id
+            current_pr.pr_id = fresh_id
+        if current_pr.pr_revision > match.pr_revision:
+            match.attribution_mode = current_pr.attribution_mode
+            match.attribution_explicit = current_pr.attribution_explicit
+            match.pr_id = current_pr.pr_id
+            match.pr_revision = current_pr.pr_revision
 
 
 def _save_record_unlocked(
@@ -2322,6 +2573,19 @@ def _save_record_unlocked(
                 merged.append(claim)
         merged.extend(reserved.values())
         record.resources = merged
+        # codename-attribution-by-default (round-11 finding): a codename is
+        # assigned AT MOST ONCE and never reassigned afterward, unlike the
+        # revision-tracked fields above -- so the merge rule is simply
+        # "never let a stale in-memory record with no codename yet overwrite
+        # an on-disk record that a concurrent lazy-backfill already
+        # assigned one to." Never the reverse (an in-memory codename always
+        # wins over a current on-disk absence): a writer that itself just
+        # allocated the codename in this same call chain must not have its
+        # own fresh assignment discarded.
+        if not record.codename and current.codename:
+            record.codename = current.codename
+            record.codename_source = current.codename_source
+        _merge_pr_attribution_state(record, current)
 
     for session in record.sessions or ():
         if len(session.activations) > _MAX_SESSION_ACTIVATIONS:
@@ -2658,6 +2922,10 @@ def _save_record_unlocked(
     # legacy/pre-Phase-2 worktree's YAML stays byte-identical.
     if record.codename:
         content += f"codename: {_yaml_scalar(record.codename)}\n"
+    # codename-attribution-by-default: emitted only when set, so a legacy/
+    # pre-Phase-1 worktree's YAML stays byte-identical.
+    if record.codename_source:
+        content += f"codename_source: {_yaml_scalar(record.codename_source)}\n"
     # agent-fabric resource-claims: the forward outbound list. Emitted only when
     # non-empty (the common case owns nothing), keeping legacy YAMLs identical.
     if record.resources:
@@ -3997,6 +4265,7 @@ def create_new_record(
     pair_ref: str | None = None,
     pair_kind: str | None = None,
     codename: str | None = None,
+    codename_source: str | None = None,
 ) -> WorktreeRecord:
     """Create and save a new worktree tracking record."""
     now = _now_iso()
@@ -4043,6 +4312,7 @@ def create_new_record(
         pair_ref=pair_ref or None,
         pair_kind=pair_kind or None,
         codename=codename or None,
+        codename_source=codename_source or None,
     )
     _mark_controller_projection_dirty(
         record,

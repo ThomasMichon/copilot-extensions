@@ -1933,12 +1933,58 @@ def _carve_paired_knowledge(
     # no tracking record. Assignment + the eventual record-write share one
     # allocation lock (see codename_tracking.py) so a concurrent carve can
     # never pick the same candidate.
+    #
+    # codename-attribution-by-default (round-10/11 findings): the
+    # allocation-policy check below is deliberately OUTSIDE this
+    # config-load try/except -- an earlier design had it inside, where a
+    # bare `except Exception` swallowed the policy violation into a silent
+    # `knowledge_wordlist = None` fallback, letting this path allocate a
+    # codename (with codename_source="built-in") for exactly the
+    # custom-wordlist/unconfigured-source_attribution repo the policy
+    # exists to block. A config-load failure degrades ONLY the wordlist
+    # resolution (matching this function's existing fail-safe posture);
+    # it never silently authorizes an otherwise-blocked allocation.
     try:
         knowledge_config = cfg.load_config(project=knowledge_name)
         knowledge_wordlist = codename_tracking.wordlist_for_repo(knowledge_config)
+        knowledge_policy_kwargs = codename_tracking.allocation_policy_kwargs_for_repo(
+            knowledge_config
+        )
     except Exception:
         knowledge_wordlist = None
+        knowledge_policy_kwargs = {
+            "codename_source": "built-in", "pr_enabled": False,
+            "source_attribution_configured": False,
+        }
+
+    # Preflight (round-12/13 finding): validate BEFORE any side effect this
+    # function performs (worktree, branch, or record) -- the `create` flow
+    # already persisted the HARNESS worktree/branch/record before calling
+    # this function, so failing here does not roll those back (no rollback
+    # protocol is implemented; see the second revalidation below for the
+    # orphan-naming backstop).
+    codename_tracking.check_allocation_policy(**knowledge_policy_kwargs)
+
     with codename_tracking.allocation_lock(knowledge_tracking_path):
+        # Second revalidation (round-13/14 finding) immediately before the
+        # first side effect below -- shrinks, but does not eliminate, the
+        # residual TOCTOU window between the preflight above and this
+        # point. If hit, the harness worktree/branch created by the caller
+        # before this function ran is now orphaned (no automatic
+        # rollback) -- name it explicitly so the operator can remove it.
+        try:
+            codename_tracking.check_allocation_policy(**knowledge_policy_kwargs)
+        except codename_tracking.CodenameAttributionPolicyError as exc:
+            harness_worktree_path = str(
+                Path(config.default_repo.worktree_root) / harness_id
+            )
+            raise codename_tracking.CodenameAttributionPolicyError(
+                f"{exc} A harness worktree/branch was already created "
+                "before this policy violation was detected and is left in "
+                f"place (no automatic rollback): worktree="
+                f"{harness_worktree_path!r} branch={f'worktree/{harness_id}'!r}. "
+                "Remove it manually with `git worktree remove` if unwanted."
+            ) from exc
         knowledge_codename = codename_tracking.assign_new_codename(
             knowledge_tracking_path, knowledge_wordlist
         )
@@ -1968,6 +2014,7 @@ def _carve_paired_knowledge(
             pair_ref=harness_ref,
             pair_kind="worktree",
             codename=knowledge_codename,
+            codename_source=knowledge_policy_kwargs["codename_source"],
         )
     # Best-effort permissions + trust for the knowledge worktree.
     try:
@@ -2256,9 +2303,37 @@ def _create_worktree_core(
     # allocation lock, as an earlier revision did) is a real cross-process
     # deadlock hazard against a concurrent backfill of that same owner
     # worktree's own codename.
+    #
+    # codename-attribution-by-default (round-21 finding): preflight the
+    # allocation-time policy BEFORE any create side effect below (owner
+    # claim journal, git worktree/branch, tracking record) -- a distinct,
+    # more severe gap than the paired-knowledge path since this is the
+    # ordinary `create` path every worktree goes through.
+    new_codename_source = codename_tracking.classify_codename_source(
+        getattr(repo, "codename", None)
+    )
+    codename_tracking.check_allocation_policy(
+        pr_enabled=bool(getattr(repo.pr, "enabled", False)),
+        codename_source=new_codename_source,
+        source_attribution_configured=bool(
+            getattr(repo.pr, "source_attribution_configured", False)
+        ),
+    )
     tracking_path = cfg.tracking_dir()
     tracking_path.mkdir(parents=True, exist_ok=True)
     with codename_tracking.allocation_lock(tracking_path):
+        # Second revalidation immediately before the first side effect
+        # below (round-13/14 finding): shrinks, but does not eliminate, the
+        # residual TOCTOU window between the preflight above and this
+        # point -- closing it fully would need config-file locking, out of
+        # scope for this effort.
+        codename_tracking.check_allocation_policy(
+            pr_enabled=bool(getattr(repo.pr, "enabled", False)),
+            codename_source=new_codename_source,
+            source_attribution_configured=bool(
+                getattr(repo.pr, "source_attribution_configured", False)
+            ),
+        )
         new_codename = codename_tracking.assign_new_codename(
             tracking_path, codename_tracking.wordlist_for_repo(config)
         )
@@ -2303,6 +2378,7 @@ def _create_worktree_core(
                 interface=interface,
                 origin=origin,
                 codename=new_codename,
+                codename_source=new_codename_source,
                 dispatch_attempt=(
                     tracking.DispatchAttempt(
                         task_id=str(dispatch_attempt["task_id"]),
@@ -2363,6 +2439,14 @@ def _create_worktree_core(
                 plat=plat,
                 plat_short=plat_short,
             )
+        except codename_tracking.CodenameAttributionPolicyError:
+            # codename-attribution-by-default (round-10/11 finding): this is
+            # NOT an ordinary pairing glitch -- it is the paired-knowledge
+            # allocation policy correctly refusing to leak a custom
+            # vocabulary term. Re-raise (abort `create` outright) rather
+            # than degrading to a logged warning and a silent `pair_stamp =
+            # None`, which would defeat the policy entirely.
+            raise
         except Exception as exc:  # pragma: no cover - defensive
             print(f"paired-knowledge carve failed (non-fatal): {exc}", file=sys.stderr)
             pair_stamp = None
@@ -6118,7 +6202,8 @@ def _resolve_resume(
     # access.
     if hasattr(fresh, "codename") and not fresh.codename:
         fresh = codename_tracking.ensure_codename(
-            fresh, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config)
+            fresh, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config),
+            **codename_tracking.allocation_policy_kwargs_for_repo(config),
         )
         record.codename = fresh.codename
 
@@ -7432,7 +7517,8 @@ def _cmd_status_write(
     peek = tracking.load_record(yaml_path)
     if not peek.codename:
         codename_tracking.ensure_codename(
-            peek, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config)
+            peek, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config),
+            **codename_tracking.allocation_policy_kwargs_for_repo(config),
         )
     # Foreground verb (#4547): the whole load -> set_disposition -> save is a
     # critical RMW held under the blocking record lock, so a concurrent Picker

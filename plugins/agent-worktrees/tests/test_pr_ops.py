@@ -204,6 +204,38 @@ class TestCreatePR:
         assert res["success"] is False
         assert "not enabled" in res["error"]
 
+    def test_freezes_attribution_and_stamps_pr_id_at_fresh_construction(
+        self, pr_repo,
+    ):
+        # codename-attribution-by-default (rounds 26-39): create_pr's own
+        # fresh-construction site must stamp the frozen pair + pr_id.
+        config, wid, _wt_path, _ = pr_repo
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+        assert res["success"] is True
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        pr = rec.active_pr()
+        assert pr is not None
+        # pr_repo's bare PRConfig() resolves the implicit "codename" default.
+        assert pr.attribution_mode == "codename"
+        assert pr.attribution_explicit is False
+        assert pr.pr_id
+        assert pr.pr_revision == 1
+
+    def test_freezes_explicit_per_call_override_verbatim(self, pr_repo):
+        # round-31 finding: the stamp must capture the caller's EFFECTIVE
+        # attribution, including a per-call override, stamped VERBATIM --
+        # never re-derived from prcfg directly.
+        config, wid, _wt_path, _ = pr_repo
+        res = pr_ops.create_pr(
+            wid, config, title="Add feature", attribution="codename",
+        )
+        assert res["success"] is True
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        pr = rec.active_pr()
+        assert pr is not None
+        assert pr.attribution_mode == "codename"
+        assert pr.attribution_explicit is True
+
     def test_required_body_sections_fail_before_branch_publication(self, pr_repo):
         import dataclasses
 
@@ -1183,6 +1215,25 @@ class TestSetPRAndStatus:
         assert st["url"] == "https://example/pulls/7"
         assert st["number"] == 7
 
+    def test_set_pr_freezes_attribution_and_stamps_pr_id(self, pr_repo):
+        # codename-attribution-by-default (round-27 finding): manual set-pr
+        # is a fresh-construction site too -- the shared stamping helper
+        # must be wired into it, not only into create_pr's own construction.
+        # pr_repo's config resolves the bare "codename" default with
+        # source_attribution_configured False.
+        _config, wid, _wt_path, _ = pr_repo
+        res = pr_ops.set_pr(
+            wid, url="https://example/pulls/7", number=7, provider="gitea"
+        )
+        assert res["success"] is True
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        pr = rec.active_pr()
+        assert pr is not None
+        assert pr.attribution_mode == "codename"
+        assert pr.attribution_explicit is False
+        assert pr.pr_id
+        assert pr.pr_revision == 1
+
     def test_set_pr_merges_with_create_pr(self, pr_repo):
         config, wid, _wt_path, _ = pr_repo
         created = pr_ops.create_pr(wid, config, title="Add feature")
@@ -1748,6 +1799,10 @@ class TestPRFinalizeAndPush:
         )
         record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         record.codename = "harbor-lattice"
+        # codename-attribution-by-default: may_publish_codename requires a
+        # known codename_source before publishing -- this test is about
+        # marker content/format, not provenance, so stamp a safe "built-in".
+        record.codename_source = "built-in"
         tracking.save_record(record)
         pr = tracking.PRRecord(state="open", branch="feature/x", provider="gitea",
                        repo="example/project", number=42)
@@ -1869,7 +1924,225 @@ class TestPRFinalizeAndPush:
         assert error == ""
         assert publishes["count"] == 0
 
-    def test_push_changes_from_worktree_branch_snapshot(self, pr_repo):
+    def test_refresh_source_attribution_codename_mode_provenance_gating(
+        self, pr_repo, monkeypatch,
+    ):
+        """codename-attribution-by-default: the refresh path must apply the
+        SAME provenance gating as the initial create-pr publish (round-17
+        finding -- prior to this effort only one of the two paths checked
+        codename_source at all)."""
+        import dataclasses
+
+        config, wid, _wt_path, _ = pr_repo
+        repo = config.repos["ext"]
+
+        def _config_with(source_attribution_configured: bool):
+            return dataclasses.replace(
+                config,
+                repos={
+                    "ext": dataclasses.replace(
+                        repo,
+                        pr=dataclasses.replace(
+                            repo.pr, source_attribution="codename",
+                            source_attribution_configured=(
+                                source_attribution_configured
+                            ),
+                        ),
+                    )
+                },
+            )
+
+        _pr_counter = {"n": 0}
+
+        def _refresh(codename_source, *, source_attribution_configured):
+            _pr_counter["n"] += 1
+            record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+            record.codename = "harbor-lattice"
+            record.codename_source = codename_source
+            # A distinct branch/number per scenario -- each call simulates
+            # an INDEPENDENT PR from scratch; a real caller would never
+            # reuse the same branch across genuinely unrelated PRs (the
+            # merge logic correctly treats a matching branch as "the same
+            # tracked PR" and preserves its frozen state across saves,
+            # which is exactly this effort's point).
+            pr = tracking.PRRecord(
+                state="open", branch=f"feature/x-{_pr_counter['n']}",
+                provider="gitea", repo="example/project",
+                number=42 + _pr_counter["n"],
+            )
+            record.prs = [pr]
+            tracking.save_record(record)
+            publishes = {"count": 0}
+
+            class FakeProvider:
+                def publish_source_marker(
+                    self, repo, number, marker, *, api_base="", token=None
+                ):
+                    publishes["count"] += 1
+                    return ""
+
+            monkeypatch.setattr(
+                "agent_worktrees.providers.get_provider",
+                lambda name: FakeProvider(),
+            )
+            error = pr_ops.refresh_source_attribution(
+                wid, _config_with(source_attribution_configured), record, pr,
+                "deadbeef" * 5,
+            )
+            assert error == ""
+            return publishes["count"]
+
+        # (a) codename_source "custom" under the IMPLICIT default fails
+        # closed -- the legacy-drift scenario (round-8 finding).
+        assert _refresh(
+            "custom", source_attribution_configured=False,
+        ) == 0
+        # (b) an EXPLICIT opt-in publishes a KNOWN "custom" record.
+        assert _refresh(
+            "custom", source_attribution_configured=True,
+        ) == 1
+        # (b2) that SAME explicit opt-in does NOT publish for a MISSING
+        # codename_source (round-32 finding: explicit opt-in narrows the
+        # allocation-vs-publish distinction, it does not bypass provenance
+        # verification).
+        assert _refresh(
+            None, source_attribution_configured=True,
+        ) == 0
+        # (c) codename_source "built-in" publishes under the IMPLICIT
+        # default.
+        assert _refresh(
+            "built-in", source_attribution_configured=False,
+        ) == 1
+        # (d) an unrecognized stored value fails closed exactly like
+        # "custom" would.
+        assert _refresh(
+            "not-a-real-value", source_attribution_configured=True,
+        ) == 0
+
+    def test_refresh_source_attribution_legacy_freeze_runs_before_live_config_guard(
+        self, pr_repo, monkeypatch,
+    ):
+        # round-37 finding: the freeze-on-first-touch must run BEFORE any
+        # early return that depends on live config -- a legacy PR (no
+        # attribution_mode stored) touched while source_attribution is
+        # LIVE `False` must be frozen to the false state on THAT touch
+        # (not left unmigrated because the function used to return early
+        # before ever reaching the freeze), and a LATER touch under a
+        # DIFFERENT live config must still honor the ORIGINAL frozen
+        # state, not the newer one.
+        import dataclasses
+
+        config, wid, _wt_path, _ = pr_repo
+        repo = config.repos["ext"]
+
+        def _config_with(source_attribution):
+            return dataclasses.replace(
+                config,
+                repos={
+                    "ext": dataclasses.replace(
+                        repo,
+                        pr=dataclasses.replace(
+                            repo.pr, source_attribution=source_attribution,
+                        ),
+                    )
+                },
+            )
+
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        pr = tracking.PRRecord(
+            state="open", branch="feature/x", provider="gitea",
+            repo="example/project", number=42,
+        )
+        assert pr.attribution_mode == ""  # genuinely legacy/unset
+        record.prs = [pr]
+        tracking.save_record(record)
+        publishes = {"count": 0}
+
+        class FakeProvider:
+            def publish_source_marker(
+                self, repo, number, marker, *, api_base="", token=None
+            ):
+                publishes["count"] += 1
+                return ""
+
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider",
+            lambda name: FakeProvider(),
+        )
+
+        # First touch under a LIVE False config.
+        error = pr_ops.refresh_source_attribution(
+            wid, _config_with(False), record, pr, "deadbeef" * 5,
+        )
+        assert error == ""
+        assert publishes["count"] == 0
+        reloaded = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        frozen_pr = reloaded.active_pr()
+        assert frozen_pr is not None
+        assert frozen_pr.attribution_mode == "false"  # frozen, not still ""
+
+        # Second touch (a NEW head, so publish would proceed if the mode
+        # allowed it) under a config that has since changed to "codename".
+        # The ORIGINAL frozen "false" must still govern -- no marker.
+        error2 = pr_ops.refresh_source_attribution(
+            wid, _config_with("codename"), reloaded, frozen_pr,
+            "cafebabe" * 5,
+        )
+        assert error2 == ""
+        assert publishes["count"] == 0
+        assert frozen_pr.attribution_mode == "false"
+
+    def test_finish_auto_open_rerun_always_invokes_refresh_regardless_of_live_config(
+        self, pr_repo, monkeypatch,
+    ):
+        # round-38 finding: the CALLER GATE deciding whether to invoke
+        # refresh_source_attribution at all must not itself branch on live
+        # config -- a PR frozen under "true" whose live config later flips
+        # to "false" must still reach the frozen-pair logic inside the
+        # function on a create-pr re-run.
+        config, wid, _wt_path, _ = pr_repo
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        pr = tracking.PRRecord(
+            state="open", branch="feature/x", provider="gitea",
+            repo="example/project", number=42,
+            attribution_mode="true", attribution_explicit=True, pr_id="abc",
+            pr_revision=1,
+        )
+        record.prs = [pr]
+        tracking.save_record(record)
+        calls = {"count": 0}
+        real_refresh = pr_ops.refresh_source_attribution
+
+        def _spy(*a, **k):
+            calls["count"] += 1
+            return real_refresh(*a, **k)
+
+        monkeypatch.setattr(pr_ops, "refresh_source_attribution", _spy)
+
+        result: dict = {}
+        # Live config now says False -- the caller gate must NOT skip the
+        # call just because this snapshot says publication is off.
+        import dataclasses
+        repo = config.repos["ext"]
+        false_config = dataclasses.replace(
+            config,
+            repos={
+                "ext": dataclasses.replace(
+                    repo,
+                    pr=dataclasses.replace(
+                        repo.pr, source_attribution=False, auto_open=True,
+                    ),
+                )
+            },
+        )
+        pr_ops._finish_auto_open(
+            result, false_config, record, pr, title="Add feature", body=None,
+            worktree_id=wid, head_sha="deadbeef" * 5, open_pr=None,
+            draft=False, attribution=None,
+        )
+        assert calls["count"] == 1
+
+
         # New primary flow: create-pr leaves HEAD on worktree/<id> at the
         # squashed commit, so feedback commits land there. push-changes rebases
         # worktree/<id>, re-snapshots the feature branch to its tip, and pushes
