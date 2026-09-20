@@ -60,8 +60,8 @@ jobs:
         # Scoped to files THIS PR's own commits touch (like the version-bump
         # step above) -- a PR is never blocked by growth in a file it never
         # touched, which used to happen whenever another already-merged PR
-        # grew a shared module faster than the post-merge widen job could
-        # catch up (aperture-labs module-size-baseline-widen race).
+        # grew a shared module faster than the post-merge widen job below
+        # could catch up.
         if: github.event_name == 'pull_request'
         run: python tools/check-module-size.py --changed-since ${{ github.event.pull_request.base.sha }}
       - name: Module size (hard cap + shrink-only baseline, full sweep)

@@ -112,6 +112,25 @@ def _tracked_py_files() -> list[str]:
     ]
 
 
+def _diff_touches_baseline(base_ref: str) -> bool:
+    """True when this branch's own commits touch the baseline JSON itself.
+
+    A baseline-only edit (or one that edits the baseline alongside files
+    outside ``*.py``) must never be scoped by ``--changed-since``: a ceiling
+    can be lowered/removed for a file the diff's ``*.py``-only file list would
+    otherwise skip entirely, silently passing a now-inconsistent baseline
+    that only the (disabled-for-PRs) full sweep would have caught.
+    """
+    out = subprocess.run(
+        ["git", "diff", "--name-only", f"{base_ref}...HEAD", "--", str(BASELINE_PATH)],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return bool(out.stdout.strip())
+
+
 def _changed_py_files(base_ref: str) -> set[str]:
     """Files this branch's own commits touch, relative to its merge-base with
     ``base_ref`` -- unaffected by how far ``base_ref``'s own branch has moved
@@ -263,7 +282,18 @@ def main() -> int:
             print("[OK] baseline already up to date")
         return 0
 
-    only_paths = _changed_py_files(args.changed_since) if args.changed_since else None
+    only_paths = None
+    if args.changed_since:
+        if _diff_touches_baseline(args.changed_since):
+            # A baseline edit changes the invariant for the WHOLE tree, not
+            # just files this diff's *.py list would name -- always fall back
+            # to a full sweep rather than silently scoping around it.
+            print(
+                f"[INFO] {BASELINE_PATH.relative_to(REPO)} changed -- "
+                "falling back to a full sweep instead of --changed-since scoping."
+            )
+        else:
+            only_paths = _changed_py_files(args.changed_since)
     violations = check(baseline, only_paths=only_paths)
     if violations:
         print(f"[FAIL] module size ({CAP_LINES}-line cap, shrink-only baseline):")

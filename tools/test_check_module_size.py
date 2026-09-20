@@ -292,3 +292,30 @@ def test_changed_since_is_incompatible_with_refresh_baseline(repo: Path):
 
     assert result.returncode == 2
     assert "--changed-since is incompatible with --refresh-baseline" in result.stderr
+
+
+def test_changed_since_falls_back_to_full_sweep_when_baseline_itself_changes(
+    repo: Path,
+):
+    # A baseline-only edit touches no *.py file at all, so a naive *.py-only
+    # diff would scope enforcement to an empty set and silently pass a now
+    # inconsistent (too-low) ceiling. Reproduce: lower an existing entry
+    # below the file's actual (unchanged) size in a diff that touches only
+    # the baseline JSON.
+    _write_lines(repo, "src/legacy.py", 5000)
+    _write_baseline(repo, {"src/legacy.py": 5000})
+    _commit_all(repo)
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    _write_baseline(repo, {"src/legacy.py": 100})  # bogus/mistaken lowering
+    _commit_all(repo)
+
+    result = _run(repo, "--changed-since", base_sha)
+
+    # Falls back to the full sweep instead of scoping around the untouched
+    # (but now over its lowered ceiling) src/legacy.py.
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "src/legacy.py" in result.stdout
+    assert "[INFO]" in result.stdout

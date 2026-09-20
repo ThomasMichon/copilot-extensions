@@ -576,7 +576,13 @@ binstub in `~/.local/bin/`.
   (`.github/workflows/module-size-baseline-widen.yml`), which additionally
   ratchets a grown file's ceiling up to its current size and opens its own
   small, reviewable PR — never something a PR branch's own CI run applies to
-  its own diff. Test files (`tests/`, `test_*.py`,
+  its own diff. A separate `--changed-since REF` flag scopes the ordinary
+  (non-widening) check to files this branch's own commits actually touch
+  (used by CI on `pull_request` events) — this repo's high concurrent-PR
+  volume otherwise let one already-merged PR's growth in a shared,
+  already-baselined module fail every *other* PR's guard until the widen job
+  caught up, even ones that never opened that file; `--changed-since` fixes
+  the attribution, not the underlying growth. Test files (`tests/`, `test_*.py`,
   `conftest.py`) are exempt — `TESTING.md` already directs splitting those by
   behavioral contract, not arbitrary line count, a different rule for a
   different failure mode.
