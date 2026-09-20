@@ -61,7 +61,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "532887a454bc6b6b437904715233ea232837d1bf5349b9971e51e4c5062b87a4",
+          "sha256": "bda63ca80e7955351df033f05a472c1aa8db843a8a3f2c2fe254208337e369e8",
           "semantic": false,
           "non_semantic_reason": "Installation-scoped runtime defaults do not alter the representative session-create wire shape."
         },
@@ -73,7 +73,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "3891d74d145943ab0ed9f062012835551549f179ee3be1a8ea0c70197d616b3b",
+          "sha256": "c6e104c7658c76e7eca0dff7b251e687fe991c0d91ae3fd273a46949001cce87",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -117,13 +117,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "3b810edbf0b3ddd6f60cee44ef3333945fc356e2418ec89e01a334ab6590e2d8",
+          "sha256": "b87c08cc3905b0726239f1cbfde6cff9936f7ebacdfe17e52e093b5437c98314",
           "role": "current session-create response",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "1ae555543d8a273adf5801da30f23666dacf6cec8daebf0bce614f537cb5b655",
+          "sha256": "4fc665dc1ea6b31c96dec68cab47034fb52d343e4c3dc407cc970911e335b9e0",
           "role": "current representative FastAPI error",
           "generation": 15
         },
@@ -190,20 +190,20 @@
           "capture_method": "Re-attested after process-slot-ownership Phase 5 added the \"slot\" descriptor (aperture-labs); invoke the health route with a controlled empty runtime state, zeroed carrier diagnostics, and an empty routing table."
         },
         {
-          "commit": "851dfca5a0982a97eff672865648f9cbf0318229",
-          "plugin_version": "0.4.0-dev500",
+          "commit": "3019a6aa86295f44e452fb5634dafec084ec1669",
+          "plugin_version": "0.4.0-dev502",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "source_git_blob": "5568b002040e506d1c7894d2c7500daaa1492813",
-          "capture_method": "Validate and serialize representative session-create request and response models; re-attested after the HTTP_PROTOCOL_VERSION bump (agent-dispatch-session-worktree-history Phase 2 follow-up, #2955), which does not alter the representative session-create wire shape."
+          "source_git_blob": "bb258911b9add889bb0f9a7d1865644fed153671",
+          "capture_method": "Validate and serialize representative session-create request and response models; re-attested after adding the computed durable_session_id field (#2985), which does not alter the representative session-create wire shape's required fields."
         },
         {
-          "commit": "851dfca5a0982a97eff672865648f9cbf0318229",
-          "plugin_version": "0.4.0-dev500",
+          "commit": "3019a6aa86295f44e452fb5634dafec084ec1669",
+          "plugin_version": "0.4.0-dev502",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "source_git_blob": "ed270918b1813d8552fd42848b73984de0dc3852",
-          "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response; re-attested after the HTTP_PROTOCOL_VERSION bump (agent-dispatch-session-worktree-history Phase 2 follow-up, #2955), which does not touch this code path."
+          "source_git_blob": "49047f333bac11c468889dcb07f84ab9d923bcc7",
+          "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response; re-attested after adding the computed durable_session_id field (#2985), which does not touch this code path."
         },
         {
           "commit": "851dfca5a0982a97eff672865648f9cbf0318229",

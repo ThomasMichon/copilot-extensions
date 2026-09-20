@@ -833,8 +833,10 @@ only an agent-dispatch task id (not a session id) resolves it durably with
 one call: `GET /api/v1/dispatch-tasks/{id}/session` (`durable_session_id` on
 the response). This tries the task's current owner session first, then its
 durable attachment history (agent-dispatch's own `GET /tasks/{id}/attachments`),
-then the task's target worktree's latest known session — live-then-cold-store
-throughout, so it still answers once the task's worktree is reclaimed. Never
+across every session tier the bridge knows (bridge-owned, cold-store
+archived, and a represented interactive CLI session), then the task's
+target worktree's latest known session as a last resort (live-only — a
+reclaimed worktree with no resolvable candidate is a genuine 404). Never
 invent a per-consumer naming convention (e.g. deriving a worktree name from a
 PR number) to get there — this route is the one shared primitive; see
 `visions/plugins/agent-bridge`'s *topology and resolver layer* concept and

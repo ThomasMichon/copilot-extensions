@@ -57,3 +57,42 @@ def cold_store_session_info(cold: ColdStoreSession) -> SessionInfo:
         updated_at=parse_cold_store_timestamp(cold.updated_at),
         at_rest=True,
     )
+
+
+#: A live-sessions registry row's own status values (distinct from
+#: agent-bridge's bridge-owned ``SessionStatus`` lifecycle) that mean the
+#: registration is still genuinely live right now.
+_LIVE_REGISTRATION_STATUSES = frozenset({"live", "wedged"})
+
+
+def live_registration_to_session_info(row: dict) -> SessionInfo:
+    """Convert a ``live_sessions`` registry row (an interactive CLI session
+    the bridge represents but does not own -- see ``routes/live_sessions.py``)
+    to the public ``SessionInfo`` shape.
+
+    Its ``session_id`` is already the real Copilot ACP session id (the
+    bundled extension registers with ``process.env.SESSION_ID`` -- see
+    ``extensions/agent-bridge/extension.mjs``), so -- like the cold-store
+    case, and unlike a bridge-owned live session's own escrow id -- there is
+    no ``acp_session_id`` ambiguity to resolve: ``durable_session_id`` mirrors
+    ``session_id`` directly.
+    """
+    status = (
+        SessionStatus.RUNNING
+        if row.get("status") in _LIVE_REGISTRATION_STATUSES
+        else SessionStatus.STOPPED
+    )
+    session_id = row["session_id"]
+    return SessionInfo(
+        session_id=session_id,
+        name=session_id,
+        durable_session_id=session_id,
+        acp_session_id=session_id,
+        target_dir=row.get("cwd"),
+        worktree_id=row.get("worktree_id"),
+        read_only=True,
+        status=status,
+        pid=row.get("pid"),
+        created_at=datetime.fromtimestamp(row["registered_at"], tz=timezone.utc),
+        updated_at=datetime.fromtimestamp(row["updated_at"], tz=timezone.utc),
+    )
