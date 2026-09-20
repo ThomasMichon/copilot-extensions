@@ -1956,15 +1956,22 @@ class TestPRFinalizeAndPush:
 
         def _refresh(codename_source, *, source_attribution_configured):
             _pr_counter["n"] += 1
-            record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+            # A distinct SYNTHETIC worktree id per scenario -- each call
+            # simulates an INDEPENDENT worktree/PR from scratch. Reusing
+            # the same on-disk record across scenarios would let the
+            # codename-provenance merge (correctly) preserve an
+            # already-known codename_source from an earlier scenario,
+            # which is exactly this effort's point but defeats this
+            # test's intent to exercise each provenance value in
+            # isolation.
+            scenario_wid = f"{wid}-scenario-{_pr_counter['n']}"
+            tracking.create_new_record(
+                scenario_wid, f"worktree/{scenario_wid}", "/tmp/" + scenario_wid,
+                "ext", "test", "linux", cfg.tracking_dir(),
+            )
+            record = tracking.load_record(cfg.tracking_dir() / f"{scenario_wid}.yaml")
             record.codename = "harbor-lattice"
             record.codename_source = codename_source
-            # A distinct branch/number per scenario -- each call simulates
-            # an INDEPENDENT PR from scratch; a real caller would never
-            # reuse the same branch across genuinely unrelated PRs (the
-            # merge logic correctly treats a matching branch as "the same
-            # tracked PR" and preserves its frozen state across saves,
-            # which is exactly this effort's point).
             pr = tracking.PRRecord(
                 state="open", branch=f"feature/x-{_pr_counter['n']}",
                 provider="gitea", repo="example/project",
@@ -1986,7 +1993,8 @@ class TestPRFinalizeAndPush:
                 lambda name: FakeProvider(),
             )
             error = pr_ops.refresh_source_attribution(
-                wid, _config_with(source_attribution_configured), record, pr,
+                scenario_wid, _config_with(source_attribution_configured),
+                record, pr,
                 "deadbeef" * 5,
             )
             assert error == ""

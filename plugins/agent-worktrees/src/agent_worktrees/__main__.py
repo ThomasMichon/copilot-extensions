@@ -6206,6 +6206,7 @@ def _resolve_resume(
             **codename_tracking.allocation_policy_kwargs_for_repo(config),
         )
         record.codename = fresh.codename
+        record.codename_source = fresh.codename_source
 
     activity.log_event(
         "worktree_resumed",

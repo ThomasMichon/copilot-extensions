@@ -428,8 +428,22 @@ def _attribution_mode_str(attribution: object) -> str:
     return "true" if attribution is True else "false"
 
 
+def attribution_from_frozen_mode(pr: PRRecord) -> object:
+    """The inverse of :func:`_attribution_mode_str`: reconstruct an
+    effective ``SourceAttribution`` value from a PR's FROZEN
+    ``attribution_mode``, for a caller that must drive a decision off the
+    frozen pair rather than live config (round-38 finding: e.g. the
+    initial-open path, which previously recomputed a live value even
+    though the PR may already carry an earlier frozen decision).
+    """
+    if pr.attribution_mode == "codename":
+        return "codename"
+    return pr.attribution_mode == "true"
+
+
 def stamp_frozen_attribution(
     pr: PRRecord, *, attribution: object, explicit: bool,
+    assign_pr_id: bool = True,
 ) -> None:
     """Freeze this PR's attribution decision ONCE, at creation time (design.md
     § Per-PR attribution freeze, rounds 26-39). Must be called at every
@@ -452,10 +466,27 @@ def stamp_frozen_attribution(
     doesn't already have one, and bumps ``pr_revision`` -- the same
     `_save_record_unlocked`-guarded counter a later re-stamp (e.g. a
     retroactive-change migration touch) also bumps.
+
+    ``assign_pr_id=False`` (a fix-PR-#3037-review finding) is used ONLY by
+    the legacy-freeze-on-first-touch call site
+    (``refresh_source_attribution``): that call stamps an EXISTING,
+    already-on-disk entry OUTSIDE the record lock, so two concurrent
+    legacy-freeze calls for the SAME PR could otherwise each independently
+    mint a DIFFERENT random ``pr_id`` before either saves -- once both
+    in-memory copies have distinct non-empty ``pr_id`` values, the identity
+    match's ``pr_id`` path (requiring exact equality) no longer falls back
+    to the branch/number rule that would otherwise unify them, causing the
+    loser's save to append a duplicate PR record instead of merging. With
+    ``assign_pr_id=False``, both racing calls leave ``pr_id`` empty, so
+    `_save_record_unlocked`'s own inline backfill (which runs serialized
+    under the record lock) is the ONLY place that ever mints a real
+    ``pr_id`` for a legacy entry -- race-free by construction. The three
+    FRESH-construction sites keep the default ``True``: a brand-new
+    ``PRRecord`` has no on-disk counterpart to race against at all.
     """
     pr.attribution_mode = _attribution_mode_str(attribution)
     pr.attribution_explicit = bool(explicit)
-    if not pr.pr_id:
+    if assign_pr_id and not pr.pr_id:
         pr.pr_id = secrets.token_hex(16)
     pr.pr_revision += 1
 
@@ -1528,10 +1559,16 @@ def _parse_frozen_attribution_pair(raw: dict) -> dict[str, object]:
     established for ``codename_source``, applied here to a PAIR of fields
     that must migrate together:
 
-    * ``attribution_explicit`` is read via a STRICT boolean check (``is
-      True``), never a truthy/falsy coercion -- a hand-edited
-      ``attribution_explicit: "false"`` (a truthy STRING) must not
-      silently authorize publication.
+    * ``attribution_explicit`` is read via a STRICT boolean check -- a
+      value that is not literally a Python ``bool`` (a hand-edited
+      ``attribution_explicit: "false"``, a truthy STRING) invalidates the
+      WHOLE pair back to the empty legacy sentinel, not just itself
+      (fix-PR-#3037-review finding): a naive "coerce non-True to False"
+      would leave `attribution_mode` VALID while only neutralizing
+      `attribution_explicit` -- but the raw-marker (`"true"`) mode
+      publishes unconditionally on mode alone, never consulting
+      `attribution_explicit` first, so that shape would still let a
+      malformed record authorize a privacy-sensitive marker.
     * ``attribution_mode`` is validated against the closed
       ``_VALID_ATTRIBUTION_MODES`` set -- an unrecognized value is
       migrated exactly like a missing one (never read as one of the
@@ -1556,8 +1593,10 @@ def _parse_frozen_attribution_pair(raw: dict) -> dict[str, object]:
     mode = mode_raw if isinstance(mode_raw, str) else ""
     if mode not in _VALID_ATTRIBUTION_MODES:
         return {"attribution_mode": "", "attribution_explicit": False}
-    explicit = raw.get("attribution_explicit") is True
-    return {"attribution_mode": mode, "attribution_explicit": explicit}
+    explicit_raw = raw.get("attribution_explicit")
+    if not isinstance(explicit_raw, bool):
+        return {"attribution_mode": "", "attribution_explicit": False}
+    return {"attribution_mode": mode, "attribution_explicit": explicit_raw}
 
 
 def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
@@ -2447,7 +2486,17 @@ def _merge_pr_attribution_state(
             fresh_id = secrets.token_hex(16)
             match.pr_id = fresh_id
             current_pr.pr_id = fresh_id
-        if current_pr.pr_revision > match.pr_revision:
+        # An EQUAL on-disk revision is also authoritative, not only a
+        # strictly greater one (fix-PR-#3037-review finding): two
+        # concurrent first-touch freezes of the same legacy PR can each
+        # independently bump their own copy from 0 to 1, so a strict `>`
+        # would let whichever stale in-memory snapshot happens to save
+        # SECOND silently overwrite the already-persisted first decision
+        # merely because the revisions tie. The frozen pair is meant to be
+        # decided ONCE; on a tie, the value already durably on disk (this
+        # save's own lock-serialized predecessor) wins over an in-memory
+        # value that has not yet been persisted.
+        if current_pr.pr_revision >= match.pr_revision:
             match.attribution_mode = current_pr.attribution_mode
             match.attribution_explicit = current_pr.attribution_explicit
             match.pr_id = current_pr.pr_id
@@ -2584,6 +2633,20 @@ def _save_record_unlocked(
         # own fresh assignment discarded.
         if not record.codename and current.codename:
             record.codename = current.codename
+            record.codename_source = current.codename_source
+        elif (
+            record.codename
+            and record.codename == current.codename
+            and not record.codename_source
+            and current.codename_source
+        ):
+            # fix-PR-#3037-review finding: the SAME codename is already
+            # assigned on both sides, but only the on-disk copy carries a
+            # KNOWN codename_source (e.g. an operator's manual per-record
+            # promotion, or a concurrent writer's classification landing
+            # moments before this stale save). Preserve that known
+            # provenance rather than silently overwriting it with an
+            # unset value merely because this snapshot never saw it.
             record.codename_source = current.codename_source
         _merge_pr_attribution_state(record, current)
 

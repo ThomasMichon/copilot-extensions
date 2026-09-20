@@ -388,6 +388,34 @@ class TestSaveLoadRoundTrip:
         assert reloaded.codename == "quiet-harbor"
         assert reloaded.codename_source == "built-in"
 
+    def test_known_on_disk_codename_source_survives_a_matching_stale_save(
+        self, tmp_path: Path,
+    ):
+        # PR #3037 review finding: the codename-provenance merge only
+        # imported provenance when the in-memory codename was EMPTY -- if
+        # both sides already agree on the SAME codename but the in-memory
+        # copy's codename_source is unset (e.g. an operator's manual
+        # per-record promotion landed on disk after this snapshot was
+        # taken), a stale save must not silently erase that known
+        # provenance.
+        path = tmp_path / "wt.yaml"
+        rec = self._make_record(codename="amber-thicket")
+        save_record(rec, path)
+        stale_snapshot = load_record(path)
+        assert stale_snapshot.codename_source is None
+
+        current = load_record(path)
+        current.codename_source = "custom"  # manual operator promotion
+        save_record(current, path)
+
+        stale_snapshot.title = "touch"
+        save_record(stale_snapshot, path)
+
+        reloaded = load_record(path)
+        assert reloaded.codename == "amber-thicket"
+        assert reloaded.codename_source == "custom"
+        assert reloaded.title == "touch"
+
     def test_owner_ref_round_trip(self, tmp_path: Path):
         # resource-claims: the backward owner link survives save/load, is
         # omitted when unset, and parses into a qualified ClaimRef.
@@ -746,9 +774,15 @@ class TestSaveLoadRoundTrip:
     def test_pr_record_malformed_attribution_explicit_string_rejected(
         self, tmp_path: Path,
     ):
-        # round-30 finding: a hand-edited attribution_explicit: "false"
-        # (a truthy STRING, not the boolean False) must NOT authorize
-        # publication -- strict `is True` check, never truthy coercion.
+        # round-30 finding, sharpened by a PR #3037 review finding: a
+        # hand-edited attribution_explicit: "false" (a truthy STRING, not
+        # the boolean False) must invalidate the WHOLE pair back to the
+        # empty legacy sentinel -- not just neutralize explicitness while
+        # leaving mode valid. A naive "coerce non-True to False" would
+        # leave attribution_mode="codename" standing, but the raw-marker
+        # "true" mode publishes on mode alone without ever consulting
+        # explicitness, so that shape could still authorize a
+        # privacy-sensitive marker from a malformed record.
         from agent_worktrees.tracking import _parse_pr_mapping
         parsed = _parse_pr_mapping(
             {
@@ -759,6 +793,7 @@ class TestSaveLoadRoundTrip:
             "ext",
         )
         assert parsed.attribution_explicit is False
+        assert parsed.attribution_mode == ""
 
     def test_pr_record_unrecognized_attribution_mode_migrated_like_missing(
         self, tmp_path: Path,
@@ -1223,6 +1258,87 @@ class TestPrAttributionMerge:
 
         reloaded = load_record(path)
         assert len(reloaded.prs) == 2
+
+    def test_equal_revision_on_disk_is_authoritative(self, tmp_path: Path):
+        # PR #3037 review finding: two concurrent first-touch freezes of
+        # the same legacy PR can each independently bump their OWN copy's
+        # pr_revision from 0 to 1 -- a strict `>` comparison would then
+        # let whichever copy happens to save SECOND silently overwrite the
+        # already-persisted first decision merely because the revisions
+        # tie. On an EQUAL revision, the value already durably on disk
+        # must win.
+        from agent_worktrees.tracking import PRRecord, load_record, save_record
+
+        path, rec = self._make(tmp_path)
+        pr = PRRecord(
+            state="open", branch="feature/x", provider="gitea", pr_id="pid-1",
+        )
+        rec.prs = [pr]
+        save_record(rec, path)
+
+        # Writer A's in-memory copy, independently frozen to "true".
+        writer_a = load_record(path)
+        writer_a.prs[0].attribution_mode = "true"
+        writer_a.prs[0].attribution_explicit = True
+        writer_a.prs[0].pr_revision = 1
+
+        # Writer B's in-memory copy (loaded before A saved), independently
+        # frozen to "codename" -- SAME revision (1), different decision.
+        writer_b = load_record(path)
+        writer_b.prs[0].attribution_mode = "codename"
+        writer_b.prs[0].attribution_explicit = False
+        writer_b.prs[0].pr_revision = 1
+
+        # A saves first (durably persisting "true").
+        save_record(writer_a, path)
+        # B saves second -- must NOT overwrite A's already-persisted
+        # decision with its own equal-revision one.
+        save_record(writer_b, path)
+
+        reloaded = load_record(path)
+        assert reloaded.prs[0].attribution_mode == "true"
+
+    def test_concurrent_legacy_freeze_does_not_duplicate_the_pr(
+        self, tmp_path: Path,
+    ):
+        # PR #3037 review finding: two concurrent legacy-freeze calls for
+        # the SAME PR (both loaded with no pr_id yet) must not each mint a
+        # DIFFERENT random pr_id before saving -- once both in-memory
+        # copies have distinct non-empty pr_ids, the identity match's
+        # pr_id path (exact equality) stops falling back to branch/number,
+        # and the loser's save appends a duplicate PR record instead of
+        # merging. stamp_frozen_attribution(assign_pr_id=False) is how the
+        # real legacy-freeze call site avoids this; this test proves the
+        # underlying merge mechanics hold when pr_id is deliberately left
+        # unassigned by both racing writers, matching that fix.
+        from agent_worktrees.tracking import PRRecord, load_record, save_record
+
+        path, rec = self._make(tmp_path)
+        pr = PRRecord(state="open", branch="feature/x", provider="gitea")
+        assert pr.pr_id == ""
+        rec.prs = [pr]
+        save_record(rec, path)
+
+        writer_a = load_record(path)
+        assert writer_a.prs[0].pr_id == ""
+        writer_a.prs[0].attribution_mode = "true"
+        writer_a.prs[0].attribution_explicit = True
+        writer_a.prs[0].pr_revision = 1
+
+        writer_b = load_record(path)
+        assert writer_b.prs[0].pr_id == ""
+        writer_b.prs[0].attribution_mode = "codename"
+        writer_b.prs[0].attribution_explicit = False
+        writer_b.prs[0].pr_revision = 1
+
+        save_record(writer_a, path)
+        save_record(writer_b, path)
+
+        reloaded = load_record(path)
+        assert len(reloaded.prs) == 1  # never duplicated
+        assert reloaded.prs[0].pr_id  # backfilled under lock
+        assert reloaded.prs[0].attribution_mode == "true"  # A's, persisted first
+
 
 
 class TestSessionsField:

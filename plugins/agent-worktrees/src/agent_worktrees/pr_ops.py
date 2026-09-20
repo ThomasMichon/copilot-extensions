@@ -1179,9 +1179,7 @@ def _open_via_provider(
             and codename_mod.is_valid_handle(codename)
             and attr.may_publish_codename(
                 codename_source=(record.codename_source if record else None),
-                source_attribution_configured=(
-                    config.default_repo.pr.source_attribution_configured
-                ),
+                source_attribution_configured=target_pr.attribution_explicit,
             )
         )
         full_body = (
@@ -1280,6 +1278,13 @@ def refresh_source_attribution(
         tracking.stamp_frozen_attribution(
             target_pr, attribution=prcfg.source_attribution,
             explicit=prcfg.source_attribution_configured,
+            # This entry is an EXISTING on-disk record touched outside the
+            # record lock -- assign_pr_id=False defers pr_id minting
+            # entirely to _save_record_unlocked's own inline, lock-
+            # serialized backfill, so two concurrent legacy-freeze calls
+            # for the same PR can never mint two different random ids
+            # (fix-PR-#3037-review finding).
+            assign_pr_id=False,
         )
         tracking.save_record(record)
     if target_pr.attribution_head == head_sha:
@@ -1462,9 +1467,31 @@ def _finish_auto_open(
     if not want_open or target_pr is None:
         return
     if target_pr.number is None:
-        want_attribution = (
-            prcfg.source_attribution if attribution is None else attribution
-        )
+        # codename-attribution-by-default (fix-PR-#3037-review finding):
+        # use the FROZEN pair for the initial-open decision too, not a
+        # live-recomputed value -- a PR frozen on an earlier
+        # create-pr --no-open/--no-attribution run (never yet opened, so
+        # number is still None) must open under its ORIGINAL frozen
+        # policy even if live config has since changed. Lazily freeze an
+        # empty legacy pair (a target_pr that somehow reached this point
+        # unstamped) before opening, from whatever is live right now --
+        # the same one-time freeze-on-first-touch pattern
+        # refresh_source_attribution uses.
+        if not target_pr.attribution_mode:
+            _want_attribution = (
+                prcfg.source_attribution if attribution is None else attribution
+            )
+            tracking.stamp_frozen_attribution(
+                target_pr, attribution=_want_attribution,
+                explicit=(
+                    attribution is not None
+                    or prcfg.source_attribution_configured
+                ),
+                assign_pr_id=False,
+            )
+            if record is not None:
+                tracking.save_record(record)
+        want_attribution = tracking.attribution_from_frozen_mode(target_pr)
         _open_via_provider(
             result, config, record, target_pr, title, body, worktree_id,
             head_sha, draft=draft, attribution=want_attribution,
