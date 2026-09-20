@@ -31,6 +31,7 @@ import {
 } from "./cutover-seed.mjs";
 import { supersededHandoffIds } from "./handoff-tasks.mjs";
 import { AGENT_WORKTREES_QUERY_TIMEOUT_MS } from "./cli-timeouts.mjs";
+import { DEFAULT_HANDOFF_MODE, automaticHandoffEnabled } from "./mode.mjs";
 
 export const HANDOFF_META_PREFIX = "<!-- context-handoff:";
 export const HANDOFF_META_SUFFIX = "-->";
@@ -1756,7 +1757,11 @@ export function buildSeedForStored(stored) {
   return buildCutoverSeed(kind, stored.id, lead);
 }
 
-export function manualFallbackInstructions(stored, seed, { spawnInFlight = false } = {}) {
+export function manualFallbackInstructions(
+  stored,
+  seed,
+  { spawnInFlight = false, automaticCutoverDisabled = false } = {},
+) {
   const location = stored.storage === "agent-dispatch"
     ? `agent-dispatch task ${stored.id}`
     : `file handoff ${stored.id}`;
@@ -1772,6 +1777,22 @@ export function manualFallbackInstructions(stored, seed, { spawnInFlight = false
       "`/consume-handoff` in the successor session yourself, or use the " +
       "context-handoff payload-local CLI and pass only the trailing " +
       "`task:<id>` or `file:<id>` token to `consume --locator`.\n\n" +
+      "Copy only the following short handoff prompt/seed:\n\n" +
+      "```text\n" +
+      `${seed}\n` +
+      "```"
+    );
+  }
+  if (automaticCutoverDisabled) {
+    return (
+      `Handoff stored as ${location}. Automatic cutover is disabled ` +
+      "(`.context-handoff/config.yaml`'s `mode` is not `auto`), so no " +
+      "successor pane was requested and none will be spawned automatically -- " +
+      "this is expected, not a failure. Open (or ask the operator to open) " +
+      "the successor session yourself, then run `/consume-handoff`. If that " +
+      "command is unavailable, use the context-handoff payload-local CLI and " +
+      "pass only the trailing `task:<id>` or `file:<id>` token to " +
+      "`consume --locator`.\n\n" +
       "Copy only the following short handoff prompt/seed:\n\n" +
       "```text\n" +
       `${seed}\n` +
@@ -1810,6 +1831,14 @@ export async function triggerHandoff(
     // was already under way; now the loop exits the moment a spawn is
     // observed, so 30s comfortably covers that without needing to grow.
     waitMs = 30000,
+    // Live-cutover opt-in gate (`.context-handoff/config.yaml`'s `mode`):
+    // only "auto" ever emits the `handoff_requested` activity event
+    // agent-worktrees' resident status-monitor watches for, or pings
+    // agent-bridge -- the two things that can cause an automatic successor
+    // pane to spawn. Any other mode (the default, "manual-only") still
+    // stores/seeds the handoff normally; it just never wires up automatic
+    // pickup, so the operator/agent must consume it manually.
+    mode = DEFAULT_HANDOFF_MODE,
     execute = runCli,
     store = storeHandoff,
     writeSessionState = writeSessionStateHandoff,
@@ -1881,26 +1910,38 @@ export async function triggerHandoff(
   if (!justStored) {
     noteHandoff(cwd, sid, stored.id, stored.metadata?.title || title);
   }
-  const activity = logActivity(
-    cwd,
-    sid,
-    stored.metadata?.worktree || null,
-    stored,
-    sessionState.path,
-    execute,
-  );
-  const bridge = requestBridge(
-    cwd, sid, stored, seed, execute,
-  );
+  const autoEnabled = automaticHandoffEnabled(mode);
+  // Only "auto" mode emits the `handoff_requested` activity event
+  // agent-worktrees' resident status-monitor watches for, or pings
+  // agent-bridge -- both are how an automatic successor pane gets spawned.
+  // Any other mode (the default, "manual-only") skips both: the handoff is
+  // still fully stored/seeded, but nothing wires up automatic pickup.
+  const activity = autoEnabled
+    ? logActivity(
+      cwd,
+      sid,
+      stored.metadata?.worktree || null,
+      stored,
+      sessionState.path,
+      execute,
+    )
+    : { logged: false, reason: "automatic-cutover-disabled" };
+  const bridge = autoEnabled
+    ? requestBridge(cwd, sid, stored, seed, execute)
+    : { attempted: false, accepted: false, reason: "automatic-cutover-disabled" };
 
   const start = Date.now();
   let status = readPickupSignals(cwd, sid, stored, sessionState.path, execute);
   // Exit as soon as EITHER full pickup is confirmed OR a spawn is merely in
   // flight -- the latter means the automatic cutover is already under way,
   // so there is nothing more useful to learn by continuing to block; report
-  // that progress instead of waiting out the full ceiling.
+  // that progress instead of waiting out the full ceiling. When automatic
+  // cutover is disabled, nothing will spawn during this window, so don't
+  // block on it -- check once (a manually-launched successor may already
+  // have consumed it) and move straight to manual instructions.
   while (
-    !status.pickedUp
+    autoEnabled
+    && !status.pickedUp
     && !status.spawnInFlight
     && (Date.now() - start) < waitMs
   ) {
@@ -1924,6 +1965,9 @@ export async function triggerHandoff(
     },
     manualInstructions: status.pickedUp
       ? null
-      : manualFallbackInstructions(stored, seed, { spawnInFlight: status.spawnInFlight }),
+      : manualFallbackInstructions(stored, seed, {
+        spawnInFlight: status.spawnInFlight,
+        automaticCutoverDisabled: !autoEnabled,
+      }),
   };
 }

@@ -401,7 +401,7 @@ predecessor and successor ids.
 |-----------|----------|
 | 55% of window | Soft reminder: compose/store a baton at the next clean boundary and trigger directly if work still remains |
 | 70% of window | Urgent reminder: preserve the baton now and trigger directly; compaction remains at ~80% |
-| 79% of window | **Force tier:** the extension does it *for* the agent -- auto-drafts a handoff from whatever session facts are available, stores and triggers it via the same path `save_handoff_prompt`/`trigger_handoff` use, and denies further mutating tool calls (read-only inspection still allowed) for the rest of the session. This is the last chance to capture state before the runtime's own auto-compaction (~80%) destroys it -- it does not wait for the agent to act. Lifted only by a successful compaction (the operator may then keep working in the same session instead of switching to the handed-off one); at most one auto-handoff per session |
+| 79% of window | **Force tier** (only when `mode: auto`; a no-op under the default `manual-only`): the extension does it *for* the agent -- auto-drafts a handoff from whatever session facts are available, stores and triggers it via the same path `save_handoff_prompt`/`trigger_handoff` use, and denies further mutating tool calls (read-only inspection still allowed) for the rest of the session. This is the last chance to capture state before the runtime's own auto-compaction (~80%) destroys it -- it does not wait for the agent to act. Lifted only by a successful compaction (the operator may then keep working in the same session instead of switching to the handed-off one); at most one auto-handoff per session |
 
 An owning repository may override these defaults in `.context-handoff/config.yaml`,
 and a user may set lower-priority personal defaults in
@@ -416,10 +416,18 @@ thresholds:
   force_percent: 78
 ```
 
-`mode: auto` preserves today's behavior. `mode: manual-only` suppresses all
-pressure-driven nudges and the force-tier auto-trigger but leaves explicit
-manual tools available. `mode: off` disables both automatic behavior and the
-extension/CLI handoff entry points for that repo.
+**The default mode is `manual-only`, not `auto`** -- automatic nudges, the
+force-tier auto-trigger, and `trigger_handoff`'s live-cutover wiring (the
+`handoff_requested` activity event agent-worktrees' resident status-monitor
+watches for, and the agent-bridge ping) are all opt-in: a repo (or a user,
+via the home-directory layer) must explicitly set `mode: auto` in
+`.context-handoff/config.yaml` to enable them. `save_handoff_prompt`,
+`trigger_handoff`, and `consume_handoff` all keep working under
+`manual-only` -- `trigger_handoff` still stores/seeds the handoff and prints
+the manual pickup instructions, it just never wires up automatic pickup.
+`mode: off` disables both automatic behavior and the extension/CLI handoff
+entry points for that repo entirely (only the last-resort manual file write
+remains reachable, since it depends on nothing this plugin owns).
 
 Each threshold tier may use either `<tier>_percent` or `<tier>_tokens`. Mixed
 configs are allowed per tier; percent tiers resolve against the live session

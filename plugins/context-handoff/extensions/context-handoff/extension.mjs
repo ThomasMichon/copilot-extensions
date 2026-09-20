@@ -321,6 +321,7 @@ async function autoForceHandoff(sid, cwd) {
       sid,
       cwd,
       title: "Force-threshold auto-handoff",
+      mode: handoffConfig.mode,
     });
   } catch (error) {
     session.log(
@@ -714,6 +715,7 @@ const session = await joinSession({
           title,
           handoffToken:
             (args?.handoff_token ?? state.pendingHandoff?.token ?? "").toString().trim() || null,
+          mode: handoffConfig.mode,
         });
         if (!result?.ok) {
           return (

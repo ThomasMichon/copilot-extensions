@@ -119,7 +119,7 @@ function requireSid(command, args) {
 function requireManualHandoffsEnabled(command, cwd) {
   const config = loadContextHandoffConfig(cwd);
   if (manualHandoffEnabled(config.mode)) {
-    return;
+    return config;
   }
   process.stderr.write(
     `handoff-cli ${command}: context handoff is disabled for this repository ` +
@@ -176,7 +176,7 @@ function cmdSave(args) {
 async function cmdTrigger(args) {
   const sid = requireSid("trigger", args);
   const cwd = args.cwd || process.cwd();
-  requireManualHandoffsEnabled("trigger", cwd);
+  const config = requireManualHandoffsEnabled("trigger", cwd);
   const promptText = readPrompt(args);
   if (!promptText && !args["handoff-token"]) {
     process.stderr.write(
@@ -190,6 +190,7 @@ async function cmdTrigger(args) {
     cwd,
     title: normalizeHandoffTitle(args.title),
     preferTask: !args["no-task"],
+    mode: config.mode,
     handoffToken: args["handoff-token"] || null,
   });
   if (!result.ok) {

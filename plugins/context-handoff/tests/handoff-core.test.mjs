@@ -732,6 +732,7 @@ test("triggerHandoff stores, signals, waits, and skips manual fallback when pick
     sid: "predecessor-1",
     cwd: "C:\\repo",
     title: "Parser follow-up",
+    mode: "auto",
     store: ({ promptText, sid, cwd, title }) => {
       calls.push(["store", promptText, sid, cwd, title]);
       return stored;
@@ -794,6 +795,7 @@ test("triggerHandoff logs the predecessor pid in the handoff_requested activity"
     sid: "predecessor-1",
     cwd: "C:\\repo",
     title: "Parser follow-up",
+    mode: "auto",
     execute: (bin, argv, opts) => {
       execCalls.push({ bin, argv, opts });
       return "";
@@ -834,6 +836,7 @@ test("triggerHandoff always returns the final seed and manual fallback when noth
     sid: "predecessor-1",
     cwd: "C:\\repo",
     title: "Parser follow-up",
+    mode: "auto",
     store: () => ({
       storage: "file",
       id: "handoff-predecessor-1",
@@ -867,6 +870,7 @@ test("triggerHandoff exits early and reports progress once a spawn is merely in 
     sid: "predecessor-1",
     cwd: "C:\\repo",
     title: "Parser follow-up",
+    mode: "auto",
     store: () => ({
       storage: "file",
       id: "handoff-predecessor-1",
@@ -906,6 +910,60 @@ test("triggerHandoff exits early and reports progress once a spawn is merely in 
   assert.match(result.manualInstructions, /already been.*spawned and is starting up/s);
   assert.match(result.manualInstructions, /expected in-progress state, not a failure/);
   assert.doesNotMatch(result.manualInstructions, /No control system acknowledged the request/);
+});
+
+test("triggerHandoff under the default (manual-only) mode never wires up automatic pickup", async () => {
+  const calls = [];
+  const result = await triggerHandoff({
+    promptText: "stored markdown",
+    sid: "predecessor-1",
+    cwd: "C:\\repo",
+    title: "Parser follow-up",
+    // mode omitted deliberately -- proves the safe default gates this, not
+    // an explicitly-passed value.
+    store: () => ({
+      storage: "file",
+      id: "handoff-predecessor-1",
+      path: "C:\\state\\handoff-predecessor-1.json",
+      metadata: { worktree: "wt-example", title: "Parser follow-up" },
+    }),
+    writeSessionState: ({ seed }) => ({ ok: true, path: "C:\\state\\handoff-request.json", seed }),
+    noteHandoff: () => {},
+    logActivity: (...args) => {
+      calls.push(["activity", ...args]);
+      return { logged: true };
+    },
+    requestBridge: (...args) => {
+      calls.push(["bridge", ...args]);
+      return { attempted: true, accepted: true, response: { queued: true } };
+    },
+    readPickupSignals: () => {
+      calls.push(["signals"]);
+      return {
+        pickedUp: false,
+        spawnInFlight: false,
+        via: [],
+        sessionState: { path: "C:\\state\\handoff-request.json", consumed: false },
+        worktree: { pickedUp: false },
+        dispatch: { consumed: false },
+      };
+    },
+    sleepFn: async () => {
+      calls.push(["sleep"]);
+    },
+    waitMs: 120000,
+  });
+  assert.equal(result.ok, true);
+  // Neither live-cutover trigger point (the activity event agent-worktrees'
+  // resident monitor watches for, nor the agent-bridge ping) was ever
+  // invoked -- only a single pickup-status check, no polling loop, no sleep.
+  assert.deepEqual(calls.map(([name]) => name), ["signals"]);
+  assert.equal(result.worktreeSignal.activity.logged, false);
+  assert.equal(result.bridge.attempted, false);
+  assert.match(
+    result.manualInstructions,
+    /Automatic cutover is disabled.*mode.*is not `auto`/s,
+  );
 });
 
 test("triggerHandoff reports when an explicit stored baton cannot be recovered", async () => {
