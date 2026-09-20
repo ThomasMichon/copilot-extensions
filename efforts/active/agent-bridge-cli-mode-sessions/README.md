@@ -269,16 +269,16 @@ mechanism CLI mode binds through.
       client, and is retired using the exact same code paths as an ordinary
       directly-spawned Session Host session — no CLI-mode-specific behavior
       divergence.
-      **Further covered, not fully closed** — `test_cli_mode_reservations.py`
-      proves the reservation/claim/marker layer (23 cases);
-      `test_cli_mode_launch.py` proves the new `launch` verb's own mechanics
-      (reserve-then-spawn, argv/cwd wiring, 409 propagation, exit-code
-      surfacing — 4 cases, fakes both the client and the process runner).
-      What remains genuinely unautomated: an actual live run where a real
-      `copilot` process launched this way registers, gets observed by a
-      second client, and is retired — this needs a human (or a manual/live
-      validation pass), since the point of CLI mode is a real interactive
-      terminal, not something a unit test should fake end-to-end.
+      **[x] Closed with a live clean-room pass** — see the 2026-09-19
+      "Phase 3 live validation" journal entry: a real, genuinely interactive
+      `copilot` process launched via `cli-mode launch` inside a disposable
+      Docker clean room registered against the pre-existing reservation,
+      showed `cli_mode: true` to a second independent `agent-bridge
+      live-sessions list` call while still live, and cleanly `DELETE`d
+      itself on `/exit` — all through the same live-sessions routes any
+      ordinary session uses. `test_cli_mode_reservations.py` (23 cases) and
+      `test_cli_mode_launch.py` (4 cases, fakes) cover the deterministic
+      layer underneath.
 - [ ] Two concurrent CLI-mode allocation attempts for the same cwd resolve
       through the existing single-current-session-per-worktree gate (reuse,
       hand-off, or sunset) rather than racing.
@@ -307,6 +307,48 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-09-19 — Phase 3 live validation (Docker clean room)
+
+Ran the genuinely live check the unit tests couldn't: a disposable clean-room
+container (`tools/clean-room`'s `base` image, built with the internal npm
+feed since this machine is governed), our worktree mounted **read-write** at
+`/harness` (a `:ro` mount breaks an editable `uv pip install`'s
+`egg_info` step — a clean-room-mount nuance, not a product bug),
+`copilot plugin marketplace add /harness` (a local **directory** marketplace
+source — `copilot plugin install` confirmed "loaded live from /harness...
+nothing was copied", so this ran our actual worktree code, not a stale
+published build), then `agent-bridge`+`agent-worktrees` installed and
+provisioned (needed `UV_INDEX_URL`/`UV_DEFAULT_INDEX` pointed at this
+machine's internal PyPI proxy, mirrored from `pip config list`, for the same
+reason the README documents for any governed box).
+
+Registered a scratch repo, created a real worktree, then ran:
+```
+agent-bridge live-sessions cli-mode launch --worktree-id <id> --cwd <worktree>
+```
+**First attempt used `copilot -p "..." --allow-all-tools` for speed and
+showed NO registration at all** — traced to a real, useful finding: `copilot
+-p` (the one-shot prompt mode) does not load CLI extensions the way a genuine
+interactive session does (`extension.mjs`'s own header already says as much
+for ACP mode; empirically the same holds for `-p`). This is not a Phase 3
+regression — headless `-p` was never CLI mode's target shape — but it means
+`-p` is a bad stand-in for validating this specific mechanism. Corrected by
+driving a **real interactive session inside `tmux`** (a genuine PTY,
+confirmed via `tmux capture-pane` rendering copilot's actual TUI).
+
+Result: the interactive `copilot` process registered itself completely
+ordinarily (no code change, no special-casing); `agent-bridge live-sessions
+cli-mode status` showed the reservation `claimed by <session-id>`; a second,
+independent `agent-bridge live-sessions list` call (simulating a second
+observer) showed `"cli_mode": true` for the live session; `/exit` inside the
+TUI cleanly `DELETE`d the session (confirmed in `agent-bridge.log`) — the
+exact same register/observe/deregister path any ordinary interactive session
+uses, with zero CLI-mode-specific divergence. This closes the previously-open
+Validation Plan item honestly, with real evidence rather than a claimed pass.
+
+Container torn down after (`docker rm -f`); nothing persisted outside the
+disposable clean room.
 
 ### 2026-09-19 — Phase 3: opt-in local launch surface
 
