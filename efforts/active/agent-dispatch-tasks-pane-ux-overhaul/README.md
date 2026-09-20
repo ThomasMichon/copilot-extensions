@@ -122,9 +122,14 @@ session never has to re-derive "what's already done" from the Journal alone.
   non-authoritative, transient view (never a persisted task-row copy of
   worktree state — a real ownership conflict a Copilot review already
   flagged once). Do not start Phase 8 by reaching for a per-render
-  subprocess. Phase 5 (Artifacts/claims)
-  remains next in Plan order but the CLI-vs-headless badge and Phase 8 are the
-  operator's stated priority — triage/sequence them explicitly with the
+  subprocess. **Phase 5 (Artifacts/claims) is now BLOCKED on the same
+  prerequisite** (its own claims computation must consume this same
+  not-yet-built projection, per its 2026-09-20 reconciliation note) — it is
+  no longer simply "next in Plan order" until that lands; Phase 6 (Repo
+  filter, independent of claims) is the next unblocked phase if Phase 5
+  can't proceed. The CLI-vs-headless badge, Phase 6, and (once unblocked)
+  Phase 5/Phase 8 are the operator's stated priority — triage/sequence
+  them explicitly with the
   operator rather than silently defaulting to strict Plan order.
 - **Build/test commands** (agent-dispatch package):
   ```powershell
@@ -865,7 +870,7 @@ first time since Phase 4 landed.
    the original note anticipated; scope and implement as its own follow-up
    rather than folded into this session's item 1-2 fix.
 
-### Phase 5 — Artifacts (claims) surface
+### Phase 5 — Artifacts (claims) surface — BLOCKED on the agent-worktrees accelerator
 - [ ] Land `artifacts_summary` computation in `board_cli.py` (or wherever
       agent-dispatch tracks claims) and the drill-in claims viewer content
       for the Worktree Status card. (Not duplicated with Phase 3 — Phase 3
@@ -883,6 +888,18 @@ first time since Phase 4 landed.
       (e.g. task-level, not worktree-level), name and scope that as an
       explicitly different concept before implementing it, rather than
       reusing the word for two different ownership boundaries.
+- [ ] **Explicit prerequisite (Copilot review, 2026-09-20):** this phase now
+      depends on the same not-yet-built projection path Phase 8 depends on
+      (an `agent-worktrees` accelerator exposing worktree/claims state, plus
+      agent-dispatch's own consumer of it — neither exists yet). Per this
+      effort's own sequencing rule (land each phase before starting the
+      next), **do not start Phase 5's implementation until that
+      prerequisite work lands** — starting it earlier either produces
+      nothing executable or invites exactly the duplicate-claims-computation
+      fallback this reconciliation forbids. If Phase 5 is picked up before
+      the prerequisite lands, treat Phase 6 (independent of claims) as the
+      next unblocked phase instead, and say so explicitly rather than
+      silently reordering.
 
 ### Phase 6 — Source-repo grouping/filtering
 - [ ] The REPO column ships in Phase 3. A dedicated repo filter chip
