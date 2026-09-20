@@ -189,6 +189,84 @@ def test_manager_tarball_url_non_github_is_none(tmp_path):
     assert self_install.manager_tarball_url(tmp_path) is None
 
 
+@pytest.mark.parametrize("repo,ref,expected", [
+    ("https://github.com/ThomasMichon/copilot-extensions.git", "main",
+     "https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main"
+     "/worktree-manager/src/worktree_manager/__init__.py"),
+    ("https://github.com/acme/widgets", "canary",
+     "https://raw.githubusercontent.com/acme/widgets/canary"
+     "/worktree-manager/src/worktree_manager/__init__.py"),
+    ("git@github.com:acme/widgets.git", "main",
+     "https://raw.githubusercontent.com/acme/widgets/main"
+     "/worktree-manager/src/worktree_manager/__init__.py"),
+])
+def test_remote_init_url_github(tmp_path, repo, ref, expected):
+    from worktree_manager import source_config as sc
+    sc.set_source(repo=repo, ref=ref, root=tmp_path)
+    assert self_install.remote_init_url(tmp_path) == expected
+
+
+def test_remote_init_url_non_github_is_none(tmp_path):
+    from worktree_manager import source_config as sc
+    sc.set_source(repo=str(tmp_path / "local"), root=tmp_path)
+    assert self_install.remote_init_url(tmp_path) is None
+
+
+def test_fetch_remote_version_parses_the_fetched_init_py(monkeypatch, tmp_path):
+    """A successful GET returns the parsed ``__version__`` -- no git, no
+    clone/tarball, a single small file read."""
+    from worktree_manager import source_config as sc
+
+    sc.set_source(
+        repo="https://github.com/acme/widgets.git", ref="main", root=tmp_path)
+
+    class _FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'__version__ = "9.9.9"\n'
+
+    seen = {}
+
+    def fake_urlopen(url, timeout=None):
+        seen["url"] = url
+        seen["timeout"] = timeout
+        return _FakeResp()
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen", fake_urlopen)
+    assert self_install.fetch_remote_version(tmp_path) == "9.9.9"
+    assert seen["url"] == (
+        "https://raw.githubusercontent.com/acme/widgets/main"
+        "/worktree-manager/src/worktree_manager/__init__.py")
+
+
+def test_fetch_remote_version_degrades_to_none_on_any_failure(monkeypatch, tmp_path):
+    """Network error, timeout, unparsable content -- all degrade to ``None``,
+    never raise. This is the property a background poll depends on."""
+    from worktree_manager import source_config as sc
+
+    sc.set_source(
+        repo="https://github.com/acme/widgets.git", ref="main", root=tmp_path)
+
+    def boom(url, timeout=None):
+        raise OSError("network is down")
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+    assert self_install.fetch_remote_version(tmp_path) is None
+
+
+def test_fetch_remote_version_non_github_source_is_none(tmp_path):
+    from worktree_manager import source_config as sc
+    sc.set_source(repo=str(tmp_path / "local"), root=tmp_path)
+    assert self_install.fetch_remote_version(tmp_path) is None
+
+
+
 def test_self_update_reports_updated(monkeypatch, tmp_path):
     from worktree_manager.self_install import SelfInstallResult
     monkeypatch.setattr(self_install.shutil, "which", lambda name: "/usr/bin/git")

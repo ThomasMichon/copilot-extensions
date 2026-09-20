@@ -121,6 +121,7 @@ async def capture_async(
     settle: float = 0.0,
     keys: Optional[list[str]] = None,
     update_state: Optional[str] = None,
+    manager_update_state: Optional[str] = None,
     prepare: Optional[Callable[[Any, Any], Awaitable[None]]] = None,
     pivot: str | None = None,
     wait_pivot: float = 0.0,
@@ -146,8 +147,12 @@ async def capture_async(
     - ``wait_pivot`` -- when on a registered pivot, poll (up to this many seconds)
       for its background ``list`` load to finish before capturing, so the snapshot
       shows real rows instead of a "loading…" spinner. ``0`` disables the wait.
-    - ``update_state`` -- force the topbar update indicator (e.g. ``"current"``
-      for a clean ✓ instead of a transient "update available").
+    - ``update_state`` -- force the engine/marketplace topbar update indicator
+      (e.g. ``"current"`` for a clean ✓ instead of a transient "update available").
+    - ``manager_update_state`` -- force the Manager's OWN update indicator
+      (distinct from ``update_state`` -- see ``manager_update_check``'s module
+      docstring for why they must not be conflated), e.g. ``"current"``/
+      ``"available"``/``"idle"``.
     - ``prepare`` -- an escape-hatch coroutine awaited with ``(screen, pilot)``
       for anything ``keys`` can't express.
     """
@@ -181,6 +186,8 @@ async def capture_async(
             # Set last, just before render: a background update-poll can flip it
             # back during settle, so an early assignment would not stick.
             scr.update_state = update_state
+        if manager_update_state is not None:
+            scr.manager_update_state = manager_update_state
         return capture_screen(scr, title=title)
 
 

@@ -720,6 +720,7 @@ class _PickerNativeData(OptionList):
             nrows, fp = -1, ()
         return (kind, scr.htab, scr.machine_idx, nrows, wt,
                 getattr(scr, "pulse", 0), getattr(scr, "update_state", None),
+                getattr(scr, "manager_update_state", None),
                 scr.size.width, getattr(scr, "cmd_mode", False),
                 getattr(scr.list_view, "query", ""),
                 getattr(scr.list_view, "sort_index", 0), fp)
@@ -1583,6 +1584,16 @@ class PickerScreen(Widget):
         self.update_state = "idle"
         self._upd_poll_frame = -1
         self.call_after_refresh(self._poll_update_state)
+        # Manager-self update check (distinct from update_state above, which
+        # is the engine/marketplace payload's own staged-update signal --
+        # see manager_update_check's module docstring for why conflating the
+        # two read as "the checkmark says I'm current" when it never checked
+        # the Manager's own version at all). Cheap/cached: a picker relaunch
+        # within CHECK_INTERVAL_SECS reads the persisted result with no
+        # network hit; only a stale/missing cache triggers a real background
+        # fetch here.
+        self.manager_update_state = "idle"
+        self.call_after_refresh(self._poll_manager_update_state)
         # ~10 fps drives the SSH spinner and the slower live-glyph pulse.
         self.set_interval(0.1, self._tick)
 
@@ -1985,6 +1996,36 @@ class PickerScreen(Widget):
             self.update_state = update_stage.indicator_state()
         except Exception:
             pass
+
+    def _poll_manager_update_state(self):
+        """Refresh ``self.manager_update_state`` from the cached
+        manager-update-check status (cheap, read-only, no network) and, if
+        the cache is stale or missing, kick a background thread to actually
+        check GitHub -- never on the render thread, since the network fetch
+        itself is not cheap. Safe to call every launch: the cache means a
+        real fetch only happens once per
+        ``manager_update_check.CHECK_INTERVAL_SECS``."""
+        from ... import manager_update_check as _muc
+
+        try:
+            self.manager_update_state = _muc.indicator_state()
+        except Exception:
+            return
+        if not _muc.should_check():
+            return
+
+        def _work():
+            try:
+                _muc.check_now()
+                return _muc.indicator_state()
+            except Exception:
+                return None
+
+        def _done(state):
+            if state is not None:
+                self.manager_update_state = state
+
+        self._run_bg("manager-update-check", _work, _done, quiet=True)
 
     def _maybe_repoll(self):
         """Fire a bounded, in-place background refresh of machine state (#1421).
@@ -3347,7 +3388,9 @@ class PickerScreen(Widget):
         return (W, H, self.sel, self.top, self._data_top, kind, self.htab,
                 self.machine_idx, self.btn_idx, getattr(self, "pcol", 0),
                 nrows, wt, getattr(self, "pulse", 0),
-                getattr(self, "update_state", None), getattr(self, "debug", None),
+                getattr(self, "update_state", None),
+                getattr(self, "manager_update_state", None),
+                getattr(self, "debug", None),
                 self.cmd_mode, self.list_view.query, self.list_view.sort_index)
 
     def _build_body_split(self, width, sel=None):
@@ -3904,6 +3947,30 @@ class PickerScreen(Widget):
         t.append(" " * max(0, W - t.cell_len))
         return t
 
+    def _manager_update_seg(self):
+        """Render the Manager's OWN update-availability state -- distinct
+        from :meth:`_update_seg` (the engine/marketplace payload's staged
+        state). Directly qualifies the ``v{VERSION}`` string it sits next
+        to: ``idle`` shows nothing (never checked yet / non-GitHub source),
+        ``current`` shows a plain ✓, ``available`` names the newer version
+        and the command to fetch it (no in-picker apply flow -- unlike the
+        engine's staged-update refresh, updating the Manager itself needs a
+        real network fetch, so this stays purely informational)."""
+        st = getattr(self, "manager_update_state", "idle")
+        if st == "idle":
+            return None
+        t = Text()
+        if st == "current":
+            t.append(" ✓", style=C_READY)
+        elif st == "available":
+            from ... import manager_update_check as _muc
+
+            remote = _muc.read_status().get("remote_version") or "newer"
+            t.append(" ↻ ", style=C_HINT_ON)
+            t.append(f"Manager update available ({remote}) -- run "
+                     "`worktree-manager update`", style=C_HINT_ON)
+        return t
+
     def _update_seg(self, focused: bool):
         """Render the launcher's idle/paused/checking/current/available state."""
         st = getattr(self, "update_state", "idle")
@@ -3939,6 +4006,13 @@ class PickerScreen(Widget):
             left = Text(" Worktree Manager", style="bold")
             if present["version"]:
                 left.append(ver, style=C_DIM)
+            # Manager-self update indicator: qualifies the version string
+            # directly above (distinct from the engine/marketplace segment
+            # below -- see _manager_update_seg's own docstring for why they
+            # must not be conflated).
+            mgr_seg = self._manager_update_seg()
+            if mgr_seg is not None:
+                left.append_text(mgr_seg)
             # Update indicator (#1430): spinner while the launcher stages the
             # marketplace update, ✓ when current, ↻ when an update is staged.
             seg = self._update_seg(upd_focused)

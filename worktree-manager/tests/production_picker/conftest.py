@@ -30,6 +30,28 @@ def _disable_resident_monitor_processes():
 
 
 @pytest.fixture(autouse=True)
+def _disable_manager_update_check():
+    """Mounting a real PickerScreen (``app.run_test()``) triggers
+    ``_poll_manager_update_state`` in ``_finish_mount``, which -- unlike the
+    engine's own (file-only) update_state check -- makes a REAL network
+    call the first time ``should_check()`` sees no/stale cache. Every test
+    in this module must be network-free and deterministic (a capture test
+    diffing two mounts byte-for-byte is not the place for a live GitHub
+    fetch racing itself), so this pauses the check the same way an operator
+    would via ``WORKTREE_NO_UPDATE=1``."""
+    key = "WORKTREE_NO_UPDATE"
+    prior = os.environ.get(key)
+    os.environ[key] = "1"
+    try:
+        yield
+    finally:
+        if prior is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = prior
+
+
+@pytest.fixture(autouse=True)
 def _isolate_agent_worktrees_home(tmp_path_factory):
     fake_home = tmp_path_factory.mktemp("aw-home")
     (fake_home / ".agent-worktrees").mkdir(parents=True, exist_ok=True)

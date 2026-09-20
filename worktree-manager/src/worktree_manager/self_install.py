@@ -75,6 +75,48 @@ def manager_tarball_url(root: Path | None = None, ref: str | None = None) -> str
     return f"https://codeload.github.com/{m.group('owner')}/{m.group('name')}/tar.gz/{ref}"
 
 
+def remote_init_url(root: Path | None = None, ref: str | None = None) -> str | None:
+    """The raw GitHub URL for the configured source's ``__init__.py``, or
+    ``None`` for a non-GitHub source (mirrors :func:`manager_tarball_url`'s
+    GitHub-only support). This is the lightweight (single small file, no
+    clone/tarball) endpoint :func:`fetch_remote_version` reads to check
+    whether a newer Manager release exists without a full fetch."""
+    m = _GITHUB_REPO_RE.search(manager_repo(root).strip())
+    if not m:
+        return None
+    ref = ref or manager_ref(root)
+    return (
+        f"https://raw.githubusercontent.com/{m.group('owner')}/{m.group('name')}"
+        f"/{ref}/worktree-manager/src/worktree_manager/__init__.py"
+    )
+
+
+def fetch_remote_version(
+    root: Path | None = None, ref: str | None = None, timeout: float = 5.0,
+) -> str | None:
+    """The ``__version__`` currently on the configured source's ``ref``, via a
+    single small HTTP GET -- no git, no clone/tarball. Best-effort: returns
+    ``None`` on any failure (network, timeout, non-GitHub source, unparsable
+    content), so a caller (a background update-availability poll) never has
+    to guard this itself. This is deliberately separate from
+    :func:`manager_tarball_url`/:func:`self_update`'s full fetch: it exists
+    purely to answer "is a newer Manager version available", cheaply enough
+    to run on a background thread on every picker launch."""
+    url = remote_init_url(root, ref)
+    if url is None:
+        return None
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
+            text = resp.read().decode("utf-8", errors="replace")
+    except (OSError, urllib.error.URLError, ValueError):
+        return None
+    m = _VERSION_RE.search(text)
+    return m.group(1) if m else None
+
+
 def default_root() -> Path:
     """Install root, mirroring ``~/.agent-worktrees`` for the core installer."""
     env = os.environ.get("WORKTREE_MANAGER_ROOT")
