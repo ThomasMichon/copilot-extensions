@@ -333,9 +333,14 @@ worktree, machine, session, and head SHA. The marker is **off by default** and
 must stay off for public PRs. A public repo that still wants author-side
 traceability can instead set `pr.source_attribution: codename`, which embeds
 **only** the worktree's assigned codename -- resolve it back via
-`resolve --codename` when it is the same machine; on a different machine the
-author must manually SSH there and check its tracking store (there is no
-automated cross-machine lookup yet). Useful flags: `--no-open` (push only),
+`resolve --codename` (or `embody --codename`) on the same machine, or on a
+*different* machine it now runs a cross-machine SSH scan automatically
+(effort `pr-attribution-codenames` Phase 3): every other known, ssh-ready
+machine is asked over SSH whether its own tracking store has that codename.
+A match on a different machine still fails closed -- it reports the
+resolving machine and worktree id rather than attempting a remote launch;
+SSH there directly (or use a future agent-bridge dispatch) to actually
+resume it. Useful flags: `--no-open` (push only),
 `--no-attribution` (suppress a configured marker), `--body`/`--body-file`,
 `--repo owner/name`. If the provider call fails the branch is still pushed, and
 the result carries `pr_open_error` so you can fall back to Steps 2-3 below. A

@@ -1392,6 +1392,152 @@ def test_claimant_liveness_json_output(monkeypatch, capfd):
     assert out["owner_ref"] == "emancipation-cube/test-chamber/wt-A"
 
 
+def test_codename_lookup_parser_and_registration():
+    args = m.build_parser().parse_args(
+        ["codename-lookup", "sturdy-crate", "--json"])
+    assert args.command == "codename-lookup"
+    assert args.codename == "sturdy-crate"
+    assert args.json is True
+    assert m.COMMAND_MAP["codename-lookup"] is m.cmd_codename_lookup
+    assert m._WORKTREE_VERBS.get("codename-lookup") == "codename-lookup"
+
+
+def test_codename_lookup_json_found(monkeypatch, capfd):
+    import argparse
+    import json as _json
+
+    monkeypatch.setattr(m, "resolve_worktree_id_by_codename",
+                        lambda name: "wt-A" if name == "sturdy-crate" else None)
+    rc = m.cmd_codename_lookup(argparse.Namespace(
+        codename="sturdy-crate", json=True))
+    assert rc == 0
+    out = _json.loads(capfd.readouterr().out)
+    assert out["found"] is True
+    assert out["worktree_id"] == "wt-A"
+    assert out["codename"] == "sturdy-crate"
+
+
+def test_codename_lookup_json_not_found(monkeypatch, capfd):
+    import argparse
+    import json as _json
+
+    monkeypatch.setattr(m, "resolve_worktree_id_by_codename", lambda name: None)
+    rc = m.cmd_codename_lookup(argparse.Namespace(
+        codename="unknown-name", json=True))
+    assert rc == 0
+    out = _json.loads(capfd.readouterr().out)
+    assert out["found"] is False
+    assert out["worktree_id"] is None
+
+
+def test_codename_lookup_plain_mode(monkeypatch, capsys):
+    import argparse
+
+    monkeypatch.setattr(m, "resolve_worktree_id_by_codename", lambda name: "wt-A")
+    rc = m.cmd_codename_lookup(argparse.Namespace(
+        codename="sturdy-crate", json=False))
+    assert rc == 0
+    assert "found -> wt-A" in capsys.readouterr().out
+
+
+class TestResolveCodenameAnywhere:
+    """pr-attribution-codenames Phase 3: local-then-cross-machine resolution
+    shared by ``resolve --codename`` and ``embody --codename``."""
+
+    def test_local_match_returns_id_no_remote_call(self, monkeypatch):
+        monkeypatch.setattr(m, "resolve_worktree_id_by_codename",
+                            lambda name: "wt-local")
+        called = []
+        import agent_worktrees.codename_reverse_lookup as crl
+        monkeypatch.setattr(
+            crl, "resolve_codename_cross_machine_unique",
+            lambda *a, **k: called.append(1),
+        )
+        wt_id, error = m._resolve_codename_anywhere("sturdy-crate")
+        assert wt_id == "wt-local"
+        assert error is None
+        assert called == []
+
+    def test_remote_match_fails_closed_with_machine_name(self, monkeypatch):
+        monkeypatch.setattr(m, "resolve_worktree_id_by_codename", lambda name: None)
+        import agent_worktrees.codename_reverse_lookup as crl
+        monkeypatch.setattr(
+            crl, "resolve_codename_cross_machine_unique",
+            lambda name, **k: crl.RemoteCodenameMatch(
+                machine="borealis", worktree_id="wt-remote"),
+        )
+        wt_id, error = m._resolve_codename_anywhere("sturdy-crate")
+        assert wt_id is None
+        assert "borealis" in error
+        assert "wt-remote" in error
+        assert "not supported" in error
+
+    def test_no_match_anywhere(self, monkeypatch):
+        monkeypatch.setattr(m, "resolve_worktree_id_by_codename", lambda name: None)
+        import agent_worktrees.codename_reverse_lookup as crl
+        monkeypatch.setattr(
+            crl, "resolve_codename_cross_machine_unique", lambda name, **k: None,
+        )
+        wt_id, error = m._resolve_codename_anywhere("nope")
+        assert wt_id is None
+        assert "No worktree found" in error
+
+    def test_ambiguous_collision_surfaced(self, monkeypatch):
+        monkeypatch.setattr(m, "resolve_worktree_id_by_codename", lambda name: None)
+        import agent_worktrees.codename_reverse_lookup as crl
+
+        def _raise(name, **k):
+            raise crl.AmbiguousCodenameError(name, [
+                crl.RemoteCodenameMatch(machine="borealis", worktree_id="wt-1"),
+                crl.RemoteCodenameMatch(machine="wheatley", worktree_id="wt-2"),
+            ])
+        monkeypatch.setattr(crl, "resolve_codename_cross_machine_unique", _raise)
+        wt_id, error = m._resolve_codename_anywhere("sturdy-crate")
+        assert wt_id is None
+        assert "borealis" in error and "wheatley" in error
+
+
+def test_embody_codename_remote_fails_closed(monkeypatch, capfd):
+    import argparse
+    import json as _json
+
+    monkeypatch.setattr(m, "_resolve_codename_anywhere", lambda name: (
+        None,
+        "Codename 'sturdy-crate' resolves to worktree 'wt-remote' on "
+        "machine 'borealis', not this machine. Resolve/embody it there "
+        "directly (e.g. SSH to 'borealis') -- remote launch is not supported.",
+    ))
+    rc = m.cmd_embody(argparse.Namespace(
+        codename="sturdy-crate", worktree_id=None, new=False,
+    ))
+    assert rc == 1
+    out = _json.loads(capfd.readouterr().out)
+    assert "borealis" in out["error"]
+    assert "wt-remote" in out["error"]
+
+
+def test_embody_codename_local_match_proceeds_past_selector_gate(monkeypatch, capfd):
+    import argparse
+    import json as _json
+
+    # A local match should NOT hit the "requires --worktree-id/--codename/
+    # --new" gate -- verify raw_id is populated by checking the function
+    # proceeds past it to config.load_config() (mocked to fail with a
+    # distinct marker message) rather than returning the selector-gate error.
+    monkeypatch.setattr(m, "_resolve_codename_anywhere",
+                        lambda name: ("wt-local", None))
+
+    def _raise(*a, **k):
+        raise RuntimeError("stop-here-marker")
+    monkeypatch.setattr(m.cfg, "load_config", _raise)
+    rc = m.cmd_embody(argparse.Namespace(
+        codename="sturdy-crate", worktree_id=None, new=False,
+    ))
+    assert rc == 1
+    out = _json.loads(capfd.readouterr().out)
+    assert out["error"] == "stop-here-marker"
+
+
 def test_pr_research_dispatch_json(monkeypatch, capsys):
     # #225: pr-research reads live provider settings and prints the derived
     # policy matrix (read-only), via the config + provider seams.
