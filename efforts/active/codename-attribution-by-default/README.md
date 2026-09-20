@@ -738,13 +738,20 @@ these decisions directly and assumes this design is understood.
     have a NON-EMPTY `pr_id` and the values are equal; an entry with no
     `pr_id` on either side never matches anything (extends round-35's
     "no established identity" case from empty-branch-and-no-number to
-    the general no-`pr_id` state). **Every EXISTING `PRRecord` must be
-    backfilled with a `pr_id` in a single one-time migration pass at
-    shipping time, not lazily at each entry's next touch** — a lazy
-    per-touch backfill would still leave a window, for any not-yet-
-    touched record, where a `set-pr` branch/number correction races a
-    stale reader with no stable identity on either side (the exact
-    scenario round-36 raised) — never just the
+    the general no-`pr_id` state). **Backfill `pr_id` INLINE in
+    `_save_record_unlocked`'s existing merge step, not via a separate
+    "shipping-time" migration pass (round-37 finding, corrects the
+    round-36 text)** — this repo's config-migration framework
+    (`config_migrations.py`) is scoped to machine-local config and
+    explicitly excludes tracking YAML, so a claimed "one-time pass at
+    shipping time" has no actual entry point to invoke it. Every
+    `save_record` call already acquires the record lock and runs
+    `_save_record_unlocked` against a freshly-loaded on-disk copy — add
+    one step there, before the identity-matching/merge logic: for each
+    `current.prs` entry lacking a `pr_id`, generate and persist one right
+    then, as part of that same locked write. This piggybacks on code
+    that already runs on every write, closing the race without a
+    separate migration mechanism — never just the
     single `.pr` active-PR accessor (round-32 finding: `.prs` supports
     serial/parallel PRs, and a merge keyed on the active-PR property
     alone cannot protect a frozen pair on a non-active entry). Add a
@@ -1007,13 +1014,21 @@ these decisions directly and assumes this design is understood.
   entry (matched via `pr_id`, not `branch`/`number`), proving `pr_id` —
   not `branch` — is the identity that survives a branch rename (the
   gap round-35's "branch is primary" rule left open).
-- [ ] Unit (round-36 finding): running the one-time migration pass
-  against a tracking directory containing an existing (pre-migration)
-  YAML record with a `PRRecord` and no `pr_id` stamps a non-empty
-  `pr_id` onto that entry, under the record lock, in a single pass — and
-  running the SAME migration pass again afterward (e.g. a re-run on
-  restart) is a no-op: it does not overwrite an already-assigned
-  `pr_id` with a new random value.
+- [ ] Unit (round-36 finding, mechanism corrected round-37): saving a
+  `WorktreeRecord` whose on-disk `PRRecord` has no `pr_id` stamps a
+  non-empty `pr_id` onto that entry, INLINE as part of
+  `_save_record_unlocked`'s existing locked write (not a separate
+  migration pass) — and a SECOND save afterward is idempotent: it does
+  not overwrite the already-assigned `pr_id` with a new random value.
+- [ ] Unit (round-37 finding): a legacy `PRRecord` (no `attribution_mode`
+  stored) is touched by `refresh_source_attribution` while the repo's
+  LIVE `source_attribution` is `False` — assert the pair is frozen to
+  the false state on THAT touch (not left unmigrated because the
+  function returned early), then the repo's config changes to
+  `codename` and the same PR is touched again — the marker STAYS
+  suppressed on the second touch, proving the freeze runs before the
+  live-config early return rather than being deferred until whichever
+  later touch happens to occur under a truthy config.
 - [ ] Unit (round-34 finding): a `WorktreeRecord` with an unbackfilled
   (missing/unknown) `codename_source`, in a repo with
   `source_attribution: True` (the raw-marker mode) — the PR still
@@ -1253,31 +1268,39 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-35 history lives in **[journal.md](journal.md)** to keep this
+> round-36 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
 
 
-### 2026-09-20 — Plan-review round 36 fixes
+### 2026-09-20 — Plan-review round 37 fixes
 
-- One new genuine finding: **`branch` isn't immutable either.**
-  Round-35's "branch is the primary identity" rule assumed a pushed
-  feature branch name never changes once set, but the same manual
-  `set-pr` correction path that can reassign `number` (`pr_ops.py`'s
-  `_set_pr_locked`) can ALSO reassign `branch`, with no identity-preserving
-  reset tied to either mutation. A stale snapshot captured before a
-  concurrent branch correction would then fail to match its own on-disk
-  counterpart by branch OR number, reproducing the exact
-  false-non-match/duplicate-append failure round-34/35 fixed for `number`
-  alone. Fixed: added a dedicated `pr_id` field — a random UUID assigned
-  ONCE at entry creation and never mutated by any later `branch`/
-  `number`/`provider`/`state` correction — as the SOLE per-entry identity,
-  superseding `branch` entirely. Every existing `PRRecord` gets `pr_id`
-  backfilled in a single one-time migration pass at shipping time (not
-  lazily at next touch), closing the window where a not-yet-migrated
-  entry could still race a `set-pr` correction with no stable identity on
-  either side.
+- Confirmed: round-36's `pr_id` identity fix verified correct — this
+  round's review lists it under "Resolved since last review."
+- Two new genuine findings, both exposing that round-36's design
+  described mechanisms with no actual place to run:
+  1. **No executable hook for the `pr_id` backfill:** round-36 called for
+     a "one-time migration pass at shipping time," but this repo's
+     config-migration framework (`config_migrations.py`) is scoped to
+     machine-local config and explicitly excludes tracking YAML — the
+     described pass had no entry point that would ever invoke it. Fixed:
+     backfill `pr_id` INLINE inside `_save_record_unlocked`'s existing
+     merge step, which already runs under the record lock on every
+     single `save_record` call — no separate migration mechanism needed.
+  2. **The legacy-freeze-on-first-touch design (round-32) can't fire
+     for a repo whose live `source_attribution` starts `False`:**
+     `refresh_source_attribution` returns immediately
+     (`if not config.default_repo.pr.source_attribution: return ""`,
+     `pr_ops.py:1199`) before ever reaching the freeze logic. A legacy
+     PR first touched under a false config would stay unmigrated
+     indefinitely; if the config later changes to `codename`, that LATER
+     touch (not the true first one) would be lazily frozen instead,
+     silently adopting the newer policy. Fixed: the freeze check must
+     run BEFORE the live-config early return, unconditionally — freezing
+     to the false state when that's what's live, so a later config
+     change correctly finds the pair already frozen.
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
-  `f2b538c47` for thirteen rounds straight — not re-edited again).
+  `f2b538c47` for fourteen rounds straight — not re-edited again).
+
 

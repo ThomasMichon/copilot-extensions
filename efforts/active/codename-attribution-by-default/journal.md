@@ -852,3 +852,26 @@ Part of the [codename-attribution-by-default effort](README.md).
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
   `f2b538c47` for twelve rounds straight — not re-edited again).
+
+### 2026-09-20 — Plan-review round 36 fixes
+
+- One new genuine finding: **`branch` isn't immutable either.**
+  Round-35's "branch is the primary identity" rule assumed a pushed
+  feature branch name never changes once set, but the same manual
+  `set-pr` correction path that can reassign `number` (`pr_ops.py`'s
+  `_set_pr_locked`) can ALSO reassign `branch`, with no identity-preserving
+  reset tied to either mutation. A stale snapshot captured before a
+  concurrent branch correction would then fail to match its own on-disk
+  counterpart by branch OR number, reproducing the exact
+  false-non-match/duplicate-append failure round-34/35 fixed for `number`
+  alone. Fixed: added a dedicated `pr_id` field — a random UUID assigned
+  ONCE at entry creation and never mutated by any later `branch`/
+  `number`/`provider`/`state` correction — as the SOLE per-entry identity,
+  superseding `branch` entirely. Every existing `PRRecord` gets `pr_id`
+  backfilled in a single one-time migration pass at shipping time (not
+  lazily at next touch), closing the window where a not-yet-migrated
+  entry could still race a `set-pr` correction with no stable identity on
+  either side.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for thirteen rounds straight — not re-edited again).

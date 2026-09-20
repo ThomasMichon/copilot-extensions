@@ -292,7 +292,31 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   save path — after which that PR is frozen exactly like every PR opened
   after this mechanism shipped; only the ONE transition (unmigrated →
   frozen) ever consults live config for an existing PR, and it happens at
-  most once per PR, not on every touch. This exactly mirrors
+  most once per PR, not on every touch. **This freeze step must run
+  BEFORE `refresh_source_attribution`'s live-config early return, not
+  after it (round-37 finding)** — verified in source:
+  `refresh_source_attribution` currently opens with
+  `if not config.default_repo.pr.source_attribution: return ""`
+  (`pr_ops.py:1199`), which exits before ever reaching the freeze logic
+  this section specifies. A legacy PR first touched while
+  `source_attribution` happens to be `False` would therefore never get
+  frozen on that touch — it would just keep hitting the same early
+  return, unmigrated, until some LATER touch happens to occur under a
+  `codename`/`True` config, at which point THAT touch (not the true first
+  touch) would be lazily frozen instead — silently adopting the newer
+  policy for a PR whose real first touch occurred under the old one,
+  exactly the retroactive exposure this whole mechanism exists to
+  prevent. **Corrected order:** the freeze check (stamp
+  `attribution_mode`/`attribution_explicit` from whatever is live, if not
+  already stamped) must be the FIRST thing `refresh_source_attribution`
+  does for a tracked `PRRecord`, unconditionally — including when the
+  live config value is `False`, in which case it freezes the pair to the
+  false state (so a later config change to `codename` correctly still
+  finds the pair already frozen and does not re-derive it) — and only
+  after that does the function proceed to its existing
+  early-return/publish logic, now driven by the just-frozen (or
+  previously-frozen) pair rather than by live config directly. This
+  exactly mirrors
   `codename_source`'s own lazy-assignment pattern (round-8/round-13) —
   the one difference is provenance-sensitive `codename_source` refuses to
   auto-promote an unbackfilled record (round-10 finding: the guess is
@@ -318,7 +342,14 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   SECOND refresh — the second refresh still uses the value frozen at the
   first touch, not the newly-changed config, proving the lazy backfill
   itself does not reopen the retroactive-change window it was meant to
-  close.
+  close; (v) (round-37 finding) a legacy `PRRecord` is first touched by
+  `refresh_source_attribution` while the repo's LIVE `source_attribution`
+  is `False` — assert the pair is frozen to the false state on THAT touch
+  (not left unmigrated), then change the repo's config to `codename` and
+  touch again — the marker STAYS suppressed on the second touch, proving
+  the freeze runs before the live-config early return rather than being
+  silently skipped until whatever later touch happens to occur under a
+  truthy config.
 **Strictly validate the persisted `attribution_mode`/
   `attribution_explicit` pair, not just round-trip it (round-30
   finding):** `_parse_pr_mapping` deserializes hand-rolled YAML with no
@@ -396,16 +427,25 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   from empty-branch-and-no-number to the general no-`pr_id` state — a
   merge miss here is, at worst, a transient extra list entry; a false
   match would silently overwrite one entry's frozen state with an
-  unrelated one's, the more dangerous failure). **Every EXISTING
-  `PRRecord` on disk must be backfilled with a `pr_id` in a single
-  one-time migration pass performed as part of shipping this field — not
-  lazily deferred to each entry's next touch** — a lazy per-touch backfill
-  would still leave a window, for any record not yet touched, where a
-  `set-pr` branch/number correction races a stale reader with no stable
-  identity on either side (the exact scenario the round-36 finding
-  raises); an upfront pass across every tracked worktree's YAML at
-  migration time closes that window entirely before any subsequent
-  `set-pr` correction can ever run against a `pr_id`-less entry. Add a
+  unrelated one's, the more dangerous failure). **Backfill `pr_id` INLINE
+  in `_save_record_unlocked`'s existing merge step, not via a separate
+  "shipping-time" migration pass (round-37 finding, corrects the
+  round-36 text)** — there is no executable hook for that: this repo's
+  config-migration framework (`config_migrations.py`) is explicitly
+  scoped to the machine-local `config.yaml`/`repos.yaml`/`projects.yaml`
+  and deliberately excludes per-worktree tracking YAML, so a "one-time
+  pass at shipping time" with no defined entry point would leave every
+  existing entry `pr_id`-less indefinitely — reproducing the exact race
+  it was meant to close. **Fix:** every single `save_record` call already
+  acquires the record lock and runs `_save_record_unlocked` against a
+  freshly-loaded `current` (on-disk) copy — add one step there, BEFORE
+  the identity-matching/merge logic runs: for each entry in `current.prs`
+  lacking a `pr_id`, generate and persist one right then, as part of that
+  same locked write. Because this piggybacks on code that already
+  executes on every write (not a new hook that must additionally be
+  invoked), there is no window where a not-yet-migrated entry can
+  outlive the very first save that touches its `WorktreeRecord` — closing
+  the race without a separate migration mechanism. Add a
   `pr_revision` counter PER `PRRecord` entry (not one shared worktree-level
   counter — following the existing `profile_assignment_revision`/
   `lifecycle_revision` pattern already in `_save_record_unlocked`, but
