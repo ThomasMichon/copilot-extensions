@@ -89,8 +89,10 @@ session never has to re-derive "what's already done" from the Journal alone.
   unscheduled)" right after Phase 4, and the same-dated Journal entry): (1)
   swapped the Started/Queued group order in both `board_cli.py`'s `GROUPS`
   tuple and `__main__.py`'s byte-identical `_BOARD_GROUPS`; (2) added a
-  `wt_badge` field (rendered `[WT]`) so a worktree-bearing Started task is
-  unmistakable at a glance, wired into the pivot manifest's `badges` list.
+  `wt_badge` field, then fixed on Copilot review to instead style the WT
+  column directly (`"style": "bold cyan"`) since this pivot uses `columns`
+  (table mode), where `entry.badges` never renders — so a worktree-bearing
+  Started task is unmistakable at a glance.
   Item (3) (why every observed Started task is CLI-embodied, none
   headless-worker-embodied) was **investigated and closed as NOT a bug** —
   see the Journal entry below for the live-coordinator evidence: headless
@@ -809,11 +811,15 @@ first time since Phase 4 landed.
    `test_cli.py` (`test_sort_orders_by_group_priority`) and the manifest
    badge test updated to match.
 2. **Hard to tell at a glance which Started tasks have an assigned
-   worktree — LANDED 2026-09-20.** Added `board_cli._build`'s `wt_badge`
-   field (`"WT"` when `has_worktree`, else `None`) and wired it into the
-   pivot manifest's `badges` list (`["activity", "wt_badge", "labels"]`), so
-   it renders as a `[WT]` badge next to the title — independent of, and a
-   clearer signal than, the existing narrow WT column.
+   worktree — LANDED 2026-09-20.** First attempt added a `wt_badge` field
+   wired into the pivot manifest's `badges` list — but Copilot's PR review
+   caught that this pivot declares `columns` (table mode), where
+   `engine.py`'s `build_data` never reads `entry.badges`/`badge_fields` at
+   all (that path is table-mode-vs-list-mode mutually exclusive). Fixed
+   instead by giving the existing WT column its own `"style": "bold cyan"`
+   in the manifest, which the table-render path (`_column_row`) does
+   apply per cell — so a populated WT id now reads distinctly at a glance,
+   with no board_cli/engine.py change needed.
 3. **Investigate: every observed "Started" task is CLI-embodied; NONE are
    headless-worker-embodied — INVESTIGATED 2026-09-20, closed as NOT a bug.**
    Live-coordinator evidence (`agent-dispatch reservations list` /
@@ -1880,10 +1886,12 @@ Runbook's own instructions.
   Updated the order-sensitive `test_sort_orders_by_group_priority` and the
   manifest-badges assertion in `test_cli.py`, plus doc comments naming the
   old order in three places (`__main__.py` x2, `README.md`).
-- **Item 2 (WT visibility) landed.** New `wt_badge` field in
-  `board_cli._build` (`"WT"` / `None`), added to the pivot manifest's
-  `badges` list. New `test_build_wt_badge_reflects_has_worktree` regression
-  test.
+- **Item 2 (WT visibility) landed — after a fix.** First attempt added a
+  `wt_badge` field to `board_cli._build` wired into the pivot manifest's
+  `badges` list; Copilot's PR review (see the later Journal entry) caught
+  this is dead code for a `columns`-declaring (table-mode) pivot. Fixed by
+  styling the WT column directly (`"style": "bold cyan"`) instead; the
+  `wt_badge` field/test were removed.
 - **Item 3 (CLI-vs-headless investigation) closed as NOT a bug**, evidenced
   live against the real coordinator: `agent-dispatch reservations list`
   showed two genuine headless (`local-body:`) spawn reservations for
@@ -1913,4 +1921,21 @@ Runbook's own instructions.
   overage — same non-blocking, not-required-check situation already noted
   for Phase 4 (confirmed not in the required-checks ruleset); not treated as
   something to fix inside this change.
+- **PR #3008 opened, then fixed on Copilot's first-pass review.** Copilot's
+  automatic review caught a real bug: this pivot manifest declares
+  `columns` (table mode), so `engine.py`'s `build_data` only calls `_row`/
+  reads `badge_fields` when `reg.columns` is **empty** — the `wt_badge`
+  entry (and, pre-existing, `activity`/`labels` too) never rendered for
+  this manifest at all. Fixed by dropping the dead `wt_badge` field/badges-
+  list entry entirely and instead giving the existing WT column its own
+  `"style": "bold cyan"` in the manifest — the column-table render path
+  (`_column_row`) already applies `col.style` per cell, so a populated WT
+  id now reads distinctly without any board_cli/engine.py change. Verified
+  against `test_plugin_contracts.py::test_real_checkout_manifests_match_
+  contract` (validates every real installed manifest, including this one)
+  plus the full `test_pivots.py`/`test_pivot_registry.py` suites (107/107).
+  **Lesson for future badge/legibility asks on this pivot:** always check
+  whether the manifest declares `columns` before reaching for
+  `entry.badges` — the two are mutually exclusive render paths, and this
+  pivot has used `columns` since Phase 3.
 
