@@ -257,7 +257,12 @@ answered from state the accelerator's own sweep and operation-triggered
 recompute already keep current, not freshly (re)derived per caller. Rich
 conversation/message history is explicitly excluded from this cache (see
 *Not a transcript or event warehouse* below) — a consumer that wants recent
-messages pulls them on demand from the owning session host instead.
+messages pulls them on demand from the owning session host instead. When no
+accelerator is reachable, this contract degrades the same way *Derived
+status* already does for any other reader: direct, in-process computation of
+the same facts is a correct fallback, never a hard failure — a consumer is
+never left with no answer merely because the accelerator happens to be
+unavailable at that moment.
 
 ### registered-by-default-listing
 
@@ -365,9 +370,15 @@ what keep an ordinary reader's answer current without it.
 ### a-full-health-check-leaves-nothing-stale
 
 Running a full consistency/health pass over the accelerator's tracked state
-is expected to leave every fact it owns confirmed fresh, not merely
-reachable — so a caller that follows a health check with an ordinary read
-never needs its own force-refresh to trust the answer.
+is expected to leave every fact it owns **confirmed fresh wherever that
+confirmation is actually obtainable** — not merely reachable — so a caller
+that follows a health check with an ordinary read never needs its own
+force-refresh to trust the answer. This does not override
+*uncertainty-is-marked-not-multiplied* above: a fact a health check genuinely
+could not confirm (its source was unreachable, absent, or ambiguous even
+after the pass) is reported as that fact's real value plus an explicit
+unconfirmed marker, never silently claimed fresh just because a health check
+ran (see *uncertainty-is-marked-not-multiplied* above).
 
 ### one-fetch-serves-every-sibling
 
