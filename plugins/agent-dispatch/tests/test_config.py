@@ -286,7 +286,160 @@ def test_has_live_false_when_routed_endpoint_not_listening(monkeypatch):
 def test_has_live_true_when_routed_endpoint_listening(monkeypatch):
     monkeypatch.setattr(config_mod, "_routing_url", lambda: "http://127.0.0.1:59999")
     monkeypatch.setattr(config_mod, "_url_listening", lambda url, **k: True)
+    monkeypatch.setattr(config_mod, "_health_responsive", lambda url, **k: True)
     assert config_mod.has_live_local_coordinator() is True
+
+
+def test_has_live_false_when_socket_listening_but_health_unresponsive(monkeypatch):
+    # Confirmed live incident (ThomasMichon/copilot-extensions#3031): a wedged
+    # coordinator kept its socket open and accepting connections for ~9h while
+    # never answering a request. A listening socket alone must not count as
+    # live -- has_live_local_coordinator needs a real, bounded /health round
+    # trip too, or the CLI's lazy-start never notices the wedge and never
+    # spawns a replacement.
+    monkeypatch.setattr(config_mod, "_routing_url", lambda: "http://127.0.0.1:59999")
+    monkeypatch.setattr(config_mod, "_url_listening", lambda url, **k: True)
+    monkeypatch.setattr(config_mod, "_health_responsive", lambda url, **k: False)
+    monkeypatch.setattr(config_mod, "_discover_local_endpoint", lambda: None)
+    assert config_mod.has_live_local_coordinator() is False
+
+
+def test_has_live_false_when_discovered_endpoint_health_unresponsive(monkeypatch):
+    # Same wedge scenario, but reached via the legacy discovery ladder rather
+    # than the zdd routing table (no routed URL at all).
+    monkeypatch.setattr(config_mod, "_routing_url", lambda: None)
+    monkeypatch.setattr(
+        config_mod,
+        "_discover_local_endpoint",
+        lambda: rendezvous.Endpoint(transport="tcp", address="127.0.0.1:59999"),
+    )
+    monkeypatch.setattr(config_mod, "_health_responsive", lambda url, **k: False)
+    assert config_mod.has_live_local_coordinator() is False
+
+
+def test_has_live_false_when_routed_health_fails_even_if_legacy_discovery_healthy(monkeypatch):
+    # The routing table is authoritative whenever it has an entry: client_url()
+    # prefers the routed URL, so falling back to a *different*, healthy legacy
+    # endpoint here would report "live" while every real request still goes to
+    # the wedged routed generation -- silently defeating this whole check.
+    monkeypatch.setattr(config_mod, "_routing_url", lambda: "http://127.0.0.1:59999")
+    monkeypatch.setattr(config_mod, "_url_listening", lambda url, **k: True)
+    monkeypatch.setattr(config_mod, "_health_responsive", lambda url, **k: False)
+    monkeypatch.setattr(
+        config_mod,
+        "_discover_local_endpoint",
+        lambda: rendezvous.Endpoint(transport="tcp", address="127.0.0.1:12345"),
+    )
+    assert config_mod.has_live_local_coordinator() is False
+
+
+def test_has_live_true_when_discovered_endpoint_health_responsive(monkeypatch):
+    monkeypatch.setattr(config_mod, "_routing_url", lambda: None)
+    monkeypatch.setattr(
+        config_mod,
+        "_discover_local_endpoint",
+        lambda: rendezvous.Endpoint(transport="tcp", address="127.0.0.1:59999"),
+    )
+    monkeypatch.setattr(config_mod, "_health_responsive", lambda url, **k: True)
+    assert config_mod.has_live_local_coordinator() is True
+
+
+def test_discovered_endpoint_health_responsive_probes_tcp_as_http(monkeypatch):
+    captured = {}
+
+    def _fake_health_responsive(url, **_k):
+        captured["url"] = url
+        return True
+
+    monkeypatch.setattr(config_mod, "_health_responsive", _fake_health_responsive)
+    endpoint = rendezvous.Endpoint(transport="tcp", address="127.0.0.1:59999")
+    assert config_mod._discovered_endpoint_health_responsive(endpoint) is True
+    assert captured["url"] == "http://127.0.0.1:59999"
+
+
+def test_discovered_endpoint_health_responsive_true_for_non_tcp_transport(monkeypatch):
+    # No plain-HTTP mapping exists for a unix socket / named pipe here -- trust
+    # the existing connect-probe-verified liveness for those transports rather
+    # than guessing at a URL _health_responsive can't speak to.
+    monkeypatch.setattr(
+        config_mod,
+        "_health_responsive",
+        lambda url, **k: (_ for _ in ()).throw(AssertionError("should not be called")),
+    )
+    endpoint = rendezvous.Endpoint(transport="unix", address="/tmp/agent-dispatch.sock")
+    assert config_mod._discovered_endpoint_health_responsive(endpoint) is True
+
+
+def test_health_responsive_true_on_2xx(monkeypatch):
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        config_mod.urllib.request, "urlopen", lambda *a, **k: _FakeResponse()
+    )
+    assert config_mod._health_responsive("http://127.0.0.1:59999") is True
+
+
+def test_health_responsive_false_on_timeout(monkeypatch):
+    def _raise(*_a, **_k):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(config_mod.urllib.request, "urlopen", _raise)
+    assert config_mod._health_responsive("http://127.0.0.1:59999") is False
+
+
+def test_health_responsive_sends_bearer_token_when_configured(monkeypatch):
+    # A token-protected coordinator returns 401 to an unauthenticated probe and
+    # would otherwise be permanently misclassified as dead, causing every
+    # autostarting CLI invocation to attempt an unnecessary recovery against a
+    # healthy, already-live coordinator.
+    captured: dict = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _fake_urlopen(request, timeout=None):
+        captured["auth_header"] = request.get_header("Authorization")
+        return _FakeResponse()
+
+    monkeypatch.setattr(config_mod, "client_token", lambda: "s3cr3t")
+    monkeypatch.setattr(config_mod.urllib.request, "urlopen", _fake_urlopen)
+    assert config_mod._health_responsive("http://127.0.0.1:59999") is True
+    assert captured["auth_header"] == "Bearer s3cr3t"
+
+
+def test_health_responsive_omits_auth_header_when_no_token(monkeypatch):
+    captured: dict = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _fake_urlopen(request, timeout=None):
+        captured["auth_header"] = request.get_header("Authorization")
+        return _FakeResponse()
+
+    monkeypatch.setattr(config_mod, "client_token", lambda: None)
+    monkeypatch.setattr(config_mod.urllib.request, "urlopen", _fake_urlopen)
+    assert config_mod._health_responsive("http://127.0.0.1:59999") is True
+    assert captured["auth_header"] is None
 
 
 def test_client_url_wsl_uses_discovered_port_when_opted_in(monkeypatch):
