@@ -105,10 +105,20 @@ session never has to re-derive "what's already done" from the Journal alone.
   (needs a real backend field: today's task list has no per-task signal
   distinguishing the two without a `spawn_reservations` join, which is Phase
   1/3/4-sized work of its own — see the Journal for the concrete next step).
-  **Phase 8 (Worktree Status card) is confirmed real and
-  current** — cards come up empty beyond title against the live
-  coordinator; do this phase properly, verified against an actually
-  embodied task, not just the preview fixture. Phase 5 (Artifacts/claims)
+  **Phase 8 (Worktree Status card) is BLOCKED on real architecture work,
+  not a quick fix** — investigated 2026-09-20 (see the Journal entry): a
+  `kind:"card"` action and `board_cli.py` are both documented as
+  subprocess-free on their hot paths, and agent-dispatch tracks none of
+  session-lineage/git-state/liveness/claims itself. Resolved direction
+  (operator decision, same date): `agent-worktrees`'s resident accelerator
+  becomes the live-authority cache for this data — now recorded in its own
+  vision (`visions/plugins/agent-worktrees/README.md`'s new
+  *external-status-consumer-contract* Feature) — but agent-dispatch's own
+  consumer of that cache is still undesigned. **Next step for whoever picks
+  this up:** design agent-dispatch's read side (a background-supervisor
+  poll into the task row is the leading idea) once `agent-worktrees`
+  actually exposes the cache the vision now promises; do not start Phase 8
+  by reaching for a per-render subprocess. Phase 5 (Artifacts/claims)
   remains next in Plan order but the CLI-vs-headless badge and Phase 8 are the
   operator's stated priority — triage/sequence them explicitly with the
   operator rather than silently defaulting to strict Plan order.
@@ -891,6 +901,34 @@ no lifecycle-control logic invented at this layer.
       descriptor, claims), the vision's own stated purpose for this card —
       verify against a real embodied task before calling this phase done,
       not just the preview fixture.
+- [ ] **Design constraint discovered 2026-09-20 (blocks a naive
+      implementation) — see the Journal entry of the same date for the
+      full investigation.** A `kind:"card"` action is documented as
+      read-only against data already present on the entry ("No subprocess
+      is run" at click time), and `board_cli.py` is documented as "Pure
+      coordinator-state rendering: no agent-worktrees/agent-bridge
+      subprocesses on the Picker read path" (it re-runs on every Picker
+      refresh). Neither can shell out to git/agent-worktrees per row or per
+      click, and agent-dispatch's own coordinator today tracks none of
+      session-lineage/git-state/liveness/claims itself. **Resolved
+      direction (operator decision 2026-09-20):** `agent-worktrees`'s
+      resident accelerator becomes the live-authority cache for this data
+      (worktree/session mapping, lineage + lifecycle event history,
+      liveness, git state, claims graph — see the `agent-worktrees` vision's
+      new *external-status-consumer-contract* Feature and
+      *force-refresh-is-opt-in-not-implicit*/*a-full-health-check-leaves-
+      nothing-stale* Behaviors, added the same date). Phase 8's own
+      implementation therefore needs an **agent-dispatch-side consumer**
+      of that cache — read on a cadence/trigger that keeps board rows
+      populated without a per-render subprocess (e.g. a background
+      supervisor poll into the task row, mirroring how `activity` is
+      already self-reported into a task field) — not yet designed or
+      scoped into concrete steps; do that as the next step before writing
+      any Phase 8 code. Recent-message history is explicitly NOT part of
+      this cache (pulled on demand from agent-bridge instead, per the
+      vision's existing *Not a transcript or event warehouse* non-goal) —
+      Phase 8's card body should treat any "last messages" content, if
+      wanted at all, as a separate on-demand fetch, not a cached field.
 
 ### Phase 9 — Configuration → Registrars viewer/editor (implementation)
 - [ ] Build the Configuration-menu view listing every registration
@@ -1938,4 +1976,58 @@ Runbook's own instructions.
   whether the manifest declares `columns` before reaching for
   `entry.badges` — the two are mutually exclusive render paths, and this
   pivot has used `columns` since Phase 3.
+
+### 2026-09-20 — Phase 8 investigated: real blocker found, vision updated, code deferred
+Picked Phase 8 up next (operator's choice after PR #3008 merged). Fresh
+worktree via `agent-worktrees -p copilot-extensions create`.
+
+- **Investigated before writing code** (per the effort's own established
+  pattern: confirm design with the operator when a real decision is
+  involved) and found this is genuinely blocked on a real architectural
+  gap, not just unimplemented plumbing:
+  - `pivot_manifest.py`'s own docstring for a `kind:"card"` action: "No
+    subprocess is run" — it renders strictly from data already present on
+    the entry when the operator opens it, so `worktree_status.body` cannot
+    be fetched live at click time.
+  - `board_cli.py`'s own header comment: "Pure coordinator-state
+    rendering: no agent-worktrees/agent-bridge subprocesses on the Picker
+    read path" — it re-runs on every Picker refresh (sub-second), so it
+    cannot shell out to git/agent-worktrees per row either.
+  - agent-dispatch's own coordinator tracks none of session-lineage,
+    git/commit state, liveness, or the claims graph today — that all lives
+    in git and in `agent-worktrees`' own state, outside any agent-dispatch
+    task row.
+  - Real "Claims" content is Phase 5's own scope (not landed yet), so even
+    a partial Phase 8 slice can't show real claims without it.
+- **Surfaced this to the operator rather than guessing a workaround.**
+  Resolved direction: `agent-worktrees`'s existing **resident accelerator**
+  (already documented in its vision as the one-per-host freshness/status
+  computer) becomes the explicit live-authority cache for exactly this
+  data — worktree/session mapping, session lineage + lifecycle event
+  history, last-known liveness (mux/Copilot lock), last-known git state,
+  and the claims graph — with fast-cache reads, and force-refresh
+  available strictly at explicit user/agent discretion (queued to
+  coalesce, never triggered by an ordinary read). Message/conversation
+  history stays explicitly out of this cache — pulled on demand from
+  agent-bridge instead, matching the vision's pre-existing *Not a
+  transcript or event warehouse* non-goal.
+- **Updated the `agent-worktrees` vision** (`visions/plugins/agent-worktrees/
+  README.md`) to make this explicit and durable rather than leaving it as
+  an unrecorded intention: added *external-status-consumer-contract*
+  (Features) and *force-refresh-is-opt-in-not-implicit* /
+  *a-full-health-check-leaves-nothing-stale* (Behaviors), plus a Provenance
+  entry recording the operator directive and its origin in this effort.
+  Deliberately did **not** invent new commands/schemas in the vision itself
+  (it's explicitly "Not a specification") — that's still open design work.
+- **Filed the remaining Phase 8 design gap into the Plan** (see the new
+  bullet under Phase 8 above) rather than starting to code against an
+  unresolved architecture: agent-dispatch still needs its own consumer of
+  this soon-to-exist cache (a background-supervisor poll into the task row
+  is the leading idea, mirroring how `activity` is already self-reported —
+  but not yet scoped into concrete steps, and it depends on
+  `agent-worktrees` actually building the cache the vision now promises).
+- **Not implemented this session** (operator's own chosen scope: "write a
+  design proposal... then stop for your review before coding"). No
+  agent-dispatch/worktree-manager code changed this pass; only the vision
+  doc and this effort's own Plan/Journal.
 

@@ -245,6 +245,20 @@ The Worktrees presentation surface is described through machine-readable
 semantics that any compatible control plane can render without importing the
 engine or persisting a second copy of its state.
 
+### external-status-consumer-contract
+
+Any other capability that needs a worktree's current status — a Tasks-board
+status card, a dashboard, a notification — reads the resident accelerator's
+fast cache as its live-authority source, rather than independently
+recomputing git state, session lineage, liveness, or the claims graph, or
+polling agent-worktrees with its own subprocess on a hot per-render path. The
+accelerator is the sole live computer of this state; a consumer's read is
+answered from state the accelerator's own sweep and operation-triggered
+recompute already keep current, not freshly (re)derived per caller. Rich
+conversation/message history is explicitly excluded from this cache (see
+*Not a transcript or event warehouse* below) — a consumer that wants recent
+messages pulls them on demand from the owning session host instead.
+
 ### registered-by-default-listing
 
 Every enumeration of worktrees — a listing command, a session-to-worktree
@@ -337,6 +351,23 @@ happened to include a fetch. The system actively keeps shared evidence
 current — a periodic background sweep plus operation-triggered
 recomputation — so an ordinary reader benefits from freshness without
 personally requesting it.
+
+### force-refresh-is-opt-in-not-implicit
+
+A caller may force the resident accelerator to recompute a specific fact
+immediately, funneled through the accelerator's own queue so concurrent
+force-refresh requests coalesce rather than each triggering independent,
+thrashing recomputation. This exists purely at explicit user or agent
+discretion — no ordinary read path triggers a force-refresh merely to
+produce an answer; the periodic sweep and operation-triggered recompute are
+what keep an ordinary reader's answer current without it.
+
+### a-full-health-check-leaves-nothing-stale
+
+Running a full consistency/health pass over the accelerator's tracked state
+is expected to leave every fact it owns confirmed fresh, not merely
+reachable — so a caller that follows a health check with an ordinary read
+never needs its own force-refresh to trust the answer.
 
 ### one-fetch-serves-every-sibling
 
@@ -437,6 +468,22 @@ manager, or session-host implementation.
 
 ## Provenance
 
+- **2026-09-20** — Added *external-status-consumer-contract* (Features),
+  *force-refresh-is-opt-in-not-implicit* and *a-full-health-check-leaves-
+  nothing-stale* (Behaviors). Mined from an operator directive during the
+  `agent-dispatch-tasks-pane-ux-overhaul` effort's Phase 8 design pass: a
+  worktree-status card (or any other external status consumer) needs a
+  fast, complete, cached read against the resident accelerator's own
+  live-authority state — worktree/session mapping, session lineage and
+  lifecycle event history, last-known liveness, last-known git state, and
+  the claims graph — never its own independent git/session polling on a
+  hot per-render path. Force-refresh exists, but strictly at explicit user
+  or agent discretion (queued to coalesce concurrent requests, never
+  triggered by an ordinary read just to function); a full health/
+  consistency pass is expected to leave that cache fully current. Message/
+  conversation history is explicitly excluded (reaffirming the existing
+  *Not a transcript or event warehouse* non-goal) — a consumer pulls recent
+  messages on demand from the owning session host (agent-bridge) instead.
 - **2026-09-20** — Added *Post-finalization archival* (Concepts & Components),
   *registered-by-default-listing* (Features), and
   *archival-is-a-terminus-not-a-deletion* (Behaviors): a reaped, unpaired
