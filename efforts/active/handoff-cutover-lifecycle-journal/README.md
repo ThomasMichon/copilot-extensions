@@ -574,6 +574,21 @@ renumbering from the "acknowledges handoff" step onward.)
       hours as an invisible orphan (the operator's reported "phantom
       agents"). Fixed with a lock-independent, identity-verified OS pid
       check as a fallback. See Journal for full evidence and the fix.
+- [ ] **New item (2026-09-20), tracked as
+      [aperture-labs#7246](https://gitea.michon.ski/tmichon/aperture-labs/issues/7246):**
+      a fifth root cause -- `_monitor_claim_handoff_cutover` /
+      `_monitor_handoff_claim_staleness` reclaim a handoff-cutover claim
+      purely on age (`AGENT_WORKTREES_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS`,
+      default 180s) because the claim's recorded pid/start_time are the
+      resident monitor's own (never dies, so `pid-gone`/`pid-reused` never
+      fire), with no check on whether the previously spawned successor
+      pane/session is still alive. Produced 4 concurrent duplicate Copilot
+      panes on one worktree before manual `link-succession` +
+      `handoffs-check --execute` remediation. Two fixes needed: gate reclaim
+      on successor-pane liveness, and root-cause why stage 9
+      (`handoff_successor_session_start_bound`) never fires for a
+      status-monitor-spawned `--interactive` pane. See Journal entry for
+      full evidence.
 
 ### Phase 5 — Docs
 - [x] Document the 13-stage lifecycle in
@@ -1335,6 +1350,52 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   continuing the exact same task lineage as a *newer*, correctly-mux-hosted
   successor also running concurrently) -- until it finally exited on its own
   right as this investigation reached it.
+
+### 2026-09-20 — Fifth root cause: claim reclaimed on age alone, no successor-liveness check
+
+- **New live recurrence, tracked as aperture-labs issue
+  [#7246](https://gitea.michon.ski/tmichon/aperture-labs/issues/7246).**
+  Worktree `lambda-core-win-20260826-223842-c332` (a different machine/repo
+  from this effort's home, aperture-labs) got stuck in a repeat cutover
+  loop: `handoff_requested` fired, but the successor never reached stage 9
+  (`handoff_successor_session_start_bound`). Every ~180s -- the resident
+  monitor's `AGENT_WORKTREES_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS`
+  default -- `_monitor_handoff_claim_staleness` reclaimed the handoff-cutover
+  claim purely on `reason: age-expired` and spawned a brand-new successor
+  for the same token, even though the *previous* spawn had actually
+  succeeded and its pane was alive and idle. Root cause: the claim payload's
+  recorded `pid`/`start_time` are the **status-monitor daemon's own**
+  process identity, not the spawned successor's -- since the resident
+  monitor never dies by design, the `pid-gone`/`pid-reused` staleness paths
+  can never fire, leaving the flat age timer as the *only* staleness check
+  that ever runs. Nothing checks whether the prior successor pane/session is
+  still alive before reclaiming. Over ~9 minutes this produced **4
+  concurrent live duplicate Copilot mux windows** on one worktree, each
+  independently noticing the duplication and declining to redo the work --
+  but none of them stopped the loop, which would have kept respawning
+  indefinitely.
+- **This is a distinct, fifth root cause** from the four fixed in the
+  2026-09-17 session (PRs #2518/#2525/#2533/#2537, which addressed
+  predecessor-retire identity and the pending-vs-linked scan gap) -- those
+  fixes concerned *retiring* a stranded predecessor; this one concerns the
+  monitor *respawning a successor* without ever confirming the earlier
+  attempt actually failed.
+- **Live-remediated, not yet code-fixed:** `agent-worktrees link-succession
+  --worktree <id> --predecessor <old-head-session> --successor
+  <completed-session> --handoff-token <token>` forced stage-9/13 closure by
+  hand, followed by `agent-worktrees handoffs-check --execute`, then closing
+  the 3 redundant idle mux windows. Facility-wide `handoffs-check --all`
+  returned 0 stranded handoffs afterward. The underlying claim-reclaim gap
+  in `_monitor_claim_handoff_cutover` / `_monitor_handoff_claim_staleness`
+  (`plugins/agent-worktrees/src/agent_worktrees/__main__.py`) is unfixed --
+  filed as issue #7246 (aperture-labs, per this repo's Gitea-only filing
+  convention for cross-repo bugs) rather than fixed in this pass, since no
+  operator go-ahead for remediation-in-code was sought this session. Two
+  fixes are needed together: (1) gate reclaim on the previous successor
+  pane/session's actual liveness, not just claim age; (2) root-cause why
+  stage 9 never fires for a status-monitor-spawned `--interactive`-seeded
+  pane in the first place, since that's the reason a reclaim is ever
+  attempted. **Left open for a future leg of this effort.**
   - **Root cause:** `reclaim.ensure_session_copilot_reaped()`'s "is the
     predecessor actually dead" check is entirely gated on the presence of a
     live `inuse.<pid>.lock` file (`resolve_bound_copilots()` only reports a
