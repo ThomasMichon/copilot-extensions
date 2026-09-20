@@ -294,7 +294,7 @@ def test_external_state_root_falls_back_to_project_flag_for_bare_repo(
     bare.mkdir()
     (home / ".agent-worktrees" / "repos.yaml").write_text(
         "repos:\n"
-        f"  odsp-web-harness:\n"
+        f"  example-anchor-repo:\n"
         f"    windows: {json.dumps(str(bare))}\n",
         encoding="utf-8",
     )
@@ -333,7 +333,7 @@ def test_external_state_root_falls_back_to_project_flag_for_bare_repo(
     assert state == "ready"
     assert path == (tmp_path / "knowledge").resolve()
     assert len(calls) == 2
-    assert "--project" in calls[1] and "odsp-web-harness" in calls[1]
+    assert "--project" in calls[1] and "example-anchor-repo" in calls[1]
 
 
 def test_external_state_root_suppresses_console_for_resolved_command(
