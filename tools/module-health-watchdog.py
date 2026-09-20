@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Proactively flag the single worst module-size offender for decomposition.
 
-Phase 2a of the module-health-attribution-and-watchdog effort (aperture-labs).
 `tools/check-module-size.py`'s PR-time gate (Phase 1, `--changed-since`)
 fairly attributes *growth*, but growth is only half the problem: a module
 already at or near its cap is organic, cumulative drift that no single small
@@ -83,8 +82,23 @@ def worst_candidate(cms) -> tuple[str, int, int, int] | None:
     return rows[0]
 
 
+class LookupFailed(RuntimeError):
+    """The existing-issue search itself could not be completed reliably.
+
+    Distinct from "searched and found nothing" -- a caller must never treat
+    this the same as "no duplicate exists" (that would file a real
+    duplicate on a transient API hiccup or a not-yet-created label).
+    """
+
+
 def _existing_issue_number(repo: str, path: str) -> int | None:
-    """Return an already-open tracking issue's number for ``path``, or None."""
+    """Return an already-open tracking issue's number for ``path``, or None
+    if the search completed successfully and found no match.
+
+    Raises :class:`LookupFailed` when the search itself could not be
+    completed -- callers must abort filing rather than treat that the same
+    as a confirmed "no match".
+    """
     out = subprocess.run(
         [
             "gh", "issue", "list",
@@ -98,14 +112,11 @@ def _existing_issue_number(repo: str, path: str) -> int | None:
         text=True,
     )
     if out.returncode != 0:
-        # A missing label (first run) or transient API error must not crash a
-        # scheduled, unattended job -- report and let the caller decide.
-        print(f"[WARN] gh issue list failed: {out.stderr.strip()}", file=sys.stderr)
-        return None
+        raise LookupFailed(out.stderr.strip() or f"gh issue list exited {out.returncode}")
     try:
         matches = json.loads(out.stdout or "[]")
-    except json.JSONDecodeError:
-        return None
+    except json.JSONDecodeError as error:
+        raise LookupFailed(f"unparseable gh issue list output: {error}") from error
     return matches[0]["number"] if matches else None
 
 
@@ -199,7 +210,15 @@ def main() -> int:
         print("[INFO] dry run -- pass --file-issue to actually open a tracking issue.")
         return 0
 
-    existing = _existing_issue_number(args.repo, path)
+    try:
+        existing = _existing_issue_number(args.repo, path)
+    except LookupFailed as error:
+        # Never treat "couldn't confirm" as "confirmed absent" -- that would
+        # risk filing a real duplicate on a transient API hiccup or a
+        # not-yet-created label. Report and abort without filing; the next
+        # scheduled run tries again.
+        print(f"[WARN] existing-issue lookup failed, aborting without filing: {error}", file=sys.stderr)
+        return 0
     if existing is not None:
         print(f"[OK] already tracked: #{existing} -- not filing a duplicate.")
         return 0

@@ -1,10 +1,8 @@
-# Phase 2a of the module-health-attribution-and-watchdog effort
-# (aperture-labs). Detection only -- no agent dispatch, no live-registrar
-# change. Files (or leaves alone, if one is already open) a tracking issue
-# for the single worst module-size offender, mirroring
-# module-size-baseline-widen.yml's own proven scheduled/mechanical shape.
-# See tools/module-health-watchdog.py's module docstring for the full
-# rationale.
+# Detection only -- no agent dispatch, no live-registrar change. Files (or
+# leaves alone, if one is already open) a tracking issue for the single
+# worst module-size offender, mirroring module-size-baseline-widen.yml's own
+# proven scheduled/mechanical shape. See tools/module-health-watchdog.py's
+# module docstring for the full rationale.
 name: Module health watchdog
 
 on:
@@ -13,6 +11,13 @@ on:
     # and keeps this well clear of the CI budget the fast per-PR jobs share.
     - cron: "17 8 * * *"
   workflow_dispatch:
+
+concurrency:
+  # A scheduled run and a manually dispatched `workflow_dispatch` run could
+  # otherwise both observe "no matching issue yet" and each file one --
+  # serialize so one run's issue is visible to the next before it decides.
+  group: module-health-watchdog
+  cancel-in-progress: false
 
 permissions:
   contents: read

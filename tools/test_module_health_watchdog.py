@@ -132,3 +132,40 @@ def test_dry_run_cli_reports_without_filing():
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "dry run" in result.stdout
+
+
+def test_existing_issue_number_raises_lookup_failed_on_a_nonzero_exit(monkeypatch):
+    watchdog = _load_watchdog(SCRIPT.parent)
+
+    class _FailedRun:
+        returncode = 1
+        stdout = ""
+        stderr = "label 'needs-decomposition' not found"
+
+    monkeypatch.setattr(watchdog.subprocess, "run", lambda *a, **k: _FailedRun())
+
+    with pytest.raises(watchdog.LookupFailed):
+        watchdog._existing_issue_number("owner/repo", "src/big.py")
+
+
+def test_main_aborts_without_filing_when_lookup_fails(monkeypatch, capsys):
+    watchdog = _load_watchdog(SCRIPT.parent)
+
+    def _raise_lookup_failed(*_args, **_kwargs):
+        raise watchdog.LookupFailed("simulated transient failure")
+
+    called_file_issue = False
+
+    def _fake_file_issue(*_args, **_kwargs):
+        nonlocal called_file_issue
+        called_file_issue = True
+
+    monkeypatch.setattr(watchdog, "_existing_issue_number", _raise_lookup_failed)
+    monkeypatch.setattr(watchdog, "_file_issue", _fake_file_issue)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--file-issue", "--near-cap", "100000"])
+
+    exit_code = watchdog.main()
+
+    assert exit_code == 0
+    assert not called_file_issue
+    assert "aborting without filing" in capsys.readouterr().err
