@@ -286,7 +286,62 @@ def test_has_live_false_when_routed_endpoint_not_listening(monkeypatch):
 def test_has_live_true_when_routed_endpoint_listening(monkeypatch):
     monkeypatch.setattr(config_mod, "_routing_url", lambda: "http://127.0.0.1:59999")
     monkeypatch.setattr(config_mod, "_url_listening", lambda url, **k: True)
+    monkeypatch.setattr(config_mod, "_health_responsive", lambda url, **k: True)
     assert config_mod.has_live_local_coordinator() is True
+
+
+def test_has_live_false_when_socket_listening_but_health_unresponsive(monkeypatch):
+    # Confirmed live incident (ThomasMichon/copilot-extensions#3031): a wedged
+    # coordinator kept its socket open and accepting connections for ~9h while
+    # never answering a request. A listening socket alone must not count as
+    # live -- has_live_local_coordinator needs a real, bounded /health round
+    # trip too, or the CLI's lazy-start never notices the wedge and never
+    # spawns a replacement.
+    monkeypatch.setattr(config_mod, "_routing_url", lambda: "http://127.0.0.1:59999")
+    monkeypatch.setattr(config_mod, "_url_listening", lambda url, **k: True)
+    monkeypatch.setattr(config_mod, "_health_responsive", lambda url, **k: False)
+    monkeypatch.setattr(config_mod, "_discover_local_endpoint", lambda: None)
+    assert config_mod.has_live_local_coordinator() is False
+
+
+def test_has_live_false_when_discovered_endpoint_health_unresponsive(monkeypatch):
+    # Same wedge scenario, but reached via the legacy discovery ladder rather
+    # than the zdd routing table (no routed URL at all).
+    monkeypatch.setattr(config_mod, "_routing_url", lambda: None)
+    monkeypatch.setattr(config_mod, "_discover_local_endpoint", lambda: "http://127.0.0.1:59999")
+    monkeypatch.setattr(config_mod, "_health_responsive", lambda url, **k: False)
+    assert config_mod.has_live_local_coordinator() is False
+
+
+def test_has_live_true_when_discovered_endpoint_health_responsive(monkeypatch):
+    monkeypatch.setattr(config_mod, "_routing_url", lambda: None)
+    monkeypatch.setattr(config_mod, "_discover_local_endpoint", lambda: "http://127.0.0.1:59999")
+    monkeypatch.setattr(config_mod, "_health_responsive", lambda url, **k: True)
+    assert config_mod.has_live_local_coordinator() is True
+
+
+def test_health_responsive_true_on_2xx(monkeypatch):
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        config_mod.urllib.request, "urlopen", lambda *a, **k: _FakeResponse()
+    )
+    assert config_mod._health_responsive("http://127.0.0.1:59999") is True
+
+
+def test_health_responsive_false_on_timeout(monkeypatch):
+    def _raise(*_a, **_k):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(config_mod.urllib.request, "urlopen", _raise)
+    assert config_mod._health_responsive("http://127.0.0.1:59999") is False
 
 
 def test_client_url_wsl_uses_discovered_port_when_opted_in(monkeypatch):

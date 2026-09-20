@@ -49,6 +49,8 @@ from __future__ import annotations
 
 import os
 import socket
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -321,6 +323,26 @@ def _url_listening(base_url: str, *, timeout: float = 0.25) -> bool:
         return False
 
 
+def _health_responsive(base_url: str, *, timeout: float = 3.0) -> bool:
+    """True if ``base_url``'s ``/health`` endpoint answers within ``timeout``.
+
+    A TCP listener can stay open (still ``accept()``-ing new connections) long
+    after the process behind it has wedged -- confirmed live (see
+    gim-home/odsp-web-harness#... / ThomasMichon/copilot-extensions#3031): a
+    coordinator hung mid-cycle for ~9h while still holding its socket, so every
+    ``_url_listening`` probe kept reporting it as live and the CLI's lazy-start
+    never tried to replace it. Liveness must therefore include a real bounded
+    HTTP round-trip, not just a socket connect.
+    """
+    try:
+        with urllib.request.urlopen(  # noqa: S310 -- fixed loopback host from our own routing table
+            f"{base_url.rstrip('/')}/health", timeout=timeout
+        ) as resp:
+            return 200 <= resp.status < 300
+    except (OSError, urllib.error.URLError, ValueError, TimeoutError):
+        return False
+
+
 def has_live_local_coordinator() -> bool:
     """True if a local coordinator is discoverable **and** answering its probe.
 
@@ -334,11 +356,17 @@ def has_live_local_coordinator() -> bool:
     lazy-start would stop waiting the instant a just-spawned coordinator wrote its
     routing entry and the very next client call would race the bind and get
     ``Connection refused``.
+
+    A listening socket alone is not sufficient: a wedged coordinator can hold its
+    socket open indefinitely while never answering a request (see
+    ``_health_responsive``), so an actually-reachable endpoint must also answer
+    ``/health`` within a bounded timeout before it counts as live.
     """
     routed = _routing_url()
-    if routed is not None and _url_listening(routed):
+    if routed is not None and _url_listening(routed) and _health_responsive(routed):
         return True
-    return _discover_local_endpoint() is not None
+    discovered = _discover_local_endpoint()
+    return discovered is not None and _health_responsive(discovered)
 
 
 def client_url() -> str:
