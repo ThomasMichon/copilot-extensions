@@ -169,3 +169,25 @@ def test_main_aborts_without_filing_when_lookup_fails(monkeypatch, capsys):
     assert exit_code == 0
     assert not called_file_issue
     assert "aborting without filing" in capsys.readouterr().err
+
+
+def test_negative_margin_always_qualifies_regardless_of_a_negative_near_cap(
+    repo: Path, monkeypatch, capsys
+):
+    # A real, active cap violation (margin -1) must never be silently
+    # skipped just because an operator passed a negative --near-cap.
+    _write_lines(repo, "src/legacy.py", 5001)
+    _write_baseline(repo, {"src/legacy.py": 5000})
+    _commit_all(repo)
+
+    watchdog = _load_watchdog(repo)
+    monkeypatch.setattr(watchdog, "_CHECK_MODULE_SIZE", repo / "tools" / CHECK_MODULE_SIZE.name)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--near-cap", "-5"])
+
+    exit_code = watchdog.main()
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "src/legacy.py" in out
+    assert "nothing to file" not in out

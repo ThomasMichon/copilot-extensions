@@ -202,7 +202,7 @@ def main() -> int:
     status = "OVER its cap/ceiling" if margin < 0 else "within its cap/ceiling"
     print(f"[INFO] worst offender: {path} ({lines} lines, ceiling {ceiling}, margin {margin}, {status})")
 
-    if margin > args.near_cap:
+    if margin >= 0 and margin > args.near_cap:
         print(f"[OK] worst margin ({margin}) is comfortably above the --near-cap threshold ({args.near_cap}) -- nothing to file.")
         return 0
 
