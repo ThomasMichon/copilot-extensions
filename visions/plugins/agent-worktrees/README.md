@@ -258,7 +258,11 @@ work-coalescing-singleton pattern, this is **warmth, not truth**: the
 accelerator owns no fact a consumer couldn't otherwise obtain, it only saves
 everyone from separately paying to recompute the same shareable answer, and
 a stale or unreachable accelerator is never treated as authoritative over a
-fresher direct answer. Rich conversation/message history is explicitly
+fresher direct answer. The projection itself carries the same per-fact
+freshness/unconfirmed markers *Derived status* already requires (never a
+flattened, all-or-nothing "current" verdict); a consumer renders those
+markers as given rather than presenting a successfully-fetched but stale or
+unconfirmed fact as certain. Rich conversation/message history is explicitly
 excluded from this cache (see *Not a transcript or event warehouse* below) —
 a consumer that wants recent messages pulls them on demand from the owning
 session host instead.
