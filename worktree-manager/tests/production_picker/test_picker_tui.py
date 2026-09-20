@@ -4248,6 +4248,56 @@ def test_update_indicator_focus_glyph_and_refresh():
     assert captured == {"action": "refresh"}
 
 
+def test_manager_update_seg_is_distinct_from_the_engine_update_seg(monkeypatch):
+    """The Manager's own update-availability state (manager_update_state)
+    renders via a SEPARATE segment from the engine/marketplace one
+    (update_state) -- conflating the two previously made the topbar's
+    checkmark next to the version string mean "the engine plugin's staged
+    payload is current", not "the Manager itself is current", which read as
+    a false assurance when the Manager was actually stale."""
+    from worktree_manager.production_picker.picker_tui.engine import PickerScreen
+
+    s = PickerScreen(_fixture_source(), live=False)
+    s.setup()
+    s.htab = 0
+
+    # idle: no segment (matches the engine segment's own idle behavior).
+    s.manager_update_state = "idle"
+    assert s._manager_update_seg() is None
+
+    # current: a plain checkmark, no focus stop (purely informational).
+    s.manager_update_state = "current"
+    assert "\u2713" in s._manager_update_seg().plain        # ✓
+    assert ("UPD", 0) not in s.stops()
+
+    # available: names the remote version and the CLI command to run --
+    # there is no in-picker apply flow for the Manager's own update (unlike
+    # the engine's staged-payload refresh), so this never becomes a stop.
+    from worktree_manager import manager_update_check as muc
+    monkeypatch.setattr(
+        muc, "read_status",
+        lambda root=None: {"checked_at": 0, "local_version": "0.1.0-dev54",
+                            "remote_version": "0.1.0-dev55", "available": True})
+    s.manager_update_state = "available"
+    seg = s._manager_update_seg()
+    assert "\u21bb" in seg.plain                            # ↻
+    assert "0.1.0-dev55" in seg.plain
+    assert "worktree-manager update" in seg.plain
+    assert ("UPD", 0) not in s.stops()
+
+
+def test_manager_update_seg_appears_in_the_topbar_next_to_the_version():
+    from worktree_manager.production_picker.picker_tui.engine import PickerScreen
+
+    s = PickerScreen(_fixture_source(), live=False)
+    s.setup()
+    s.htab = 0
+    s.manager_update_state = "current"
+    s.update_state = "idle"
+    text = "".join(row.plain for row in s.topbar(140))
+    assert "\u2713" in text
+
+
 def test_update_icon_is_its_own_region_not_the_pivots():
     """#g5 split-regions bug: the update refresh icon and the View pivots shared
     zone 'V' and double-highlighted. Focusing the update icon ("UPD", 0) must
