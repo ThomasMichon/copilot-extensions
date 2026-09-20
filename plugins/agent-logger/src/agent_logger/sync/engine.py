@@ -27,6 +27,7 @@ from agent_logger.sync.meta import (
 from agent_logger.sync.notify import post_notify
 from agent_logger.sync.origin import classify_for_sync, effective_harness, mark_all
 from agent_logger.sync.targets import build_target
+from agent_logger.sync.worktree_binding import mark_all_worktrees
 
 
 def _automation_disabled() -> bool:
@@ -125,6 +126,19 @@ def run_sync(
     if verbose:
         print(f"origin:    marked {origin_summary['marked']}/"
               f"{origin_summary['total']} session(s) {origin_summary['by_repo']}")
+
+    # session-worktree-archive-linkout Phase 3: proactively bind each session
+    # to its worktree (via the live local agent-worktrees tracking, while it's
+    # still available) rather than requiring Permanent Record to reconstruct
+    # one from the archived CWD after the fact. Must run after origin marking
+    # above -- it reads each session's just-written origin.json for its
+    # harness-project scope. A no-op (never an error) when agent-worktrees
+    # isn't installed alongside agent-logger on this machine.
+    worktree_summary = mark_all_worktrees(source, dry_run=dry_run)
+    if verbose:
+        print(f"worktree:  marked {worktree_summary['marked']}/"
+              f"{worktree_summary['total']} session(s) "
+              f"({worktree_summary['unresolved']} unresolved)")
 
     if dry_run:
         scope = "" if include is None else f", {len(include)} session(s) match"

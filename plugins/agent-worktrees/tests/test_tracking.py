@@ -1667,6 +1667,25 @@ class TestFindWorktreeIdByCwd:
     def test_empty_cwd_returns_none(self, tmp_tracking_dir: Path, monkeypatch_config):
         assert find_worktree_id_by_cwd("") is None
 
+    def test_explicit_project_overrides_ambient_project(
+        self, tmp_path: Path, monkeypatch_config,
+    ) -> None:
+        """An out-of-context caller (e.g. a machine-wide sync process whose own
+        CWD is unrelated to the session being resolved) passes ``project=`` to
+        scope the lookup to a specific project's tracking dir rather than the
+        ambient (CWD-resolved) active one."""
+        other_tracking_dir = tmp_path / ".other-project" / "worktrees"
+        other_tracking_dir.mkdir(parents=True)
+        self._save(other_tracking_dir, "other-wt", "/tmp/src/other-wt")
+
+        # Not found in the ambient (test-project) tracking dir...
+        assert find_worktree_id_by_cwd("/tmp/src/other-wt") is None
+        # ...but resolves once scoped to the project that actually owns it.
+        assert (
+            find_worktree_id_by_cwd("/tmp/src/other-wt", project="other-project")
+            == "other-wt"
+        )
+
 
 class TestPairedRecordResolution:
     """load_record_by_id + find_paired_record -- the #957 pairing resolver."""
@@ -2197,6 +2216,22 @@ class TestFindWorktreeIdBySession:
         self._save(tmp_tracking_dir, "wt-a", ["other"])
         assert find_worktree_id_by_session("missing") is None
         assert find_worktree_id_by_session("") is None
+
+    def test_explicit_project_overrides_ambient_project(
+        self, tmp_path: Path, monkeypatch_config,
+    ) -> None:
+        """Mirrors :class:`TestFindWorktreeIdByCwd`'s equivalent case -- a
+        caller that already knows a session's project scopes the lookup to
+        it rather than the ambient (CWD-resolved) active one."""
+        other_tracking_dir = tmp_path / ".other-project" / "worktrees"
+        other_tracking_dir.mkdir(parents=True)
+        self._save(other_tracking_dir, "other-wt", ["other-session"])
+
+        assert find_worktree_id_by_session("other-session") is None
+        assert (
+            find_worktree_id_by_session("other-session", project="other-project")
+            == "other-wt"
+        )
 
 
 # ---------------------------------------------------------------------------
