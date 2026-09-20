@@ -35,6 +35,7 @@ that wants to garbage-collect old entries.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -98,12 +99,19 @@ def _tunnel_id(instance: str) -> str:
     """Map a federation ``instance`` id to a valid, deterministic Dev Tunnel id.
 
     Tunnel ids share a single global namespace (not scoped to a label) and
-    accept a restricted charset, so the mapping must be both injective enough
-    for our purposes and safe. A short ``adf-`` prefix keeps a stray tunnel
-    recognizable as federation-owned even without checking labels.
+    accept a restricted charset, so naive sanitization is not injective: e.g.
+    ``"a/b"`` and ``"a-b"`` would otherwise collapse to the same id, and two
+    distinct long ids could collide after truncation -- letting one instance's
+    tunnel silently overwrite/heartbeat/deregister another's. A short digest of
+    the *original* instance string is appended so the mapping is
+    collision-resistant regardless of how the human-readable prefix collapses;
+    the ``adf-`` prefix keeps a stray tunnel recognizable as federation-owned
+    even without checking labels.
     """
+    digest = hashlib.sha256(instance.encode("utf-8")).hexdigest()[:16]
     safe = "".join(c if c.isalnum() else "-" for c in instance.lower()).strip("-")
-    return f"adf-{safe}"[:60]
+    prefix = (safe or "instance")[:40]
+    return f"adf-{prefix}-{digest}"
 
 
 class DevTunnelRendezvous:
@@ -176,8 +184,10 @@ class DevTunnelRendezvous:
         """Reconstruct a directory-entry dict from a tunnel's ``description``.
 
         Returns ``None`` for a tunnel this backend doesn't recognize as one of
-        its own (no parseable federation payload) -- defensive against a
-        foreign or hand-created tunnel that happened to carry the label.
+        its own -- no parseable federation payload, or a payload whose fields
+        don't have the expected types (a malformed or hand-crafted
+        ``description`` must never raise and break the whole fleet read; it is
+        simply not one of ours).
         """
         raw = tunnel.get("description") or ""
         if not raw:
@@ -186,19 +196,35 @@ class DevTunnelRendezvous:
             payload = json.loads(raw)
         except json.JSONDecodeError:
             return None
-        if not isinstance(payload, dict) or "instance" not in payload:
+        if not isinstance(payload, dict):
             return None
+        instance = payload.get("instance")
+        if not isinstance(instance, str) or not instance:
+            return None
+        try:
+            epoch = int(payload.get("epoch", 0))
+            last_seen = float(payload.get("last_seen", 0.0))
+            registered_at = float(payload.get("registered_at", last_seen))
+        except (TypeError, ValueError):
+            return None
+        role = payload.get("role", "peer")
+        if not isinstance(role, str) or not role:
+            role = "peer"
+        machine = payload.get("machine")
+        if not isinstance(machine, str) or not machine:
+            machine = instance
+        gate_state = payload.get("gate_state", "open")
+        if not isinstance(gate_state, str) or not gate_state:
+            gate_state = "open"
         now = time.time()
-        last_seen = float(payload.get("last_seen", 0.0))
-        registered_at = float(payload.get("registered_at", last_seen))
         return {
-            "instance": payload["instance"],
-            "role": payload.get("role", "peer"),
-            "epoch": int(payload.get("epoch", 0)),
-            "machine": payload.get("machine") or payload["instance"],
+            "instance": instance,
+            "role": role,
+            "epoch": epoch,
+            "machine": machine,
             "worktrees": [],
             "capabilities": [],
-            "gate_state": payload.get("gate_state", "open"),
+            "gate_state": gate_state,
             "agent_versions": {},
             "status": {},
             "registered_at": registered_at,

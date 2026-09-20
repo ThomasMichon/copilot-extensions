@@ -129,9 +129,21 @@ def test_backend_satisfies_the_protocol(rv):
 
 
 def test_tunnel_id_is_deterministic_and_safe():
-    assert _tunnel_id("Lambda-Core") == _tunnel_id("lambda-core")
+    assert _tunnel_id("lambda-core") == _tunnel_id("lambda-core")
     assert _tunnel_id("wt/sweep").startswith("adf-")
     assert " " not in _tunnel_id("a b/c")
+
+
+def test_tunnel_id_does_not_collide_after_sanitization():
+    # "a/b" and "a-b" would sanitize to the same prefix; the digest suffix
+    # must still distinguish them.
+    assert _tunnel_id("a/b") != _tunnel_id("a-b")
+
+
+def test_tunnel_id_does_not_collide_after_truncation():
+    long_a = "x" * 80 + "-instance-one"
+    long_b = "x" * 80 + "-instance-two"
+    assert _tunnel_id(long_a) != _tunnel_id(long_b)
 
 
 # -- awareness plane ----------------------------------------------------------
@@ -220,6 +232,44 @@ def test_reap_stale_deletes_dead_tunnels(cli):
     assert cli._tunnels == {}
 
 
+# -- malformed payload robustness -------------------------------------------------
+
+
+def test_discover_peers_skips_malformed_description(cli, rv):
+    rv.register("host-a")
+    # Hand-craft a second, foreign-looking tunnel carrying the same label but a
+    # payload whose fields have the wrong types -- must be skipped, not raise.
+    cli._tunnels["adf-bogus"] = {
+        "tunnelId": "adf-bogus",
+        "labels": [cli._tunnels[_tunnel_id("host-a")]["labels"][0]],
+        "description": json.dumps({"instance": "bogus", "last_seen": "not-a-number"}),
+    }
+    peers = rv.discover_peers()
+    assert [p["instance"] for p in peers] == ["host-a"]
+
+
+def test_discover_peers_skips_non_dict_description(cli, rv):
+    rv.register("host-a")
+    cli._tunnels["adf-list-payload"] = {
+        "tunnelId": "adf-list-payload",
+        "labels": [cli._tunnels[_tunnel_id("host-a")]["labels"][0]],
+        "description": json.dumps([1, 2, 3]),
+    }
+    peers = rv.discover_peers()
+    assert [p["instance"] for p in peers] == ["host-a"]
+
+
+def test_discover_peers_skips_missing_instance_field(cli, rv):
+    rv.register("host-a")
+    cli._tunnels["adf-no-instance"] = {
+        "tunnelId": "adf-no-instance",
+        "labels": [cli._tunnels[_tunnel_id("host-a")]["labels"][0]],
+        "description": json.dumps({"role": "peer"}),
+    }
+    peers = rv.discover_peers()
+    assert [p["instance"] for p in peers] == ["host-a"]
+
+
 # -- transport error handling -----------------------------------------------------
 
 
@@ -253,6 +303,37 @@ def test_devtunnel_rendezvous_built_when_selected(monkeypatch):
     monkeypatch.setenv("AGENT_DISPATCH_FEDERATION_BACKEND", "devtunnels")
     rv = devtunnel_rendezvous()
     assert isinstance(rv, DevTunnelRendezvous)
+
+
+def test_rendezvous_from_config_selects_devtunnels_backend(monkeypatch):
+    from agent_dispatch.federation_runner import rendezvous_from_config
+
+    monkeypatch.setenv("AGENT_DISPATCH_FEDERATION_BACKEND", "devtunnels")
+    rv = rendezvous_from_config()
+    assert isinstance(rv, DevTunnelRendezvous)
+
+
+def test_rendezvous_from_config_defaults_to_gateway_backend(monkeypatch):
+    from agent_dispatch.federation_runner import rendezvous_from_config
+
+    monkeypatch.delenv("AGENT_DISPATCH_FEDERATION_BACKEND", raising=False)
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_URL", raising=False)
+    # No AGENT_DISPATCH_SHARED_URL configured -> the gateway backend is
+    # selected but can't be built, confirming the selector did NOT fall
+    # through to devtunnels.
+    assert rendezvous_from_config() is None
+
+
+def test_runner_from_config_selects_devtunnels_backend(monkeypatch):
+    from agent_dispatch.federation_runner import runner_from_config
+
+    monkeypatch.setenv("AGENT_DISPATCH_FEDERATION_ROLE", "peer")
+    monkeypatch.setenv("AGENT_DISPATCH_FEDERATION_INSTANCE", "test-instance")
+    monkeypatch.setenv("AGENT_DISPATCH_FEDERATION_BACKEND", "devtunnels")
+    runner = runner_from_config()
+    assert runner is not None
+    assert isinstance(runner._rv, DevTunnelRendezvous)
+
 
 
 def test_federation_backend_defaults_to_gateway(monkeypatch):
