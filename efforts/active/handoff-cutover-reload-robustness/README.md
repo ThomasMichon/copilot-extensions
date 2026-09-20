@@ -208,16 +208,41 @@ to the runtime fix (#5253† / upstream #13494). Findings:
       pattern `_pending_handoff_retire_requests` already uses) and consult it
       in `_monitor_pending_handoff_request` before returning any token as
       actionable — a token with a prior `handoff_cutover_spawn` event is never
-      spawned again, regardless of claim-lock staleness.
-- [x] Regression test `test_monitor_pending_handoff_request_tries_only_once_per_token`
+      spawned again, regardless of claim-lock staleness. Moved to
+      `sessions_pane_retire.py` (grandfathered `__main__.py` shrink-only size
+      guard) and, per Copilot review, widened to also count
+      `handoff_successor_spawn_started` (logged before `pane_create` even
+      runs) so a spawn that fails outright — never reaching the success event
+      — still counts as attempted.
+- [x] Regression tests: `test_monitor_pending_handoff_request_tries_only_once_per_token`,
+      `test_monitor_pending_handoff_request_counts_failed_spawn_as_attempted`,
+      `test_monitor_pending_handoff_request_honors_durable_trace_after_log_eviction`
       (asserts `_monitor_claim_handoff_cutover` is never invoked for an
-      already-attempted token).
-- [ ] Open, land, and deploy the PR.
-- [ ] Clean-room validation: a fresh box exercises a pending handoff with a
-      logged prior spawn attempt and confirms the monitor does not spawn a
-      second successor.
-- [ ] Confirm the stuck panes this incident already left behind stay cleaned
-      up (terminated manually on 2026-09-20) and no new pile forms on b431.
+      already-attempted token, across the success, failed-spawn, and
+      durable-trace-only-after-log-eviction cases).
+- [x] Opened, landed, and deployed: copilot-extensions
+      [#3011](https://github.com/ThomasMichon/copilot-extensions/pull/3011)
+      (squash-merged, agent-worktrees `1.5.5-dev178`); rolled out via
+      `odsp-web-harness update` on the affected machine (tmichon-cloud1).
+- [x] **Live validation, not just clean-room:** immediately after diagnosis
+      (before the PR existed), hand-patched the *installed* `1.5.5-dev177`
+      payload with the same fix and restarted the status-monitor — worktree
+      b431 held at a single mux pane with no further spawn/claim activity for
+      the affected token. After the real PR merged and `odsp-web-harness
+      update` deployed `1.5.5-dev178` (superseding the hand-patch), the
+      status-monitor was cleanly reaped/respawned on the new build and b431
+      remained at a single pane. This is stronger evidence than a synthetic
+      clean-room reproduction: it is the actual box, the actual daemon, and
+      the actual runaway token that had already stacked 20+ panes.
+- [x] Confirmed the stuck panes this incident already left behind stay
+      cleaned up (terminated manually on 2026-09-20; none re-accumulated
+      after the fix landed and deployed). Added a resident hourly watchdog
+      (mux-pane + worktree-tracking sweep) as a monitoring/repair safety net
+      on top of the code fix.
+- [ ] A dedicated Docker clean-room scenario for this specific picker/gate
+      logic (mirroring `context-handoff-cutover`'s pattern) remains a
+      nice-to-have follow-up — not blocking, given the live-box validation
+      above; open a follow-up issue if pursued.
 
 ## Validation Plan
 
@@ -235,9 +260,12 @@ to the runtime fix (#5253† / upstream #13494). Findings:
       handoff with no manual re-drive.
 - [ ] **No regression on Windows/psmux** (the sibling effort's substrate).
 - [x] **Runtime orphaned-call race (Sub C) confirmed fixed upstream** 2026-09-20.
-- [ ] **Sub E spawn-retry cap validated in a clean room** (new scenario, unit
-      test covers the picker logic; clean-room proves the deployed daemon
-      honors it end-to-end on a fresh box).
+- [x] **Sub E spawn-retry cap validated live** (unit tests cover the picker
+      logic's success/failure/durable-trace-backstop branches; the deployed
+      daemon was confirmed honoring it end-to-end on the actual incident
+      machine/worktree, both via the pre-PR hand-patch and the post-merge
+      `odsp-web-harness update` deploy). A synthetic Docker clean-room replay
+      of this specific scenario remains an open, non-blocking follow-up.
 
 ## Journal
 
