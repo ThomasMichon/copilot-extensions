@@ -69,7 +69,7 @@ async def test_resume_retries_then_succeeds(tmp_db, spawn_target, mock_acp_clien
     assert retries[0].data["attempt"] == 1
     assert retries[0].data["will_retry"] is True
     assert retries[0].data["stderr_tail"] == "Resuming..."
-    # Regression guard (issue #7239 / aperture-labs #7239): a resumed session
+    # Regression guard: a resumed session
     # must re-mount its declared MCP servers via load_session, or a
     # task-bound tool (e.g. a reviewer's dedicated Gitea credential) silently
     # vanishes on every resume after the very first spawn.
