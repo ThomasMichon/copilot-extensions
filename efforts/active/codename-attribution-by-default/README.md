@@ -619,39 +619,80 @@ these decisions directly and assumes this design is understood.
   record fails closed by default regardless of the owning repo's current
   config, and that no code path auto-promotes it without an explicit,
   individually-targeted operator edit.
-- [ ] **Freeze each PR's attribution decision at open time; never
-  re-derive it live on later pushes (round-26 finding)** — the vision's
-  `unconfigured-attribution-never-leaks` behavior (round-23) promises a
-  config change won't retroactively expose or hide a marker already
-  published under a prior policy, but `refresh_source_attribution`
-  currently re-reads `prcfg.source_attribution` LIVE on every later push
+- [ ] **Freeze each PR's attribution decision (mode AND explicitness) at
+  PRRecord-creation time — at EVERY creation site, not just auto-open;
+  never re-derive either live on later pushes (round-26 finding, extended
+  round-27)** — the vision's `unconfigured-attribution-never-leaks`
+  behavior (round-23) promises a config change won't retroactively expose
+  or hide a marker already published under a prior policy, but
+  `refresh_source_attribution` currently re-reads `prcfg.source_attribution`
+  AND `prcfg.source_attribution_configured` LIVE on every later push
   (verified in source: it has no persisted memory of what mode the PR was
-  actually opened under). A repo that flips `source_attribution` from
-  `false`/`true` to `codename` (or vice versa) partway through an
-  already-open PR's life would have `refresh_source_attribution` start
-  publishing (or stop publishing, or swap marker shape for) that SAME PR
-  on its very next push — the exact retroactive-change failure the vision
-  language exists to rule out, and this design does not yet deliver it.
-  Fix: add `PRRecord.attribution_mode: str = ""`, persisted ONCE at
-  PR-open time (`_open_via_provider`, the same place the initial marker
-  decision is made) with the actually-resolved effective mode
-  (`"codename"` / `"true"` / `"false"`) — persist it the same
-  manually-wired way `codename_source` is (see the serialization bullet
-  above; `PRRecord` has its own hand-rolled YAML round-trip, distinct from
-  `WorktreeRecord`'s). `refresh_source_attribution` must use this FROZEN
-  `attribution_mode`, never live `prcfg.source_attribution`, to decide
-  what to (re)publish on every subsequent push to that same PR — the
-  live config is consulted only once, at open time, never again for that
-  PR's life. **Migration for a PR opened before this field existed:** an
+  actually opened under, or whether that mode was explicit). Two distinct
+  gaps, both must close together:
+  1. **Retroactive mode change:** a repo that flips `source_attribution`
+     from `false`/`true` to `codename` (or vice versa) partway through an
+     already-open PR's life would have `refresh_source_attribution` start
+     publishing (or stop publishing, or swap marker shape for) that SAME
+     PR on its very next push.
+  2. **Retroactive explicitness change (round-27 finding):**
+     `attribution_mode` alone is insufficient even once frozen — an
+     implicit-`codename` PR opened against a `"custom"`/unknown-provenance
+     record is correctly suppressed at open time (round-22 gate), but if
+     the repo LATER adds an explicit `source_attribution: codename` key
+     (or removes one), a helper that re-reads live
+     `source_attribution_configured` would silently flip that SAME PR's
+     publish authorization on its next refresh — the identical class of
+     retroactive-change bug, one level deeper (explicitness, not mode).
+  **Fix:** add BOTH `PRRecord.attribution_mode: str = ""` (the resolved
+  effective mode: `"codename"` / `"true"` / `"false"`) AND
+  `PRRecord.attribution_explicit: bool = False`
+  (`source_attribution_configured`'s value at that same moment), stamped
+  TOGETHER, ONCE, by one shared helper — never separately, so they can
+  never drift out of sync with each other. **Call this helper at EVERY
+  `PRRecord` creation site, not only `_open_via_provider` (round-27
+  finding: stamping only there misses every path that constructs a
+  `PRRecord` before `_open_via_provider` ever runs)** — verified four
+  distinct construction sites: (a) `create_pr`'s own `target_pr =
+  PRRecord(...)` (`pr_ops.py:~868`, BEFORE `_open_via_provider` is called
+  later in the same flow); (b) `_push_existing_feature`'s fresh-target
+  construction for a new push to a terminal/absent PR (`~2090`); (c)
+  manual `set-pr`'s bare `pr = PRRecord()` when no active PR exists yet
+  (`~1676`) — the round-27 finding's specific example: a manual
+  attach-PR flow that never goes through `_open_via_provider` at all,
+  which would otherwise leave both fields permanently empty and silently
+  fall back to always-live behavior; (d) `tracking.py`'s `_parse_pr`
+  deserialization (`~1403`) must parse both fields back from YAML (the
+  round-9 serialization pattern) — this is a READ, not a fresh stamp,
+  for a `PRRecord` reloaded from disk. `refresh_source_attribution` (and
+  `_open_via_provider`'s own initial-publish decision) must use these
+  FROZEN `attribution_mode`/`attribution_explicit` pair, never live
+  `prcfg.source_attribution`/`source_attribution_configured`, for every
+  publish decision on that PR's life — the live config is consulted only
+  once, at the PRRecord's creation moment, never again for that PR.
+  **Migration for a PR opened before these fields existed:** an
   empty/unset `attribution_mode` on an in-flight legacy `PRRecord` falls
-  back to today's existing live-config behavior (no regression for a PR
-  already mid-life when this ships) — the freeze guarantee applies
-  prospectively, to every PR opened after this field exists, not
-  retroactively to one already open without a stored mode. Add a
-  regression test: open a PR under one `source_attribution` value, change
-  the repo's config to a DIFFERENT value, push again — the marker
-  published/refreshed on that push still reflects the ORIGINAL
-  (frozen) mode, not the new config.
+  back to today's existing live-config behavior for BOTH fields together
+  (no regression for a PR already mid-life when this ships) — the freeze
+  guarantee applies prospectively, to every `PRRecord` created after these
+  fields exist, not retroactively to one already open without stored
+  values. Add regression tests: (i) open a PR under one
+  `source_attribution` value, change the repo's config to a DIFFERENT
+  value, push again — the marker published/refreshed on that push still
+  reflects the ORIGINAL frozen mode, not the new config; (ii) open a PR
+  under an implicit `codename` default against a `"custom"`-sourced
+  record (correctly suppressed at open), then add an explicit
+  `source_attribution: codename` to the repo's config and push again —
+  the marker STAYS suppressed, proving `attribution_explicit` is frozen
+  too, not just `attribution_mode`; (iii) attach a PR via manual `set-pr`
+  (never touching `_open_via_provider`) and push via `push-changes` —
+  `refresh_source_attribution` still uses a properly-stamped frozen
+  pair, not the legacy-fallback path, proving the shared helper is
+  actually wired into the manual-attach site.
+- [ ] **Versioning gate (required for this phase's PR):** this phase
+  changes `agent-worktrees` runtime source (`config.py`). Per
+  `AGENTS.md`'s Version Bump section, bump `plugins/agent-worktrees/plugin.json`,
+  `plugins/agent-worktrees/pyproject.toml`, the `agent-worktrees` entry in
   `.github/plugin/marketplace.json`, **and** that catalog's own top-level
   `metadata.version` (agent-worktrees changes bump both) — in the same
   commit as the code change, not a follow-up.
@@ -812,16 +853,33 @@ these decisions directly and assumes this design is understood.
   closed) — never auto-promoted to `"built-in"` by any automated pass,
   regardless of the owning repo's current wordlist config (round-10
   finding: no config-inferred backfill).
-- [ ] Unit (round-26 finding): open a PR under one `source_attribution`
-  value (e.g. `false`), change the repo's config to a DIFFERENT value
-  (e.g. `codename`), then push again — the marker published/refreshed on
-  that second push still reflects the ORIGINAL, frozen
-  `PRRecord.attribution_mode`, not the new live config. Cover both
+- [ ] Unit (round-26 finding, extended round-27): open a PR under one
+  `source_attribution` value (e.g. `false`), change the repo's config to
+  a DIFFERENT value (e.g. `codename`), then push again — the marker
+  published/refreshed on that second push still reflects the ORIGINAL,
+  frozen `PRRecord.attribution_mode`, not the new live config. Cover both
   directions (an added marker on a config that used to publish nothing,
   and vice versa) and assert a legacy `PRRecord` with no stored
-  `attribution_mode` (predates this field) falls back to today's
-  live-config behavior unchanged (no regression for a PR already mid-life
-  when this ships).
+  `attribution_mode`/`attribution_explicit` (predates these fields) falls
+  back to today's live-config behavior unchanged (no regression for a PR
+  already mid-life when this ships).
+- [ ] Unit (round-27 finding): open a PR under an IMPLICIT `codename`
+  default against a `"custom"`-sourced (or unknown-provenance) record —
+  correctly suppressed at open per the round-22 gate — then add an
+  EXPLICIT `source_attribution: codename` to the repo's config and push
+  again: the marker STAYS suppressed on refresh, proving
+  `attribution_explicit` (not just `attribution_mode`) is frozen at
+  creation time and never re-derived from live
+  `source_attribution_configured`.
+- [ ] Unit (round-27 finding): attach a PR via manual `set-pr` (a path
+  that never calls `_open_via_provider` at all) against a repo/record
+  combination that would be suppressed under the implicit default, then
+  run `push-changes` (which invokes `refresh_source_attribution`) —
+  asserts the manual-attach `PRRecord` was ALSO stamped with a frozen
+  `attribution_mode`/`attribution_explicit` pair by the shared helper
+  (not left empty/falling back to live config), proving the freeze
+  helper is wired into every `PRRecord` creation site, not only the
+  auto-open path.
 - [ ] Round-trip (round-9 finding): assign a codename with a known
   `codename_source`, `save_record` it, `load_record` it back, assert
   `codename_source` is unchanged — proving the manual YAML
@@ -1001,35 +1059,34 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-25 history lives in **[journal.md](journal.md)** to keep this
+> round-26 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 26 fixes
+### 2026-09-20 — Plan-review round 27 fixes
 
-- One new finding plus two "previously missed" items, each verified
-  against actual source (the doc-impact-statement carryover confirmed
-  already fixed, no action):
-  1. **Uncovered allocation paths:** verified `resume` and
-     `status --write` both call `ensure_codename` directly for legacy
-     pre-Phase-2 records with no codename yet, and neither was protected
-     by any of the allocation-time preflights specified so far (those
-     only covered `create`/paired-knowledge/`create-pr`). Centralized
-     the gate INSIDE `ensure_codename` itself (on the actual-new-
-     allocation branch only, never the concurrent-writer-copy branch),
-     so every current and future caller is protected by construction.
-  2. **Retroactive attribution changes:** verified `refresh_source_attribution`
-     re-reads live config on every push, which could silently change an
-     already-open PR's attribution mode mid-review if the repo's config
-     changes — directly contradicting the `unconfigured-attribution-
-     never-leaks` vision behavior this effort itself added in round-23.
-     Added `PRRecord.attribution_mode`, frozen at PR-open time and
-     consulted (never live config) on every later refresh, with an
-     explicit no-regression fallback for a PR already open before this
-     field ships.
-  3. **Migration policy ambiguity (previously missed):** Phase 3 offered
-     "remove or flip to codename" as equivalent choices for this repo's
-     own config, but verified they are NOT equivalent under the round-22
-     `source_attribution_configured` gate (explicit `codename` would
-     authorize even an unverified/unknown legacy `codename_source`).
-     Chose removal decisively as this repo's migration and updated the
-     config-comment-update requirement to match.
+- Two new findings plus two stale carryovers (verified already fixed,
+  no action) on the round-26 head:
+  1. **Manual `set-pr` uncovered:** verified round-26's
+     `attribution_mode` stamping happened only inside
+     `_open_via_provider`, but that's not where a `PRRecord` is actually
+     constructed for `create_pr`'s own auto-open flow, and manual
+     `set-pr` never calls `_open_via_provider` at all — its own bare
+     `PRRecord()` would permanently miss the stamp. Found and fixed a
+     malformed-checklist side effect of the round-26 edit too (the
+     Phase 1 "Versioning gate" bullet had lost its opening sentence).
+     Moved the stamping to a single shared helper called at all four
+     `PRRecord` construction/parse sites: `create_pr`'s own
+     construction, `_push_existing_feature`'s fresh-target
+     construction, `set-pr`'s manual construction, and `_parse_pr`'s
+     deserialization (a read, not a stamp).
+  2. **Explicitness not frozen alongside mode:** `attribution_mode`
+     alone doesn't capture whether that mode was explicit or implicit,
+     so a repo adding/removing an explicit `source_attribution: codename`
+     key after a PR opened could still retroactively flip that PR's
+     publish authorization for a `"custom"`-sourced codename — the same
+     retroactive-change bug one level deeper. Added
+     `PRRecord.attribution_explicit`, stamped together with
+     `attribution_mode` by the same shared helper, and corrected
+     `design.md`'s decisive-fix paragraph, which had explicitly (and
+     incorrectly) claimed explicitness is "read at publish time" from
+     live config.

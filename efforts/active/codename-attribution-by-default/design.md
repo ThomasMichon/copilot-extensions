@@ -97,8 +97,15 @@ these are deliberately two independent gates, not one rule reapplied
 twice — allocation-time gate decides `codename_source` for a new record and
 whether the implicit default may assign one at all; publish-time gate
 decides only from the resulting stored `codename_source` plus explicitness,
-forever fixed at assignment except for the repo's live
-`source_attribution_configured` state, which is read at publish time).
+both forever fixed **not** at codename-assignment time but at the owning
+`PRRecord`'s own creation time (round-27 refinement): `codename_source` is
+per-`WorktreeRecord` and assignment-time-fixed as described above, but the
+explicitness input to the publish gate (`source_attribution_configured`)
+is per-`PRRecord` and freezes at THAT record's creation, via the same
+`attribution_mode`/`attribution_explicit` mechanism the Plan's freeze
+bullet defines — never read live from current config at publish/refresh
+time, which would silently reverse an already-open PR's publish
+authorization if the repo's config changed mid-PR-life).
 New allocations still consult the *current* config to decide
 `codename_source` at the moment of assignment (the current-config check
 remains correct and sufficient there, since assignment and config-read are

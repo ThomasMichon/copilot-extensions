@@ -521,3 +521,33 @@ Part of the [codename-attribution-by-default effort](README.md).
   carryover (the review tool's diff-based tracking does not appear to
   re-resolve findings anchored to PR-metadata-only edits), not a real
   re-finding, per the review protocol's commit-match check.
+
+### 2026-09-20 — Plan-review round 26 fixes
+
+- One new finding plus two "previously missed" items, each verified
+  against actual source (the doc-impact-statement carryover confirmed
+  already fixed, no action):
+  1. **Uncovered allocation paths:** verified `resume` and
+     `status --write` both call `ensure_codename` directly for legacy
+     pre-Phase-2 records with no codename yet, and neither was protected
+     by any of the allocation-time preflights specified so far (those
+     only covered `create`/paired-knowledge/`create-pr`). Centralized
+     the gate INSIDE `ensure_codename` itself (on the actual-new-
+     allocation branch only, never the concurrent-writer-copy branch),
+     so every current and future caller is protected by construction.
+  2. **Retroactive attribution changes:** verified `refresh_source_attribution`
+     re-reads live config on every push, which could silently change an
+     already-open PR's attribution mode mid-review if the repo's config
+     changes — directly contradicting the `unconfigured-attribution-
+     never-leaks` vision behavior this effort itself added in round-23.
+     Added `PRRecord.attribution_mode`, frozen at PR-open time and
+     consulted (never live config) on every later refresh, with an
+     explicit no-regression fallback for a PR already open before this
+     field ships.
+  3. **Migration policy ambiguity (previously missed):** Phase 3 offered
+     "remove or flip to codename" as equivalent choices for this repo's
+     own config, but verified they are NOT equivalent under the round-22
+     `source_attribution_configured` gate (explicit `codename` would
+     authorize even an unverified/unknown legacy `codename_source`).
+     Chose removal decisively as this repo's migration and updated the
+     config-comment-update requirement to match.
