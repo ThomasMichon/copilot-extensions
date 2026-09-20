@@ -401,18 +401,6 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
     worktrees, release your claims, then finalize."
   # or dispatch the same to its owning agent: `<repo> bridge send <machine> "…"`
   ```
-  > ⚠️ **Headed-resume hang caveat.** `embody` — and `--spawn-backend embody`, or
-  > any headed `--spawn` — resumes a **headed** Copilot session, which can hang on
-  > "Loading…/Resuming…" with the seeded close-out prompt queued but **never
-  > submitted** while the CLI extension-reload bug
-  > (github/copilot-agent-runtime#13492) is outstanding. So **never assume a
-  > spawned/embodied close-out actually ran**: confirm the session reached an
-  > interactive/ready state (or that its dispatch task advanced to
-  > `started`/`completed`) before trusting it. Prefer **filing the task queued**
-  > (no eager `--spawn`) so a healthy worker claims it. `--no-experimental`
-  > sidesteps the hang by disabling extensions — but that also disables the very
-  > plugins close-out needs (agent-worktrees, `claims`, cross-repo helpers), so it
-  > is rarely viable here.
   Let the worktree confirm it is fully wrapped up, *then* finalize/reap it. Only
   fall back to manual `claims release`/`sweep` for a worktree that genuinely
   cannot be resumed (its session is gone) or whose obligations are provably

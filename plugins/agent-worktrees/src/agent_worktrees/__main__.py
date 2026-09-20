@@ -9867,13 +9867,11 @@ def _monitor_pending_handoff_request(
         )
         if str(event.get("handoff_id") or "").strip()
     }
+    already_attempted = sessions_pane_retire.already_attempted_handoff_tokens(worktree_id)
     for handoff in reversed(record.pending_handoffs):
         token = str(getattr(handoff, "token", "") or "").strip()
-        if (
-            not token
-            or getattr(handoff, "candidate", None)
-            or getattr(handoff, "successor", None)
-        ):
+        confirmed = getattr(handoff, "candidate", None) or getattr(handoff, "successor", None)
+        if not token or confirmed or token in already_attempted:
             continue
         request_event = requested.get(token, {})
         predecessor_session = str(
