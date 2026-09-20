@@ -662,7 +662,14 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   [venue-parity](../venue-parity/README.md) — the cross-cutting principle that the
   fabric's venue providers (agent-codespaces / agent-containers) are thin,
   symmetric SSH transports over one agent-bridge dispatch core, so a dispatched
-  agent is the same in a CodeSpace or a local container. Further per-plugin leaves
+  agent is the same in a CodeSpace or a local container;
+  [remote-interactive-sessions](../remote-interactive-sessions/README.md) — how a
+  human-attended, muxed session in a remote venue becomes a first-class peer of a
+  local one, bound to its Session Host by explicit cwd-keyed discovery rather than
+  ambient self-registration;
+  [host-resource-providers](../host-resource-providers/README.md) — how any plugin
+  registers a named, locally-reachable capability a coordinated session can
+  request, generalizing the credential relay's pluggable-source shape. Further per-plugin leaves
   live under `visions/plugins/<name>/` as authored (e.g.
   [`visions/plugins/agent-bridge/`](../plugins/agent-bridge/README.md) and
   [`visions/plugins/context-handoff/`](../plugins/context-handoff/README.md) —
