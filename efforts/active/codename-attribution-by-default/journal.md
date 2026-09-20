@@ -469,3 +469,31 @@ Part of the [codename-attribution-by-default effort](README.md).
   5. **Validation gap (previously missed):** the parser test list never
      covered explicit `source_attribution: codename` at all — folded
      into fix #2's new test.
+
+### 2026-09-20 — Plan-review round 23 fixes
+
+- One reopened/stale-carryover finding (verified already resolved,
+  no action needed), one new finding, and one nit:
+  1. Verified the round-22 explicit-vs-implicit `codename_source` gate
+     fix is correctly in place in the current head — the carried-over
+     thread's anchor commit predates that fix, so treated as a stale
+     carryover per the review protocol, not a real re-finding.
+  2. **Vision insufficiency:** round-22's `vision-extending`
+     reclassification cited
+     `visions/plugins/agent-worktrees/pull-requests` as already covering
+     this capability, but verified that vision doc never actually
+     mentions `source_attribution`, markers, or codenames — only the
+     generic provider-neutral PR surface. Citing an existing vision as
+     sufficient without it actually covering the capability doesn't earn
+     `vision-extending`. Revised the vision doc itself (a genuine blind
+     spot, not a vision-ahead gap): added a
+     `provenance-attribution-without-identifier-leakage` Feature and an
+     `unconfigured-attribution-never-leaks` Behavior stating the
+     informationless-by-default guarantee and its persistence-across-
+     config-change expectation at the intent level (no field names/config
+     keys pinned in the should-be body), bumped `Last revised`, and added
+     a Provenance entry. Updated the effort's own Vision line to point at
+     the now-actually-covering vision instead of merely asserting
+     sufficiency.
+  3. Fixed a duplicated-phrase typo in `design.md` ("see the assignment —
+     see the") left over from an earlier edit's text-splice.
