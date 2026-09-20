@@ -3258,6 +3258,25 @@ class TestInboxBoard:
         assert manifest["entry"]["group"] == "group"
         assert manifest["entry"]["badges"] == ["activity", "labels"]
 
+    def test_picker_manifest_wt_column_is_styled_for_at_a_glance_visibility(self):
+        """Operator feedback 2026-09-20 (item 2): a worktree-bearing Started
+        task must be unmistakable at a glance. This manifest declares
+        `columns` (table mode), so `entry.badges` never renders for it
+        (`engine.py`'s `build_data` only calls `_row`/`badge_fields` when
+        `reg.columns` is empty) -- the WT column itself must carry its own
+        `style` instead."""
+        import json
+        from pathlib import Path
+
+        manifest = json.loads(
+            (Path(__file__).parents[1] / "pivots" / "agent-dispatch.json")
+            .read_text(encoding="utf-8")
+        )
+        wt_column = next(
+            c for c in manifest["columns"] if c["key"] == "target_worktree"
+        )
+        assert wt_column.get("style")
+
     def test_sort_orders_by_group_priority(self):
         from agent_dispatch import __main__ as m
         tasks = [
@@ -3271,7 +3290,7 @@ class TestInboxBoard:
         ]
         tasks.sort(key=m._board_sort_key)
         assert [m._board_group(t) for t in tasks] == [
-            "Blocked", "Proposed", "Queued", "Started", "Suspended",
+            "Blocked", "Proposed", "Started", "Queued", "Suspended",
             "Completed", "Abandoned",
         ]
 

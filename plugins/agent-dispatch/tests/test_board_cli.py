@@ -50,6 +50,33 @@ def test_build_groups_and_expires_activity(monkeypatch):
     assert by_id["dormant"]["group"] == "Suspended"
 
 
+def test_build_orders_started_ahead_of_queued(monkeypatch):
+    """Operator feedback 2026-09-20 (item 1): Started is more interesting to
+    inspect at a glance than Queued (a task not yet running). This asserts
+    `board_cli._build`'s own `GROUPS`-driven sort directly -- `__main__.py`'s
+    byte-identical `_BOARD_GROUPS`/`_board_sort_key` has its own coverage in
+    `test_cli.py::test_sort_orders_by_group_priority`."""
+    monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
+    rows = board_cli._build(
+        [
+            {"id": "completed", "status": "completed", "updated_at": 100},
+            {"id": "blocked", "status": "started", "awaiting_steer": True,
+             "updated_at": 100},
+            {"id": "queued", "status": "queued", "updated_at": 100},
+            {"id": "proposed", "status": "proposed", "updated_at": 100},
+            {"id": "abandoned", "status": "abandoned", "updated_at": 100},
+            {"id": "started", "status": "started", "updated_at": 100},
+            {"id": "suspended", "status": "suspended", "updated_at": 100},
+        ],
+        machine="m1",
+        recent_mins=120,
+    )
+    assert [row["group"] for row in rows] == [
+        "Blocked", "Proposed", "Started", "Queued", "Suspended",
+        "Completed", "Abandoned",
+    ]
+
+
 def test_build_wt_live_reflects_headless_activity_only(monkeypatch):
     """Phase 3: `wt_live` reuses the already-computed `activity`/
     `activity_updated_at` (a headless self-report) -- it is blank, not a
