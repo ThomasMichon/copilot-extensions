@@ -551,3 +551,32 @@ Part of the [codename-attribution-by-default effort](README.md).
      authorize even an unverified/unknown legacy `codename_source`).
      Chose removal decisively as this repo's migration and updated the
      config-comment-update requirement to match.
+
+### 2026-09-20 — Plan-review round 27 fixes
+
+- Two new findings plus two stale carryovers (verified already fixed,
+  no action) on the round-26 head:
+  1. **Manual `set-pr` uncovered:** verified round-26's
+     `attribution_mode` stamping happened only inside
+     `_open_via_provider`, but that's not where a `PRRecord` is actually
+     constructed for `create_pr`'s own auto-open flow, and manual
+     `set-pr` never calls `_open_via_provider` at all — its own bare
+     `PRRecord()` would permanently miss the stamp. Found and fixed a
+     malformed-checklist side effect of the round-26 edit too (the
+     Phase 1 "Versioning gate" bullet had lost its opening sentence).
+     Moved the stamping to a single shared helper called at all four
+     `PRRecord` construction/parse sites: `create_pr`'s own
+     construction, `_push_existing_feature`'s fresh-target
+     construction, `set-pr`'s manual construction, and `_parse_pr`'s
+     deserialization (a read, not a stamp).
+  2. **Explicitness not frozen alongside mode:** `attribution_mode`
+     alone doesn't capture whether that mode was explicit or implicit,
+     so a repo adding/removing an explicit `source_attribution: codename`
+     key after a PR opened could still retroactively flip that PR's
+     publish authorization for a `"custom"`-sourced codename — the same
+     retroactive-change bug one level deeper. Added
+     `PRRecord.attribution_explicit`, stamped together with
+     `attribution_mode` by the same shared helper, and corrected
+     `design.md`'s decisive-fix paragraph, which had explicitly (and
+     incorrectly) claimed explicitness is "read at publish time" from
+     live config.

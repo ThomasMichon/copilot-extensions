@@ -661,10 +661,21 @@ these decisions directly and assumes this design is understood.
   (`~1676`) — the round-27 finding's specific example: a manual
   attach-PR flow that never goes through `_open_via_provider` at all,
   which would otherwise leave both fields permanently empty and silently
-  fall back to always-live behavior; (d) `tracking.py`'s `_parse_pr`
-  deserialization (`~1403`) must parse both fields back from YAML (the
-  round-9 serialization pattern) — this is a READ, not a fresh stamp,
-  for a `PRRecord` reloaded from disk. `refresh_source_attribution` (and
+  fall back to always-live behavior; (d) `tracking.py`'s
+  `_parse_pr_mapping` deserialization (`~1393`) must parse both fields
+  back from YAML (the round-9 serialization pattern) — this is a READ,
+  not a fresh stamp, for a `PRRecord` reloaded from disk. **The WRITE
+  side must be specified too, not just the read (round-28 finding)** —
+  `tracking.py`'s `_pr_to_yaml_dict` (`~1422`, verified in source: a
+  lean, omit-empties dict-builder distinct from `WorktreeRecord`'s
+  hand-rolled string-content builder used for `codename_source`) must
+  ALSO emit `attribution_mode`/`attribution_explicit` (following the
+  exact same `if pr.attribution_head: d["attribution_head"] = ...`
+  only-emit-when-set pattern the function already uses for its other
+  optional fields) — parsing alone is not durable: without this write
+  side, both fields silently vanish on the very next `tracking.save_record`
+  after being stamped, since `_pr_to_yaml_dict` builds the dict every
+  `PRRecord` is actually persisted through. `refresh_source_attribution` (and
   `_open_via_provider`'s own initial-publish decision) must use these
   FROZEN `attribution_mode`/`attribution_explicit` pair, never live
   `prcfg.source_attribution`/`source_attribution_configured`, for every
@@ -880,6 +891,12 @@ these decisions directly and assumes this design is understood.
   (not left empty/falling back to live config), proving the freeze
   helper is wired into every `PRRecord` creation site, not only the
   auto-open path.
+- [ ] Round-trip (round-28 finding): stamp a `PRRecord` with a known
+  `attribution_mode`/`attribution_explicit` pair, `save_record` it,
+  `load_record` it back, assert both fields are unchanged — proving
+  `_pr_to_yaml_dict` actually emits them (not just `_parse_pr_mapping`
+  parsing them) and a legacy record with neither field present still
+  round-trips to empty/`False`, not a crash.
 - [ ] Round-trip (round-9 finding): assign a codename with a known
   `codename_source`, `save_record` it, `load_record` it back, assert
   `codename_source` is unchanged — proving the manual YAML
@@ -1059,34 +1076,18 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-26 history lives in **[journal.md](journal.md)** to keep this
+> round-27 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 27 fixes
+### 2026-09-20 — Plan-review round 28 fixes
 
-- Two new findings plus two stale carryovers (verified already fixed,
-  no action) on the round-26 head:
-  1. **Manual `set-pr` uncovered:** verified round-26's
-     `attribution_mode` stamping happened only inside
-     `_open_via_provider`, but that's not where a `PRRecord` is actually
-     constructed for `create_pr`'s own auto-open flow, and manual
-     `set-pr` never calls `_open_via_provider` at all — its own bare
-     `PRRecord()` would permanently miss the stamp. Found and fixed a
-     malformed-checklist side effect of the round-26 edit too (the
-     Phase 1 "Versioning gate" bullet had lost its opening sentence).
-     Moved the stamping to a single shared helper called at all four
-     `PRRecord` construction/parse sites: `create_pr`'s own
-     construction, `_push_existing_feature`'s fresh-target
-     construction, `set-pr`'s manual construction, and `_parse_pr`'s
-     deserialization (a read, not a stamp).
-  2. **Explicitness not frozen alongside mode:** `attribution_mode`
-     alone doesn't capture whether that mode was explicit or implicit,
-     so a repo adding/removing an explicit `source_attribution: codename`
-     key after a PR opened could still retroactively flip that PR's
-     publish authorization for a `"custom"`-sourced codename — the same
-     retroactive-change bug one level deeper. Added
-     `PRRecord.attribution_explicit`, stamped together with
-     `attribution_mode` by the same shared helper, and corrected
-     `design.md`'s decisive-fix paragraph, which had explicitly (and
-     incorrectly) claimed explicitness is "read at publish time" from
-     live config.
+- One new finding plus four stale carryovers (verified already fixed):
+  round-27's freeze fix specified parsing `attribution_mode`/
+  `attribution_explicit` back from YAML (`_parse_pr_mapping`) but never
+  specified the WRITE side — verified `tracking.py`'s `_pr_to_yaml_dict`
+  is a separate, lean omit-empties dict-builder that would silently drop
+  both new fields on the very next save, undoing the freeze one
+  `save_record` after it's stamped. Added the explicit requirement to
+  emit both fields from `_pr_to_yaml_dict` (matching its existing
+  only-emit-when-set pattern) and a round-trip Validation Plan test
+  proving both directions actually work together.
