@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (agent-worktrees plugin)
 - **Branch(es):** `pr/<slug>` per phase
 - **Created:** 2026-09-17
-- **Status:** Active <!-- Draft | Active | Blocked | Done -->
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
 - **Vision:** vision-extending — extends the existing `source_attribution`
   marker capability (today boolean: on/off) with a third, public-safe mode.
 - **Umbrella issue:** [#2838](https://github.com/ThomasMichon/copilot-extensions/issues/2838)
@@ -914,4 +914,18 @@ checked off.
   codename/providers/pr_ops/cli_routing/claimant suites (25 new in
   `test_codename_reverse_lookup.py` alone); confirmed no new module-size
   or version-consistency regressions from the rebase.
+
+### 2026-09-20 — Effort closed (PR #2922 merged; all phases done)
+
+- Confirmed PR #2922 (Phase 3, cross-machine reverse lookup) merged at
+  2026-09-20T07:16:49Z after 5 non-blocking review rounds, each catching a
+  real issue (command-injection on `codename`, then on the explicit
+  `project` argument, a best-effort backfill that could crash on lock
+  contention, and a non-`str` `project` type-safety gap).
+- Confirmed the umbrella issue (#2838) is CLOSED and every Plan/Validation
+  Plan checkbox across all four phases is resolved (`[x]`) -- no open
+  items, no transfers.
+- With Phases 1, 2, 4, and 5 already merged and Phase 3 now landed, this
+  was the last phase. Set **Status: Done** and archived this effort per
+  the `planning-efforts` skill's archive procedure.
 
