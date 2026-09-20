@@ -615,3 +615,35 @@ Part of the [codename-attribution-by-default effort](README.md).
   documentation-impact statement finding, `#discussion_r4057190221`,
   unchanged at anchor `f2b538c47` for six rounds straight — the PR
   description remains verifiably correct; not re-edited again).
+
+### 2026-09-20 — Plan-review round 30 fixes
+
+- Confirmed: all four round-29 "stale carryover" calls verified
+  correct — this round's review lists them under "Resolved since last
+  review," proving they were already fixed by rounds 26-28.
+- Two new, genuine findings, both closing gaps the round-26/27/28 freeze
+  design left open:
+  1. **Strict validation for the persisted `attribution_mode`/
+     `attribution_explicit` pair:** the round-28 round-trip fix
+     specified emitting/parsing both fields but never specified STRICT
+     parsing, the same class of gap the round-12 fix already closed for
+     `codename_source` — a hand-edited/malformed `attribution_explicit:
+     "false"` string would be truthy-coerced, an unrecognized
+     `attribution_mode` value could be silently accepted, and a partial
+     pair (only one field set) could authorize publication off the one
+     field present. Added explicit strict-parsing requirements (closed
+     mode set, strict boolean check, partial-pair-falls-back rule) plus
+     three regression tests.
+  2. **Merge the frozen `pr` field under the record lock during
+     concurrent saves:** verified in source that `_save_record_unlocked`
+     has NO merge protection for `pr` at all (no revision counter, no
+     merge branch) — unlike `codename`/`codename_source` (round-11) and
+     `profile_assignment_revision`, which it already protects. A stale
+     concurrent `WorktreeRecord` save could silently erase a freshly-
+     frozen attribution pair, defeating the entire freeze guarantee one
+     layer beneath the round-28 write-side fix. Added a `pr_revision`
+     counter following the existing revision-merge pattern, plus a
+     stale-writer regression test.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for seven rounds straight — not re-edited again).

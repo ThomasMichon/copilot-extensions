@@ -625,131 +625,48 @@ these decisions directly and assumes this design is understood.
   config, and that no code path auto-promotes it without an explicit,
   individually-targeted operator edit.
 - [ ] **Freeze each PR's attribution decision (mode AND explicitness) at
-  PRRecord-creation time — at EVERY creation site, not just auto-open;
-  never re-derive either live on later pushes (round-26 finding, extended
-  round-27)** — the vision's `unconfigured-attribution-never-leaks`
-  behavior (round-23) promises a config change won't retroactively expose
-  or hide a marker already published under a prior policy, but
-  `refresh_source_attribution` currently re-reads `prcfg.source_attribution`
-  AND `prcfg.source_attribution_configured` LIVE on every later push
-  (verified in source: it has no persisted memory of what mode the PR was
-  actually opened under, or whether that mode was explicit). Two distinct
-  gaps, both must close together:
-  1. **Retroactive mode change:** a repo that flips `source_attribution`
-     from `false`/`true` to `codename` (or vice versa) partway through an
-     already-open PR's life would have `refresh_source_attribution` start
-     publishing (or stop publishing, or swap marker shape for) that SAME
-     PR on its very next push.
-  2. **Retroactive explicitness change (round-27 finding):**
-     `attribution_mode` alone is insufficient even once frozen — an
-     implicit-`codename` PR opened against a `"custom"`/unknown-provenance
-     record is correctly suppressed at open time (round-22 gate), but if
-     the repo LATER adds an explicit `source_attribution: codename` key
-     (or removes one), a helper that re-reads live
-     `source_attribution_configured` would silently flip that SAME PR's
-     publish authorization on its next refresh — the identical class of
-     retroactive-change bug, one level deeper (explicitness, not mode).
-  **Fix:** add BOTH `PRRecord.attribution_mode: str = ""` (the resolved
-  effective mode: `"codename"` / `"true"` / `"false"`) AND
-  `PRRecord.attribution_explicit: bool = False`
-  (`source_attribution_configured`'s value at that same moment), stamped
-  TOGETHER, ONCE, by one shared helper — never separately, so they can
-  never drift out of sync with each other. **Call this helper at EVERY
-  `PRRecord` creation site, not only `_open_via_provider` (round-27
-  finding: stamping only there misses every path that constructs a
-  `PRRecord` before `_open_via_provider` ever runs)** — verified four
-  distinct construction sites: (a) `create_pr`'s own `target_pr =
-  PRRecord(...)` (`pr_ops.py:~868`, BEFORE `_open_via_provider` is called
-  later in the same flow); (b) `_push_existing_feature`'s fresh-target
-  construction for a new push to a terminal/absent PR (`~2090`); (c)
-  manual `set-pr`'s bare `pr = PRRecord()` when no active PR exists yet
-  (`~1676`) — the round-27 finding's specific example: a manual
-  attach-PR flow that never goes through `_open_via_provider` at all,
-  which would otherwise leave both fields permanently empty and silently
-  fall back to always-live behavior; (d) `tracking.py`'s
-  `_parse_pr_mapping` deserialization (`~1393`) must parse both fields
-  back from YAML (the round-9 serialization pattern) — this is a READ,
-  not a fresh stamp, for a `PRRecord` reloaded from disk. **The WRITE
-  side must be specified too, not just the read (round-28 finding)** —
-  `tracking.py`'s `_pr_to_yaml_dict` (`~1422`, verified in source: a
-  lean, omit-empties dict-builder distinct from `WorktreeRecord`'s
-  hand-rolled string-content builder used for `codename_source`) must
-  ALSO emit `attribution_mode`/`attribution_explicit` (following the
-  exact same `if pr.attribution_head: d["attribution_head"] = ...`
-  only-emit-when-set pattern the function already uses for its other
-  optional fields) — parsing alone is not durable: without this write
-  side, both fields silently vanish on the very next `tracking.save_record`
-  after being stamped, since `_pr_to_yaml_dict` builds the dict every
-  `PRRecord` is actually persisted through. `refresh_source_attribution` (and
-  `_open_via_provider`'s own initial-publish decision) must use these
-  FROZEN `attribution_mode`/`attribution_explicit` pair, never live
-  `prcfg.source_attribution`/`source_attribution_configured`, for every
-  publish decision on that PR's life — the live config is consulted only
-  once, at the PRRecord's creation moment, never again for that PR.
-  **Migration for a PR opened before these fields existed:** an
-  empty/unset `attribution_mode` on an in-flight legacy `PRRecord` falls
-  back to today's existing live-config behavior for BOTH fields together
-  (no regression for a PR already mid-life when this ships) — the freeze
-  guarantee applies prospectively, to every `PRRecord` created after these
-  fields exist, not retroactively to one already open without stored
-  values. Add regression tests: (i) open a PR under one
-  `source_attribution` value, change the repo's config to a DIFFERENT
-  value, push again — the marker published/refreshed on that push still
-  reflects the ORIGINAL frozen mode, not the new config; (ii) open a PR
-  under an implicit `codename` default against a `"custom"`-sourced
-  record (correctly suppressed at open), then add an explicit
-  `source_attribution: codename` to the repo's config and push again —
-  the marker STAYS suppressed, proving `attribution_explicit` is frozen
-  too, not just `attribution_mode`; (iii) attach a PR via manual `set-pr`
-  (never touching `_open_via_provider`) and push via `push-changes` —
-  `refresh_source_attribution` still uses a properly-stamped frozen
-  pair, not the legacy-fallback path, proving the shared helper is
-  actually wired into the manual-attach site.
-- [ ] **Strictly validate the persisted `attribution_mode`/
-  `attribution_explicit` pair, not just round-trip it (round-30
-  finding):** `_parse_pr_mapping` deserializes hand-rolled YAML with no
-  schema enforcement — the same class of gap the round-12 fix already
-  closed for `codename_source` (treat anything except the one known-safe
-  literal as unsafe, never the inverted "anything except the one known-
-  unsafe literal" shape). Apply the identical discipline here: (a)
-  `attribution_explicit` must be checked with `is True` (or an equivalent
-  strict boolean check), never a truthy/falsy coercion — a stored string
-  `"false"` is truthy in a loose check and must NOT be treated as
-  explicit; (b) `attribution_mode` must be validated against the closed
-  set `{"", "false", "true", "codename"}` — any other stored value
-  (a typo, a future mode this code doesn't know about, hand-edited YAML)
-  must be treated as the safe **empty legacy sentinel** (falls back to
-  live config, today's existing behavior), never silently accepted as if
-  it authorized publication; (c) a partial pair (`attribution_mode` set
-  but `attribution_explicit` absent, or vice versa) must ALSO be treated
-  as the empty legacy sentinel — never let a half-written record produce
-  a mode without its matching explicitness, or an explicitness without
-  its matching mode. Add regression tests for all three: a stored
-  `attribution_explicit: "false"` string does not authorize publication;
-  an unrecognized `attribution_mode` value falls back to legacy live-
-  config behavior rather than being read as one of the three known
-  modes; a record with only one of the two fields set falls back to
-  legacy behavior rather than using the one field that IS present.
-- [ ] **Merge the frozen `pr.attribution_mode`/`pr.attribution_explicit`
-  pair under the record lock during concurrent saves, the same way
-  round-11 protects `codename`/`codename_source` (round-30 finding):**
-  `_save_record_unlocked` currently has NO merge protection for the `pr`
-  field at all (verified in source: no revision counter or merge branch
-  covers it), so a status/finalize writer holding an in-memory
-  `WorktreeRecord` snapshot from BEFORE a concurrent `create-pr`/`set-pr`
-  stamped the frozen attribution pair onto that same record's `pr` can
-  save over it and silently erase the freeze — the next
-  `refresh_source_attribution` then sees the empty legacy `pr` and falls
-  back to live config, defeating the entire round-26/27/28 guarantee.
-  Add a `pr_revision` counter (following the existing
-  `profile_assignment_revision`/`lifecycle_revision` pattern already in
-  `_save_record_unlocked`), bumped every time `pr.attribution_mode`/
-  `pr.attribution_explicit` are stamped, and merge `record.pr` from the
-  current on-disk record whenever `current.pr_revision >
-  record.pr_revision`. Add a regression test: stamp a PRRecord's frozen
-  attribution pair under the lock, then save a stale in-memory
-  `WorktreeRecord` snapshot captured BEFORE that stamp — the stale save
-  must not erase the freshly-frozen pair.
+  PRRecord-creation time, at EVERY creation site; strictly validate the
+  persisted pair; protect it under concurrent-save merge (rounds
+  26-31)** — full rationale, gap enumeration, and regression-test
+  requirements in
+  **[design.md § Per-PR attribution freeze](design.md#per-pr-attribution-freeze-rounds-26-31)**;
+  read it before touching any of these sites:
+  - Add `PRRecord.attribution_mode`/`PRRecord.attribution_explicit`,
+    stamped TOGETHER, ONCE, by one shared helper called at all four
+    `PRRecord` construction/parse sites: `create_pr`'s own construction
+    (`pr_ops.py:~868`), `_push_existing_feature`'s fresh-target
+    construction (`~2090`), manual `set-pr`'s bare construction (`~1676`),
+    and `tracking.py`'s `_parse_pr_mapping` deserialization (`~1393`).
+  - The stamp must capture the caller's already-computed EFFECTIVE
+    attribution (`want_attribution`), including any per-call
+    `--attribution`/`--no-attribution` override — never re-derive from
+    `prcfg` directly (round-31 finding).
+  - `tracking.py`'s `_pr_to_yaml_dict` (`~1422`) must ALSO emit both
+    fields (round-28 finding) — parsing alone is not durable.
+  - `refresh_source_attribution`/`_open_via_provider` must use the FROZEN
+    pair, never live `prcfg.source_attribution`/
+    `source_attribution_configured`, for every publish decision on that
+    PR's life. A legacy `PRRecord` predating these fields falls back to
+    today's live-config behavior unchanged (no regression).
+  - `_parse_pr_mapping` must STRICTLY validate the persisted pair (round-30
+    finding): `attribution_explicit` via strict boolean check (never
+    truthy-coerced); `attribution_mode` against the closed set
+    `{"", "false", "true", "codename"}`; a partial pair (only one field
+    set) falls back to the empty legacy sentinel — the same
+    never-treat-unknown-as-safe discipline round-12 established for
+    `codename_source`.
+  - `_save_record_unlocked` must merge the frozen `pr` field under the
+    record lock during concurrent saves (round-30 finding), the same way
+    round-11 protects `codename`/`codename_source`: add a `pr_revision`
+    counter (following the `profile_assignment_revision` pattern) with
+    explicit YAML load/save wiring (round-31 finding: an in-memory-only
+    counter reloads as `0` in another process and defeats the merge
+    guard), bumped every time the attribution pair is stamped, merging
+    `record.pr` whenever `current.pr_revision > record.pr_revision`.
+  - See the Validation Plan below for the full regression-test matrix
+    (retroactive mode/explicitness change, manual `set-pr`, per-call
+    override freeze, strict-parsing edge cases, `pr_revision` round-trip,
+    stale-writer merge).
 - [ ] **Versioning gate (required for this phase's PR):** this phase
   changes `agent-worktrees` runtime source (`config.py`). Per
   `AGENTS.md`'s Version Bump section, bump `plugins/agent-worktrees/plugin.json`,
@@ -969,6 +886,28 @@ these decisions directly and assumes this design is understood.
   merges `record.pr` from the current on-disk record by `pr_revision`,
   the same way it already merges `codename`/`codename_source` (round-11)
   and `profile_assignment_revision`.
+- [ ] Round-trip (round-31 finding): bump a `WorktreeRecord`'s
+  `pr_revision` and `save_record` it, then `load_record` the same file
+  back into a FRESH object (a different Python object, not a mutated
+  reference) — assert `pr_revision` survives as the same non-zero value,
+  proving the counter has explicit YAML load/save wiring and does not
+  reload as `0`, which would silently defeat the round-30 stale-writer
+  merge guard in any process other than the one that stamped it.
+- [ ] Unit (round-31 finding): call `create_pr` with an explicit
+  `attribution=False` override against a repo whose config would
+  otherwise publish a `"codename"` marker — assert the stamped `PRRecord`
+  records `attribution_mode="false"`/`attribution_explicit=True` (not the
+  config's `"codename"`/live-configured value), then run a SUBSEQUENT
+  `push-changes`/`refresh_source_attribution` on that same PR with no
+  further override — the marker stays suppressed, proving a one-shot
+  per-call override freezes exactly like a config-derived decision
+  rather than reverting on the very next push.
+- [ ] Unit (round-31 finding): call `create_pr` with an explicit
+  `attribution="codename"` override (post-widening) against a repo whose
+  config default is `False`/unconfigured — assert the stamped pair
+  records `attribution_mode="codename"`/`attribution_explicit=True`,
+  proving the override's own value is stamped verbatim rather than
+  coerced to only `True`/`False`.
 - [ ] Round-trip (round-9 finding): assign a codename with a known
   `codename_source`, `save_record` it, `load_record` it back, assert
   `codename_source` is unchanged — proving the manual YAML
@@ -1148,37 +1087,56 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-29 history lives in **[journal.md](journal.md)** to keep this
+> round-30 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 30 fixes
+### 2026-09-20 — Plan-review round 31 fixes
 
-- Confirmed: all four round-29 "stale carryover" calls verified
-  correct — this round's review lists them under "Resolved since last
-  review," proving they were already fixed by rounds 26-28.
-- Two new, genuine findings, both closing gaps the round-26/27/28 freeze
-  design left open:
-  1. **Strict validation for the persisted `attribution_mode`/
-     `attribution_explicit` pair:** the round-28 round-trip fix
-     specified emitting/parsing both fields but never specified STRICT
-     parsing, the same class of gap the round-12 fix already closed for
-     `codename_source` — a hand-edited/malformed `attribution_explicit:
-     "false"` string would be truthy-coerced, an unrecognized
-     `attribution_mode` value could be silently accepted, and a partial
-     pair (only one field set) could authorize publication off the one
-     field present. Added explicit strict-parsing requirements (closed
-     mode set, strict boolean check, partial-pair-falls-back rule) plus
-     three regression tests.
-  2. **Merge the frozen `pr` field under the record lock during
-     concurrent saves:** verified in source that `_save_record_unlocked`
-     has NO merge protection for `pr` at all (no revision counter, no
-     merge branch) — unlike `codename`/`codename_source` (round-11) and
-     `profile_assignment_revision`, which it already protects. A stale
-     concurrent `WorktreeRecord` save could silently erase a freshly-
-     frozen attribution pair, defeating the entire freeze guarantee one
-     layer beneath the round-28 write-side fix. Added a `pr_revision`
-     counter following the existing revision-merge pattern, plus a
-     stale-writer regression test.
+- Confirmed: both round-30 findings (strict-parsing, `pr_revision`
+  merge protection) verified correct — this round's review lists them
+  under "Resolved since last review."
+- Two new genuine findings, one prior "Previously missed" finding
+  actually addressed for the first time:
+  1. **`pr_revision` needs explicit YAML load/save wiring, not
+     in-memory-only (round-31 finding):** `WorktreeRecord` is
+     hand-serialized, so a counter with no read/write wiring reloads as
+     `0` in every other process, defeating the round-30 merge guard
+     entirely. Added an explicit parse line (following
+     `profile_assignment_revision`'s own bounded-int parsing) and emit
+     line (following its exact only-emit-when-set pattern), plus a
+     round-trip regression test using a FRESH object, not a mutated
+     reference.
+  2. **Freeze must capture the caller's effective per-call attribution
+     override, not raw config (round-31 finding, was flagged separately
+     as "Previously missed" too):** verified in source that `create_pr`
+     accepts its own `attribution: bool | None` override
+     (`--attribution`/`--no-attribution`), and every call site already
+     computes an effective `want_attribution` before deciding whether to
+     publish. If the freeze stamp instead reads `prcfg.source_attribution`
+     directly, a `--no-attribution` PR would still stamp from live
+     config and a later refresh would start publishing a marker the
+     operator explicitly suppressed — the freeze's OWN construction
+     recreating the exact retroactive-change bug it exists to prevent.
+     Fixed: the shared stamping helper now takes the caller's
+     already-computed effective value, with an override always forcing
+     `attribution_explicit = True` (a per-call override is a stronger,
+     more explicit signal than any config flag). **Self-caught
+     correction:** the first draft of this fix wrongly claimed a
+     per-call override is "always a bool, never `codename`" — but this
+     SAME Phase 1's round-18 fix widens the `attribution` parameter's
+     type to `SourceAttribution | None`, so a post-widening override CAN
+     legitimately be `"codename"` too; corrected to stamp whatever value
+     the override itself carries, verbatim, and added a matching
+     regression test.
+  3. **Doc-split maintenance (round-31 finding, low severity):** the
+     README had grown to 1,252 lines with my own round-31 additions,
+     re-triggering the round-18 doc-split concern — the freeze/
+     strict-validation/merge-protection bullets (rounds 26-31, ~178
+     lines) carried the most self-contained design rationale of
+     anything still in the README. Moved that full rationale into
+     **[design.md § Per-PR attribution freeze](design.md#per-pr-attribution-freeze-rounds-26-31)**,
+     leaving a condensed, still-fully-actionable checklist item in the
+     Plan. README dropped from 1,252 to ~1,120 lines.
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
-  `f2b538c47` for seven rounds straight — not re-edited again).
+  `f2b538c47` for eight rounds straight — not re-edited again).
