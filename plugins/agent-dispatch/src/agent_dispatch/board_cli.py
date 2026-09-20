@@ -187,12 +187,6 @@ def _build(tasks: list[dict], *, machine: str, recent_mins: int) -> list[dict]:
         # stay hard-`False` pending their own follow-on phases (see the two
         # comments below for exactly why).
         row["has_worktree"] = bool(task.get("target_worktree"))
-        # Operator feedback 2026-09-20 (item 2): a 4-char id in a 5-wide WT
-        # column doesn't read as "this task HAS a worktree" at a glance among
-        # the other columns. Surface it as its own badge (rendered as
-        # `[WT]` by the picker) so a worktree-bearing Started task is
-        # unmistakable without having to parse the WT column's contents.
-        row["wt_badge"] = "WT" if row["has_worktree"] else None
         # `embodied` gates Pause/Force-stop: true only for a task with a
         # genuinely LIVE session (`started`). A "Blocked" task's real status
         # is `suspended` (see `set_card`'s own docstring: posting a card with
