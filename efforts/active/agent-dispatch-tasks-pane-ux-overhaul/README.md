@@ -85,18 +85,31 @@ session never has to re-derive "what's already done" from the Journal alone.
   Journal below for the full chain. **Phase 4 (Worktree cross-link) is
   COMPLETE and MERGED to `main`** (PR #2979, squash-merged 2026-09-20).
 
-  **Next up — operator feedback filed 2026-09-20** (see "Findings (filed,
+  **Operator feedback items 1-2 LANDED 2026-09-20** (see "Findings (filed,
   unscheduled)" right after Phase 4, and the same-dated Journal entry): (1)
-  swap the Started/Queued group order in `board_cli.py`'s `GROUPS` tuple
-  (small, standalone); (2) make WT-assignment more visible at a glance in
-  the Started section; (3) investigate why every observed Started task is
-  CLI-embodied and none headless-worker-embodied (real gap vs current
-  operational reality — not yet determined), with a likely follow-on badge
-  either way. **Phase 8 (Worktree Status card) is confirmed real and
+  swapped the Started/Queued group order in both `board_cli.py`'s `GROUPS`
+  tuple and `__main__.py`'s byte-identical `_BOARD_GROUPS`; (2) added a
+  `wt_badge` field, then fixed on Copilot review to instead style the WT
+  column directly (`"style": "bold cyan"`) since this pivot uses `columns`
+  (table mode), where `entry.badges` never renders — so a worktree-bearing
+  Started task is unmistakable at a glance.
+  Item (3) (why every observed Started task is CLI-embodied, none
+  headless-worker-embodied) was **investigated and closed as NOT a bug** —
+  see the Journal entry below for the live-coordinator evidence: headless
+  spawn reservations for review-inbox tasks exist and do reach `started`,
+  but cycle out of it far more readily (card-post -> `suspended`,
+  liveness-`gone` -> requeued to `queued`) than an operator's own
+  interactively-driven CLI session, which stays `started` for the session's
+  whole life — a real snapshot-timing effect, not a spawn-path defect. The
+  follow-on CLI-vs-headless-vs-unknown badge itself remains **unimplemented**
+  (needs a real backend field: today's task list has no per-task signal
+  distinguishing the two without a `spawn_reservations` join, which is Phase
+  1/3/4-sized work of its own — see the Journal for the concrete next step).
+  **Phase 8 (Worktree Status card) is confirmed real and
   current** — cards come up empty beyond title against the live
   coordinator; do this phase properly, verified against an actually
   embodied task, not just the preview fixture. Phase 5 (Artifacts/claims)
-  remains next in Plan order but items 1-3 above and Phase 8 are the
+  remains next in Plan order but the CLI-vs-headless badge and Phase 8 are the
   operator's stated priority — triage/sequence them explicitly with the
   operator rather than silently defaulting to strict Plan order.
 - **Build/test commands** (agent-dispatch package):
@@ -789,56 +802,54 @@ rather than folded into this bug.
 
 ### Findings (filed, unscheduled) — operator feedback on the live Phase 0-4 UX
 Reported by the operator 2026-09-20, live-driving the real Tasks pane for the
-first time since Phase 4 landed. Three items, not yet triaged into a numbered
-phase (do that as part of picking this up — see each item's likely home):
+first time since Phase 4 landed.
 
-1. **Swap the Started/Queued section order.** `board_cli.py`'s `GROUPS` tuple
-   currently orders `Blocked, Proposed, Queued, Started, Suspended, Completed,
-   Abandoned`. Started is more interesting to inspect at a glance than
-   Queued (a task not yet running) — reorder to put Started right after
-   Blocked/Proposed. **NOT a one-location change**: `__main__.py` carries a
-   byte-identical duplicate (`_BOARD_GROUPS`/`_board_group`/
-   `_board_sort_key`, used by the delegated `inbox` CLI path, distinct from
-   `board_cli.py`'s own `GROUPS`/`_group`) that must be reordered
-   identically, or the Picker's Tasks pivot and the `inbox` command would
-   disagree on group order. Check `tests/test_cli.py` for any order-
-   sensitive assertions on either definition before landing. Likely lands
-   as part of whichever phase next touches the Tasks pivot's grouping
-   (Phase 6 is the closest existing home, though its own scope is REPO
-   filtering, not group order — fine to
-   land standalone instead if nothing else is touching that file).
+1. **Swap the Started/Queued section order — LANDED 2026-09-20.**
+   `board_cli.py`'s `GROUPS` tuple and `__main__.py`'s byte-identical
+   `_BOARD_GROUPS`/`_board_group`/`_board_sort_key` both reordered to put
+   Started right after Blocked/Proposed. Order-sensitive assertions in
+   `test_cli.py` (`test_sort_orders_by_group_priority`) and the manifest
+   badge test updated to match.
 2. **Hard to tell at a glance which Started tasks have an assigned
-   worktree.** The WT column (Phase 4) exists, but a 4-char id sitting in a
-   5-wide column among several other columns doesn't read as "this task HAS
-   a worktree" vs "this column happens to be non-empty." Worth a more
-   deliberate visual treatment (e.g. a small icon/badge, or grouping
-   worktree-bearing Started tasks first within the section) — pair with
-   item 3 below, since both are about the Started section's own legibility.
-3. **Investigate: every observed "Started" task is CLI-embodied (the
-   operator's own manually-claimed session in their own worktree); NONE
-   are headless-worker-embodied.** This may be a real operational gap (no
-   headless worker pool currently spawning against this coordinator) or a
-   genuine bug in the headless-spawn path — needs investigation before
-   concluding either way. Note for whoever picks this up: the data model
-   ALREADY distinguishes headless from everything else internally --
-   `queue_liveness.py`'s `_active_headless_handle` queries the reservations
-   table for a `local-body:`/`fleet-body:`-prefixed `session_handle`
-   (headless) vs no matching reservation, resolved via
-   `tracking.liveness_verdict` instead (per `LivenessMixin
-   .reconcile_liveness`'s own docstring, this "no headless reservation"
-   case covers BOTH a CLI-embodied task AND a not-yet-identifiable owner --
-   it is not proof of CLI-embodiment by itself; don't build a badge that
-   silently misclassifies the latter as the former) -- but `board_cli.py`'s
-   own task row doesn't currently expose this distinction at all
-   (`row["embodied"] = task.get("status") == "started"`, true for either
-   kind, no further detail). If the investigation finds the headless path
-   is fine and this is just current operational reality (no worker pool
-   active right now), the follow-on UI work is still real: surface the
-   CLI-vs-headless-vs-unknown distinction as a badge so an operator isn't
-   left guessing which kind of
-   "Started" they're looking at -- directly addresses item 2 above too.
-   Likely spans Phase 1 (if the backend needs a new field) and Phase 3/4
-   (the pivot's own badges) depending on what the investigation finds.
+   worktree — LANDED 2026-09-20.** First attempt added a `wt_badge` field
+   wired into the pivot manifest's `badges` list — but Copilot's PR review
+   caught that this pivot declares `columns` (table mode), where
+   `engine.py`'s `build_data` never reads `entry.badges`/`badge_fields` at
+   all (that path is table-mode-vs-list-mode mutually exclusive). Fixed
+   instead by giving the existing WT column its own `"style": "bold cyan"`
+   in the manifest, which the table-render path (`_column_row`) does
+   apply per cell — so a populated WT id now reads distinctly at a glance,
+   with no board_cli/engine.py change needed.
+3. **Investigate: every observed "Started" task is CLI-embodied; NONE are
+   headless-worker-embodied — INVESTIGATED 2026-09-20, closed as NOT a bug.**
+   Live-coordinator evidence (`agent-dispatch reservations list` /
+   `agent-dispatch show` against this machine's real coordinator):
+   headless (`local-body:`) spawn reservations exist for two real
+   review-inbox tasks and both had reached `started` in the past, but at
+   the moment of inspection one had cycled to `queued` (its headless body
+   was found `gone` by `reconcile_liveness` and requeued) and the other to
+   `suspended` (a card was posted, which atomically suspends per
+   `set_card`'s own docstring). Meanwhile every task actually observed in
+   `started` at that moment was an operator-driven CLI/interactive
+   session, which has no automatic state-cycling and stays `started` for
+   the whole life of the worktree session. This is a genuine, expected
+   **timing/snapshot effect** (headless bodies churn through `started`
+   quickly; CLI sessions linger there), not evidence of a broken
+   headless-spawn path.
+
+   The follow-on UI need (surfacing CLI-vs-headless-vs-unknown as its own
+   badge, addressing item 2's legibility goal too) is **still open** and is
+   real backend work, not a quick board-side computation: `board_cli.py`
+   only sees the coordinator's `/tasks` list response, which carries no
+   per-task spawn-reservation signal today (`queue_liveness.py`'s
+   `_active_headless_handle` is computed only inside
+   `reconcile_liveness`'s own GC pass and is never persisted to the task
+   row or exposed over the API). Landing the badge needs a new
+   `embodiment_kind` (or similar) field computed at task-list time — likely
+   a `spawn_reservations` join in `queue.py`'s `list()` — which is exactly
+   the Phase 1 (backend field) + Phase 3/4 (board plumbing + badge) span
+   the original note anticipated; scope and implement as its own follow-up
+   rather than folded into this session's item 1-2 fix.
 
 ### Phase 5 — Artifacts (claims) surface
 - [ ] Land `artifacts_summary` computation in `board_cli.py` (or wherever
@@ -1864,4 +1875,67 @@ with a manual recovery prompt (context-handoff's automatic cutover is
 currently unreliable) rather than continuing in this same session. Filed
 the findings into the Plan first so the next session doesn't have to
 re-derive where they fit, then composed and stored the handoff.
+
+### 2026-09-20 — Handoff picked up: items 1-2 landed, item 3 investigated
+Fresh worktree via `agent-worktrees -p copilot-extensions create`, per the
+Runbook's own instructions.
+
+- **Item 1 (order swap) landed.** `board_cli.py`'s `GROUPS` and
+  `__main__.py`'s `_BOARD_GROUPS` both reordered to
+  `Blocked, Proposed, Started, Queued, Suspended, Completed, Abandoned`.
+  Updated the order-sensitive `test_sort_orders_by_group_priority` and the
+  manifest-badges assertion in `test_cli.py`, plus doc comments naming the
+  old order in three places (`__main__.py` x2, `README.md`).
+- **Item 2 (WT visibility) landed — after a fix.** First attempt added a
+  `wt_badge` field to `board_cli._build` wired into the pivot manifest's
+  `badges` list; Copilot's PR review (see the later Journal entry) caught
+  this is dead code for a `columns`-declaring (table-mode) pivot. Fixed by
+  styling the WT column directly (`"style": "bold cyan"`) instead; the
+  `wt_badge` field/test were removed.
+- **Item 3 (CLI-vs-headless investigation) closed as NOT a bug**, evidenced
+  live against the real coordinator: `agent-dispatch reservations list`
+  showed two genuine headless (`local-body:`) spawn reservations for
+  review-inbox tasks; `agent-dispatch show` on each confirmed one had cycled
+  to `queued` (liveness `gone` -> requeued) and the other to `suspended` (a
+  card had been posted). At the exact moment inspected, `agent-dispatch list
+  --status started` showed only operator-driven CLI/interactive sessions —
+  consistent with headless bodies churning through `started` far faster
+  than a durable CLI session, not a broken spawn path. See the Findings
+  section above (right after Phase 4) for the full write-up and the still-
+  open follow-on (a real `embodiment_kind` backend field + badge, scoped as
+  its own Phase 1/3/4-sized follow-up, not done this session).
+- **Verification:** `plugins/agent-dispatch` — `test_board_cli.py` (9/9),
+  targeted `test_cli.py` board/order tests (11/11); full `test_cli.py` run
+  has 23 pre-existing `ModuleNotFoundError: fastapi` failures unrelated to
+  this change (environment gap, not a regression — confirmed `import
+  fastapi` fails standalone too). `worktree-manager` — full
+  `tests/production_picker` suite: 644 passed, 2 failed
+  (`test_capture_is_deterministic`, a previously-noted load-sensitive
+  flake; `test_form_collect_all_types_on_confirm`, an unrelated steering-
+  modal radio-button assertion, neither touching Tasks-board code), 1
+  skipped; the Tasks-pivot-specific `test_pivots.py` alone: 78/78 passed.
+- Bumped `agent-dispatch` to `0.1.2-dev137` (`plugin.json`, `pyproject.toml`,
+  `.github/plugin/marketplace.json`) per the version-bump guard.
+  `check-module-size.py` now also flags `__main__.py` (4959 lines vs its
+  4954-line grandfathered ceiling) alongside the pre-existing `engine.py`
+  overage — same non-blocking, not-required-check situation already noted
+  for Phase 4 (confirmed not in the required-checks ruleset); not treated as
+  something to fix inside this change.
+- **PR #3008 opened, then fixed on Copilot's first-pass review.** Copilot's
+  automatic review caught a real bug: this pivot manifest declares
+  `columns` (table mode), so `engine.py`'s `build_data` only calls `_row`/
+  reads `badge_fields` when `reg.columns` is **empty** — the `wt_badge`
+  entry (and, pre-existing, `activity`/`labels` too) never rendered for
+  this manifest at all. Fixed by dropping the dead `wt_badge` field/badges-
+  list entry entirely and instead giving the existing WT column its own
+  `"style": "bold cyan"` in the manifest — the column-table render path
+  (`_column_row`) already applies `col.style` per cell, so a populated WT
+  id now reads distinctly without any board_cli/engine.py change. Verified
+  against `test_plugin_contracts.py::test_real_checkout_manifests_match_
+  contract` (validates every real installed manifest, including this one)
+  plus the full `test_pivots.py`/`test_pivot_registry.py` suites (107/107).
+  **Lesson for future badge/legibility asks on this pivot:** always check
+  whether the manifest declares `columns` before reaching for
+  `entry.badges` — the two are mutually exclusive render paths, and this
+  pivot has used `columns` since Phase 3.
 

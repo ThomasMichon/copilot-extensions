@@ -17,11 +17,15 @@ from .install_paths import install_dir
 from .procutil import no_window_kwargs as _no_window_kwargs
 from .procutil import windowless_python, windowless_python_env
 
+#: Operator feedback 2026-09-20: Started is more interesting to inspect at a
+#: glance than Queued (a task not yet running), so it sits right after
+#: Blocked/Proposed. `__main__.py`'s `_BOARD_GROUPS` is a byte-identical
+#: duplicate (used by the delegated `inbox` CLI path) and must stay in sync.
 GROUPS = (
     "Blocked",
     "Proposed",
-    "Queued",
     "Started",
+    "Queued",
     "Suspended",
     "Completed",
     "Abandoned",

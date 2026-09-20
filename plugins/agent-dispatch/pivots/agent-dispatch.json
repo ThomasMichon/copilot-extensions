@@ -16,7 +16,7 @@
     {"key": "group", "header": "PHASE", "width": 10, "palette": "task_phase", "priority": 3},
     {"key": "repo_name", "header": "REPO", "width": 15, "priority": 6},
     {"key": "title", "header": "TITLE", "width": 40, "priority": 1},
-    {"key": "target_worktree", "header": "WT", "width": 5, "priority": 4},
+    {"key": "target_worktree", "header": "WT", "width": 5, "priority": 4, "style": "bold cyan"},
     {"key": "turn_count", "header": "T", "width": 4, "align": "r", "priority": 7},
     {"key": "wt_live", "header": "LIVE", "width": 13, "priority": 5},
     {"key": "artifacts_summary", "header": "ARTIFACTS", "width": 18, "priority": 8}
