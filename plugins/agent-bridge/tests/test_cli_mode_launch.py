@@ -80,6 +80,10 @@ def test_launch_reserves_then_embodies_the_worktree() -> None:
     argv = seen_argv[0]
     assert argv[:4] == ["agent-worktrees", "embody", "--worktree-id", "wt-A"]
     assert "--json" in argv
+    # Explicit opt-in: a bare `embody` never installs tmux for an operator
+    # running a BYO terminal manager, but `cli-mode launch` IS the deliberate
+    # per-request case that's fine defaulting it on.
+    assert "--ensure-mux" in argv
     assert "--driver" in argv and "cli-mode" in argv  # default driver stamp
     assert outcome["session"] == "wt-wt-A"
     assert outcome["exit_code"] == 0

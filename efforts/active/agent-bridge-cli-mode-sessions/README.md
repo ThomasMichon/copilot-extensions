@@ -259,11 +259,16 @@ mechanism CLI mode binds through.
       real gap independent of which venue provider gets built first: added
       `agent_worktrees.sessions.ensure_mux_available()` (best-effort,
       POSIX-only, `apt-get`/`dnf`/`yum`/`apk` via `sudo -n` or direct-as-root,
-      silent-safe) and wired it into `cmd_embody` right before
-      `mux_new_session`, so ANY venue missing tmux (a CodeSpace, a trusted
-      container, a bare dev box) self-heals on first `embody`/`cli-mode
-      launch` rather than failing with a raw "not found" or silently
-      downgrading to a non-reattachable headless launch. See journal.
+      silent-safe), gated behind an **explicit `--ensure-mux` opt-in** on
+      `embody` (never ambient — an operator running a BYO terminal/session
+      manager, e.g. Herdr, on their own machine must never have tmux
+      installed underneath them by an ordinary `embody` call; see the
+      2026-09-20 "Gate `ensure_mux_available`" journal entry).
+      `agent-bridge`'s `cli-mode launch` passes `--ensure-mux` explicitly —
+      it *is* the deliberate per-request case fine to default. So: a
+      CodeSpace, a trusted container, or a bare dev box reached through
+      `cli-mode launch` self-heals a missing tmux; a plain, human-typed
+      `embody` never does.
 - [ ] Confirm/document the remaining venue-prep prerequisites this surfaces
       before any venue-specific launch verb is added: (1) `copilot` present
       or bootstrapped (already a venue-parity/devcontainer convention — verify,
@@ -349,6 +354,52 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-09-20 — Gate `ensure_mux_available` behind explicit opt-in (`--ensure-mux`)
+
+Operator pushback on yesterday's tmux self-heal: agent-worktrees has a
+long-term goal (documented already in `visions/mux-companion/README.md`:
+"Going forward, the multiplexer relationship belongs to the Worktree
+Manager, not to `agent-worktrees` directly") to let operators who run a BYO
+terminal/session manager (e.g. Herdr) on their **own** machine opt out of
+agent-worktrees owning tmux at all. Yesterday's `ensure_mux_available()` was
+wired to fire **unconditionally** from `cmd_embody` -- meaning a Herdr user's
+own, ordinary `embody` call would have silently `apt-get install tmux`'d
+underneath them the moment tmux was absent. That's exactly the ambient
+default this effort has otherwise been careful to avoid
+(`opt-in-not-ambient-default`).
+
+Clarified scope, though: the reason is about **local flexibility**, not "no
+tmux ever." For a freshly-provisioned remote venue (a CodeSpace, a trusted
+container) there's nothing else already managing sessions to conflict with,
+so defaulting to tmux there is exactly right -- consistent with yesterday's
+own CodeSpace finding.
+
+Fixed by making the self-heal an **explicit opt-in**: `embody` grew
+`--ensure-mux` (default off); `cmd_embody` only calls
+`sessions.ensure_mux_available()` when that flag is set
+(`getattr(args, "ensure_mux", False)`, so every existing test/caller that
+doesn't know about it is unaffected). `agent-bridge`'s `_launch_cli_mode_session`
+now passes `--ensure-mux` explicitly on its `embody` invocation — `cli-mode
+launch` **is** the deliberate, per-request case the vision's own
+`opt-in-not-ambient-default` behavior already carves out as fine to default.
+An ordinary, human-typed `embody` (or any other caller) still gets tmux
+missing exactly as before this whole investigation started: `mux_new_session`
+fails with a plain "not found" rather than installing anything.
+
+2 new `test_embody.py` cases (confirms `ensure_mux_available` is NOT called
+without the flag, IS called with it) plus the existing 8
+`test_ensure_mux_available.py` cases and 5 `test_cli_mode_launch.py` cases
+(now also asserting `--ensure-mux` is present in the `embody` argv) all pass.
+`module-size-baseline.json` widened again for both `__main__.py` files
+(agent-bridge 6865→6873; agent-worktrees 28772→28789).
+
+Left the deeper mux-companion/Worktree-Manager ownership-transfer question
+alone -- that's a Draft-status vision scoped (so far) to status-push +
+hotkey commands, not session creation, and isn't this effort's to resolve.
+Noted for whoever eventually does that transfer: `embody`'s session-creation
+path (and now `ensure_mux_available`) is a second caller into agent-worktrees'
+direct tmux/psmux ownership, alongside Mux-bind's status-push relationship.
 
 ### 2026-09-20 — Phase 4 prep: real-venue tmux gap, fixed with a self-heal
 

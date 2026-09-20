@@ -2208,6 +2208,14 @@ def _launch_cli_mode_session(
     argv = [
         embody_bin, "embody", "--worktree-id", worktree_id, "--json",
         "--verify-timeout", str(verify_timeout),
+        # Explicit opt-in only: agent-worktrees never installs tmux/psmux for
+        # a bare `embody` call (an operator running a BYO terminal/session
+        # manager, e.g. Herdr, on their own machine must never have tmux
+        # installed underneath them). A `cli-mode launch` IS the deliberate,
+        # per-request case that vision calls out as fine to default -- there
+        # is nothing else already managing sessions on a freshly-prepared
+        # venue (CodeSpace/container) or a bare local box.
+        "--ensure-mux",
     ]
     if driver:
         argv += ["--driver", driver]
