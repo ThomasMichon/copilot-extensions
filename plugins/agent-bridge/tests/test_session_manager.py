@@ -3187,7 +3187,7 @@ class TestResyncSession:
             client.shutdown = AsyncMock()
             client.cancel_prompt = AsyncMock()
 
-            async def _load(cwd, session_id, suppress_replay=True):
+            async def _load(cwd, session_id, suppress_replay=True, mcp_servers=None):
                 if not suppress_replay and on_event:
                     for etype, data in replay_events:
                         on_event(etype, data)
@@ -3323,7 +3323,7 @@ class TestReconcileWedged:
             client.shutdown = AsyncMock()
             client.cancel_prompt = AsyncMock()
 
-            async def _load(cwd, session_id, suppress_replay=True):
+            async def _load(cwd, session_id, suppress_replay=True, mcp_servers=None):
                 if not suppress_replay and on_event:
                     for etype, data in replay:
                         on_event(etype, data)
@@ -3342,14 +3342,28 @@ class TestReconcileWedged:
         session.status = SessionStatus.RUNNING
         session._prompt_task = None
         session.last_output_at = time.time() - 10_000  # stalled
+        session.mcp_servers = [{"name": "gitea-mcp"}]
+
+        created_clients = []
+        factory = self._replay_factory([("agent_message", {"text": "x"})])
+
+        def _capturing_factory(*args, **kwargs):
+            client = factory(*args, **kwargs)
+            created_clients.append(client)
+            return client
 
         with patch("agent_bridge.session_manager.AcpClient",
-                   side_effect=self._replay_factory([("agent_message", {"text": "x"})])):
+                   side_effect=_capturing_factory):
             healed = await session_manager.reconcile_wedged_running()
 
         assert healed == 1
         assert session.status == SessionStatus.IDLE
         assert session.event_log.get_events()[-1].data.get("resynced") is True
+        # Regression guard (issue #7239): resync must re-mount the session's
+        # declared MCP servers via load_session, matching the resume ladder.
+        load_kwargs = created_clients[-1].load_session.await_args.kwargs
+        assert load_kwargs.get("mcp_servers") == session.mcp_servers
+
 
     @pytest.mark.asyncio
     async def test_leaves_stalled_no_live_turn_within_threshold(

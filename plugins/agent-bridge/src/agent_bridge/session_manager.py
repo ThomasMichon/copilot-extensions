@@ -1843,6 +1843,7 @@ class SessionManager:
                         client.load_session(
                             cwd=session_cwd,
                             session_id=load_session_id,
+                            mcp_servers=mcp_servers,
                             timing_callback=timing.add,
                         ),
                         timeout=self._timeouts.session_new,
@@ -4993,6 +4994,7 @@ class SessionManager:
                                         or _default_cwd(session.target)
                                     ),
                                     session_id=session.acp_session_id,
+                                    mcp_servers=session.mcp_servers,
                                 ),
                                 timeout=self._timeouts.session_new,
                             )
@@ -5305,6 +5307,7 @@ class SessionManager:
                 await client.load_session(
                     cwd=session.target.cwd or _default_cwd(session.target),
                     session_id=session.acp_session_id,
+                    mcp_servers=session.mcp_servers,
                     suppress_replay=False,
                 )
 

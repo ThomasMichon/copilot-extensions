@@ -54,6 +54,7 @@ async def test_resume_retries_then_succeeds(tmp_db, spawn_target, mock_acp_clien
          patch("agent_bridge.session_manager.AcpClient", return_value=mock_acp_client):
         sm = SessionManager(tmp_db)
         session = await _make_stopped_session(sm, spawn_target, mock_acp_client)
+        session.mcp_servers = [{"name": "gitea-mcp"}]
 
         # First launch stalls (TimeoutError), second succeeds.
         mock_acp_client.start = AsyncMock(side_effect=[asyncio.TimeoutError(), None])
@@ -68,6 +69,12 @@ async def test_resume_retries_then_succeeds(tmp_db, spawn_target, mock_acp_clien
     assert retries[0].data["attempt"] == 1
     assert retries[0].data["will_retry"] is True
     assert retries[0].data["stderr_tail"] == "Resuming..."
+    # Regression guard: a resumed session
+    # must re-mount its declared MCP servers via load_session, or a
+    # task-bound tool (e.g. a reviewer's dedicated Gitea credential) silently
+    # vanishes on every resume after the very first spawn.
+    load_kwargs = mock_acp_client.load_session.await_args.kwargs
+    assert load_kwargs.get("mcp_servers") == session.mcp_servers
 
 
 @pytest.mark.asyncio
