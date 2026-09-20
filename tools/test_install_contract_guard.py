@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from tools.install_contract_guard import (
     PERSISTENT_ENV_END,
     PERSISTENT_ENV_START,
+    is_ignored_scan_path,
     persistent_environment_violations,
 )
 
@@ -77,3 +80,29 @@ Set-CopilotPersistentEnvironmentVariable -Name Path -Value $value -Target User
 """
 
     assert persistent_environment_violations(source) == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        Path("plugins/agent-worktrees/.venv/Scripts/Activate.ps1"),
+        Path(".git/hooks/pre-push.ps1"),
+        Path("worktree-manager/.test-venvs/foo/Scripts/Activate.ps1"),
+        Path("libs/foo/.venv-tools/bin/x.ps1"),
+        Path("web/node_modules/.bin/thing.ps1"),
+    ],
+)
+def test_ignores_generated_and_vendored_scan_paths(path):
+    assert is_ignored_scan_path(path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        Path("plugins/agent-worktrees/scripts/install.ps1"),
+        Path("libs/installation-context/tests/powershell-test-host.ps1"),
+        Path("worktree-manager/bin/launch-session.ps1"),
+    ],
+)
+def test_allows_tracked_source_scan_paths(path):
+    assert not is_ignored_scan_path(path)
