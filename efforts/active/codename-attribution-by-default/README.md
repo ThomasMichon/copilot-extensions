@@ -288,6 +288,26 @@ addition, not a replacement, of the config-shape check above.
   raw `codename.wordlist_path` string at THAT call's own moment (non-empty
   → `"custom"`, empty/absent → `"built-in"`), not share a value computed
   elsewhere and not derive it from the resolved `Wordlist`.
+- [ ] **Add a `wordlist_path_configured` flag to distinguish "absent" from
+  "present but malformed" (round-13 finding)** — the "read the raw path"
+  rule above is not implementable as stated: all three assignment sites
+  only have access to the already-PARSED `CodenameConfig`, and
+  `codename_config.parse_codename` (verified in source) silently
+  normalizes ANY non-string `wordlist_path` value (e.g. `wordlist_path:
+  []`, a number, a mapping) to the empty string — indistinguishable from
+  "key never set." A malformed-but-present value would therefore
+  misclassify as `"built-in"` the same way round-11's raw-vs-resolved gap
+  did. Fix by extending `CodenameConfig` with a
+  `wordlist_path_configured: bool` field, set by `parse_codename` to
+  `True` whenever the raw `codename:` block's `wordlist_path` key is
+  present at all (regardless of whether its value parses to a valid
+  string) — mirroring the exact pattern `source_attribution_configured`
+  already uses for the analogous "key present vs. absent" distinction on
+  `pr.source_attribution`. Classification then checks THIS flag, not
+  `wordlist_path`'s truthiness, so a malformed value still classifies
+  `"custom"` (fail closed). Add tests proving: `wordlist_path: []` (or
+  any other non-string value) still classifies `"custom"`, not
+  `"built-in"`.
 - [ ] **Fix `ensure_codename`'s signature and provenance-copy gap
   (round-12 finding):** the lazy-backfill function currently accepts only
   a resolved `wordlist: Wordlist | None` parameter (never the raw path,
@@ -335,25 +355,34 @@ addition, not a replacement, of the config-shape check above.
   must ALSO explicitly re-raise this same type rather than catching it
   into `pair_stamp = None` — only a generic/incidental pairing failure
   stays non-fatal there, never this specific policy violation.
-  **Transactionality (round-12 finding):** the `create` flow persists the
-  harness worktree, branch, and tracking record BEFORE it calls
-  `_carve_paired_knowledge` — so simply re-raising the policy error at
-  that point would fail the `create` command while leaving that harness
-  worktree/branch/record behind as orphaned partial state (no rollback
-  today for a re-raised error at this late a stage). Add an explicit
-  **preflight check**: validate the knowledge project's config (does it
-  have a custom wordlist AND an unresolved/omitted `source_attribution`?)
-  BEFORE any harness-side create side effect (worktree, branch, or
-  record) happens, and fail the whole `create` command at that preflight
-  point if the policy would be violated — never after the harness side
-  already exists. This makes the re-raised exception path (inner +
-  outer handlers above) a pure defense-in-depth backstop for a race the
-  preflight didn't/can't catch (e.g. the knowledge config changing
-  between preflight and the actual carve), not the primary enforcement
-  mechanism. Add a regression test: the preflight check rejects the
-  `create` command outright, before any worktree/branch/record exists,
-  for a knowledge project with a custom wordlist and omitted
-  `source_attribution`.
+  **Transactionality (round-12 finding, narrowed round-13):** the
+  `create` flow persists the harness worktree, branch, and tracking
+  record BEFORE it calls `_carve_paired_knowledge` — so simply re-raising
+  the policy error at that point would fail the `create` command while
+  leaving that harness worktree/branch/record behind as orphaned partial
+  state. Add an explicit **preflight check**: validate the knowledge
+  project's config (does it have a custom wordlist AND an
+  unresolved/omitted `source_attribution`?) BEFORE any harness-side
+  create side effect (worktree, branch, or record) happens, and fail the
+  whole `create` command at that preflight point if the policy would be
+  violated. **This narrows, but does not eliminate, the exposure — say
+  so explicitly rather than overclaiming full transactionality (round-13
+  finding):** a config edit landing in the window between the preflight
+  check and the actual `_carve_paired_knowledge` call is a residual,
+  accepted TOCTOU race no in-process check alone closes (closing it
+  fully would need config-file locking, out of scope for this effort).
+  Shrink that window as far as practical by **revalidating the identical
+  preflight check a second time immediately before the first
+  harness-side side effect** (as late as possible in the `create` path,
+  not just once at the top), rather than relying on a single early
+  check — this still leaves a narrow residual window, which the plan
+  explicitly accepts rather than silently ignores. The re-raised
+  exception path (inner + outer handlers above) remains a defense-in-
+  depth backstop for exactly this residual window, not the primary
+  enforcement mechanism. Add a regression test: the preflight check
+  rejects the `create` command outright, before any worktree/branch/
+  record exists, for a knowledge project with a custom wordlist and
+  omitted `source_attribution`.
 - [ ] **Merge `codename`/`codename_source` under the record lock during
   concurrent saves (round-11 finding):** `_save_record_unlocked` already
   merges several fields (handoff reservations, lifecycle/session-backend/
@@ -538,6 +567,13 @@ addition, not a replacement, of the config-shape check above.
   `codename_source: "custom"` — proving classification reads the raw
   config value, not `wordlist_for_repo`'s fail-soft-to-built-in resolved
   `Wordlist`.
+- [ ] Unit (round-13 finding): a repo config with `wordlist_path` set to a
+  non-string value (e.g. `[]`, a number, a mapping) still classifies
+  `codename_source: "custom"` — proving classification consults
+  `wordlist_path_configured` (set whenever the raw key is present,
+  regardless of its value's validity), not `wordlist_path`'s own
+  post-parse truthiness (which `parse_codename` silently coerces to
+  empty for any non-string value).
 - [ ] Unit (round-12 finding): a `WorktreeRecord` with an unrecognized
   stored `codename_source` value (neither `"built-in"` nor `"custom"` —
   e.g. hand-edited YAML, a typo, a future value) fails closed exactly
@@ -567,6 +603,11 @@ addition, not a replacement, of the config-shape check above.
   harness-side worktree, branch, or tracking record is created — proving
   the failure is transactional (no orphaned partial state), not just a
   late re-raise after the harness side already exists.
+- [ ] Unit (round-13 finding): the preflight check is revalidated a
+  second time immediately before the first harness-side side effect (not
+  just once at the top of `create`) — proving the residual TOCTOU window
+  is minimized to the documented narrow case, not left at the width of
+  the entire `create` command.
 - [ ] Unit (round-11 finding): a save from a stale in-memory
   `WorktreeRecord` (loaded before a concurrent lazy-backfill assigned a
   codename under the record lock) does not erase the `codename`/
@@ -810,3 +851,26 @@ _Pending._
      project's policy BEFORE any harness-side side effect, making the
      re-raise path a defense-in-depth backstop rather than the primary
      enforcement point.
+
+### 2026-09-20 — Plan-review round 13 fixes
+
+- Two more findings, again each verified against actual source:
+  1. Round-11's "read the raw `wordlist_path` string" rule was itself
+     unimplementable as written: verified `codename_config.parse_codename`
+     silently coerces ANY non-string `wordlist_path` value (a list,
+     number, mapping) to the empty string, indistinguishable from "key
+     never set" — the same class of gap round 11 found in
+     `wordlist_for_repo`, one layer earlier in the parse pipeline. Fixed
+     by adding a `wordlist_path_configured` boolean to `CodenameConfig`,
+     set whenever the raw key is present regardless of value validity —
+     mirroring the existing `source_attribution_configured` pattern for
+     the identical "key present vs. absent" distinction on a sibling
+     config field.
+  2. The preflight fix from round 12 closes the common case but still
+     leaves a real TOCTOU window (config changing between preflight and
+     the actual carve) that a single early check can't fully close.
+     Rather than overclaim full transactionality, narrowed the plan to
+     say so explicitly: revalidate the same check a second time
+     immediately before the first harness-side side effect (shrinking,
+     not eliminating, the window), with the re-raise path as an accepted
+     defense-in-depth backstop for the documented residual case.
