@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (agent-worktrees plugin)
 - **Branch(es):** `pr/<slug>` per phase
 - **Created:** 2026-09-17
-- **Status:** Active <!-- Draft | Active | Blocked | Done -->
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
 - **Vision:** vision-extending — extends the existing `source_attribution`
   marker capability (today boolean: on/off) with a third, public-safe mode.
 - **Umbrella issue:** [#2838](https://github.com/ThomasMichon/copilot-extensions/issues/2838)

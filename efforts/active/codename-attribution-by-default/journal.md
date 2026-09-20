@@ -1,0 +1,907 @@
+# Journal - codename-attribution-by-default
+
+Dated, append-only running log of the effort.
+
+Part of the [codename-attribution-by-default effort](README.md).
+
+### 2026-09-20 — Kickoff
+
+- Effort created directly from a live demonstration: checked this repo's
+  own recent PRs (#2915, #2922 — the PRs that BUILT the codename feature)
+  and found neither carries any attribution marker, because the repo's
+  config explicitly opts out (`source_attribution: false`, which was also
+  the pre-existing global default). Cross-checked a private, closed-circuit
+  downstream repo and confirmed its recent merges all correctly carry the
+  full raw marker, proving the mechanism itself works — the gap is purely
+  a policy/default problem, not a broken feature.
+- Surveyed repos this codename feature already applies to and confirmed
+  the pattern generalizes: some rely on the implicit `false` default with
+  no attribution at all, while at least one private/closed-circuit repo
+  already correctly uses `true`. Repo-specific inventory and rollout order
+  are kept in private planning, not this public record (see Context).
+- Closed the predecessor effort's umbrella issue (`pr-attribution-codenames`,
+  #2838 — Done, all 5 phases merged) and opened this effort's own umbrella
+  issue (#2977).
+- Handed off for execution: this effort's plan has not yet been reviewed
+  (per `planning-efforts`' review gate, submit this README as a PR and let
+  the repo's non-blocking automated review clear it before starting Phase 1).
+
+### 2026-09-20 — Plan-review round 6 fixes
+
+- Automated review (PR #2978) flagged that `Vision: vision-extending` cited
+  nothing. Surveyed `visions/plugins/agent-worktrees/README.md` and its
+  `pull-requests/README.md` child vision; neither governs the specific
+  *default value* of `source_attribution` — they describe the PR/codename
+  mechanism's existence and shape, which `pr-attribution-codenames`
+  (Done) already reconciled. Reclassified as **below-altitude**: this
+  effort changes a configuration default on an already-vision-covered
+  capability, not new architecture, so no vision revision is required.
+- Also flagged: the custom-wordlist risk (Context, Phase 1) only covers
+  *future* codename allocations. Added an explicit migration-gap
+  subsection: a `WorktreeRecord` created before this effort ships, under a
+  repo with a custom wordlist, may already carry a possibly-identifying
+  codename with no provenance flag to detect it — added a matching Phase 1
+  checklist item and Validation Plan item requiring an explicit
+  migration/suppression decision, not just the forced-wordlist fix for new
+  allocations.
+
+### 2026-09-20 — Plan-review round 7 fixes
+
+- Round 6's two custom-wordlist findings were both still open after the
+  round-6 fix landed. Replaced the hedged "options include X or Y, pick
+  one" language with a single decisive rule: a repo with
+  `codename.wordlist_path` configured is excluded from the new implicit
+  default entirely and must set `source_attribution` explicitly. This one
+  config-shape check resolves both the future-allocation risk and the
+  pre-existing-codename migration gap at once (a custom-wordlist repo
+  never silently inherits the default, so nothing already-assigned starts
+  publishing merely because the global default changed) — no separate
+  migration/provenance-tracking mechanism is needed after all.
+- Fixed an overstated claim: the plan previously implied the wide test
+  sweep spans `test_config.py`, `test_pr_ops.py`, and `test_providers.py`
+  uniformly. Verified the actual fixtures — `test_pr_ops.py` call sites
+  already pass explicit `source_attribution=`/`source_attribution_configured=`
+  kwargs (intentional opt-out/explicit-mode cases that must not change);
+  only genuinely bare-default assertions (concentrated in `test_config.py`)
+  are affected by the dataclass-default flip. Narrowed the plan text and
+  added an explicit per-call-site-audit instruction instead of a blanket
+  three-file rewrite.
+- Resolved a stale "unrelated baseline exceeds module size cap" finding:
+  confirmed via `git diff origin/main..HEAD --stat` that this PR's actual
+  diff no longer touches `tools/module-size-baseline.json` at all (that
+  fix landed separately in PR #2980, merged before this branch's last
+  rebase); manually resolved the review thread and posted an explanatory
+  comment rather than re-editing unrelated plan content.
+
+### 2026-09-20 — Plan-review round 8 fixes
+
+- Round 7's decisive fix ("a repo with a custom wordlist config is
+  excluded from the implicit default") was itself flagged as
+  insufficient: it silently assumes a repo's *current* wordlist config
+  accurately reflects what generated *every* codename it has ever
+  assigned. That assumption breaks the moment a repo's
+  `codename.wordlist_path` config changes AFTER a codename was assigned
+  (added, used, then later removed or swapped) — the repo would then read
+  as "no custom wordlist" and incorrectly inherit the new default,
+  publishing an old codename that may not actually be drawn from the safe
+  built-in list. Round 7's claim that "no provenance-tracking mechanism is
+  needed after all" was wrong for this legacy-drift case specifically.
+- Fixed with the mechanism round 6 originally floated and round 7
+  mistakenly ruled out: added a per-record `codename_source` field on
+  `WorktreeRecord`, set once at assignment time from the repo's config AT
+  THAT MOMENT, consulted at publish time instead of (not in addition to)
+  the repo's current config. This correctly handles both the common case
+  (config never changes — current-config and record-provenance agree) and
+  the drift case the round-8 finding raised (config changes after
+  assignment — the record's own stored provenance still gates
+  publication correctly). Added a matching backfill-migration item: a
+  record with no `codename_source` (predates this field) must be treated
+  as `"custom"` (fail closed) by default, never silently treated as safe.
+
+### 2026-09-20 — Plan-review round 9 fixes
+
+- Round 8's `codename_source` fix was itself flagged as underspecified:
+  `WorktreeRecord` is manually round-tripped through hand-rolled YAML
+  parsing/emission (`tracking.load_record`/`save_record`'s explicit
+  per-field content-builder), not a generic dataclass serializer — adding
+  the field to the dataclass alone would not persist it across a
+  save/load cycle, silently losing provenance on the very next write.
+  Checked the actual source and confirmed three distinct codename-
+  assignment call sites (normal `create`, a separate paired
+  knowledge-repo `create` path, and lazy backfill via `ensure_codename`),
+  each of which would need to set the new field independently.
+- Added explicit plan items covering: (1) the matching manual
+  parse/emit lines in `load_record`/`save_record`, following the exact
+  only-emit-when-set pattern the `codename` field itself already uses;
+  (2) setting `codename_source` at all three assignment call sites,
+  named explicitly so none is missed; (3) a dedicated round-trip test
+  (assign → save → load → assert unchanged) plus a per-call-site test,
+  rather than relying on the existing provenance tests to catch a
+  serialization gap they don't actually exercise.
+
+### 2026-09-20 — Plan-review round 10 fixes
+
+- Two new high-severity findings, both concrete real-code gaps in the
+  round-8/9 provenance plan:
+  1. Checked `_carve_paired_knowledge`'s actual source: it wraps
+     `cfg.load_config`/`wordlist_for_repo` in a bare
+     `except Exception: knowledge_wordlist = None`, which would silently
+     swallow the new fail-closed policy-validation error (for a
+     custom-wordlist repo with omitted `source_attribution`) and fall
+     back to the built-in wordlist — letting the paired-knowledge path
+     allocate exactly the codename the validation error exists to
+     block. Added an explicit plan item requiring this path to
+     distinguish and PROPAGATE the policy error rather than swallow it,
+     plus a regression test.
+  2. Round 8's backfill-migration item inferred `codename_source` for
+     pre-existing records from the owning repo's CURRENT wordlist
+     config — flagged as unsound for the same reason round 8 itself
+     exists: a repo's config can drift after a codename was assigned, so
+     "current config says no custom wordlist" doesn't prove the record's
+     codename actually came from the built-in list. Removed the
+     config-inferred backfill entirely; an unbackfilled record now stays
+     permanently `"custom"` (fail-closed) unless an operator manually,
+     explicitly verifies and edits that specific record — never an
+     automated bulk-inference pass.
+
+### 2026-09-20 — Plan-review round 11 fixes
+
+- Three new high-severity findings, all concrete real-code gaps in the
+  round-8/9/10 provenance plan, each verified against actual source:
+  1. `_save_record_unlocked` (`tracking.py`) already merges several
+     fields (handoff reservations, lifecycle/session-backend/
+     execution-leg state) from the current on-disk record into a stale
+     in-memory snapshot before overwriting — specifically to stop a
+     stale concurrent writer from erasing a field another writer set
+     under the lock — but does not cover `codename`/`codename_source`.
+     Added a plan item to extend that same existing merge logic to these
+     two fields, plus a concurrent-save regression test.
+  2. `wordlist_for_repo` (via `load_wordlist_or_default`) fail-softs to
+     `DEFAULT_WORDLIST` for a missing/malformed custom-path file
+     (verified in `codename.py`) — so classifying provenance from the
+     RESOLVED wordlist (as round-8/9's plan text implied) would
+     misclassify a configured-but-broken custom path as `"built-in"`.
+     Changed the classification rule to read the raw
+     `codename.wordlist_path` config string directly (non-empty →
+     `"custom"`) at every assignment site, never the resolved `Wordlist`.
+  3. Round 10's paired-knowledge fix only addressed
+     `_carve_paired_knowledge`'s own inner `except Exception` — but its
+     caller in the `create` path wraps the ENTIRE
+     `_carve_paired_knowledge(...)` call in its own outer
+     `except Exception as exc: ... pair_stamp = None`, a deliberate
+     pre-existing fail-safe for ordinary pairing glitches that would
+     still swallow the re-raised policy error at that outer boundary.
+     Added a plan item requiring a dedicated exception type
+     (`CodenameAttributionPolicyError`) that both the inner AND outer
+     handlers must explicitly re-raise rather than catch — only a
+     genuine/incidental pairing failure stays non-fatal at either layer.
+
+### 2026-09-20 — Plan-review round 12 fixes
+
+- Three more findings against the round-8 through 11 provenance
+  mechanism, again each verified against actual source:
+  1. Publish-time gating must check `codename_source == "built-in"`, not
+     the inverted `!= "custom"` — `tracking.load_record` enforces no
+     schema on stored field values, so an unrecognized/malformed stored
+     value must fail closed like `"custom"`, never be silently treated as
+     safe by an inverted check.
+  2. Verified `ensure_codename`'s actual signature and body: it takes
+     only a resolved `Wordlist` (not the raw path needed to classify
+     provenance), and its concurrent-writer-already-assigned branch
+     copies `current.codename` but not `current.codename_source` —
+     dropping provenance for the losing side of a race. Added a plan
+     item to change the signature to accept an explicit
+     `codename_source` and to copy it in that branch too.
+  3. Verified the `create` flow's actual ordering: the harness worktree,
+     branch, and tracking record are persisted BEFORE
+     `_carve_paired_knowledge` runs, so round 10/11's "re-raise the
+     policy error" fix would fail the command while leaving that
+     already-created harness state behind — not transactional. Added an
+     explicit preflight-check requirement: validate the knowledge
+     project's policy BEFORE any harness-side side effect, making the
+     re-raise path a defense-in-depth backstop rather than the primary
+     enforcement point.
+
+### 2026-09-20 — Plan-review round 13 fixes
+
+- Two more findings, again each verified against actual source:
+  1. Round-11's "read the raw `wordlist_path` string" rule was itself
+     unimplementable as written: verified `codename_config.parse_codename`
+     silently coerces ANY non-string `wordlist_path` value (a list,
+     number, mapping) to the empty string, indistinguishable from "key
+     never set" — the same class of gap round 11 found in
+     `wordlist_for_repo`, one layer earlier in the parse pipeline. Fixed
+     by adding a `wordlist_path_configured` boolean to `CodenameConfig`,
+     set whenever the raw key is present regardless of value validity —
+     mirroring the existing `source_attribution_configured` pattern for
+     the identical "key present vs. absent" distinction on a sibling
+     config field.
+  2. The preflight fix from round 12 closes the common case but still
+     leaves a real TOCTOU window (config changing between preflight and
+     the actual carve) that a single early check can't fully close.
+     Rather than overclaim full transactionality, narrowed the plan to
+     say so explicitly: revalidate the same check a second time
+     immediately before the first harness-side side effect (shrinking,
+     not eliminating, the window), with the re-raise path as an accepted
+     defense-in-depth backstop for the documented residual case.
+
+### 2026-09-20 — Plan-review round 14 fixes
+
+- Three findings on the round-13 head, each verified against actual
+  source before editing:
+  1. **Previously-missed, resolved:** the repo-level "custom wordlist
+     configured → `source_attribution` must be explicit" gate (Decision,
+     Context) and the round-8/9 per-record `codename_source` gate were
+     both stated as unconditional rules, and conflicted for the case of a
+     repo that currently has a custom wordlist configured but holds a
+     `codename_source: "built-in"` record from before that config
+     existed. Resolved by explicitly scoping the two gates to different
+     questions: the repo-level check governs only whether a *new*
+     codename may be allocated implicitly; the per-record check governs
+     only whether an *already-assigned* codename is safe to *publish*
+     implicitly, and always wins for that question regardless of the
+     repo's current config. Edited both the "Decision" paragraph and the
+     "Decisive fix" paragraph in Context to state this explicitly instead
+     of leaving it implicit.
+  2. Consolidated the round-11 "read the raw path" classification rule
+     and the round-13 `wordlist_path_configured` flag into one coherent
+     instruction — the round-11 bullet still told implementers to "read
+     the raw `codename.wordlist_path` string," which is literally not
+     possible from a call site holding only a parsed `CodenameConfig`
+     (the very problem round-13 introduced the flag to fix). Rewrote the
+     round-11 bullet to state the two failure modes it covers
+     (unreadable/malformed custom-path *file*, and a non-string
+     `wordlist_path` *value*) and point directly at the
+     `wordlist_path_configured` flag as the single classification
+     mechanism, removing the contradictory "read it raw" instruction.
+  3. The transactionality narrowing from round 12/13 acknowledged the
+     residual TOCTOU race exists but never specified what happens if it's
+     actually hit — an implementer could reasonably guess anything from
+     "silent orphan" to "crash." Specified the concrete behavior: no
+     automatic rollback of the harness worktree/branch/record (explicit
+     scope exclusion, same rationale as the config-locking exclusion),
+     and the surfaced error must name the orphaned worktree path/branch
+     for manual cleanup via the existing `git worktree remove` path.
+     Added a matching Validation Plan test that simulates the race
+     directly (not just the preflight-catches-it case) and asserts the
+     message and no-rollback behavior.
+
+### 2026-09-20 — Plan-review round 15 fixes
+
+- One finding on the round-14 head, verified against the actual plan
+  text: the Phase 1 "implement the custom-wordlist exclusion decision"
+  bullet and its matching Validation Plan test were both phrased as "a
+  repo with a custom wordlist and omitted `source_attribution` publishes
+  nothing," stated without qualification — contradicting the Context
+  decision (round-14 fix) that an already-assigned `codename_source:
+  "built-in"` record still publishes normally under the implicit default
+  even when the repo's current config has a custom wordlist. Split the
+  bullet explicitly into two distinct gates: the repo-level check is
+  **allocation-time only** (blocks assigning a *new* codename implicitly),
+  never a publish-time check; a `codename_source: "built-in"` record's
+  publish decision is untouched by it. Reworded the Phase 1 bullet and its
+  Validation Plan test to require BOTH a test that the allocation-time
+  error fires AND a test that a pre-existing built-in record still
+  publishes in that same repo/config combination, so one overbroad
+  implementation can't satisfy the requirement by accident.
+
+### 2026-09-20 — Plan-review round 16 fixes
+
+- One finding on the round-15 head, verified against the actual
+  `pr_ops.py` source: the paired-knowledge fix (round-10/11) and the
+  `create` command's preflight (round-12/13/14) only cover the `create`
+  command's harness-carve path. `ensure_codename` has a SECOND, entirely
+  separate call site — `pr_ops.py`'s `_open_via_provider`, in the
+  `codename`-marker branch's lazy-backfill — wrapped in its own bare
+  `try: ensure_codename(...); except Exception: pass`, deliberately broad
+  so an ordinary backfill failure (e.g. a lock `TimeoutError`) degrades to
+  "skip the marker" rather than aborting an otherwise-successful
+  `create-pr`. Unaddressed, this same broad handler would also swallow the
+  new `CodenameAttributionPolicyError`, letting `create-pr` succeed with
+  no marker for exactly the repo/config combination the policy exists to
+  block — fail-OPEN instead of fail-closed, and a different bypass route
+  than the one the paired-knowledge fix closes. Fixed by requiring this
+  handler to catch and re-raise `CodenameAttributionPolicyError`
+  specifically, ahead of the generic `except Exception: pass`, while every
+  other exception keeps today's skip-the-marker behavior. Added a matching
+  Validation Plan test pair: one proving `create-pr` fails closed for the
+  policy violation, one proving other exceptions are unaffected.
+
+
+### 2026-09-20 — Plan-review round 17 fixes
+
+- One finding on the round-16 head, verified against the actual
+  `pr_ops.py` source: the plan's publish-time `codename_source` gate
+  (round-8/9/12) and its Validation Plan integration test both only
+  addressed `_open_via_provider`'s initial-PR-body marker path.
+  `pr_ops.py` has a SECOND, independent marker publisher —
+  `refresh_source_attribution`, which republishes the managed attribution
+  comment on every later push to an already-open PR — whose `codename`
+  branch currently checks only `is_valid_handle(record.codename)`, with no
+  `codename_source` check at all. Left as specified, the initial-path fix
+  alone would leave a legacy or `"custom"`-sourced record's codename
+  publishing anyway on the PR's second and later pushes, defeating the
+  fail-closed guarantee this effort exists to add. Fixed by requiring both
+  marker-publishing call sites to share one `codename_source == "built-in"`
+  helper rather than duplicating (and risking re-drifting) the condition,
+  and adding a matching refresh-path Validation Plan test alongside the
+  existing initial-path one.
+
+### 2026-09-20 — Plan-review round 18 fixes
+
+- Five findings on the round-17 head, each verified against actual
+  source/repo convention before editing:
+  1. **Typing gap:** `create_pr`, `_finish_auto_open`, and
+     `_push_existing_feature` all still annotate their `attribution`
+     override parameter `bool | None`, but `create_pr` already threads
+     `prcfg.source_attribution` (typed `SourceAttribution`) through all
+     three on the unconfigured/default path — now routinely a string.
+     Added a Phase 1 item to widen all three to `SourceAttribution |
+     None`, matching `PRConfig`'s own field type.
+  2. **Live-validation gap:** the "this effort's own landing PR carries
+     a marker" live-validation target would silently fail: verified this
+     very worktree's `WorktreeRecord` predates `codename_source` and the
+     plan's own fail-closed migration rule requires an unbackfilled
+     record to suppress implicit publication permanently, so the
+     CURRENT worktree can never satisfy this check. Narrowed the
+     Validation Plan item to require either a NEW post-Phase-1 worktree
+     or an explicit, manually-verified `codename_source: "built-in"`
+     edit.
+  3. **Malformed Markdown (previously missed):** the round-11
+     concurrent-save-merge checklist item had lost its `- [ ] **Merge
+     ...` opening line during an earlier edit, leaving an orphaned
+     continuation paragraph starting mid-sentence with an unmatched
+     closing `**` and no checklist marker. Restored the missing prefix.
+  4. **Audit-remedy gap:** `audit_source_attribution_risk`'s `None`-branch
+     remedy text tells an absent-key repo to "migrate to ... codename" —
+     verified this is now a no-op once codename is the implicit default,
+     and gave the `None` branch the same mode-aware remedy the existing
+     `"codename"` branch already uses (drop the now-inapplicable clause).
+  5. **Structural (previously missed):** the effort README had grown to
+     1,137 lines, mixing detailed design rationale and a 12-round journal
+     into the coordination document, against `efforts/README.md`'s
+     "extract substantial phase designs/inventories into sibling
+     documents" convention. Split the Custom-wordlists/Downstream-effects
+     design rationale into **design.md** and the round-6 through round-16
+     journal history into **journal.md**, leaving this README as a
+     navigable summary with links — reduced from 1,137 to 746 lines.
+
+
+### 2026-09-20 — Plan-review round 19 fixes
+
+- Two findings on the round-18 head, verified against actual repo
+  convention:
+  1. The round-18 typing-fix bullet asked for a "type-check assertion,"
+     but checked `TESTING.md`: this repo's documented Python validation is
+     `ruff check --select F,E9` (pyflakes/syntax only) plus pytest — no
+     mypy/pyright gate exists, so that acceptance criterion was
+     unverifiable as written. Reworded to name the actual gate (and note
+     it does NOT itself catch this class of mismatch) and replaced the
+     criterion with a concrete runtime integration test: `create_pr` with
+     no explicit override, against a `"codename"`-resolved repo, must
+     propagate the string through `_finish_auto_open`/
+     `_push_existing_feature` and produce a published marker.
+  2. The round-18 journal entry's own finding count was wrong ("Four
+     findings" against a five-item list, including the structural
+     doc-split finding) — corrected to "Five." Also moved the round-18
+     journal entry itself into **journal.md** at this pass (it had been
+     left in the README as the "most recent" entry per the established
+     one-entry-in-README pattern; this entry now takes that place).
+
+### 2026-09-20 — Plan-review round 20 fixes
+
+- One "previously missed" finding on the round-19 head, verified
+  against actual source: the Phase 2 bullet asking to "re-examine
+  whether an absent-key repo with a safe `head_pattern` should be
+  flagged" posed this as an open design question, but
+  `providers/attribution.py`'s `audit_source_attribution_risk` already
+  returns `[]` immediately whenever `head_pattern_leak_risk` finds no
+  risky token, regardless of `source_attribution`'s value — a safe
+  `head_pattern` is already never flagged today, for any config. Fixed
+  by replacing the open question with a decisive "preserve this
+  existing behavior, add a regression test" requirement, removing the
+  only remaining undecided item in the Phase 2 checklist.
+
+### 2026-09-20 — Plan-review round 21 fixes
+
+- One finding on the round-20 head, verified against actual source —
+  and the most consequential gap found so far: the plan's
+  allocation-time custom-wordlist gate had only ever been specified for
+  `_carve_paired_knowledge` (the paired-knowledge-repo carve). Grepped
+  `__main__.py` for every `assign_new_codename` call site and confirmed
+  `_create_worktree_core` — the ORDINARY harness-worktree creation path
+  every `create` call goes through, not a rare paired-repo feature —
+  independently allocates a codename from only a resolved `Wordlist`,
+  with no raw-config access and therefore no way to enforce the
+  fail-closed policy at all. Left as specified, the plan's own
+  flagship regression test (round-15) would have passed while the most
+  common real-world path — an ordinary `create` — silently bypassed the
+  policy entirely. Fixed by adding an explicit Phase 1 item requiring
+  the identical preflight (same exception type, same
+  transactionality/TOCTOU treatment already specified for the
+  paired-knowledge path) in `_create_worktree_core` itself, plus a
+  dedicated Validation Plan test exercising `_create_worktree_core`'s
+  own wiring (not just the shared validation helper), so a regression in
+  either path is caught independently.
+
+### 2026-09-20 — Plan-review round 22 fixes
+
+- Four findings on the round-21 head (three new, one a scope-refinement
+  reopen of round-21's own fix) plus two "previously missed" items,
+  each verified against actual source/repo convention:
+  1. **Scoping (reopened round-21 finding):** the allocation-time
+     custom-wordlist gate blocked ordinary `create` even for repos with
+     PR mode entirely disabled — verified `PRConfig.enabled: bool =
+     False` by default, and that `codename.wordlist_path` is documented
+     as purely local/declarative. Since a `pr.enabled: false` repo can
+     never publish a marker, the persisted `codename_source` already
+     makes publish-time resolution safe regardless — scoped the
+     allocation-time gate (across all three call sites: normal
+     `create`, paired-knowledge, and the new `create-pr` preflight
+     below) to `pr.enabled: true` repos only, with a regression test
+     proving ordinary allocation still works for PR-inactive repos.
+  2. **Explicit-vs-implicit threading:** the publish-time gate's shared
+     helper decided "safe to publish" from `attribution == "codename"`
+     alone, but an EXPLICIT opt-in and the bare IMPLICIT default produce
+     the identical string at runtime and need opposite `codename_source`
+     handling. Threaded `PRConfig.source_attribution_configured` into
+     the shared helper so an explicit opt-in publishes any
+     `codename_source` while an implicit default still requires
+     `"built-in"`; added a parser-level test for the previously-missing
+     explicit-`codename` case (distinct from absent-key), which is what
+     the fix's own discriminator now depends on.
+  3. **Transactionality gap in `create-pr`:** verified `create_pr`
+     squashes, force-pushes, and saves the PR tracking record BEFORE
+     `_open_via_provider` runs — so round-16's late re-raise there would
+     abort with a real public branch and open tracking state already
+     left behind, unlike the preflight-based transactionality this plan
+     defines everywhere else. Added a `create_pr`-level preflight before
+     the squash/push (the ordinary case), keeping the late re-raise only
+     as the documented residual-race backstop.
+  4. **Vision classification (previously missed):** `below-altitude` was
+     inconsistent with Phase 1's actual scope (a new persisted field, a
+     new exception type, and multi-site policy gates) per
+     `AGENTS.md:139-143`'s "a design change owes both" rule. Reclassified
+     to vision-extending (against the existing PR-capability vision) and
+     documented that `docs/patterns/README.md`'s binding invariants don't
+     apply (this is a data-model/CLI change, not a plugin-service
+     topology change).
+  5. **Validation gap (previously missed):** the parser test list never
+     covered explicit `source_attribution: codename` at all — folded
+     into fix #2's new test.
+
+### 2026-09-20 — Plan-review round 23 fixes
+
+- One reopened/stale-carryover finding (verified already resolved,
+  no action needed), one new finding, and one nit:
+  1. Verified the round-22 explicit-vs-implicit `codename_source` gate
+     fix is correctly in place in the current head — the carried-over
+     thread's anchor commit predates that fix, so treated as a stale
+     carryover per the review protocol, not a real re-finding.
+  2. **Vision insufficiency:** round-22's `vision-extending`
+     reclassification cited
+     `visions/plugins/agent-worktrees/pull-requests` as already covering
+     this capability, but verified that vision doc never actually
+     mentions `source_attribution`, markers, or codenames — only the
+     generic provider-neutral PR surface. Citing an existing vision as
+     sufficient without it actually covering the capability doesn't earn
+     `vision-extending`. Revised the vision doc itself (a genuine blind
+     spot, not a vision-ahead gap): added a
+     `provenance-attribution-without-identifier-leakage` Feature and an
+     `unconfigured-attribution-never-leaks` Behavior stating the
+     informationless-by-default guarantee and its persistence-across-
+     config-change expectation at the intent level (no field names/config
+     keys pinned in the should-be body), bumped `Last revised`, and added
+     a Provenance entry. Updated the effort's own Vision line to point at
+     the now-actually-covering vision instead of merely asserting
+     sufficiency.
+  3. Fixed a duplicated-phrase typo in `design.md` ("see the assignment —
+     see the") left over from an earlier edit's text-splice.
+
+### 2026-09-20 — Plan-review round 24 fixes
+
+- One reopened/stale-carryover finding (verified the round-23 vision
+  revision is already in place, no action needed) and one new finding:
+  the PR's "Documentation impact" statement still claimed "no other
+  docs affected," but this PR now also revises
+  `visions/plugins/agent-worktrees/pull-requests/README.md` (round-23)
+  and added the `design.md`/`journal.md` sibling docs (round-18) —
+  neither was reflected in the PR description. Edited the PR
+  description directly (`pr edit --body-file`) to list the vision
+  revision and sibling-doc split under Changes and correct the
+  Documentation-impact statement to match the actual final diff.
+
+### 2026-09-20 — Plan-review round 25 fixes
+
+- Zero new findings; the one carried-over "Open" item
+  (documentation-impact statement) is anchored to commit `f2b538c47`,
+  which predates the round-24 PR-description edit that already fixed it
+  — verified the current PR description still correctly states the
+  vision revision under Documentation impact. Treated as a stale
+  carryover (the review tool's diff-based tracking does not appear to
+  re-resolve findings anchored to PR-metadata-only edits), not a real
+  re-finding, per the review protocol's commit-match check.
+
+### 2026-09-20 — Plan-review round 26 fixes
+
+- One new finding plus two "previously missed" items, each verified
+  against actual source (the doc-impact-statement carryover confirmed
+  already fixed, no action):
+  1. **Uncovered allocation paths:** verified `resume` and
+     `status --write` both call `ensure_codename` directly for legacy
+     pre-Phase-2 records with no codename yet, and neither was protected
+     by any of the allocation-time preflights specified so far (those
+     only covered `create`/paired-knowledge/`create-pr`). Centralized
+     the gate INSIDE `ensure_codename` itself (on the actual-new-
+     allocation branch only, never the concurrent-writer-copy branch),
+     so every current and future caller is protected by construction.
+  2. **Retroactive attribution changes:** verified `refresh_source_attribution`
+     re-reads live config on every push, which could silently change an
+     already-open PR's attribution mode mid-review if the repo's config
+     changes — directly contradicting the `unconfigured-attribution-
+     never-leaks` vision behavior this effort itself added in round-23.
+     Added `PRRecord.attribution_mode`, frozen at PR-open time and
+     consulted (never live config) on every later refresh, with an
+     explicit no-regression fallback for a PR already open before this
+     field ships.
+  3. **Migration policy ambiguity (previously missed):** Phase 3 offered
+     "remove or flip to codename" as equivalent choices for this repo's
+     own config, but verified they are NOT equivalent under the round-22
+     `source_attribution_configured` gate (explicit `codename` would
+     authorize even an unverified/unknown legacy `codename_source`).
+     Chose removal decisively as this repo's migration and updated the
+     config-comment-update requirement to match.
+
+### 2026-09-20 — Plan-review round 27 fixes
+
+- Two new findings plus two stale carryovers (verified already fixed,
+  no action) on the round-26 head:
+  1. **Manual `set-pr` uncovered:** verified round-26's
+     `attribution_mode` stamping happened only inside
+     `_open_via_provider`, but that's not where a `PRRecord` is actually
+     constructed for `create_pr`'s own auto-open flow, and manual
+     `set-pr` never calls `_open_via_provider` at all — its own bare
+     `PRRecord()` would permanently miss the stamp. Found and fixed a
+     malformed-checklist side effect of the round-26 edit too (the
+     Phase 1 "Versioning gate" bullet had lost its opening sentence).
+     Moved the stamping to a single shared helper called at all four
+     `PRRecord` construction/parse sites: `create_pr`'s own
+     construction, `_push_existing_feature`'s fresh-target
+     construction, `set-pr`'s manual construction, and `_parse_pr`'s
+     deserialization (a read, not a stamp).
+  2. **Explicitness not frozen alongside mode:** `attribution_mode`
+     alone doesn't capture whether that mode was explicit or implicit,
+     so a repo adding/removing an explicit `source_attribution: codename`
+     key after a PR opened could still retroactively flip that PR's
+     publish authorization for a `"custom"`-sourced codename — the same
+     retroactive-change bug one level deeper. Added
+     `PRRecord.attribution_explicit`, stamped together with
+     `attribution_mode` by the same shared helper, and corrected
+     `design.md`'s decisive-fix paragraph, which had explicitly (and
+     incorrectly) claimed explicitness is "read at publish time" from
+     live config.
+
+### 2026-09-20 — Plan-review round 28 fixes
+
+- One new finding plus four stale carryovers (verified already fixed):
+  round-27's freeze fix specified parsing `attribution_mode`/
+  `attribution_explicit` back from YAML (`_parse_pr_mapping`) but never
+  specified the WRITE side — verified `tracking.py`'s `_pr_to_yaml_dict`
+  is a separate, lean omit-empties dict-builder that would silently drop
+  both new fields on the very next save, undoing the freeze one
+  `save_record` after it's stamped. Added the explicit requirement to
+  emit both fields from `_pr_to_yaml_dict` (matching its existing
+  only-emit-when-set pattern) and a round-trip Validation Plan test
+  proving both directions actually work together.
+
+### 2026-09-20 — Plan-review round 29 fixes
+
+- One genuine finding, fixed: the Guiding Intent's opening claim ("the
+  codename feature works end-to-end, proven live against real merged
+  PRs") conflated implementation/test coverage with live proof of the
+  codename marker itself — the only live-merged-PR evidence this doc
+  cites is the RAW marker form (`source_attribution: true`) on a private
+  downstream repo; no repo has ever published a real PR carrying the
+  codename-FORM marker, and this effort's own Phase 4 explicitly defers
+  that live proof until after this PR lands. Reworded the Guiding Intent
+  to state this distinction plainly instead of overclaiming.
+- Four stale carryovers (verified already fully resolved in current
+  text, each anchored to a commit predating the fix that resolved it —
+  freeze-for-manual-`set-pr`, persist-attribution-decisions,
+  persist-attribution-fields-in-YAML-round-tripping, and
+  freeze-publish-authorization-alongside-mode are all specified in the
+  Plan's round-26/27/28 freeze bullet and design.md's round-27
+  refinement) and one permanently-stale carryover (the
+  documentation-impact statement finding, `#discussion_r4057190221`,
+  unchanged at anchor `f2b538c47` for six rounds straight — the PR
+  description remains verifiably correct; not re-edited again).
+
+### 2026-09-20 — Plan-review round 30 fixes
+
+- Confirmed: all four round-29 "stale carryover" calls verified
+  correct — this round's review lists them under "Resolved since last
+  review," proving they were already fixed by rounds 26-28.
+- Two new, genuine findings, both closing gaps the round-26/27/28 freeze
+  design left open:
+  1. **Strict validation for the persisted `attribution_mode`/
+     `attribution_explicit` pair:** the round-28 round-trip fix
+     specified emitting/parsing both fields but never specified STRICT
+     parsing, the same class of gap the round-12 fix already closed for
+     `codename_source` — a hand-edited/malformed `attribution_explicit:
+     "false"` string would be truthy-coerced, an unrecognized
+     `attribution_mode` value could be silently accepted, and a partial
+     pair (only one field set) could authorize publication off the one
+     field present. Added explicit strict-parsing requirements (closed
+     mode set, strict boolean check, partial-pair-falls-back rule) plus
+     three regression tests.
+  2. **Merge the frozen `pr` field under the record lock during
+     concurrent saves:** verified in source that `_save_record_unlocked`
+     has NO merge protection for `pr` at all (no revision counter, no
+     merge branch) — unlike `codename`/`codename_source` (round-11) and
+     `profile_assignment_revision`, which it already protects. A stale
+     concurrent `WorktreeRecord` save could silently erase a freshly-
+     frozen attribution pair, defeating the entire freeze guarantee one
+     layer beneath the round-28 write-side fix. Added a `pr_revision`
+     counter following the existing revision-merge pattern, plus a
+     stale-writer regression test.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for seven rounds straight — not re-edited again).
+
+### 2026-09-20 — Plan-review round 31 fixes
+
+- Confirmed: both round-30 findings (strict-parsing, `pr_revision`
+  merge protection) verified correct — this round's review lists them
+  under "Resolved since last review."
+- Two new genuine findings, one prior "Previously missed" finding
+  actually addressed for the first time:
+  1. **`pr_revision` needs explicit YAML load/save wiring, not
+     in-memory-only (round-31 finding):** `WorktreeRecord` is
+     hand-serialized, so a counter with no read/write wiring reloads as
+     `0` in every other process, defeating the round-30 merge guard
+     entirely. Added an explicit parse line (following
+     `profile_assignment_revision`'s own bounded-int parsing) and emit
+     line (following its exact only-emit-when-set pattern), plus a
+     round-trip regression test using a FRESH object, not a mutated
+     reference.
+  2. **Freeze must capture the caller's effective per-call attribution
+     override, not raw config (round-31 finding, was flagged separately
+     as "Previously missed" too):** verified in source that `create_pr`
+     accepts its own `attribution: bool | None` override
+     (`--attribution`/`--no-attribution`), and every call site already
+     computes an effective `want_attribution` before deciding whether to
+     publish. If the freeze stamp instead reads `prcfg.source_attribution`
+     directly, a `--no-attribution` PR would still stamp from live
+     config and a later refresh would start publishing a marker the
+     operator explicitly suppressed — the freeze's OWN construction
+     recreating the exact retroactive-change bug it exists to prevent.
+     Fixed: the shared stamping helper now takes the caller's
+     already-computed effective value, with an override always forcing
+     `attribution_explicit = True` (a per-call override is a stronger,
+     more explicit signal than any config flag). **Self-caught
+     correction:** the first draft of this fix wrongly claimed a
+     per-call override is "always a bool, never `codename`" — but this
+     SAME Phase 1's round-18 fix widens the `attribution` parameter's
+     type to `SourceAttribution | None`, so a post-widening override CAN
+     legitimately be `"codename"` too; corrected to stamp whatever value
+     the override itself carries, verbatim, and added a matching
+     regression test.
+  3. **Doc-split maintenance (round-31 finding, low severity):** the
+     README had grown to 1,252 lines with my own round-31 additions,
+     re-triggering the round-18 doc-split concern — the freeze/
+     strict-validation/merge-protection bullets (rounds 26-31, ~178
+     lines) carried the most self-contained design rationale of
+     anything still in the README. Moved that full rationale into
+     **[design.md § Per-PR attribution freeze](design.md#per-pr-attribution-freeze-rounds-26-32)**,
+     leaving a condensed, still-fully-actionable checklist item in the
+     Plan. README dropped from 1,252 to ~1,120 lines.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for eight rounds straight — not re-edited again).
+
+### 2026-09-20 — Plan-review round 32 fixes
+
+- Confirmed: both round-31 findings (`pr_revision` YAML wiring, doc
+  split) verified correct — this round's review lists them under
+  "Resolved since last review."
+- Four new, genuine findings, all substantive design corrections to the
+  round-26/31 freeze mechanism:
+  1. **Explicit opt-in was over-broad (round-32 finding, narrows the
+     round-14/22 rule):** the original rule read an explicit
+     `source_attribution: codename` opt-in as authorizing publication
+     UNCONDITIONALLY regardless of `codename_source` — but that bypassed
+     the round-10 backfill's fail-closed guarantee for a record with
+     MISSING or unrecognized provenance, which may have been assigned
+     under a since-removed custom wordlist the operator never actually
+     reviewed. Narrowed: explicit opt-in only bypasses the built-in-vs-
+     custom ALLOCATION distinction (publishes a KNOWN `"custom"` record),
+     never provenance itself — an unbackfilled/unknown record still
+     requires the same manual per-record verification regardless of
+     attribution mode.
+  2. **`pr_revision` merge must operate on the full `prs` list, not the
+     single `.pr` accessor:** verified in source that `.pr` is only a
+     back-compat property over `WorktreeRecord.prs` (which supports
+     serial and PARALLEL PRs) — a merge keyed on the active-PR accessor
+     alone cannot protect a frozen pair on a non-active entry. Corrected
+     to a per-entry merge keyed by stable identity (`number` when set,
+     else `branch`), with `pr_revision` scoped per-entry rather than one
+     shared worktree-level counter.
+  3. **Legacy-PR migration conflicted with the vision guarantee it was
+     supposed to serve:** the "falls back to live config unchanged"
+     framing for a pre-existing `PRRecord` meant a repo's later
+     `source_attribution` change could still silently add/remove/reshape
+     that PR's marker on its next refresh — exactly the retroactive
+     exposure the `unconfigured-attribution-never-leaks` behavior
+     forbids, just deferred rather than eliminated. Replaced with a
+     ONE-TIME lazy-backfill freeze at the legacy PR's first
+     post-migration touch (mirroring `codename_source`'s own
+     lazy-assignment pattern), after which it is frozen exactly like
+     every PR opened after this mechanism shipped.
+  4. **The vision itself needed the same narrowing (mirrored in
+     `visions/plugins/agent-worktrees/pull-requests/README.md`):** the
+     persistence-across-config-change guarantee, as first worded, read
+     as an unbounded promise that also covered PRs published before the
+     mechanism existed — impossible to keep without perpetually
+     re-deriving from live config. Revised to be explicitly
+     forward-looking from the point persistence exists, migrated via the
+     same one-time freeze-at-first-touch, with a new Provenance entry
+     documenting the clarification.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for nine rounds straight — the PR description remains
+  accurate even after this round's further vision edit; not re-edited
+  again).
+
+### 2026-09-20 — Plan-review round 33 fixes
+
+- Confirmed: all four round-32 findings (explicit-opt-in narrowing,
+  per-entry `prs` merge, legacy freeze-at-first-touch, vision boundary)
+  verified correct — this round's review lists them under "Resolved
+  since last review."
+- Four new genuine findings, all leftover-consistency gaps from round
+  32's own edits: the round-32 fix corrected the RULE in one place per
+  document but left three OLDER restatements of the SAME superseded
+  unconditional rule unedited elsewhere in the same docs, and one
+  condensed-summary ambiguity from round 31's own doc-split:
+  1. The Plan's round-22 rationale paragraph (README.md) still said an
+     explicit opt-in "publish[es] regardless of `codename_source`" — the
+     exact unconditional statement round-32 narrowed everywhere else.
+     Corrected to state the narrowed rule (known provenance only).
+  2. design.md's own "downstream effects" narrative (the sibling
+     rationale doc for the SAME allocation-vs-publish distinction) still
+     carried the identical unconditional sentence, never updated when
+     README's copy was narrowed. Corrected to match.
+  3. The condensed Phase-1 checklist bullet (introduced by round 31's
+     own doc-split) listed `_parse_pr_mapping` as one of "all four"
+     stamping sites — but parsing an EXISTING record must stay strict
+     read-only (it deserializes an already-frozen pair, never re-derives
+     it); only the THREE fresh-construction sites actually stamp.
+     Corrected the condensed bullet to separate the three stamp sites
+     from the one read-only parse site explicitly (design.md's own
+     detailed text already had this distinction right; only the
+     round-31 condensed summary lost it).
+  4. design.md's strict-validation section still described a malformed/
+     partial persisted pair as "falls back to live config, today's
+     existing behavior" — phrasing that reads as a PERPETUAL fallback,
+     contradicting the round-32 one-time-freeze migration this same
+     section specifies. Reworded: a malformed/partial pair is migrated
+     via the identical one-time lazy-backfill freeze as a genuinely
+     missing pair, never re-derived from live config on every later
+     touch.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for ten rounds straight — not re-edited again).
+
+### 2026-09-20 — Plan-review round 34 fixes
+
+- Confirmed: all four round-33 findings (leftover unconditional-opt-in
+  restatements, condensed-checklist ambiguity) verified correct — this
+  round's review lists them under "Resolved since last review."
+- Three new genuine findings, all real correctness gaps in the round-32
+  fixes:
+  1. **`attribution_explicit` emission was keyed on the wrong condition:**
+     the round-28 emit spec used an omit-when-falsy pattern, but
+     `attribution_explicit=False` is itself a legitimately-frozen state
+     (e.g. an implicit `codename` decision) — omitting it would strand
+     `attribution_mode` without its partner on reload, silently
+     re-triggering the lazy-backfill freeze. Corrected: emit
+     `attribution_explicit` whenever `attribution_mode` is non-empty,
+     regardless of its own True/False value.
+  2. **PR identity matching didn't account for the `number=None` →
+     provider-assigned-`number` transition:** `create_pr` saves a
+     `PRRecord` before the provider assigns its `number`; the round-32
+     "number when set, else branch" rule would key a stale pre-number
+     snapshot and its now-numbered on-disk counterpart by DIFFERENT
+     fields, appending a duplicate instead of merging. Corrected: two
+     entries match when both have equal numbers, OR either side lacks a
+     number and their branches are equal.
+  3. **The provenance fail-closed rule was scoped too broadly:** round-32
+     said an unbackfilled/unknown-provenance record "never auto-publishes
+     under any attribution mode" — but `source_attribution: True`'s
+     independent raw-marker path never depended on `codename_source` and
+     must not start now. Scoped the rule explicitly to codename markers
+     only, added a regression test proving raw-marker publication is
+     unaffected.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for eleven rounds straight — not re-edited again).
+
+### 2026-09-20 — Plan-review round 35 fixes
+
+- Confirmed: all three round-34 findings (emit condition, identity
+  transition, provenance scope) verified correct — this round's review
+  lists them under "Resolved since last review."
+- Two new genuine findings, both further correctness gaps in the
+  round-34 identity-matching fix:
+  1. **Empty branches could falsely collide:** round-34's "either side
+     lacks a number → match by branch" rule didn't require the branch to
+     be non-empty — two independent, freshly-created blank `PRRecord`s
+     (e.g. from separate manual `set-pr` calls) both have `branch=""`,
+     which would match under the naive rule and silently merge one
+     blank record's state onto an unrelated one's. Fixed: branch
+     equality only establishes identity when the branch is NON-EMPTY;
+     entries with no real identity on either side never match.
+  2. **PR numbers aren't immutable:** round-34's "number when both set,
+     else branch" rule required equal numbers whenever both entries had
+     one — but a manual `set-pr` correction can reassign a number while
+     the branch stays fixed, so a stale snapshot (`number=7`) would fail
+     to match its own renumbered on-disk counterpart (`number=8`, same
+     branch) and wrongly append a duplicate. Corrected: `branch` (when
+     non-empty) is now the PRIMARY identity in all cases; `number` is
+     only a fallback when `branch` is empty on both sides.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for twelve rounds straight — not re-edited again).
+
+### 2026-09-20 — Plan-review round 36 fixes
+
+- One new genuine finding: **`branch` isn't immutable either.**
+  Round-35's "branch is the primary identity" rule assumed a pushed
+  feature branch name never changes once set, but the same manual
+  `set-pr` correction path that can reassign `number` (`pr_ops.py`'s
+  `_set_pr_locked`) can ALSO reassign `branch`, with no identity-preserving
+  reset tied to either mutation. A stale snapshot captured before a
+  concurrent branch correction would then fail to match its own on-disk
+  counterpart by branch OR number, reproducing the exact
+  false-non-match/duplicate-append failure round-34/35 fixed for `number`
+  alone. Fixed: added a dedicated `pr_id` field — a random UUID assigned
+  ONCE at entry creation and never mutated by any later `branch`/
+  `number`/`provider`/`state` correction — as the SOLE per-entry identity,
+  superseding `branch` entirely. Every existing `PRRecord` gets `pr_id`
+  backfilled in a single one-time migration pass at shipping time (not
+  lazily at next touch), closing the window where a not-yet-migrated
+  entry could still race a `set-pr` correction with no stable identity on
+  either side.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for thirteen rounds straight — not re-edited again).
+
+### 2026-09-20 — Plan-review round 37 fixes
+
+- Confirmed: round-36's `pr_id` identity fix verified correct — this
+  round's review lists it under "Resolved since last review."
+- Two new genuine findings, both exposing that round-36's design
+  described mechanisms with no actual place to run:
+  1. **No executable hook for the `pr_id` backfill:** round-36 called for
+     a "one-time migration pass at shipping time," but this repo's
+     config-migration framework (`config_migrations.py`) is scoped to
+     machine-local config and explicitly excludes tracking YAML — the
+     described pass had no entry point that would ever invoke it. Fixed:
+     backfill `pr_id` INLINE inside `_save_record_unlocked`'s existing
+     merge step, which already runs under the record lock on every
+     single `save_record` call — no separate migration mechanism needed.
+  2. **The legacy-freeze-on-first-touch design (round-32) can't fire
+     for a repo whose live `source_attribution` starts `False`:**
+     `refresh_source_attribution` returns immediately
+     (`if not config.default_repo.pr.source_attribution: return ""`,
+     `pr_ops.py:1199`) before ever reaching the freeze logic. A legacy
+     PR first touched under a false config would stay unmigrated
+     indefinitely; if the config later changes to `codename`, that LATER
+     touch (not the true first one) would be lazily frozen instead,
+     silently adopting the newer policy. Fixed: the freeze check must
+     run BEFORE the live-config early return, unconditionally — freezing
+     to the false state when that's what's live, so a later config
+     change correctly finds the pair already frozen.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for fourteen rounds straight — not re-edited again).
