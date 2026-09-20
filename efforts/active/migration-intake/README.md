@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees
 - **Created:** 2026-08-29
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** efforts `one-canonical-effort`, `reviewed-wave-execution`, and
   `cross-repository-effort-ownership`
 
@@ -68,16 +68,50 @@ Establish a generic intake campaign that can validate and route deferred
 general-purpose work without publishing its originating context or creating a
 second owner for scope already covered by an active or completed effort.
 
+## Intake Contract
+
+Frozen per Phase 1. Every candidate processed by this effort is evaluated
+against exactly this contract; a candidate that does not satisfy it is not
+published.
+
+1. **Disposition.** Every candidate resolves to exactly one of:
+   - `routed` — accepted into an existing canonical domain plan's own Plan
+     section (the domain plan is extended if its current phases do not yet
+     cover the work).
+   - `residual` — genuinely general-purpose but not yet classifiable into any
+     canonical domain; stays intake-owned until enough is known to route it.
+   - `rejected` — not portable/general-purpose (tied to one machine, one
+     session, or non-reproducible context) and not published.
+   - `closed-obsolete` — already satisfied by delivered scope (checked against
+     the domain plan's own journal/Validation Plan, or an `agent-index-engine-daemon`
+     / `uniform-runtime-resolution`-style completed reference).
+   - `superseded` — a duplicate of an existing tracker entry or another
+     candidate; the entry records which one it defers to.
+2. **Ownership.** A candidate is publishable only once it has exactly one
+   primary owner (a canonical domain plan, or this effort itself for
+   `residual`). Cross-domain relevance may be noted in the ledger without
+   creating a second owner.
+3. **Fail-closed.** If ownership or publication safety (novelty vs. the live
+   tracker, absence of environment-specific identifiers) cannot be resolved
+   from available evidence, the candidate stays `residual` — it is never
+   force-routed or force-published to clear a queue.
+
+The **candidate ledger** (`ledger.md` in this directory) is the append-only
+record: one row per candidate with its source, disposition, owner, and
+tracker outcome. A candidate leaves `residual` only when a later pass can
+resolve disposition 1-3 above.
+
 ## Plan
 
 ### Phase 1 - Freeze the intake contract
 
-- [ ] Require one explicit disposition per candidate: route to a canonical
+- [x] Require one explicit disposition per candidate: route to a canonical
   domain effort, retain as an intake-owned residual, reject as non-portable,
-  close as obsolete, or supersede as a duplicate.
-- [ ] Require one primary owner before publication; cross-domain relevance may
-  be recorded without creating joint ownership.
-- [ ] Fail closed when ownership or publication safety is unresolved.
+  close as obsolete, or supersede as a duplicate. (See Intake Contract above.)
+- [x] Require one primary owner before publication; cross-domain relevance may
+  be recorded without creating joint ownership. (See Intake Contract above.)
+- [x] Fail closed when ownership or publication safety is unresolved. (See
+  Intake Contract above.)
 
 ### Phase 2 - Validate and deduplicate
 
@@ -126,7 +160,37 @@ retain only genuinely unclassified general-purpose work here.
 
 ## Journal
 
+### 2026-09-20 — Phase 1 frozen; initial Phase 2 candidate ledger
+
+- Froze the intake contract (Phase 1, all three items) as an explicit,
+  referenceable **Intake Contract** section: a 5-way disposition taxonomy
+  (`routed`/`residual`/`rejected`/`closed-obsolete`/`superseded`), a
+  single-primary-owner rule, and a fail-closed rule for unresolved
+  ownership/safety.
+- Created `ledger.md`, the append-only candidate record the contract
+  references.
+- Ran an initial breadth-first scan of all ~47 `efforts/active/` directories
+  for deferred/out-of-scope/future-work language in their Journal and Plan
+  sections. Logged 19 raw candidates with a proposed disposition and owner
+  each (see `ledger.md`) -- explicitly **not yet Phase-2-revalidated**: none
+  have been checked against current code/docs/issues, so no tracker entries
+  exist yet and Phase 2's checkboxes remain unticked. Six candidates are
+  proposed `routed` to `worktree-manager-control-plane` alone, suggesting
+  that effort may be a much larger active sink than its own Plan currently
+  reflects -- worth confirming with that effort's owner before Phase 3
+  acceptance.
+- Data-quality finding (not a candidate): the canonical domain-plans list's
+  `session-context-aggregation` entry correctly points outside
+  `efforts/active/` (a completed historical reference), but its list
+  placement reads as if it were an active plan -- flagged for a future
+  clarifying pass, not fixed here to avoid conflating a docs nit with the
+  intake campaign's own work.
+- Next: Phase 2 revalidation of the 19 raw candidates (confirm against
+  current code/docs/issues, dedupe, strip any residual environment
+  specificity) before any Phase 3 routing/publication.
+
 ### 2026-08-29 - Kickoff
 
 - Established the neutral intake contract and indexed the canonical domain
   plans without importing any originating context.
+
