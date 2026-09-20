@@ -136,14 +136,21 @@ codename feature exists to provide, if that custom vocabulary happens to
 contain identifying or private terms.
 
 **Decision:** a repo with `codename.wordlist_path` configured is excluded
-from the new implicit default entirely. For such a repo,
-`pr.source_attribution` must be set explicitly (`codename`, `true`, or
-`false`); the new default only auto-applies to a repo with no custom
-wordlist configured. This config-shape check (does this repo have a custom
-wordlist configured *right now*?) resolves both halves of the risk for the
-common case where a repo's wordlist config never changes after
-assignment — see the legacy-record gap and its provenance-tracking fix
-below for the remaining case where it does:
+from the new implicit default entirely **for new codename allocations**.
+For such a repo, `pr.source_attribution` must be set explicitly
+(`codename`, `true`, or `false`) before a **new** codename may be assigned;
+the new default only auto-applies to a repo with no custom wordlist
+configured *at assignment time*. This config-shape check (does this repo
+have a custom wordlist configured *right now*?) governs allocation-time
+behavior only — it is superseded, for publish-time attribution decisions on
+an **already-assigned** codename, by the per-record `codename_source` check
+in the decisive fix below (round-14 finding: the two checks answer
+different questions — "may a new codename be allocated implicitly?" vs.
+"is this existing codename safe to publish implicitly?" — and must not be
+conflated). This resolves both halves of the risk for the common case
+where a repo's wordlist config never changes after assignment — see the
+legacy-record gap and its provenance-tracking fix below for the remaining
+case where it does:
 
 - **Future allocations:** a repo with a custom wordlist never silently
   inherits `codename` mode — it must opt in explicitly, at which point the
@@ -172,18 +179,27 @@ the two cases apart from config state alone.
 current config. At codename-assignment time, `WorktreeRecord` gains a
 `codename_source` field (`"built-in"` or `"custom"`) recorded once and
 never revisited afterward. Publish-time attribution resolution consults
-**the record's own stored `codename_source`** for whether a given
+**only the record's own stored `codename_source`** for whether a given
 already-assigned codename is safe to publish under the implicit default —
-not the repo's current `codename.wordlist_path` config, which may have
+never the repo's *current* `codename.wordlist_path` config, which may have
 drifted since assignment. A record with `codename_source: "custom"`
-requires the same explicit `pr.source_attribution` opt-in as a repo
-currently configured with a custom wordlist, regardless of what the repo's
-config says today; a record with `codename_source: "built-in"` is safe
-under the new implicit default unconditionally. New allocations still
-consult the *current* config to decide `codename_source` at the moment of
-assignment (the current-config check remains correct and sufficient there,
-since assignment and config-read are contemporaneous) — this is a targeted
-addition, not a replacement, of the config-shape check above.
+requires an explicit `pr.source_attribution` opt-in to publish, regardless
+of what the repo's config says today; a record with `codename_source:
+"built-in"` is safe under the new implicit default unconditionally, **even
+if the repo's `codename.wordlist_path` is currently configured** — a
+built-in-sourced codename was never drawn from that custom vocabulary, so
+the repo-level allocation-time gate above (which governs whether a *new*
+codename may be allocated implicitly) has no bearing on whether *this
+already-assigned* codename is safe to publish (round-14 finding:
+these are deliberately two independent gates, not one rule reapplied
+twice — allocation-time gate decides `codename_source` for a new record and
+whether the implicit default may assign one at all; publish-time gate
+decides only from the resulting stored `codename_source`, forever fixed at
+assignment). New allocations still consult the *current* config to decide
+`codename_source` at the moment of assignment (the current-config check
+remains correct and sufficient there, since assignment and config-read are
+contemporaneous) — this is a targeted addition, not a replacement, of the
+config-shape check above.
 
 ### Downstream effects to re-examine, not just the default itself
 
@@ -276,38 +292,41 @@ addition, not a replacement, of the config-shape check above.
   from (a), easy to miss); (c) the lazy backfill path
   (`codename_tracking.ensure_codename`, called from `__main__.py`'s
   resume/status backfill and `pr_ops.py`'s create-PR path). **Classify
-  using the RAW `codename.wordlist_path` config value's presence
-  (round-11 finding), never `wordlist_for_repo`'s resolved `Wordlist`**:
+  using `CodenameConfig.wordlist_path_configured` (defined immediately
+  below), never `wordlist_path`'s truthiness and never
+  `wordlist_for_repo`'s resolved `Wordlist`** (round-11 + round-13 +
+  round-14 findings, consolidated into one rule): all three assignment
+  sites only ever have access to the already-PARSED `CodenameConfig`, not
+  a raw config mapping, so classification must be driven entirely by a
+  flag `parse_codename` sets while parsing, never by re-reading anything
+  raw. Two independent failure modes justify this over checking
+  `wordlist_path` or the resolved `Wordlist` directly: (1)
   `load_wordlist_or_default` (which `wordlist_for_repo` calls) fail-softs
-  to `DEFAULT_WORDLIST` for a missing or malformed custom-path file
+  to `DEFAULT_WORDLIST` for a missing or malformed custom-path *file*
   (`codename.py`'s `load_wordlist_or_default`), so a configured-but-broken
   custom path would resolve to the exact same `Wordlist` object as "no
   custom path configured" — checking the resolved wordlist would
-  misclassify it `"built-in"` and let it publish under the implicit
-  default, contradicting the fail-closed policy. Each site must read the
-  raw `codename.wordlist_path` string at THAT call's own moment (non-empty
-  → `"custom"`, empty/absent → `"built-in"`), not share a value computed
-  elsewhere and not derive it from the resolved `Wordlist`.
+  misclassify it `"built-in"`; (2) `codename_config.parse_codename`
+  (verified in source) silently normalizes ANY non-string `wordlist_path`
+  *value* (e.g. `wordlist_path: []`, a number, a mapping) to the empty
+  string — indistinguishable from "key never set" — so checking
+  `wordlist_path`'s truthiness would misclassify that case too. Both
+  failure modes are closed by the single flag defined next; a value's
+  *validity* or a file's *loadability* are irrelevant to classification,
+  only the raw key's *presence* matters.
 - [ ] **Add a `wordlist_path_configured` flag to distinguish "absent" from
-  "present but malformed" (round-13 finding)** — the "read the raw path"
-  rule above is not implementable as stated: all three assignment sites
-  only have access to the already-PARSED `CodenameConfig`, and
-  `codename_config.parse_codename` (verified in source) silently
-  normalizes ANY non-string `wordlist_path` value (e.g. `wordlist_path:
-  []`, a number, a mapping) to the empty string — indistinguishable from
-  "key never set." A malformed-but-present value would therefore
-  misclassify as `"built-in"` the same way round-11's raw-vs-resolved gap
-  did. Fix by extending `CodenameConfig` with a
-  `wordlist_path_configured: bool` field, set by `parse_codename` to
+  "present but malformed" (round-13 finding)** — extend `CodenameConfig`
+  with a `wordlist_path_configured: bool` field, set by `parse_codename` to
   `True` whenever the raw `codename:` block's `wordlist_path` key is
   present at all (regardless of whether its value parses to a valid
-  string) — mirroring the exact pattern `source_attribution_configured`
-  already uses for the analogous "key present vs. absent" distinction on
-  `pr.source_attribution`. Classification then checks THIS flag, not
-  `wordlist_path`'s truthiness, so a malformed value still classifies
-  `"custom"` (fail closed). Add tests proving: `wordlist_path: []` (or
-  any other non-string value) still classifies `"custom"`, not
-  `"built-in"`.
+  string, or whether the file it names exists or loads) — mirroring the
+  exact pattern `source_attribution_configured` already uses for the
+  analogous "key present vs. absent" distinction on `pr.source_attribution`.
+  Classification then checks THIS flag, so a malformed value or an
+  unreadable file still classifies `"custom"` (fail closed). Add tests
+  proving: `wordlist_path: []` (or any other non-string value) still
+  classifies `"custom"`, not `"built-in"`, and a valid string path naming a
+  missing/malformed file also classifies `"custom"`.
 - [ ] **Fix `ensure_codename`'s signature and provenance-copy gap
   (round-12 finding):** the lazy-backfill function currently accepts only
   a resolved `wordlist: Wordlist | None` parameter (never the raw path,
@@ -365,24 +384,36 @@ addition, not a replacement, of the config-shape check above.
   unresolved/omitted `source_attribution`?) BEFORE any harness-side
   create side effect (worktree, branch, or record) happens, and fail the
   whole `create` command at that preflight point if the policy would be
-  violated. **This narrows, but does not eliminate, the exposure — say
-  so explicitly rather than overclaiming full transactionality (round-13
-  finding):** a config edit landing in the window between the preflight
-  check and the actual `_carve_paired_knowledge` call is a residual,
-  accepted TOCTOU race no in-process check alone closes (closing it
-  fully would need config-file locking, out of scope for this effort).
-  Shrink that window as far as practical by **revalidating the identical
-  preflight check a second time immediately before the first
-  harness-side side effect** (as late as possible in the `create` path,
-  not just once at the top), rather than relying on a single early
-  check — this still leaves a narrow residual window, which the plan
-  explicitly accepts rather than silently ignores. The re-raised
-  exception path (inner + outer handlers above) remains a defense-in-
-  depth backstop for exactly this residual window, not the primary
-  enforcement mechanism. Add a regression test: the preflight check
-  rejects the `create` command outright, before any worktree/branch/
-  record exists, for a knowledge project with a custom wordlist and
-  omitted `source_attribution`.
+  violated. **This narrows, but does not eliminate, the exposure — the
+  transactionality claim covers only the preflight-detected case, never
+  the full flow (round-13 finding, further resolved round-14):** a config
+  edit landing in the window between the preflight check and the actual
+  `_carve_paired_knowledge` call is a residual, accepted TOCTOU race no
+  in-process check alone closes (closing it fully would need config-file
+  locking, out of scope for this effort). Shrink that window as far as
+  practical by **revalidating the identical preflight check a second time
+  immediately before the first harness-side side effect** (as late as
+  possible in the `create` path, not just once at the top), rather than
+  relying on a single early check. **If the residual race is hit anyway
+  (round-14 finding — specify the concrete behavior, do not leave it
+  implicit):** the re-raised exception path (inner + outer handlers above)
+  still fails the `create` command, and Phase 1 does **not** attempt to
+  automatically roll back the already-created harness worktree, branch, or
+  tracking record — no rollback protocol is implemented, an explicit scope
+  decision consistent with the config-locking exclusion above (a correct
+  rollback of a partially-created git worktree/branch is materially harder
+  than the check it would be compensating for, and this race is narrow and
+  rare). Instead, the error surfaced to the operator MUST name the exact
+  orphaned worktree path and branch so it can be removed with the existing
+  worktree-removal path (`git worktree remove`); this is a defense-in-depth
+  backstop for the residual window, not a substitute for the preflight
+  checks, which remain the primary enforcement mechanism. Add a regression
+  test: the preflight check rejects the `create` command outright, before
+  any worktree/branch/record exists, for a knowledge project with a custom
+  wordlist and omitted `source_attribution`; add a second regression test
+  simulating the race (policy becomes violated only after the second
+  preflight check) asserting the failure message names the orphaned
+  worktree path/branch and that no automatic rollback is attempted.
 - [ ] **Merge `codename`/`codename_source` under the record lock during
   concurrent saves (round-11 finding):** `_save_record_unlocked` already
   merges several fields (handoff reservations, lifecycle/session-backend/
@@ -601,13 +632,22 @@ addition, not a replacement, of the config-shape check above.
 - [ ] Unit (round-12 finding): the preflight check rejects a `create`
   command for a paired-knowledge policy violation BEFORE any
   harness-side worktree, branch, or tracking record is created — proving
-  the failure is transactional (no orphaned partial state), not just a
-  late re-raise after the harness side already exists.
+  the failure is transactional for the preflight-detected case (no
+  orphaned partial state when the check catches the violation), not just
+  a late re-raise after the harness side already exists.
 - [ ] Unit (round-13 finding): the preflight check is revalidated a
   second time immediately before the first harness-side side effect (not
   just once at the top of `create`) — proving the residual TOCTOU window
   is minimized to the documented narrow case, not left at the width of
   the entire `create` command.
+- [ ] Unit (round-14 finding): simulate the residual TOCTOU race directly
+  (the knowledge project's config becomes policy-violating only AFTER the
+  second preflight check passes, then `_carve_paired_knowledge` re-raises)
+  — assert the `create` command fails, no automatic rollback of the
+  already-created harness worktree/branch/record is attempted, and the
+  surfaced error message names the exact orphaned worktree path and branch
+  so an operator can remove it manually — proving the documented residual
+  behavior is real and observable, not merely asserted in prose.
 - [ ] Unit (round-11 finding): a save from a stale in-memory
   `WorktreeRecord` (loaded before a concurrent lazy-backfill assigned a
   codename under the record lock) does not erase the `codename`/
@@ -874,3 +914,44 @@ _Pending._
      immediately before the first harness-side side effect (shrinking,
      not eliminating, the window), with the re-raise path as an accepted
      defense-in-depth backstop for the documented residual case.
+
+### 2026-09-20 — Plan-review round 14 fixes
+
+- Three findings on the round-13 head, each verified against actual
+  source before editing:
+  1. **Previously-missed, resolved:** the repo-level "custom wordlist
+     configured → `source_attribution` must be explicit" gate (Decision,
+     Context) and the round-8/9 per-record `codename_source` gate were
+     both stated as unconditional rules, and conflicted for the case of a
+     repo that currently has a custom wordlist configured but holds a
+     `codename_source: "built-in"` record from before that config
+     existed. Resolved by explicitly scoping the two gates to different
+     questions: the repo-level check governs only whether a *new*
+     codename may be allocated implicitly; the per-record check governs
+     only whether an *already-assigned* codename is safe to *publish*
+     implicitly, and always wins for that question regardless of the
+     repo's current config. Edited both the "Decision" paragraph and the
+     "Decisive fix" paragraph in Context to state this explicitly instead
+     of leaving it implicit.
+  2. Consolidated the round-11 "read the raw path" classification rule
+     and the round-13 `wordlist_path_configured` flag into one coherent
+     instruction — the round-11 bullet still told implementers to "read
+     the raw `codename.wordlist_path` string," which is literally not
+     possible from a call site holding only a parsed `CodenameConfig`
+     (the very problem round-13 introduced the flag to fix). Rewrote the
+     round-11 bullet to state the two failure modes it covers
+     (unreadable/malformed custom-path *file*, and a non-string
+     `wordlist_path` *value*) and point directly at the
+     `wordlist_path_configured` flag as the single classification
+     mechanism, removing the contradictory "read it raw" instruction.
+  3. The transactionality narrowing from round 12/13 acknowledged the
+     residual TOCTOU race exists but never specified what happens if it's
+     actually hit — an implementer could reasonably guess anything from
+     "silent orphan" to "crash." Specified the concrete behavior: no
+     automatic rollback of the harness worktree/branch/record (explicit
+     scope exclusion, same rationale as the config-locking exclusion),
+     and the surfaced error must name the orphaned worktree path/branch
+     for manual cleanup via the existing `git worktree remove` path.
+     Added a matching Validation Plan test that simulates the race
+     directly (not just the preflight-catches-it case) and asserts the
+     message and no-rollback behavior.
