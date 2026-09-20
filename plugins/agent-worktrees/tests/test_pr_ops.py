@@ -2027,6 +2027,36 @@ class TestPRFinalizeAndPush:
             "not-a-real-value", source_attribution_configured=True,
         ) == 0
 
+    def test_refresh_source_attribution_freezes_before_metadata_validation(
+        self, pr_repo,
+    ):
+        # PR #3037 review finding: the freeze-on-first-touch must run
+        # BEFORE the number/repo metadata-validation early return too, not
+        # only before the live-config guard -- a legacy PR with missing
+        # provider metadata (e.g. before `set-pr` has supplied it) must
+        # still be frozen on this touch; if `set-pr` supplies the metadata
+        # LATER after config has changed, that later touch must not be
+        # treated as the true first one.
+        config, wid, _wt_path, _ = pr_repo
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        pr = tracking.PRRecord(state="creating", branch="feature/x")
+        assert pr.number is None and not pr.repo  # incomplete metadata
+        assert pr.attribution_mode == ""
+        record.prs = [pr]
+        tracking.save_record(record)
+
+        error = pr_ops.refresh_source_attribution(
+            wid, config, record, pr, "deadbeef" * 5,
+        )
+        assert error == "active PR has no provider repo/number"
+
+        reloaded = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        frozen_pr = reloaded.active_pr()
+        assert frozen_pr is not None
+        # Frozen despite the incomplete metadata -- pr_repo's bare
+        # PRConfig() resolves the implicit "codename" default.
+        assert frozen_pr.attribution_mode == "codename"
+
     def test_refresh_source_attribution_legacy_freeze_runs_before_live_config_guard(
         self, pr_repo, monkeypatch,
     ):

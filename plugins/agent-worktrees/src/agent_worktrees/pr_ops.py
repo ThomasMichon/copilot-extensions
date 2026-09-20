@@ -1258,22 +1258,23 @@ def refresh_source_attribution(
     head_sha: str,
 ) -> str:
     """Publish the pushed head as a dedicated managed attribution comment."""
-    if target_pr is None or target_pr.number is None or not target_pr.repo:
+    if target_pr is None:
         return "active PR has no provider repo/number"
     prcfg = config.default_repo.pr
-    # codename-attribution-by-default (round-32 finding, corrected round-37):
-    # a legacy PRRecord predating the frozen attribution_mode/
-    # attribution_explicit fields is lazily frozen on this, its FIRST
-    # post-migration touch -- computed from whatever config is live AT THIS
-    # SINGLE MOMENT, persisted immediately. This runs BEFORE any decision
-    # that depends on live config (including the early-return this function
-    # used to open with when `not config.default_repo.pr.source_attribution`)
-    # -- round-37 finding: that early return, if it ran first, would leave a
-    # PR first touched under a `False` config permanently unmigrated, and a
-    # LATER touch under a `codename`/`True` config would then be frozen
-    # instead of the true first one, silently adopting the newer policy.
-    # Freezing to the `False` state here (when that's what's live) correctly
-    # makes a later config change find the pair already frozen.
+    # codename-attribution-by-default (round-32 finding, corrected round-37,
+    # sharpened by a PR #3037 review finding): a legacy PRRecord predating
+    # the frozen attribution_mode/attribution_explicit fields is lazily
+    # frozen on this, its FIRST post-migration touch -- computed from
+    # whatever config is live AT THIS SINGLE MOMENT, persisted immediately.
+    # This runs BEFORE any decision that depends on live config OR on this
+    # PR's own metadata completeness (including the number/repo validation
+    # below) -- a legacy PR with missing provider metadata (e.g. before
+    # `set-pr` has supplied it) must still be frozen on this touch; gating
+    # the freeze on that validation would let it stay unmigrated until
+    # metadata arrives, at which point THAT later touch (not the true
+    # first one) would be frozen instead, silently adopting whatever
+    # policy is live by then. The number/repo check below gates
+    # PUBLICATION only, never the freeze itself.
     if not target_pr.attribution_mode:
         tracking.stamp_frozen_attribution(
             target_pr, attribution=prcfg.source_attribution,
@@ -1287,6 +1288,8 @@ def refresh_source_attribution(
             assign_pr_id=False,
         )
         tracking.save_record(record)
+    if target_pr.number is None or not target_pr.repo:
+        return "active PR has no provider repo/number"
     if target_pr.attribution_head == head_sha:
         return ""
     from . import providers
