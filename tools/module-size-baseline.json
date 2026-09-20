@@ -68,6 +68,7 @@
   "plugins/agent-machines/scripts/cell_lifecycle.py": 1018,
   "plugins/agent-machines/scripts/installation-context/installation_context.py": 9169,
   "plugins/agent-machines/scripts/versioned_runtime.py": 1245,
+  "plugins/agent-machines/src/agent_machines/_installation_context.py": 9169,
   "plugins/agent-machines/src/agent_machines/playwright_cli.py": 1816,
   "plugins/agent-machines/src/agent_machines/resources.py": 2002,
   "plugins/agent-machines/src/agent_machines/self_update.py": 1191,
