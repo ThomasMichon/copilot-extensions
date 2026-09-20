@@ -1,11 +1,14 @@
 # Same-cell peer launcher
 
 `peer_launch.py` is the canonical, dependency-free native process boundary for
-Agent Dispatch, Agent CodeSpaces, Agent Containers, and Agent Logger.
-`tools/sync-peer-launch.py` packages
+Agent Dispatch, Agent CodeSpaces, Agent Containers, Agent Logger, and Agent
+Index. `tools/sync-peer-launch.py` packages
 byte-identical copies alongside each consumer's `_installation_context.py`;
 `tools/sync-installation-context.py` owns those validator bytes. Neither
 bootstrap imports a validator through an unvalidated payload pointer.
+Supported peers are `agent-worktrees`, `agent-bridge`, and `agent-ssh` --
+each a canonical `libs/installation-context` adopter in its own right, so
+adding a peer is just a `PEERS` mapping entry with no boundary changes.
 
 `launch_prefix(owner, own_root, raw_context, peer)` returns a composable native
 Python argv prefix. At execution the boundary validates active owner, namespace,
@@ -56,6 +59,11 @@ and in-process relay registration preserve context refusal before publishing
 an allowlist or touching the token store.
 The scrubber removes the Containers environment namespace as well as the other
 callers' credentials and routing overrides.
+Containers also uses this boundary for its provider-exec SSH profile
+publisher (`emit_ssh_profile`), the first consumer of the `agent-ssh` peer:
+unlike the optional knowledge-repo lookup above, agent-ssh is *required*
+here, so a validated owner with no same-cell agent-ssh installation is a
+refusal rather than a silent absence.
 
 Logger uses this boundary for its cold-session-compaction tracked-worktree
 check. Genuine absence -- a valid owner with no same-cell worktrees peer

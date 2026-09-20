@@ -375,6 +375,51 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-20 — agent-ssh as a new peer target; agent-containers provider_ssh.py converted
+
+- Extended `libs/peer-launch`'s `PEERS` mapping with `agent-ssh` (joining
+  agent-worktrees and agent-bridge). agent-ssh is itself a canonical
+  `libs/installation-context` adopter with the identical receipt/governance
+  contract, so no boundary changes were needed -- just the mapping entry and
+  a re-sync of all five packaged vendors (PEERS lives in the shared canonical
+  file, so every owner's copy moves together even though only one owner
+  calls the new peer today).
+- Converted `agent-containers`' `emit_ssh_profile()` (the provider-exec SSH
+  profile publisher, `provider_ssh.py`) from unconditional
+  `shutil.which("agent-ssh")` ambient-PATH resolution to the validated
+  same-cell peer boundary under an explicit installation context. This was
+  the identified-but-deferred candidate from the previous slice
+  ("different peer, durable publication semantics, not yet analyzed") --
+  and unblocks the other deferred candidate, `agent-machines`'
+  `self_update.py` `shutil.which("agent-ssh")` call, for a future slice.
+  agent-ssh is a *required* peer here (unlike the optional knowledge-repo
+  config lookup other converted callers use), so a validated owner with no
+  same-cell agent-ssh installation is a `ContextRefused`, not a silent
+  absence. Legacy ambient-PATH resolution is unchanged with no explicit
+  context.
+- Added focused tests: same-cell prefix resolution and argv shape, refusal
+  when agent-ssh has no same-cell installation, plus an isolation-guard
+  regression test proving `provider_ssh.py` has no unexplained
+  `path-sibling-launch` findings (`check-marketplace-isolation`'s count for
+  that category dropped from 48 to 47).
+- Validation: `agent-containers` full suite (28 `test_provider_ssh.py` cases,
+  0 new failures); `libs/peer-launch/tests` (9 passed); module-size,
+  version-consistency, version-bump, `sync-peer-launch`,
+  `sync-installation-context`, and `check-marketplace-isolation` guards all
+  pass. Widened `provider_ssh.py`'s module-size baseline (1068 -> 1104 lines)
+  for the new resolver helper -- a manual, reviewed baseline edit, not an
+  automated widen.
+- Remaining pre-existing/unrelated failures observed in the same run (bash/
+  WSL PATH gaps in shared bootstrap-opt-in tests, Windows POSIX-mode-emulation
+  gaps in `test_private_state.py`, embedded-script assertions in
+  `test_rescue.py`) are environment-specific to this Windows host and
+  untouched by this change; not investigated further here.
+- `#1110` remains open. Next candidates: `agent-machines/self_update.py`'s
+  now-unblocked `agent-ssh` conversion, `harness-knowledge`'s
+  `assemble_plugins.py` (a skill-only, non-Python-package plugin -- shape
+  not yet validated against the `OWNERS`/vendoring pattern), and the Phase 7
+  intake ledger.
+
 ### 2026-09-20 — Agent-index as a fifth same-cell peer-launch consumer
 
 - Continued Phase 6 caller conversions. Added `agent-index` to the shared

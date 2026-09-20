@@ -748,6 +748,67 @@ def test_emit_profile_fails_when_agent_ssh_is_unavailable(monkeypatch):
         provider_ssh.emit_ssh_profile("sandbox-1")
 
 
+def test_emit_profile_uses_same_cell_agent_ssh_prefix(monkeypatch, tmp_path):
+    cell = tmp_path / "marketplaces" / "test-cell"
+    root = cell / "plugins" / "agent-containers"
+    root.mkdir(parents=True)
+    (cell / "plugins" / "agent-ssh").mkdir()
+    own = {"cellRoot": str(cell), "pluginRoot": str(root)}
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
+    monkeypatch.setattr(provider_ssh._peer_launch, "validate_owner", lambda *args: own)
+    monkeypatch.setattr(
+        provider_ssh.shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
+    )
+    registry_path = tmp_path / "profile.json"
+    monkeypatch.setattr(provider_ssh, "_profile_registry_path", lambda: registry_path)
+    monkeypatch.setattr(
+        provider_ssh,
+        "ssh_profile_spec",
+        lambda *_args: {
+            "module": str(tmp_path / "module.yaml"),
+            "registry": {
+                "transport": "provider-exec",
+                "proxy_command_binary": "/payload/bin/agent-containers",
+                "machines": [{"name": "sandbox-1"}],
+            },
+        },
+    )
+    expected_prefix = provider_ssh._peer_launch.launch_prefix(
+        "agent-containers", Path(own["pluginRoot"]),
+        str(Path(own["pluginRoot"]) / "install.json"), "agent-ssh",
+    )
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(provider_ssh.subprocess, "run", run)
+
+    assert provider_ssh.emit_ssh_profile("sandbox-1") == 0
+    assert calls[0][:len(expected_prefix)] == expected_prefix
+    assert calls[0][len(expected_prefix):] == [
+        "emit-profile", str(registry_path), "--module", str(tmp_path / "module.yaml"),
+    ]
+
+
+def test_emit_profile_refuses_without_same_cell_agent_ssh(monkeypatch, tmp_path):
+    cell = tmp_path / "marketplaces" / "test-cell"
+    root = cell / "plugins" / "agent-containers"
+    root.mkdir(parents=True)
+    own = {"cellRoot": str(cell), "pluginRoot": str(root)}
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
+    monkeypatch.setattr(provider_ssh._peer_launch, "validate_owner", lambda *args: own)
+    monkeypatch.setattr(
+        provider_ssh.shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
+    )
+
+    with pytest.raises(
+        provider_ssh._peer_launch.ContextRefused, match="same-cell installation",
+    ):
+        provider_ssh.emit_ssh_profile("sandbox-1")
+
+
 def test_print_profile_does_not_invalidate_published_registry(monkeypatch, tmp_path):
     registry_path = tmp_path / "provider-exec.json"
     published = {
