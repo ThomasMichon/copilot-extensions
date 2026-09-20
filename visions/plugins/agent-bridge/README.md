@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-09-18
+- **Last revised:** 2026-09-20
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -359,6 +359,19 @@ through its adapter; neither answers, and a cold-store provider is asked
 instead), never *whether* one is attempted. The caller is never required to
 already know a session is dead before asking for it.
 
+### listing-defaults-to-registered-excludes-archived
+
+A single, explicitly-addressed session or worktree is always resolvable (see
+*any-session-any-registered-worktree-regardless-of-liveness* above) — but an
+**enumeration** (list every worktree's sessions, list every worktree an agent
+knows about) defaults to the **registered** set agent-worktrees itself
+currently tracks, excluding any worktree it has marked **archived**. An
+archived worktree's sessions remain reachable by direct reference through the
+cold-store path; they simply do not appear in a default listing next to live
+and active work. A caller that genuinely wants the archived set asks for it
+explicitly — the bridge never silently expands a listing's scope to include
+retired history the caller didn't ask for.
+
 ### resolve-by-any-origin-reference
 
 A caller rarely starts with a session ID in hand — it has a worktree ID, or a
@@ -552,6 +565,14 @@ Every participating bridge can host local sessions and initiate outbound reach.
 The mesh does not require a single central bridge to become the only neck the
 whole fabric depends on.
 
+### archived-is-opt-in-never-ambient
+
+Every worktree- or session-listing surface treats an **archived** worktree
+(agent-worktrees' own post-finalization terminus) as excluded by default,
+mirroring agent-worktrees' own registered-by-default listing. Inclusion is a
+caller's explicit ask (a parameter, a flag, a dedicated route), never the
+ambient default a generic listing quietly widens to over time.
+
 ### attributed-prompt-injection
 
 Every injected message is attributed to its sender and kind. Agent-to-agent and
@@ -658,6 +679,16 @@ machine may deliberately gate outbound reach until policy allows it.
 
 ## Provenance
 
+- **2026-09-20** — Added *listing-defaults-to-registered-excludes-archived*
+  (Features) and *archived-is-opt-in-never-ambient* (Behaviors): every
+  worktree/session listing surface excludes an agent-worktrees-archived
+  worktree by default, mirroring agent-worktrees' own new
+  *registered-by-default-listing* (see that plugin's vision, same date).
+  Mined from the same operator directive during `aperture-labs`
+  `session-worktree-archive-linkout` Phase 2b: agent-bridge should not
+  invent its own archival reconstruction for a worktree agent-worktrees has
+  already tombstoned — it should simply respect that tombstone's default
+  exclusion, surfacing it only on an explicit ask.
 - **2026-09-20** — Closed a reality gap in *session and event ledger*: the
   concept already implied `acp_session_id` is the durable identity, but no
   session response exposed an unambiguous field callers could persist or

@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-15
+- **Last revised:** 2026-09-20
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -123,6 +123,17 @@ Creation, isolation, contribution-policy enforcement, publication, finalization,
 and prune safety remain worktree-lifetime concerns. They do not depend on which
 interactive host ran the agent that produced the change.
 
+### Post-finalization archival
+
+A finalized worktree whose on-disk checkout is reclaimed does not vanish from
+the durable record — it transitions to a distinct **archived** state, strictly
+after finalization, that tombstones its identity, lineage, and session history
+rather than deleting them outright. Archival answers "what happened here" for a
+worktree that no longer exists on disk, without pretending that worktree is
+still live, resumable, or a member of the ordinary active set. It is the
+natural terminus of the lifecycle — reap discards the checkout, never the
+record of what the checkout was.
+
 ### Derived status
 
 Overall status is a reduction over independently owned facts: source-control
@@ -233,6 +244,15 @@ owner derives the aggregate.
 The Worktrees presentation surface is described through machine-readable
 semantics that any compatible control plane can render without importing the
 engine or persisting a second copy of its state.
+
+### registered-by-default-listing
+
+Every enumeration of worktrees — a listing command, a session-to-worktree
+lookup, a fleet-wide catalog — defaults to the **registered** set: worktrees
+agent-worktrees actively tracks, excluding those that have transitioned to
+**archived**. An archived worktree's durable record remains queryable by its
+own identity (it is never deleted), but it never appears in a default listing
+alongside active work — surfacing it requires an explicit ask.
 
 ### decomposed-status-facts
 
@@ -352,6 +372,16 @@ existing durable record, lineage, claims, or history. A worktree that is
 genuinely done accepting new work is retired from active resumption entirely,
 not left resumable-but-silently-crippled.
 
+### archival-is-a-terminus-not-a-deletion
+
+Reclaiming a finalized worktree's on-disk checkout retires it to **archived**,
+strictly after finalization — it never deletes the durable record outright.
+An archived worktree is unambiguously not resumable and not a member of any
+default listing, but its identity, lineage, and session history remain
+queryable by direct reference indefinitely. Nothing that already depended on a
+worktree's past existence — a session's recorded binding, a lineage graph, an
+audit trail — silently loses its anchor the moment the checkout is reclaimed.
+
 ### provider-replacement-preserves-agency
 
 Changing the preferred session host affects future execution legs, not the
@@ -407,6 +437,19 @@ manager, or session-host implementation.
 
 ## Provenance
 
+- **2026-09-20** — Added *Post-finalization archival* (Concepts & Components),
+  *registered-by-default-listing* (Features), and
+  *archival-is-a-terminus-not-a-deletion* (Behaviors): a reaped, unpaired
+  worktree's tracking record is currently deleted outright
+  (`retire_record`), leaving nothing for a consumer to answer "what
+  happened here" beyond hand-reconstructing from an archived session corpus
+  elsewhere. Mined from an operator directive during the `aperture-labs`
+  `session-worktree-archive-linkout` effort's Phase 2b: agent-worktrees
+  should itself be the durable authority for a worktree's post-life
+  identity (a new **archived** state, strictly after finalized), every
+  listing surface should default to the registered (non-archived) set, and
+  a consumer (agent-bridge) should mirror that default rather than
+  inventing its own archival reconstruction.
 - **2026-09-15** — Refined *Derived status* into a decomposed sub-state model:
   a fixed set of independently named facts (checkpoint activity,
   upstream-containment, dirtiness, open claims, pending handoff), freshness
