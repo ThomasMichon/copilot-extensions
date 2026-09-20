@@ -461,6 +461,19 @@ remaining Phase 4 plan item: do `agent-codespaces` first; treat
 existing (possibly its own follow-on effort), not silently deferred inside
 this one without saying so.
 
+Rebased PR #2966 onto `origin/main` (17 commits, main had advanced by 29) to
+land this update: resolved straightforward version-string conflicts (kept the
+higher/HEAD value), a contract-registry `sha256` conflict (fixed by
+recomputing the real hash post-rebase, not guessing), and a
+`module-size-baseline.json` line-count conflict (fixed by widening to the
+actual post-rebase line count). Skipped one now-redundant commit
+(`719378ea8`, a prior hash-refresh-post-rebase this rebase superseded). Also
+had to bump `agent-bridge` and `agent-worktrees` versions again --
+`check-version-bump` correctly caught that the conflict resolutions left
+stale version strings. Full `agent-bridge` suite post-rebase: 2612 passed, 28
+skipped, the same 3 pre-existing unrelated failures. CI fully green on the
+rebased PR.
+
 ### 2026-09-20 — Phase 4 prep: real-venue tmux gap, fixed with a self-heal
 
 Before writing any venue-specific launch code, checked what a **real** venue
