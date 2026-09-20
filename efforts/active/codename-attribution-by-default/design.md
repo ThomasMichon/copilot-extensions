@@ -81,8 +81,12 @@ config, which may have drifted since assignment. `attribution ==
 "codename"` alone cannot distinguish an explicit opt-in from the bare
 implicit default (both produce the identical string), so the gate reads
 `PRConfig.source_attribution_configured` too: an EXPLICIT `codename`
-opt-in publishes any codename regardless of `codename_source` (the
-operator has reviewed this repo's vocabulary), while an IMPLICIT
+opt-in publishes a KNOWN `codename_source` (`"built-in"` OR `"custom"`)
+regardless of which of the two it is (the operator has reviewed this
+repo's vocabulary) — but NEVER a missing/unrecognized `codename_source`
+(round-32 narrowing: explicit opt-in only bypasses the built-in-vs-custom
+ALLOCATION distinction, never provenance verification itself; see the
+Plan's round-32 finding) — while an IMPLICIT
 `codename` default requires `codename_source == "built-in"`. A record
 with `codename_source: "custom"` under an implicit default requires an
 explicit `pr.source_attribution` opt-in to publish, regardless of what the
@@ -314,18 +318,26 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   explicit; (b) `attribution_mode` must be validated against the closed
   set `{"", "false", "true", "codename"}` — any other stored value
   (a typo, a future mode this code doesn't know about, hand-edited YAML)
-  must be treated as the safe **empty legacy sentinel** (falls back to
-  live config, today's existing behavior), never silently accepted as if
-  it authorized publication; (c) a partial pair (`attribution_mode` set
-  but `attribution_explicit` absent, or vice versa) must ALSO be treated
+  must be treated as the safe **empty legacy sentinel** — the same
+  not-yet-migrated state as a genuinely absent field, which triggers the
+  ONE-TIME lazy-backfill freeze above (round-33 finding: an earlier pass
+  described this as falling back to live config "today's existing
+  behavior," which read as a PERPETUAL fallback and conflicted with the
+  one-time-freeze migration this same section specifies; a malformed
+  value must be migrated exactly like a missing one, frozen once at
+  first touch, never re-derived on every later refresh) — never silently
+  accepted as if it authorized publication; (c) a partial pair
+  (`attribution_mode` set but `attribution_explicit` absent, or vice
+  versa) must ALSO be treated
   as the empty legacy sentinel — never let a half-written record produce
   a mode without its matching explicitness, or an explicitness without
   its matching mode. Add regression tests for all three: a stored
   `attribution_explicit: "false"` string does not authorize publication;
-  an unrecognized `attribution_mode` value falls back to legacy live-
-  config behavior rather than being read as one of the three known
-  modes; a record with only one of the two fields set falls back to
-  legacy behavior rather than using the one field that IS present.
+  an unrecognized `attribution_mode` value is migrated via the same
+  one-time lazy-backfill freeze as a missing value, not read as one of
+  the three known modes and not perpetually re-derived from live config;
+  a record with only one of the two fields set is migrated the same way
+  rather than using the one field that IS present.
 **Merge the frozen `attribution_mode`/`attribution_explicit`/`pr_revision`
   fields per-entry across `WorktreeRecord.prs`, not just the single
   `.pr` accessor, under the record lock during concurrent saves, the same

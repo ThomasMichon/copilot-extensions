@@ -698,3 +698,56 @@ Part of the [codename-attribution-by-default effort](README.md).
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
   `f2b538c47` for eight rounds straight — not re-edited again).
+
+### 2026-09-20 — Plan-review round 32 fixes
+
+- Confirmed: both round-31 findings (`pr_revision` YAML wiring, doc
+  split) verified correct — this round's review lists them under
+  "Resolved since last review."
+- Four new, genuine findings, all substantive design corrections to the
+  round-26/31 freeze mechanism:
+  1. **Explicit opt-in was over-broad (round-32 finding, narrows the
+     round-14/22 rule):** the original rule read an explicit
+     `source_attribution: codename` opt-in as authorizing publication
+     UNCONDITIONALLY regardless of `codename_source` — but that bypassed
+     the round-10 backfill's fail-closed guarantee for a record with
+     MISSING or unrecognized provenance, which may have been assigned
+     under a since-removed custom wordlist the operator never actually
+     reviewed. Narrowed: explicit opt-in only bypasses the built-in-vs-
+     custom ALLOCATION distinction (publishes a KNOWN `"custom"` record),
+     never provenance itself — an unbackfilled/unknown record still
+     requires the same manual per-record verification regardless of
+     attribution mode.
+  2. **`pr_revision` merge must operate on the full `prs` list, not the
+     single `.pr` accessor:** verified in source that `.pr` is only a
+     back-compat property over `WorktreeRecord.prs` (which supports
+     serial and PARALLEL PRs) — a merge keyed on the active-PR accessor
+     alone cannot protect a frozen pair on a non-active entry. Corrected
+     to a per-entry merge keyed by stable identity (`number` when set,
+     else `branch`), with `pr_revision` scoped per-entry rather than one
+     shared worktree-level counter.
+  3. **Legacy-PR migration conflicted with the vision guarantee it was
+     supposed to serve:** the "falls back to live config unchanged"
+     framing for a pre-existing `PRRecord` meant a repo's later
+     `source_attribution` change could still silently add/remove/reshape
+     that PR's marker on its next refresh — exactly the retroactive
+     exposure the `unconfigured-attribution-never-leaks` behavior
+     forbids, just deferred rather than eliminated. Replaced with a
+     ONE-TIME lazy-backfill freeze at the legacy PR's first
+     post-migration touch (mirroring `codename_source`'s own
+     lazy-assignment pattern), after which it is frozen exactly like
+     every PR opened after this mechanism shipped.
+  4. **The vision itself needed the same narrowing (mirrored in
+     `visions/plugins/agent-worktrees/pull-requests/README.md`):** the
+     persistence-across-config-change guarantee, as first worded, read
+     as an unbounded promise that also covered PRs published before the
+     mechanism existed — impossible to keep without perpetually
+     re-deriving from live config. Revised to be explicitly
+     forward-looking from the point persistence exists, migrated via the
+     same one-time freeze-at-first-touch, with a new Provenance entry
+     documenting the clarification.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for nine rounds straight — the PR description remains
+  accurate even after this round's further vision edit; not re-edited
+  again).

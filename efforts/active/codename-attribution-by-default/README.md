@@ -560,8 +560,10 @@ these decisions directly and assumes this design is understood.
   or via the bare, unconfigured implicit default (both produce the same
   Python string), yet the two cases require opposite `codename_source`
   handling: an explicit opt-in is the operator consciously reviewing and
-  accepting this repo's vocabulary (publish regardless of
-  `codename_source`, per case (b) below), while the bare implicit default
+  accepting this repo's vocabulary (publishes a KNOWN provenance
+  regardless of whether it's `"built-in"` or `"custom"` — never a
+  missing/unknown one; see the round-32 narrowing below, per case (b)
+  below), while the bare implicit default
   is exactly the silent-leak scenario this whole effort exists to prevent
   (must still gate on `codename_source == "built-in"`). A helper keyed
   only on `attribution == "codename"` cannot distinguish these — it either
@@ -662,11 +664,18 @@ these decisions directly and assumes this design is understood.
   **[design.md § Per-PR attribution freeze](design.md#per-pr-attribution-freeze-rounds-26-32)**;
   read it before touching any of these sites:
   - Add `PRRecord.attribution_mode`/`PRRecord.attribution_explicit`,
-    stamped TOGETHER, ONCE, by one shared helper called at all four
-    `PRRecord` construction/parse sites: `create_pr`'s own construction
+    stamped TOGETHER, ONCE, by one shared helper called at the three
+    FRESH-construction sites: `create_pr`'s own construction
     (`pr_ops.py:~868`), `_push_existing_feature`'s fresh-target
-    construction (`~2090`), manual `set-pr`'s bare construction (`~1676`),
-    and `tracking.py`'s `_parse_pr_mapping` deserialization (`~1393`).
+    construction (`~2090`), and manual `set-pr`'s bare construction
+    (`~1676`). **`tracking.py`'s `_parse_pr_mapping` deserialization
+    (`~1393`) must stay STRICT READ-ONLY (round-33 finding: an earlier
+    condensed pass lumped it in as a fourth "stamp" site) — it parses an
+    EXISTING `PRRecord`'s already-frozen pair back from YAML, never
+    re-derives or re-stamps it from current config; calling the shared
+    stamping helper there would overwrite a persisted decision on every
+    load and reopen the exact retroactive-policy bug this freeze exists
+    to close.**
   - The stamp must capture the caller's already-computed EFFECTIVE
     attribution (`want_attribution`), including any per-call
     `--attribution`/`--no-attribution` override, stamped VERBATIM
@@ -925,15 +934,17 @@ these decisions directly and assumes this design is understood.
   `false`) does NOT authorize publication — `_parse_pr_mapping` must
   reject it to the safe empty-legacy-sentinel fallback, not coerce it
   truthy.
-- [ ] Unit (round-30 finding): an unrecognized `attribution_mode` value
-  (not one of `""`/`"false"`/`"true"`/`"codename"`) falls back to the
-  legacy live-config behavior rather than being read as an authorized
-  mode.
-- [ ] Unit (round-30 finding): a `PRRecord` with only ONE of
-  `attribution_mode`/`attribution_explicit` set (the other absent/empty)
-  falls back to legacy live-config behavior for BOTH fields together —
-  a partial pair never authorizes publication using just the one field
-  that is present.
+- [ ] Unit (round-30 finding, corrected round-33): an unrecognized
+  `attribution_mode` value (not one of `""`/`"false"`/`"true"`/
+  `"codename"`) is migrated via the same one-time lazy-backfill freeze as
+  a missing value (never perpetually re-derived from live config), not
+  read as an authorized mode.
+- [ ] Unit (round-30 finding, corrected round-33): a `PRRecord` with only
+  ONE of `attribution_mode`/`attribution_explicit` set (the other
+  absent/empty) is migrated the same one-time lazy-backfill way for BOTH
+  fields together — a partial pair never authorizes publication using
+  just the one field that is present, nor is it perpetually re-derived
+  from live config.
 - [ ] Unit (round-30 finding, corrected round-32): stamp a `PRRecord`
   entry's frozen `attribution_mode`/`attribution_explicit` pair under the
   record lock (bumping that entry's `pr_revision`), then `save_record` a
@@ -1151,58 +1162,46 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-31 history lives in **[journal.md](journal.md)** to keep this
+> round-32 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 32 fixes
 
-- Confirmed: both round-31 findings (`pr_revision` YAML wiring, doc
-  split) verified correct — this round's review lists them under
-  "Resolved since last review."
-- Four new, genuine findings, all substantive design corrections to the
-  round-26/31 freeze mechanism:
-  1. **Explicit opt-in was over-broad (round-32 finding, narrows the
-     round-14/22 rule):** the original rule read an explicit
-     `source_attribution: codename` opt-in as authorizing publication
-     UNCONDITIONALLY regardless of `codename_source` — but that bypassed
-     the round-10 backfill's fail-closed guarantee for a record with
-     MISSING or unrecognized provenance, which may have been assigned
-     under a since-removed custom wordlist the operator never actually
-     reviewed. Narrowed: explicit opt-in only bypasses the built-in-vs-
-     custom ALLOCATION distinction (publishes a KNOWN `"custom"` record),
-     never provenance itself — an unbackfilled/unknown record still
-     requires the same manual per-record verification regardless of
-     attribution mode.
-  2. **`pr_revision` merge must operate on the full `prs` list, not the
-     single `.pr` accessor:** verified in source that `.pr` is only a
-     back-compat property over `WorktreeRecord.prs` (which supports
-     serial and PARALLEL PRs) — a merge keyed on the active-PR accessor
-     alone cannot protect a frozen pair on a non-active entry. Corrected
-     to a per-entry merge keyed by stable identity (`number` when set,
-     else `branch`), with `pr_revision` scoped per-entry rather than one
-     shared worktree-level counter.
-  3. **Legacy-PR migration conflicted with the vision guarantee it was
-     supposed to serve:** the "falls back to live config unchanged"
-     framing for a pre-existing `PRRecord` meant a repo's later
-     `source_attribution` change could still silently add/remove/reshape
-     that PR's marker on its next refresh — exactly the retroactive
-     exposure the `unconfigured-attribution-never-leaks` behavior
-     forbids, just deferred rather than eliminated. Replaced with a
-     ONE-TIME lazy-backfill freeze at the legacy PR's first
-     post-migration touch (mirroring `codename_source`'s own
-     lazy-assignment pattern), after which it is frozen exactly like
-     every PR opened after this mechanism shipped.
-  4. **The vision itself needed the same narrowing (mirrored in
-     `visions/plugins/agent-worktrees/pull-requests/README.md`):** the
-     persistence-across-config-change guarantee, as first worded, read
-     as an unbounded promise that also covered PRs published before the
-     mechanism existed — impossible to keep without perpetually
-     re-deriving from live config. Revised to be explicitly
-     forward-looking from the point persistence exists, migrated via the
-     same one-time freeze-at-first-touch, with a new Provenance entry
-     documenting the clarification.
+### 2026-09-20 — Plan-review round 33 fixes
+
+- Confirmed: all four round-32 findings (explicit-opt-in narrowing,
+  per-entry `prs` merge, legacy freeze-at-first-touch, vision boundary)
+  verified correct — this round's review lists them under "Resolved
+  since last review."
+- Four new genuine findings, all leftover-consistency gaps from round
+  32's own edits: the round-32 fix corrected the RULE in one place per
+  document but left three OLDER restatements of the SAME superseded
+  unconditional rule unedited elsewhere in the same docs, and one
+  condensed-summary ambiguity from round 31's own doc-split:
+  1. The Plan's round-22 rationale paragraph (README.md) still said an
+     explicit opt-in "publish[es] regardless of `codename_source`" — the
+     exact unconditional statement round-32 narrowed everywhere else.
+     Corrected to state the narrowed rule (known provenance only).
+  2. design.md's own "downstream effects" narrative (the sibling
+     rationale doc for the SAME allocation-vs-publish distinction) still
+     carried the identical unconditional sentence, never updated when
+     README's copy was narrowed. Corrected to match.
+  3. The condensed Phase-1 checklist bullet (introduced by round 31's
+     own doc-split) listed `_parse_pr_mapping` as one of "all four"
+     stamping sites — but parsing an EXISTING record must stay strict
+     read-only (it deserializes an already-frozen pair, never re-derives
+     it); only the THREE fresh-construction sites actually stamp.
+     Corrected the condensed bullet to separate the three stamp sites
+     from the one read-only parse site explicitly (design.md's own
+     detailed text already had this distinction right; only the
+     round-31 condensed summary lost it).
+  4. design.md's strict-validation section still described a malformed/
+     partial persisted pair as "falls back to live config, today's
+     existing behavior" — phrasing that reads as a PERPETUAL fallback,
+     contradicting the round-32 one-time-freeze migration this same
+     section specifies. Reworded: a malformed/partial pair is migrated
+     via the identical one-time lazy-backfill freeze as a genuinely
+     missing pair, never re-derived from live config on every later
+     touch.
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
-  `f2b538c47` for nine rounds straight — the PR description remains
-  accurate even after this round's further vision edit; not re-edited
-  again).
+  `f2b538c47` for ten rounds straight — not re-edited again).
