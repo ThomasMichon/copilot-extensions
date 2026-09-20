@@ -40,7 +40,7 @@
   "plugins/agent-dispatch/src/agent_dispatch/_installation_context.py": 9169,
   "plugins/agent-dispatch/src/agent_dispatch/client.py": 1153,
   "plugins/agent-dispatch/src/agent_dispatch/companion.py": 1421,
-  "plugins/agent-dispatch/src/agent_dispatch/coordinator.py": 2828,
+  "plugins/agent-dispatch/src/agent_dispatch/coordinator.py": 2830,
   "plugins/agent-dispatch/src/agent_dispatch/embody.py": 1003,
   "plugins/agent-dispatch/src/agent_dispatch/managed_retention.py": 1018,
   "plugins/agent-dispatch/src/agent_dispatch/managed_runtime.py": 1605,

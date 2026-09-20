@@ -412,6 +412,72 @@ def test_self_retire_status_lifecycle_reflects_the_live_loop(tmp_path, monkeypat
         assert status["confirms"] >= 1
 
 
+def test_abandoned_passive_reap_status_lifecycle_reflects_the_live_loop(
+    tmp_path, monkeypatch,
+):
+    """Copilot review finding on PR #2963: the abandoned-passive-reap loop's
+    published status needs its own deterministic lifecycle proof, mirroring
+    the self-retire coverage above -- it arms, then `last_outcome` reflects a
+    real reap cycle's decision (here: a breadcrumb naming a pid that plainly
+    is not a live coordinator, so the cycle's own no-op reasoning is what gets
+    proven live-published, not fabricated)."""
+    import json
+    import os
+    import time
+    from datetime import datetime, timedelta, timezone
+
+    from zdd import routing
+
+    routing_dir = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing_dir))
+    monkeypatch.setenv("AGENT_DISPATCH_SELF_RETIRE", "0")
+    monkeypatch.setenv("AGENT_DISPATCH_ABANDONED_PASSIVE_REAP", "1")
+    monkeypatch.setenv("AGENT_DISPATCH_ABANDONED_PASSIVE_REAP_POLL_S", "0.05")
+
+    my_pid = os.getpid()
+    routing.publish_active(
+        routing_dir, bind="127.0.0.1", port=9999, pid=my_pid, version="1.0",
+    )
+    # An aged, non-terminal breadcrumb naming a pid that is not a live
+    # coordinator process -- a deterministic, real (not monkeypatched) no-op
+    # decision for reap_abandoned_passive_backstop to reach.
+    routing_dir.mkdir(parents=True, exist_ok=True)
+    aged = (datetime.now(timezone.utc) - timedelta(seconds=99999)).isoformat()
+    (routing_dir / "cutover.json").write_text(
+        json.dumps({
+            "state": "started",
+            "started_at": aged,
+            "updated_at": aged,
+            "pid": my_pid,
+            "old": None,
+            "new_port": 9281,
+            "new_pid": 999999,
+            "error": None,
+        }),
+        encoding="utf-8",
+    )
+
+    app = create_app(TaskQueue(tmp_path / "t.db"))
+    with TestClient(app) as client:
+
+        def _wait(predicate, *, timeout=5.0):
+            deadline = time.monotonic() + timeout
+            last = None
+            while time.monotonic() < deadline:
+                last = client.get("/health").json()["slot"]["abandoned_passive_reap"]
+                if predicate(last):
+                    return last
+                time.sleep(0.02)
+            pytest.fail(f"condition not met within {timeout}s; last status={last}")
+
+        armed = _wait(lambda s: s["armed"])
+        assert armed["last_outcome"] is None or isinstance(armed["last_outcome"], dict)
+
+        outcome = _wait(lambda s: s["last_outcome"] is not None)["last_outcome"]
+        assert outcome["reaped"] is False
+        assert outcome["pid"] == 999999
+
+
 def test_create_and_get(api):
     r = api.post(
         "/tasks",

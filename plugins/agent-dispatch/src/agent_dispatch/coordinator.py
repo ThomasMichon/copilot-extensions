@@ -1459,6 +1459,7 @@ def create_app(
                         loop_name="self-retire",
                     ):
                         confirms = 0
+                        _app.state.self_retire_status["confirms"] = 0
                         continue
                     try:
                         superseded = await asyncio.to_thread(
@@ -1489,6 +1490,7 @@ def create_app(
                             loop_name="self-retire",
                         ):
                             confirms = 0
+                            _app.state.self_retire_status["confirms"] = 0
                             continue
                         log.info(
                             "superseded by a live newer generation at a safe cutover "
