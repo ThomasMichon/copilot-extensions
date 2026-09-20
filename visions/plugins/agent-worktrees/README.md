@@ -248,28 +248,29 @@ engine or persisting a second copy of its state.
 ### external-status-consumer-contract
 
 Any other capability that needs a worktree's current status — a Tasks-board
-status card, a dashboard, a notification — reads the resident accelerator's
-fast, coalesced cache as its preferred read path, rather than independently
-recomputing git state, session lineage, liveness, or the claims graph, or
-polling agent-worktrees with its own subprocess on a hot per-render path.
-Per the suite-wide work-coalescing-singleton pattern, this is **warmth, not
-truth**: the accelerator owns no fact a consumer couldn't otherwise derive
-itself, it only saves everyone from separately paying to recompute the same
-shareable answer. A consumer's read is answered from state the
-accelerator's own sweep and operation-triggered recompute already keep
-current, not freshly (re)derived per caller — but a stale or unreachable
-accelerator is never treated as authoritative over a fresher direct answer.
-Rich conversation/message history is explicitly excluded from this cache
-(see *Not a transcript or event warehouse* below) — a consumer that wants
-recent messages pulls them on demand from the owning session host instead.
-When no accelerator is reachable, this contract degrades the same way
-*Derived status* already does for any other reader: direct, in-process
-computation of the same facts is a correct fallback, never a hard failure.
-When even that direct computation cannot confirm a fact (its own source is
-unreachable too), the consumer reports that fact as unconfirmed rather than
-silently omitting it or guessing — the same *uncertainty-is-marked-not-
-multiplied* discipline the accelerator itself follows, never a distinct
-"cache-miss" state of its own.
+status card, a dashboard, a notification — is the same kind of reader
+*Derived status* above already describes: it boots the resident accelerator
+on demand if none is reachable, subscribes, and reads the answer from its
+fast, coalesced cache, rather than independently recomputing git state,
+session lineage, liveness, or the claims graph, or spawning its own
+subprocess on a hot per-render or per-click path. Per the suite-wide
+work-coalescing-singleton pattern, this is **warmth, not truth**: the
+accelerator owns no fact a consumer couldn't otherwise obtain, it only saves
+everyone from separately paying to recompute the same shareable answer, and
+a stale or unreachable accelerator is never treated as authoritative over a
+fresher direct answer. Rich conversation/message history is explicitly
+excluded from this cache (see *Not a transcript or event warehouse* below) —
+a consumer that wants recent messages pulls them on demand from the owning
+session host instead.
+
+A consumer able to compute these facts itself (an in-process agent-worktrees
+caller) retains *Derived status*'s existing direct-computation fallback when
+no accelerator is reachable. A consumer that cannot — a separate plugin with
+no access to agent-worktrees' own git/session/claims logic — has no such
+fallback available to it: its boot-on-demand subscribe attempt either
+succeeds within its own bounded wait, or it reports the requested facts as
+stale/unknown and moves on, never blocking its own render or click path and
+never silently recomputing or guessing at the answer.
 
 ### registered-by-default-listing
 
@@ -377,15 +378,16 @@ what keep an ordinary reader's answer current without it.
 ### a-full-health-check-leaves-nothing-stale
 
 Running a full consistency/health pass over the accelerator's tracked state
-is expected to leave every fact it owns **confirmed fresh wherever that
-confirmation is actually obtainable** — not merely reachable — so a caller
-that follows a health check with an ordinary read never needs its own
-force-refresh to trust the answer. This does not override
-*uncertainty-is-marked-not-multiplied* above: a fact a health check genuinely
-could not confirm (its source was unreachable, absent, or ambiguous even
-after the pass) is reported as that fact's real value plus an explicit
-unconfirmed marker, never silently claimed fresh just because a health check
-ran (see *uncertainty-is-marked-not-multiplied* above).
+is expected to leave every fact whose underlying observation **completed
+successfully** confirmed fresh — not merely reachable — so a caller that
+follows a health check with an ordinary read never needs its own
+force-refresh to trust an answer the pass actually confirmed. This does not
+override *observation-loss-degrades-honestly* or
+*uncertainty-is-marked-not-multiplied* above: when a health check's own
+fetch, provider probe, or git access fails or is unreachable, the affected
+fact is reported as stale/unknown — its last-known value plus an explicit
+unconfirmed marker — never silently claimed fresh just because a health
+check ran.
 
 ### one-fetch-serves-every-sibling
 
@@ -498,17 +500,21 @@ manager, or session-host implementation.
   path. This is the same *warmth, not truth* accelerator already
   established elsewhere in this vision (*Derived status*) and in
   `docs/patterns/work-coalescing-singleton.md`: an unreachable accelerator
-  falls back to correct direct computation, never a hard failure, and a
-  fact even direct computation cannot confirm is marked unconfirmed rather
-  than silently omitted or claimed fresh. Force-refresh exists, but
+  falls back to *Derived status*'s existing direct-computation path only
+  for a consumer that can actually perform that computation itself (an
+  in-process agent-worktrees caller); a separate-plugin consumer with no
+  access to that logic reports the affected facts as stale/unknown instead,
+  never silently recomputing or blocking. Force-refresh exists, but
   strictly at explicit user or agent discretion (queued to coalesce
   concurrent requests, never triggered by an ordinary read just to
   function); a full health/consistency pass is expected to leave every
-  confirmable fact fresh, without overriding the same unconfirmed-marker
-  discipline. Message/conversation history is explicitly excluded
-  (reaffirming the existing *Not a transcript or event warehouse*
-  non-goal) — a consumer pulls recent messages on demand from the owning
-  session host (agent-bridge) instead.
+  successfully-observed fact fresh, without overriding the existing
+  observation-loss/unconfirmed-marker discipline. Message/conversation
+  history is explicitly excluded (reaffirming the existing *Not a
+  transcript or event warehouse* non-goal) — a consumer pulls recent
+  messages on demand from whichever session host owns that session
+  instead (e.g. agent-bridge for a bridge-hosted one; CLI/mux, ACP, SDK,
+  and third-party hosts are peers, not a single fixed source).
 - **2026-09-20** — Added *Post-finalization archival* (Concepts & Components),
   *registered-by-default-listing* (Features), and
   *archival-is-a-terminus-not-a-deletion* (Behaviors): a reaped, unpaired

@@ -868,7 +868,19 @@ first time since Phase 4 landed.
       agent-dispatch tracks claims) and the drill-in claims viewer content
       for the Worktree Status card. (Not duplicated with Phase 3 — Phase 3
       only lands the column plumbing/manifest; the actual claims-tracking
-      computation is owned here.)
+      computation is owned here.) **Reconciled 2026-09-20 (see the
+      `agent-worktrees` vision's new *external-status-consumer-contract*):**
+      the worktree's own claims graph (PRs/issues/environments/sessions it
+      owns or adopts) is `agent-worktrees`' durable ledger, per that
+      vision's *Claims, leases, and obligations* concept — a duplicate,
+      independently-computed claims model here would conflict with
+      *derive-dont-duplicate*. This phase's `artifacts_summary` must
+      **consume** that ledger (via the same coalesced projection read path
+      Phase 8 uses), not recompute claims from scratch; if a genuinely
+      distinct, agent-dispatch-owned notion of "claims" is ever needed
+      (e.g. task-level, not worktree-level), name and scope that as an
+      explicitly different concept before implementing it, rather than
+      reusing the word for two different ownership boundaries.
 
 ### Phase 6 — Source-repo grouping/filtering
 - [ ] The REPO column ships in Phase 3. A dedicated repo filter chip
@@ -913,26 +925,35 @@ no lifecycle-control logic invented at this layer.
       refresh). Neither can shell out to git/agent-worktrees per row or per
       click, and agent-dispatch's own coordinator tracks only task-scoped
       liveness (`last_liveness`, `activity`/`activity_updated_at`) — it has
-      no worktree/session/git-state/claims authority of its own. **Resolved
-      direction (operator decision 2026-09-20):** `agent-worktrees`'s
-      resident accelerator becomes the coalesced, cached-projection read
-      path for this data
-      (worktree/session mapping, lineage + lifecycle event history,
-      liveness, git state, claims graph — see the `agent-worktrees` vision's
-      new *external-status-consumer-contract* Feature and
+      no worktree/session/git-state/claims authority of its own. Note also:
+      agent-dispatch is a **separate plugin in its own venv**
+      (`pivots.py`'s own contract: "data flows only through the
+      contributing plugin's CLI on `PATH`, never a cross-venv import") — it
+      cannot fall back to importing and directly recomputing
+      `agent-worktrees`' facts itself the way a same-process
+      `agent-worktrees` caller can. **Resolved direction (operator decision
+      2026-09-20):** `agent-worktrees`'s resident accelerator becomes the
+      coalesced, cached-projection read path for this data (worktree/session
+      mapping, lineage + lifecycle event history, liveness, git state, the
+      claims graph — see the `agent-worktrees` vision's new
+      *external-status-consumer-contract* Feature and
       *force-refresh-is-opt-in-not-implicit*/*a-full-health-check-leaves-
       nothing-stale* Behaviors, added the same date). Phase 8's own
       implementation therefore needs an **agent-dispatch-side consumer**
       of that cache — read on a cadence/trigger that keeps board rows
       populated without a per-render subprocess (e.g. a background
       supervisor poll into the task row, mirroring how `activity` is
-      already self-reported into a task field) — not yet designed or
-      scoped into concrete steps; do that as the next step before writing
-      any Phase 8 code. Recent-message history is explicitly NOT part of
-      this cache (pulled on demand from agent-bridge instead, per the
-      vision's existing *Not a transcript or event warehouse* non-goal) —
-      Phase 8's card body should treat any "last messages" content, if
-      wanted at all, as a separate on-demand fetch, not a cached field.
+      already self-reported into a task field), reporting a fact it cannot
+      confirm as stale/unknown rather than blocking the render or the
+      click — not yet designed or scoped into concrete steps; do that as
+      the next step before writing any Phase 8 code. Recent-message
+      history is explicitly NOT part of this cache (pulled on demand from
+      the owning session host instead, per the vision's existing *Not a
+      transcript or event warehouse* non-goal) — Phase 8's card body should
+      treat any "last messages" content, if wanted at all, as a separate
+      on-demand fetch, not a cached field. **Claims specifically are Phase
+      5's own field** (see that phase's 2026-09-20 note) — Phase 8 renders
+      whatever Phase 5 exposes rather than computing claims itself.
 
 ### Phase 9 — Configuration → Registrars viewer/editor (implementation)
 - [ ] Build the Configuration-menu view listing every registration
@@ -2003,21 +2024,36 @@ worktree via `agent-worktrees -p copilot-extensions create`.
     claims-graph authority of its own — that all lives in git and in
     `agent-worktrees`' own state, outside any agent-dispatch task row.
   - Real "Claims" content is Phase 5's own scope (not landed yet), so even
-    a partial Phase 8 slice can't show real claims without it.
+    a partial Phase 8 slice can't show real claims without it — and Phase
+    5's own claims computation must consume the same `agent-worktrees`
+    projection rather than independently recompute the worktree's claims
+    ledger (see Phase 5's own 2026-09-20 reconciliation note).
+  - **agent-dispatch cannot fall back to importing/recomputing
+    `agent-worktrees`' facts itself** — it is a separate plugin in its own
+    venv (`pivots.py`'s own contract: cross-plugin data flows only through
+    the contributing plugin's CLI, never a cross-venv import), so the
+    "direct in-process computation" fallback the vision's *Derived status*
+    already grants a same-process caller isn't available here; an
+    unreachable accelerator must degrade to an explicit stale/unknown
+    outcome for this consumer, never a silent recompute.
 - **Surfaced this to the operator rather than guessing a workaround.**
   Resolved direction: `agent-worktrees`'s existing **resident accelerator**
   (already documented in its vision as the one-per-host freshness/status
   computer — "warmth, not truth" per `docs/patterns/work-coalescing-
   singleton.md`) becomes the coalesced, cached-projection read path for
   exactly this data — worktree/session mapping, session lineage +
-  lifecycle event history, last-known liveness (mux/Copilot lock),
-  last-known git state, and the claims graph — with fast-cache reads and a
-  correct direct-computation fallback when it's unreachable, and
-  force-refresh available strictly at explicit user/agent discretion
-  (queued to coalesce, never triggered by an ordinary read). Message/
-  conversation history stays explicitly out of this cache — pulled on
-  demand from agent-bridge instead, matching the vision's pre-existing
-  *Not a transcript or event warehouse* non-goal.
+  lifecycle event history, last-known liveness, last-known git state, and
+  the claims graph — with fast-cache reads. A cross-venv consumer like
+  agent-dispatch boots the accelerator on demand and subscribes like any
+  other reader; if it can't reach it within its own bounded wait, it
+  reports the affected facts as stale/unknown rather than blocking its
+  render/click path or guessing. Force-refresh is available strictly at
+  explicit user/agent discretion (queued to coalesce, never triggered by
+  an ordinary read). Message/conversation history stays explicitly out of
+  this cache — pulled on demand from the owning session host instead
+  (agent-bridge for a bridge-hosted session; another provider for a
+  non-bridge one), matching the vision's pre-existing *Not a transcript or
+  event warehouse* non-goal.
 - **Updated the `agent-worktrees` vision** (`visions/plugins/agent-worktrees/
   README.md`) to make this explicit and durable rather than leaving it as
   an unrecorded intention: added *external-status-consumer-contract*
