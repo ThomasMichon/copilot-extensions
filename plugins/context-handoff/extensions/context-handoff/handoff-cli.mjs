@@ -202,9 +202,11 @@ async function cmdTrigger(args) {
   if (args.json) return emit(result, args);
 
   const pickup = result.pickup || { via: [], waitedMs: 0 };
-  const header = pickup.pickedUp
-    ? `Handoff request signaled (${result.stored.storage}: ${result.stored.id}); pickup acknowledged via ${pickup.via.join(", ")} after ${(pickup.waitedMs / 1000).toFixed(1)}s.`
-    : `Handoff request signaled (${result.stored.storage}: ${result.stored.id}); no pickup signal arrived within ${(pickup.waitedMs / 1000).toFixed(1)}s.`;
+  const header = result.automaticCutoverDisabled
+    ? `Handoff stored (automatic cutover disabled) (${result.stored.storage}: ${result.stored.id}); no live-cutover signal was sent (mode is not \`auto\`).`
+    : pickup.pickedUp
+      ? `Handoff request signaled (${result.stored.storage}: ${result.stored.id}); pickup acknowledged via ${pickup.via.join(", ")} after ${(pickup.waitedMs / 1000).toFixed(1)}s.`
+      : `Handoff request signaled (${result.stored.storage}: ${result.stored.id}); no pickup signal arrived within ${(pickup.waitedMs / 1000).toFixed(1)}s.`;
   process.stdout.write(
     `${header}\n\n` +
     (

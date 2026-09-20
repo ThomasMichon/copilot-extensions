@@ -1954,6 +1954,12 @@ export async function triggerHandoff(
     stored,
     seed,
     sessionState,
+    // Explicit, top-level flag so callers can branch on it directly instead
+    // of re-deriving it from nested activity/bridge reason strings -- a
+    // real, distinct outcome from "signaled but no pickup arrived" (Copilot
+    // extension review finding on PR #3041: caller-facing text must not say
+    // "signaled" when neither live-cutover trigger point ever ran).
+    automaticCutoverDisabled: !autoEnabled,
     worktreeSignal: {
       noted: true,
       activity,

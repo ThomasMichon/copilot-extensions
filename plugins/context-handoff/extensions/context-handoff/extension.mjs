@@ -743,6 +743,20 @@ const session = await joinSession({
                 : `agent-bridge ping did not confirm pickup${result.bridge.error ? ` (${result.bridge.error})` : ""}.`
             )
           : "agent-bridge was not pinged.";
+        if (result.automaticCutoverDisabled) {
+          return (
+            `Handoff stored (automatic cutover disabled) for ${result.stored.storage} ` +
+            `baton ${result.stored.id}. No live-cutover signal was sent -- ` +
+            "neither the worktree-visible pending-handoff state nor an " +
+            "agent-bridge ping was requested, because `.context-handoff/" +
+            "config.yaml`'s `mode` is not `auto`.\n\n" +
+            `${result.manualInstructions}\n\n` +
+            "Final short handoff prompt/seed:\n\n" +
+            "```text\n" +
+            `${result.seed}\n` +
+            "```"
+          );
+        }
         return (
           `Handoff request signaled for ${result.stored.storage} baton ` +
           `${result.stored.id}. ${pickupLine}\n\n` +
