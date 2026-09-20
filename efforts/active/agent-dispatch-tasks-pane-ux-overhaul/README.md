@@ -707,6 +707,30 @@ the original bug's severity (a guaranteed ~100ms hit on literally the first
 Tasks switch every session) — not chased further given three rounds of
 otherwise-resolved PR review feedback on this exact trade-off.
 
+**Follow-up (2026-09-19, same day) — ordering fix, separate from the accepted
+residual above.** The operator reported the freeze again after this fix had
+already landed. Investigation (including a direct timing probe with a
+deliberately slow fixture `list` command, which did NOT reproduce a hang —
+confirming `RegisteredPivotRuntime.ensure`/`.repoll` remain correctly async,
+same conclusion as the original profiling) found both `setup()` and
+`_setup_live_pivots` ran the (potentially slow, synchronous-on-its-caller)
+pivot-registry scan **before** starting the `prewarm_optional_modules` thread
+— not the tiny stdlib-only `tasks` import the residual note above accepted,
+but the FULL scan (manifest materialize/classify/`resolve_active_plugins()`)
+gating the prewarm's own start. So the prewarm thread only began once the
+scan had already finished, shrinking (rather than maximizing) its head start
+over the operator's next keypress — which, immediately after a mount/reload
+finally unblocks input, is often the very next thing that happens. Fixed by
+reordering both call sites so `prewarm_optional_modules` is kicked off (or,
+in `_setup_live_pivots`, called directly, since that method is already
+off-thread) as the very first statement, before the scan. Regression tests
+(`test_setup_prewarm_starts_before_the_pivot_scan`,
+`test_setup_live_pivots_prewarm_starts_before_the_pivot_scan` in
+`test_picker_first_paint.py`) assert the ordering directly so a future edit
+can't silently reintroduce it. This is additive to, not a re-litigation of,
+the accepted residual above (which remains about the negligible `tasks`
+import cost, not the scan).
+
 ### Phase 5 — Artifacts (claims) surface
 - [ ] Land `artifacts_summary` computation in `board_cli.py` (or wherever
       agent-dispatch tracks claims) and the drill-in claims viewer content
@@ -1496,3 +1520,39 @@ double-blank-line spots elsewhere in the file to net zero growth, per the
 tool's own guard -- `--allow-widen` is post-merge/`main`-only by its own
 documented convention, never a PR branch's own diff).
 
+### 2026-09-19 — Tasks-pivot-freeze bug: reported again, ordering gap found and fixed
+The operator reported the same freeze again the same day, after the above fix
+had already landed. Re-investigated rather than assuming the prior fix was
+incomplete in the way already accepted (the residual note in the Plan section
+above, about the tiny stdlib-only `tasks` import): reproduced with a direct
+timing probe (a real `PickerApp`, a fixture registered pivot whose `list`
+command sleeps 4s, timing both the render after switching and a direct
+`_switch_pivot()` call). The probe did NOT reproduce a hang -- confirming
+`RegisteredPivotRuntime.ensure`/`.repoll` are still correctly async, the same
+conclusion the original profiling reached. That ruled out "the manifest
+command runs synchronously" as the operator had hypothesized.
+
+Found instead: both `setup()` and `_setup_live_pivots` ran the pivot-registry
+scan (manifest materialize/classify/`resolve_active_plugins()` --
+potentially slow, and synchronous on whichever thread calls it) BEFORE
+starting the `prewarm_optional_modules` thread/call -- not after, as the
+prewarm fix's own stated purpose requires. This meant the prewarm import
+only got a head start equal to whatever time was left AFTER the scan
+finished, rather than running concurrently with it from the start -- and
+since the operator's next keypress often lands the instant the app becomes
+responsive again (right when the scan finally returns), that keypress
+frequently raced the still-in-progress `data_ssh` import and lost, same
+visible symptom as before the original fix.
+
+**Fix:** reordered both call sites so `prewarm_optional_modules` starts (or,
+in `_setup_live_pivots`, runs directly, since that method is already
+off-thread) as the very first statement, before the scan -- giving it the
+maximum possible head start rather than the minimum. Added
+`test_setup_prewarm_starts_before_the_pivot_scan` and
+`test_setup_live_pivots_prewarm_starts_before_the_pivot_scan` to
+`test_picker_first_paint.py`, asserting the ordering directly (not just that
+the call happens) so a future edit can't silently reintroduce the gap. Full
+`tests/production_picker/` suite re-run twice; the only failures both times
+were pre-existing, unrelated flakes (`test_native_list_sticky_no_reflow_flicker`,
+confirmed via `git stash` to fail identically without these changes, and 3
+Windows-path failures in `test_data_ssh_sources.py`, likewise pre-existing).
