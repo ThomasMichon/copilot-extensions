@@ -348,18 +348,23 @@ def github_owner(remote: str) -> str | None:
 
 
 def is_https_remote(remote: str) -> bool:
-    """True when ``remote`` is an ``http(s)://`` URL, not an SSH form.
+    """True when ``remote`` is specifically an ``https://`` URL.
 
     Both the persisted credential pin (:func:`git_ops.pin_git_credential`,
     which only ever writes ``credential.https://<host>.*``) and the
     clone-time auth override (:func:`git_ops._auth_config_args_for_url`,
     which only ever produces an ``http.extraheader``) affect HTTPS
-    transport exclusively. An ``ssh://``/``git@host:owner/repo`` remote uses
-    the ambient SSH key instead and is untouched by either -- treating it as
-    "pinned"/"authed" would be a false positive that reports success while
-    changing nothing.
+    transport exclusively. An SSH remote (``ssh://``/``git@host:owner/repo``)
+    uses the ambient SSH key instead and is untouched by either. A plain
+    ``http://`` remote is excluded too, for the same reason: git's
+    credential config is scheme-specific (``credential.https://...`` never
+    matches an ``http://`` fetch), and injecting the OAuth bearer token as an
+    ``http.extraheader`` onto plaintext HTTP would additionally send it over
+    an unencrypted connection. Treating either as "pinned"/"authed" would be
+    a false positive that reports success while changing nothing (or
+    changing the wrong thing).
     """
-    return remote.strip().lower().startswith(("http://", "https://"))
+    return remote.strip().lower().startswith("https://")
 
 
 def github_slug(remote: str) -> str | None:

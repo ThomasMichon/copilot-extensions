@@ -882,6 +882,38 @@ def test_repos_short_help_flag_shows_usage(monkeypatch, capsys):
     assert "Repo classes:" in capsys.readouterr().out
 
 
+def test_clarify_registration_account_expands_home_relative_path(monkeypatch):
+    """The operator's interactive account choice must still get pinned when
+    the registration path is home-relative (e.g. '~/src/repo' from
+    'repos add') -- Path('~/src/repo').is_dir() is always False, so the raw
+    string must be expanduser()'d before reaching pin_git_credential."""
+    from agent_worktrees import git_ops, repos
+
+    monkeypatch.setattr(
+        repos, "resolve_registration_account",
+        lambda remote, explicit: repos.AccountResolution(
+            owner="github", login="github", source="owner-fallback",
+            authenticated=False, needs_clarify=True,
+        ),
+    )
+    monkeypatch.setattr(git_ops, "list_gh_accounts", lambda: ["acct-a"])
+    monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _: "acct-a")
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        git_ops, "pin_git_credential",
+        lambda path, login, host="github.com": captured.update(path=path, login=login),
+    )
+
+    m._clarify_registration_account(
+        "https://github.com/github/proj.git", "proj", "", "~/src/proj",
+    )
+
+    assert captured["login"] == "acct-a"
+    assert captured["path"] != "~/src/proj"
+    assert not captured["path"].startswith("~")
+
+
 def test_repos_pin_credentials_json_output(monkeypatch, capfd):
     from agent_worktrees import repos
 

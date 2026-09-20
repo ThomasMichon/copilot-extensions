@@ -583,7 +583,7 @@ def test_backfill_skips_ssh_remote(home: Path, tmp_path: Path):
 
 def test_is_https_remote():
     assert repos.is_https_remote("https://github.com/o/r.git") is True
-    assert repos.is_https_remote("http://github.com/o/r.git") is True
+    assert repos.is_https_remote("http://github.com/o/r.git") is False
     assert repos.is_https_remote("git@github.com:o/r.git") is False
     assert repos.is_https_remote("ssh://git@github.com/o/r.git") is False
     assert repos.is_https_remote("") is False

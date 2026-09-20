@@ -20407,7 +20407,11 @@ def _clarify_registration_account(
     repos.set_account_map(owner, choice)
     if path and repos.is_https_remote(remote):
         try:
-            git_ops.pin_git_credential(path, choice)
+            # A caller-supplied path can be home-relative (e.g. '~/src/repo'
+            # from 'repos add'); Path(path).is_dir() is always False for
+            # that literal string, which would otherwise make the pin
+            # silently no-op right after the operator just chose an account.
+            git_ops.pin_git_credential(os.path.expanduser(path), choice)
         except Exception:
             pass
 
