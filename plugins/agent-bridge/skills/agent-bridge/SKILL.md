@@ -796,6 +796,50 @@ still use headless bridge agents (`send`/`create`). A **handoff** is the in-plac
 variant: a live cutover replaces the current CLI in its mux with a successor that
 takes the work over (see the `context-handoff:context-handoff` and `agent-dispatch:agent-dispatch` skills).
 
+## Session identity: durable vs bridge-internal (read this before persisting an id)
+
+A session carries **two different identifiers**, and conflating them breaks
+every downstream deep link or cross-service reference:
+
+- **`session_id`** — agent-bridge's own internal handle. For a *live*
+  bridge-owned ACP session it is a short-lived escrow id, assigned only to
+  correlate a spawn attempt to its bridge session while creating it. It is
+  **not durable**: agent-bridge prunes its own session store aggressively,
+  and nothing outside that exact bridge instance can resolve it once the
+  session ends.
+- **`acp_session_id`** — the real Copilot ACP session id
+  (`~/.copilot/session-state/<uuid>/`). This is the durable identity every
+  other surface (Neuron Forge, Permanent Record, agent-dispatch, any future
+  consumer) actually needs, live or archived.
+
+Every `SessionInfo` response (`GET /api/v1/sessions/{id}`,
+`GET /api/v1/dispatch-tasks/{id}/session`, a `/api/v1/worktrees` entry's
+session linkage) also carries a **`durable_session_id`** field: `acp_session_id`
+when known, else the (non-durable) `session_id` as a last resort. **Use
+`durable_session_id` for anything that outlives the current call** — a deep
+link, a database column, a task binding, a log line meant to be resolvable
+later. Never persist `session_id` directly.
+
+This is not a hypothetical footgun: agent-dispatch's `owner_session_id` was
+captured from the ephemeral `session_id` instead of the durable one for every
+headless dispatch task, silently breaking Intelligence Dampener's "View
+reviewer" deep link for every completed review (copilot-extensions PR #2964,
+aperture-labs PR #7223 fixed the fallout). Retrofit any code that reads a
+bridge session's id and stores or forwards it — check it uses
+`durable_session_id`, not `session_id`.
+
+**Traversing from a dispatch task to its conversation.** A caller holding
+only an agent-dispatch task id (not a session id) resolves it durably with
+one call: `GET /api/v1/dispatch-tasks/{id}/session` (`durable_session_id` on
+the response). This tries the task's current owner session first, then its
+durable attachment history (agent-dispatch's own `GET /tasks/{id}/attachments`),
+then the task's target worktree's latest known session — live-then-cold-store
+throughout, so it still answers once the task's worktree is reclaimed. Never
+invent a per-consumer naming convention (e.g. deriving a worktree name from a
+PR number) to get there — this route is the one shared primitive; see
+`visions/plugins/agent-bridge`'s *topology and resolver layer* concept and
+*resolve-by-any-origin-reference* feature.
+
 ## Troubleshooting
 
 - **Start with the `agent-bridge-troubleshooting` skill.** Its read-only

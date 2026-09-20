@@ -178,12 +178,24 @@ POST   /api/v1/sessions/{id}/stop        # Stop (preserve state)
 POST   /api/v1/sessions/{id}/resume      # Resume stopped session
 DELETE /api/v1/sessions/{id}             # End (full cleanup)
 
+GET    /api/v1/live-sessions             # Registered live interactive CLI sessions
+GET    /api/v1/live-sessions/resolve     # Resolve a session id OR worktree handle -> its live session
+GET    /api/v1/live-sessions/{id}        # Fetch one registered live session
+GET    /api/v1/dispatch-tasks/{id}/session # Resolve an agent-dispatch task -> the session that worked it (live-then-cold-store, durable attachment history)
+
 GET    /api/v1/remote/{host}/sessions/{id}/status
 GET    /api/v1/remote/{host}/live-sessions/{id}
 GET    /api/v1/remote/{host}/sessions/{id}/events
 POST   /api/v1/remote/events             # Multiplex several remote subscriptions
 POST   /api/v1/remote/{host}/sessions/{id}/cursor
 ```
+
+**Session identity: `session_id` vs `durable_session_id`.** Every session
+response also carries `acp_session_id` (the durable Copilot session id) and
+`durable_session_id` (`acp_session_id` when known, else the non-durable
+`session_id`). Persist or deep-link with `durable_session_id`, never
+`session_id` directly -- see the `agent-bridge` skill's *Session identity*
+section for the full contract and the incident that motivated it.
 
 The SSE stream (`/events`) resumes from the caller's last-acked **delivery
 cursor** when `after` is omitted and `caller_id` is supplied; pass an explicit
