@@ -401,3 +401,25 @@ Part of the [codename-attribution-by-default effort](README.md).
   by replacing the open question with a decisive "preserve this
   existing behavior, add a regression test" requirement, removing the
   only remaining undecided item in the Phase 2 checklist.
+
+### 2026-09-20 — Plan-review round 21 fixes
+
+- One finding on the round-20 head, verified against actual source —
+  and the most consequential gap found so far: the plan's
+  allocation-time custom-wordlist gate had only ever been specified for
+  `_carve_paired_knowledge` (the paired-knowledge-repo carve). Grepped
+  `__main__.py` for every `assign_new_codename` call site and confirmed
+  `_create_worktree_core` — the ORDINARY harness-worktree creation path
+  every `create` call goes through, not a rare paired-repo feature —
+  independently allocates a codename from only a resolved `Wordlist`,
+  with no raw-config access and therefore no way to enforce the
+  fail-closed policy at all. Left as specified, the plan's own
+  flagship regression test (round-15) would have passed while the most
+  common real-world path — an ordinary `create` — silently bypassed the
+  policy entirely. Fixed by adding an explicit Phase 1 item requiring
+  the identical preflight (same exception type, same
+  transactionality/TOCTOU treatment already specified for the
+  paired-knowledge path) in `_create_worktree_core` itself, plus a
+  dedicated Validation Plan test exercising `_create_worktree_core`'s
+  own wiring (not just the shared validation helper), so a regression in
+  either path is caught independently.

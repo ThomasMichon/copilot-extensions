@@ -20,19 +20,29 @@ codename feature exists to provide, if that custom vocabulary happens to
 contain identifying or private terms.
 
 **Decision:** a repo with `codename.wordlist_path` configured is excluded
-from the new implicit default entirely **for new codename allocations**.
-For such a repo, `pr.source_attribution` must be set explicitly
+from the new implicit default entirely **for new codename allocations,
+scoped to PR-active repos only (round-22 refinement)**. This gate applies
+only when `pr.enabled` is `true` for the repo being allocated into —
+`codename.wordlist_path` is a purely local, declarative Picker-ergonomics
+feature independent of whether the repo ever opens a PR at all, and a
+repo with `pr.enabled` false/unset can never publish a marker, so blocking
+its ordinary `create` is pure friction with no safety benefit (the
+publish-time `codename_source` gate below already makes this safe
+regardless, the moment PR mode is later enabled). For a PR-active repo
+with a custom wordlist, `pr.source_attribution` must be set explicitly
 (`codename`, `true`, or `false`) before a **new** codename may be assigned;
-the new default only auto-applies to a repo with no custom wordlist
-configured *at assignment time*. This config-shape check (does this repo
-have a custom wordlist configured *right now*?) governs allocation-time
-behavior only — it is superseded, for publish-time attribution decisions on
-an **already-assigned** codename, by the per-record `codename_source` check
-in the decisive fix below (round-14 finding: the two checks answer
-different questions — "may a new codename be allocated implicitly?" vs.
-"is this existing codename safe to publish implicitly?" — and must not be
-conflated). This resolves both halves of the risk for the common case
-where a repo's wordlist config never changes after assignment — see the
+the new default only auto-applies to a PR-active repo with no custom
+wordlist configured *at assignment time*, or to any repo with `pr.enabled`
+false/unset regardless of wordlist. This config-shape check (does this
+repo have a custom wordlist configured *right now*, and is it PR-active?)
+governs allocation-time behavior only — it is superseded, for publish-time
+attribution decisions on an **already-assigned** codename, by the
+per-record `codename_source` check in the decisive fix below (round-14
+finding: the two checks answer different questions — "may a new codename
+be allocated implicitly?" vs. "is this existing codename safe to publish
+implicitly?" — and must not be conflated). This resolves both halves of
+the risk for the common case where a repo's wordlist config never changes
+after assignment — see the assignment — see the
 legacy-record gap and its provenance-tracking fix below for the remaining
 case where it does:
 
@@ -63,23 +73,33 @@ the two cases apart from config state alone.
 current config. At codename-assignment time, `WorktreeRecord` gains a
 `codename_source` field (`"built-in"` or `"custom"`) recorded once and
 never revisited afterward. Publish-time attribution resolution consults
-**only the record's own stored `codename_source`** for whether a given
-already-assigned codename is safe to publish under the implicit default —
-never the repo's *current* `codename.wordlist_path` config, which may have
-drifted since assignment. A record with `codename_source: "custom"`
-requires an explicit `pr.source_attribution` opt-in to publish, regardless
-of what the repo's config says today; a record with `codename_source:
-"built-in"` is safe under the new implicit default unconditionally, **even
-if the repo's `codename.wordlist_path` is currently configured** — a
-built-in-sourced codename was never drawn from that custom vocabulary, so
-the repo-level allocation-time gate above (which governs whether a *new*
-codename may be allocated implicitly) has no bearing on whether *this
-already-assigned* codename is safe to publish (round-14 finding:
+**the record's own stored `codename_source` together with whether
+`pr.source_attribution` was EXPLICITLY configured (round-22 refinement)**
+for whether a given already-assigned codename is safe to publish under the
+implicit default — never the repo's *current* `codename.wordlist_path`
+config, which may have drifted since assignment. `attribution ==
+"codename"` alone cannot distinguish an explicit opt-in from the bare
+implicit default (both produce the identical string), so the gate reads
+`PRConfig.source_attribution_configured` too: an EXPLICIT `codename`
+opt-in publishes any codename regardless of `codename_source` (the
+operator has reviewed this repo's vocabulary), while an IMPLICIT
+`codename` default requires `codename_source == "built-in"`. A record
+with `codename_source: "custom"` under an implicit default requires an
+explicit `pr.source_attribution` opt-in to publish, regardless of what the
+repo's config says today; a record with `codename_source: "built-in"` is
+safe under the new implicit default unconditionally, **even if the repo's
+`codename.wordlist_path` is currently configured** — a built-in-sourced
+codename was never drawn from that custom vocabulary, so the repo-level
+allocation-time gate above (which governs whether a *new* codename may be
+allocated implicitly) has no bearing on whether *this already-assigned*
+codename is safe to publish (round-14 finding:
 these are deliberately two independent gates, not one rule reapplied
 twice — allocation-time gate decides `codename_source` for a new record and
 whether the implicit default may assign one at all; publish-time gate
-decides only from the resulting stored `codename_source`, forever fixed at
-assignment). New allocations still consult the *current* config to decide
+decides only from the resulting stored `codename_source` plus explicitness,
+forever fixed at assignment except for the repo's live
+`source_attribution_configured` state, which is read at publish time).
+New allocations still consult the *current* config to decide
 `codename_source` at the moment of assignment (the current-config check
 remains correct and sufficient there, since assignment and config-read are
 contemporaneous) — this is a targeted addition, not a replacement, of the

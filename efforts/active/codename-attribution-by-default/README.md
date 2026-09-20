@@ -5,15 +5,27 @@
 - **Branch(es):** `pr/<slug>` per phase
 - **Created:** 2026-09-20
 - **Status:** Draft <!-- Draft | Active | Blocked | Done -->
-- **Vision:** below-altitude — no `visions/` item governs the specific
-  default value of the `source_attribution` marker mode. The nearest
-  candidates (`visions/agent-fabric`'s "worktree identity" section,
-  `visions/plugins/agent-worktrees/pull-requests`'s PR-capability vision)
-  describe the mechanism's existence and shape, not this policy/default
-  choice within it; this effort changes a configuration default on an
-  already-vision-covered capability (`pr-attribution-codenames`, Done),
-  not new architecture. Proceeding without a vision revision per the
-  below-altitude path.
+- **Vision:** vision-extending — `visions/plugins/agent-worktrees/pull-requests`
+  already covers the PR-marker/codename mechanism's existence and shape
+  (`pr-attribution-codenames`, Done); this effort does not introduce new
+  architecture untethered from that vision, but it is MORE than a bare
+  default-value flip (round-22 finding: `below-altitude` undersold the
+  actual scope) — Phase 1 adds a new persisted `WorktreeRecord` field
+  (`codename_source`), a new dedicated exception type
+  (`CodenameAttributionPolicyError`), and new allocation-time/publish-time
+  policy gates spanning multiple call sites, all extending that same
+  covered capability's safety envelope. Extends, rather than closes, the
+  vision: the vision describes the marker mechanism existing and its
+  public-safety intent; this effort deepens the provenance/fail-closed
+  guarantee behind that same intent for a config-default change, rather
+  than adding an unrelated new capability. **Checked against
+  `docs/patterns/README.md`'s binding design invariants:** none apply —
+  this is a CLI/data-model change to an existing plugin's own tracking
+  records, not a plugin SERVICE change (no new network endpoint, no
+  installation-cell/marketplace-provenance surface, no shared-
+  infrastructure dependency, no runtime-versioning concern); the
+  invariants govern plugin-service topology and deployment, which this
+  effort does not touch.
 - **Umbrella issue:** [#2977](https://github.com/ThomasMichon/copilot-extensions/issues/2977)
 
 ## Guiding Intent
@@ -203,46 +215,65 @@ these decisions directly and assumes this design is understood.
   the implicit default — `pr.source_attribution` must resolve to an
   explicitly-configured value (`codename`, `true`, or `false`) before a
   new codename may be assigned for such a repo, never the bare fallback.
-  This covers future allocations only (a custom-wordlist repo never
-  silently starts allocating new implicit-default codenames without an
-  explicit opt-in); it has no effect on *publishing* a codename that is
+  **Scope this gate to PR-active repos only (round-22 finding)** —
+  `codename.wordlist_path` is documented as a purely local, declarative
+  Picker-ergonomics feature, independent of whether the repo uses PR mode
+  at all (`PRConfig.enabled: bool = False` by default — verified in
+  source); a repo with `pr.enabled` false or unset never opens a PR and
+  can never publish a marker, so gating ordinary `create` for such a repo
+  is pure friction with no corresponding safety benefit — the persisted
+  `codename_source` (below) already makes publish-time resolution
+  fail-closed regardless, the moment (if ever) that repo later turns PR
+  mode on. **Enforce this allocation-time gate only when `pr.enabled` is
+  `true`** for the repo being allocated into; when `pr.enabled` is
+  false/unset, allocation proceeds normally and simply records the
+  correct `codename_source` for whenever PR mode might later be enabled.
+  This covers future allocations only (a PR-active, custom-wordlist repo
+  never silently starts allocating new implicit-default codenames without
+  an explicit opt-in); it has no effect on *publishing* a codename that is
   already assigned — that decision is made exclusively by the record's own
   `codename_source` (see the publish-time gating bullets below), and a
   `codename_source: "built-in"` record publishes normally under the
   implicit default even in a repo that currently has this validation error
-  active. Add a test proving: a repo with a custom wordlist AND an
-  absent/default `source_attribution` fails an attempted **new**
-  allocation closed (a config validation error at config-load/allocation
-  time, not a silent `false`-fallback and not a leaked marker) — and add a
-  second test proving that same repo/config combination still successfully
+  active. Add tests proving: (a) a PR-ACTIVE (`pr.enabled: true`) repo
+  with a custom wordlist AND an absent/default `source_attribution` fails
+  an attempted **new** allocation closed (a config validation error at
+  config-load/allocation time, not a silent `false`-fallback and not a
+  leaked marker); (b) that same repo/config combination still successfully
   **publishes** a pre-existing `codename_source: "built-in"` record
-  unaffected by this allocation-time error, so the two tests can't be
-  satisfied by one shared, overbroad implementation.
-- [ ] **Apply the identical allocation-time preflight to the NORMAL
-  `create` path, not just the paired-knowledge path (round-21 finding)** —
-  the bullets above and below only specify this policy for
-  `_carve_paired_knowledge` (the knowledge-repo carve); `__main__.py`'s
-  `_create_worktree_core` — the ordinary harness-worktree creation path
-  every `create` call goes through — independently calls
+  unaffected by this allocation-time error; (c) the IDENTICAL custom
+  wordlist/omitted-`source_attribution` config combination on a repo with
+  `pr.enabled` false/unset allocates a **new** codename successfully (no
+  validation error), proving the gate is correctly scoped and does not
+  regress ordinary local-only Picker usage — three tests, not two, so an
+  overbroad implementation (blocking (c)) or an underbroad one (missing
+  (a)) both fail.
+- [ ] **Apply the identical, identically-scoped allocation-time preflight
+  to the NORMAL `create` path, not just the paired-knowledge path
+  (round-21 finding)** — the bullets above and below only specify this
+  policy for `_carve_paired_knowledge` (the knowledge-repo carve);
+  `__main__.py`'s `_create_worktree_core` — the ordinary harness-worktree
+  creation path every `create` call goes through — independently calls
   `codename_tracking.assign_new_codename(tracking_path,
   codename_tracking.wordlist_for_repo(config))` (verified in source,
   ~line 2268) and currently receives only a resolved `Wordlist`, with no
   way to distinguish an omitted `source_attribution` key from an explicit
-  one. Left unaddressed, an ordinary `create` against a repo with a custom
-  wordlist and omitted `source_attribution` would silently allocate and
-  set `codename_source: "built-in"` for the harness worktree itself,
-  bypassing the fail-closed policy entirely through the single most common
-  code path — a gap distinct from (and more severe than) the
+  one. Left unaddressed, an ordinary `create` against a PR-active repo
+  with a custom wordlist and omitted `source_attribution` would silently
+  allocate and set `codename_source: "built-in"` for the harness worktree
+  itself, bypassing the fail-closed policy entirely through the single
+  most common code path — a gap distinct from (and more severe than) the
   paired-knowledge gap the surrounding bullets close. Add the same
   preflight check `_create_worktree_core` runs BEFORE any create side
-  effect (worktree, branch, or record): validate the *own* repo's config
-  (not the knowledge project's) for a custom wordlist with an
-  unresolved/omitted `source_attribution`, raising
-  `CodenameAttributionPolicyError` (the same dedicated exception type
-  introduced below) if violated — mirroring the paired-knowledge
-  preflight's transactionality treatment (preflight before any side
-  effect, a second revalidation immediately before the first side effect,
-  and the same documented residual-TOCTOU-window/no-rollback/named-
+  effect (worktree, branch, or record), scoped by the same `pr.enabled`
+  condition above: validate the *own* repo's config (not the knowledge
+  project's) for a custom wordlist with an unresolved/omitted
+  `source_attribution`, raising `CodenameAttributionPolicyError` (the same
+  dedicated exception type introduced below) if violated **and
+  `pr.enabled` is true** — mirroring the paired-knowledge preflight's
+  transactionality treatment (preflight before any side effect, a second
+  revalidation immediately before the first side effect, and the same
+  documented residual-TOCTOU-window/no-rollback/named-
   orphan-path behavior). Add a regression test: `create` against a repo
   with a custom wordlist and omitted `source_attribution` fails outright,
   before any worktree/branch/record exists — the direct normal-path
@@ -329,10 +360,12 @@ these decisions directly and assumes this design is understood.
   `except Exception: knowledge_wordlist = None`, which silently falls back
   to the built-in wordlist on ANY config-load failure — including the
   new fail-closed policy validation error this effort adds for a
-  custom-wordlist repo with an omitted `source_attribution`. That would
-  let the paired-knowledge path allocate a codename (and set
-  `codename_source: "built-in"`) for exactly the repo/config combination
-  the validation error exists to block, defeating it entirely.
+  custom-wordlist **PR-active** (`pr.enabled: true`, round-22 scoping —
+  see the allocation-time gate bullet above) repo with an omitted
+  `source_attribution`. That would let the paired-knowledge path allocate
+  a codename (and set `codename_source: "built-in"`) for exactly the
+  repo/config combination the validation error exists to block, defeating
+  it entirely.
   **Additionally**, even after fixing that inner handler, the caller in
   `__main__.py`'s `create` path (~line 2362-2375) wraps the entire
   `_carve_paired_knowledge(...)` call in its own
@@ -404,17 +437,43 @@ these decisions directly and assumes this design is understood.
   letting `create-pr` succeed with no marker for exactly the
   custom-wordlist/omitted-`source_attribution` repo the policy exists to
   block — a *different*, `create-pr`-specific way to defeat the same
-  fail-closed guarantee the paired-knowledge fix closes for `create`. Fix:
-  this `except Exception` clause must catch `CodenameAttributionPolicyError`
+  fail-closed guarantee the paired-knowledge fix closes for `create`.
+  **This re-raise point is too late to be transactional (round-22
+  finding) — a preflight, not just a late re-raise, is required:** by the
+  time `_open_via_provider` runs, `create_pr` has already squashed,
+  force-pushed the feature branch, and `tracking.save_record`'d the PR
+  entry (verified in source, `create_pr`'s flow ~lines 990-1007) —
+  re-raising here would abort with a genuinely public branch and an open
+  tracking record already left behind, unlike `_create_worktree_core`/
+  `_carve_paired_knowledge`, for which this plan defines real
+  preflight-based transactionality. Fix requires BOTH pieces, not just the
+  re-raise: (1) **preflight** — `create_pr` must run the identical
+  policy-and-`pr.enabled`-scoped preflight (same helper the allocation-time
+  gate bullets above use) BEFORE the squash/push, for the record's own
+  repo, whenever the effective attribution mode will need to lazy-backfill
+  a codename (record has none yet and effective `attribution` resolves to
+  `"codename"`) — failing `create_pr` outright at that point, before any
+  branch is pushed or PR record saved, the same "fail before side effects"
+  treatment every other allocation site in this plan uses; (2) **the
+  re-raise stays too**, as a defense-in-depth backstop for the same class
+  of narrow TOCTOU race the other preflights document (config changing
+  between the preflight and the actual backfill) — this residual race is
+  NOT expected to be closed further, matching this plan's established
+  narrowed-transactionality posture elsewhere, and its already-pushed
+  branch/record are left in place with no automatic rollback, consistent
+  with the no-rollback decision documented for the other preflights. Fix
+  the `except Exception` clause to catch `CodenameAttributionPolicyError`
   **before** the general `except Exception: pass`, and re-raise it
   (aborting `create-pr` outright) rather than falling through to the
   generic pass — every other exception type keeps today's
-  skip-the-marker behavior unchanged. Add a regression test: `create-pr`
-  against a custom-wordlist repo with omitted `source_attribution`
-  (an unmigrated/pre-existing worktree record with no codename yet, so
-  the lazy-backfill path is actually exercised) fails the whole
-  `create-pr` command with the policy error, rather than succeeding with
-  the marker silently omitted.
+  skip-the-marker behavior unchanged. Add regression tests: (a)
+  `create-pr` against a PR-active custom-wordlist repo with omitted
+  `source_attribution` (an unmigrated/pre-existing worktree record with no
+  codename yet) fails BEFORE any squash/push happens, via the new
+  preflight; (b) simulating the residual race (policy becomes violated
+  only after the preflight passes) still fails via the re-raise path, with
+  the branch/record left in place and no automatic rollback attempted —
+  the direct `create-pr` analog of the other preflights' race tests.
 - [ ] **Merge `codename`/`codename_source` under the record lock during
   concurrent saves (round-11 finding):** `_save_record_unlocked` already
   merges several fields (handoff reservations, lifecycle/session-backend/
@@ -451,15 +510,39 @@ these decisions directly and assumes this design is understood.
   record with no `codename_source` (which this plan requires to fail
   closed) would still publish its codename on refresh even after the
   initial-path gate is added. Both branches must apply the identical
-  `codename_source == "built-in"` check before treating an already-
-  assigned codename as safe under the implicit default — factor the check
-  into one shared helper both call sites use, rather than duplicating the
-  condition, so the two paths cannot drift out of sync again. A record
-  with `codename_source: "custom"` requires the same explicit
-  `pr.source_attribution` opt-in as a currently-custom-wordlist repo, even
-  if the repo's config has since reverted to no custom wordlist. **Any
-  stored value other than the literal string `"built-in"` must be treated
-  as unsafe/`"custom"` (round-12 finding)**: `tracking.load_record`
+  gating check (defined next) before treating an already-assigned
+  codename as safe to publish — factor the check into one shared helper
+  both call sites use, rather than duplicating the condition, so the two
+  paths cannot drift out of sync again.
+  **The shared helper must take `source_attribution_configured` as an
+  explicit input, not just the resolved `attribution` value (round-22
+  finding)** — `attribution == "codename"` is identical at runtime whether
+  it arrived via an EXPLICIT `pr.source_attribution: codename` config key
+  or via the bare, unconfigured implicit default (both produce the same
+  Python string), yet the two cases require opposite `codename_source`
+  handling: an explicit opt-in is the operator consciously reviewing and
+  accepting this repo's vocabulary (publish regardless of
+  `codename_source`, per case (b) below), while the bare implicit default
+  is exactly the silent-leak scenario this whole effort exists to prevent
+  (must still gate on `codename_source == "built-in"`). A helper keyed
+  only on `attribution == "codename"` cannot distinguish these — it either
+  blocks the safe implicit default's ordinary `"built-in"` case or leaks a
+  `"custom"`-sourced codename under the implicit default, one or the
+  other. Fix: thread `source_attribution_configured` (`PRConfig`'s
+  existing field, `True` only when the raw key was literally present)
+  into the shared helper alongside `attribution` and `codename_source`;
+  the gating logic is: publish when EITHER (i) `source_attribution` is
+  `True` (raw/full marker mode, unaffected by codenames), OR (ii)
+  `attribution == "codename"` AND (`source_attribution_configured` is
+  `True` **or** `codename_source == "built-in"`) — i.e. an EXPLICIT
+  `codename` opt-in always publishes regardless of `codename_source`, but
+  an IMPLICIT `codename` default only publishes a `"built-in"`-sourced
+  codename. A record with `codename_source: "custom"` under an implicit
+  (not explicit) `codename` default requires the repo to explicitly set
+  `pr.source_attribution` (to `codename` or `true`) to publish, even if
+  the repo's wordlist config has since reverted to no custom wordlist.
+  **Any stored value other than the literal string `"built-in"` must be
+  treated as unsafe/`"custom"` (round-12 finding)**: `tracking.load_record`
   accepts arbitrary YAML values for record fields with no schema
   enforcement, so the shared helper must check
   `codename_source == "built-in"` to treat a record as safe — never the
@@ -469,16 +552,21 @@ these decisions directly and assumes this design is understood.
   Add tests proving, for BOTH `_open_via_provider` and
   `refresh_source_attribution`: (a) a `WorktreeRecord` with
   `codename_source: "custom"`, in a repo whose config NOW has no custom
-  wordlist, still fails closed under the implicit default (the exact
-  legacy-drift scenario the round-8 finding raised); (b) a repo with a
-  custom wordlist that HAS explicitly configured
-  `source_attribution: codename` publishes normally regardless of any
-  record's `codename_source`, including for a pre-existing
-  `WorktreeRecord` assigned before this effort shipped; (c) a
-  `WorktreeRecord` with `codename_source: "built-in"` publishes normally
-  under the implicit default; (d) a `WorktreeRecord` with an unrecognized
-  stored `codename_source` value (neither `"built-in"` nor `"custom"`)
-  fails closed exactly like `"custom"` would.
+  wordlist and an IMPLICIT (not explicit) `codename` default, still fails
+  closed (the exact legacy-drift scenario the round-8 finding raised); (b)
+  a repo with a custom wordlist that HAS EXPLICITLY configured
+  `source_attribution: codename` (`source_attribution_configured` is
+  `True`) publishes normally regardless of any record's `codename_source`,
+  including for a pre-existing `WorktreeRecord` assigned before this
+  effort shipped; (c) a `WorktreeRecord` with `codename_source:
+  "built-in"` publishes normally under an IMPLICIT `codename` default; (d)
+  a `WorktreeRecord` with an unrecognized stored `codename_source` value
+  (neither `"built-in"` nor `"custom"`) fails closed exactly like
+  `"custom"` would under an implicit default; (e) the case (a) scenario
+  again, but this time also asserting explicitly that an implicit default
+  by itself is never sufficient to publish a `"custom"`-sourced record —
+  proving the helper reads `source_attribution_configured`, not just
+  `attribution`'s value, to decide (a) vs. (b).
 - [ ] **Backfill migration for existing `WorktreeRecord`s created before
   this field existed (round-10 finding: keep this fail-closed, never
   infer from current config):** a record with no `codename_source`
@@ -590,8 +678,9 @@ these decisions directly and assumes this design is understood.
 
 ## Validation Plan
 
-- [ ] Unit (round-15 finding: allocation-time, not publish-time): a repo
-  with a custom `codename.wordlist_path` configured AND an absent/default
+- [ ] Unit (round-15 finding: allocation-time, not publish-time; scoped
+  round-22): a **PR-active** (`pr.enabled: true`) repo with a custom
+  `codename.wordlist_path` configured AND an absent/default
   `source_attribution` fails a **new codename allocation** closed (a
   config validation error at config-load/allocation time, not a silent
   `false`-fallback and not a leaked marker) — the single highest-priority
@@ -599,6 +688,12 @@ these decisions directly and assumes this design is understood.
   flip could introduce. This test must NOT touch an existing
   `WorktreeRecord`'s publish path — see the next bullet and the
   `codename_source: "built-in"` bullet below for that.
+- [ ] Unit (round-22 finding): the IDENTICAL custom-wordlist/omitted-
+  `source_attribution` config, but with `pr.enabled` false/unset, allocates
+  a **new** codename successfully with no validation error — proving the
+  allocation-time gate is scoped to PR-active repos only and does not
+  regress ordinary local-only (`codename.wordlist_path` for Picker
+  ergonomics, no PR features in use) `create` usage.
 - [ ] Unit (round-21 finding): the SAME allocation-time policy violation,
   exercised through the **normal `create` path**
   (`_create_worktree_core`), not just the paired-knowledge path — a
@@ -611,19 +706,25 @@ these decisions directly and assumes this design is understood.
   `_create_worktree_core`'s own preflight wiring must fail this test even
   if the shared helper itself is correct.
 - [ ] Unit: a repo with a custom `codename.wordlist_path` configured AND an
-  explicit `source_attribution: codename` publishes normally — including
-  for a pre-existing `WorktreeRecord` whose codename was assigned before
-  this effort shipped, proving the exclusion decision is scoped to
-  "no explicit config," not to "has ever had a custom wordlist."
-- [ ] Unit (legacy-record gap, round-8 finding): a `WorktreeRecord` with
-  `codename_source: "custom"`, in a repo whose CURRENT config has no
-  custom wordlist configured (the config changed after assignment), still
-  fails closed under the implicit default — proving publish-time
-  resolution consults the record's own provenance, not just current
-  config.
+  EXPLICIT `source_attribution: codename` (`source_attribution_configured`
+  is `True`) publishes normally — including for a pre-existing
+  `WorktreeRecord` whose codename was assigned before this effort shipped
+  and carries `codename_source: "custom"` — proving the shared
+  publish-time helper reads `source_attribution_configured`, not just
+  `attribution == "codename"`, to grant this explicit-opt-in exception
+  (round-22 finding: the two are otherwise indistinguishable at runtime).
+- [ ] Unit (legacy-record gap, round-8 finding, sharpened round-22): a
+  `WorktreeRecord` with `codename_source: "custom"`, in a repo whose
+  CURRENT config has no custom wordlist configured (the config changed
+  after assignment) AND whose `source_attribution` is the IMPLICIT
+  (unconfigured) `codename` default — not an explicit one — still fails
+  closed. This must be run alongside the previous bullet's EXPLICIT case
+  to prove the helper actually branches on `source_attribution_configured`
+  rather than coincidentally passing both by always requiring
+  `codename_source: "built-in"`.
 - [ ] Unit: a `WorktreeRecord` with `codename_source: "built-in"` publishes
-  normally under the implicit default regardless of the repo's current
-  wordlist config.
+  normally under an IMPLICIT `codename` default, regardless of the repo's
+  current wordlist config.
 - [ ] Unit: an existing `WorktreeRecord` with no `codename_source` recorded
   (predates this effort) is permanently treated as `"custom"` (fails
   closed) — never auto-promoted to `"built-in"` by any automated pass,
@@ -695,14 +796,20 @@ these decisions directly and assumes this design is understood.
   surfaced error message names the exact orphaned worktree path and branch
   so an operator can remove it manually — proving the documented residual
   behavior is real and observable, not merely asserted in prose.
-- [ ] Unit (round-16 finding): `create-pr` against a custom-wordlist repo
-  with an omitted `source_attribution`, run on a worktree record with no
-  codename yet (forcing `_open_via_provider`'s lazy-backfill branch to
-  actually call `ensure_codename`) — asserts the whole `create-pr` command
-  fails with the policy error, proving the `except Exception: pass` around
-  that call site re-raises `CodenameAttributionPolicyError` instead of
-  swallowing it into a silent skip-the-marker success, the same way the
-  `create` command's paired-knowledge boundary already does. Add a second
+- [ ] Unit (round-16 finding, preflight added round-22): `create-pr`
+  against a PR-active custom-wordlist repo with an omitted
+  `source_attribution`, run on a worktree record with no codename yet —
+  asserts the whole `create-pr` command fails with the policy error
+  **before any squash/push has happened** (proving the new preflight, not
+  just the late re-raise, is what actually catches this — the ordinary
+  case). Add a second case simulating the narrow residual race (policy
+  becomes violated only after the preflight passes, so
+  `_open_via_provider`'s lazy-backfill actually calls `ensure_codename`
+  and hits the re-raise instead): asserts `create-pr` still fails via the
+  `except Exception: pass` re-raising `CodenameAttributionPolicyError`
+  instead of swallowing it into a silent skip-the-marker success, with the
+  already-pushed branch/record left in place and no automatic rollback —
+  the `create-pr` analog of the other preflights' race tests. Add a third
   case proving every OTHER exception from `ensure_codename` (e.g. a lock
   `TimeoutError`) still degrades to skip-the-marker, unaffected by this
   fix.
@@ -721,9 +828,27 @@ these decisions directly and assumes this design is understood.
   parses to `False` (opt-out remains available and unchanged).
 - [ ] Unit: `_parse_pr` with an explicit `source_attribution: true` still
   parses to `True` (closed-circuit opt-in remains unchanged).
+- [ ] **Unit (round-22 finding): `_parse_pr` with an EXPLICIT
+  `source_attribution: codename` parses to `"codename"` AND
+  `source_attribution_configured` is `True`** — this is the critical case
+  the existing three bullets above miss entirely: an absent key ALSO
+  parses to `"codename"` (the new implicit default), so a test suite that
+  only distinguishes `false`/`true`/absent leaves the explicit-`codename`
+  vs. implicit-`codename` boundary — the exact distinction the publish-time
+  gate's `source_attribution_configured` check depends on — completely
+  unverified. A regression collapsing this case into the absent-key case
+  (or vice versa) would either silently block the main allowed opt-in
+  (explicit `codename` on a custom-wordlist repo) or silently let an
+  implicit default masquerade as an explicit one and leak a `"custom"`-
+  sourced codename. Cover this at both the parser level AND with a real
+  allocation: a repo with a custom wordlist and this EXPLICIT
+  `source_attribution: codename` config successfully allocates a new
+  codename (the allocation-time gate in Phase 1 does not block it, since
+  the key is explicitly present, not omitted).
 - [ ] Regression: `source_attribution_configured` is `False` for every
-  absent-key case above and `True` for every explicit case (both `false`
-  and `true` count as "configured"), proving the two fields never drift.
+  absent-key case above and `True` for every explicit case (`false`,
+  `true`, AND `codename`, all three count as "configured"), proving the
+  fields never drift.
 - [ ] **Integration (not just parser-level):** with `source_attribution`
   entirely omitted from a repo's config, `create_pr` actually publishes a
   codename marker (`_open_via_provider`'s marker-writing path, not just
@@ -777,27 +902,51 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-20 history lives in **[journal.md](journal.md)** to keep this
+> round-21 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 21 fixes
+### 2026-09-20 — Plan-review round 22 fixes
 
-- One finding on the round-20 head, verified against actual source —
-  and the most consequential gap found so far: the plan's
-  allocation-time custom-wordlist gate had only ever been specified for
-  `_carve_paired_knowledge` (the paired-knowledge-repo carve). Grepped
-  `__main__.py` for every `assign_new_codename` call site and confirmed
-  `_create_worktree_core` — the ORDINARY harness-worktree creation path
-  every `create` call goes through, not a rare paired-repo feature —
-  independently allocates a codename from only a resolved `Wordlist`,
-  with no raw-config access and therefore no way to enforce the
-  fail-closed policy at all. Left as specified, the plan's own
-  flagship regression test (round-15) would have passed while the most
-  common real-world path — an ordinary `create` — silently bypassed the
-  policy entirely. Fixed by adding an explicit Phase 1 item requiring
-  the identical preflight (same exception type, same
-  transactionality/TOCTOU treatment already specified for the
-  paired-knowledge path) in `_create_worktree_core` itself, plus a
-  dedicated Validation Plan test exercising `_create_worktree_core`'s
-  own wiring (not just the shared validation helper), so a regression in
-  either path is caught independently.
+- Four findings on the round-21 head (three new, one a scope-refinement
+  reopen of round-21's own fix) plus two "previously missed" items,
+  each verified against actual source/repo convention:
+  1. **Scoping (reopened round-21 finding):** the allocation-time
+     custom-wordlist gate blocked ordinary `create` even for repos with
+     PR mode entirely disabled — verified `PRConfig.enabled: bool =
+     False` by default, and that `codename.wordlist_path` is documented
+     as purely local/declarative. Since a `pr.enabled: false` repo can
+     never publish a marker, the persisted `codename_source` already
+     makes publish-time resolution safe regardless — scoped the
+     allocation-time gate (across all three call sites: normal
+     `create`, paired-knowledge, and the new `create-pr` preflight
+     below) to `pr.enabled: true` repos only, with a regression test
+     proving ordinary allocation still works for PR-inactive repos.
+  2. **Explicit-vs-implicit threading:** the publish-time gate's shared
+     helper decided "safe to publish" from `attribution == "codename"`
+     alone, but an EXPLICIT opt-in and the bare IMPLICIT default produce
+     the identical string at runtime and need opposite `codename_source`
+     handling. Threaded `PRConfig.source_attribution_configured` into
+     the shared helper so an explicit opt-in publishes any
+     `codename_source` while an implicit default still requires
+     `"built-in"`; added a parser-level test for the previously-missing
+     explicit-`codename` case (distinct from absent-key), which is what
+     the fix's own discriminator now depends on.
+  3. **Transactionality gap in `create-pr`:** verified `create_pr`
+     squashes, force-pushes, and saves the PR tracking record BEFORE
+     `_open_via_provider` runs — so round-16's late re-raise there would
+     abort with a real public branch and open tracking state already
+     left behind, unlike the preflight-based transactionality this plan
+     defines everywhere else. Added a `create_pr`-level preflight before
+     the squash/push (the ordinary case), keeping the late re-raise only
+     as the documented residual-race backstop.
+  4. **Vision classification (previously missed):** `below-altitude` was
+     inconsistent with Phase 1's actual scope (a new persisted field, a
+     new exception type, and multi-site policy gates) per
+     `AGENTS.md:139-143`'s "a design change owes both" rule. Reclassified
+     to vision-extending (against the existing PR-capability vision) and
+     documented that `docs/patterns/README.md`'s binding invariants don't
+     apply (this is a data-model/CLI change, not a plugin-service
+     topology change).
+  5. **Validation gap (previously missed):** the parser test list never
+     covered explicit `source_attribution: codename` at all — folded
+     into fix #2's new test.
