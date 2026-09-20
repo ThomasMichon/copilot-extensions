@@ -89,7 +89,12 @@ class TestRegisterSessionStdin:
 
         assert rc == 0
         rec = load_record(tmp_tracking_dir / "wt-cutover.yaml")
-        assert rec.resolved_head_session == "old"
+        # "old" yielded the moment it opened the handoff (gitea
+        # aperture-labs#7230) -- head is vacant, not still "old". The
+        # candidate association itself still does not hand head to "new";
+        # that requires a separate, deliberate link/bind.
+        assert rec.resolved_head_session is None
+        assert rec.session_entry("old").state == "yielded"
         assert rec.handoffs[0].candidate == "new"
         assert rec.handoffs[0].state == "pending"
 
@@ -278,7 +283,9 @@ class TestRegisterSessionStdin:
         tracking.register_session("wt-candidate-only", "old")
         rec = load_record(tmp_tracking_dir / "wt-candidate-only.yaml")
         tracking.open_handoff(rec, "old", "task-cand")
-        tracking.register_session("wt-candidate-only", "new")
+        tracking.register_session(
+            "wt-candidate-only", "new", candidate_token="task-cand",
+        )
         rec = load_record(tmp_tracking_dir / "wt-candidate-only.yaml")
         tracking.associate_handoff_candidate(rec, "task-cand", "new")
         activity.log_event(

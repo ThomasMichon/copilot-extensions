@@ -40,11 +40,20 @@ WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"
 # (session-lifecycle / agent-fabric vision `single-current-session-per-worktree`):
 #   * "active"     -- a current, resumable session (the default; a stopped or
 #                     ended session is still active/resumable until concluded).
+#   * "yielded"    -- this session has opened a handoff intent (see
+#                     `open_handoff`) and is no longer the authoritative head,
+#                     but has NOT concluded -- it may still be alive/resumable.
+#                     Distinct from "handed-off": a yielded session's handoff
+#                     may never be formally linked to a specific successor (a
+#                     stored/paste handoff, an operator manually opening a new
+#                     pane, etc.), and claiming head from a yielded state is a
+#                     separate, non-blocking concern from consuming the actual
+#                     handoff charter (gitea aperture-labs#7230).
 #   * "handed-off" -- concluded *into* a successor via a handoff cutover.
 #   * "concluded"  -- deliberately finished / sunset.
-# Conclusion is an ASSERTED act, never inferred from liveness. Absent (legacy
-# records) = "active", so no migration is needed.
-SessionState = Literal["active", "handed-off", "concluded"]
+# Conclusion ("handed-off"/"concluded") is an ASSERTED act, never inferred from
+# liveness. Absent (legacy records) = "active", so no migration is needed.
+SessionState = Literal["active", "yielded", "handed-off", "concluded"]
 HandoffState = Literal["pending", "linked", "cancelled"]
 ProfileAssignmentDisposition = Literal["pending", "bound", "abandoned"]
 ControllerRelationKind = Literal["worktree", "session"]
@@ -56,6 +65,14 @@ ControllerRelationState = Literal["active", "ended"]
 # States that mean "no longer the current session" -- a replayed head pointing
 # at one resolves to no current session until an explicit successor/adoption.
 _CONCLUDED_SESSION_STATES: tuple[SessionState, ...] = ("handed-off", "concluded")
+
+# States that make a session ineligible to BE resolved as the current head --
+# a superset of `_CONCLUDED_SESSION_STATES` that also excludes "yielded"
+# (gitea aperture-labs#7230). Used only by head resolution
+# (`resolved_head_session`/`replayed_head_session`); NOT used by
+# `conclude_session` (a yielded session has not concluded -- it may still be
+# alive) or `link_handoff`'s already-concluded successor check.
+_HEAD_INELIGIBLE_STATES: tuple[SessionState, ...] = (*_CONCLUDED_SESSION_STATES, "yielded")
 
 # A worktree's owner class. "session" = an interactive agent session (the
 # default, shown in the launch Picker). "system" = a daemon-owned worktree
@@ -1084,7 +1101,7 @@ class WorktreeRecord:
         if transition is None or transition.session_id is None:
             return None
         entry = self.session_entry(transition.session_id)
-        if entry is None or entry.state in _CONCLUDED_SESSION_STATES:
+        if entry is None or entry.state in _HEAD_INELIGIBLE_STATES:
             return None
         return transition.session_id
 
@@ -1096,12 +1113,22 @@ class WorktreeRecord:
           1. when a transition ledger exists, replay its highest monotonic
              revision; ``head_session`` is only a repairable cache;
           2. otherwise the stored ``head_session`` when it names a session that still
-             exists and is **not** concluded/handed-off (a stale head that was
-             concluded without advancing does not win);
-          3. otherwise the **newest non-concluded** session in ``sessions``
-             (by list order -- registration order), preserving today's
-             "latest is current" behavior for un-annotated records;
-          4. otherwise None (no sessions, or all concluded).
+             exists and is **not** concluded/handed-off/yielded (a stale head
+             that concluded, or yielded to an intended-but-never-linked
+             handoff, without advancing does not win);
+          3. otherwise the **newest non-concluded, non-yielded** session in
+             ``sessions`` (by list order -- registration order), preserving
+             today's "latest is current" behavior for un-annotated records;
+          4. otherwise None (no sessions, or all concluded/yielded).
+
+        A "yielded" session (one that opened a handoff intent but was never
+        formally linked to a specific successor) is deliberately excluded here
+        so the *next* session to register in this worktree -- regardless of
+        whether it consumes that handoff's charter -- can freely claim head
+        (see `register_session`; gitea aperture-labs#7230). This is distinct
+        from `_CONCLUDED_SESSION_STATES`, which `conclude_session` and
+        `link_handoff` still use unchanged: a yielded session has not
+        concluded and may still be alive/resumable.
 
         This is the record-local head. Filesystem-precise "latest by
         workspace.yaml mtime" resolution still lives in ``sessions.py``; this
@@ -1111,10 +1138,10 @@ class WorktreeRecord:
             return self.replayed_head_session
         if self.head_session:
             entry = self.session_entry(self.head_session)
-            if entry is not None and entry.state not in _CONCLUDED_SESSION_STATES:
+            if entry is not None and entry.state not in _HEAD_INELIGIBLE_STATES:
                 return self.head_session
         for entry in reversed(self.sessions or ()):
-            if entry.state not in _CONCLUDED_SESSION_STATES:
+            if entry.state not in _HEAD_INELIGIBLE_STATES:
                 return entry.session_id
         return None
 
@@ -1592,7 +1619,8 @@ def load_record(path: Path) -> WorktreeRecord:
                     # resumable session.
                     st_raw = entry.get("state")
                     st_val: SessionState = (
-                        st_raw if st_raw in ("active", "handed-off", "concluded")
+                        st_raw
+                        if st_raw in ("active", "yielded", "handed-off", "concluded")
                         else "active")
                     succ = entry.get("successor")
                     pred = entry.get("predecessor")
@@ -3633,6 +3661,14 @@ def open_handoff(
         opened_at=opened_at or _now_iso(),
     )
     record.handoffs.append(handoff)
+    # Opening a handoff intent IS the predecessor yielding (gitea
+    # aperture-labs#7230): it is no longer the authoritative head, but has not
+    # concluded -- it may still be alive/resumable, and consuming this
+    # handoff's actual charter remains a separate, non-blocking concern. Never
+    # downgrade an already-concluded/handed-off entry -- "yielded" only ever
+    # applies to a still-active predecessor.
+    if predecessor.state == "active":
+        predecessor.state = "yielded"
     _next_lifecycle_revision(record, predecessor_id)
     if save:
         save_record(record)
@@ -3786,6 +3822,34 @@ def _cancel_pending_handoffs(record: WorktreeRecord) -> bool:
             handoff.state = "cancelled"
             changed = True
     return changed
+
+
+def _handoff_state(record: WorktreeRecord, token: str) -> str | None:
+    """The current state of one handoff by token, or ``None`` if untracked."""
+    handoff = next((h for h in record.handoffs if h.token == token), None)
+    return handoff.state if handoff is not None else None
+
+
+def _pending_handoffs_all_from_yielded(record: WorktreeRecord) -> bool:
+    """True when every pending handoff's predecessor is merely "yielded" --
+    never a genuine asserted conclusion (gitea aperture-labs#7230).
+
+    An ordinary (non-``bind``) new session may freely supersede a pending
+    handoff left by a *yielded* predecessor (still possibly alive; it only
+    opened a handoff intent -- see `open_handoff`), since consuming that
+    handoff's charter is a separate, non-blocking concern from becoming head.
+    But a pending handoff whose predecessor already explicitly concluded via
+    `conclude_session(state="handed-off", handoff_token=...)` represents a
+    specific, already-in-flight formal cutover awaiting its named successor;
+    an unrelated ordinary session must still NOT silently hijack that (only
+    an explicit ``bind`` may). Returns True (safe to bypass) when there are
+    no pending handoffs at all.
+    """
+    for handoff in record.pending_handoffs:
+        predecessor = record.session_entry(handoff.predecessor)
+        if predecessor is None or predecessor.state != "yielded":
+            return False
+    return True
 
 
 def set_head_session(
@@ -5017,6 +5081,7 @@ def register_session(
     source: str = "hook",
     recorded_at: str | None = None,
     handoff_token: str | None = None,
+    candidate_token: str | None = None,
     initial_projection: bool = False,
 ) -> SessionHandoff | None:
     """Register a Copilot session against a worktree (called from sessionStart hook).
@@ -5024,6 +5089,16 @@ def register_session(
     Returns the :class:`SessionHandoff` this call *newly* linked (the head
     authoritatively transferred to ``session_id``), or ``None`` when no fresh
     link happened -- callers use this to emit Stage 10/11 events exactly once.
+
+    ``candidate_token`` names a handoff this session is a *candidate*
+    successor for (the live-cutover spawn path's weaker signal -- typically
+    from an inherited env var -- ahead of a caller's own separate
+    `associate_handoff_candidate` call). It never links the handoff itself,
+    but -- like ``handoff_token`` -- it disables the ordinary
+    yielded-predecessor auto-claim bypass (gitea aperture-labs#7230) for
+    *this* registration, so a genuine, still-in-flight candidate flow is
+    never raced out from under itself by its own registration call cancelling
+    the very handoff it is about to be associated with.
     """
     yaml_path = _owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
@@ -5094,6 +5169,16 @@ def register_session(
                     entry.pid = pid
                 if pane_id:
                     entry.pane_id = pane_id
+                if handoff_token and _handoff_state(record, handoff_token) == "cancelled":
+                    # Already superseded by an unrelated ordinary session's
+                    # yielded-predecessor bypass (gitea aperture-labs#7230),
+                    # not a genuine misuse -- degrade silently rather than
+                    # attempting (and failing) the link. A real error (bad
+                    # token, candidate mismatch, etc.) below still raises
+                    # exactly as before -- the sessionStart hook must never
+                    # hard-error merely because an unrelated ordinary session
+                    # won the race to become head first.
+                    handoff_token = None
                 if handoff_token:
                     try:
                         linked_handoff = _link_if_fresh()
@@ -5105,13 +5190,20 @@ def register_session(
                     save_record(record)
                     return linked_handoff
                 elif (
-                    record.resolved_head_session is None
+                    not candidate_token
+                    and record.resolved_head_session is None
                     and entry.state == "active"
-                    and (
-                        not record.pending_handoffs
-                        or source == "bind"
-                    )
+                    and (source == "bind" or _pending_handoffs_all_from_yielded(record))
                 ):
+                    # `record.resolved_head_session is None` already means no
+                    # OTHER session is the current, non-yielded/non-concluded
+                    # head. A pending handoff left by a merely-YIELDED
+                    # predecessor (gitea aperture-labs#7230) is a separate,
+                    # non-blocking concern and is superseded here rather than
+                    # awaited; a pending handoff whose predecessor already
+                    # explicitly concluded (a named, in-flight formal
+                    # cutover) still requires an explicit ``bind`` to
+                    # supersede, unchanged from before.
                     _cancel_pending_handoffs(record)
                     _append_head_transition(
                         record, session_id, reason="rebind", at=event_at,
@@ -5154,15 +5246,26 @@ def register_session(
         # A successor claims one exact, previously opened handoff token. Merely
         # starting another session never steals the head.
         linked_handoff = None
+        if handoff_token and _handoff_state(record, handoff_token) == "cancelled":
+            # Already superseded by an unrelated ordinary session's
+            # yielded-predecessor bypass (gitea aperture-labs#7230) -- degrade
+            # silently rather than attempting (and failing) the link.
+            handoff_token = None
         if handoff_token:
             try:
                 linked_handoff = _link_if_fresh()
             except SessionLifecycleError:
                 save_record(record)
                 raise
-        elif not had_active_head and (
-            not record.pending_handoffs or source == "bind"
+        elif not candidate_token and not had_active_head and (
+            source == "bind" or _pending_handoffs_all_from_yielded(record)
         ):
+            # `had_active_head` already accounts for a yielded predecessor
+            # (gitea aperture-labs#7230): its pending handoff is a separate,
+            # non-blocking concern and is superseded here rather than
+            # awaited. A pending handoff whose predecessor already explicitly
+            # concluded (a named, in-flight formal cutover) still requires an
+            # explicit ``bind`` to supersede, unchanged from before.
             _cancel_pending_handoffs(record)
             _append_head_transition(
                 record,

@@ -73,6 +73,67 @@ def read_session_state_handoff(session_id: str | None) -> dict[str, object] | No
     return data if isinstance(data, dict) else None
 
 
+def session_state_worktree_binding_path(session_id: str | None) -> Path | None:
+    """Path to one session's durable worktree-association record.
+
+    Unconditional counterpart to `session_state_handoff_path` (which only
+    exists for a handoff flow): every session that registers against a
+    worktree gets this record, regardless of whether a handoff was ever
+    involved (gitea aperture-labs#7230, wish 1 -- durable session recording
+    must not depend on the handoff mechanism succeeding).
+    """
+    if not session_id:
+        return None
+    return (
+        sessions._session_state_dir()
+        / _safe_session_segment(session_id)
+        / "worktree-binding.json"
+    )
+
+
+def stamp_session_state_worktree_binding(
+    session_id: str | None,
+    worktree_id: str | None,
+    *,
+    worktree_dir: str | None = None,
+    machine: str | None = None,
+) -> dict[str, object] | None:
+    """Best-effort, unconditional durable record of "this session registered
+    against this worktree" -- written from the session-state side (mirrors
+    the worktree's own tracking YAML, which already accumulates every
+    session in `record.sessions`; this is the session-state-folder half of
+    that same fact, so a caller with only a session id in hand -- no
+    worktree context -- can still recover which worktree it belongs to, and
+    so the association survives even if the worktree's own tracking file is
+    ever lost/corrupted).
+
+    Never creates the session-state directory itself -- an active session
+    already owns it (mirrors context-handoff's `writeSessionStateHandoff`
+    convention); a session-state dir that does not yet exist is a silent
+    no-op, not an error. Atomic write via a temp-file rename.
+    """
+    path = session_state_worktree_binding_path(session_id)
+    if path is None or not worktree_id:
+        return None
+    session_dir = path.parent
+    if not session_dir.is_dir():
+        return None
+    record = {
+        "sessionId": session_id,
+        "worktreeId": worktree_id,
+        "worktreeDir": worktree_dir,
+        "machine": machine,
+        "registeredAt": tracking._now_iso(),
+    }
+    try:
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(record, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        return None
+    return record
+
+
 def stamp_session_state_handoff(
     session_id: str | None,
     *,

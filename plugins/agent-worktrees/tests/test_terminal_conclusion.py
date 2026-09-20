@@ -142,7 +142,9 @@ def test_pending_handoff_preserves_predecessor(tmp_path, monkeypatch):
     assert result["action"] == "skipped"
     assert result["reason"] == "pending-handoff"
     assert record.kind == "session"
-    assert record.session_entry("session-exact").state == "active"
+    # "session-exact" yielded the moment it opened the handoff (gitea
+    # aperture-labs#7230) -- no longer "active", but not concluded either.
+    assert record.session_entry("session-exact").state == "yielded"
     assert record.pending_handoffs
 
 

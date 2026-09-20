@@ -64,7 +64,9 @@ class TestBindSession:
         tracking.register_session("wt-ack", "old")
         rec = load_record(tmp_tracking_dir / "wt-ack.yaml")
         tracking.open_handoff(rec, "old", "task-123")
-        tracking.register_session("wt-ack", "new")
+        tracking.register_session(
+            "wt-ack", "new", candidate_token="task-123",
+        )
         rec = load_record(tmp_tracking_dir / "wt-ack.yaml")
         tracking.associate_handoff_candidate(rec, "task-123", "new")
         captured: dict = {}
@@ -92,7 +94,9 @@ class TestBindSession:
         tracking.register_session("wt-ack2", "old")
         rec = load_record(tmp_tracking_dir / "wt-ack2.yaml")
         tracking.open_handoff(rec, "old", "task-999")
-        tracking.register_session("wt-ack2", "new")
+        tracking.register_session(
+            "wt-ack2", "new", candidate_token="task-999",
+        )
         rec = load_record(tmp_tracking_dir / "wt-ack2.yaml")
         tracking.associate_handoff_candidate(rec, "task-999", "new")
         captured: dict = {}

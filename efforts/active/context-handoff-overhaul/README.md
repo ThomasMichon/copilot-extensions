@@ -379,6 +379,26 @@ Verbatim from the operator:
   primitives and their callers to build session-qualified
   `session:window.pane` targets when the owning session is known and to fail
   closed on ambiguous bare-id fallback instead of guessing.
+- [x] **Session/worktree head-claim tracking fix (gitea aperture-labs#7230).**
+  Discovered while live-validating the above: a worktree kept resuming into
+  a stale predecessor session instead of its most recent successor, even
+  after that predecessor had opened a handoff and successor sessions had
+  done real work for ~36 hours without ever becoming head. Not a mux-pane
+  bug — `register_session`'s head-claim gating treated any pending handoff
+  as blocking ordinary auto-claim, even when the predecessor never
+  progressed past "active" (`open_handoff` never marked its own state).
+  Fixed with a new `"yielded"` `SessionState` (distinct from
+  `handed-off`/`concluded`), a `_HEAD_INELIGIBLE_STATES` split so
+  head-resolution-only logic doesn't leak into `conclude_session`/
+  `link_handoff`'s stricter "already concluded" checks, and a
+  `_pending_handoffs_all_from_yielded()` gate so a genuine in-flight formal
+  cutover (predecessor `conclude_session`'d with a still-pending token)
+  still blocks ordinary auto-claim — only an explicit bind may supersede
+  that. Also added `handoff_diagnostics.stamp_session_state_worktree_binding()`,
+  an unconditional best-effort write of
+  `~/.copilot/session-state/<sid>/worktree-binding.json` recording every
+  session's worktree association (the durable per-session-start recording
+  half of the two operator-described wishes). PR #2989.
 
 ## Validation Plan
 
@@ -1138,4 +1158,46 @@ gate land._
   checkout (unrelated to this change).
 - Cleaned up: disposable successor/predecessor panes and the `--system`
   worktree used for the live test were all removed after validation.
+
+### 2026-09-20 — Session/worktree head-claim tracking fix (gitea aperture-labs#7230)
+
+- Root cause: `register_session`'s auto-claim-of-head branch was gated by
+  "no pending handoffs at all", so a predecessor that had merely opened a
+  handoff (`trigger_handoff`/note-handoff) — but never itself moved past
+  `"active"` — permanently blocked head resolution for every later session
+  in that worktree. Separately, there was no durable per-session record of
+  which worktree a session belongs to, so a stale successor's own
+  session-state folder had no way to self-identify.
+- Fix: new `SessionState` value `"yielded"` set by `open_handoff()` on its
+  predecessor (only from `"active"`); a new `_HEAD_INELIGIBLE_STATES`
+  constant used only by head-resolution properties (left
+  `_CONCLUDED_SESSION_STATES` and `conclude_session`/`link_handoff`'s
+  stricter checks untouched); a new `_pending_handoffs_all_from_yielded()`
+  helper so ordinary auto-claim is allowed only when *every* pending
+  handoff's predecessor is merely yielded — a genuinely `conclude_session`'d
+  predecessor with a still-pending token continues to block ordinary
+  auto-claim, preserving the existing protection for a real in-flight
+  formal cutover (only an explicit bind may supersede that).
+- Also fixed a race this surfaced: `register_session()` gained a
+  `candidate_token` parameter so the sessionStart hook's ordinary
+  registration call (which precedes its separate
+  `associate_handoff_candidate` call) can't itself auto-claim head and
+  cancel the very handoff token the candidate association is about to
+  reference; and a handoff token's state is now pre-checked before
+  `_link_if_fresh`, so a token already cancelled by an unrelated session's
+  auto-claim degrades to `None` instead of raising `SessionLifecycleError`
+  out of `cmd_register_session` (which would hard-fail sessionStart).
+- New `handoff_diagnostics.stamp_session_state_worktree_binding()`: an
+  unconditional, best-effort, atomic write of
+  `~/.copilot/session-state/<sid>/worktree-binding.json` recording every
+  session's worktree/machine association, wired into `cmd_register_session`
+  right after successful registration.
+- Updated 5 existing test files whose assertions encoded the old
+  "predecessor stays active until formally linked" semantics; added
+  `test_session_worktree_binding.py` (12 new tests). Full regression across
+  all touched + adjacent suites: 385+ passed. One pre-existing, unrelated
+  failure confirmed via stash-and-retest against clean `origin/main`
+  (`test_status_monitor.py::test_monitor_retire_handoff_predecessor_preserves_identity_guard`)
+  — not fixed here, flagged separately.
+- PR #2989.
 
