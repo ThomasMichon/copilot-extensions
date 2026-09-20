@@ -497,3 +497,16 @@ Part of the [codename-attribution-by-default effort](README.md).
      sufficiency.
   3. Fixed a duplicated-phrase typo in `design.md` ("see the assignment —
      see the") left over from an earlier edit's text-splice.
+
+### 2026-09-20 — Plan-review round 24 fixes
+
+- One reopened/stale-carryover finding (verified the round-23 vision
+  revision is already in place, no action needed) and one new finding:
+  the PR's "Documentation impact" statement still claimed "no other
+  docs affected," but this PR now also revises
+  `visions/plugins/agent-worktrees/pull-requests/README.md` (round-23)
+  and added the `design.md`/`journal.md` sibling docs (round-18) —
+  neither was reflected in the PR description. Edited the PR
+  description directly (`pr edit --body-file`) to list the vision
+  revision and sibling-doc split under Changes and correct the
+  Documentation-impact statement to match the actual final diff.

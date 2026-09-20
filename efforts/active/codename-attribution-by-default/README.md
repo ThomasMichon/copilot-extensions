@@ -906,18 +906,16 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-23 history lives in **[journal.md](journal.md)** to keep this
+> round-24 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 24 fixes
+### 2026-09-20 — Plan-review round 25 fixes
 
-- One reopened/stale-carryover finding (verified the round-23 vision
-  revision is already in place, no action needed) and one new finding:
-  the PR's "Documentation impact" statement still claimed "no other
-  docs affected," but this PR now also revises
-  `visions/plugins/agent-worktrees/pull-requests/README.md` (round-23)
-  and added the `design.md`/`journal.md` sibling docs (round-18) —
-  neither was reflected in the PR description. Edited the PR
-  description directly (`pr edit --body-file`) to list the vision
-  revision and sibling-doc split under Changes and correct the
-  Documentation-impact statement to match the actual final diff.
+- Zero new findings; the one carried-over "Open" item
+  (documentation-impact statement) is anchored to commit `f2b538c47`,
+  which predates the round-24 PR-description edit that already fixed it
+  — verified the current PR description still correctly states the
+  vision revision under Documentation impact. Treated as a stale
+  carryover (the review tool's diff-based tracking does not appear to
+  re-resolve findings anchored to PR-metadata-only edits), not a real
+  re-finding, per the review protocol's commit-match check.
