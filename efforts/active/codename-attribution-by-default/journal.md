@@ -580,3 +580,16 @@ Part of the [codename-attribution-by-default effort](README.md).
      `design.md`'s decisive-fix paragraph, which had explicitly (and
      incorrectly) claimed explicitness is "read at publish time" from
      live config.
+
+### 2026-09-20 — Plan-review round 28 fixes
+
+- One new finding plus four stale carryovers (verified already fixed):
+  round-27's freeze fix specified parsing `attribution_mode`/
+  `attribution_explicit` back from YAML (`_parse_pr_mapping`) but never
+  specified the WRITE side — verified `tracking.py`'s `_pr_to_yaml_dict`
+  is a separate, lean omit-empties dict-builder that would silently drop
+  both new fields on the very next save, undoing the freeze one
+  `save_record` after it's stamped. Added the explicit requirement to
+  emit both fields from `_pr_to_yaml_dict` (matching its existing
+  only-emit-when-set pattern) and a round-trip Validation Plan test
+  proving both directions actually work together.

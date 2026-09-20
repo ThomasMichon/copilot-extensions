@@ -34,8 +34,13 @@
 
 ## Guiding Intent
 
-Close the gap `pr-attribution-codenames` left open: the codename feature
-works end-to-end (proven live against real merged PRs — see Context), but
+Close the gap `pr-attribution-codenames` left open: the codename feature is
+fully built and unit/integration-tested end-to-end (round-29 finding: this
+is IMPLEMENTATION coverage, not live proof of the codename marker itself —
+the only live-merged-PR evidence cited in Context is the RAW marker form
+(`source_attribution: true`) on a private downstream repo; no repo has ever
+actually published a real PR carrying the codename-form marker, and this
+effort's own Phase 4 defers that live proof until after this PR lands), but
 it requires an explicit `source_attribution: codename` opt-in, and in
 practice **no repo has opted in**. `copilot-extensions` — the very repo the
 feature was built in — still explicitly sets `source_attribution: false`,
@@ -1076,18 +1081,27 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-27 history lives in **[journal.md](journal.md)** to keep this
+> round-28 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 28 fixes
+### 2026-09-20 — Plan-review round 29 fixes
 
-- One new finding plus four stale carryovers (verified already fixed):
-  round-27's freeze fix specified parsing `attribution_mode`/
-  `attribution_explicit` back from YAML (`_parse_pr_mapping`) but never
-  specified the WRITE side — verified `tracking.py`'s `_pr_to_yaml_dict`
-  is a separate, lean omit-empties dict-builder that would silently drop
-  both new fields on the very next save, undoing the freeze one
-  `save_record` after it's stamped. Added the explicit requirement to
-  emit both fields from `_pr_to_yaml_dict` (matching its existing
-  only-emit-when-set pattern) and a round-trip Validation Plan test
-  proving both directions actually work together.
+- One genuine finding, fixed: the Guiding Intent's opening claim ("the
+  codename feature works end-to-end, proven live against real merged
+  PRs") conflated implementation/test coverage with live proof of the
+  codename marker itself — the only live-merged-PR evidence this doc
+  cites is the RAW marker form (`source_attribution: true`) on a private
+  downstream repo; no repo has ever published a real PR carrying the
+  codename-FORM marker, and this effort's own Phase 4 explicitly defers
+  that live proof until after this PR lands. Reworded the Guiding Intent
+  to state this distinction plainly instead of overclaiming.
+- Four stale carryovers (verified already fully resolved in current
+  text, each anchored to a commit predating the fix that resolved it —
+  freeze-for-manual-`set-pr`, persist-attribution-decisions,
+  persist-attribution-fields-in-YAML-round-tripping, and
+  freeze-publish-authorization-alongside-mode are all specified in the
+  Plan's round-26/27/28 freeze bullet and design.md's round-27
+  refinement) and one permanently-stale carryover (the
+  documentation-impact statement finding, `#discussion_r4057190221`,
+  unchanged at anchor `f2b538c47` for six rounds straight — the PR
+  description remains verifiably correct; not re-edited again).
