@@ -11,6 +11,7 @@ exercise the route's own resolution/fallback logic, not the HTTP client.
 
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -112,6 +113,55 @@ def test_falls_back_to_worktree_latest_session_when_no_candidate_resolves(
     resp = client.get("/api/v1/dispatch-tasks/task-3/session")
     assert resp.status_code == 200
     assert resp.json()["session_id"] == "session-in-worktree"
+
+
+def test_resolves_owner_session_from_live_registration_registry(
+    app, client, monkeypatch,
+):
+    """A CLI-embodied task's owner_session_id is a real ACP id registered in
+    the *live-sessions* registry (an interactive CLI session the bridge
+    represents but does not own), not bridge-owned SessionManager or the
+    cold-store provider -- this must still resolve, not 404."""
+    db = app.state.db
+    db.register_live_session(
+        "11111111-1111-1111-1111-111111111111",
+        machine="lambda-core", cwd="/wt", worktree_id="wt-embody",
+        repo="aperture-labs", branch="main", pid=123, role=None,
+        now=1000.0,
+    )
+    _mock_dispatch(
+        monkeypatch,
+        task={"owner_session_id": "11111111-1111-1111-1111-111111111111"},
+    )
+
+    resp = client.get("/api/v1/dispatch-tasks/task-embody/session")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["session_id"] == "11111111-1111-1111-1111-111111111111"
+    assert body["durable_session_id"] == "11111111-1111-1111-1111-111111111111"
+    assert body["acp_session_id"] == "11111111-1111-1111-1111-111111111111"
+
+
+def test_falls_back_to_worktree_latest_live_registration(app, client, monkeypatch):
+    """No owner, no attachment history hit, no bridge-owned worktree
+    session -- but the task's target worktree has a current *interactive*
+    CLI session registered."""
+    db = app.state.db
+    db.register_live_session(
+        "22222222-2222-2222-2222-222222222222",
+        machine="lambda-core", cwd="/wt", worktree_id="wt-embody-2",
+        repo="aperture-labs", branch="main", pid=456, role=None,
+        now=time.time(),
+    )
+    _mock_dispatch(
+        monkeypatch,
+        task={"owner_session_id": None, "target_worktree": "wt-embody-2"},
+        attachments=[],
+    )
+
+    resp = client.get("/api/v1/dispatch-tasks/task-embody-2/session")
+    assert resp.status_code == 200
+    assert resp.json()["session_id"] == "22222222-2222-2222-2222-222222222222"
 
 
 def test_no_resolvable_session_is_404_not_error(app, client, monkeypatch):

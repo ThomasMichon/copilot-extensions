@@ -17,13 +17,19 @@ Resolution order:
 2. Rank candidate session IDs with
    :func:`agent_bridge.dispatch_task_resolution.candidate_session_ids`
    (current owner first, then attachment history newest-first) and try each
-   through the existing live-then-cold-store resolver
-   (``SessionManager.get_session`` / ``fetch_cold_store_session`` -- the
-   same pair ``routes.sessions.get_session`` uses), stopping at the first
-   hit.
+   through the live-then-cold-store-then-live-registration resolver:
+   ``SessionManager.get_session`` (bridge-owned) /
+   ``fetch_cold_store_session`` (archived) /
+   ``Database.get_live_session`` (a CLI-embodied task's *interactive*
+   session, represented but not owned -- see ``routes/live_sessions.py``) --
+   stopping at the first hit.
 3. If nothing resolves, fall back to the task's target worktree's own
-   latest known bridge session
-   (:func:`agent_bridge.routes.worktrees._latest_session_for_worktree`).
+   latest known session: first the bridge-owned tier
+   (:func:`agent_bridge.routes.worktrees._latest_session_for_worktree`, live
+   only), then the live-sessions registry's own worktree-scoped lookup
+   (``Database.current_represented_session_for_worktree``, also live only --
+   there is no cold-store "latest session for a worktree" query capability,
+   only exact-session-id lookups).
 4. Otherwise 404 -- never an error; a task with no resolvable session at
    all is a legitimate, expected outcome for a caller that must degrade
    gracefully (e.g. hide a "View reviewer" link rather than show a broken
@@ -33,12 +39,13 @@ Resolution order:
 from __future__ import annotations
 
 import logging
+import time
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 
 from ..agent_dispatch_client import fetch_attachments, fetch_task
-from ..cold_store_views import cold_store_session_info
+from ..cold_store_views import cold_store_session_info, live_registration_to_session_info
 from ..dispatch_task_resolution import candidate_session_ids, task_worktree_id
 from ..models import SessionInfo
 from ..session_manager import SessionManager
@@ -94,6 +101,7 @@ async def get_dispatch_task_session(task_id: str, request: Request) -> SessionIn
         attachments = []
 
     mgr: SessionManager = request.app.state.session_manager
+    db = getattr(request.app.state, "db", None)
     for session_id in candidate_session_ids(task, attachments):
         session = mgr.get_session(session_id)
         if session is not None:
@@ -101,12 +109,39 @@ async def get_dispatch_task_session(task_id: str, request: Request) -> SessionIn
         cold = await mgr.fetch_cold_store_session(session_id)
         if cold is not None:
             return cold_store_session_info(cold)
+        # A CLI-embodied task's owner_session_id is a real ACP session id
+        # registered in the *live-sessions* registry (an interactive CLI
+        # session the bridge represents but does not own -- see
+        # `routes/live_sessions.py`), never bridge-owned SessionManager or
+        # the cold-store provider. Check it too before moving to the next
+        # candidate.
+        if db is not None:
+            live_row = db.get_live_session(session_id)
+            if live_row is not None:
+                return live_registration_to_session_info(live_row)
 
     worktree_id = task_worktree_id(task)
     if worktree_id:
         fallback = _latest_session_for_worktree(mgr, worktree_id)
         if fallback is not None:
             return _session_info(fallback)
+        # Live-only tier above is bridge-owned sessions; a worktree whose
+        # *interactive* CLI session is current (e.g. an `embody`-spawned
+        # task) has no bridge-owned session at all -- check the
+        # live-sessions registry's own worktree-scoped lookup before giving
+        # up. Deliberately live-only, same as the SessionManager tier above:
+        # there is no cold-store "latest session for a worktree" query
+        # capability (only exact-session-id lookups), so a reclaimed
+        # worktree's history is only reachable via a resolvable candidate
+        # session id above, not through this fallback.
+        if db is not None:
+            live_session_id = db.current_represented_session_for_worktree(
+                worktree_id, now=time.time(),
+            )
+            if live_session_id:
+                live_row = db.get_live_session(live_session_id)
+                if live_row is not None:
+                    return live_registration_to_session_info(live_row)
 
     raise HTTPException(
         status_code=404,
