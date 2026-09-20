@@ -259,17 +259,31 @@ config-shape check above.
   `False` by dataclass default, `True` only when the raw key is literally
   present) — no code change expected here, but add a regression test
   proving the two fields don't drift together.
-- [ ] **Implement the custom-wordlist exclusion decision** from Context: a
-  repo with `codename.wordlist_path` configured does not receive the new
-  implicit default at all — `pr.source_attribution` must resolve to an
-  explicitly-configured value (`codename`, `true`, or `false`) for such a
-  repo, never the bare fallback. This covers future allocations (a
-  custom-wordlist repo never silently starts publishing without an
-  explicit opt-in). Add a test proving: a repo with a custom wordlist AND
-  an absent/default `source_attribution` publishes nothing (fails closed,
-  does not silently fall back to `false` either — surface this as a
-  config validation error so the gap is caught at config-load time, not
-  discovered via a leaked marker).
+- [ ] **Implement the custom-wordlist exclusion decision** from Context —
+  this is an **allocation-time** gate only, distinct from the **publish-
+  time** `codename_source` gate below (round-15 finding: the two must be
+  implemented as separate checks, not one shared condition, or an
+  already-published `codename_source: "built-in"` record would be wrongly
+  blocked by this repo-level check): a repo with `codename.wordlist_path`
+  currently configured must not have a **new** codename allocated under
+  the implicit default — `pr.source_attribution` must resolve to an
+  explicitly-configured value (`codename`, `true`, or `false`) before a
+  new codename may be assigned for such a repo, never the bare fallback.
+  This covers future allocations only (a custom-wordlist repo never
+  silently starts allocating new implicit-default codenames without an
+  explicit opt-in); it has no effect on *publishing* a codename that is
+  already assigned — that decision is made exclusively by the record's own
+  `codename_source` (see the publish-time gating bullets below), and a
+  `codename_source: "built-in"` record publishes normally under the
+  implicit default even in a repo that currently has this validation error
+  active. Add a test proving: a repo with a custom wordlist AND an
+  absent/default `source_attribution` fails an attempted **new**
+  allocation closed (a config validation error at config-load/allocation
+  time, not a silent `false`-fallback and not a leaked marker) — and add a
+  second test proving that same repo/config combination still successfully
+  **publishes** a pre-existing `codename_source: "built-in"` record
+  unaffected by this allocation-time error, so the two tests can't be
+  satisfied by one shared, overbroad implementation.
 - [ ] **Persist `codename_source` through serialization** (round-9
   finding): `WorktreeRecord` is manually round-tripped through YAML, not
   via a generic dataclass (de)serializer — `tracking.load_record` parses
@@ -558,11 +572,15 @@ config-shape check above.
 
 ## Validation Plan
 
-- [ ] Unit: a repo with a custom `codename.wordlist_path` configured AND an
-  absent/default `source_attribution` fails closed (a config validation
-  error at load time, not a silent `false`-fallback and not a leaked
-  marker) — the single highest-priority test in this effort, since it's
-  the one silent-leak scenario the default flip could introduce.
+- [ ] Unit (round-15 finding: allocation-time, not publish-time): a repo
+  with a custom `codename.wordlist_path` configured AND an absent/default
+  `source_attribution` fails a **new codename allocation** closed (a
+  config validation error at config-load/allocation time, not a silent
+  `false`-fallback and not a leaked marker) — the single highest-priority
+  test in this effort, since it's the one silent-leak scenario the default
+  flip could introduce. This test must NOT touch an existing
+  `WorktreeRecord`'s publish path — see the next bullet and the
+  `codename_source: "built-in"` bullet below for that.
 - [ ] Unit: a repo with a custom `codename.wordlist_path` configured AND an
   explicit `source_attribution: codename` publishes normally — including
   for a pre-existing `WorktreeRecord` whose codename was assigned before
@@ -955,3 +973,22 @@ _Pending._
      Added a matching Validation Plan test that simulates the race
      directly (not just the preflight-catches-it case) and asserts the
      message and no-rollback behavior.
+
+### 2026-09-20 — Plan-review round 15 fixes
+
+- One finding on the round-14 head, verified against the actual plan
+  text: the Phase 1 "implement the custom-wordlist exclusion decision"
+  bullet and its matching Validation Plan test were both phrased as "a
+  repo with a custom wordlist and omitted `source_attribution` publishes
+  nothing," stated without qualification — contradicting the Context
+  decision (round-14 fix) that an already-assigned `codename_source:
+  "built-in"` record still publishes normally under the implicit default
+  even when the repo's current config has a custom wordlist. Split the
+  bullet explicitly into two distinct gates: the repo-level check is
+  **allocation-time only** (blocks assigning a *new* codename implicitly),
+  never a publish-time check; a `codename_source: "built-in"` record's
+  publish decision is untouched by it. Reworded the Phase 1 bullet and its
+  Validation Plan test to require BOTH a test that the allocation-time
+  error fires AND a test that a pre-existing built-in record still
+  publishes in that same repo/config combination, so one overbroad
+  implementation can't satisfy the requirement by accident.
