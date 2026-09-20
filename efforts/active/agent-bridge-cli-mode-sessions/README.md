@@ -25,6 +25,11 @@
   CLI-mode session; the two compose (a CLI-mode session, once running, is
   discoverable through #2530's primitives like any other) but neither depends
   on the other.
+- **Deferred out (tracked separately, not blocking):**
+  [#2971](https://github.com/ThomasMichon/copilot-extensions/issues/2971) —
+  a represented interactive session's `ask_user`/elicitation remaining
+  unanswerable remotely (read-only, take-over-only). See Phase 1's journal
+  entry for why this isn't pursued here.
 
 ## Guiding Intent
 
@@ -92,17 +97,17 @@ for the full reconciliation and the resulting north star.
 
 ## Plan
 
-### Phase 1 — Fix the two blocking ACP gaps
+### Phase 1 — Fix the blocking ACP gap
 
 Prerequisite correctness work, useful independent of CLI mode itself: a
 represented interactive peer should already be reliable before it becomes the
 mechanism CLI mode binds through.
 
-- [ ] Fix `send` single-stream admission for a represented interactive peer so
+- [x] Fix `send` single-stream admission for a represented interactive peer so
       an injected `session.send` turn cannot race or split-stream against
       another admission source. Add the regression the delegation contract's
       "experimental until proven" note is waiting on.
-      - [x] **Done** — traced the actual root cause against
+      **Done** — traced the actual root cause against
         `copilot-agent-runtime`'s send-admission path
         (`session_send_dispatch.rs::apply_public_send_admission`,
         `SendRequest.source` in the generated API): a `session.send()` call
@@ -121,14 +126,32 @@ mechanism CLI mode binds through.
         remains the same periodic, quick, non-blocking timer callback; the
         added `delivery.mjs` import is a plain static ES module with no I/O
         or watches of its own — no new extension-host directory-lock risk.
-- [ ] Make `ask_user_request`/elicitation answerability durable and correctly
-      routed to whichever client is currently attached, including after a
-      reconnect — resolving the `unknown_after_restart` gap for this path.
-- [ ] Land both as ordinary agent-bridge fixes; no CLI-mode-specific code
-      depends on them existing yet, but CLI mode is not attempted until they
-      do.
+- [x] ~~Make `ask_user_request`/elicitation answerability durable and
+      correctly routed to whichever client is currently attached~~ —
+      **deferred, not fixed here.** Investigation
+      (`plugins/agent-bridge/src/agent_bridge/live_representation.py`,
+      `@github/copilot-sdk`'s `onUserInputRequest`/`onElicitationRequest`)
+      found the current read-only/take-over-only behavior for a represented
+      interactive session's `ask_user`/`permission.requested` is not a fixable
+      routing bug: `joinSession()`-registered handlers only intercept requests
+      from the *extension's own* contributed tools (proven by the existing
+      `onPermissionRequest: approveAll` registration, which explicitly does
+      not touch the operator's own tool calls), not the live session's real
+      `ask_user` flow. That read-only fallback was adopted because SDK-level
+      propagation for an extension-*joined* (not extension-*created*) session
+      couldn't be gotten working previously — not derived from a
+      first-principles safety requirement, so it's worth revisiting, just not
+      as part of this effort. Filed
+      [ThomasMichon/copilot-extensions#2971](https://github.com/ThomasMichon/copilot-extensions/issues/2971)
+      to track a future revisit. Current behavior (operator reconnects and
+      takes over) is acceptable to live with meanwhile and already matches
+      this vision's `degrade-to-direct-reconnect-honestly` Behavior.
+- [x] Phase 1 complete: the send-admission fix landed; the elicitation item is
+      knowingly deferred (#2971), not blocking. CLI mode (Phase 2+) may
+      proceed.
 
 ### Phase 2 — Session Host CLI mode + cwd-keyed discovery
+
 
 - [ ] Add a CLI mode to Session Host allocation: the coordination layer
       allocates and prepares a host **without** spawning a `copilot --acp`
@@ -181,10 +204,14 @@ mechanism CLI mode binds through.
 
 ## Validation Plan
 
-- [ ] A represented interactive peer under concurrent `send` pressure never
-      produces a split-stream turn (regression covering the Phase 1 fix).
-- [ ] A CLI-native `ask_user`/elicitation prompt reaches whichever client is
-      currently attached, including across a reconnect.
+- [x] A represented interactive peer under concurrent `send` pressure never
+      produces a split-stream turn (regression covering the Phase 1 fix) —
+      covered by `tests/delivery.test.mjs`.
+- [ ] ~~A CLI-native `ask_user`/elicitation prompt reaches whichever client is
+      currently attached, including across a reconnect~~ — deferred with the
+      Phase 1 item; tracked in
+      [#2971](https://github.com/ThomasMichon/copilot-extensions/issues/2971),
+      not this effort's validation surface.
 - [ ] A locally-launched CLI-mode session reattaches, is observed by a second
       client, and is retired using the exact same code paths as an ordinary
       directly-spawned Session Host session — no CLI-mode-specific behavior
@@ -206,6 +233,27 @@ launch verb's surface need a short design pass in Phase 2/3 before
 implementation._
 
 ## Journal
+
+### 2026-09-19 — Phase 1 closed: elicitation fix deferred, not pursued
+
+Investigated whether the represented interactive session's read-only,
+take-over-only `ask_user`/`permission.requested` behavior
+(`live_representation.py`) was a fixable routing bug. Traced
+`@github/copilot-sdk`'s `onUserInputRequest`/`onElicitationRequest`
+(`joinSession`/`ResumeSessionConfig`) and confirmed, using agent-bridge's own
+existing `onPermissionRequest: approveAll` registration as proof, that
+`joinSession()`-registered handlers only intercept requests from the
+*extension's own* contributed tools — never the live session's real
+conversation. Operator direction: the current read-only/take-over-only
+behavior was adopted historically because propagating elicitation through the
+SDK for an extension-*joined* session couldn't be gotten working at the time,
+not derived from a first-principles safety requirement — so it's a known,
+acceptable-for-now limitation worth revisiting later, not a bug to chase
+inside this effort. Filed
+[#2971](https://github.com/ThomasMichon/copilot-extensions/issues/2971) to
+track a future revisit and stopped pursuing it here. **Phase 1 is complete**:
+the send-admission fix landed (previous entry); this item is knowingly
+deferred. Phase 2 (Session Host CLI mode + cwd-keyed discovery) is next.
 
 ### 2026-09-19 — Phase 1 first fix: send single-stream admission
 
