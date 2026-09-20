@@ -223,7 +223,12 @@ def test_reap_host_owned_worktree_retires_tracking_only(tmp_path, monkeypatch):
     assert failures == 0
     assert warnings == []
     assert worktree.is_dir()
-    assert not (tracking_dir / "host.yaml").exists()
+    # Host-owned tracking-only retirement now archives rather than deletes
+    # (archival-is-a-terminus-not-a-deletion) -- the tracking record persists
+    # as a durable tombstone, distinct from the checkout it never owned.
+    path = tracking_dir / "host.yaml"
+    assert path.exists()
+    assert tracking.load_record(path).status == "archived"
 
 
 # --- kill-switch + grace resolution -----------------------------------------

@@ -114,16 +114,20 @@ class TestEnsureCodename:
         assert result.codename is None  # returned as-is, still codename-less
         assert not (tmp_path / "wt-gone.yaml").exists()  # never resurrected
 
-    def test_never_resurrects_concurrently_with_retire_record(self, tmp_path: Path) -> None:
+    def test_archived_tombstone_survives_concurrent_codename_backfill(
+        self, tmp_path: Path,
+    ) -> None:
         # Real concurrency (not just "already gone before we started"):
         # ensure_codename and tracking.retire_record race against the SAME
-        # record from separate threads. Both now serialize through the same
-        # per-record `_RecordLock`, so retire_record's unconditional delete
-        # (unpaired records) and ensure_codename's existence-check + save can
-        # never interleave -- whichever runs last determines the outcome, and
-        # since retire_record always deletes an unpaired record, the file
-        # must be gone once both have finished, regardless of which one
-        # actually won the race to go first.
+        # record from separate threads. Both serialize through the same
+        # per-record `_RecordLock`, so retire_record's archive-tombstone
+        # write (unpaired records) and ensure_codename's existence-check +
+        # re-read + save can never interleave -- whichever runs last
+        # determines the final content, but `ensure_codename` always
+        # re-reads the CURRENT on-disk record before saving (see
+        # codename_tracking.ensure_codename), so it can never clobber an
+        # archived tombstone back to a live status regardless of which
+        # thread wins the race.
         import threading
 
         from agent_worktrees import tracking
@@ -162,9 +166,12 @@ class TestEnsureCodename:
             t_backfill.join(timeout=5)
 
             assert not errors, f"race produced exception(s): {errors}"
-            # retire_record always deletes an unpaired record -- no
-            # interleaving can leave a resurrected file behind.
-            assert not yaml_path.exists()
+            # retire_record archives (never deletes) an unpaired record --
+            # the file must still exist, and its status must be the
+            # archived tombstone regardless of which thread won the race.
+            assert yaml_path.exists()
+            final = tracking.load_record(yaml_path)
+            assert final.status == "archived"
 
 
 class TestFindRecordByCodename:

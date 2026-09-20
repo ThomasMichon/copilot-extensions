@@ -16131,10 +16131,10 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         print("No tracked sessions.")
         return 0
 
-    # System worktrees are daemon-owned and torn down by their owning service;
-    # never auto-removed here (a routine cleanup must not yank one out from
-    # under a running daemon). Force-removal lives in the ":" System menu.
-    records = [r for r in records if r.kind not in tracking.MANAGED_KINDS]
+    # System worktrees are daemon-owned (never auto-removed here). Archived
+    # records have nothing left to reap -- exclude both from cleanup.
+    records = [r for r in records if r.kind not in tracking.MANAGED_KINDS
+               and r.status != "archived"]
     if not records:
         print("No tracked sessions.")
         return 0
@@ -23515,8 +23515,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--tracking-status",
         default="all",
-        choices=["active", "complete", "finalized", "orphaned", "all"],
-        help="Filter by tracking status (default: all)",
+        choices=["active", "complete", "finalized", "orphaned", "archived", "all"],
+        help="Filter by tracking status (default: all). 'archived' also needs --all.",
     )
     p.add_argument(
         "--all",
