@@ -275,13 +275,22 @@ addition, not a replacement, of the config-shape check above.
   feeding its own `codename=` kwarg, ~line 1948 — a distinct code path
   from (a), easy to miss); (c) the lazy backfill path
   (`codename_tracking.ensure_codename`, called from `__main__.py`'s
-  resume/status backfill and `pr_ops.py`'s create-PR path). Each site must
-  compute `codename_source` from `wordlist_for_repo`/the repo's
-  `codename.wordlist_path` config at THAT call's own moment, not share a
-  value computed elsewhere.
-- [ ] **Fix the paired-knowledge path's error-swallowing (round-10
-  finding):** `_carve_paired_knowledge` currently wraps
-  `cfg.load_config(project=knowledge_name)` +
+  resume/status backfill and `pr_ops.py`'s create-PR path). **Classify
+  using the RAW `codename.wordlist_path` config value's presence
+  (round-11 finding), never `wordlist_for_repo`'s resolved `Wordlist`**:
+  `load_wordlist_or_default` (which `wordlist_for_repo` calls) fail-softs
+  to `DEFAULT_WORDLIST` for a missing or malformed custom-path file
+  (`codename.py`'s `load_wordlist_or_default`), so a configured-but-broken
+  custom path would resolve to the exact same `Wordlist` object as "no
+  custom path configured" — checking the resolved wordlist would
+  misclassify it `"built-in"` and let it publish under the implicit
+  default, contradicting the fail-closed policy. Each site must read the
+  raw `codename.wordlist_path` string at THAT call's own moment (non-empty
+  → `"custom"`, empty/absent → `"built-in"`), not share a value computed
+  elsewhere and not derive it from the resolved `Wordlist`.
+- [ ] **Fix the paired-knowledge path's error-swallowing at BOTH layers
+  (round-10 + round-11 findings):** `_carve_paired_knowledge` currently
+  wraps `cfg.load_config(project=knowledge_name)` +
   `codename_tracking.wordlist_for_repo(...)` in a bare
   `except Exception: knowledge_wordlist = None`, which silently falls back
   to the built-in wordlist on ANY config-load failure — including the
@@ -289,14 +298,46 @@ addition, not a replacement, of the config-shape check above.
   custom-wordlist repo with an omitted `source_attribution`. That would
   let the paired-knowledge path allocate a codename (and set
   `codename_source: "built-in"`) for exactly the repo/config combination
-  the validation error exists to block, defeating it entirely. Change
-  this path to distinguish the new policy-validation error from a
-  genuine "no config for this project" case and PROPAGATE the policy
-  error (fail the paired-knowledge create), never swallow it into a
-  silent built-in fallback. Add a regression test: a paired-knowledge
-  create against a knowledge project with a custom wordlist and omitted
-  `source_attribution` fails the whole create with the policy error, it
-  does not silently proceed with a built-in-sourced codename.
+  the validation error exists to block, defeating it entirely.
+  **Additionally**, even after fixing that inner handler, the caller in
+  `__main__.py`'s `create` path (~line 2362-2375) wraps the entire
+  `_carve_paired_knowledge(...)` call in its own
+  `except Exception as exc: ... pair_stamp = None` — a deliberate,
+  pre-existing "pairing failures never break the harness carve"
+  fail-safe design for ordinary pairing glitches, but it would swallow
+  the re-raised policy error at this OUTER boundary too, silently
+  reducing "fail the whole create" back down to a logged warning. Fix
+  requires BOTH layers: (1) introduce a dedicated exception type (e.g.
+  `CodenameAttributionPolicyError`) that the inner config-load/validation
+  code raises instead of a generic exception; (2) the inner
+  `except Exception` in `_carve_paired_knowledge` explicitly re-raises
+  this type rather than swallowing it into `knowledge_wordlist = None`;
+  (3) the OUTER `except Exception as exc` around the
+  `_carve_paired_knowledge(...)` call in the `create` path (~line 2372)
+  must ALSO explicitly re-raise this same type rather than catching it
+  into `pair_stamp = None` — only a generic/incidental pairing failure
+  stays non-fatal there, never this specific policy violation. Add a
+  regression test: a paired-knowledge create against a knowledge project
+  with a custom wordlist and omitted `source_attribution` fails the WHOLE
+  `create` command (propagates past both handlers), it does not silently
+  proceed with a built-in-sourced codename or merely log a non-fatal
+  warning.
+- [ ] **Merge `codename`/`codename_source` under the record lock during
+  concurrent saves (round-11 finding):** `_save_record_unlocked` already
+  merges several fields (handoff reservations, lifecycle/session-backend/
+  execution-leg state) from the current on-disk record into a stale
+  in-memory snapshot before overwriting, specifically to prevent a
+  stale concurrent writer from erasing a field set by another writer
+  under the lock — but it does NOT currently merge `codename` or the new
+  `codename_source`. Without this, a status/PR writer holding an
+  in-memory record from BEFORE a concurrent lazy-backfill assigned a
+  codename could save over it and erase the just-assigned
+  `codename`/`codename_source`. Add `codename`/`codename_source` to the
+  same merge-from-current-on-disk-record logic
+  `_save_record_unlocked` already applies to those other fields. Add a
+  regression test: a save from a stale in-memory record (predating a
+  concurrent codename assignment) does not erase the codename or its
+  provenance that a concurrent writer set under the lock.
 - [ ] **Round-trip test**: assign a codename (setting `codename_source`),
   `save_record`, `load_record` the same file back, assert
   `codename_source` survives unchanged — proving the serialization wiring
@@ -450,12 +491,31 @@ addition, not a replacement, of the config-shape check above.
   backfill (`ensure_codename`) — sets `codename_source` correctly from
   that call's own config read; a regression in any ONE site (e.g. the
   knowledge-repo path alone) is caught, not just the aggregate behavior.
+- [ ] Unit (round-11 finding): a repo with `codename.wordlist_path` set to
+  a path that does not exist (or is malformed) is still classified
+  `codename_source: "custom"` — proving classification reads the raw
+  config value, not `wordlist_for_repo`'s fail-soft-to-built-in resolved
+  `Wordlist`.
 - [ ] Unit (round-10 finding): a paired knowledge-repo create against a
   knowledge project with a custom wordlist and an omitted
   `source_attribution` fails the whole create with the policy validation
   error — `_carve_paired_knowledge`'s config-load exception handling must
   NOT swallow this into a silent `knowledge_wordlist = None` / built-in
   fallback that would let the create proceed anyway.
+- [ ] Unit (round-11 finding): the same paired knowledge-repo policy
+  violation propagates past the `create` command's OUTER
+  `except Exception` around the whole `_carve_paired_knowledge(...)` call
+  too (not just the inner handler) — the whole `create` command fails,
+  it is not caught, logged as non-fatal, and reduced to `pair_stamp =
+  None` the way an ordinary/incidental pairing failure correctly is.
+- [ ] Unit (round-11 finding): a save from a stale in-memory
+  `WorktreeRecord` (loaded before a concurrent lazy-backfill assigned a
+  codename under the record lock) does not erase the `codename`/
+  `codename_source` the concurrent writer set — proving
+  `_save_record_unlocked`'s existing merge-from-current-on-disk-record
+  logic now also covers these two fields, not just the fields it already
+  protected (handoff reservations, lifecycle/session-backend/
+  execution-leg state).
 - [ ] Unit: `_parse_pr` with an absent `source_attribution` key (both
   "`pr:` block present, key omitted" and "`pr:` block entirely absent")
   parses to `"codename"`, not `False`.
@@ -633,3 +693,35 @@ _Pending._
      permanently `"custom"` (fail-closed) unless an operator manually,
      explicitly verifies and edits that specific record — never an
      automated bulk-inference pass.
+
+### 2026-09-20 — Plan-review round 11 fixes
+
+- Three new high-severity findings, all concrete real-code gaps in the
+  round-8/9/10 provenance plan, each verified against actual source:
+  1. `_save_record_unlocked` (`tracking.py`) already merges several
+     fields (handoff reservations, lifecycle/session-backend/
+     execution-leg state) from the current on-disk record into a stale
+     in-memory snapshot before overwriting — specifically to stop a
+     stale concurrent writer from erasing a field another writer set
+     under the lock — but does not cover `codename`/`codename_source`.
+     Added a plan item to extend that same existing merge logic to these
+     two fields, plus a concurrent-save regression test.
+  2. `wordlist_for_repo` (via `load_wordlist_or_default`) fail-softs to
+     `DEFAULT_WORDLIST` for a missing/malformed custom-path file
+     (verified in `codename.py`) — so classifying provenance from the
+     RESOLVED wordlist (as round-8/9's plan text implied) would
+     misclassify a configured-but-broken custom path as `"built-in"`.
+     Changed the classification rule to read the raw
+     `codename.wordlist_path` config string directly (non-empty →
+     `"custom"`) at every assignment site, never the resolved `Wordlist`.
+  3. Round 10's paired-knowledge fix only addressed
+     `_carve_paired_knowledge`'s own inner `except Exception` — but its
+     caller in the `create` path wraps the ENTIRE
+     `_carve_paired_knowledge(...)` call in its own outer
+     `except Exception as exc: ... pair_stamp = None`, a deliberate
+     pre-existing fail-safe for ordinary pairing glitches that would
+     still swallow the re-raised policy error at that outer boundary.
+     Added a plan item requiring a dedicated exception type
+     (`CodenameAttributionPolicyError`) that both the inner AND outer
+     handlers must explicitly re-raise rather than catch — only a
+     genuine/incidental pairing failure stays non-fatal at either layer.
