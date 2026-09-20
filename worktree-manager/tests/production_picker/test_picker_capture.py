@@ -269,17 +269,27 @@ def _assets_source():
 
 
 def test_asset_hints_render_at_wide_and_narrow_widths(monkeypatch, tmp_path):
-    """#6443/upstream #1979 Phase 6: the tile's bounded per-kind asset-hint
-    line is legible in the deterministic character grid at both a wide and a
-    narrow capture width -- neither width crashes the renderer nor drops the
-    hint tokens (a narrow width may clip the live-pulse intent text, but the
-    hints themselves stay visible since they are bounded, not free text)."""
+    """#6443/upstream #1979 Phase 6, superseded by the "Title: Activity"
+    simplification (picker-list-interaction-layer follow-up): the per-kind
+    asset-hint breakdown (``PR``/``WT``/...) no longer renders on the tile's
+    detail line at all -- it collapsed into a single, neutrally-styled ``*``
+    (the full breakdown now lives behind the Actions menu's "View details"
+    card). This proves that collapse is legible and bounded at both a wide
+    and a narrow capture width -- neither width crashes the renderer nor
+    drops the marker."""
     _isolate_pivots(monkeypatch, tmp_path)
     wide = pcap.capture(_assets_source(), live=False, size=(118, 24))["text"]
     narrow = pcap.capture(_assets_source(), live=False, size=(60, 24))["text"]
     for text in (wide, narrow):
-        assert "PR" in text
-        assert "WT" in text
+        assert "Ships things" in text   # the full title, now on its own line
+        detail_lines = [ln for ln in text.splitlines() if "Ships things" in ln]
+        assert len(detail_lines) == 1
+        assert detail_lines[0].rstrip().endswith("*")
+        # The raw per-kind codes never leak onto the detail line itself (the
+        # PR/WT column headers elsewhere in the grid would otherwise produce
+        # a false pass for a bare substring check).
+        assert "PR" not in detail_lines[0]
+        assert "WT" not in detail_lines[0]
 
 
 def _bare_markers_source():
@@ -312,14 +322,16 @@ def _bare_markers_source():
 
 def test_bare_status_markers_render_as_readable_text(monkeypatch, tmp_path):
     """The raw closure-descriptor tokens (``C1``/``U*``/``OC*``) are a wire
-    shorthand, not operator-facing copy -- when they're the ONLY thing on the
-    tile's second line, they must expand into a short human phrase rather than
-    render as a bare, undocumented token string."""
+    shorthand, never operator-facing copy. Superseded by the "Title: Activity"
+    simplification: rather than expanding into a (still fairly cryptic) short
+    phrase, the whole marker breakdown now collapses into a single, neutral
+    ``*`` on the title's own detail line -- the full breakdown lives behind
+    the Actions menu's "View details" card instead."""
     _isolate_pivots(monkeypatch, tmp_path)
     text = pcap.capture(_bare_markers_source(), live=False)["text"]
-    assert "1 held claim" in text
-    assert "merge unconfirmed" in text
-    assert "claims unconfirmed" in text
+    detail_lines = [ln for ln in text.splitlines() if "Bare marker row" in ln]
+    assert len(detail_lines) == 1
+    assert detail_lines[0].rstrip().endswith("*")
     # The raw wire tokens themselves never leak into the rendered grid.
     assert "C1" not in text
     assert "OC*" not in text
@@ -362,24 +374,22 @@ def _markers_and_assets_source():
 
 
 def test_marker_and_asset_line_never_overflows_narrow_width(monkeypatch, tmp_path):
-    """The combined status_markers + asset_hints detail line must never
-    exceed the capture width, even at a narrow 60-column width where the
-    readable marker expansion alone could otherwise overrun the row (PR #2897
-    review). Bounded by construction -- every grid row is exactly `width`
-    cells, so this asserts the capture doesn't crash and stays a clean
-    rectangular grid at the narrow width, AND that the asset hint specifically
-    survives on the detail line itself (not merely somewhere in the grid --
-    the `PR` column header would otherwise produce a false pass)."""
+    """The "Title: Activity [*]" detail line must never exceed the capture
+    width, even at a narrow 60-column width with both a closure-descriptor
+    marker AND asset hints on the same row (PR #2897's original overflow
+    scenario, now exercised against the simplified single-``*`` collapse).
+    Bounded by construction -- every grid row is exactly `width` cells, so
+    this asserts the capture doesn't crash and stays a clean rectangular grid
+    at the narrow width, AND that the claims marker specifically survives on
+    the title's own detail line."""
     _isolate_pivots(monkeypatch, tmp_path)
     grid = pcap.capture(_markers_and_assets_source(), live=False, size=(60, 24))["text"]
     lines = grid.splitlines()
     widths = {len(line) for line in lines}
     assert len(widths) == 1, f"ragged grid at narrow width: {sorted(widths)}"
-    detail_lines = [ln for ln in lines if "held claim" in ln]
+    detail_lines = [ln for ln in lines if "Mixed row" in ln]
     assert len(detail_lines) == 1
-    # Asset hints are bounded and take priority: the marker text was
-    # truncated to make room for the hint rather than crowding it out.
-    assert "PR" in detail_lines[0]
+    assert detail_lines[0].rstrip().endswith("*")
 
 
 def _markers_and_pulse_source():
