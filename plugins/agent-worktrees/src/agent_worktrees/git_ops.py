@@ -1060,6 +1060,9 @@ def _credential_pin_lock(repo_path: Path, git_dir: str):
         yield
         return
     try:
+        if stream.tell() == 0:
+            stream.write(b"\0")
+            stream.flush()
         if platform.system() == "Windows":
             import msvcrt
             stream.seek(0)

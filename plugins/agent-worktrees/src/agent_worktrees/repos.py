@@ -687,14 +687,15 @@ def clone_repo(
     # a successful clone, so inject the same one-shot cross-account auth
     # override the fetch/push paths use, resolved directly from the clone
     # URL (there is no checked-out remote yet to resolve a name against).
+    from . import git_ops
     try:
-        from . import git_ops
         extra_args = git_ops._auth_config_args_for_url(remote)
     except Exception:
         extra_args = []
+    argv = ["git", *extra_args, "clone", remote, str(target_path)]
     try:
         result = subprocess.run(
-            ["git", *extra_args, "clone", remote, str(target_path)],
+            argv,
             capture_output=True,
             text=True,
             timeout=300,
@@ -703,7 +704,16 @@ def clone_repo(
             output.err(f"git clone failed: {result.stderr.strip()}")
             return None
     except Exception as e:
-        output.err(f"Clone failed: {e}")
+        # The argv (possibly including the injected http.extraheader token)
+        # can appear in this exception's own __str__ (e.g.
+        # subprocess.TimeoutExpired embeds its full cmd) -- redact before
+        # ever logging it, the same helper GitError/_redact_args already use.
+        redacted_argv = git_ops._redact_args(argv)
+        detail = str(e)
+        for arg in extra_args:
+            if arg.startswith("http.extraheader="):
+                detail = detail.replace(arg, "http.extraheader=<redacted>")
+        output.err(f"Clone failed running {redacted_argv}: {detail}")
         return None
 
     output.ok(f"Cloned {remote} to {target}")
