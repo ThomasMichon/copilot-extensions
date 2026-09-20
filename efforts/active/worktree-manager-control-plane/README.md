@@ -314,6 +314,25 @@ realized in `main`; unchecked items are the remaining delta.
       worktrees with a recorded `session_backend` binding must keep resolving
       correctly against the relocated code.
 
+### Phase 3c — Picker non-blocking I/O (Planned)
+- [ ] Make every I/O-touching Picker surface — pivot loads (built-in and
+      plugin-contributed), menu opens, and action execution with progress
+      reporting — consistently non-blocking, closing the gap found while
+      investigating a "menus feel slow" report after
+      [#2967](https://github.com/ThomasMichon/copilot-extensions/pull/2967):
+      `PickerScreen.setup()`'s pivot-registry scan and single-machine data
+      load run synchronously on the render thread at four call sites (initial
+      mount, the `r` reload key, and two post-action rescans), unlike the
+      already-async live/multi-machine loader path. A same-session attempt to
+      fix this with a naive background thread introduced a cross-test data
+      race (a stale scan landing after a newer `setup()` call) and was
+      reverted rather than shipped unverified. Full audit, the specific
+      failure mode, and an ordered slice plan (a generation/epoch-guarded
+      background-task primitive, migrating `setup()` onto it, a regression
+      guard against future synchronous menu-opens, and a cross-repo proposal
+      for built-in-verb progress percentages):
+      [`phase-3c-picker-nonblocking-io.md`](phase-3c-picker-nonblocking-io.md).
+
 ### Phase 4 — Bare-invocation seam & handoff (Plugin side landed; end-state pending)
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
       `PATH` (health-probed), else the still-bundled Picker, else the install
@@ -425,6 +444,16 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-19** — Added Phase 3c (Planned): design/architecture/plan for
+  consistently non-blocking Picker I/O across pivot loads, menu opens, and
+  action execution/progress, written up after #2967's picker UX fixes
+  surfaced (and a reverted same-session prototype for) `setup()`'s
+  synchronous pivot-registry scan + single-machine data load blocking the
+  render thread. See
+  [`phase-3c-picker-nonblocking-io.md`](phase-3c-picker-nonblocking-io.md)
+  for the full audit, the specific race the reverted prototype hit, and the
+  ordered slice plan. No implementation in this pass -- planning only.
 
 - **2026-09-17** — Finished Phase 3b Slice 1 Steps 5-6. Deleted
   agent-worktrees' remaining AHP implementation path
