@@ -1201,3 +1201,61 @@ gate land._
   — not fixed here, flagged separately.
 - PR #2989.
 
+### 2026-09-20 — Symptom-bug sweep + durable instructions.md fallback guidance
+
+- Per operator direction: swept every filed context-handoff/agent-worktrees
+  symptom bug across both trackers (aperture-labs Gitea + this repo's GitHub
+  issues) to check for a clean, consistent pattern before continuing.
+  Notable open items found: GitHub #3006/#3001/#3000/#2830 (unbounded
+  cutover-spawn retries, orphaned/stacked panes, three-way state desync
+  between mux/agent-worktrees/agent-dispatch); Gitea #7072/#7179 (Windows
+  psmux env-var-propagation confirmation gap; successor sessions missing
+  `context-handoff` re-triggering an auto-handoff loop forever); #4702/#3454
+  (head-pointer zombie regression, deeper root cause: phantom `resources`
+  entries marked active/released for pickup attempts never corroborated
+  against real `agent-bridge` liveness).
+- **Avoided duplicating in-flight work:** began an independent fix for the
+  "controller endlessly retries a cutover" bug (GitHub #3006/#3001; a durable
+  per-handoff `spawn_attempted_at` field gating the automatic monitor sweep
+  to at most one pane per token), then discovered **PR #3011** already open
+  addressing the same root cause via a different mechanism
+  (activity-log-based `_monitor_already_attempted_handoff_tokens`). Reverted
+  the parallel implementation rather than compete; #3011 merged shortly
+  after (commit range `89c554554`..`600ae2cf7`, plus a reviewer-flagged
+  follow-up already closed out).
+- **Shipped PR #3016** for the other, genuinely open half of the ask: harness
+  repos' `.github/instructions/*.instructions.md` projections are the "last
+  line of defense" (load even when a plugin's skill/MCP tools fail to
+  register this session), but both context-handoff's and agent-worktrees'
+  projected `session-guidance.instructions.md` files only pointed at a
+  dynamically-generated per-session file and carried no fallback content of
+  their own -- a dead end if the writer hook never ran. Added two new static
+  projections (following the established `worktree-context-guide` precedent
+  of a *separate* topic-named projection, per
+  `docs/patterns/session-scoped-dynamic-guidance.md`'s "only the computed
+  part belongs in the session-folder file" rule -- `session-guidance`
+  itself stays untouched):
+  - `context-handoff/instructions/handoff-fallback.instructions.md`:
+    brief-prep, consume-and-record-as-head, CLI fallback, and a heuristic
+    discovery order (dynamic file -> last-resort manual handoff-file glob ->
+    agent-worktrees' own ledger -> payload-local CLI) for when the plugin's
+    tools are absent entirely -- explicitly routes pane cleanup through
+    `agent-worktrees handoffs-check --execute`, never a manual pane kill.
+  - `agent-worktrees/instructions/head-claim-fallback.instructions.md`: the
+    complementary self-claim-head (`bind-session`) and stuck-cutover
+    diagnosis (`handoffs-check`/`doctor --fix`) guidance.
+  - Both held under the 4096-byte per-template budget
+    `instruction_projections.py` enforces.
+  - Merge commit `2fd2dc8de`.
+- **Operational hazard found and worked around, not fixed:** the shared
+  local worktree checkout used for this work
+  (`copilot-extensions.worktrees/manual-context-handoff-overhaul`) had
+  unrelated, uncommitted `worktree-manager` picker-TUI changes mixed into it
+  mid-session -- almost certainly a concurrent session sharing the same
+  checkout. Left that WIP completely untouched; did all rebase/push work for
+  PR #3016 from a disposable, isolated `git worktree add` checkout instead of
+  risking it. Flagged to the operator; not itself resolved.
+- Flagged (not yet filed): the reviewer-identified gap in #3011 (only the
+  terminal-success `handoff_cutover_spawn` event gated the retry, not
+  `_started`/`_failed`) was addressed before merge per the PR's own
+  iteration -- verify on a future pass rather than assuming closed.
