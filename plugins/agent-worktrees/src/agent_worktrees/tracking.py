@@ -34,7 +34,11 @@ from .effort_focus import ActiveEffort, active_effort_from_mapping
 #: display).
 TITLE_MAX = 30
 
-WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"]
+#: ``archived`` is post-``finalized`` -- the tombstone `retire_record`
+#: writes for an unpaired reaped worktree instead of deleting it.
+WorktreeStatus = Literal[
+    "active", "complete", "pushed", "finalized", "orphaned", "archived",
+]
 
 # A Copilot session's asserted lifecycle state within its worktree
 # (session-lifecycle / agent-fabric vision `single-current-session-per-worktree`):
@@ -2911,13 +2915,13 @@ def find_paired_record(record: WorktreeRecord) -> WorktreeRecord | None:
 
 
 def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
-    """Retire a reaped worktree's tracking record: delete it, or tombstone it
-    when paired (BOTH-gate follow-up, #957/#220).
-
-    An ordinary (unpaired) record is deleted outright -- nothing else depends
-    on it once its worktree is reaped. A **paired** -harness/-knowledge
-    record's fate depends on whether its sibling has ITSELF already been
-    reaped:
+    """Retire a reaped worktree's tracking record: tombstone it as
+    ``archived`` (unpaired) or ``finalized`` when paired (BOTH-gate
+    follow-up, #957/#220). An unpaired record becomes a minimal
+    ``archived`` tombstone (``reaped_at`` stamped), not a deletion --
+    identity, lineage, and session history stay queryable after the
+    checkout is gone. A **paired** record's fate depends on whether its
+    sibling is ITSELF already reaped:
 
     * If the sibling record is missing, not yet ``finalized``, or ``finalized``
       but not marked :attr:`WorktreeRecord.reaped_at` (i.e. still a live,
@@ -2955,13 +2959,12 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
 
     Any resolution failure (an unreadable sibling record, a cross-machine
     pair, etc.) is treated as "not confirmed reaped" and falls back to the
-    tombstone path -- the safe direction, matching
-    :func:`default_paired_sibling_final`'s own "unknown -> spare" philosophy.
+    tombstone path -- matching :func:`default_paired_sibling_final`'s own
+    "unknown -> spare" philosophy.
 
     Fail-safe: if a tombstone write raises for any reason, falls back to a
     plain unlink -- a reap must never be blocked *indefinitely* by this
-    bookkeeping (see the return-value contract below for how it avoids being
-    blocked at all).
+    bookkeeping.
 
     **Locking (pr-attribution-codenames Phase 2 follow-up).** Every delete
     (including the sibling delete, in the both-reaped hard-delete branch) is
@@ -2969,37 +2972,26 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
     -- not just the tombstone rewrite, which already went through
     ``save_record``'s own locking. Two properties this closes:
 
-    * Without any lock at all, a concurrent reader/backfiller (e.g.
+    * Without any lock, a concurrent reader/backfiller (e.g.
       ``codename_tracking.ensure_codename``, which holds the SAME record's
-      ``_RecordLock`` across its own existence-check + save) could observe
-      the record as present an instant before this function unlinks it out
-      from under that read, or -- worse -- recreate a record this function
-      just deleted.
-    * ``require_sidecar=True`` (rather than the graceful-degradation default)
-      is required for that guarantee to be REAL cross-process, not just
-      same-thread: a degrading lock would let this function proceed and
-      delete even while another process's ``ensure_codename`` still
-      genuinely holds the lock, letting that backfill resurrect the file
-      right after. Instead, a contended lock (this record's, or -- in the
-      both-reaped branch -- the sibling's) makes this call **defer**: return
-      ``False`` without deleting anything, rather than either blocking the
-      caller's reap pass indefinitely or proceeding without real exclusivity.
-      The caller's reap runs on a cadence (`cleanup`/`gc`), so a deferred
-      record is retried on a later pass -- nothing is lost, just delayed.
-    * The two locks needed in the both-reaped hard-delete branch (this
-      record's and its sibling's) are acquired in a **deterministic order**
-      (sorted by absolute path) via one ``ExitStack``, all-or-nothing --
-      never "this record's lock, then the sibling's" unconditionally, which
-      would let two concurrent ``retire_record`` calls on the two halves of
-      the SAME pair each hold one lock while waiting for the other
-      (a genuine cross-call deadlock).
+      lock across its own existence-check + save) could observe the record
+      present an instant before this function unlinks it, or recreate one
+      this function just deleted.
+    * ``require_sidecar=True`` makes that guarantee REAL cross-process, not
+      just same-thread. A contended lock (this record's, or -- both-reaped
+      branch -- the sibling's) makes this call **defer**: return ``False``
+      without deleting anything, rather than blocking indefinitely or
+      proceeding without real exclusivity. The caller's reap runs on a
+      cadence (`cleanup`/`gc`), so a deferred record retries later.
+    * The two locks in the both-reaped hard-delete branch are acquired in a
+      **deterministic order** (sorted by path) via one ``ExitStack``,
+      all-or-nothing -- never unconditionally, which would let two
+      concurrent calls on the two halves of the SAME pair deadlock each
+      other.
 
-    Returns ``True`` once the record is durably retired (deleted or
-    tombstoned); ``False`` if retirement was deferred because a needed lock
-    could not be acquired promptly. Callers must treat ``False`` as "try
-    again on a later reap pass", not a permanent failure -- nothing about an
-    already-removed worktree checkout depends on this call succeeding
-    immediately.
+    Returns ``True`` once the record is durably retired (tombstoned or
+    deleted); ``False`` if deferred by a contended lock -- callers treat
+    that as "retry on a later reap pass," not a failure.
     """
     path = tracking_path / f"{record.worktree_id}.yaml"
     sibling_path: Path | None = None
@@ -3030,19 +3022,26 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                     sibling_path.unlink(missing_ok=True)
                 path.unlink(missing_ok=True)
                 return True
-            if record.is_paired:
+
+            def _write_tombstone(status: WorktreeStatus) -> bool:
+                # A raising tombstone write falls back to a plain unlink
+                # rather than blocking the reap indefinitely.
                 try:
                     now = _now_iso()
-                    record.status = "finalized"
+                    record.status = status
                     if record.completed_at is None:
                         record.completed_at = now
                     record.reaped_at = now
                     save_record(record, path=path)
                     return True
                 except Exception:
-                    pass
-            path.unlink(missing_ok=True)
-            return True
+                    path.unlink(missing_ok=True)
+                    return True
+
+            # Paired -> "finalized" (a sibling-detection signal, #957/#220);
+            # unpaired -> "archived" (tombstones identity/lineage/session
+            # history rather than discarding them when the checkout is gone).
+            return _write_tombstone("finalized" if record.is_paired else "archived")
     except TimeoutError:
         return False
 

@@ -1860,7 +1860,8 @@ class TestOwningTrackingDirResolution:
 
 
 class TestRetireRecord:
-    """retire_record -- delete outright, or tombstone a paired sibling (#957/#220).
+    """retire_record -- archive-tombstone an unpaired record, or
+    finalized-tombstone a paired sibling (#957/#220).
 
     Reproduces the "paired sibling state unknown" bug: a plain unlink on reap
     left the OTHER half of a -harness/-knowledge pair permanently unable to
@@ -1870,6 +1871,12 @@ class TestRetireRecord:
     can still resolve. Once BOTH halves have gone through their own reap (each
     observing the other's ``reaped_at``-stamped tombstone), both records are
     hard-deleted instead of leaving two dangling tombstones behind forever.
+
+    An unpaired record has no sibling to unblock, but per the
+    *archival-is-a-terminus-not-a-deletion* vision behavior it is likewise
+    tombstoned rather than deleted outright -- as ``archived`` -- so its
+    identity, lineage, and session history remain durably queryable after
+    its checkout is reclaimed.
     """
 
     def _rec(self, wt_id: str, **overrides) -> WorktreeRecord:
@@ -1891,11 +1898,29 @@ class TestRetireRecord:
         base.update(overrides)
         return WorktreeRecord(**base)
 
-    def test_unpaired_record_is_deleted(self, tmp_tracking_dir: Path):
+    def test_unpaired_record_is_archived_not_deleted(self, tmp_tracking_dir: Path):
         rec = self._rec("wt-solo")
         save_record(rec, tmp_tracking_dir / "wt-solo.yaml")
         retire_record(rec, tmp_tracking_dir)
-        assert not (tmp_tracking_dir / "wt-solo.yaml").exists()
+        path = tmp_tracking_dir / "wt-solo.yaml"
+        assert path.exists()
+        tombstoned = load_record(path)
+        assert tombstoned.status == "archived"
+        assert tombstoned.completed_at is not None
+        assert tombstoned.reaped_at is not None
+
+    def test_archived_tombstone_preserves_session_history(self, tmp_tracking_dir: Path):
+        """The whole point of archiving over deleting: a session's binding
+        to this worktree must remain resolvable after the checkout is gone."""
+        rec = self._rec(
+            "wt-solo-sessions",
+            sessions=[SessionEntry("sess-a", "2026-06-01T10:00:00")],
+        )
+        save_record(rec, tmp_tracking_dir / "wt-solo-sessions.yaml")
+        retire_record(rec, tmp_tracking_dir)
+        tombstoned = load_record(tmp_tracking_dir / "wt-solo-sessions.yaml")
+        assert tombstoned.status == "archived"
+        assert [s.session_id for s in tombstoned.sessions] == ["sess-a"]
 
     def test_paired_record_is_tombstoned_not_deleted(self, tmp_tracking_dir: Path):
         rec = self._rec(
