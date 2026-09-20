@@ -2007,8 +2007,17 @@ class PickerScreen(Widget):
 
         Cheap (two small files) and never fatal -- a read hiccup leaves the
         last state in place. Kept off the SSH/tmux hot path by the frame
-        throttle in ``_tick``.
-        """
+        throttle in ``_tick``. A no-op once ``_update_state_pinned`` is set
+        (:func:`capture.capture_async`'s ``update_state`` override, applied
+        after this poll's ``call_after_refresh`` scheduling): this callback's
+        exact fire time relative to that override is not guaranteed by pause
+        count alone (Textual's mount lifecycle can defer it later than any
+        fixed number of ``pilot.pause()`` calls), so an unconditional
+        assignment here could silently clobber an explicit test/audit
+        override moments after it was set -- a real, observed capture-race,
+        not just a hypothetical one."""
+        if getattr(self, "_update_state_pinned", False):
+            return
         try:
             self.update_state = update_stage.indicator_state()
         except Exception:
@@ -2021,7 +2030,12 @@ class PickerScreen(Widget):
         check GitHub -- never on the render thread, since the network fetch
         itself is not cheap. Safe to call every launch: the cache means a
         real fetch only happens once per
-        ``manager_update_check.CHECK_INTERVAL_SECS``."""
+        ``manager_update_check.CHECK_INTERVAL_SECS``. A no-op once
+        ``_manager_update_state_pinned`` is set -- see ``_poll_update_state``'s
+        docstring for why an unconditional assignment here can clobber an
+        explicit capture/audit override."""
+        if getattr(self, "_manager_update_state_pinned", False):
+            return
         from ... import manager_update_check as _muc
 
         try:
@@ -2039,7 +2053,8 @@ class PickerScreen(Widget):
                 return None
 
         def _done(state):
-            if state is not None:
+            if state is not None and not getattr(
+                    self, "_manager_update_state_pinned", False):
                 self.manager_update_state = state
 
         self._run_bg("manager-update-check", _work, _done, quiet=True)

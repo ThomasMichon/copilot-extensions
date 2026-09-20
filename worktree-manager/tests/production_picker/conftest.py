@@ -142,11 +142,24 @@ def _isolate_agent_worktrees_home(tmp_path_factory):
     saved_userprofile = os.environ.get("USERPROFILE")
     saved_home = os.environ.get("HOME")
     saved_agent_home = os.environ.get("AGENT_HOME")
+    saved_wm_root = os.environ.get("WORKTREE_MANAGER_ROOT")
     saved_path_home = pathlib.Path.__dict__.get("home")
 
     os.environ["USERPROFILE"] = str(fake_home)
     os.environ["HOME"] = str(fake_home)
     os.environ.pop("AGENT_HOME", None)
+    # self_install.default_root() (manager_update_check's status-file root,
+    # among others) checks WORKTREE_MANAGER_ROOT BEFORE USERPROFILE/HOME --
+    # left set from a real interactive shell (this machine's own
+    # worktree-manager launch sets it), it silently escapes the isolated
+    # fake home above and reads/writes the REAL ~/.worktree-manager, most
+    # visibly a genuinely stale real update-check.json racing
+    # test_capture_is_deterministic's two mounts against each other
+    # (whichever one's queued _poll_manager_update_state callback happens to
+    # run first sees it, the other doesn't -- a real state leak, not just a
+    # network one). Redirect it alongside the fake home so every test is
+    # fully sandboxed from this machine's actual installed state.
+    os.environ["WORKTREE_MANAGER_ROOT"] = str(fake_home / ".worktree-manager")
     pathlib.Path.home = classmethod(lambda cls: fake_home)
     try:
         yield fake_home
@@ -157,6 +170,7 @@ def _isolate_agent_worktrees_home(tmp_path_factory):
             ("USERPROFILE", saved_userprofile),
             ("HOME", saved_home),
             ("AGENT_HOME", saved_agent_home),
+            ("WORKTREE_MANAGER_ROOT", saved_wm_root),
         ):
             if value is None:
                 os.environ.pop(key, None)

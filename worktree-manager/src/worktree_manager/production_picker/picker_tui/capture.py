@@ -182,12 +182,32 @@ async def capture_async(
         if prepare is not None:
             await prepare(scr, pilot)
             await pilot.pause()
-        if update_state is not None:
-            # Set last, just before render: a background update-poll can flip it
-            # back during settle, so an early assignment would not stick.
-            scr.update_state = update_state
-        if manager_update_state is not None:
-            scr.manager_update_state = manager_update_state
+        if update_state is not None or manager_update_state is not None:
+            # Pin FIRST, before assigning: this makes ``_poll_update_state``/
+            # ``_poll_manager_update_state`` permanently no-op regardless of
+            # WHEN their ``call_after_refresh``-scheduled callback actually
+            # fires (not guaranteed to have already fired by any particular
+            # pilot.pause() count -- Textual's mount lifecycle can defer it
+            # later, a real observed race that clobbered the override back
+            # to its polled value moments after this code set it, even with
+            # a trailing pause to force the repaint below).
+            if update_state is not None:
+                scr._update_state_pinned = True
+                scr.update_state = update_state
+            if manager_update_state is not None:
+                scr._manager_update_state_pinned = True
+                scr.manager_update_state = manager_update_state
+            # Force a real repaint before capturing: ``capture_screen`` reads
+            # the compositor's LAST-PAINTED frame (``screen._compositor``),
+            # not a fresh render, so plainly assigning these attributes is
+            # not enough by itself -- whichever frame happened to already be
+            # painted (or not) before this point is what would otherwise be
+            # captured. ``refresh()`` + one more pause lets the compositor
+            # actually paint these values before the snapshot is taken; the
+            # pin above keeps that pause from letting a still-pending poll
+            # win the race back.
+            scr.refresh()
+            await pilot.pause()
         return capture_screen(scr, title=title)
 
 
