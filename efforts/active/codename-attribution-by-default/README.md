@@ -175,17 +175,24 @@ these decisions directly and assumes this design is understood.
   bool | Literal["codename"]`) whenever the caller passes `None`, and
   passes that same value on to the other two functions — with the default
   now `"codename"`, the normal/unconfigured path routinely carries a
-  string through a parameter typed as `bool | None`, which is
-  type-incompatible under this repo's type checking. Change all three
-  parameters to `SourceAttribution | None`, matching `PRConfig`'s own
-  field type, so an explicit override can also legitimately be `codename`
-  (not just `True`/`False`); the CLI's existing `--no-attribution` boolean
-  opt-out flag's behavior is unchanged (it still passes `False` through
-  the same parameter, just now correctly typed as one member of the wider
-  union). Add a regression test/type-check assertion that a `create_pr`
-  call with no explicit `attribution` override, on a repo with the new
-  implicit `"codename"` default, type-checks cleanly end to end through
-  `_finish_auto_open`/`_push_existing_feature`.
+  string through a parameter annotated `bool | None`: an inaccurate
+  annotation, not a runtime crash (this repo's documented Python gate is
+  `ruff check --select F,E9` plus pytest — no mypy/pyright gate exists;
+  see `TESTING.md`, round-19 finding). Change all three parameters to
+  `SourceAttribution | None`, matching `PRConfig`'s own field type, so the
+  annotation is accurate and an explicit override can also legitimately be
+  `codename` (not just `True`/`False`); the CLI's existing
+  `--no-attribution` boolean opt-out flag's behavior is unchanged (it
+  still passes `False` through the same parameter, just now correctly
+  typed as one member of the wider union). **Acceptance criterion (must be
+  an executable test, not a type-check claim this repo has no gate for):**
+  add a runtime integration test that calls `create_pr` with no explicit
+  `attribution` override against a repo whose `prcfg.source_attribution`
+  resolves to `"codename"`, and asserts the string value propagates
+  through `_finish_auto_open`/`_push_existing_feature` unchanged and
+  produces a published codename marker — proving the annotation change
+  didn't accompany a silent runtime behavior change, since ruff's F/E9
+  selection does not itself catch a parameter-type mismatch.
 - [ ] **Implement the custom-wordlist exclusion decision** from Context —
   this is an **allocation-time** gate only, distinct from the **publish-
   time** `codename_source` gate below (round-15 finding: the two must be
@@ -723,44 +730,26 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-17 history lives in **[journal.md](journal.md)** to keep this
+> round-18 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 18 fixes
+### 2026-09-20 — Plan-review round 19 fixes
 
-- Four findings on the round-17 head, each verified against actual
-  source/repo convention before editing:
-  1. **Typing gap:** `create_pr`, `_finish_auto_open`, and
-     `_push_existing_feature` all still annotate their `attribution`
-     override parameter `bool | None`, but `create_pr` already threads
-     `prcfg.source_attribution` (typed `SourceAttribution`) through all
-     three on the unconfigured/default path — now routinely a string.
-     Added a Phase 1 item to widen all three to `SourceAttribution |
-     None`, matching `PRConfig`'s own field type.
-  2. **Live-validation gap:** the "this effort's own landing PR carries
-     a marker" live-validation target would silently fail: verified this
-     very worktree's `WorktreeRecord` predates `codename_source` and the
-     plan's own fail-closed migration rule requires an unbackfilled
-     record to suppress implicit publication permanently, so the
-     CURRENT worktree can never satisfy this check. Narrowed the
-     Validation Plan item to require either a NEW post-Phase-1 worktree
-     or an explicit, manually-verified `codename_source: "built-in"`
-     edit.
-  3. **Malformed Markdown (previously missed):** the round-11
-     concurrent-save-merge checklist item had lost its `- [ ] **Merge
-     ...` opening line during an earlier edit, leaving an orphaned
-     continuation paragraph starting mid-sentence with an unmatched
-     closing `**` and no checklist marker. Restored the missing prefix.
-  4. **Audit-remedy gap:** `audit_source_attribution_risk`'s `None`-branch
-     remedy text tells an absent-key repo to "migrate to ... codename" —
-     verified this is now a no-op once codename is the implicit default,
-     and gave the `None` branch the same mode-aware remedy the existing
-     `"codename"` branch already uses (drop the now-inapplicable clause).
-  5. **Structural (previously missed):** the effort README had grown to
-     1,137 lines, mixing detailed design rationale and a 12-round journal
-     into the coordination document, against `efforts/README.md`'s
-     "extract substantial phase designs/inventories into sibling
-     documents" convention. Split the Custom-wordlists/Downstream-effects
-     design rationale into **design.md** and the round-6 through round-16
-     journal history into **journal.md**, leaving this README as a
-     navigable summary with links — reduced from 1,137 to 746 lines.
+- Two findings on the round-18 head, verified against actual repo
+  convention:
+  1. The round-18 typing-fix bullet asked for a "type-check assertion,"
+     but checked `TESTING.md`: this repo's documented Python validation is
+     `ruff check --select F,E9` (pyflakes/syntax only) plus pytest — no
+     mypy/pyright gate exists, so that acceptance criterion was
+     unverifiable as written. Reworded to name the actual gate (and note
+     it does NOT itself catch this class of mismatch) and replaced the
+     criterion with a concrete runtime integration test: `create_pr` with
+     no explicit override, against a `"codename"`-resolved repo, must
+     propagate the string through `_finish_auto_open`/
+     `_push_existing_feature` and produce a published marker.
+  2. The round-18 journal entry's own finding count was wrong ("Four
+     findings" against a five-item list, including the structural
+     doc-split finding) — corrected to "Five." Also moved the round-18
+     journal entry itself into **journal.md** at this pass (it had been
+     left in the README as the "most recent" entry per the established
+     one-entry-in-README pattern; this entry now takes that place).

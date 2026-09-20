@@ -326,3 +326,43 @@ Part of the [codename-attribution-by-default effort](README.md).
   helper rather than duplicating (and risking re-drifting) the condition,
   and adding a matching refresh-path Validation Plan test alongside the
   existing initial-path one.
+
+### 2026-09-20 — Plan-review round 18 fixes
+
+- Five findings on the round-17 head, each verified against actual
+  source/repo convention before editing:
+  1. **Typing gap:** `create_pr`, `_finish_auto_open`, and
+     `_push_existing_feature` all still annotate their `attribution`
+     override parameter `bool | None`, but `create_pr` already threads
+     `prcfg.source_attribution` (typed `SourceAttribution`) through all
+     three on the unconfigured/default path — now routinely a string.
+     Added a Phase 1 item to widen all three to `SourceAttribution |
+     None`, matching `PRConfig`'s own field type.
+  2. **Live-validation gap:** the "this effort's own landing PR carries
+     a marker" live-validation target would silently fail: verified this
+     very worktree's `WorktreeRecord` predates `codename_source` and the
+     plan's own fail-closed migration rule requires an unbackfilled
+     record to suppress implicit publication permanently, so the
+     CURRENT worktree can never satisfy this check. Narrowed the
+     Validation Plan item to require either a NEW post-Phase-1 worktree
+     or an explicit, manually-verified `codename_source: "built-in"`
+     edit.
+  3. **Malformed Markdown (previously missed):** the round-11
+     concurrent-save-merge checklist item had lost its `- [ ] **Merge
+     ...` opening line during an earlier edit, leaving an orphaned
+     continuation paragraph starting mid-sentence with an unmatched
+     closing `**` and no checklist marker. Restored the missing prefix.
+  4. **Audit-remedy gap:** `audit_source_attribution_risk`'s `None`-branch
+     remedy text tells an absent-key repo to "migrate to ... codename" —
+     verified this is now a no-op once codename is the implicit default,
+     and gave the `None` branch the same mode-aware remedy the existing
+     `"codename"` branch already uses (drop the now-inapplicable clause).
+  5. **Structural (previously missed):** the effort README had grown to
+     1,137 lines, mixing detailed design rationale and a 12-round journal
+     into the coordination document, against `efforts/README.md`'s
+     "extract substantial phase designs/inventories into sibling
+     documents" convention. Split the Custom-wordlists/Downstream-effects
+     design rationale into **design.md** and the round-6 through round-16
+     journal history into **journal.md**, leaving this README as a
+     navigable summary with links — reduced from 1,137 to 746 lines.
+
