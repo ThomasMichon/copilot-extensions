@@ -31,7 +31,8 @@
           "0.4.0-dev432",
           "0.4.0-dev435",
           "0.4.0-dev447",
-          "0.4.0-dev500"
+          "0.4.0-dev500",
+          "0.4.0-dev502"
         ]
       },
       "capability_versions": {
@@ -66,7 +67,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
-          "sha256": "729566b0f8865493b91ffcc9ef61a7d4f375c279695f14f05564146f0a00be29",
+          "sha256": "79e82a170d622cfee1ea52d1aee4c43da39dd7581433fb7a802d616d4c47e099",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -92,7 +93,7 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "918eda38f35c0f631533d70391c500413dfde5b2773fcc7e05e9755540e5c093",
+          "sha256": "ac652b15a5d331e8497b766a05cef2062d7f4e287bfe4dedaa3ca23f41c9417f",
           "role": "current health response",
           "generation": 15
         },
@@ -128,19 +129,19 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-11/health.json",
-          "sha256": "71741f49f9f6a4b5d5afbd3f6d75e2a1ad4d963d219d0c985f058255cbf0d40d",
+          "sha256": "daa89aff1b47e512e9e47a24af81bed67bc0f2a075aaeeddfc125b12e3e3f59e",
           "role": "previous HTTP generation health evidence",
           "generation": 11
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-9/health.json",
-          "sha256": "f9a5d3a19a5bab679afb2851d9dbab44eea9367b707747ef1489650d5e27be92",
+          "sha256": "a92ae359f0216f73321e5329cf6c3ca8471bb832b4673c1565188f278aa2d5d2",
           "role": "previous HTTP generation health evidence",
           "generation": 9
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev424/health.json",
-          "sha256": "61c71de24ee21fd7a99197146a160d84351bd31fa9e84ebe25fe0ef6210a7abd",
+          "sha256": "0ce32c87ddd5db298a6290716bd446b1545e92ca657f89c617a978e4475820de",
           "role": "previous runtime speaking current HTTP generation",
           "generation": 10
         },
@@ -179,6 +180,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
           "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
           "capture_method": "Invoke the health route with a controlled empty runtime state and zeroed carrier diagnostics."
+        },
+        {
+          "commit": "30601bc4cbbe82c9f8e42a6c4d507a93a11cf892",
+          "plugin_version": "0.4.0-dev502",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "597419228aa8d66fc18d954aa8e889c303ecec86",
+          "capture_method": "Re-attested after process-slot-ownership Phase 5 added the \"slot\" descriptor (aperture-labs); invoke the health route with a controlled empty runtime state, zeroed carrier diagnostics, and an empty routing table."
         },
         {
           "commit": "851dfca5a0982a97eff672865648f9cbf0318229",
