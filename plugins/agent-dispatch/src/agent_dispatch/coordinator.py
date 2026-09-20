@@ -1204,7 +1204,11 @@ def _slot_descriptor(app_state: Any) -> dict:
     active = table.get("active") if isinstance(table, dict) else None
     previous = table.get("previous") if isinstance(table, dict) else None
     active_pid = active.get("pid") if isinstance(active, dict) else None
-    if not isinstance(active_pid, int) or active_pid <= 0:
+    if (
+        not isinstance(active_pid, int)
+        or isinstance(active_pid, bool)  # bool is an int subclass -- exclude it
+        or active_pid <= 0
+    ):
         # No usable pid to compare against (missing/null/malformed entry) --
         # cannot answer the owner question either way.
         role = "unknown"
