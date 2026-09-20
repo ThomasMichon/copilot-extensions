@@ -76,6 +76,8 @@ jobs:
         run: python tools/check-module-size.py
       - name: Module size guard tests
         run: python -m pytest -q tools/test_check_module_size.py
+      - name: Module health watchdog tests
+        run: python -m pytest -q tools/test_module_health_watchdog.py
       - name: Install contract
         run: python tools/check-install-contract.py
       - name: Runtime resolution (marker-only, uniform)
