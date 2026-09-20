@@ -372,34 +372,40 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   a non-active entry, or a concurrent stamp landing on a DIFFERENT `prs`
   entry than the one the stale snapshot's `.pr` property currently
   resolves to. **Fix:** merge per-entry across the full `prs` list, keyed
-  by a stable per-PR identity. **`branch` is the PRIMARY identity, not
-  `number` (round-35 finding, replaces the round-34 "number when equal,
-  else branch" rule)** — `number` is not immutable: a supported manual
-  `set-pr` correction can reassign an entry's `number` (e.g. fixing a
-  mistaken value) while its `branch` stays the same, so a rule requiring
-  equal numbers whenever both are set would fail to match a stale
-  snapshot (`number=7`) against its own corrected on-disk counterpart
-  (`number=8`, same `branch`) and wrongly append a duplicate. `branch` has
-  no such mutation path — a pushed feature branch name is fixed for that
-  PR's life — and is unique per entry within one worktree's `prs` list (a
-  parallel PR is, by definition, a different branch). **Corrected rule:**
-  two entries are the SAME PR when EITHER (a) both have a NON-EMPTY
-  `branch` and the values are equal (the primary, stable identity —
-  covers the pre-open, mid-transition, already-open, and
-  manually-renumbered cases uniformly, regardless of what either side's
-  `number` is), OR (b) `branch` is empty/unset on either side AND both
-  have a `number` set and equal (the only remaining case `branch` can't
-  cover: a not-yet-pushed placeholder record identified solely by
-  `number`). **Two entries with BOTH an empty/unset `branch` AND no
-  `number` on either side never match (round-35 finding: a naive
-  either-side-empty-branch rule would let two genuinely unrelated blank
-  `PRRecord`s — e.g. two independent manual `set-pr` calls that haven't
-  attached anything yet — collide and merge)** — with no identity
-  established at all, they are always treated as distinct entries (a
-  merge miss here means, at worst, an extra transient list entry until
-  one side gains a real `branch`/`number`; a false MATCH would instead
-  silently overwrite one blank record's frozen state with an unrelated
-  one's, which is the more dangerous failure mode). Add a
+  by a stable per-PR identity. **A dedicated `pr_id` field is the SOLE
+  identity, not `branch` (round-36 finding, replaces the round-35 "branch
+  is primary" rule)** — `branch` is not immutable either: the identical
+  manual `set-pr` correction path that can reassign `number`
+  (`pr_ops.py:1693-1695`) can ALSO reassign `branch` (the very next line,
+  `if branch is not None: pr.branch = branch`), with no reset tied to that
+  mutation. A stale in-memory snapshot captured before a concurrent
+  branch correction would then fail to match its own on-disk counterpart
+  by branch OR number, reproducing the exact false-non-match/duplicate-
+  append failure round-34/35 fixed for `number` alone — round-35's
+  "branch is primary" rule assumed an invariant (`branch` never changes
+  once pushed) that the code does not actually enforce. **Fix:** add
+  `pr_id: str = ""` to `PRRecord` — a random UUID generated exactly ONCE,
+  when the entry is first created (`create_pr`'s initial append and
+  `_set_pr_locked`'s "new blank `PRRecord`" branch) — and never touched by
+  any later mutation (`branch`, `number`, `provider`, `state` corrections
+  all leave `pr_id` untouched, unlike the existing `identity_changed`
+  reset of `attribution_head`/`head_observed_at` for `number`/`provider`
+  changes). Two entries are the SAME PR iff both have a NON-EMPTY `pr_id`
+  and the values are equal; an entry with no `pr_id` on either side never
+  matches anything (extends round-35's "no established identity" case
+  from empty-branch-and-no-number to the general no-`pr_id` state — a
+  merge miss here is, at worst, a transient extra list entry; a false
+  match would silently overwrite one entry's frozen state with an
+  unrelated one's, the more dangerous failure). **Every EXISTING
+  `PRRecord` on disk must be backfilled with a `pr_id` in a single
+  one-time migration pass performed as part of shipping this field — not
+  lazily deferred to each entry's next touch** — a lazy per-touch backfill
+  would still leave a window, for any record not yet touched, where a
+  `set-pr` branch/number correction races a stale reader with no stable
+  identity on either side (the exact scenario the round-36 finding
+  raises); an upfront pass across every tracked worktree's YAML at
+  migration time closes that window entirely before any subsequent
+  `set-pr` correction can ever run against a `pr_id`-less entry. Add a
   `pr_revision` counter PER `PRRecord` entry (not one shared worktree-level
   counter — following the existing `profile_assignment_revision`/
   `lifecycle_revision` pattern already in `_save_record_unlocked`, but
@@ -464,5 +470,12 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   saving a stale snapshot of one must NOT merge onto the other merely
   because they share the same empty `branch`/absent `number`, proving
   entries with no established identity at all are never treated as a
-  match.
+  match; (vi) (round-36 finding) a stale in-memory snapshot holds a
+  post-migration entry with a real `pr_id` set, `number=7`,
+  `branch="feature-x"`; a concurrent manual `set-pr` correction changes
+  the ON-DISK entry's `branch` to `"feature-y"` AND its `number` to `8`
+  (leaving `pr_id` untouched), then stamps the frozen attribution pair —
+  the stale save must still MERGE onto the renamed-and-renumbered entry
+  (matched via `pr_id`, not `branch`/`number`), proving `pr_id` — not
+  `branch` — is the identity that survives a branch rename.
 

@@ -725,17 +725,26 @@ these decisions directly and assumes this design is understood.
     fail-closed rule.
   - `_save_record_unlocked` must merge the frozen attribution fields
     PER-ENTRY across the full `WorktreeRecord.prs` list, keyed by a
-    stable identity — **`branch` (when NON-EMPTY) is the PRIMARY
-    identity, `number` only a fallback when `branch` is empty on either
-    side (round-35 finding, replaces the round-34 "number when both set,
-    else branch" rule)** — `number` is not immutable (a manual `set-pr`
-    correction can reassign it while `branch` stays fixed), so keying on
-    equal numbers whenever both are set would miss a match across a
-    renumbering; equal-and-NON-EMPTY `branch` values always win as the
-    match. Two entries with an empty/unset `branch` on both sides AND no
-    `number` on either side NEVER match each other (round-35 finding:
-    prevents two unrelated blank `PRRecord`s, e.g. from separate manual
-    `set-pr` calls, from colliding) — never just the
+    stable identity — **a dedicated `pr_id` field is the SOLE identity,
+    not `branch` (round-36 finding, replaces the round-35 "branch is
+    primary" rule)** — `branch` is not immutable either: the same manual
+    `set-pr` correction path that can reassign `number` can ALSO reassign
+    `branch` (`pr_ops.py`'s `_set_pr_locked`, no reset tied to either
+    mutation), so a stale snapshot could fail to match its own on-disk
+    counterpart by branch OR number after a rename. **Fix:** add
+    `pr_id: str = ""` to `PRRecord` — a random UUID assigned ONCE at
+    entry creation and never touched by any later `branch`/`number`/
+    `provider`/`state` correction. Two entries are the SAME PR iff both
+    have a NON-EMPTY `pr_id` and the values are equal; an entry with no
+    `pr_id` on either side never matches anything (extends round-35's
+    "no established identity" case from empty-branch-and-no-number to
+    the general no-`pr_id` state). **Every EXISTING `PRRecord` must be
+    backfilled with a `pr_id` in a single one-time migration pass at
+    shipping time, not lazily at each entry's next touch** — a lazy
+    per-touch backfill would still leave a window, for any not-yet-
+    touched record, where a `set-pr` branch/number correction races a
+    stale reader with no stable identity on either side (the exact
+    scenario round-36 raised) — never just the
     single `.pr` active-PR accessor (round-32 finding: `.prs` supports
     serial/parallel PRs, and a merge keyed on the active-PR property
     alone cannot protect a frozen pair on a non-active entry). Add a
@@ -965,27 +974,46 @@ these decisions directly and assumes this design is understood.
   own value is falsy (which would strand `attribution_mode` without its
   partner and silently re-trigger the lazy-backfill freeze on next
   load).
-- [ ] Unit (round-34 finding): a `create_pr` flow saves a `PRRecord` with
-  `number=None`/a set `branch`; a concurrent process observes the
-  provider assigning that PR a `number` and stamps the frozen
-  attribution pair (bumping `pr_revision`) onto the now-numbered
-  on-disk entry; a stale in-memory snapshot still holds the pre-number
-  version of the same entry — `save_record`ing the stale snapshot must
-  MERGE onto the numbered entry (not append a duplicate), proving the
-  identity rule matches across the `number=None` →
-  provider-assigned-`number` transition via the shared `branch`.
-- [ ] Unit (round-35 finding): a stale in-memory snapshot holds an entry
-  with `number=7`/`branch="feature-x"`; a concurrent manual `set-pr`
-  correction changes the ON-DISK entry's `number` to `8` while its
-  `branch` stays `"feature-x"`, then stamps the frozen attribution pair
-  — the stale save must still MERGE onto the renumbered entry (matched
-  via `branch`, not `number`), proving `branch` is the primary identity
-  and a `number` correction alone never causes a false non-match.
+- [ ] Unit (round-34 finding, matcher corrected round-36): a `create_pr`
+  flow saves a `PRRecord` with `number=None`/a set `branch`/an assigned
+  `pr_id`; a concurrent process observes the provider assigning that PR
+  a `number` and stamps the frozen attribution pair (bumping
+  `pr_revision`) onto the now-numbered on-disk entry; a stale in-memory
+  snapshot still holds the pre-number version of the same entry —
+  `save_record`ing the stale snapshot must MERGE onto the numbered entry
+  (not append a duplicate), proving the identity rule matches across the
+  `number=None` → provider-assigned-`number` transition via the shared
+  `pr_id`.
+- [ ] Unit (round-35 finding, matcher corrected round-36): a stale
+  in-memory snapshot holds an entry with `pr_id` set, `number=7`,
+  `branch="feature-x"`; a concurrent manual `set-pr` correction changes
+  the ON-DISK entry's `number` to `8` while its `branch` stays
+  `"feature-x"` (leaving `pr_id` unchanged), then stamps the frozen
+  attribution pair — the stale save must still MERGE onto the
+  renumbered entry (matched via `pr_id`), proving a `number` correction
+  alone never causes a false non-match.
 - [ ] Unit (round-35 finding): TWO independent, freshly-created blank
-  `PRRecord`s (both `number=None`/`branch=""`) — saving a stale snapshot
-  of one must NOT merge onto the other merely because they share the
-  same empty `branch`/absent `number`, proving entries with no
-  established identity at all are never treated as a match.
+  `PRRecord`s (both `number=None`/`branch=""`/no `pr_id` yet assigned) —
+  saving a stale snapshot of one must NOT merge onto the other merely
+  because they share the same empty `branch`/absent `number`/absent
+  `pr_id`, proving entries with no established identity at all are
+  never treated as a match.
+- [ ] Unit (round-36 finding): a stale in-memory snapshot holds a
+  post-migration entry with a real `pr_id` set, `number=7`,
+  `branch="feature-x"`; a concurrent manual `set-pr` correction changes
+  the ON-DISK entry's `branch` to `"feature-y"` AND its `number` to `8`
+  (leaving `pr_id` untouched), then stamps the frozen attribution pair
+  — the stale save must still MERGE onto the renamed-and-renumbered
+  entry (matched via `pr_id`, not `branch`/`number`), proving `pr_id` —
+  not `branch` — is the identity that survives a branch rename (the
+  gap round-35's "branch is primary" rule left open).
+- [ ] Unit (round-36 finding): running the one-time migration pass
+  against a tracking directory containing an existing (pre-migration)
+  YAML record with a `PRRecord` and no `pr_id` stamps a non-empty
+  `pr_id` onto that entry, under the record lock, in a single pass — and
+  running the SAME migration pass again afterward (e.g. a re-run on
+  restart) is a no-op: it does not overwrite an already-assigned
+  `pr_id` with a new random value.
 - [ ] Unit (round-34 finding): a `WorktreeRecord` with an unbackfilled
   (missing/unknown) `codename_source`, in a repo with
   `source_attribution: True` (the raw-marker mode) — the PR still
@@ -1225,34 +1253,31 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-34 history lives in **[journal.md](journal.md)** to keep this
+> round-35 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
 
 
-### 2026-09-20 — Plan-review round 35 fixes
+### 2026-09-20 — Plan-review round 36 fixes
 
-- Confirmed: all three round-34 findings (emit condition, identity
-  transition, provenance scope) verified correct — this round's review
-  lists them under "Resolved since last review."
-- Two new genuine findings, both further correctness gaps in the
-  round-34 identity-matching fix:
-  1. **Empty branches could falsely collide:** round-34's "either side
-     lacks a number → match by branch" rule didn't require the branch to
-     be non-empty — two independent, freshly-created blank `PRRecord`s
-     (e.g. from separate manual `set-pr` calls) both have `branch=""`,
-     which would match under the naive rule and silently merge one
-     blank record's state onto an unrelated one's. Fixed: branch
-     equality only establishes identity when the branch is NON-EMPTY;
-     entries with no real identity on either side never match.
-  2. **PR numbers aren't immutable:** round-34's "number when both set,
-     else branch" rule required equal numbers whenever both entries had
-     one — but a manual `set-pr` correction can reassign a number while
-     the branch stays fixed, so a stale snapshot (`number=7`) would fail
-     to match its own renumbered on-disk counterpart (`number=8`, same
-     branch) and wrongly append a duplicate. Corrected: `branch` (when
-     non-empty) is now the PRIMARY identity in all cases; `number` is
-     only a fallback when `branch` is empty on both sides.
+- One new genuine finding: **`branch` isn't immutable either.**
+  Round-35's "branch is the primary identity" rule assumed a pushed
+  feature branch name never changes once set, but the same manual
+  `set-pr` correction path that can reassign `number` (`pr_ops.py`'s
+  `_set_pr_locked`) can ALSO reassign `branch`, with no identity-preserving
+  reset tied to either mutation. A stale snapshot captured before a
+  concurrent branch correction would then fail to match its own on-disk
+  counterpart by branch OR number, reproducing the exact
+  false-non-match/duplicate-append failure round-34/35 fixed for `number`
+  alone. Fixed: added a dedicated `pr_id` field — a random UUID assigned
+  ONCE at entry creation and never mutated by any later `branch`/
+  `number`/`provider`/`state` correction — as the SOLE per-entry identity,
+  superseding `branch` entirely. Every existing `PRRecord` gets `pr_id`
+  backfilled in a single one-time migration pass at shipping time (not
+  lazily at next touch), closing the window where a not-yet-migrated
+  entry could still race a `set-pr` correction with no stable identity on
+  either side.
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
-  `f2b538c47` for twelve rounds straight — not re-edited again).
+  `f2b538c47` for thirteen rounds straight — not re-edited again).
+

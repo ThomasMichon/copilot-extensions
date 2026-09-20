@@ -825,3 +825,30 @@ Part of the [codename-attribution-by-default effort](README.md).
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
   `f2b538c47` for eleven rounds straight — not re-edited again).
+
+### 2026-09-20 — Plan-review round 35 fixes
+
+- Confirmed: all three round-34 findings (emit condition, identity
+  transition, provenance scope) verified correct — this round's review
+  lists them under "Resolved since last review."
+- Two new genuine findings, both further correctness gaps in the
+  round-34 identity-matching fix:
+  1. **Empty branches could falsely collide:** round-34's "either side
+     lacks a number → match by branch" rule didn't require the branch to
+     be non-empty — two independent, freshly-created blank `PRRecord`s
+     (e.g. from separate manual `set-pr` calls) both have `branch=""`,
+     which would match under the naive rule and silently merge one
+     blank record's state onto an unrelated one's. Fixed: branch
+     equality only establishes identity when the branch is NON-EMPTY;
+     entries with no real identity on either side never match.
+  2. **PR numbers aren't immutable:** round-34's "number when both set,
+     else branch" rule required equal numbers whenever both entries had
+     one — but a manual `set-pr` correction can reassign a number while
+     the branch stays fixed, so a stale snapshot (`number=7`) would fail
+     to match its own renumbered on-disk counterpart (`number=8`, same
+     branch) and wrongly append a duplicate. Corrected: `branch` (when
+     non-empty) is now the PRIMARY identity in all cases; `number` is
+     only a fallback when `branch` is empty on both sides.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for twelve rounds straight — not re-edited again).
