@@ -24,7 +24,10 @@ from single_instance_lease import is_listening as _is_listening
 from single_instance_lease import is_superseded as _lib_is_superseded
 from zdd import routing
 
-__all__ = ["_is_listening", "is_superseded", "slot_descriptor"]
+__all__ = [
+    "_is_listening", "initial_self_retire_status", "is_superseded",
+    "slot_descriptor",
+]
 
 
 def is_superseded(
@@ -56,6 +59,18 @@ _DEFAULT_SELF_RETIRE_STATUS = {
     "superseded": False,
     "confirms": 0,
 }
+
+
+def initial_self_retire_status() -> dict:
+    """Status for a just-started, not-yet-armed self-retire loop.
+
+    Set at loop start (before the arm-wait completes) so ``"enabled"`` is
+    visible on ``/health`` immediately -- not only once armed, which can take
+    up to ~5 minutes (the arm-wait ceiling) on a promoted cutover daemon.
+    """
+    status = dict(_DEFAULT_SELF_RETIRE_STATUS)
+    status["enabled"] = True
+    return status
 
 
 def slot_descriptor(
