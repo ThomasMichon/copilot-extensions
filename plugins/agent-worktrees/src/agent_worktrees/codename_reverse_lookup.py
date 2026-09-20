@@ -204,9 +204,12 @@ def resolve_codename_cross_machine(
     exactly like "not found." An explicitly supplied ``project`` is
     interpolated into the same remote command and is validated the same
     way, against ``cfg._PROJECT_NAME_RE`` (the same shape
-    ``cfg.project_name()``'s own resolution enforces) -- the default
-    (``project=None``, resolved via ``cfg.project_name()``) is already
-    trusted and is not re-validated.
+    ``cfg.project_name()``'s own resolution enforces) -- guarded with an
+    ``isinstance`` check first since a non-``str`` value (the type hint
+    is not runtime-enforced) would otherwise raise inside the regex match
+    instead of degrading to ``[]``. The default (``project=None``,
+    resolved via ``cfg.project_name()``) is already trusted and is not
+    re-validated.
     """
     if not codename or os.environ.get(NO_REMOTE_ENV):
         return []
@@ -218,7 +221,7 @@ def resolve_codename_cross_machine(
             project = cfg.project_name()
         except Exception:
             return []
-    elif not cfg._PROJECT_NAME_RE.fullmatch(project):
+    elif not isinstance(project, str) or not cfg._PROJECT_NAME_RE.fullmatch(project):
         return []
     try:
         self_machine = cfg.load_config().machine

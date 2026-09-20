@@ -197,6 +197,20 @@ class TestResolveCodenameCrossMachine:
             ) == []
         assert called == []
 
+    def test_non_string_explicit_project_degrades_to_empty(self, monkeypatch):
+        # `project`'s type hint (str | None) is not runtime-enforced -- a
+        # non-str value must degrade to [] (the fail-soft contract), never
+        # raise inside the regex match.
+        monkeypatch.delenv(crl.NO_REMOTE_ENV, raising=False)
+        called = []
+        monkeypatch.setattr(crl, "_probe_machine",
+                            lambda *a, **k: called.append(1))
+        for non_string_project in (123, [], {}, object()):
+            assert crl.resolve_codename_cross_machine(
+                "sturdy-crate", project=non_string_project,
+            ) == []
+        assert called == []
+
     def test_valid_explicit_project_is_accepted(self, monkeypatch):
         monkeypatch.delenv(crl.NO_REMOTE_ENV, raising=False)
         monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("lambda-core"))

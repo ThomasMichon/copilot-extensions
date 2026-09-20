@@ -891,3 +891,27 @@ checked off.
   exact text, so no test changes needed. Full plugin suite: 642 passed
   (same 10 pre-existing `test_doctor.py` failures, unrelated).
 
+### 2026-09-20 — Phase 3 PR review round 5 (PR #2922, rebase + type-safety fix)
+
+- **Long gap, large rebase.** This PR sat open ~19 hours; `origin/main`
+  advanced 6+ merges past its base, including two concurrent
+  `agent-worktrees` version bumps and pre-existing (unrelated)
+  module-size-baseline drift in `worktree-manager`'s picker engine.
+  Rebased cleanly onto the new tip: resolved the version-bump conflicts
+  by bumping past the new base version, kept the higher (already-correct)
+  baseline values from `origin/main` over this branch's now-stale ones,
+  and additionally fixed the pre-existing `picker_tui/engine.py` drift
+  since CI checks the merged result regardless of origin.
+- **Non-`str` explicit `project` (medium severity):** round 3's
+  `project`-validation fix assumed `project` was already a `str` before
+  regex-matching it against `cfg._PROJECT_NAME_RE` -- but the parameter's
+  type hint (`str | None`) is not runtime-enforced, so a non-`str` value
+  (an `int`, a `list`, ...) would raise a `TypeError` inside the match
+  instead of degrading to `[]` (the fail-soft contract every other input
+  path here honors). Added an `isinstance` guard before the regex check.
+  1 new test (`test_non_string_explicit_project_degrades_to_empty`, four
+  non-string types). Full plugin suite: 553 passed on the targeted
+  codename/providers/pr_ops/cli_routing/claimant suites (25 new in
+  `test_codename_reverse_lookup.py` alone); confirmed no new module-size
+  or version-consistency regressions from the rebase.
+
