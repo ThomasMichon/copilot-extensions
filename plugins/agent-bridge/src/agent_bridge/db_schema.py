@@ -404,3 +404,42 @@ class _SchemaMixin:
             log.info(
                 "Schema migrated to version 17: delivery cursor invalidations"
             )
+
+        if from_version < 18:
+            # v17 -> v18: CLI-mode Session Host reservations
+            # (agent-bridge-cli-mode-sessions, Phase 2). A reservation lets the
+            # coordination layer allocate a worktree's next CLI-mode session
+            # *before* the muxed, interactive CLI process starts
+            # (§allocate-before-launch); a later live-session registration for
+            # the same worktree atomically claims it, marking the resulting row
+            # ``cli_mode=1`` -- a durable, honest marker distinguishing an
+            # explicitly-allocated, human-attended session from an ordinary
+            # ambient one. See visions/remote-interactive-sessions.
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cli_mode_reservations (
+                    worktree_id TEXT PRIMARY KEY,
+                    reservation_id TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    expires_at REAL NOT NULL,
+                    claimed_by_session_id TEXT
+                )
+                """
+            )
+            cols = [
+                r[1]
+                for r in conn.execute(
+                    "PRAGMA table_info(live_sessions)"
+                ).fetchall()
+            ]
+            if "cli_mode" not in cols:
+                conn.execute(
+                    "ALTER TABLE live_sessions ADD COLUMN cli_mode "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
+            conn.execute("UPDATE schema_version SET version=?", (18,))
+            conn.commit()
+            log.info(
+                "Schema migrated to version 18: cli_mode_reservations table + "
+                "live_sessions.cli_mode"
+            )
