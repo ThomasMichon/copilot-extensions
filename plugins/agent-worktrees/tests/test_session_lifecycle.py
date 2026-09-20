@@ -270,7 +270,9 @@ class TestExactHandoffLedger:
         tracking.register_session("wt-1", "old")
         rec = load_record(tmp_tracking_dir / "wt-1.yaml")
         tracking.open_handoff(rec, "old", "task-123")
-        tracking.register_session("wt-1", "new")
+        tracking.register_session(
+            "wt-1", "new", candidate_token="task-123",
+        )
         rec = load_record(tmp_tracking_dir / "wt-1.yaml")
         tracking.associate_handoff_candidate(rec, "task-123", "new")
 
@@ -278,8 +280,11 @@ class TestExactHandoffLedger:
         handoff = rec.handoffs[0]
         assert handoff.candidate == "new"
         assert handoff.state == "pending"
-        assert rec.resolved_head_session == "old"
-        assert rec.session_entry("old").state == "active"
+        # "old" yielded the moment it opened the handoff (gitea
+        # aperture-labs#7230) -- head is vacant, not still "old"; the
+        # candidate association alone does not hand head to "new" either.
+        assert rec.resolved_head_session is None
+        assert rec.session_entry("old").state == "yielded"
 
         tracking.register_session(
             "wt-1", "new", source="bind", handoff_token="task-123"
@@ -296,8 +301,12 @@ class TestExactHandoffLedger:
         tracking.register_session("wt-1", "old")
         rec = load_record(tmp_tracking_dir / "wt-1.yaml")
         tracking.open_handoff(rec, "old", "task-123")
-        tracking.register_session("wt-1", "candidate")
-        tracking.register_session("wt-1", "other")
+        tracking.register_session(
+            "wt-1", "candidate", candidate_token="task-123",
+        )
+        tracking.register_session(
+            "wt-1", "other", candidate_token="task-123",
+        )
         rec = load_record(tmp_tracking_dir / "wt-1.yaml")
         tracking.associate_handoff_candidate(
             rec, "task-123", "candidate"

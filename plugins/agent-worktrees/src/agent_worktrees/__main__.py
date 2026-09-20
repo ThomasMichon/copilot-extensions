@@ -25300,6 +25300,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             started_at=event_at,
             source=source,
             handoff_token=getattr(args, "handoff_token", None),
+            candidate_token=candidate_token,
             initial_projection=source == "hook:new",
         )
         if candidate_token:
@@ -25322,6 +25323,21 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     except Exception as e:
         output.err(f"Failed to register session: {e}")
         return 1
+    # Durable session-state-folder half of "every session that starts in a
+    # worktree is recorded" (gitea aperture-labs#7230, wish 1) -- unconditional,
+    # not gated on a handoff ever having been involved. Best-effort: a failed
+    # load/write here must never fail session registration itself.
+    try:
+        binding_record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
+        from . import handoff_diagnostics
+
+        handoff_diagnostics.stamp_session_state_worktree_binding(
+            session_id, wt_id,
+            worktree_dir=binding_record.worktree_path,
+            machine=binding_record.machine,
+        )
+    except Exception:
+        pass
     profile_assignment.bind(
         getattr(args, "assignment_token", None)
         or (
