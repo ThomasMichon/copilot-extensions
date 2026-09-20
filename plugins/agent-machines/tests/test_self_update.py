@@ -842,7 +842,7 @@ def test_register_scheduled_task_hourly_uses_native_repetition_parameters():
         "watchdog",
         runner=fake_runner,
         resolve_binary=lambda name: f"/usr/bin/{name}",
-        home=Path("/home/tmichon"),
+        home=Path("/home/operator"),
     )
     script = captured["argv"][-1]
     assert "-RepetitionInterval (New-TimeSpan -Hours 1)" in script
@@ -862,7 +862,7 @@ def test_register_scheduled_task_daily_has_no_repetition_parameters():
         "sweep",
         runner=fake_runner,
         resolve_binary=lambda name: f"/usr/bin/{name}",
-        home=Path("/home/tmichon"),
+        home=Path("/home/operator"),
     )
     script = captured["argv"][-1]
     assert "-Daily -At '3:00AM' -DaysInterval 1" in script
@@ -928,7 +928,7 @@ def test_default_command_runner_resolves_pathext_shim(monkeypatch):
     captured: dict[str, list[str]] = {}
 
     def fake_which(name):
-        return f"C:\\Users\\tmichon\\.local\\bin\\{name}.cmd" if name == "agent-worktrees" else None
+        return f"C:\\Users\\operator\\.local\\bin\\{name}.cmd" if name == "agent-worktrees" else None
 
     def fake_run(argv, **kwargs):
         captured["argv"] = argv
@@ -943,7 +943,7 @@ def test_default_command_runner_resolves_pathext_shim(monkeypatch):
     monkeypatch.setattr(self_update.shutil, "which", fake_which)
     monkeypatch.setattr(self_update.subprocess, "run", fake_run)
     result = self_update.default_command_runner(["agent-worktrees", "-p", "dotfiles", "list"])
-    assert captured["argv"][0] == "C:\\Users\\tmichon\\.local\\bin\\agent-worktrees.cmd"
+    assert captured["argv"][0] == "C:\\Users\\operator\\.local\\bin\\agent-worktrees.cmd"
     # The reported CommandResult.argv still shows the original logical argv
     # (not the resolved absolute path) so status/log output stays readable.
     assert result.argv[0] == "agent-worktrees"
