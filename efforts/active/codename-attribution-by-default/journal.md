@@ -751,3 +751,43 @@ Part of the [codename-attribution-by-default effort](README.md).
   `f2b538c47` for nine rounds straight — the PR description remains
   accurate even after this round's further vision edit; not re-edited
   again).
+
+### 2026-09-20 — Plan-review round 33 fixes
+
+- Confirmed: all four round-32 findings (explicit-opt-in narrowing,
+  per-entry `prs` merge, legacy freeze-at-first-touch, vision boundary)
+  verified correct — this round's review lists them under "Resolved
+  since last review."
+- Four new genuine findings, all leftover-consistency gaps from round
+  32's own edits: the round-32 fix corrected the RULE in one place per
+  document but left three OLDER restatements of the SAME superseded
+  unconditional rule unedited elsewhere in the same docs, and one
+  condensed-summary ambiguity from round 31's own doc-split:
+  1. The Plan's round-22 rationale paragraph (README.md) still said an
+     explicit opt-in "publish[es] regardless of `codename_source`" — the
+     exact unconditional statement round-32 narrowed everywhere else.
+     Corrected to state the narrowed rule (known provenance only).
+  2. design.md's own "downstream effects" narrative (the sibling
+     rationale doc for the SAME allocation-vs-publish distinction) still
+     carried the identical unconditional sentence, never updated when
+     README's copy was narrowed. Corrected to match.
+  3. The condensed Phase-1 checklist bullet (introduced by round 31's
+     own doc-split) listed `_parse_pr_mapping` as one of "all four"
+     stamping sites — but parsing an EXISTING record must stay strict
+     read-only (it deserializes an already-frozen pair, never re-derives
+     it); only the THREE fresh-construction sites actually stamp.
+     Corrected the condensed bullet to separate the three stamp sites
+     from the one read-only parse site explicitly (design.md's own
+     detailed text already had this distinction right; only the
+     round-31 condensed summary lost it).
+  4. design.md's strict-validation section still described a malformed/
+     partial persisted pair as "falls back to live config, today's
+     existing behavior" — phrasing that reads as a PERPETUAL fallback,
+     contradicting the round-32 one-time-freeze migration this same
+     section specifies. Reworded: a malformed/partial pair is migrated
+     via the identical one-time lazy-backfill freeze as a genuinely
+     missing pair, never re-derived from live config on every later
+     touch.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for ten rounds straight — not re-edited again).

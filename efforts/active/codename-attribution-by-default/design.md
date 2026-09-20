@@ -208,7 +208,21 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   ALSO emit `attribution_mode`/`attribution_explicit` (following the
   exact same `if pr.attribution_head: d["attribution_head"] = ...`
   only-emit-when-set pattern the function already uses for its other
-  optional fields) — parsing alone is not durable: without this write
+  optional fields, **but keyed on `attribution_mode` being non-empty,
+  never on `attribution_explicit`'s own truthy value (round-34
+  finding)** — `attribution_explicit=False` is itself a MEANINGFUL,
+  legitimately-frozen state (e.g. an implicit `codename` decision that
+  was correctly stamped as non-explicit), not the empty/unset sentinel;
+  a naive `if pr.attribution_explicit: d["attribution_explicit"] = ...`
+  would omit it whenever it's `False`, so a reload sees `attribution_mode`
+  present but its partner missing — the strict parser then reads that as
+  a PARTIAL pair (the empty-legacy-sentinel case), triggers the one-time
+  lazy-backfill freeze again, and reopens the exact retroactive-policy
+  bug this freeze exists to close. **Fix:** emit
+  `attribution_explicit` whenever `attribution_mode` is non-empty
+  (`if pr.attribution_mode: d["attribution_mode"] = ...;
+  d["attribution_explicit"] = pr.attribution_explicit`), including when
+  `attribution_explicit` is `False`) — parsing alone is not durable: without this write
   side, both fields silently vanish on the very next `tracking.save_record`
   after being stamped, since `_pr_to_yaml_dict` builds the dict every
   `PRRecord` is actually persisted through. `refresh_source_attribution` (and
@@ -358,17 +372,29 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   a non-active entry, or a concurrent stamp landing on a DIFFERENT `prs`
   entry than the one the stale snapshot's `.pr` property currently
   resolves to. **Fix:** merge per-entry across the full `prs` list, keyed
-  by a stable per-PR identity — prefer `number` when set (assigned once
-  and never reused), fall back to `branch` when `number` is still `None`
-  (a PR record created but not yet opened via the provider; `branch` is
-  unique per entry within one worktree's `prs` at that stage). Add a
-  `pr_revision` counter PER `PRRecord` entry (not one shared worktree-level
+  by a stable per-PR identity. **Matching must account for the
+  `number=None` → provider-assigned-`number` transition every PR goes
+  through (round-34 finding, corrects the round-32 "number when set,
+  else branch" rule)** — `create_pr` saves a `PRRecord` with `number=None`
+  BEFORE the provider assigns one; a stale in-memory snapshot captured in
+  that window still has `number=None`/a set `branch`, while the on-disk
+  `current` entry may have since gained its `number` from the provider —
+  keying strictly on "number when set, else branch" would compare the two
+  entries by DIFFERENT identity fields (current by `number`, the stale
+  snapshot by `branch`), so they'd never match and the merge would wrongly
+  APPEND a duplicate entry instead of merging the frozen fields onto the
+  existing one. **Corrected rule:** two entries are the SAME PR when
+  EITHER (a) both have a `number` set and they're equal, OR (b) either
+  side's `number` is `None` and their `branch` values are equal (covers
+  the pre-open, mid-transition, and already-open-on-both-sides cases
+  uniformly). Add a `pr_revision` counter PER `PRRecord` entry (not one shared worktree-level
   counter — following the existing `profile_assignment_revision`/
   `lifecycle_revision` pattern already in `_save_record_unlocked`, but
   scoped per-entry the way `prs` itself is a list), bumped every time that
   specific entry's `attribution_mode`/`attribution_explicit` are stamped.
   On save: for each entry in `current.prs` (on-disk), find the matching
-  entry in `record.prs` (in-memory) by identity; if no match exists (a
+  entry in `record.prs` (in-memory) by the corrected identity rule; if no
+  match exists (a
   concurrent writer added a PR the stale snapshot never saw), append
   `current`'s entry into `record.prs` unchanged; if a match exists and
   `current`'s entry has a strictly higher `pr_revision`, overwrite that
@@ -403,5 +429,14 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   must not erase B's freeze even though the snapshot's `.pr` (active-PR)
   accessor currently resolves to entry A, proving the merge operates on
   the full `prs` list keyed by identity, not just the single active-PR
-  accessor.
+  accessor; (iii) (round-34 finding) a `create_pr` flow saves a
+  `PRRecord` with `number=None`/a set `branch`, a concurrent process then
+  observes the provider assigning a `number` to that SAME PR and stamps
+  the frozen attribution pair (bumping `pr_revision`) onto the
+  now-numbered on-disk entry, while a stale in-memory snapshot still
+  holds the pre-number, `number=None` version of the same entry — the
+  stale save must MERGE onto (not duplicate-append) the numbered entry,
+  proving the identity rule matches across the `number=None` →
+  provider-assigned-`number` transition via the shared `branch`, not two
+  unrelated identities.
 

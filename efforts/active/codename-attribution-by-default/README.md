@@ -600,7 +600,11 @@ these decisions directly and assumes this design is understood.
   unknown `codename_source` requires the SAME manual, explicit,
   per-record operator verification the round-10 backfill migration
   already mandates (promoting it to a known `"built-in"`/`"custom"`
-  value) before it can ever publish under any attribution mode. An
+  value) before it can ever publish a **codename marker**, explicit or
+  implicit opt-in alike (round-34 finding: scoped to codename markers
+  only — `source_attribution: True`'s independent raw-marker path never
+  consulted `codename_source` before this effort and must not start now;
+  an unbackfilled record still publishes the raw marker unaffected). An
   IMPLICIT `codename` default only publishes a `"built-in"`-sourced
   codename, same as before. A record with `codename_source: "custom"`
   under an implicit (not explicit) `codename` default requires the repo
@@ -682,7 +686,13 @@ these decisions directly and assumes this design is understood.
     (post-widening, an override may itself be `"codename"`, not just a
     bool) — never re-derive from `prcfg` directly (round-31 finding).
   - `tracking.py`'s `_pr_to_yaml_dict` (`~1422`) must ALSO emit both
-    fields (round-28 finding) — parsing alone is not durable.
+    fields (round-28 finding) — parsing alone is not durable. **Emit
+    `attribution_explicit` whenever `attribution_mode` is non-empty, not
+    only when `attribution_explicit` is truthy (round-34 finding)** — a
+    `False` explicitness is itself a legitimately-frozen state (e.g. an
+    implicit `codename` decision), and omitting it would strand
+    `attribution_mode` without its partner on reload, silently
+    re-triggering the lazy-backfill freeze.
   - `refresh_source_attribution`/`_open_via_provider` must use the FROZEN
     pair, never live `prcfg.source_attribution`/
     `source_attribution_configured`, for every publish decision on that
@@ -701,14 +711,27 @@ these decisions directly and assumes this design is understood.
     `codename_source`.
   - **An EXPLICIT `codename` opt-in only bypasses the built-in/custom
     ALLOCATION distinction, never provenance itself (round-32 finding,
-    narrows the round-14/22 rule)** — it publishes a KNOWN
-    `codename_source: "custom"` record, but a record with a MISSING or
-    unrecognized `codename_source` never auto-publishes under any
-    attribution mode, explicit or implicit, until the round-10 manual
-    backfill promotes it to a known value.
+    narrows the round-14/22 rule; scope corrected round-34)** — it
+    publishes a KNOWN `codename_source: "custom"` record, but a record
+    with a MISSING or unrecognized `codename_source` never auto-publishes
+    a **codename marker** (`attribution == "codename"`), explicit or
+    implicit, until the round-10 manual backfill promotes it to a known
+    value. **This rule is scoped to codename markers only (round-34
+    finding)** — `source_attribution: True` (the independent raw-marker
+    path: worktree id, machine, session, head SHA) never consulted
+    `codename_source` before this effort and must not start doing so now;
+    an unbackfilled/unknown-provenance record still publishes the full
+    raw marker exactly as it always has, unaffected by this codename-only
+    fail-closed rule.
   - `_save_record_unlocked` must merge the frozen attribution fields
     PER-ENTRY across the full `WorktreeRecord.prs` list, keyed by a
-    stable identity (`number` when set, else `branch`) — never just the
+    stable identity — same `number` when both entries have one set, else
+    same `branch` (round-34 finding: matching must fall back to `branch`
+    whenever EITHER side lacks a `number`, covering the normal
+    `number=None` → provider-assigned-`number` transition every PR goes
+    through; "number when set, else branch" alone would key the two
+    sides of that transition differently and wrongly append a
+    duplicate) — never just the
     single `.pr` active-PR accessor (round-32 finding: `.prs` supports
     serial/parallel PRs, and a merge keyed on the active-PR property
     alone cannot protect a frozen pair on a non-active entry). Add a
@@ -929,6 +952,30 @@ these decisions directly and assumes this design is understood.
   `_pr_to_yaml_dict` actually emits them (not just `_parse_pr_mapping`
   parsing them) and a legacy record with neither field present still
   round-trips to empty/`False`, not a crash.
+- [ ] Round-trip (round-34 finding): stamp a `PRRecord` with
+  `attribution_mode="codename"`/`attribution_explicit=False` (an
+  IMPLICIT codename decision — explicitness legitimately `False`),
+  `save_record`/`load_record` it back — assert `attribution_explicit`
+  round-trips as `False`, NOT absent, proving `_pr_to_yaml_dict` emits it
+  whenever `attribution_mode` is set rather than omitting it because its
+  own value is falsy (which would strand `attribution_mode` without its
+  partner and silently re-trigger the lazy-backfill freeze on next
+  load).
+- [ ] Unit (round-34 finding): a `create_pr` flow saves a `PRRecord` with
+  `number=None`/a set `branch`; a concurrent process observes the
+  provider assigning that PR a `number` and stamps the frozen
+  attribution pair (bumping `pr_revision`) onto the now-numbered
+  on-disk entry; a stale in-memory snapshot still holds the pre-number
+  version of the same entry — `save_record`ing the stale snapshot must
+  MERGE onto the numbered entry (not append a duplicate), proving the
+  identity rule matches across the `number=None` →
+  provider-assigned-`number` transition via the shared `branch`.
+- [ ] Unit (round-34 finding): a `WorktreeRecord` with an unbackfilled
+  (missing/unknown) `codename_source`, in a repo with
+  `source_attribution: True` (the raw-marker mode) — the PR still
+  publishes the full raw marker exactly as it always has, proving the
+  round-32 provenance fail-closed rule is scoped to codename markers
+  only and does not regress the independent raw-marker path.
 - [ ] Unit (round-30 finding): a hand-edited/malformed
   `attribution_explicit: "false"` (a truthy string, not the boolean
   `false`) does NOT authorize publication — `_parse_pr_mapping` must
@@ -1162,46 +1209,40 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-32 history lives in **[journal.md](journal.md)** to keep this
+> round-33 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
 
-### 2026-09-20 — Plan-review round 33 fixes
+### 2026-09-20 — Plan-review round 34 fixes
 
-- Confirmed: all four round-32 findings (explicit-opt-in narrowing,
-  per-entry `prs` merge, legacy freeze-at-first-touch, vision boundary)
-  verified correct — this round's review lists them under "Resolved
-  since last review."
-- Four new genuine findings, all leftover-consistency gaps from round
-  32's own edits: the round-32 fix corrected the RULE in one place per
-  document but left three OLDER restatements of the SAME superseded
-  unconditional rule unedited elsewhere in the same docs, and one
-  condensed-summary ambiguity from round 31's own doc-split:
-  1. The Plan's round-22 rationale paragraph (README.md) still said an
-     explicit opt-in "publish[es] regardless of `codename_source`" — the
-     exact unconditional statement round-32 narrowed everywhere else.
-     Corrected to state the narrowed rule (known provenance only).
-  2. design.md's own "downstream effects" narrative (the sibling
-     rationale doc for the SAME allocation-vs-publish distinction) still
-     carried the identical unconditional sentence, never updated when
-     README's copy was narrowed. Corrected to match.
-  3. The condensed Phase-1 checklist bullet (introduced by round 31's
-     own doc-split) listed `_parse_pr_mapping` as one of "all four"
-     stamping sites — but parsing an EXISTING record must stay strict
-     read-only (it deserializes an already-frozen pair, never re-derives
-     it); only the THREE fresh-construction sites actually stamp.
-     Corrected the condensed bullet to separate the three stamp sites
-     from the one read-only parse site explicitly (design.md's own
-     detailed text already had this distinction right; only the
-     round-31 condensed summary lost it).
-  4. design.md's strict-validation section still described a malformed/
-     partial persisted pair as "falls back to live config, today's
-     existing behavior" — phrasing that reads as a PERPETUAL fallback,
-     contradicting the round-32 one-time-freeze migration this same
-     section specifies. Reworded: a malformed/partial pair is migrated
-     via the identical one-time lazy-backfill freeze as a genuinely
-     missing pair, never re-derived from live config on every later
-     touch.
+- Confirmed: all four round-33 findings (leftover unconditional-opt-in
+  restatements, condensed-checklist ambiguity) verified correct — this
+  round's review lists them under "Resolved since last review."
+- Three new genuine findings, all real correctness gaps in the round-32
+  fixes:
+  1. **`attribution_explicit` emission was keyed on the wrong condition:**
+     the round-28 emit spec used an omit-when-falsy pattern, but
+     `attribution_explicit=False` is itself a legitimately-frozen state
+     (e.g. an implicit `codename` decision) — omitting it would strand
+     `attribution_mode` without its partner on reload, silently
+     re-triggering the lazy-backfill freeze. Corrected: emit
+     `attribution_explicit` whenever `attribution_mode` is non-empty,
+     regardless of its own True/False value.
+  2. **PR identity matching didn't account for the `number=None` →
+     provider-assigned-`number` transition:** `create_pr` saves a
+     `PRRecord` before the provider assigns its `number`; the round-32
+     "number when set, else branch" rule would key a stale pre-number
+     snapshot and its now-numbered on-disk counterpart by DIFFERENT
+     fields, appending a duplicate instead of merging. Corrected: two
+     entries match when both have equal numbers, OR either side lacks a
+     number and their branches are equal.
+  3. **The provenance fail-closed rule was scoped too broadly:** round-32
+     said an unbackfilled/unknown-provenance record "never auto-publishes
+     under any attribution mode" — but `source_attribution: True`'s
+     independent raw-marker path never depended on `codename_source` and
+     must not start now. Scoped the rule explicitly to codename markers
+     only, added a regression test proving raw-marker publication is
+     unaffected.
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
-  `f2b538c47` for ten rounds straight — not re-edited again).
+  `f2b538c47` for eleven rounds straight — not re-edited again).
