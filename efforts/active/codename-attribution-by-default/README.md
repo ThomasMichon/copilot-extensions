@@ -572,14 +572,39 @@ these decisions directly and assumes this design is understood.
   into the shared helper alongside `attribution` and `codename_source`;
   the gating logic is: publish when EITHER (i) `source_attribution` is
   `True` (raw/full marker mode, unaffected by codenames), OR (ii)
-  `attribution == "codename"` AND (`source_attribution_configured` is
-  `True` **or** `codename_source == "built-in"`) — i.e. an EXPLICIT
-  `codename` opt-in always publishes regardless of `codename_source`, but
-  an IMPLICIT `codename` default only publishes a `"built-in"`-sourced
-  codename. A record with `codename_source: "custom"` under an implicit
-  (not explicit) `codename` default requires the repo to explicitly set
-  `pr.source_attribution` (to `codename` or `true`) to publish, even if
-  the repo's wordlist config has since reverted to no custom wordlist.
+  `attribution == "codename"` AND `codename_source == "built-in"` (always
+  safe, implicit or explicit), OR (iii) `attribution == "codename"` AND
+  `codename_source == "custom"` AND `source_attribution_configured` is
+  `True` (a KNOWN custom-sourced codename publishes only under an
+  EXPLICIT opt-in, never the bare implicit default). **A `codename_source`
+  that is missing or an unrecognized/malformed value NEVER auto-publishes,
+  even under an explicit opt-in (round-32 finding, narrows the original
+  round-14/22 rule)** — the original rule read explicit opt-in
+  (`source_attribution_configured`) as authorizing publication
+  UNCONDITIONALLY regardless of `codename_source`, on the theory that an
+  operator explicitly opting in has reviewed the repo's CURRENT
+  vocabulary; but that reasoning only covers the repo's current config,
+  not an individual record's actual provenance — an unbackfilled or
+  malformed-`codename_source` record may have been assigned under a
+  custom wordlist the repo's config has since dropped or swapped (the
+  exact round-10 legacy-drift concern), so blanket-authorizing it under
+  explicit opt-in would bypass the round-10 backfill migration's
+  fail-closed guarantee entirely and could expose an identifier from a
+  vocabulary the operator never actually reviewed. **Fix:** explicit
+  opt-in only ever bypasses the ALLOCATION-time distinction between
+  `"built-in"` and `"custom"` (i.e. it authorizes a KNOWN custom-sourced
+  codename that would otherwise require an implicit default to reject
+  it) — it never bypasses provenance itself; a record with missing/
+  unknown `codename_source` requires the SAME manual, explicit,
+  per-record operator verification the round-10 backfill migration
+  already mandates (promoting it to a known `"built-in"`/`"custom"`
+  value) before it can ever publish under any attribution mode. An
+  IMPLICIT `codename` default only publishes a `"built-in"`-sourced
+  codename, same as before. A record with `codename_source: "custom"`
+  under an implicit (not explicit) `codename` default requires the repo
+  to explicitly set `pr.source_attribution` (to `codename` or `true`) to
+  publish, even if the repo's wordlist config has since reverted to no
+  custom wordlist.
   **Any stored value other than the literal string `"built-in"` must be
   treated as unsafe/`"custom"` (round-12 finding)**: `tracking.load_record`
   accepts arbitrary YAML values for record fields with no schema
@@ -595,9 +620,14 @@ these decisions directly and assumes this design is understood.
   closed (the exact legacy-drift scenario the round-8 finding raised); (b)
   a repo with a custom wordlist that HAS EXPLICITLY configured
   `source_attribution: codename` (`source_attribution_configured` is
-  `True`) publishes normally regardless of any record's `codename_source`,
-  including for a pre-existing `WorktreeRecord` assigned before this
-  effort shipped; (c) a `WorktreeRecord` with `codename_source:
+  `True`) publishes normally for a `WorktreeRecord` with a KNOWN
+  `codename_source: "custom"`, including for a pre-existing
+  `WorktreeRecord` assigned before this effort shipped and later
+  backfilled to a known value; (b2) (round-32 finding) that SAME
+  explicit-opt-in repo does NOT publish for a `WorktreeRecord` with a
+  MISSING or unrecognized `codename_source` — explicit opt-in narrows the
+  allocation-vs-publish distinction, it does not bypass provenance
+  verification; (c) a `WorktreeRecord` with `codename_source:
   "built-in"` publishes normally under an IMPLICIT `codename` default; (d)
   a `WorktreeRecord` with an unrecognized stored `codename_source` value
   (neither `"built-in"` nor `"custom"`) fails closed exactly like
@@ -627,9 +657,9 @@ these decisions directly and assumes this design is understood.
 - [ ] **Freeze each PR's attribution decision (mode AND explicitness) at
   PRRecord-creation time, at EVERY creation site; strictly validate the
   persisted pair; protect it under concurrent-save merge (rounds
-  26-31)** — full rationale, gap enumeration, and regression-test
+  26-32)** — full rationale, gap enumeration, and regression-test
   requirements in
-  **[design.md § Per-PR attribution freeze](design.md#per-pr-attribution-freeze-rounds-26-31)**;
+  **[design.md § Per-PR attribution freeze](design.md#per-pr-attribution-freeze-rounds-26-32)**;
   read it before touching any of these sites:
   - Add `PRRecord.attribution_mode`/`PRRecord.attribution_explicit`,
     stamped TOGETHER, ONCE, by one shared helper called at all four
@@ -639,15 +669,20 @@ these decisions directly and assumes this design is understood.
     and `tracking.py`'s `_parse_pr_mapping` deserialization (`~1393`).
   - The stamp must capture the caller's already-computed EFFECTIVE
     attribution (`want_attribution`), including any per-call
-    `--attribution`/`--no-attribution` override — never re-derive from
-    `prcfg` directly (round-31 finding).
+    `--attribution`/`--no-attribution` override, stamped VERBATIM
+    (post-widening, an override may itself be `"codename"`, not just a
+    bool) — never re-derive from `prcfg` directly (round-31 finding).
   - `tracking.py`'s `_pr_to_yaml_dict` (`~1422`) must ALSO emit both
     fields (round-28 finding) — parsing alone is not durable.
   - `refresh_source_attribution`/`_open_via_provider` must use the FROZEN
     pair, never live `prcfg.source_attribution`/
     `source_attribution_configured`, for every publish decision on that
-    PR's life. A legacy `PRRecord` predating these fields falls back to
-    today's live-config behavior unchanged (no regression).
+    PR's life. **A legacy `PRRecord` predating these fields is lazily
+    frozen on its FIRST post-migration touch, from whatever config is
+    live at that single moment — never left to fall back to live config
+    indefinitely (round-32 finding: the earlier "falls back to live
+    config unchanged" framing conflicted with the vision's own
+    persistence guarantee)** — see design.md for the full migration spec.
   - `_parse_pr_mapping` must STRICTLY validate the persisted pair (round-30
     finding): `attribution_explicit` via strict boolean check (never
     truthy-coerced); `attribution_mode` against the closed set
@@ -655,18 +690,32 @@ these decisions directly and assumes this design is understood.
     set) falls back to the empty legacy sentinel — the same
     never-treat-unknown-as-safe discipline round-12 established for
     `codename_source`.
-  - `_save_record_unlocked` must merge the frozen `pr` field under the
-    record lock during concurrent saves (round-30 finding), the same way
-    round-11 protects `codename`/`codename_source`: add a `pr_revision`
-    counter (following the `profile_assignment_revision` pattern) with
-    explicit YAML load/save wiring (round-31 finding: an in-memory-only
-    counter reloads as `0` in another process and defeats the merge
-    guard), bumped every time the attribution pair is stamped, merging
-    `record.pr` whenever `current.pr_revision > record.pr_revision`.
+  - **An EXPLICIT `codename` opt-in only bypasses the built-in/custom
+    ALLOCATION distinction, never provenance itself (round-32 finding,
+    narrows the round-14/22 rule)** — it publishes a KNOWN
+    `codename_source: "custom"` record, but a record with a MISSING or
+    unrecognized `codename_source` never auto-publishes under any
+    attribution mode, explicit or implicit, until the round-10 manual
+    backfill promotes it to a known value.
+  - `_save_record_unlocked` must merge the frozen attribution fields
+    PER-ENTRY across the full `WorktreeRecord.prs` list, keyed by a
+    stable identity (`number` when set, else `branch`) — never just the
+    single `.pr` active-PR accessor (round-32 finding: `.prs` supports
+    serial/parallel PRs, and a merge keyed on the active-PR property
+    alone cannot protect a frozen pair on a non-active entry). Add a
+    `pr_revision` counter PER entry (following the
+    `profile_assignment_revision` pattern) with explicit YAML load/save
+    wiring (round-31 finding: an in-memory-only counter reloads as `0`
+    in another process and defeats the merge guard), bumped every time
+    that entry's attribution pair is stamped, merging each `current.prs`
+    entry into the matching `record.prs` entry (or appending it, if
+    unmatched) whenever `current`'s `pr_revision` is strictly higher.
   - See the Validation Plan below for the full regression-test matrix
     (retroactive mode/explicitness change, manual `set-pr`, per-call
-    override freeze, strict-parsing edge cases, `pr_revision` round-trip,
-    stale-writer merge).
+    override freeze including a `"codename"`-valued override,
+    strict-parsing edge cases, explicit-opt-in provenance narrowing,
+    `pr_revision` round-trip, per-entry stale-writer merge across
+    parallel PRs, legacy-PR lazy-freeze-at-first-touch).
 - [ ] **Versioning gate (required for this phase's PR):** this phase
   changes `agent-worktrees` runtime source (`config.py`). Per
   `AGENTS.md`'s Version Bump section, bump `plugins/agent-worktrees/plugin.json`,
@@ -837,10 +886,17 @@ these decisions directly and assumes this design is understood.
   published/refreshed on that second push still reflects the ORIGINAL,
   frozen `PRRecord.attribution_mode`, not the new live config. Cover both
   directions (an added marker on a config that used to publish nothing,
-  and vice versa) and assert a legacy `PRRecord` with no stored
-  `attribution_mode`/`attribution_explicit` (predates these fields) falls
-  back to today's live-config behavior unchanged (no regression for a PR
-  already mid-life when this ships).
+  and vice versa).
+- [ ] Unit (round-32 finding, corrects the round-26 entry's "falls back
+  to live-config unchanged" framing): a legacy `PRRecord` with no stored
+  `attribution_mode`/`attribution_explicit` (predates these fields) is
+  lazily frozen on its FIRST `refresh_source_attribution`/
+  `_open_via_provider` touch, computed from whatever config is live at
+  that single moment — then the repo's config changes to a DIFFERENT
+  value before a SECOND refresh on that same PR — the second refresh
+  still uses the value frozen at the FIRST touch, not the newly-changed
+  config, proving the lazy migration itself does not reopen the
+  retroactive-change window.
 - [ ] Unit (round-27 finding): open a PR under an IMPLICIT `codename`
   default against a `"custom"`-sourced (or unknown-provenance) record —
   correctly suppressed at open per the round-22 gate — then add an
@@ -878,14 +934,22 @@ these decisions directly and assumes this design is understood.
   falls back to legacy live-config behavior for BOTH fields together —
   a partial pair never authorizes publication using just the one field
   that is present.
-- [ ] Unit (round-30 finding): stamp a `PRRecord`'s frozen
-  `attribution_mode`/`attribution_explicit` pair under the record lock
-  (bumping `pr_revision`), then `save_record` a STALE in-memory
-  `WorktreeRecord` snapshot captured before that stamp — the stale save
-  must not erase the freshly-frozen pair, proving `_save_record_unlocked`
-  merges `record.pr` from the current on-disk record by `pr_revision`,
-  the same way it already merges `codename`/`codename_source` (round-11)
-  and `profile_assignment_revision`.
+- [ ] Unit (round-30 finding, corrected round-32): stamp a `PRRecord`
+  entry's frozen `attribution_mode`/`attribution_explicit` pair under the
+  record lock (bumping that entry's `pr_revision`), then `save_record` a
+  STALE in-memory `WorktreeRecord` snapshot captured before that stamp —
+  the stale save must not erase the freshly-frozen entry, proving
+  `_save_record_unlocked` merges `WorktreeRecord.prs` per-entry, keyed by
+  identity, from the current on-disk record by that entry's
+  `pr_revision`, the same way it already merges `codename`/
+  `codename_source` (round-11) and `profile_assignment_revision`.
+- [ ] Unit (round-32 finding): a `WorktreeRecord` with TWO parallel `prs`
+  entries — stamp the frozen attribution pair on entry B (bumping ONLY
+  B's `pr_revision`) while a stale in-memory snapshot holds BOTH entries
+  unfrozen, then `save_record` the stale snapshot — entry B's freeze
+  survives even though the snapshot's `.pr` (active-PR) property
+  resolves to entry A, proving the merge protects the full `prs` list by
+  identity, not just the single active-PR accessor.
 - [ ] Round-trip (round-31 finding): bump a `WorktreeRecord`'s
   `pr_revision` and `save_record` it, then `load_record` the same file
   back into a FRESH object (a different Python object, not a mutated
@@ -1087,56 +1151,58 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-30 history lives in **[journal.md](journal.md)** to keep this
+> round-31 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 31 fixes
+### 2026-09-20 — Plan-review round 32 fixes
 
-- Confirmed: both round-30 findings (strict-parsing, `pr_revision`
-  merge protection) verified correct — this round's review lists them
-  under "Resolved since last review."
-- Two new genuine findings, one prior "Previously missed" finding
-  actually addressed for the first time:
-  1. **`pr_revision` needs explicit YAML load/save wiring, not
-     in-memory-only (round-31 finding):** `WorktreeRecord` is
-     hand-serialized, so a counter with no read/write wiring reloads as
-     `0` in every other process, defeating the round-30 merge guard
-     entirely. Added an explicit parse line (following
-     `profile_assignment_revision`'s own bounded-int parsing) and emit
-     line (following its exact only-emit-when-set pattern), plus a
-     round-trip regression test using a FRESH object, not a mutated
-     reference.
-  2. **Freeze must capture the caller's effective per-call attribution
-     override, not raw config (round-31 finding, was flagged separately
-     as "Previously missed" too):** verified in source that `create_pr`
-     accepts its own `attribution: bool | None` override
-     (`--attribution`/`--no-attribution`), and every call site already
-     computes an effective `want_attribution` before deciding whether to
-     publish. If the freeze stamp instead reads `prcfg.source_attribution`
-     directly, a `--no-attribution` PR would still stamp from live
-     config and a later refresh would start publishing a marker the
-     operator explicitly suppressed — the freeze's OWN construction
-     recreating the exact retroactive-change bug it exists to prevent.
-     Fixed: the shared stamping helper now takes the caller's
-     already-computed effective value, with an override always forcing
-     `attribution_explicit = True` (a per-call override is a stronger,
-     more explicit signal than any config flag). **Self-caught
-     correction:** the first draft of this fix wrongly claimed a
-     per-call override is "always a bool, never `codename`" — but this
-     SAME Phase 1's round-18 fix widens the `attribution` parameter's
-     type to `SourceAttribution | None`, so a post-widening override CAN
-     legitimately be `"codename"` too; corrected to stamp whatever value
-     the override itself carries, verbatim, and added a matching
-     regression test.
-  3. **Doc-split maintenance (round-31 finding, low severity):** the
-     README had grown to 1,252 lines with my own round-31 additions,
-     re-triggering the round-18 doc-split concern — the freeze/
-     strict-validation/merge-protection bullets (rounds 26-31, ~178
-     lines) carried the most self-contained design rationale of
-     anything still in the README. Moved that full rationale into
-     **[design.md § Per-PR attribution freeze](design.md#per-pr-attribution-freeze-rounds-26-31)**,
-     leaving a condensed, still-fully-actionable checklist item in the
-     Plan. README dropped from 1,252 to ~1,120 lines.
+- Confirmed: both round-31 findings (`pr_revision` YAML wiring, doc
+  split) verified correct — this round's review lists them under
+  "Resolved since last review."
+- Four new, genuine findings, all substantive design corrections to the
+  round-26/31 freeze mechanism:
+  1. **Explicit opt-in was over-broad (round-32 finding, narrows the
+     round-14/22 rule):** the original rule read an explicit
+     `source_attribution: codename` opt-in as authorizing publication
+     UNCONDITIONALLY regardless of `codename_source` — but that bypassed
+     the round-10 backfill's fail-closed guarantee for a record with
+     MISSING or unrecognized provenance, which may have been assigned
+     under a since-removed custom wordlist the operator never actually
+     reviewed. Narrowed: explicit opt-in only bypasses the built-in-vs-
+     custom ALLOCATION distinction (publishes a KNOWN `"custom"` record),
+     never provenance itself — an unbackfilled/unknown record still
+     requires the same manual per-record verification regardless of
+     attribution mode.
+  2. **`pr_revision` merge must operate on the full `prs` list, not the
+     single `.pr` accessor:** verified in source that `.pr` is only a
+     back-compat property over `WorktreeRecord.prs` (which supports
+     serial and PARALLEL PRs) — a merge keyed on the active-PR accessor
+     alone cannot protect a frozen pair on a non-active entry. Corrected
+     to a per-entry merge keyed by stable identity (`number` when set,
+     else `branch`), with `pr_revision` scoped per-entry rather than one
+     shared worktree-level counter.
+  3. **Legacy-PR migration conflicted with the vision guarantee it was
+     supposed to serve:** the "falls back to live config unchanged"
+     framing for a pre-existing `PRRecord` meant a repo's later
+     `source_attribution` change could still silently add/remove/reshape
+     that PR's marker on its next refresh — exactly the retroactive
+     exposure the `unconfigured-attribution-never-leaks` behavior
+     forbids, just deferred rather than eliminated. Replaced with a
+     ONE-TIME lazy-backfill freeze at the legacy PR's first
+     post-migration touch (mirroring `codename_source`'s own
+     lazy-assignment pattern), after which it is frozen exactly like
+     every PR opened after this mechanism shipped.
+  4. **The vision itself needed the same narrowing (mirrored in
+     `visions/plugins/agent-worktrees/pull-requests/README.md`):** the
+     persistence-across-config-change guarantee, as first worded, read
+     as an unbounded promise that also covered PRs published before the
+     mechanism existed — impossible to keep without perpetually
+     re-deriving from live config. Revised to be explicitly
+     forward-looking from the point persistence exists, migrated via the
+     same one-time freeze-at-first-touch, with a new Provenance entry
+     documenting the clarification.
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
-  `f2b538c47` for eight rounds straight — not re-edited again).
+  `f2b538c47` for nine rounds straight — the PR description remains
+  accurate even after this round's further vision edit; not re-edited
+  again).

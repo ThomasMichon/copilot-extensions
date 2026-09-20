@@ -141,7 +141,7 @@ config-shape check above.
   whether that's still actually wanted, not just left in place by inertia.
 
 
-## Per-PR attribution freeze (rounds 26-31)
+## Per-PR attribution freeze (rounds 26-32)
 
 Full rationale, gap enumeration, fix specification, and regression-test
 requirements for freezing each PR's attribution decision (mode AND
@@ -255,25 +255,52 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   stamped pair still records `attribution_mode="codename"`/
   `attribution_explicit=True` (proving the override's OWN value is
   stamped verbatim, not coerced to only `True`/`False`).
-  **Migration for a PR opened before these fields existed:** an
-  empty/unset `attribution_mode` on an in-flight legacy `PRRecord` falls
-  back to today's existing live-config behavior for BOTH fields together
-  (no regression for a PR already mid-life when this ships) — the freeze
-  guarantee applies prospectively, to every `PRRecord` created after these
-  fields exist, not retroactively to one already open without stored
-  values. Add regression tests: (i) open a PR under one
-  `source_attribution` value, change the repo's config to a DIFFERENT
-  value, push again — the marker published/refreshed on that push still
-  reflects the ORIGINAL frozen mode, not the new config; (ii) open a PR
-  under an implicit `codename` default against a `"custom"`-sourced
-  record (correctly suppressed at open), then add an explicit
-  `source_attribution: codename` to the repo's config and push again —
-  the marker STAYS suppressed, proving `attribution_explicit` is frozen
-  too, not just `attribution_mode`; (iii) attach a PR via manual `set-pr`
-  (never touching `_open_via_provider`) and push via `push-changes` —
+  **Migration for a PR opened before these fields existed (round-32
+  finding: replaces the earlier perpetual-live-config-fallback design,
+  which conflicted with the vision's own persistence guarantee)** — an
+  empty/unset `attribution_mode` on an in-flight legacy `PRRecord` must
+  NOT fall back to live config forever: that would let a repo's later
+  `source_attribution` change silently add, remove, or reshape that
+  legacy PR's marker on its next refresh — exactly the retroactive
+  exposure/suppression the `unconfigured-attribution-never-leaks`
+  guarantee forbids, just deferred to the PR's first post-migration
+  touch instead of eliminated. **Fix:** the first time
+  `refresh_source_attribution` OR `_open_via_provider` encounters a
+  `PRRecord` with an empty/unset `attribution_mode` (a legacy PR that
+  predates this mechanism), it performs a ONE-TIME lazy-backfill freeze —
+  computing the effective mode/explicitness from whatever config is live
+  AT THAT SINGLE MOMENT via the same shared stamping helper every other
+  creation site uses, persisting it via the same `pr_revision`-guarded
+  save path — after which that PR is frozen exactly like every PR opened
+  after this mechanism shipped; only the ONE transition (unmigrated →
+  frozen) ever consults live config for an existing PR, and it happens at
+  most once per PR, not on every touch. This exactly mirrors
+  `codename_source`'s own lazy-assignment pattern (round-8/round-13) —
+  the one difference is provenance-sensitive `codename_source` refuses to
+  auto-promote an unbackfilled record (round-10 finding: the guess is
+  unsound), whereas `attribution_mode`/`attribution_explicit` carry no
+  such provenance risk (they describe policy intent, not vocabulary
+  origin) and are safe to auto-freeze from current config on first touch.
+  Add regression tests: (i) open a PR under one `source_attribution`
+  value, change the repo's config to a DIFFERENT value, push again — the
+  marker published/refreshed on that push still reflects the ORIGINAL
+  frozen mode, not the new config; (ii) open a PR under an implicit
+  `codename` default against a `"custom"`-sourced record (correctly
+  suppressed at open), then add an explicit `source_attribution:
+  codename` to the repo's config and push again — the marker STAYS
+  suppressed, proving `attribution_explicit` is frozen too, not just
+  `attribution_mode`; (iii) attach a PR via manual `set-pr` (never
+  touching `_open_via_provider`) and push via `push-changes` —
   `refresh_source_attribution` still uses a properly-stamped frozen
-  pair, not the legacy-fallback path, proving the shared helper is
-  actually wired into the manual-attach site.
+  pair, not a live-config fallback, proving the shared helper is actually
+  wired into the manual-attach site; (iv) a legacy `PRRecord` (created
+  before these fields existed, `attribution_mode` empty) is lazily
+  frozen on its FIRST `refresh_source_attribution` call under one config
+  value, then the repo's config changes to a DIFFERENT value before a
+  SECOND refresh — the second refresh still uses the value frozen at the
+  first touch, not the newly-changed config, proving the lazy backfill
+  itself does not reopen the retroactive-change window it was meant to
+  close.
 **Strictly validate the persisted `attribution_mode`/
   `attribution_explicit` pair, not just round-trip it (round-30
   finding):** `_parse_pr_mapping` deserializes hand-rolled YAML with no
@@ -299,41 +326,70 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   config behavior rather than being read as one of the three known
   modes; a record with only one of the two fields set falls back to
   legacy behavior rather than using the one field that IS present.
-**Merge the frozen `pr.attribution_mode`/`pr.attribution_explicit`
-  pair under the record lock during concurrent saves, the same way
-  round-11 protects `codename`/`codename_source` (round-30 finding):**
-  `_save_record_unlocked` currently has NO merge protection for the `pr`
-  field at all (verified in source: no revision counter or merge branch
-  covers it), so a status/finalize writer holding an in-memory
-  `WorktreeRecord` snapshot from BEFORE a concurrent `create-pr`/`set-pr`
-  stamped the frozen attribution pair onto that same record's `pr` can
-  save over it and silently erase the freeze — the next
-  `refresh_source_attribution` then sees the empty legacy `pr` and falls
-  back to live config, defeating the entire round-26/27/28 guarantee.
-  Add a `pr_revision` counter (following the existing
-  `profile_assignment_revision`/`lifecycle_revision` pattern already in
-  `_save_record_unlocked`), bumped every time `pr.attribution_mode`/
-  `pr.attribution_explicit` are stamped, and merge `record.pr` from the
-  current on-disk record whenever `current.pr_revision >
-  record.pr_revision`. **The counter must be wired into `WorktreeRecord`'s
-  hand-written YAML load/save, not held in memory only (round-31
-  finding)** — `WorktreeRecord` is hand-serialized (verified: the same
-  reason `codename_source`/`profile_assignment_revision` each need their
-  own explicit parse line and emit line, per the round-9/round-13
-  serialization pattern), so a `pr_revision` that exists only as a
-  dataclass field with no read/write wiring reloads as `0` in every other
-  process — defeating the `current.pr_revision > record.pr_revision`
-  comparison entirely, since a freshly-loaded `current` record would
-  never show a revision higher than an in-memory stale snapshot. Add: a
-  parse line reading `data.get("pr_revision", 0)` (bounded
-  non-negative, following `profile_assignment_revision`'s own parsing
-  exactly) at record-load time, and an emit line
-  (`if record.pr_revision: content += f"pr_revision: {record.pr_revision}\n"`,
-  following the exact `profile_assignment_revision` emit pattern) at
-  record-save time. Add a regression test: stamp a PRRecord's frozen
-  attribution pair under the lock (bumping `pr_revision`),
+**Merge the frozen `attribution_mode`/`attribution_explicit`/`pr_revision`
+  fields per-entry across `WorktreeRecord.prs`, not just the single
+  `.pr` accessor, under the record lock during concurrent saves, the same
+  way round-11 protects `codename`/`codename_source` (round-30 finding,
+  corrected round-32)** — `_save_record_unlocked` currently has NO merge
+  protection for PR state at all (verified in source: no revision counter
+  or merge branch covers it), so a status/finalize writer holding an
+  in-memory `WorktreeRecord` snapshot from BEFORE a concurrent
+  `create-pr`/`set-pr` stamped the frozen attribution pair onto that
+  record's PR state can save over it and silently erase the freeze — the
+  next `refresh_source_attribution` then sees the empty legacy state and
+  falls back to live config, defeating the entire round-26/27/28
+  guarantee. **`record.pr` is only a back-compat property over the real
+  `WorktreeRecord.prs` list (round-32 finding, corrects the round-30/31
+  text's "merge `record.pr`" framing)** — `.prs` supports serial re-PRs
+  and PARALLEL PRs (multiple simultaneously live entries), so a merge
+  keyed on the single active-PR accessor cannot protect a frozen pair on
+  a non-active entry, or a concurrent stamp landing on a DIFFERENT `prs`
+  entry than the one the stale snapshot's `.pr` property currently
+  resolves to. **Fix:** merge per-entry across the full `prs` list, keyed
+  by a stable per-PR identity — prefer `number` when set (assigned once
+  and never reused), fall back to `branch` when `number` is still `None`
+  (a PR record created but not yet opened via the provider; `branch` is
+  unique per entry within one worktree's `prs` at that stage). Add a
+  `pr_revision` counter PER `PRRecord` entry (not one shared worktree-level
+  counter — following the existing `profile_assignment_revision`/
+  `lifecycle_revision` pattern already in `_save_record_unlocked`, but
+  scoped per-entry the way `prs` itself is a list), bumped every time that
+  specific entry's `attribution_mode`/`attribution_explicit` are stamped.
+  On save: for each entry in `current.prs` (on-disk), find the matching
+  entry in `record.prs` (in-memory) by identity; if no match exists (a
+  concurrent writer added a PR the stale snapshot never saw), append
+  `current`'s entry into `record.prs` unchanged; if a match exists and
+  `current`'s entry has a strictly higher `pr_revision`, overwrite that
+  matched `record.prs` entry's `attribution_mode`/`attribution_explicit`/
+  `pr_revision` from `current`'s copy (never the reverse — a lower or
+  equal `current` revision never overwrites an in-memory entry that is
+  already at least as fresh). **The counter must be wired into
+  `WorktreeRecord`'s hand-written YAML load/save, not held in memory only
+  (round-31 finding)** — `WorktreeRecord` is hand-serialized (verified:
+  the same reason `codename_source`/`profile_assignment_revision` each
+  need their own explicit parse line and emit line, per the
+  round-9/round-13 serialization pattern), so a `pr_revision` that exists
+  only as a dataclass field with no read/write wiring reloads as `0` in
+  every other process — defeating the revision comparison entirely, since
+  a freshly-loaded `current` record would never show a revision higher
+  than an in-memory stale snapshot. Add: a parse line reading
+  `data.get("pr_revision", 0)` (bounded non-negative, following
+  `profile_assignment_revision`'s own parsing exactly) alongside each
+  `prs:` entry's own deserialization in `_parse_pr_mapping`, and a
+  matching emit line in `_pr_to_yaml_dict` (following the
+  only-emit-when-set pattern the function already uses for its other
+  optional fields). Add regression tests: (i) stamp a PRRecord's frozen
+  attribution pair under the lock (bumping that entry's `pr_revision`),
   `save_record`/`load_record` the same file back in a FRESH in-memory
   object (not the same Python object), confirm `pr_revision` survives
-  round-trip as a non-zero value, THEN save a stale in-memory
-  `WorktreeRecord` snapshot captured BEFORE that stamp — the stale save
-  must not erase the freshly-frozen pair.
+  round-trip as a non-zero value on the correct entry, THEN save a stale
+  in-memory `WorktreeRecord` snapshot captured BEFORE that stamp — the
+  stale save must not erase the freshly-frozen entry; (ii) (round-32
+  finding) a `WorktreeRecord` with TWO parallel `prs` entries — stamp the
+  frozen pair on entry B (bumping ONLY B's `pr_revision`) while an
+  in-memory snapshot holds a stale copy of BOTH entries — the stale save
+  must not erase B's freeze even though the snapshot's `.pr` (active-PR)
+  accessor currently resolves to entry A, proving the merge operates on
+  the full `prs` list keyed by identity, not just the single active-PR
+  accessor.
+

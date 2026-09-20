@@ -647,3 +647,54 @@ Part of the [codename-attribution-by-default effort](README.md).
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
   `f2b538c47` for seven rounds straight — not re-edited again).
+
+### 2026-09-20 — Plan-review round 31 fixes
+
+- Confirmed: both round-30 findings (strict-parsing, `pr_revision`
+  merge protection) verified correct — this round's review lists them
+  under "Resolved since last review."
+- Two new genuine findings, one prior "Previously missed" finding
+  actually addressed for the first time:
+  1. **`pr_revision` needs explicit YAML load/save wiring, not
+     in-memory-only (round-31 finding):** `WorktreeRecord` is
+     hand-serialized, so a counter with no read/write wiring reloads as
+     `0` in every other process, defeating the round-30 merge guard
+     entirely. Added an explicit parse line (following
+     `profile_assignment_revision`'s own bounded-int parsing) and emit
+     line (following its exact only-emit-when-set pattern), plus a
+     round-trip regression test using a FRESH object, not a mutated
+     reference.
+  2. **Freeze must capture the caller's effective per-call attribution
+     override, not raw config (round-31 finding, was flagged separately
+     as "Previously missed" too):** verified in source that `create_pr`
+     accepts its own `attribution: bool | None` override
+     (`--attribution`/`--no-attribution`), and every call site already
+     computes an effective `want_attribution` before deciding whether to
+     publish. If the freeze stamp instead reads `prcfg.source_attribution`
+     directly, a `--no-attribution` PR would still stamp from live
+     config and a later refresh would start publishing a marker the
+     operator explicitly suppressed — the freeze's OWN construction
+     recreating the exact retroactive-change bug it exists to prevent.
+     Fixed: the shared stamping helper now takes the caller's
+     already-computed effective value, with an override always forcing
+     `attribution_explicit = True` (a per-call override is a stronger,
+     more explicit signal than any config flag). **Self-caught
+     correction:** the first draft of this fix wrongly claimed a
+     per-call override is "always a bool, never `codename`" — but this
+     SAME Phase 1's round-18 fix widens the `attribution` parameter's
+     type to `SourceAttribution | None`, so a post-widening override CAN
+     legitimately be `"codename"` too; corrected to stamp whatever value
+     the override itself carries, verbatim, and added a matching
+     regression test.
+  3. **Doc-split maintenance (round-31 finding, low severity):** the
+     README had grown to 1,252 lines with my own round-31 additions,
+     re-triggering the round-18 doc-split concern — the freeze/
+     strict-validation/merge-protection bullets (rounds 26-31, ~178
+     lines) carried the most self-contained design rationale of
+     anything still in the README. Moved that full rationale into
+     **[design.md § Per-PR attribution freeze](design.md#per-pr-attribution-freeze-rounds-26-32)**,
+     leaving a condensed, still-fully-actionable checklist item in the
+     Plan. README dropped from 1,252 to ~1,120 lines.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for eight rounds straight — not re-edited again).

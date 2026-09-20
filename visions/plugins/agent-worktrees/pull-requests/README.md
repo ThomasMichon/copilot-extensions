@@ -159,6 +159,13 @@ by omission. A capability that persists provenance across a config change
 (so an operator can later tighten or loosen a repo's policy without
 retroactively exposing or hiding a marker that was already published under
 a prior policy) is expected of any such tracking, not merely a suggestion.
+This guarantee is forward-looking from the point such persistence exists: a
+PR opened before the persistence mechanism itself existed is migrated onto
+it via a one-time freeze at first touch (computing its effective policy from
+whatever config is live at that single moment, then holding it fixed
+exactly like every PR opened after the mechanism shipped) — not perpetually
+re-derived from live config on every later touch, which would silently
+reopen the exact retroactive-exposure gap this guarantee exists to close.
 
 ## Non-Goals / Boundaries
 
@@ -198,6 +205,16 @@ a prior policy) is expected of any such tracking, not merely a suggestion.
   change expectation, without pinning the `source_attribution`/
   `codename_source` field names or exact config keys, which remain
   reality-doc/effort-level detail.
+- **2026-09-20** — Round-32 review of the same effort found the
+  persistence-across-config-change guarantee, as first worded, implicitly
+  promised protection for PRs published before the persistence mechanism
+  itself existed too — a promise the effort's own legacy-PR migration
+  design could not keep without perpetually re-deriving from live config,
+  reopening the exact gap the guarantee exists to close. Narrowed the
+  guarantee to be explicitly forward-looking from the point persistence
+  exists, migrated via a one-time freeze-at-first-touch rather than an
+  unbounded live-config fallback — this is a clarification of the
+  guarantee's boundary, not a new capability.
 - **2026-09-14** — Authored from an odsp-web-harness clean-room session's
   real finding: a `code-review` scenario-eval run correctly reported a
   `noop`/BLOCKED verdict for "no PR available" rather than fabricate a
