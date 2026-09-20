@@ -228,22 +228,20 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
 
 
 def main() -> int:
+    exit_code = 0
     try:
         raw = _read_bounded_stdin()
         payload = json.loads(raw) if raw.strip() else {}
         write_session_guidance(payload if isinstance(payload, dict) else {})
     except GuidanceRefused as error:
-        print(f"CodeSpaces guidance refused: {error}", file=sys.stderr)
-        sys.stdout.write("{}")
-        return 126
+        sys.stderr.write(f"CodeSpaces guidance refused: {error}\n")
+        exit_code = 126
     except Exception as error:
         if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""):
-            print(f"CodeSpaces guidance refused: {error}", file=sys.stderr)
-            sys.stdout.write("{}")
-            return 126
-        pass
+            sys.stderr.write(f"CodeSpaces guidance refused: {error}\n")
+            exit_code = 126
     sys.stdout.write("{}")
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":
