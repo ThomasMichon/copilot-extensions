@@ -43,6 +43,7 @@ from pathlib import Path
 from install_contract_guard import (
     PERSISTENT_ENV_END,
     PERSISTENT_ENV_START,
+    is_ignored_scan_path,
     persistent_environment_violations,
 )
 
@@ -207,6 +208,7 @@ def _extract_marker(text: str, start_marker: str, end_marker: str) -> str | None
     return text[i : j + len(end_marker)]
 
 
+
 def _entrypoint_base(plugin: Path) -> str | None:
     """Return the runtime entrypoint base for a plugin, or None.
 
@@ -275,6 +277,30 @@ def check() -> int:
             violations.append(
                 f"{relative}: {problem} outside the shared "
                 "test-persistent-environment adapter"
+            )
+
+    # Repo-wide backstop: the loop above enforces the full installer contract
+    # (adapter present + wired) only for `plugins/**/*.ps1`. A test/helper
+    # script living anywhere else in the repo (e.g. under a plugin's `tests/`,
+    # a shared `libs/*/tests/`, or a future integration harness) never had to
+    # carry the adapter at all, so it was free to call the real
+    # `[Environment]::SetEnvironmentVariable(..., 'User'|'Machine')` (or the
+    # registry paths/APIs) directly and leak into the operator's real,
+    # persistent Windows User PATH -- exactly the leak this repo hit live. This
+    # pass only checks the same direct-access detector against every other
+    # tracked `.ps1` in the repo; it does not require the adapter marker or
+    # `PLUGINS_DIR`'s stricter identical-block rules, which are installer-only.
+    for path in sorted(REPO.rglob("*.ps1")):
+        if PLUGINS_DIR in path.parents or is_ignored_scan_path(path):
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for problem in persistent_environment_violations(text):
+            relative = path.relative_to(REPO).as_posix()
+            violations.append(
+                f"{relative}: {problem} (persistent User/Machine environment "
+                "write outside the shared test-persistent-environment adapter "
+                "-- route through Set-CopilotPersistentEnvironmentVariable, "
+                "or use an explicit 'Process' target in a test)"
             )
 
     for plugin in plugins:
