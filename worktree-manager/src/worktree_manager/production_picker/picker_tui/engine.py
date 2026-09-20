@@ -773,7 +773,7 @@ class _PickerNativeData(OptionList):
         finally:
             self._syncing = False
         self._sig = new_sig
-        self._sync_from_sel()
+        self._sync_from_sel(quiet=preserve_scroll)
         self._update_sticky()
 
     def _index_for_stop(self, stop):
@@ -782,14 +782,31 @@ class _PickerNativeData(OptionList):
                 return i
         return None
 
-    def _sync_from_sel(self):
-        """Point the native cursor at the option owning the engine's ``sel``."""
+    def _sync_from_sel(self, *, quiet: bool = False):
+        """Point the native cursor at the option owning the engine's ``sel``.
+
+        ``quiet`` re-applies ``highlighted`` (via ``set_reactive``, bypassing
+        the watcher) without invoking Textual's own ``scroll_to_highlight``
+        side effect. Used by :meth:`_rebuild` when a same-pivot rebuild
+        (e.g. a periodic live-pulse tick) already restored the operator's own
+        scroll position: ``clear_options()`` unconditionally resets
+        ``highlighted`` to ``None``, so re-establishing it here would
+        otherwise look like a genuine cursor move and immediately snap the
+        list back to the cursor -- discarding a mouse-wheel scroll the
+        operator made while their focus row hadn't changed. A REAL focus
+        move (arrow keys/click changing ``sel``, or a genuine pivot switch)
+        still goes through the normal noisy path and scrolls into view
+        immediately, per the "scroll moves on focus change, not after" rule.
+        """
         idx = self._index_for_stop(self._screen.sel)
         if idx is None or self.highlighted == idx:
             return
         self._syncing = True
         try:
-            self.highlighted = idx
+            if quiet:
+                self.set_reactive(OptionList.highlighted, idx)
+            else:
+                self.highlighted = idx
         finally:
             self._syncing = False
 

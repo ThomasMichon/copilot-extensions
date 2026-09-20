@@ -174,6 +174,62 @@ def test_production_runner_activates_project_and_uses_transplanted_ui(monkeypatc
     ]
 
 
+def test_prepare_does_not_block_first_paint_on_slow_config_load(monkeypatch):
+    """``_prepare`` must return (so the Picker can mount and paint) without
+    waiting on ``config_module.load_config()``/the anchor heal check -- a
+    real, uncached ``load_config()`` can take several real seconds on a
+    machine with many registered repos (its control-plane related-PR
+    discovery walks every anchor), and blocking the render thread on that
+    before the Textual app even exists was the actual cause of a many-second
+    blank screen at Picker launch. Proven here with a real background
+    thread (not the ImmediateThread test double other tests in this module
+    use) and a slow ``load_config`` gated on an Event only the anchor-heal
+    background worker sets."""
+    import threading
+
+    heal_started = threading.Event()
+    release_heal = threading.Event()
+
+    class Config:
+        @staticmethod
+        def set_active_project(project):
+            pass
+
+        @staticmethod
+        def load_config():
+            heal_started.set()
+            assert release_heal.wait(timeout=5), "heal worker never released"
+            return "config"
+
+    class Cli:
+        @staticmethod
+        def _resolve_active_project(project):
+            return project, None
+
+        @staticmethod
+        def _in_ssh_session():
+            return False
+
+        @staticmethod
+        def _heal_stale_anchor_if_self_missing(config):
+            return config
+
+    monkeypatch.setattr(
+        runner,
+        "engine_module",
+        lambda name: Config if name == "config" else Cli,
+    )
+
+    try:
+        cli, default_live = runner._prepare("demo")
+        assert cli is Cli
+        assert default_live is True
+        assert heal_started.wait(timeout=5), (
+            "background anchor-heal worker never started")
+    finally:
+        release_heal.set()
+
+
 def test_engine_runtime_prefers_explicit_context_over_checkout(monkeypatch, tmp_path):
     home = tmp_path / "home"
     home.mkdir()
