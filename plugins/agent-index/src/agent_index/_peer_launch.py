@@ -17,7 +17,11 @@ from types import ModuleType
 from typing import Any
 
 CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
-PEERS = {"agent-worktrees": "agent_worktrees", "agent-bridge": "agent_bridge"}
+PEERS = {
+    "agent-worktrees": "agent_worktrees",
+    "agent-bridge": "agent_bridge",
+    "agent-ssh": "agent_ssh",
+}
 OWNERS = {"agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger", "agent-index"}
 
 
