@@ -288,6 +288,24 @@ addition, not a replacement, of the config-shape check above.
   raw `codename.wordlist_path` string at THAT call's own moment (non-empty
   → `"custom"`, empty/absent → `"built-in"`), not share a value computed
   elsewhere and not derive it from the resolved `Wordlist`.
+- [ ] **Fix `ensure_codename`'s signature and provenance-copy gap
+  (round-12 finding):** the lazy-backfill function currently accepts only
+  a resolved `wordlist: Wordlist | None` parameter (never the raw path,
+  so it cannot classify `codename_source` itself per the rule above), AND
+  when it discovers a concurrent writer already assigned a codename
+  (`if current.codename: record.codename = current.codename; return
+  record`) it copies only `.codename` from the freshly-reloaded on-disk
+  record, never `.codename_source` — silently dropping the provenance a
+  concurrent writer already recorded. Change `ensure_codename` to accept
+  an explicit `codename_source` input (derived by the caller from the raw
+  config path, per the classification rule above) instead of deriving
+  anything from `wordlist`, set `current.codename_source` alongside
+  `current.codename` in the actual-assignment branch, AND copy
+  `current.codename_source` (not just `current.codename`) in the
+  concurrent-writer-already-assigned branch. Add a regression test: two
+  concurrent `ensure_codename` calls on the same record, where one wins
+  the race — the LOSING caller's returned record still carries the
+  correct `codename_source`, not `None`/a default.
 - [ ] **Fix the paired-knowledge path's error-swallowing at BOTH layers
   (round-10 + round-11 findings):** `_carve_paired_knowledge` currently
   wraps `cfg.load_config(project=knowledge_name)` +
@@ -316,12 +334,26 @@ addition, not a replacement, of the config-shape check above.
   `_carve_paired_knowledge(...)` call in the `create` path (~line 2372)
   must ALSO explicitly re-raise this same type rather than catching it
   into `pair_stamp = None` — only a generic/incidental pairing failure
-  stays non-fatal there, never this specific policy violation. Add a
-  regression test: a paired-knowledge create against a knowledge project
-  with a custom wordlist and omitted `source_attribution` fails the WHOLE
-  `create` command (propagates past both handlers), it does not silently
-  proceed with a built-in-sourced codename or merely log a non-fatal
-  warning.
+  stays non-fatal there, never this specific policy violation.
+  **Transactionality (round-12 finding):** the `create` flow persists the
+  harness worktree, branch, and tracking record BEFORE it calls
+  `_carve_paired_knowledge` — so simply re-raising the policy error at
+  that point would fail the `create` command while leaving that harness
+  worktree/branch/record behind as orphaned partial state (no rollback
+  today for a re-raised error at this late a stage). Add an explicit
+  **preflight check**: validate the knowledge project's config (does it
+  have a custom wordlist AND an unresolved/omitted `source_attribution`?)
+  BEFORE any harness-side create side effect (worktree, branch, or
+  record) happens, and fail the whole `create` command at that preflight
+  point if the policy would be violated — never after the harness side
+  already exists. This makes the re-raised exception path (inner +
+  outer handlers above) a pure defense-in-depth backstop for a race the
+  preflight didn't/can't catch (e.g. the knowledge config changing
+  between preflight and the actual carve), not the primary enforcement
+  mechanism. Add a regression test: the preflight check rejects the
+  `create` command outright, before any worktree/branch/record exists,
+  for a knowledge project with a custom wordlist and omitted
+  `source_attribution`.
 - [ ] **Merge `codename`/`codename_source` under the record lock during
   concurrent saves (round-11 finding):** `_save_record_unlocked` already
   merges several fields (handoff reservations, lifecycle/session-backend/
@@ -353,7 +385,15 @@ addition, not a replacement, of the config-shape check above.
   default — a record with `codename_source: "custom"` requires the same
   explicit `pr.source_attribution` opt-in as a currently-custom-wordlist
   repo, even if the repo's config has since reverted to no custom
-  wordlist. Add tests proving: (a) a `WorktreeRecord` with
+  wordlist. **Any stored value other than the literal string
+  `"built-in"` must be treated as unsafe/`"custom"` (round-12 finding)**:
+  `tracking.load_record` accepts arbitrary YAML values for record fields
+  with no schema enforcement, so publish-time gating must check
+  `codename_source == "built-in"` to treat a record as safe — never the
+  inverted `codename_source != "custom"` shape, which would silently
+  treat an unrecognized/malformed stored value (a typo, a future value
+  this code doesn't know about, hand-edited YAML) as safe by default.
+  Add tests proving: (a) a `WorktreeRecord` with
   `codename_source: "custom"`, in a repo whose config NOW has no custom
   wordlist, still fails closed under the implicit default (the exact
   legacy-drift scenario the round-8 finding raised); (b) a repo with a
@@ -362,7 +402,9 @@ addition, not a replacement, of the config-shape check above.
   record's `codename_source`, including for a pre-existing
   `WorktreeRecord` assigned before this effort shipped; (c) a
   `WorktreeRecord` with `codename_source: "built-in"` publishes normally
-  under the implicit default.
+  under the implicit default; (d) a `WorktreeRecord` with an unrecognized
+  stored `codename_source` value (neither `"built-in"` nor `"custom"`)
+  fails closed exactly like `"custom"` would.
 - [ ] **Backfill migration for existing `WorktreeRecord`s created before
   this field existed (round-10 finding: keep this fail-closed, never
   infer from current config):** a record with no `codename_source`
@@ -496,6 +538,18 @@ addition, not a replacement, of the config-shape check above.
   `codename_source: "custom"` — proving classification reads the raw
   config value, not `wordlist_for_repo`'s fail-soft-to-built-in resolved
   `Wordlist`.
+- [ ] Unit (round-12 finding): a `WorktreeRecord` with an unrecognized
+  stored `codename_source` value (neither `"built-in"` nor `"custom"` —
+  e.g. hand-edited YAML, a typo, a future value) fails closed exactly
+  like `"custom"` — proving publish-time gating checks
+  `codename_source == "built-in"`, never the inverted
+  `codename_source != "custom"` shape.
+- [ ] Unit (round-12 finding): two concurrent `ensure_codename` calls race
+  on the same record; the call that loses the race (finds
+  `current.codename` already set) still returns a record whose
+  `codename_source` matches what the winning call actually set — proving
+  the losing branch copies `current.codename_source`, not just
+  `current.codename`.
 - [ ] Unit (round-10 finding): a paired knowledge-repo create against a
   knowledge project with a custom wordlist and an omitted
   `source_attribution` fails the whole create with the policy validation
@@ -508,6 +562,11 @@ addition, not a replacement, of the config-shape check above.
   too (not just the inner handler) — the whole `create` command fails,
   it is not caught, logged as non-fatal, and reduced to `pair_stamp =
   None` the way an ordinary/incidental pairing failure correctly is.
+- [ ] Unit (round-12 finding): the preflight check rejects a `create`
+  command for a paired-knowledge policy violation BEFORE any
+  harness-side worktree, branch, or tracking record is created — proving
+  the failure is transactional (no orphaned partial state), not just a
+  late re-raise after the harness side already exists.
 - [ ] Unit (round-11 finding): a save from a stale in-memory
   `WorktreeRecord` (loaded before a concurrent lazy-backfill assigned a
   codename under the record lock) does not erase the `codename`/
@@ -725,3 +784,29 @@ _Pending._
      (`CodenameAttributionPolicyError`) that both the inner AND outer
      handlers must explicitly re-raise rather than catch — only a
      genuine/incidental pairing failure stays non-fatal at either layer.
+
+### 2026-09-20 — Plan-review round 12 fixes
+
+- Three more findings against the round-8 through 11 provenance
+  mechanism, again each verified against actual source:
+  1. Publish-time gating must check `codename_source == "built-in"`, not
+     the inverted `!= "custom"` — `tracking.load_record` enforces no
+     schema on stored field values, so an unrecognized/malformed stored
+     value must fail closed like `"custom"`, never be silently treated as
+     safe by an inverted check.
+  2. Verified `ensure_codename`'s actual signature and body: it takes
+     only a resolved `Wordlist` (not the raw path needed to classify
+     provenance), and its concurrent-writer-already-assigned branch
+     copies `current.codename` but not `current.codename_source` —
+     dropping provenance for the losing side of a race. Added a plan
+     item to change the signature to accept an explicit
+     `codename_source` and to copy it in that branch too.
+  3. Verified the `create` flow's actual ordering: the harness worktree,
+     branch, and tracking record are persisted BEFORE
+     `_carve_paired_knowledge` runs, so round 10/11's "re-raise the
+     policy error" fix would fail the command while leaving that
+     already-created harness state behind — not transactional. Added an
+     explicit preflight-check requirement: validate the knowledge
+     project's policy BEFORE any harness-side side effect, making the
+     re-raise path a defense-in-depth backstop rather than the primary
+     enforcement point.
