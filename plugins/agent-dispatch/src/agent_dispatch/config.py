@@ -577,3 +577,28 @@ def federation_interval() -> float:
         except ValueError:
             pass
     return DEFAULT_FEDERATION_INTERVAL
+
+
+#: The rendezvous backends federation can select between. ``gateway`` (default)
+#: is the Phase-3 coordinator-hosted backend over ``AGENT_DISPATCH_SHARED_URL``;
+#: ``devtunnels`` is the Phase-4 single-user work-environment backend over the
+#: Dev Tunnels management service (no stable URL needed).
+FEDERATION_BACKENDS = frozenset({"gateway", "devtunnels"})
+
+DEFAULT_FEDERATION_DEVTUNNEL_LABEL = "agent-dispatch-federation"
+
+
+def federation_backend() -> str:
+    """Which rendezvous backend federation drives
+    (``AGENT_DISPATCH_FEDERATION_BACKEND``); defaults to ``gateway`` (Phase 3)
+    so existing deployments are unaffected. An unrecognized value also falls
+    back to ``gateway`` rather than silently no-op'ing federation."""
+    raw = (os.environ.get("AGENT_DISPATCH_FEDERATION_BACKEND") or "").strip().lower()
+    return raw if raw in FEDERATION_BACKENDS else "gateway"
+
+
+def federation_devtunnel_label() -> str:
+    """The Dev Tunnels label the ``devtunnels`` backend publishes/enumerates
+    under (``AGENT_DISPATCH_FEDERATION_DEVTUNNEL_LABEL``)."""
+    raw = (os.environ.get("AGENT_DISPATCH_FEDERATION_DEVTUNNEL_LABEL") or "").strip()
+    return raw or DEFAULT_FEDERATION_DEVTUNNEL_LABEL
