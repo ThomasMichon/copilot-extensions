@@ -71,9 +71,8 @@ class _WorktreeEntry:
     # #2668 two-axis taxonomy, surfaced from ``agent-worktrees list --json`` so
     # NF's cockpit can foreground the operator's own work. ``interface`` is
     # cli|acp, ``origin`` is user|system|delegate, and ``picker_hidden`` is the
-    # agent-worktrees Picker's own visibility verdict (origin in system/delegate).
-    # All default to "unknown/shown" so an older agent-worktrees runtime that
-    # doesn't emit them degrades to today's show-everything behavior.
+    # Picker's own visibility verdict (origin in system/delegate). All default
+    # to "unknown/shown" for an older agent-worktrees runtime.
     interface: str | None = None
     origin: str | None = None
     picker_hidden: bool = False
@@ -82,12 +81,9 @@ class _WorktreeEntry:
     # ``agent-worktrees list --json`` so the cockpit can render "where attention
     # is owed" and "what each agent is doing now" -- not just liveness. All
     # default off/empty so an older agent-worktrees runtime degrades cleanly.
-    # ``summary`` is the single home for the worktree's one-line status: since
-    # Phase 6 it is also what ``agent-dispatch focus`` writes (derive-don't-
-    # duplicate), so the cockpit reads focus/disposition from here, not a
-    # separate focus store. The live pulse is emitted raw (intent + its
-    # timestamp + idle flag); freshness is computed at render time so a cached
-    # value cannot read "fresh" forever.
+    # ``summary`` is also what ``agent-dispatch focus`` writes (derive-don't-
+    # duplicate). The live pulse is emitted raw; freshness is computed at
+    # render time so a cached value cannot read "fresh" forever.
     follow_up: bool = False
     summary: str | None = None
     status_note_at: str | None = None
@@ -97,10 +93,8 @@ class _WorktreeEntry:
     # worktree-finality-and-obligations (Phase 5): the canonical closure
     # descriptor (``prune.assemble_closure_descriptor``'s ``to_dict()``
     # shape), surfaced raw/opaque from ``agent-worktrees list --json
-    # --classify``. This route intentionally does NOT interpret it (label,
-    # final-ness, action disposition) -- a cross-machine crawl may reach an
-    # older/newer agent-worktrees runtime, so only the consumer that knows
-    # the current ``DESCRIPTOR_VERSION`` (e.g. via
+    # --classify``. This route intentionally does NOT interpret it -- only
+    # the consumer that knows the current ``DESCRIPTOR_VERSION`` (e.g. via
     # ``prune.interpret_descriptor_payload``) may treat it as authoritative.
     # Absent on an older runtime or when git classification wasn't run.
     closure: dict[str, Any] | None = None
@@ -1234,19 +1228,9 @@ async def _owning_agent(
 ) -> tuple[str, AgentConfig] | None:
     """Resolve which configured agent owns ``worktree_id``.
 
-    Uses the discovery cache to find the agent group that contains the
-    worktree, then looks up that agent's config on the resolver.  Returns
-    ``(agent_name, config)`` or None if the worktree isn't known.
-
-    session-worktree-archive-linkout: the discovery cache only ever crawls
-    ``list --json`` (the picker's own default filters -- on-disk, non-
-    archived worktrees), so a worktree that ``agent-worktrees`` has since
-    tombstoned as ``"archived"`` (retire_record, cx#3015) never appears in
-    it even though its tracking record -- and session history -- still
-    exists. When the live cache has nothing for ``worktree_id``, fall back
-    to an explicit archived-record probe across every eligible agent, so a
-    caller (e.g. Neuron Forge's session/lineage links) can still resolve an
-    archived worktree's owning machine instead of a bare 404.
+    Checks the live discovery cache first; falls back to an explicit
+    ``archived`` record probe (cache never crawls tombstoned worktrees,
+    cx#3015) so an archived worktree's owner still resolves.
     """
     resolver = getattr(request.app.state, "resolver", None)
     if resolver is None:
@@ -1259,27 +1243,12 @@ async def _owning_agent(
             if config is not None:
                 return agent_name, config
 
-    return await _owning_agent_from_archive(worktree_id, resolver)
-
-
-async def _owning_agent_from_archive(
-    worktree_id: str, resolver: AgentResolver,
-) -> tuple[str, AgentConfig] | None:
-    """Probe every eligible agent for an archived record of ``worktree_id``.
-
-    Runs ``list --tracking-status archived --all --worktree-id <id> --json``
-    (a single-record, bounded lookup -- not a full archived-listing crawl)
-    concurrently across agents and returns the first hit. Mirrors the same
-    ``cfg.project and cfg.worktree_discovery`` eligibility gate the live
-    discovery crawl uses.
-    """
     eligible = [
         (name, cfg) for name, cfg in resolver.agents.items()
         if cfg.project and cfg.worktree_discovery
     ]
     if not eligible:
         return None
-
     args = [
         "list", "--json", "--tracking-status", "archived", "--all",
         "--worktree-id", worktree_id,
@@ -1297,8 +1266,7 @@ async def _owning_agent_from_archive(
             continue
         worktrees = data.get("worktrees") if isinstance(data, dict) else None
         if isinstance(worktrees, list) and any(
-            isinstance(wt, dict) and wt.get("id") == worktree_id
-            for wt in worktrees
+            isinstance(wt, dict) and wt.get("id") == worktree_id for wt in worktrees
         ):
             return agent_name, config
     return None
@@ -1311,14 +1279,13 @@ async def list_worktree_sessions(
     """List the CLI sessions belonging to a worktree.
 
     Shells out to ``<project> list-sessions --worktree <id> --json`` on the
-    machine that owns the worktree (local or via SSH).  This is the
-    authoritative, branch-independent session registry maintained by
-    agent-worktrees -- it counts sessions launched by the picker *and* by
-    agent-bridge / Mission Control (which carry no ``branch`` field).
+    machine that owns the worktree (local or via SSH) -- the authoritative,
+    branch-independent session registry maintained by agent-worktrees (it
+    counts sessions launched by the picker *and* by agent-bridge / Mission
+    Control, which carry no ``branch`` field).
 
-    For the worktree's full head-succession/fork-lineage graph (including
-    fork detection), see ``GET /api/v1/worktrees/{id}/lineage`` instead --
-    this route intentionally stays a plain session list.
+    For the worktree's full head-succession/fork-lineage graph, see
+    ``GET /api/v1/worktrees/{id}/lineage`` instead.
     """
     cache = get_cache()
     await cache.crawl_if_empty()
@@ -1351,10 +1318,8 @@ async def list_worktree_sessions(
 
     sessions = data.get("sessions", data) if isinstance(data, dict) else data
     # session-lifecycle: forward the ground-layer's asserted head so a consumer
-    # (Neuron Forge) resolves the current session head-first + badges the rest
-    # "no longer current" (agent-fabric single-current-session-per-worktree,
-    # Phase 4). Derived straight from the ground-layer envelope -- the bridge
-    # keeps no head of its own (derive-dont-duplicate).
+    # (Neuron Forge) resolves the current session head-first (derive-dont-
+    # duplicate -- the bridge keeps no head of its own).
     head_session = data.get("head_session") if isinstance(data, dict) else None
     return {
         "worktree_id": worktree_id,
@@ -1372,17 +1337,11 @@ async def get_worktree_lineage(
     lineage graph -- the current head, every session with its
     predecessor/successor, the head-transition history, and the handoff
     ledger (each entry carries its own ``state``, so a caller can tell a
-    genuine **fork** -- more than one simultaneously ``pending`` handoff,
-    e.g. a second handoff opened off a predecessor before its first
-    candidate ever consumed it -- from ordinary resolved/cancelled
-    history).
+    genuine **fork** from ordinary resolved/cancelled history).
 
     Shells out to ``<project> worktree-lineage --worktree <id> --json`` on
     the machine that owns the worktree -- the same purpose-built,
-    already-bounded surface ``agent-worktrees`` itself uses (see
-    ``lineage_surfaces.worktree_lineage`` and its ``test_worktree_lineage_
-    preserves_fork_and_missing_nodes`` regression test), rather than the
-    bridge re-deriving fork/lineage semantics from the plain session list.
+    already-bounded surface ``agent-worktrees`` itself uses.
     """
     cache = get_cache()
     await cache.crawl_if_empty()
@@ -1427,18 +1386,13 @@ async def get_worktree_session_transcript(
     """Return the rendered transcript for a session in a worktree.
 
     Shells out to ``<project> session-transcript <session_id> --json`` on the
-    machine that owns the worktree.  Lets Neuron Forge (and any other
-    consumer) view a CLI transcript for *any* session in *any* worktree,
-    including ones it did not launch, without crawling session-state itself.
+    machine that owns the worktree. Lets Neuron Forge (and any other
+    consumer) view a CLI transcript for *any* session in *any* worktree.
 
-    Falls through to a registered cold-store provider (Phase 2b/2c) when
-    there is no live owning agent at all, or the owning agent's own local
-    session-state has nothing for this session (``session-transcript``
-    deliberately answers an absent/unarchived session with an *empty*
-    ``events`` list, not an error -- e.g. the session was compacted into an
-    archive or synced elsewhere on that same machine). This mirrors
-    ``get_session``'s bare session-lookup fallback so a caller never has to
-    know which tier answered.
+    Falls through to a registered cold-store provider when there is no live
+    owning agent at all, or the owning agent's local session-state has
+    nothing for this session (mirrors ``get_session``'s bare-lookup
+    fallback).
     """
     cache = get_cache()
     await cache.crawl_if_empty()
@@ -1513,20 +1467,13 @@ async def restart_worktree_copilot(
     """Restart a worktree's interactive (mux-launched) Copilot in place.
 
     Shells out to ``<project> restart <id> --json`` on the machine that owns
-    the worktree (local or via SSH).  The agent-worktrees ``restart`` primitive
-    terminates the worktree's interactive Copilot -- graceful double Ctrl-C into
-    the ``wt-<id>`` mux pane, then a hard mux ``kill-session`` fallback -- while
-    **keeping the worktree on disk**, so a caller can relaunch (picker) or
-    ACP-resume (Neuron Forge "Take over", #1388).
+    the worktree. Terminates the interactive Copilot (graceful double Ctrl-C,
+    then a hard mux ``kill-session`` fallback) while **keeping the worktree
+    on disk**, so a caller can relaunch (picker) or ACP-resume (Neuron
+    Forge "Take over"). Pass ``force=true`` to skip the graceful quit.
 
-    This targets the **interactive mux Copilot**, not a bridge ACP session --
-    distinct from ``DELETE /sessions/{id}`` / the worktree ``terminate`` path,
-    which stop bridge-owned sessions.  Pass ``force=true`` to skip the graceful
-    quit and hard-kill the mux session immediately (``--no-graceful``).
-
-    Returns the primitive's JSON verdict:
-    ``{worktree_id, had_session, method, ok}`` where ``method`` is one of
-    ``none`` | ``graceful`` | ``hard`` | ``failed``.
+    Returns ``{worktree_id, had_session, method, ok}`` where ``method`` is
+    one of ``none`` | ``graceful`` | ``hard`` | ``failed``.
     """
     cache = get_cache()
     await cache.crawl_if_empty()
