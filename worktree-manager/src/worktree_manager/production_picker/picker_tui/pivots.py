@@ -67,6 +67,51 @@ from .pivot_manifest import (
     resolve_path,
 )
 from .pivot_registry_scan import ensure_pivots, scan_pivot_registry, warn_pivot_findings
+def find_claiming_task(pivots, pivot_runtimes, machine, wid, wid4):
+    """Phase 4 REVERSE cross-link (agent-dispatch-tasks-pane-ux-overhaul):
+    the cached registered-pivot task row (from ``pivots``' descriptor list +
+    ``pivot_runtimes``, a ``{reg.name: RegisteredPivotRuntime}`` map) whose
+    ``worktree_field`` value equals worktree ``wid`` (the real, full id) or
+    ``wid4`` (a short-fixture-style 4-char id, e.g. the demo preview's), or
+    ``None``. Deliberately exact equality on both, not a suffix/``endswith``
+    match against ``wid4`` -- two distinct full worktree ids can share the
+    same trailing 4 hex chars, and a suffix match would silently associate
+    a task with the wrong worktree on that collision. Reads each pivot's own
+    ``get`` under the SAME scope key its OWN fetches use --
+    ``engine.PickerScreen._pivot_scope_key``'s account-scoped pivots cache
+    under the empty-string key regardless of machine, so this always uses
+    ``machine`` for a machine-scoped registration but ``""`` for an
+    ``account_scoped`` one, never a mismatched key that would silently
+    never show a match. Read-only (never ``ensure``/``repoll``), so callers
+    never trigger a fetch or block on one.
+
+    Returns ``(row, group_field)`` -- the matched pivot's OWN declared
+    ``group_field`` (the manifest key its phase actually lives under, e.g.
+    agent-dispatch's ``group``; ``None`` when the manifest declares none),
+    not a hardcoded ``"group"``, so a caller reads the real phase value
+    regardless of the field name a given manifest chose. See
+    ``engine.PickerScreen._worktree_claiming_task`` for the caller."""
+    if not wid and not wid4:
+        return None
+    for d in pivots:
+        reg = d.get("pivot")
+        if reg is None or not getattr(reg, "worktree_field", None):
+            continue
+        rt = pivot_runtimes.get(reg.name)
+        if rt is None:
+            continue
+        scope = "" if getattr(reg, "account_scoped", False) else machine
+        state, rows, _err = rt.get(scope)
+        if state != "ready":
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            wt = str(row.get(reg.worktree_field) or "").strip().lower()
+            if wt and (wt == wid or (wid4 and wt == wid4)):
+                return (row, getattr(reg, "group_field", None))
+    return None
+
 
 # Kept for symmetry with maintenance.py's module layout; the engine imports the
 # functions above directly.
@@ -86,6 +131,7 @@ __all__ = [
     "discover_worktree_actions",
     "ensure_pivots",
     "entry_matches",
+    "find_claiming_task",
     "format_form_template",
     "format_template",
     "installed_plugins_dir",
