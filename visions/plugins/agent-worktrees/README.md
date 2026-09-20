@@ -265,12 +265,15 @@ session host instead.
 
 A consumer able to compute these facts itself (an in-process agent-worktrees
 caller) retains *Derived status*'s existing direct-computation fallback when
-no accelerator is reachable. A consumer that cannot — a separate plugin with
-no access to agent-worktrees' own git/session/claims logic — has no such
-fallback available to it: its boot-on-demand subscribe attempt either
-succeeds within its own bounded wait, or it reports the requested facts as
-stale/unknown and moves on, never blocking its own render or click path and
-never silently recomputing or guessing at the answer.
+no accelerator is reachable. A consumer that cannot — a separate plugin
+operating under its own documented subprocess-free contract (a Tasks-board
+render loop or card click forbidden from spawning work, for instance) — has
+no such fallback available to it: this is the narrow, named exception
+`docs/patterns/work-coalescing-singleton.md` records for exactly this
+shape. Its boot-on-demand subscribe attempt either succeeds within its own
+bounded wait, or it reports the requested facts as stale/unknown and moves
+on, never blocking its own render or click path and never silently
+recomputing or guessing at the answer.
 
 ### registered-by-default-listing
 

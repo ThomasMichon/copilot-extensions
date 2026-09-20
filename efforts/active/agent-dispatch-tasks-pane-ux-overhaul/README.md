@@ -117,10 +117,12 @@ session never has to re-derive "what's already done" from the Journal alone.
   vision (`visions/plugins/agent-worktrees/README.md`'s new
   *external-status-consumer-contract* Feature) — but agent-dispatch's own
   consumer of that cache is still undesigned. **Next step for whoever picks
-  this up:** design agent-dispatch's read side (a background-supervisor
-  poll into the task row is the leading idea) once `agent-worktrees`
-  actually exposes the cache the vision now promises; do not start Phase 8
-  by reaching for a per-render subprocess. Phase 5 (Artifacts/claims)
+  this up:** design agent-dispatch's read side once `agent-worktrees`
+  actually exposes the cache the vision now promises; it must stay a
+  non-authoritative, transient view (never a persisted task-row copy of
+  worktree state — a real ownership conflict a Copilot review already
+  flagged once). Do not start Phase 8 by reaching for a per-render
+  subprocess. Phase 5 (Artifacts/claims)
   remains next in Plan order but the CLI-vs-headless badge and Phase 8 are the
   operator's stated priority — triage/sequence them explicitly with the
   operator rather than silently defaulting to strict Plan order.
@@ -941,11 +943,19 @@ no lifecycle-control logic invented at this layer.
       nothing-stale* Behaviors, added the same date). Phase 8's own
       implementation therefore needs an **agent-dispatch-side consumer**
       of that cache — read on a cadence/trigger that keeps board rows
-      populated without a per-render subprocess (e.g. a background
-      supervisor poll into the task row, mirroring how `activity` is
-      already self-reported into a task field), reporting a fact it cannot
-      confirm as stale/unknown rather than blocking the render or the
-      click — not yet designed or scoped into concrete steps; do that as
+      populated without a per-render subprocess, reporting a fact it
+      cannot confirm as stale/unknown rather than blocking the render or
+      the click. **Ownership constraint (Copilot review, 2026-09-20):** the
+      earlier idea of writing the accelerator's projection into an
+      agent-dispatch task row as a background-supervisor poll was flagged
+      as a real second, independently-aging copy of worktree state —
+      conflicting with `provider-owned-worktrees-surface` (a control plane
+      renders without persisting a second copy) and `derive-dont-duplicate`
+      (agent-worktrees owns this state). Any read-side design must stay a
+      **non-authoritative, transient view** — read fresh from the
+      accelerator (or a short-lived in-memory cache scoped to a single
+      board render, never a durable task-row column or other persisted
+      copy) — not yet designed or scoped into concrete steps; do that as
       the next step before writing any Phase 8 code. Recent-message
       history is explicitly NOT part of this cache (pulled on demand from
       the owning session host instead, per the vision's existing *Not a
@@ -2065,10 +2075,12 @@ worktree via `agent-worktrees -p copilot-extensions create`.
 - **Filed the remaining Phase 8 design gap into the Plan** (see the new
   bullet under Phase 8 above) rather than starting to code against an
   unresolved architecture: agent-dispatch still needs its own consumer of
-  this soon-to-exist cache (a background-supervisor poll into the task row
-  is the leading idea, mirroring how `activity` is already self-reported —
-  but not yet scoped into concrete steps, and it depends on
-  `agent-worktrees` actually building the cache the vision now promises).
+  this soon-to-exist cache — a non-authoritative, transient view, never a
+  persisted task-row copy of worktree state (a real
+  `provider-owned-worktrees-surface`/`derive-dont-duplicate` conflict a
+  later Copilot review pass caught in an earlier draft of this idea) — not
+  yet scoped into concrete steps, and it depends on `agent-worktrees`
+  actually building the cache the vision now promises.
 - **Not implemented this session** (operator's own chosen scope: "write a
   design proposal... then stop for your review before coding"). No
   agent-dispatch/worktree-manager code changed this pass; only the vision
