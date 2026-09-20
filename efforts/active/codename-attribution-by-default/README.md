@@ -191,6 +191,14 @@ starting Phase 1.
   "the (safe) default" today; correct every instance to describe
   `"codename"` as the default and `false`/`true` as the two opt-out
   directions (fully anonymous / fully raw).
+- [ ] Update the SOURCE-level comments/docstrings that make the same now-
+  wrong claim, not just the standalone docs: `PRConfig`'s inline field
+  comments in `config.py` describing `source_attribution`,
+  `pr_ops.audit_attribution_risk`'s docstring, and
+  `providers/attribution.py`'s `audit_source_attribution_risk` docstring
+  all currently say or imply `false` is the default -- an implementation
+  that updates only the standalone docs would leave these
+  behaviorally-adjacent comments actively misleading.
 - [ ] **Versioning gate (required for this phase's PR):** this phase
   changes `agent-worktrees` runtime source (`providers/attribution.py`,
   `pr_ops.py`) even though most of the diff is documentation -- the same
@@ -230,6 +238,16 @@ starting Phase 1.
 - [ ] Regression: `source_attribution_configured` is `False` for every
   absent-key case above and `True` for every explicit case (both `false`
   and `true` count as "configured"), proving the two fields never drift.
+- [ ] **Integration (not just parser-level):** with `source_attribution`
+  entirely omitted from a repo's config, `create_pr` actually publishes a
+  codename marker (`_open_via_provider`'s marker-writing path, not just
+  `_parse_pr`'s returned value) — a change that only touched the parser
+  tests could otherwise leave `create_pr`'s old `false`-shaped behavior in
+  place undetected. Update/extend the existing provider-fixture test that
+  currently exercises this path with `source_attribution=False` explicitly
+  set (`tests/test_providers.py`) to also cover the key OMITTED entirely,
+  asserting a marker IS published; keep the explicit-`false` case (marker
+  never published) as the still-required opt-out regression.
 - [ ] Unit: `audit_source_attribution_risk`'s finding text for an absent
   key says "codename," not "false."
 - [ ] Full existing `test_config.py`/`test_pr_ops.py`/`test_providers.py`
