@@ -15,6 +15,7 @@ import platform
 import re
 import shutil
 import subprocess
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -939,15 +940,18 @@ def resolve_remote_name(remote_or_url: str, *, cwd: str | Path) -> str:
 
 
 def _parse_github_owner(url: str) -> str | None:
-    """Extract the owner from a github.com remote URL (https or ssh form)."""
-    url = url.strip()
-    m = re.match(r"https?://[^/]*github\.com/([^/]+)/", url)
-    if m:
-        return m.group(1)
-    m = re.match(r"(?:ssh://)?git@[^:/]*github\.com[:/]([^/]+)/", url)
-    if m:
-        return m.group(1)
-    return None
+    """Extract the owner from a github.com remote URL (https or ssh form).
+
+    Delegates to :func:`repos.github_owner`, whose host matching is
+    boundary-aware (the host must actually *be* ``github.com``, not merely
+    contain that substring) -- this function decides which host a minted
+    token gets sent to (see :func:`_auth_config_args_for_url`), so a
+    lookalike host such as ``evilgithub.com`` must never match.
+    """
+    if not url:
+        return None
+    from . import repos
+    return repos.github_owner(url)
 
 
 def slug_from_url(url: str | None) -> str | None:
@@ -1033,6 +1037,50 @@ def gh_token_for_account(account: str) -> str | None:
     return _gh_token_for_owner(account)
 
 
+@contextmanager
+def _credential_pin_lock(repo_path: Path, git_dir: str):
+    """Serialize concurrent :func:`pin_git_credential` calls on one checkout.
+
+    An interprocess file lock (same OS-native primitive as the binstub
+    installer's own lock) keyed on the resolved ``--git-dir``, so two
+    processes racing to pin the same repo (e.g. a registration and a
+    concurrent backfill) can never interleave the helper-reset/username/
+    helper-append writes into a mixed-account result.
+    """
+    git_dir_path = Path(git_dir)
+    if not git_dir_path.is_absolute():
+        git_dir_path = repo_path / git_dir_path
+    lock_path = git_dir_path / "agent-worktrees-credential-pin.lock"
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        stream = lock_path.open("a+b")
+    except OSError:
+        # No writable git-dir (unexpected, but never worth failing the pin
+        # attempt over) -- proceed unlocked rather than raise.
+        yield
+        return
+    try:
+        if platform.system() == "Windows":
+            import msvcrt
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if platform.system() == "Windows":
+                import msvcrt
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+    finally:
+        stream.close()
+
+
 def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.com") -> bool:
     """Persist a repo-local git credential pin for ``login`` on ``host``.
 
@@ -1064,7 +1112,11 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
     credential-helper chain is otherwise cumulative across scopes, so without
     the reset the pinned helper would just be appended after (not replace) a
     generic ``gh auth git-credential`` helper that resolves the wrong
-    account.
+    account. That reset, the username write, and the helper append are three
+    independent ``git config`` processes; an interprocess lock (keyed on the
+    resolved ``--git-dir``) serializes concurrent pins of the same checkout
+    (e.g. two registrations/backfills racing) so they can never interleave
+    into a helper/username combination pulled from different accounts.
 
     No-ops (returns ``False``, never raises) when ``repo_path`` is not a git
     working directory, ``login``/``host`` is empty or contains a character
@@ -1103,28 +1155,31 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
         )
         if probe.returncode != 0:
             return False
-        key = f"credential.https://{host}"
-        helper_script = (
-            "!f() { if test x$1 = xget; then "
-            f"token=$(gh auth token --hostname {host} --user '{login}') || exit $?; "
-            "printf '%s\\n' \"password=$token\"; fi; }; f"
-        )
-        subprocess.run(
-            ["git", "-C", str(path), "config", "--local", "--unset-all", f"{key}.helper"],
-            capture_output=True, text=True, timeout=10, env=env,
-        )
-        subprocess.run(
-            ["git", "-C", str(path), "config", "--local", "--add", f"{key}.helper", ""],
-            capture_output=True, text=True, timeout=10, env=env,
-        )
-        subprocess.run(
-            ["git", "-C", str(path), "config", "--local", f"{key}.username", login],
-            capture_output=True, text=True, timeout=10, env=env,
-        )
-        result = subprocess.run(
-            ["git", "-C", str(path), "config", "--local", "--add", f"{key}.helper", helper_script],
-            capture_output=True, text=True, timeout=10, env=env,
-        )
+        git_dir = probe.stdout.strip()
+        with _credential_pin_lock(path, git_dir):
+            key = f"credential.https://{host}"
+            helper_script = (
+                "!f() { if test x$1 = xget; then "
+                f"token=$(gh auth token --hostname {host} --user '{login}') || exit $?; "
+                "printf '%s\\n' \"password=$token\"; fi; }; f"
+            )
+            subprocess.run(
+                ["git", "-C", str(path), "config", "--local", "--unset-all", f"{key}.helper"],
+                capture_output=True, text=True, timeout=10, env=env,
+            )
+            subprocess.run(
+                ["git", "-C", str(path), "config", "--local", "--add", f"{key}.helper", ""],
+                capture_output=True, text=True, timeout=10, env=env,
+            )
+            subprocess.run(
+                ["git", "-C", str(path), "config", "--local", f"{key}.username", login],
+                capture_output=True, text=True, timeout=10, env=env,
+            )
+            result = subprocess.run(
+                ["git", "-C", str(path), "config", "--local", "--add",
+                 f"{key}.helper", helper_script],
+                capture_output=True, text=True, timeout=10, env=env,
+            )
         return result.returncode == 0
     except Exception:
         return False

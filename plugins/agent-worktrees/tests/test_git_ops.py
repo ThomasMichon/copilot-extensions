@@ -518,6 +518,53 @@ class TestPinGitCredential:
         ).stdout.splitlines()
         assert helpers == ["", helpers[-1]]
 
+    def test_concurrent_pins_never_interleave(self, tmp_path: Path, monkeypatch):
+        """Two threads racing to pin the same checkout to different logins
+        must leave a self-consistent result: the on-disk username always
+        matches the login embedded in the (single) surviving helper entry,
+        never a mix of one thread's username with another's helper."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        import threading
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+
+        results: list[bool] = []
+        lock = threading.Lock()
+
+        def _pin(login: str) -> None:
+            for _ in range(5):
+                ok = go.pin_git_credential(repo, login)
+                with lock:
+                    results.append(ok)
+
+        threads = [
+            threading.Thread(target=_pin, args=("acct-a",)),
+            threading.Thread(target=_pin, args=("acct-b",)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert all(results)
+
+        username = sp.run(
+            ["git", "-C", str(repo), "config", "--local",
+             "credential.https://github.com.username"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        helpers = sp.run(
+            ["git", "-C", str(repo), "config", "--local", "--get-all",
+             "credential.https://github.com.helper"],
+            capture_output=True, text=True, check=True,
+        ).stdout.splitlines()
+        # Exactly the reset + one helper survive (never extra entries from an
+        # interleaved unset-all/add sequence), and the surviving username and
+        # helper agree on the same login.
+        assert helpers == ["", helpers[-1]]
+        assert username in helpers[-1]
+
     def test_pins_for_custom_host(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
         repo = tmp_path / "repo"
