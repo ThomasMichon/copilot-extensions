@@ -1,0 +1,58 @@
+# Detection only -- no agent dispatch, no live-registrar change. Files (or
+# leaves alone, if one is already open) a tracking issue for the single
+# worst module-size offender, mirroring module-size-baseline-widen.yml's own
+# proven scheduled/mechanical shape. See tools/module-health-watchdog.py's
+# module docstring for the full rationale.
+name: Module health watchdog
+
+on:
+  schedule:
+    # Once a day; organic drift accrues slowly, so a daily cadence is ample
+    # and keeps this well clear of the CI budget the fast per-PR jobs share.
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # A scheduled run and a manually dispatched `workflow_dispatch` run could
+  # otherwise both observe "no matching issue yet" and each file one --
+  # serialize so one run's issue is visible to the next before it decides.
+  group: module-health-watchdog
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watchdog:
+    name: file a decomposition issue for the worst offender
+    runs-on: ubuntu-latest
+    # `workflow_dispatch` can target any ref; without this guard, a manual
+    # run against a PR branch could analyze unreviewed code and file a
+    # public issue from it. `schedule` always runs against the default
+    # branch already; this is belt-and-suspenders for both triggers, the
+    # same pattern `module-size-baseline-widen.yml` already uses.
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Ensure the tracking label exists
+        # `gh issue create --label` fails outright if the label is missing;
+        # `label create --force` is idempotent (creates once, updates
+        # color/description on every later run, never fails on a repeat).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh label create needs-decomposition
+          --color B60205
+          --description "Organic module-size drift the watchdog flagged for a cohesive split"
+          --force
+      - name: Detect and file
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python tools/module-health-watchdog.py --file-issue

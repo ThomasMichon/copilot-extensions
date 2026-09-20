@@ -623,6 +623,16 @@ binstub in `~/.local/bin/`.
     vendored copies — e.g. the `installation-context`/`versioned-runtime`
     sync targets — into one row so the ranking reflects distinct real work,
     not duplicated line counts).
+  - **A scheduled watchdog surfaces organic drift proactively**
+    (`.github/workflows/module-health-watchdog.yml`,
+    `tools/module-health-watchdog.py`, daily): no single PR is ever blamed
+    for a module that grew past its cap/ceiling one small, individually
+    reasonable contribution at a time — the watchdog finds the single worst
+    offender (already-over-cap files always outrank merely-near-cap ones)
+    and files (or leaves alone, if one is already open) a
+    `needs-decomposition`-labeled tracking issue naming it, for a dedicated
+    decomposition pass rather than diffuse pressure on whichever future PR
+    happens to touch the file next.
 
 ### Git Hooks
 
