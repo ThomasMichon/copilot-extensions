@@ -873,3 +873,21 @@ checked off.
   plugin suite: 642 passed (same 10 pre-existing `test_doctor.py`
   failures, unrelated).
 
+### 2026-09-19 — Phase 3 PR review round 4 (PR #2922, unrelated CI blip + final polish)
+
+- **Unrelated CI failure:** a concurrently-merged PR
+  (`agent-dispatch`#2923, "reuse one persistent claims-management comment
+  per issue/loop") added lines to
+  `agent_dispatch/repository_issue_loops.py` without widening its own
+  module-size baseline, which then failed THIS PR's CI once rebased onto
+  the new `main` tip. Fixed the baseline in this PR (a `tools/`-only
+  change, no plugin version bump required) since CI runs against the
+  merged result regardless of which PR's change caused the drift.
+- **Round 4 verdict: 🟢 Approval recommended.** One low-severity cosmetic
+  finding remained: `embody`'s `--new`/`--worktree-id` mutual-exclusivity
+  error message didn't mention the newly-added `--codename` selector
+  (relevant since `--codename` resolves into the same `raw_id` that
+  trips this check). Reworded for accuracy; no test asserted the old
+  exact text, so no test changes needed. Full plugin suite: 642 passed
+  (same 10 pre-existing `test_doctor.py` failures, unrelated).
+

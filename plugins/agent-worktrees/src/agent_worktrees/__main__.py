@@ -3838,7 +3838,10 @@ def cmd_embody(args: argparse.Namespace) -> int:
             return _json_error(error_message, exit_code=1)
         raw_id = resolved_id
     if make_new and raw_id:
-        return _json_error("--new and --worktree-id are mutually exclusive", exit_code=2)
+        return _json_error(
+            "--new is mutually exclusive with --worktree-id/--codename",
+            exit_code=2,
+        )
     if not make_new and not raw_id:
         return _json_error(
             "embody requires --worktree-id <id>, --codename <name>, or --new",
