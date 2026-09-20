@@ -2214,6 +2214,99 @@ async def test_recover_disconnected_hosts_skips_session_with_inflight_lifecycle_
 
 
 @pytest.mark.asyncio
+async def test_recover_disconnected_hosts_escalates_after_repeated_failures(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    """A remote host that keeps failing reattach with no error surfacing the
+    child's actual death (#2998) must not be retried forever. After
+    _DISCONNECTED_REATTACH_ESCALATE_AFTER consecutive failures, an
+    authoritative liveness check (_recover_remote_host_records) must run
+    instead of blindly retrying _reattach_one again.
+    """
+    from agent_bridge.session_host.protocol import PROTOCOL_VERSION
+    from agent_bridge.session_manager import _DISCONNECTED_REATTACH_ESCALATE_AFTER
+
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.IDLE
+    session.acp_session_id = "acp-1"
+    session.client = None
+    manager._sessions[session.session_id] = session
+    rec = SimpleNamespace(
+        session_id=session.session_id,
+        protocol_version=PROTOCOL_VERSION,
+        host_version="test",
+        host_pid=123,
+        child_pid=456,
+        created_at=time.time(),
+        resume_on_reattach=False,
+        boundary="codespace",
+    )
+    attach = AsyncMock(return_value=False)
+    authoritative_check = AsyncMock(return_value=0)
+    monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(manager, "_reattach_one", attach)
+    monkeypatch.setattr(manager, "_recover_remote_host_records", authoritative_check)
+    monkeypatch.setattr(
+        manager, "_codespace_host_available", AsyncMock(return_value=True),
+    )
+
+    # Fewer than the threshold: no escalation yet, just a failed reattach.
+    for _ in range(_DISCONNECTED_REATTACH_ESCALATE_AFTER - 1):
+        assert await manager.recover_disconnected_hosts() == 0
+    authoritative_check.assert_not_awaited()
+    assert (
+        manager._disconnected_reattach_failures[session.session_id]
+        == _DISCONNECTED_REATTACH_ESCALATE_AFTER - 1
+    )
+
+    # The threshold-th failure escalates to the authoritative check instead of
+    # just incrementing the counter again.
+    assert await manager.recover_disconnected_hosts() == 0
+    authoritative_check.assert_awaited_once_with(
+        allow_wake=True, session_ids={session.session_id},
+    )
+    # Throttled: the counter resets after escalating so it doesn't re-escalate
+    # every single heartbeat once past threshold.
+    assert session.session_id not in manager._disconnected_reattach_failures
+
+
+@pytest.mark.asyncio
+async def test_recover_disconnected_hosts_clears_failure_count_on_success(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    """A successful reattach must clear any accrued failure count -- a
+    transient blip that then recovers should not carry stale state toward a
+    future escalation."""
+    from agent_bridge.session_host.protocol import PROTOCOL_VERSION
+
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.IDLE
+    session.acp_session_id = "acp-1"
+    session.client = None
+    manager._sessions[session.session_id] = session
+    rec = SimpleNamespace(
+        session_id=session.session_id,
+        protocol_version=PROTOCOL_VERSION,
+        host_version="test",
+        host_pid=123,
+        child_pid=456,
+        created_at=time.time(),
+        resume_on_reattach=False,
+        boundary="local",
+    )
+    manager._disconnected_reattach_failures[session.session_id] = 2
+    monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(manager, "_reattach_one", AsyncMock(return_value=True))
+
+    assert await manager.recover_disconnected_hosts() == 1
+    assert session.session_id not in manager._disconnected_reattach_failures
+
+
+@pytest.mark.asyncio
 async def test_stopped_container_resume_reattaches_without_refresh(
     tmp_db, tmp_path, monkeypatch,
 ) -> None:
