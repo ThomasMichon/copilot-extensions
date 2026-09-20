@@ -29,7 +29,7 @@ that pattern to this repository.
 | [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Active | #1448 |
 | [agent-bridge Attention Waits](active/agent-bridge-attention-waits/README.md) | Draft | #1450 |
 | [agent-bridge Session Discovery](active/agent-bridge-session-discovery/README.md) | Draft | #2530 |
-| [agent-bridge CLI-Mode Sessions](active/agent-bridge-cli-mode-sessions/README.md) | Draft | See effort |
+| [agent-bridge CLI-Mode Sessions](active/agent-bridge-cli-mode-sessions/README.md) | Active | See effort |
 | [agent-bridge Delegation Contract](active/agent-bridge-delegation-contract/README.md) | Done; pending archive | #1449 |
 | [Migration Intake](active/migration-intake/README.md) | Draft | See effort |
 | [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |

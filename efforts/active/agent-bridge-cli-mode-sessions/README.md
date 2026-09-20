@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
 - **Created:** 2026-09-19
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [`visions/remote-interactive-sessions`](../../../visions/remote-interactive-sessions/README.md)
   (leaf, child of [`visions/agent-fabric`](../../../visions/agent-fabric/README.md))
   — realizes *Session Host CLI mode*, *CWD-keyed discovery*, *symmetric venue
@@ -88,6 +88,21 @@ mechanism CLI mode binds through.
       an injected `session.send` turn cannot race or split-stream against
       another admission source. Add the regression the delegation contract's
       "experimental until proven" note is waiting on.
+      - [x] **Done** — traced the actual root cause against
+        `copilot-agent-runtime`'s send-admission path
+        (`session_send_dispatch.rs::apply_public_send_admission`,
+        `SendRequest.source` in the generated API): a `session.send()` call
+        with no explicit `source` defaults to `source: "user"` for an
+        immediate/visible send, making a bridge-delivered inbox message
+        indistinguishable from the operator's own live keystrokes at the
+        contention/steering layer — the actual collision the "experimental"
+        note describes. Fixed by tagging every delivery with the runtime's
+        own already-documented `agent-<agent-id>` provenance convention
+        (`source: "agent-bridge"`). Extracted the pure options-building logic
+        into `extensions/agent-bridge/delivery.mjs` (mirroring
+        context-handoff's core-module split, since `extension.mjs`'s
+        top-level `joinSession()` makes it untestable directly) and added
+        `tests/delivery.test.mjs`. Version bumped to `0.4.0-dev502`.
 - [ ] Make `ask_user_request`/elicitation answerability durable and correctly
       routed to whichever client is currently attached, including after a
       reconnect — resolving the `unknown_after_restart` gap for this path.
@@ -169,6 +184,35 @@ launch verb's surface need a short design pass in Phase 2/3 before
 implementation._
 
 ## Journal
+
+### 2026-09-19 — Phase 1 first fix: send single-stream admission
+
+Traced the "experimental until single-stream admission is proven" gap to its
+actual mechanism using a local `copilot-agent-runtime` checkout:
+`session_send_dispatch.rs::apply_public_send_admission` defaults an
+immediate/visible `session.send()` with no explicit `source` to
+`source: "user"`. `agent-bridge`'s inbox-delivery poller
+(`extensions/agent-bridge/extension.mjs::pollInbox`) called `session.send()`
+with no `source` at all, so every delivered peer message was silently
+admitted as if the operator had typed it — indistinguishable from real
+keystrokes at the contention/steering layer. `SendRequest.source`'s own
+generated-API doc comment already documents the fix: `agent-<agent-id>` is a
+first-class, non-`user` provenance tag (`is_agent_source` /
+`getAgentMessageSourceAgentId` on the runtime side accept any non-empty
+suffix). Tagged every delivery with `source: "agent-bridge"`, extracted the
+previously-inline rendering/options logic into a new, directly-testable
+`delivery.mjs` (the existing `extension.mjs` cannot be imported by a test
+because of its top-level `await joinSession(...)`, the same reason
+context-handoff already splits its extension into a core module + entrypoint),
+and added `tests/delivery.test.mjs`. Bumped `agent-bridge` to `0.4.0-dev502`
+(plugin.json + pyproject.toml + marketplace.json). Full `pytest` suite for
+agent-bridge: 549 passed, 2 pre-existing unrelated failures (confirmed via a
+`git stash` bisect — `test_bootstrap_check_reconcile_opt_in.py`, a bash/nohup
+environment quirk unrelated to this change), 2 skipped. New `node --test`
+suite: 5/5 passed. `check-version-bump`, `check-version-consistency`,
+`check-docs-consistency`, and `check-module-size` all pass.
+
+Still open in Phase 1: the `ask_user`/elicitation routing durability fix.
 
 ### 2026-09-19 — Kickoff
 
