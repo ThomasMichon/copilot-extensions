@@ -101,6 +101,10 @@ alike.
 
 ## See Also
 
+- [process-slot-ownership](process-slot-ownership.md) — the specialization
+  of this discipline for **roles/slots**: pairs the same liveness-poll reap
+  with a single-owner-slot check on the spawn side, so a duplicate live
+  holder of the same role is prevented, not just eventually reaped.
 - [service-lifecycle-supervision](service-lifecycle-supervision.md) —
   registered, supervised daemons; this pattern's polling reaper is the
   complement for ephemeral, per-unit-of-work helper processes a plugin spawns

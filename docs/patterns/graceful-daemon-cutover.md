@@ -6,7 +6,10 @@
 > **Companion patterns:** [`durable-vs-versioned-runtime`](durable-vs-versioned-runtime.md)
 > (decoupling a warm daemon from the swappable runtime),
 > [`service-lifecycle-supervision`](service-lifecycle-supervision.md),
-> [`local-endpoint-discovery`](local-endpoint-discovery.md).
+> [`local-endpoint-discovery`](local-endpoint-discovery.md),
+> [`process-slot-ownership`](process-slot-ownership.md) (the generation
+> self-retire and abandoned-passive reap that defend this cutover when the
+> orchestrator itself dies mid-flight).
 > **Origin:** the `correct-install-flows` effort, Thread B (dotfiles#1393),
 > building on the self-updating-runtime-integrity effort (dotfiles#533).
 
