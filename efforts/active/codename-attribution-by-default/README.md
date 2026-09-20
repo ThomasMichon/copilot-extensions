@@ -218,6 +218,35 @@ these decisions directly and assumes this design is understood.
   **publishes** a pre-existing `codename_source: "built-in"` record
   unaffected by this allocation-time error, so the two tests can't be
   satisfied by one shared, overbroad implementation.
+- [ ] **Apply the identical allocation-time preflight to the NORMAL
+  `create` path, not just the paired-knowledge path (round-21 finding)** —
+  the bullets above and below only specify this policy for
+  `_carve_paired_knowledge` (the knowledge-repo carve); `__main__.py`'s
+  `_create_worktree_core` — the ordinary harness-worktree creation path
+  every `create` call goes through — independently calls
+  `codename_tracking.assign_new_codename(tracking_path,
+  codename_tracking.wordlist_for_repo(config))` (verified in source,
+  ~line 2268) and currently receives only a resolved `Wordlist`, with no
+  way to distinguish an omitted `source_attribution` key from an explicit
+  one. Left unaddressed, an ordinary `create` against a repo with a custom
+  wordlist and omitted `source_attribution` would silently allocate and
+  set `codename_source: "built-in"` for the harness worktree itself,
+  bypassing the fail-closed policy entirely through the single most common
+  code path — a gap distinct from (and more severe than) the
+  paired-knowledge gap the surrounding bullets close. Add the same
+  preflight check `_create_worktree_core` runs BEFORE any create side
+  effect (worktree, branch, or record): validate the *own* repo's config
+  (not the knowledge project's) for a custom wordlist with an
+  unresolved/omitted `source_attribution`, raising
+  `CodenameAttributionPolicyError` (the same dedicated exception type
+  introduced below) if violated — mirroring the paired-knowledge
+  preflight's transactionality treatment (preflight before any side
+  effect, a second revalidation immediately before the first side effect,
+  and the same documented residual-TOCTOU-window/no-rollback/named-
+  orphan-path behavior). Add a regression test: `create` against a repo
+  with a custom wordlist and omitted `source_attribution` fails outright,
+  before any worktree/branch/record exists — the direct normal-path
+  analog of the paired-knowledge preflight test below.
 - [ ] **Persist `codename_source` through serialization** (round-9
   finding): `WorktreeRecord` is manually round-tripped through YAML, not
   via a generic dataclass (de)serializer — `tracking.load_record` parses
@@ -570,6 +599,17 @@ these decisions directly and assumes this design is understood.
   flip could introduce. This test must NOT touch an existing
   `WorktreeRecord`'s publish path — see the next bullet and the
   `codename_source: "built-in"` bullet below for that.
+- [ ] Unit (round-21 finding): the SAME allocation-time policy violation,
+  exercised through the **normal `create` path**
+  (`_create_worktree_core`), not just the paired-knowledge path — a
+  `create` against a repo with a custom wordlist and omitted
+  `source_attribution` fails outright, before any harness worktree,
+  branch, or tracking record exists. This is a distinct code path from the
+  round-12 paired-knowledge preflight test and from the round-15 test
+  above (which only exercises the shared validation helper directly, not
+  `_create_worktree_core`'s own call site) — a regression in
+  `_create_worktree_core`'s own preflight wiring must fail this test even
+  if the shared helper itself is correct.
 - [ ] Unit: a repo with a custom `codename.wordlist_path` configured AND an
   explicit `source_attribution: codename` publishes normally — including
   for a pre-existing `WorktreeRecord` whose codename was assigned before
@@ -737,19 +777,27 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-19 history lives in **[journal.md](journal.md)** to keep this
+> round-20 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 20 fixes
+### 2026-09-20 — Plan-review round 21 fixes
 
-- One "previously missed" finding on the round-19 head, verified
-  against actual source: the Phase 2 bullet asking to "re-examine
-  whether an absent-key repo with a safe `head_pattern` should be
-  flagged" posed this as an open design question, but
-  `providers/attribution.py`'s `audit_source_attribution_risk` already
-  returns `[]` immediately whenever `head_pattern_leak_risk` finds no
-  risky token, regardless of `source_attribution`'s value — a safe
-  `head_pattern` is already never flagged today, for any config. Fixed
-  by replacing the open question with a decisive "preserve this
-  existing behavior, add a regression test" requirement, removing the
-  only remaining undecided item in the Phase 2 checklist.
+- One finding on the round-20 head, verified against actual source —
+  and the most consequential gap found so far: the plan's
+  allocation-time custom-wordlist gate had only ever been specified for
+  `_carve_paired_knowledge` (the paired-knowledge-repo carve). Grepped
+  `__main__.py` for every `assign_new_codename` call site and confirmed
+  `_create_worktree_core` — the ORDINARY harness-worktree creation path
+  every `create` call goes through, not a rare paired-repo feature —
+  independently allocates a codename from only a resolved `Wordlist`,
+  with no raw-config access and therefore no way to enforce the
+  fail-closed policy at all. Left as specified, the plan's own
+  flagship regression test (round-15) would have passed while the most
+  common real-world path — an ordinary `create` — silently bypassed the
+  policy entirely. Fixed by adding an explicit Phase 1 item requiring
+  the identical preflight (same exception type, same
+  transactionality/TOCTOU treatment already specified for the
+  paired-knowledge path) in `_create_worktree_core` itself, plus a
+  dedicated Validation Plan test exercising `_create_worktree_core`'s
+  own wiring (not just the shared validation helper), so a regression in
+  either path is caught independently.

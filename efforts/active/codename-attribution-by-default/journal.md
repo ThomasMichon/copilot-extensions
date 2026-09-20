@@ -387,3 +387,17 @@ Part of the [codename-attribution-by-default effort](README.md).
      journal entry itself into **journal.md** at this pass (it had been
      left in the README as the "most recent" entry per the established
      one-entry-in-README pattern; this entry now takes that place).
+
+### 2026-09-20 — Plan-review round 20 fixes
+
+- One "previously missed" finding on the round-19 head, verified
+  against actual source: the Phase 2 bullet asking to "re-examine
+  whether an absent-key repo with a safe `head_pattern` should be
+  flagged" posed this as an open design question, but
+  `providers/attribution.py`'s `audit_source_attribution_risk` already
+  returns `[]` immediately whenever `head_pattern_leak_risk` finds no
+  risky token, regardless of `source_attribution`'s value — a safe
+  `head_pattern` is already never flagged today, for any config. Fixed
+  by replacing the open question with a decisive "preserve this
+  existing behavior, add a regression test" requirement, removing the
+  only remaining undecided item in the Phase 2 checklist.
