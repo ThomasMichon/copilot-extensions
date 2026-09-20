@@ -372,22 +372,35 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   a non-active entry, or a concurrent stamp landing on a DIFFERENT `prs`
   entry than the one the stale snapshot's `.pr` property currently
   resolves to. **Fix:** merge per-entry across the full `prs` list, keyed
-  by a stable per-PR identity. **Matching must account for the
-  `number=None` → provider-assigned-`number` transition every PR goes
-  through (round-34 finding, corrects the round-32 "number when set,
-  else branch" rule)** — `create_pr` saves a `PRRecord` with `number=None`
-  BEFORE the provider assigns one; a stale in-memory snapshot captured in
-  that window still has `number=None`/a set `branch`, while the on-disk
-  `current` entry may have since gained its `number` from the provider —
-  keying strictly on "number when set, else branch" would compare the two
-  entries by DIFFERENT identity fields (current by `number`, the stale
-  snapshot by `branch`), so they'd never match and the merge would wrongly
-  APPEND a duplicate entry instead of merging the frozen fields onto the
-  existing one. **Corrected rule:** two entries are the SAME PR when
-  EITHER (a) both have a `number` set and they're equal, OR (b) either
-  side's `number` is `None` and their `branch` values are equal (covers
-  the pre-open, mid-transition, and already-open-on-both-sides cases
-  uniformly). Add a `pr_revision` counter PER `PRRecord` entry (not one shared worktree-level
+  by a stable per-PR identity. **`branch` is the PRIMARY identity, not
+  `number` (round-35 finding, replaces the round-34 "number when equal,
+  else branch" rule)** — `number` is not immutable: a supported manual
+  `set-pr` correction can reassign an entry's `number` (e.g. fixing a
+  mistaken value) while its `branch` stays the same, so a rule requiring
+  equal numbers whenever both are set would fail to match a stale
+  snapshot (`number=7`) against its own corrected on-disk counterpart
+  (`number=8`, same `branch`) and wrongly append a duplicate. `branch` has
+  no such mutation path — a pushed feature branch name is fixed for that
+  PR's life — and is unique per entry within one worktree's `prs` list (a
+  parallel PR is, by definition, a different branch). **Corrected rule:**
+  two entries are the SAME PR when EITHER (a) both have a NON-EMPTY
+  `branch` and the values are equal (the primary, stable identity —
+  covers the pre-open, mid-transition, already-open, and
+  manually-renumbered cases uniformly, regardless of what either side's
+  `number` is), OR (b) `branch` is empty/unset on either side AND both
+  have a `number` set and equal (the only remaining case `branch` can't
+  cover: a not-yet-pushed placeholder record identified solely by
+  `number`). **Two entries with BOTH an empty/unset `branch` AND no
+  `number` on either side never match (round-35 finding: a naive
+  either-side-empty-branch rule would let two genuinely unrelated blank
+  `PRRecord`s — e.g. two independent manual `set-pr` calls that haven't
+  attached anything yet — collide and merge)** — with no identity
+  established at all, they are always treated as distinct entries (a
+  merge miss here means, at worst, an extra transient list entry until
+  one side gains a real `branch`/`number`; a false MATCH would instead
+  silently overwrite one blank record's frozen state with an unrelated
+  one's, which is the more dangerous failure mode). Add a
+  `pr_revision` counter PER `PRRecord` entry (not one shared worktree-level
   counter — following the existing `profile_assignment_revision`/
   `lifecycle_revision` pattern already in `_save_record_unlocked`, but
   scoped per-entry the way `prs` itself is a list), bumped every time that
@@ -438,5 +451,18 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   stale save must MERGE onto (not duplicate-append) the numbered entry,
   proving the identity rule matches across the `number=None` →
   provider-assigned-`number` transition via the shared `branch`, not two
-  unrelated identities.
+  unrelated identities; (iv) (round-35 finding) a stale in-memory
+  snapshot holds an entry with `number=7`/`branch="feature-x"`; a
+  concurrent manual `set-pr` correction changes the ON-DISK entry's
+  `number` to `8` while its `branch` stays `"feature-x"`, then stamps the
+  frozen attribution pair — the stale save must still MERGE onto the
+  renumbered entry (matched via `branch`, not `number`), proving `branch`
+  is the primary identity and a `number` correction alone never causes a
+  false non-match; (v) (round-35 finding) TWO independent, freshly-created
+  blank `PRRecord`s (both `number=None`/`branch=""`, e.g. from two
+  separate manual `set-pr` calls that haven't attached anything yet) —
+  saving a stale snapshot of one must NOT merge onto the other merely
+  because they share the same empty `branch`/absent `number`, proving
+  entries with no established identity at all are never treated as a
+  match.
 

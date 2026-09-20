@@ -725,13 +725,17 @@ these decisions directly and assumes this design is understood.
     fail-closed rule.
   - `_save_record_unlocked` must merge the frozen attribution fields
     PER-ENTRY across the full `WorktreeRecord.prs` list, keyed by a
-    stable identity — same `number` when both entries have one set, else
-    same `branch` (round-34 finding: matching must fall back to `branch`
-    whenever EITHER side lacks a `number`, covering the normal
-    `number=None` → provider-assigned-`number` transition every PR goes
-    through; "number when set, else branch" alone would key the two
-    sides of that transition differently and wrongly append a
-    duplicate) — never just the
+    stable identity — **`branch` (when NON-EMPTY) is the PRIMARY
+    identity, `number` only a fallback when `branch` is empty on either
+    side (round-35 finding, replaces the round-34 "number when both set,
+    else branch" rule)** — `number` is not immutable (a manual `set-pr`
+    correction can reassign it while `branch` stays fixed), so keying on
+    equal numbers whenever both are set would miss a match across a
+    renumbering; equal-and-NON-EMPTY `branch` values always win as the
+    match. Two entries with an empty/unset `branch` on both sides AND no
+    `number` on either side NEVER match each other (round-35 finding:
+    prevents two unrelated blank `PRRecord`s, e.g. from separate manual
+    `set-pr` calls, from colliding) — never just the
     single `.pr` active-PR accessor (round-32 finding: `.prs` supports
     serial/parallel PRs, and a merge keyed on the active-PR property
     alone cannot protect a frozen pair on a non-active entry). Add a
@@ -970,6 +974,18 @@ these decisions directly and assumes this design is understood.
   MERGE onto the numbered entry (not append a duplicate), proving the
   identity rule matches across the `number=None` →
   provider-assigned-`number` transition via the shared `branch`.
+- [ ] Unit (round-35 finding): a stale in-memory snapshot holds an entry
+  with `number=7`/`branch="feature-x"`; a concurrent manual `set-pr`
+  correction changes the ON-DISK entry's `number` to `8` while its
+  `branch` stays `"feature-x"`, then stamps the frozen attribution pair
+  — the stale save must still MERGE onto the renumbered entry (matched
+  via `branch`, not `number`), proving `branch` is the primary identity
+  and a `number` correction alone never causes a false non-match.
+- [ ] Unit (round-35 finding): TWO independent, freshly-created blank
+  `PRRecord`s (both `number=None`/`branch=""`) — saving a stale snapshot
+  of one must NOT merge onto the other merely because they share the
+  same empty `branch`/absent `number`, proving entries with no
+  established identity at all are never treated as a match.
 - [ ] Unit (round-34 finding): a `WorktreeRecord` with an unbackfilled
   (missing/unknown) `codename_source`, in a repo with
   `source_attribution: True` (the raw-marker mode) — the PR still
@@ -1209,40 +1225,34 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-33 history lives in **[journal.md](journal.md)** to keep this
+> round-34 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
 
-### 2026-09-20 — Plan-review round 34 fixes
 
-- Confirmed: all four round-33 findings (leftover unconditional-opt-in
-  restatements, condensed-checklist ambiguity) verified correct — this
-  round's review lists them under "Resolved since last review."
-- Three new genuine findings, all real correctness gaps in the round-32
-  fixes:
-  1. **`attribution_explicit` emission was keyed on the wrong condition:**
-     the round-28 emit spec used an omit-when-falsy pattern, but
-     `attribution_explicit=False` is itself a legitimately-frozen state
-     (e.g. an implicit `codename` decision) — omitting it would strand
-     `attribution_mode` without its partner on reload, silently
-     re-triggering the lazy-backfill freeze. Corrected: emit
-     `attribution_explicit` whenever `attribution_mode` is non-empty,
-     regardless of its own True/False value.
-  2. **PR identity matching didn't account for the `number=None` →
-     provider-assigned-`number` transition:** `create_pr` saves a
-     `PRRecord` before the provider assigns its `number`; the round-32
-     "number when set, else branch" rule would key a stale pre-number
-     snapshot and its now-numbered on-disk counterpart by DIFFERENT
-     fields, appending a duplicate instead of merging. Corrected: two
-     entries match when both have equal numbers, OR either side lacks a
-     number and their branches are equal.
-  3. **The provenance fail-closed rule was scoped too broadly:** round-32
-     said an unbackfilled/unknown-provenance record "never auto-publishes
-     under any attribution mode" — but `source_attribution: True`'s
-     independent raw-marker path never depended on `codename_source` and
-     must not start now. Scoped the rule explicitly to codename markers
-     only, added a regression test proving raw-marker publication is
-     unaffected.
+### 2026-09-20 — Plan-review round 35 fixes
+
+- Confirmed: all three round-34 findings (emit condition, identity
+  transition, provenance scope) verified correct — this round's review
+  lists them under "Resolved since last review."
+- Two new genuine findings, both further correctness gaps in the
+  round-34 identity-matching fix:
+  1. **Empty branches could falsely collide:** round-34's "either side
+     lacks a number → match by branch" rule didn't require the branch to
+     be non-empty — two independent, freshly-created blank `PRRecord`s
+     (e.g. from separate manual `set-pr` calls) both have `branch=""`,
+     which would match under the naive rule and silently merge one
+     blank record's state onto an unrelated one's. Fixed: branch
+     equality only establishes identity when the branch is NON-EMPTY;
+     entries with no real identity on either side never match.
+  2. **PR numbers aren't immutable:** round-34's "number when both set,
+     else branch" rule required equal numbers whenever both entries had
+     one — but a manual `set-pr` correction can reassign a number while
+     the branch stays fixed, so a stale snapshot (`number=7`) would fail
+     to match its own renumbered on-disk counterpart (`number=8`, same
+     branch) and wrongly append a duplicate. Corrected: `branch` (when
+     non-empty) is now the PRIMARY identity in all cases; `number` is
+     only a fallback when `branch` is empty on both sides.
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
-  `f2b538c47` for eleven rounds straight — not re-edited again).
+  `f2b538c47` for twelve rounds straight — not re-edited again).

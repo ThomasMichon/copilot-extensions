@@ -791,3 +791,37 @@ Part of the [codename-attribution-by-default effort](README.md).
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
   `f2b538c47` for ten rounds straight — not re-edited again).
+
+### 2026-09-20 — Plan-review round 34 fixes
+
+- Confirmed: all four round-33 findings (leftover unconditional-opt-in
+  restatements, condensed-checklist ambiguity) verified correct — this
+  round's review lists them under "Resolved since last review."
+- Three new genuine findings, all real correctness gaps in the round-32
+  fixes:
+  1. **`attribution_explicit` emission was keyed on the wrong condition:**
+     the round-28 emit spec used an omit-when-falsy pattern, but
+     `attribution_explicit=False` is itself a legitimately-frozen state
+     (e.g. an implicit `codename` decision) — omitting it would strand
+     `attribution_mode` without its partner on reload, silently
+     re-triggering the lazy-backfill freeze. Corrected: emit
+     `attribution_explicit` whenever `attribution_mode` is non-empty,
+     regardless of its own True/False value.
+  2. **PR identity matching didn't account for the `number=None` →
+     provider-assigned-`number` transition:** `create_pr` saves a
+     `PRRecord` before the provider assigns its `number`; the round-32
+     "number when set, else branch" rule would key a stale pre-number
+     snapshot and its now-numbered on-disk counterpart by DIFFERENT
+     fields, appending a duplicate instead of merging. Corrected: two
+     entries match when both have equal numbers, OR either side lacks a
+     number and their branches are equal.
+  3. **The provenance fail-closed rule was scoped too broadly:** round-32
+     said an unbackfilled/unknown-provenance record "never auto-publishes
+     under any attribution mode" — but `source_attribution: True`'s
+     independent raw-marker path never depended on `codename_source` and
+     must not start now. Scoped the rule explicitly to codename markers
+     only, added a regression test proving raw-marker publication is
+     unaffected.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for eleven rounds straight — not re-edited again).
