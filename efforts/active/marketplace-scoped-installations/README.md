@@ -375,6 +375,48 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-20 — agent-machines as a sixth owner; self_update.py's dtssh-mesh refresh converted
+
+- Added `agent-machines` to `libs/peer-launch`'s `OWNERS` set (joining
+  dispatch/CodeSpaces/Containers/Logger/Index) -- its first time vendoring
+  `peer_launch.py` + `_installation_context.py`. Also closed a gap left by
+  the previous slice: `agent-ssh`'s own environment-variable prefix
+  (`AGENT_SSH_`) was never added to `peer_environment()`'s scrub list even
+  though agent-ssh became a resolvable peer in that same slice.
+- Converted `self_update.py`'s `refresh_dtssh_mesh()` (the watchdog tier's
+  dtssh-mesh reachability refresh, delegating to `agent-ssh refresh-mesh`)
+  from unconditional `shutil.which("agent-ssh")` ambient-PATH resolution to
+  the validated same-cell peer boundary -- the deferred candidate from two
+  slices back, now unblocked. Unlike Containers' *required* agent-ssh use,
+  this call is optional (not every machine runs a dtssh mesh): a validated
+  owner with no same-cell agent-ssh returns `None` (reported `skipped`,
+  matching legacy behavior); only a malformed/refused context raises
+  `ContextRefused`.
+- **Caught and fixed a real regression in CI** for the previous slice (#3028):
+  its own version bump to agent-index wasn't mirrored into
+  `agent-index-service.json` -- the *same* drift class fixed twice before.
+  Added a durable guard (`_registrar_declaration_violations()` in
+  `tools/check-version-consistency.py`) so this is now caught at push-time
+  instead of relying on running agent-dispatch's test suite; it caught the
+  *next* recurrence (this slice's own agent-index bump) before push.
+- Added focused tests: same-cell prefix + argv shape, `skipped` when no
+  same-cell agent-ssh, `ContextRefused` propagation on a bad context, plus
+  an isolation-guard regression test for `self_update.py`. Extended
+  `libs/peer-launch/tests/test_packaging.py` for the sixth vendor.
+- Validation: `agent-machines` full suite (569 passed, 20 skipped -- one
+  unrelated installer-subprocess test timed out under host load and passed
+  cleanly on retry/isolation, confirmed pre-existing/flaky, not a
+  regression); `libs/peer-launch/tests` (10 passed); module-size (widened
+  `self_update.py`'s baseline 1155 -> 1191 lines), version-consistency,
+  version-bump, `sync-peer-launch`, `sync-installation-context`, and
+  `check-marketplace-isolation` (`path-sibling-launch` count dropped 47 ->
+  46) all pass.
+- `#1110` remains open. `harness-knowledge`'s `assemble_plugins.py` (a
+  skill-only, non-Python-package plugin) is the last identified Phase 6
+  caller-conversion candidate and still needs its shape validated against
+  the `OWNERS`/vendoring pattern before conversion. Phase 7's intake ledger
+  remains outstanding.
+
 ### 2026-09-20 — agent-ssh as a new peer target; agent-containers provider_ssh.py converted
 
 - Extended `libs/peer-launch`'s `PEERS` mapping with `agent-ssh` (joining

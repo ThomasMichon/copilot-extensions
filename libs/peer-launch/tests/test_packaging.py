@@ -15,7 +15,7 @@ def test_all_packaged_launchers_and_validators_match():
     for plugin, filename in (
         ("agent-dispatch", "peer_launch.py"), ("agent-codespaces", "_peer_launch.py"),
         ("agent-containers", "_peer_launch.py"), ("agent-logger", "_peer_launch.py"),
-        ("agent-index", "_peer_launch.py"),
+        ("agent-index", "_peer_launch.py"), ("agent-machines", "_peer_launch.py"),
     ):
         package = ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
         assert (package / filename).read_bytes() == canonical.read_bytes()
@@ -49,7 +49,7 @@ def test_sync_tool_registers_all_packaged_primitives():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     destinations = {destination for _, destination in module.vendor_pairs()}
-    for plugin in ("agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger", "agent-index"):
+    for plugin in ("agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger", "agent-index", "agent-machines"):
         assert (
             ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
             / "_installation_context.py"
@@ -132,6 +132,21 @@ def test_containers_provider_ssh_has_no_unexplained_sibling_launches(monkeypatch
     monkeypatch.setitem(sys.modules, spec.name, guard)
     spec.loader.exec_module(guard)
     path = ROOT / "plugins" / "agent-containers" / "src" / "agent_containers" / "provider_ssh.py"
+    findings = [
+        finding for finding in guard._scan_file(path, ROOT, guard._command_patterns(ROOT))
+        if finding.category == "path-sibling-launch"
+    ]
+    assert findings == [], findings
+
+
+def test_machines_self_update_has_no_unexplained_sibling_launches(monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "machines_ssh_peer_isolation_guard", ROOT / "tools" / "check-marketplace-isolation.py",
+    )
+    guard = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, guard)
+    spec.loader.exec_module(guard)
+    path = ROOT / "plugins" / "agent-machines" / "src" / "agent_machines" / "self_update.py"
     findings = [
         finding for finding in guard._scan_file(path, ROOT, guard._command_patterns(ROOT))
         if finding.category == "path-sibling-launch"

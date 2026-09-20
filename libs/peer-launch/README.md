@@ -1,8 +1,8 @@
 # Same-cell peer launcher
 
 `peer_launch.py` is the canonical, dependency-free native process boundary for
-Agent Dispatch, Agent CodeSpaces, Agent Containers, Agent Logger, and Agent
-Index. `tools/sync-peer-launch.py` packages
+Agent Dispatch, Agent CodeSpaces, Agent Containers, Agent Logger, Agent
+Index, and Agent Machines. `tools/sync-peer-launch.py` packages
 byte-identical copies alongside each consumer's `_installation_context.py`;
 `tools/sync-installation-context.py` owns those validator bytes. Neither
 bootstrap imports a validator through an unvalidated payload pointer.
@@ -78,6 +78,13 @@ fallback for a foreign machine's session, so "no peer in this cell" is no more
 informative than a failure there -- both are treated as unresolved, and the
 whole compaction pass fails closed rather than proceeding as if nothing
 needed protecting.
+
+Machines uses this boundary for `self_update.py`'s dtssh-mesh reachability
+refresh -- the second `agent-ssh` consumer. Unlike Containers' required use,
+this call is optional (not every machine runs a dtssh mesh): a validated
+owner with no same-cell agent-ssh installation returns `None` (reported
+`skipped`, matching legacy behavior); only a malformed/refused context
+raises `ContextRefused`.
 
 ## Validation
 

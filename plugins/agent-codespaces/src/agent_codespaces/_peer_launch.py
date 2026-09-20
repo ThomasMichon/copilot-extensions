@@ -22,7 +22,10 @@ PEERS = {
     "agent-bridge": "agent_bridge",
     "agent-ssh": "agent_ssh",
 }
-OWNERS = {"agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger", "agent-index"}
+OWNERS = {
+    "agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger",
+    "agent-index", "agent-machines",
+}
 
 
 def no_window_kwargs() -> dict[str, int]:
@@ -87,6 +90,7 @@ def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict
         if upper.startswith((
             "AGENT_RT_", "AGENT_DISPATCH_", "AGENT_CODESPACES_", "AGENT_CONTAINERS_",
             "AGENT_LOGGER_", "AGENT_WORKTREES_", "AGENT_BRIDGE_", "AGENT_INDEX_",
+            "AGENT_MACHINES_", "AGENT_SSH_",
         )) or (
             upper.startswith("AGENT_")
             and upper.endswith(("_ROOT", "_DIR", "_HOME", "_INSTALLATION_ID"))
