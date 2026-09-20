@@ -170,19 +170,33 @@ It may either:
 Its contract is:
 
 1. drop the full markdown in the current session's session-state folder,
-2. refresh worktree-visible pending-handoff state when `agent-worktrees` is
-   available,
-3. reuse the existing agent-dispatch task path when available,
-4. best-effort ping `agent-bridge` if present,
-5. wait up to 30 seconds for the cutover itself to start -- not for the
+2. **only when `.context-handoff/config.yaml`'s `mode` is `auto`** (the
+   default is `manual-only` -- see "Mode gate" below): refresh
+   worktree-visible pending-handoff state when `agent-worktrees` is
+   available, reuse the existing agent-dispatch task path when available,
+   and best-effort ping `agent-bridge` if present,
+3. wait up to 30 seconds for the cutover itself to start -- not for the
    successor to fully finish cold-starting and consume the handoff (a real
    Copilot cold-start routinely takes 40-90+ seconds, and isn't worth
-   blocking on),
-6. check for any pickup signal, including the earlier, cheaper "spawn
+   blocking on) -- **skipped entirely under `manual-only`**, since nothing
+   will spawn automatically,
+4. check for any pickup signal, including the earlier, cheaper "spawn
    acknowledged" marker,
-7. print manual instructions only if nothing at all happened; print a
-   distinct "already under way" note when a spawn is merely in flight,
-8. always end with the short handoff prompt/seed.
+5. print manual instructions only if nothing at all happened; print a
+   distinct "already under way" note when a spawn is merely in flight, or a
+   distinct "automatic cutover is disabled" note under `manual-only`,
+6. always end with the short handoff prompt/seed.
+
+## Mode gate
+
+`.context-handoff/config.yaml`'s `mode` defaults to `manual-only`: the
+automatic pressure nudges, the force-tier auto-trigger, and step 2 above
+(the two live-cutover triggers) are all opt-in, requiring `mode: auto` in
+that file (repo-level) or `~/.context-handoff/config.yaml` (user-level).
+Under the default, `trigger_handoff` still fully composes, stores, and
+seeds the handoff -- it just never wires up automatic pickup, so the
+operator/agent must consume it manually. Do not assume live cutover
+happens unless you have confirmed `mode: auto` is set.
 
 ## Resume flow
 

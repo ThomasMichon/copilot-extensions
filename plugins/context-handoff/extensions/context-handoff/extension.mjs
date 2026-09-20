@@ -746,11 +746,17 @@ const session = await joinSession({
         if (result.automaticCutoverDisabled) {
           return (
             `Handoff stored (automatic cutover disabled) for ${result.stored.storage} ` +
-            `baton ${result.stored.id}. No live-cutover signal was sent -- ` +
-            "neither the worktree-visible pending-handoff state nor an " +
-            "agent-bridge ping was requested, because `.context-handoff/" +
-            "config.yaml`'s `mode` is not `auto`.\n\n" +
-            `${result.manualInstructions}\n\n` +
+            `baton ${result.stored.id}. Neither the \`handoff_requested\` ` +
+            "activity event agent-worktrees' resident monitor watches for, " +
+            "nor an agent-bridge ping, was sent, because " +
+            "`.context-handoff/config.yaml`'s `mode` is not `auto` -- no " +
+            "successor pane will be spawned automatically. (A lightweight " +
+            "worktree-record note may still have been made; that is " +
+            "advisory history, not a live-cutover trigger.)\n\n" +
+            `${result.manualInstructions
+              || "A manually-launched successor already appears to have " +
+                "picked this up. Keep the same seed available in case a " +
+                "human or tool still needs to resume it manually.\n"}\n\n` +
             "Final short handoff prompt/seed:\n\n" +
             "```text\n" +
             `${result.seed}\n` +
@@ -780,10 +786,12 @@ const session = await joinSession({
       name: "handoff-continue",
       description:
         "Generate a handoff for THIS session, store it, and trigger the " +
-        "pending-handoff signal flow. This is the explicit human yes-path: it " +
-        "does NOT spawn or retire sessions, but it does arm the baton for any " +
-        "human or control system watching the worktree, dispatch task, or " +
-        "session-state marker.",
+        "pending-handoff signal flow (only wired up automatically when " +
+        "mode: auto is configured -- see the context-handoff skill's Mode " +
+        "gate). This is the explicit human yes-path: it does NOT spawn or " +
+        "retire sessions, but it does arm the baton for any human or " +
+        "control system watching the worktree, dispatch task, or " +
+        "session-state marker when automatic mode is enabled.",
       handler: async (ctx) => {
         void ctx;
         if (!manualHandoffEnabled(handoffConfig.mode)) {
@@ -799,11 +807,14 @@ const session = await joinSession({
             "compact effort-backed shape when a valid open active effort exists, " +
             "otherwise the full standalone shape; (3) call trigger_handoff with " +
             "that markdown as `prompt_text` and a short specific `title`. " +
-            "trigger_handoff stores or refreshes the baton, signals pending " +
-            "handoff state across the available systems, waits briefly for a " +
-            "pickup, and always ends with the final short handoff prompt/seed. " +
-            "Do NOT claim the baton auto-loads on restart; if no control system " +
-            "picks it up, follow the manual instructions it printed.",
+            "trigger_handoff always stores/refreshes the baton and ends with " +
+            "the final short handoff prompt/seed; it only signals pending " +
+            "handoff state across the available systems and waits briefly for " +
+            "a pickup when `.context-handoff/config.yaml`'s `mode` is `auto` " +
+            "(the default, `manual-only`, skips that live-cutover signaling " +
+            "entirely). Do NOT claim the baton auto-loads on restart; if no " +
+            "control system picks it up (or automatic mode is disabled), " +
+            "follow the manual instructions it printed.",
           displayPrompt: "Trigger handoff pickup (/handoff-continue)",
         });
       },

@@ -405,12 +405,12 @@ Verbatim from the operator:
 > "materially broken, seemingly everywhere" in live production use --
 > plugin load failures, Worktree Manager pickup failures, duplicate spawns,
 > stuck predecessors, and unreliable head tracking severe enough to warrant
-> shutting automatic behavior off until resolved. Tracked via gitea
-> aperture-labs#7264 (plugin load failures), #7265 (durable logging +
-> cut-me-over/check-the-handoff diagnostic skill), #7266 (successor
-> fallback discoverability), plus already-open #6791/#7072/#6794/#3454.
-> Sub-issue #7259 tracks the harness-vs-child-worktree knowledge gap this
-> phase's own work surfaced.
+> shutting automatic behavior off until resolved. Tracked in the facility's
+> internal issue tracker (plugin load failures; durable logging +
+> cut-me-over/check-the-handoff diagnostic skill; successor fallback
+> discoverability; several deduplicated against already-open internal
+> items). A related internal item tracks the harness-vs-child-worktree
+> knowledge gap this phase's own work surfaced.
 - [x] **Opt-in gate.** `.context-handoff/config.yaml`'s `mode` default
   flipped from `auto` to `manual-only`: automated nudges, the force-tier
   auto-trigger, and `trigger_handoff`'s live-cutover wiring (the
@@ -420,36 +420,32 @@ Verbatim from the operator:
   keep working unconditionally under the new default -- only `mode: off`
   blocks them. **PR #3041.**
 - [ ] Investigate why the `context-handoff` plugin frequently fails to load
-  in Copilot CLI sessions at all (gitea aperture-labs#7264) -- needs
-  controlled experimentation with the plugin's manifest/extension shape to
-  isolate the rejection cause.
+  in Copilot CLI sessions at all -- needs controlled experimentation with
+  the plugin's manifest/extension shape to isolate the rejection cause.
 - [ ] Fix Worktree Manager's `trigger_handoff` pickup reliability: cases
-  where a "successful" report corresponds to no actual live pane
-  (deduplicated against #6791, already open).
+  where a "successful" report corresponds to no actual live pane.
 - [ ] Harden the successor-side fallback so an agent with zero working
   context-handoff tools can reliably discover and execute the manual
-  consume+resume flow without floundering (gitea aperture-labs#7266) --
-  builds on this effort's already-merged PR #3016 instructions.md fallback;
-  live agent reports suggest it isn't sufficient on its own yet.
-- [ ] Confirm/close the duplicate-spawn gap (deduplicated against #7072,
-  already open and addressed by PR #3011) and the predecessor-termination
-  gap (deduplicated against #6794, already open) against the operator's
-  exact symptom description.
+  consume+resume flow without floundering -- builds on this effort's
+  already-merged PR #3016 instructions.md fallback; live agent reports
+  suggest it isn't sufficient on its own yet.
+- [ ] Confirm/close the duplicate-spawn gap (addressed by PR #3011) and the
+  predecessor-termination gap against the operator's exact symptom
+  description.
 - [ ] Build the dual-source head-session reconciliation + resume-time
-  conflict UX (deduplicated against #3454, already open): agent-worktrees'
-  sessionStart hook durably journals every session it observes starting
-  against a worktree; context-handoff's sessionStart hook marks a new head
-  when the worktree was open for a pending handoff; on resume, agreement
-  launches directly, disagreement surfaces both candidates' session
-  title/id/start/last-updated to the operator (Worktree Manager dialog) or
-  the calling agent (agent-bridge CLI/API), rather than guessing.
+  conflict UX: agent-worktrees' sessionStart hook durably journals every
+  session it observes starting against a worktree; context-handoff's
+  sessionStart hook marks a new head when the worktree was open for a
+  pending handoff; on resume, agreement launches directly, disagreement
+  surfaces both candidates' session title/id/start/last-updated to the
+  operator (Worktree Manager dialog) or the calling agent (agent-bridge
+  CLI/API), rather than guessing.
 - [ ] Build durable handoff event logging plus a "cut me over" (execute a
   real cutover to the live target pane from a stuck outgoing session) and
   "check the handoff" (reconcile tracking, find the true head, cut over,
-  spawning a process if needed) diagnostic skill (gitea
-  aperture-labs#7265). instructions.md needs a pointer to this
-  troubleshooting guide too, since skills aren't reliably loading in the
-  exact failure class this phase exists to fix.
+  spawning a process if needed) diagnostic skill. instructions.md needs a
+  pointer to this troubleshooting guide too, since skills aren't reliably
+  loading in the exact failure class this phase exists to fix.
 
 ## Validation Plan
 
@@ -1315,20 +1311,20 @@ gate land._
 
 - Operator reported context-handoff "materially broken, seemingly
   everywhere" in real production use, with seven distinct live symptoms
-  (see Phase 7 above) and asked to (a) file each as a tracking issue, (b)
-  drive more phases in this effort, and (c) immediately gate the risky
-  automatic behavior behind explicit opt-in. Filed gitea aperture-labs#7264
-  (plugin load failures), #7265 (durable logging + diagnostic skill),
-  #7266 (fallback discoverability); 4 others deduped against already-open
-  #6791/#7072/#6794/#3454.
+  (see Phase 7 above) and asked to (a) file each in the facility's internal
+  tracker, (b) drive more phases in this effort, and (c) immediately gate
+  the risky automatic behavior behind explicit opt-in. Filed three new
+  internal tracking items (plugin load failures; durable logging +
+  diagnostic skill; fallback discoverability); four others deduped against
+  already-open internal items.
 - Corrected mid-session by the operator: `agent-worktrees bind-session`
   must never be run from *within* a related child-repo checkout (this
   copilot-extensions worktree, worked from an aperture-labs harness
   session) -- only a harness worktree binds a session; a child worktree is
   *claimed* via its own repo-scoped CLI (`copilot-extensions create`/
   `push-changes`/`create-pr`) or `agent-worktrees related resolve <name>`.
-  Undone via `deregister-session`; filed gitea aperture-labs#7259 tracking
-  that this distinction wasn't discoverable anywhere until asked. All
+  Undone via `deregister-session`; filed an internal item tracking that
+  this distinction wasn't discoverable anywhere until asked. All
   subsequent git operations in this session routed through
   `agent-worktrees git sync` / `copilot-extensions create-pr` rather than
   raw `git worktree add`/manual push.
