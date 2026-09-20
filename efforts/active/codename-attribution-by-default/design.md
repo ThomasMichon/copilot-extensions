@@ -231,6 +231,26 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   `prcfg.source_attribution`/`source_attribution_configured`, for every
   publish decision on that PR's life — the live config is consulted only
   once, at the PRRecord's creation moment, never again for that PR.
+  **The CALLER GATE that decides whether to invoke
+  `refresh_source_attribution` at all must not itself branch on live
+  config either (round-38 finding)** — verified in source:
+  `_finish_auto_open`'s re-run path (`pr_ops.py:1396-1400`) computes
+  `want_attribution = (prcfg.source_attribution if attribution is None
+  else attribution)` from LIVE config and only calls
+  `refresh_source_attribution` `if want_attribution and record is not
+  None`. A PR frozen under `attribution_mode="true"` whose repo's live
+  `source_attribution` later changes to `false` therefore never even
+  reaches `refresh_source_attribution` on this path — `want_attribution`
+  is `False`, so the call is skipped entirely, and the frozen-pair logic
+  inside the function (which would otherwise correctly keep publishing
+  under the ORIGINAL frozen `"true"`) never gets a chance to run. **Fix:**
+  drop the `want_attribution` gate on this call site — always invoke
+  `refresh_source_attribution` whenever `record is not None`, letting the
+  function's OWN frozen-pair logic (not the caller's live-config snapshot)
+  decide whether anything changes; this is cheap and side-effect-free
+  when there is nothing to do, since `refresh_source_attribution` already
+  short-circuits immediately when `target_pr.attribution_head == head_sha`
+  (no new push to react to).
   **The stamp must capture the EFFECTIVE attribution, including any
   per-call override, not the raw config value (round-31 finding)** —
   `create_pr` accepts its own `attribution` override parameter
@@ -421,13 +441,29 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   any later mutation (`branch`, `number`, `provider`, `state` corrections
   all leave `pr_id` untouched, unlike the existing `identity_changed`
   reset of `attribution_head`/`head_observed_at` for `number`/`provider`
-  changes). Two entries are the SAME PR iff both have a NON-EMPTY `pr_id`
-  and the values are equal; an entry with no `pr_id` on either side never
-  matches anything (extends round-35's "no established identity" case
-  from empty-branch-and-no-number to the general no-`pr_id` state — a
-  merge miss here is, at worst, a transient extra list entry; a false
-  match would silently overwrite one entry's frozen state with an
-  unrelated one's, the more dangerous failure). **Backfill `pr_id` INLINE
+  changes). Two entries with a NON-EMPTY `pr_id` on BOTH sides are the SAME
+  PR iff the values are equal — the canonical, steady-state rule once
+  every entry has been migrated. **A `record.prs` (in-memory, possibly
+  stale) entry with NO `pr_id` needs an explicit legacy-reconciliation
+  step, not a bare "no match" (round-38 finding)** — the inline backfill
+  below stamps a fresh `pr_id` onto the ON-DISK (`current.prs`) entry, but
+  a caller's in-memory snapshot captured BEFORE that stamp still has NO
+  `pr_id` of its own; naively requiring both sides to already share a
+  `pr_id` would then never match that snapshot to its own (now-stamped)
+  on-disk counterpart, forcing an append — and a second stale save could
+  repeat the duplication. **Fix:** for a `record.prs` entry with no
+  `pr_id`, reconcile it against `current.prs` using the round-35
+  fallback rule (equal NON-EMPTY `branch`, or — only when `branch` is
+  empty on both sides — equal `number`) as a ONE-TIME bridging identity;
+  if reconciled, treat it as the SAME entry (not an append), and write
+  `current`'s already-backfilled `pr_id` back onto the in-memory
+  `record.prs` entry too, so that object is no longer legacy if the
+  caller saves it again later in the same process. Two entries with NO
+  `pr_id` on either side AND no non-empty `branch` AND no `number` on
+  either side never match (round-35's original terminal case, preserved
+  unchanged: a merge miss here is, at worst, a transient extra list
+  entry; a false match would silently overwrite one entry's frozen state
+  with an unrelated one's, the more dangerous failure). **Backfill `pr_id` INLINE
   in `_save_record_unlocked`'s existing merge step, not via a separate
   "shipping-time" migration pass (round-37 finding, corrects the
   round-36 text)** — there is no executable hook for that: this repo's
@@ -488,34 +524,46 @@ sites, `tracking.py`'s YAML read/write wiring, or `_save_record_unlocked`.
   must not erase B's freeze even though the snapshot's `.pr` (active-PR)
   accessor currently resolves to entry A, proving the merge operates on
   the full `prs` list keyed by identity, not just the single active-PR
-  accessor; (iii) (round-34 finding) a `create_pr` flow saves a
-  `PRRecord` with `number=None`/a set `branch`, a concurrent process then
-  observes the provider assigning a `number` to that SAME PR and stamps
-  the frozen attribution pair (bumping `pr_revision`) onto the
-  now-numbered on-disk entry, while a stale in-memory snapshot still
-  holds the pre-number, `number=None` version of the same entry — the
-  stale save must MERGE onto (not duplicate-append) the numbered entry,
-  proving the identity rule matches across the `number=None` →
-  provider-assigned-`number` transition via the shared `branch`, not two
-  unrelated identities; (iv) (round-35 finding) a stale in-memory
-  snapshot holds an entry with `number=7`/`branch="feature-x"`; a
-  concurrent manual `set-pr` correction changes the ON-DISK entry's
-  `number` to `8` while its `branch` stays `"feature-x"`, then stamps the
-  frozen attribution pair — the stale save must still MERGE onto the
-  renumbered entry (matched via `branch`, not `number`), proving `branch`
-  is the primary identity and a `number` correction alone never causes a
-  false non-match; (v) (round-35 finding) TWO independent, freshly-created
-  blank `PRRecord`s (both `number=None`/`branch=""`, e.g. from two
+  accessor; (iii) (round-34 finding, matcher rewritten round-38 to use
+  `pr_id`) a `create_pr` flow saves a `PRRecord` with `number=None`/a set
+  `branch`/an assigned `pr_id`, a concurrent process then observes the
+  provider assigning a `number` to that SAME PR and stamps the frozen
+  attribution pair (bumping `pr_revision`) onto the now-numbered on-disk
+  entry (`pr_id` unchanged), while a stale in-memory snapshot still holds
+  the pre-number, `number=None` version of the same entry (same `pr_id`)
+  — the stale save must MERGE onto (not duplicate-append) the numbered
+  entry, proving the identity rule matches across the `number=None` →
+  provider-assigned-`number` transition via the shared `pr_id`, not two
+  unrelated identities; (iv) (round-35 finding, matcher rewritten
+  round-38 to use `pr_id`) a stale in-memory snapshot holds an entry with
+  a `pr_id` set, `number=7`, `branch="feature-x"`; a concurrent manual
+  `set-pr` correction changes the ON-DISK entry's `number` to `8` while
+  its `branch` stays `"feature-x"` (leaving `pr_id` unchanged), then
+  stamps the frozen attribution pair — the stale save must still MERGE
+  onto the renumbered entry (matched via `pr_id`), proving a `number`
+  correction alone never causes a false non-match; (v) (round-35
+  finding) TWO independent, freshly-created blank `PRRecord`s (both
+  `number=None`/`branch=""`/no `pr_id` yet assigned, e.g. from two
   separate manual `set-pr` calls that haven't attached anything yet) —
   saving a stale snapshot of one must NOT merge onto the other merely
-  because they share the same empty `branch`/absent `number`, proving
-  entries with no established identity at all are never treated as a
-  match; (vi) (round-36 finding) a stale in-memory snapshot holds a
-  post-migration entry with a real `pr_id` set, `number=7`,
+  because they share the same empty `branch`/absent `number`/absent
+  `pr_id`, proving entries with no established identity at all are never
+  treated as a match; (vi) (round-36 finding) a stale in-memory snapshot
+  holds a post-migration entry with a real `pr_id` set, `number=7`,
   `branch="feature-x"`; a concurrent manual `set-pr` correction changes
   the ON-DISK entry's `branch` to `"feature-y"` AND its `number` to `8`
   (leaving `pr_id` untouched), then stamps the frozen attribution pair —
   the stale save must still MERGE onto the renamed-and-renumbered entry
   (matched via `pr_id`, not `branch`/`number`), proving `pr_id` — not
-  `branch` — is the identity that survives a branch rename.
+  `branch` — is the identity that survives a branch rename; (vii)
+  (round-38 finding) a stale in-memory `record.prs` entry has NO `pr_id`
+  (a legacy snapshot predating this feature) but a set `branch`; a
+  concurrent save backfills a fresh `pr_id` onto the corresponding
+  ON-DISK `current.prs` entry (same `branch`) and stamps the frozen
+  attribution pair — the stale save must reconcile onto that entry via
+  the round-35 branch fallback (not append a duplicate), and the
+  resulting in-memory `record.prs` entry must come away carrying the
+  SAME backfilled `pr_id`, proving a second save from that same
+  in-memory object no longer needs the fallback and does not re-append
+  either.
 

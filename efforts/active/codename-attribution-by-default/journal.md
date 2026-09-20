@@ -875,3 +875,33 @@ Part of the [codename-attribution-by-default effort](README.md).
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
   `f2b538c47` for thirteen rounds straight — not re-edited again).
+
+### 2026-09-20 — Plan-review round 37 fixes
+
+- Confirmed: round-36's `pr_id` identity fix verified correct — this
+  round's review lists it under "Resolved since last review."
+- Two new genuine findings, both exposing that round-36's design
+  described mechanisms with no actual place to run:
+  1. **No executable hook for the `pr_id` backfill:** round-36 called for
+     a "one-time migration pass at shipping time," but this repo's
+     config-migration framework (`config_migrations.py`) is scoped to
+     machine-local config and explicitly excludes tracking YAML — the
+     described pass had no entry point that would ever invoke it. Fixed:
+     backfill `pr_id` INLINE inside `_save_record_unlocked`'s existing
+     merge step, which already runs under the record lock on every
+     single `save_record` call — no separate migration mechanism needed.
+  2. **The legacy-freeze-on-first-touch design (round-32) can't fire
+     for a repo whose live `source_attribution` starts `False`:**
+     `refresh_source_attribution` returns immediately
+     (`if not config.default_repo.pr.source_attribution: return ""`,
+     `pr_ops.py:1199`) before ever reaching the freeze logic. A legacy
+     PR first touched under a false config would stay unmigrated
+     indefinitely; if the config later changes to `codename`, that LATER
+     touch (not the true first one) would be lazily frozen instead,
+     silently adopting the newer policy. Fixed: the freeze check must
+     run BEFORE the live-config early return, unconditionally — freezing
+     to the false state when that's what's live, so a later config
+     change correctly finds the pair already frozen.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for fourteen rounds straight — not re-edited again).

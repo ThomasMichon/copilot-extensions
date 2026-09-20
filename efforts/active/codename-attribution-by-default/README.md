@@ -696,7 +696,17 @@ these decisions directly and assumes this design is understood.
   - `refresh_source_attribution`/`_open_via_provider` must use the FROZEN
     pair, never live `prcfg.source_attribution`/
     `source_attribution_configured`, for every publish decision on that
-    PR's life. **A legacy `PRRecord` predating these fields is lazily
+    PR's life. **The CALLER GATE deciding whether to invoke
+    `refresh_source_attribution` at all must not itself branch on live
+    config either (round-38 finding)** — `_finish_auto_open`'s re-run
+    path (`pr_ops.py:1396-1400`) currently only calls it `if
+    want_attribution` (computed from LIVE config), so a PR frozen under
+    `"true"` whose live config later flips to `false` never even reaches
+    the frozen-pair logic. **Fix:** drop that gate — always invoke
+    `refresh_source_attribution` when `record is not None`; the
+    function's own frozen-pair check decides what happens, and it
+    already short-circuits cheaply when there's no new head to react to.
+    **A legacy `PRRecord` predating these fields is lazily
     frozen on its FIRST post-migration touch, from whatever config is
     live at that single moment — never left to fall back to live config
     indefinitely (round-32 finding: the earlier "falls back to live
@@ -734,11 +744,25 @@ these decisions directly and assumes this design is understood.
     counterpart by branch OR number after a rename. **Fix:** add
     `pr_id: str = ""` to `PRRecord` — a random UUID assigned ONCE at
     entry creation and never touched by any later `branch`/`number`/
-    `provider`/`state` correction. Two entries are the SAME PR iff both
-    have a NON-EMPTY `pr_id` and the values are equal; an entry with no
-    `pr_id` on either side never matches anything (extends round-35's
-    "no established identity" case from empty-branch-and-no-number to
-    the general no-`pr_id` state). **Backfill `pr_id` INLINE in
+    `provider`/`state` correction. Two entries with a NON-EMPTY `pr_id`
+    on BOTH sides are the SAME PR iff the values are equal (the
+    canonical, steady-state rule once every entry has migrated). **A
+    `record.prs` (in-memory, possibly stale) entry with NO `pr_id` needs
+    an explicit legacy-reconciliation step, not a bare "no match" (round-38
+    finding)** — the inline backfill below stamps a fresh `pr_id` onto
+    the ON-DISK entry, but a stale in-memory snapshot from before that
+    stamp still has none of its own; requiring both sides to already
+    share a `pr_id` would then force an append instead of a match, and a
+    second stale save could repeat the duplication. **Fix:** for a
+    `record.prs` entry with no `pr_id`, reconcile it against
+    `current.prs` using the round-35 fallback rule (equal NON-EMPTY
+    `branch`, else — only when `branch` is empty on both sides — equal
+    `number`) as a ONE-TIME bridging identity; if reconciled, write
+    `current`'s already-backfilled `pr_id` back onto the in-memory entry
+    too, so it is no longer legacy on a later save. Two entries with NO
+    `pr_id` on either side AND no non-empty `branch` AND no `number` on
+    either side never match (round-35's original terminal case,
+    preserved unchanged). **Backfill `pr_id` INLINE in
     `_save_record_unlocked`'s existing merge step, not via a separate
     "shipping-time" migration pass (round-37 finding, corrects the
     round-36 text)** — this repo's config-migration framework
@@ -1029,6 +1053,24 @@ these decisions directly and assumes this design is understood.
   suppressed on the second touch, proving the freeze runs before the
   live-config early return rather than being deferred until whichever
   later touch happens to occur under a truthy config.
+- [ ] Unit (round-38 finding): a `PRRecord` frozen at `attribution_mode:
+  "true"` has an open PR; the repo's `source_attribution` changes to
+  `False`; a create-pr re-run on the already-open PR (the
+  `_finish_auto_open` path) still calls `refresh_source_attribution`
+  and republishes/keeps the marker per the ORIGINAL frozen `"true"`
+  state — proving the caller gate no longer skips the call just because
+  live `want_attribution` is currently falsy.
+- [ ] Unit (round-38 finding): a stale in-memory `record.prs` entry has
+  NO `pr_id` (a legacy snapshot predating this feature) but a set
+  `branch`; a concurrent save backfills a fresh `pr_id` onto the
+  corresponding ON-DISK `current.prs` entry (same `branch`) and stamps
+  the frozen attribution pair — the stale save must reconcile onto that
+  entry via the round-35 branch fallback (not append a duplicate), and
+  the in-memory `record.prs` entry must come away carrying the SAME
+  backfilled `pr_id` — then a SECOND save from that same in-memory
+  object (now `pr_id`-bearing) must not re-append either, proving the
+  reconciliation is not just a one-time accident of matching but leaves
+  the caller's own copy migrated.
 - [ ] Unit (round-34 finding): a `WorktreeRecord` with an unbackfilled
   (missing/unknown) `codename_source`, in a repo with
   `source_attribution: True` (the raw-marker mode) — the PR still
@@ -1268,39 +1310,42 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-36 history lives in **[journal.md](journal.md)** to keep this
+> round-37 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
 
 
-### 2026-09-20 — Plan-review round 37 fixes
+### 2026-09-20 — Plan-review round 38 fixes
 
-- Confirmed: round-36's `pr_id` identity fix verified correct — this
-  round's review lists it under "Resolved since last review."
-- Two new genuine findings, both exposing that round-36's design
-  described mechanisms with no actual place to run:
-  1. **No executable hook for the `pr_id` backfill:** round-36 called for
-     a "one-time migration pass at shipping time," but this repo's
-     config-migration framework (`config_migrations.py`) is scoped to
-     machine-local config and explicitly excludes tracking YAML — the
-     described pass had no entry point that would ever invoke it. Fixed:
-     backfill `pr_id` INLINE inside `_save_record_unlocked`'s existing
-     merge step, which already runs under the record lock on every
-     single `save_record` call — no separate migration mechanism needed.
-  2. **The legacy-freeze-on-first-touch design (round-32) can't fire
-     for a repo whose live `source_attribution` starts `False`:**
-     `refresh_source_attribution` returns immediately
-     (`if not config.default_repo.pr.source_attribution: return ""`,
-     `pr_ops.py:1199`) before ever reaching the freeze logic. A legacy
-     PR first touched under a false config would stay unmigrated
-     indefinitely; if the config later changes to `codename`, that LATER
-     touch (not the true first one) would be lazily frozen instead,
-     silently adopting the newer policy. Fixed: the freeze check must
-     run BEFORE the live-config early return, unconditionally — freezing
-     to the false state when that's what's live, so a later config
-     change correctly finds the pair already frozen.
+- Confirmed: both round-37 findings (inline `pr_id` backfill, freeze-
+  before-guard ordering) verified correct — this round's review lists
+  them under "Resolved since last review."
+- Two new genuine findings, plus two "previously missed" findings in
+  unchanged code the reviewer newly surfaced:
+  1. **Inline `pr_id` backfill can still duplicate a legacy entry:**
+     backfilling `current.prs` (on-disk) with a fresh `pr_id` doesn't
+     help a stale in-memory `record.prs` snapshot that has NO `pr_id` of
+     its own — requiring both sides to already share one forces an
+     append instead of a match, and a second stale save could repeat the
+     duplication. Fixed: added an explicit legacy-reconciliation step —
+     a `pr_id`-less in-memory entry falls back to the round-35
+     branch/number rule to find its on-disk counterpart, and the
+     resolved `pr_id` is written back onto the in-memory entry too, so a
+     later save from the same object no longer needs the fallback.
+  2. **The frozen-attribution CALLER GATE also branches on live config:**
+     `_finish_auto_open`'s re-run path only calls
+     `refresh_source_attribution` `if want_attribution` (live), so a PR
+     frozen under `"true"` whose config later flips to `false` never
+     even reaches the frozen-pair logic round-37 fixed inside the
+     function. Fixed: drop the gate — always invoke
+     `refresh_source_attribution` when a record exists; the function's
+     own frozen-pair check (not the caller's live snapshot) decides.
+  3. Rewrote the acceptance-test items that still required matching via
+     `branch`/`number` (a contradiction with `pr_id` being the sole
+     identity per round-36/37) to exercise `pr_id` instead, and added a
+     dedicated legacy-reconciliation regression test.
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
-  `f2b538c47` for fourteen rounds straight — not re-edited again).
+  `f2b538c47` for fifteen rounds straight — not re-edited again).
 
 
