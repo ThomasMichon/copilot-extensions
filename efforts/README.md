@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Ambient Guidance Navigability](active/ambient-guidance-navigability/README.md) | Active | #3033 |
 | [Unified Skill Review](active/unified-skill-review/README.md) | Draft | #2847 |
 | [Handoff Cutover Lifecycle Journal](active/handoff-cutover-lifecycle-journal/README.md) | Draft | #2457 |
 | [Handoff Live Cutover](active/handoff-live-cutover/README.md) | Active | #2249† |

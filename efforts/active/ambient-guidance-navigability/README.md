@@ -1,0 +1,255 @@
+---
+visions:
+  - visions/harness-guidance
+---
+
+# Ambient Guidance Navigability
+
+- **Slug:** `ambient-guidance-navigability`
+- **Repo:** copilot-extensions (primary, mechanism + per-plugin content);
+  a private downstream consumer repository has a companion effort for its
+  own AGENTS.md index and one-time sync-drift fix
+- **Branch(es):** independent per-phase worktrees
+- **Created:** 2026-09-20
+- **Status:** Active
+- **Vision:** `visions/harness-guidance` -- vision-closing, not extending.
+  Behavior `task-detail-on-demand` and Feature `navigable-on-demand-grounding`
+  already state the target; reality currently violates both.
+- **Umbrella issue:** [ThomasMichon/copilot-extensions#3033](https://github.com/ThomasMichon/copilot-extensions/issues/3033)
+- **Sub-issues:** filed per-phase below as each phase starts.
+
+## Guiding Intent
+
+Skills are pull-only: they load only when their trigger phrases match what an
+agent already decided to *do*. An agent that does not know a concept exists
+(a claim ledger, a resource obligation, a blocked dispatch task, a stuck
+handoff cutover) has no phrase to match on -- so the procedure, even when it
+already exists as a skill or reference doc, is functionally undiscoverable.
+`AGENTS.md` and the ambient `.github/instructions/*.instructions.md` files are
+supposed to be the pre-skill map an agent walks *before* deciding what to do;
+they are not fulfilling that role for operational failure-triage content
+today. This effort closes that delta: every operationally important "what do
+I do when X happens" category should be reachable by walking the ambient map
+alone, down to naming the skill/doc/command that holds the actual procedure --
+never requiring the agent to already know the skill exists.
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Driving agent (this repo) | Designs and lands the registry/guard mechanism (Phase 1) and per-plugin content (Phase 2) here | independent per-phase worktree, this repo's own PR flow |
+| Driving agent (downstream consumer) | Runs the one-time sync-drift fix and adds a repo-owned terse AGENTS.md category index (Phase 0 / Phase 3) in its own private repo | that repo's own worktree/PR flow; not part of this repo's history |
+
+## Coordination
+
+- **Topology:** independent per-repo phases, not a shared branch. Each phase
+  is its own worktree and its own PR, following that repo's own merge policy.
+- **Host (owns PRs):** the driving agent in each repo, for that repo's own
+  phases.
+- **Delegates:** none beyond the split above; the downstream repo's Phase 0/3
+  work is out of scope for this repo's own history and is tracked in that
+  repo's own private effort/issue instead.
+- **Handoff:** each phase closes with its own repo's validation green and its
+  PR merged (or explicitly deferred) before the next phase starts; a fresh
+  session may pick up at any phase boundary from this doc's Journal.
+
+## Context
+
+### The audit (evidence, not assumption)
+
+A frozen-snapshot navigability audit -- 3 independent, nearly-tool-free
+`explore` sub-agents, each given only a captured system-prompt snapshot (a
+downstream consumer repo's root `AGENTS.md` plus every currently-synced
+copilot-extensions static `instructions.md` file) and explicitly forbidden
+from invoking skills or touching the live repo -- tested 12 realistic "what
+do I do" questions:
+
+| # | Question | Verdict |
+|---|---|---|
+| Source of a plugin-owned launch script mistaken for a local one | **False positive** -- pointed at the consumer repo's own local tool index, which only covers that repo's own scripts |
+| PR got a "commented, no action needed" reviewer verdict with no actionable feedback | PARTIAL |
+| Handoff requested, but the handoff skill/tools are unavailable this session | PARTIAL |
+| A plugin's CLI is not on PATH | PARTIAL |
+| A `gh`-family command failed with a GraphQL error | PARTIAL |
+| Detect a concurrent/head session in the same worktree | PARTIAL |
+| A stuck review-queue symptom, where to look | NAVIGABLE (an existing skill directly names it) |
+| Which account to use for a given repo before a `gh`-family command | NAVIGABLE (an existing wrapper command directly names it) |
+| A plugin's writable source-checkout location, when only its runtime is installed | NAVIGABLE (only because of `cross-repo-debug-tracking`, #3010, landed the same day) |
+| A worktree's "unsettled resource obligation" blocking finalize | **DEAD END** |
+| Outbound claim ledger / release a claim | **DEAD END** |
+| A dispatched task that's live but structurally blocked | **DEAD END** |
+
+3/12 navigable (one only because of a fix landed the same day this audit
+ran), 5/12 partial, 3/12 dead end, 1 **false positive** -- confidently wrong
+is worse than a dead end, since it produces misdirected work instead of a
+"look further" signal.
+
+### Root cause is partly mechanical, not just missing content
+
+`plugins/agent-worktrees/instructions/head-claim-fallback.instructions.md`
+is a genuinely good exemplar of the target pattern already: it force-syncs
+"if you don't seem to be this worktree's head session" / "if a handoff/cutover
+trigger appears to have failed" as ambient, always-loaded guidance, naming the
+exact diagnostic commands (`bind-session`, `handoffs-check`). **It is declared
+in `agent-worktrees/instruction-projections.json` but the audited consumer
+repo had never synced it in** -- absent from that repo's own
+`.github/instructions/agent-worktrees/` and from its locked
+`.github/copilot/context-projections.json`, whose recorded plugin versions
+were stale across the board (multiple plugins several dev-versions behind
+what was already installed). Authoring good ambient content is necessary but
+not sufficient if a consuming repo never resyncs it -- this is the same class
+of drift `sessionstart-static-dynamic-conformance` catches for hook-emitted
+content, but nothing currently audits *projection sync staleness* across
+consumer repos.
+
+### Related, non-duplicate prior art (checked before carving)
+
+- **`agents-md-vs-instructions-split`** (Done) -- audited whether content was
+  in the *right file* (audience: universal visitor vs. harness-self-config).
+  Orthogonal axis: this effort audits whether content is *discoverable and
+  complete*, not whether it's correctly placed. No overlap in findings; that
+  effort found "no misplacement" in every repo it audited, which is
+  consistent with this effort's findings (the problem isn't wrong-file
+  placement, it's missing/unsynced/pull-only content).
+- **`sessionstart-static-dynamic-conformance`** (Active) -- audits whether
+  `sessionStart` hook output is genuinely dynamic (vs. static content that
+  should have been a checked-in file instead). Orthogonal axis: static vs.
+  dynamic *classification*, not coverage or sync-freshness. Its own findings
+  (e.g. `worktree-conduct.md`/`account-conduct.md` being 100% static content
+  delivered dynamically) are a related but distinct defect this effort does
+  not re-litigate.
+- `docs/patterns/agents-md-vs-instructions-split.md` and
+  `docs/patterns/session-scoped-dynamic-guidance.md` already describe the
+  delivery mechanism this effort reuses (no new mechanism needed for
+  delivery); neither currently states a *completeness* or *sync-freshness*
+  obligation, which is the gap Phase 1/2 below close.
+
+## Request
+
+> An operator observed other agents losing fidelity on understanding
+> worktree management, claims, and session management, and asked that
+> ambient guidance stop being gated behind skill invocation: skills only
+> trigger when an agent already decided what it wants to *do*, so they
+> cannot hold "you might need to know this exists" information. `AGENTS.md`
+> plus the upfront `*.instructions.md` files should together give every
+> starting point for a "tree walk" toward more specific information, so an
+> agent can navigate to a known-category answer without invoking any skill,
+> and only reach for a skill once it knows the exact action to take. The
+> operator asked that this be reconciled with `reviewing-customizations`'
+> ability to enforce that flow going forward.
+
+## Plan
+
+### Phase 0 (downstream, not tracked in this repo's history) -- Fix the immediate sync-drift
+Runs entirely in the private downstream consumer repo's own worktree/PR flow:
+resync its `.github/instructions/` and `.github/copilot/context-projections.json`
+against its currently-*enabled* plugins' declared `instruction-projections.json`
+-- the sync manager's contract is settings-scoped (discovers enabled
+payloads, not every installed/marketplace plugin), so this deliberately does
+not check in pointers for disabled capabilities (picks up `head-claim-fallback`
+and the `cross-repo-debug-tracking` fix immediately; reconciles stale
+plugin-version metadata for every enabled plugin). Recorded here only as
+context for Phase 1's sync-freshness guard; not a checklist item of this
+repo's own effort.
+
+### Phase 1 -- Registry + guard mechanism (`customizing-copilot:reviewing-customizations`)
+- [ ] Design a small per-plugin `troubleshooting-index.json` (or an extension
+      of `instruction-projections.json`) declaring the failure-mode
+      categories that plugin owns (e.g. `agent-worktrees`:
+      `claims-ledger`, `resource-obligations`, `head-session` [already
+      covered by `head-claim-fallback`]; `agent-dispatch`:
+      `blocked-task-recovery`; `agent-bridge`: `path-not-found`,
+      `service-not-responding` [already partly in `diagnosing-...`]).
+- [ ] Add a guard test (parallel to
+      `test_dynamic_pointer_projections_have_exact_session_writers`) that
+      scans each plugin's static projections and asserts every declared
+      category has an ambient pointer row -- fails closed if a category is
+      claimed but not indexed.
+- [ ] Add a **sync-freshness** guard (new): compare a consumer repo's locked
+      `context-projections.json` plugin versions against the currently
+      installed plugin versions and flag drift beyond a reasonable
+      threshold, closing the Phase 0 root cause mechanically going forward.
+- [ ] Extend `docs/patterns/agents-md-vs-instructions-split.md`'s audit
+      heuristic with a third question: "Is this a known failure symptom an
+      agent can't phrase-match its way into? If yes, it needs an ambient
+      index row, not just a skill trigger."
+
+### Phase 2 -- Populate the concrete content gaps found by the audit
+- [ ] `agent-worktrees`: claims-ledger index row (-> `claims` command /
+      `tracing-claimant-graphs` skill), resource-obligations index row (->
+      `worktree/references/obligations.md` / `finalize` failure meaning).
+- [ ] `agent-dispatch`: blocked-task-recovery index row (live-but-
+      structurally-blocked task -> inspect/suspend/release/escalate path).
+- [ ] `agent-worktrees` or a shared location: `repos gh` GraphQL-error
+      triage row; command-not-found/PATH triage row.
+- [ ] `copilot-extensions-harness` or the reviewing agent's own guidance:
+      commented-verdict-with-no-actionable-feedback handling row.
+- [ ] `context-handoff`: tools-unavailable fallback row (what a session does
+      when the skill/tools it's told to invoke aren't present this session).
+- [ ] Ownership-boundary disambiguation: a rule (likely in the root
+      `AGENTS.md` template guidance, or `working-cross-repo`'s own ambient
+      half) that says *check which repo actually owns this path/script
+      before trusting a local tool index* -- closing the false-positive
+      class found by the audit.
+
+### Phase 3 (downstream, not tracked in this repo's history) -- Terse AGENTS.md category index
+Runs entirely in the private downstream consumer repo's own worktree/PR flow:
+add a compact "Troubleshooting & Where To Look" section to that repo's own
+`AGENTS.md` -- one line per category, pointing at either a direct command or
+the owning plugin's ambient index / skill, sized to respect that repo's own
+context-budget conventions. This repo's part is limited to documenting the
+generic pattern (Phase 1's guard + this doc) so any consumer repo can
+replicate it without re-deriving the model.
+
+### Phase 4 -- Validate
+- [ ] Re-run the same 12-question navigability audit (fresh frozen snapshot,
+      same nearly-tool-free method) against the fixed state; record the
+      before/after verdict table in the Journal.
+- [ ] Confirm the launch-script-ownership question specifically now produces
+      a correct "this belongs to copilot-extensions, resolve via `related
+      resolve`" answer rather than a false positive.
+
+## Validation Plan
+
+- [ ] Phase 1's guard test fails on a synthetic plugin with a declared-but-
+      unindexed category, and passes once indexed (a real negative-proof
+      test, not just a passing positive one).
+- [ ] Phase 4's re-audit shows a materially higher navigable/false-positive
+      ratio than the baseline table above, with the specific false-positive
+      corrected.
+- [ ] `tools/run-plugin-tests.py customizing-copilot` and any touched
+      plugin's own suite pass; `check-version-bump` / `check-version-
+      consistency` / `check-docs-consistency` clean on every PR.
+
+## Proposal
+
+_Pending._
+
+## Journal
+
+### 2026-09-20 -- Kickoff
+- Carved from an operator observation (other agents losing fidelity on
+  worktree/claim/session-management concepts), immediately after landing
+  `ThomasMichon/copilot-extensions#3010` (`cross-repo-debug-tracking`),
+  which turned out to be a live worked example of exactly this effort's
+  target pattern.
+- Ran the frozen-snapshot navigability audit (3 background `explore` agents,
+  12 questions, nearly-tool-free) -- see Context above for the full table.
+  A review caught a methodology-relevant correction: one question was
+  initially marked NAVIGABLE by an audit agent that didn't check ownership
+  first (the file in question is copilot-extensions-owned, not the
+  downstream consumer repo's own); reclassified as a false positive, a new
+  and arguably more important failure category than a plain dead end. A
+  later review also caught an arithmetic slip in the summary (3/12
+  navigable, not 4/12) -- corrected.
+- Checked prior art before carving: `agents-md-vs-instructions-split` (Done)
+  and `sessionstart-static-dynamic-conformance` (Active) are both real but
+  orthogonal -- placement-correctness and static/dynamic-classification,
+  not coverage/sync-freshness. No duplication found.
+- Found the `head-claim-fallback.instructions.md` exemplar already exists
+  and already proves the content pattern works -- the immediate blocker in
+  the audited downstream repo was sync-drift, not invention of a new
+  delivery mechanism; that one-time fix is tracked in that repo's own
+  private effort, not here.
+- Filed umbrella issue `ThomasMichon/copilot-extensions#3033`.
+- Not yet started: Phase 1.
