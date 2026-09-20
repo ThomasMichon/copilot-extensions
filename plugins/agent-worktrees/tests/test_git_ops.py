@@ -386,6 +386,117 @@ class TestCrossAccountAuth:
         assert all("c2VjcmV0" not in a for a in err.cmd)
 
 
+class TestPinGitCredential:
+    """dotfiles#537 / odsp-web-harness self-update sweep: a plain ``git
+    fetch``/``pull`` run by anything other than this tool's own account-aware
+    calls only ever sees whatever ``gh`` account is currently "active",
+    independent of which account a repo actually needs. ``pin_git_credential``
+    persists a repo-local override so any plain git client resolves the
+    correct login."""
+
+    def test_noop_when_login_or_host_empty(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        assert go.pin_git_credential(tmp_path, "") is False
+        assert go.pin_git_credential(tmp_path, "someone", host="") is False
+
+    def test_noop_when_gh_unavailable(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: None)
+        assert go.pin_git_credential(tmp_path, "someone") is False
+
+    def test_noop_when_path_not_a_directory(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        assert go.pin_git_credential(tmp_path / "does-not-exist", "someone") is False
+
+    def test_noop_when_not_a_git_working_tree(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        plain_dir = tmp_path / "not-a-repo"
+        plain_dir.mkdir()
+        assert go.pin_git_credential(plain_dir, "someone") is False
+
+    def test_pins_local_config_on_a_real_repo(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+
+        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
+
+        username = sp.run(
+            ["git", "-C", str(repo), "config", "--local",
+             "credential.https://github.com.username"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        assert username == "tmichon_microsoft"
+
+        helpers = sp.run(
+            ["git", "-C", str(repo), "config", "--local", "--get-all",
+             "credential.https://github.com.helper"],
+            capture_output=True, text=True, check=True,
+        ).stdout.splitlines()
+        # A leading empty entry resets any inherited (global/system) helper
+        # chain for this host before the pinned helper is appended.
+        assert helpers[0] == ""
+        assert "tmichon_microsoft" in helpers[-1]
+        assert "gh auth token" in helpers[-1]
+
+    def test_idempotent_on_repeated_calls(self, tmp_path: Path, monkeypatch):
+        """Re-pinning (e.g. a re-run of the backfill command) must not pile up
+        duplicate helper entries."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+
+        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
+        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
+
+        helpers = sp.run(
+            ["git", "-C", str(repo), "config", "--local", "--get-all",
+             "credential.https://github.com.helper"],
+            capture_output=True, text=True, check=True,
+        ).stdout.splitlines()
+        assert helpers == ["", helpers[-1]]
+
+    def test_pins_for_custom_host(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+
+        assert go.pin_git_credential(repo, "acct", host="github.example.com") is True
+        username = sp.run(
+            ["git", "-C", str(repo), "config", "--local",
+             "credential.https://github.example.com.username"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        assert username == "acct"
+
+    def test_pins_a_bare_repository(self, tmp_path: Path, monkeypatch):
+        """A bare anchor (agent-worktrees' own pattern -- a normal ``git
+        init``/``clone`` layout with ``core.bare`` forced ``true`` afterward,
+        so it can never be edited directly) has no work tree to be "inside",
+        but a plain fetch/pull can still run there directly (the
+        agent-machines self-update sweep does exactly this) and needs the
+        same pin."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "bare-repo"
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+        sp.run(["git", "-C", str(repo), "config", "core.bare", "true"], check=True)
+
+        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
+
+        username = sp.run(
+            ["git", "-C", str(repo), "config", "--local",
+             "credential.https://github.com.username"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        assert username == "tmichon_microsoft"
+
+
 class TestFetchTimeout:
     """#1709: a network ``fetch`` is bounded so an unreachable remote can't
     hang push-changes / create-pr / pr-status / sync indefinitely."""

@@ -716,6 +716,83 @@ def resolve_path(name: str, plat: str | None = None) -> str | None:
     return None
 
 
+@dataclass
+class CredentialPinResult:
+    """Outcome of one repo's credential-pin backfill attempt."""
+
+    name: str
+    status: str  # "pinned" | "skipped" | "needs_clarify" | "no_path" | "not_github"
+    login: str | None
+    detail: str
+
+
+def backfill_credential_pins(
+    name: str | None = None, *, plat: str | None = None,
+) -> list[CredentialPinResult]:
+    """Retrofit the repo-local git credential pin onto already-registered repos.
+
+    New registrations (``repos add``/``repos clone``/adopt) pin automatically
+    at registration time (see ``_clarify_registration_account`` in
+    ``__main__``); this covers repos registered *before* that existed, or
+    whose checkout predates a machine's account_map entry (dotfiles#537).
+
+    Restricts to ``name`` when given, else every registered repo. Skips
+    (rather than errors) a repo with no resolvable local path, a non-GitHub
+    remote, or an account that still needs interactive clarification (an
+    org-owned remote with no account_map/explicit override) -- those cases
+    require ``repos account set``/an operator choice, not a silent guess.
+    """
+    from . import git_ops
+
+    registry = read_registry()
+    entries = (
+        [registry.repos[name]] if name and name in registry.repos
+        else list(registry.repos.values())
+    )
+    results: list[CredentialPinResult] = []
+    for entry in entries:
+        if not entry.remote:
+            results.append(
+                CredentialPinResult(entry.name, "not_github", None, "no remote configured")
+            )
+            continue
+        path = entry.local_path(plat or _current_platform())
+        if not path or not Path(path).is_dir():
+            results.append(
+                CredentialPinResult(
+                    entry.name, "no_path", None, "no local checkout on this machine"
+                )
+            )
+            continue
+        res = resolve_registration_account(entry.remote, entry.account)
+        if res.owner is None:
+            results.append(
+                CredentialPinResult(entry.name, "not_github", None, "non-GitHub remote")
+            )
+            continue
+        if res.needs_clarify or not res.login:
+            results.append(
+                CredentialPinResult(
+                    entry.name, "needs_clarify", res.login,
+                    f"owner '{res.owner}' has no resolvable account -- "
+                    f"run: repos account set {res.owner} <login>",
+                )
+            )
+            continue
+        if git_ops.pin_git_credential(path, res.login):
+            results.append(
+                CredentialPinResult(entry.name, "pinned", res.login, f"pinned to {res.login}")
+            )
+        else:
+            results.append(
+                CredentialPinResult(
+                    entry.name, "skipped", res.login,
+                    "pin_git_credential failed (gh unavailable or not a git checkout)",
+                )
+            )
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Migration from the legacy ~/.git-repos registry
 # ---------------------------------------------------------------------------

@@ -489,6 +489,83 @@ def test_add_repo_persists_account(home: Path):
     assert repos.resolve_account(reg.repos["proj"]) == "host-acct"
 
 
+# --- backfill_credential_pins (dotfiles#537) ---------------------------------
+
+
+def test_backfill_pins_a_resolvable_repo(home: Path, tmp_path: Path):
+    work = tmp_path / "pin-me"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "pin-me", str(work), repo_class="worktree",
+        remote="https://github.com/example-operator/pin-me.git", plat="windows",
+    )
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+        results = repos.backfill_credential_pins(plat="windows")
+    assert len(results) == 1
+    assert results[0].name == "pin-me"
+    assert results[0].status == "pinned"
+    assert results[0].login == "example-operator"
+
+    username = subprocess.run(
+        ["git", "-C", str(work), "config", "--local",
+         "credential.https://github.com.username"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert username == "example-operator"
+
+
+def test_backfill_restricts_to_named_repo(home: Path, tmp_path: Path):
+    work_a = tmp_path / "a"
+    work_b = tmp_path / "b"
+    _init_repo(work_a, branch="main")
+    _init_repo(work_b, branch="main")
+    repos.add_repo("a", str(work_a), repo_class="worktree",
+                    remote="https://github.com/example-operator/a.git", plat="windows")
+    repos.add_repo("b", str(work_b), repo_class="worktree",
+                    remote="https://github.com/example-operator/b.git", plat="windows")
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+        results = repos.backfill_credential_pins("a", plat="windows")
+    assert [r.name for r in results] == ["a"]
+
+
+def test_backfill_skips_org_owner_needing_clarify(home: Path, tmp_path: Path):
+    work = tmp_path / "org-owned"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "org-owned", str(work), repo_class="worktree",
+        remote="https://github.com/github/org-owned.git", plat="windows",
+    )
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"):
+        results = repos.backfill_credential_pins(plat="windows")
+    assert results[0].status == "needs_clarify"
+    assert "repos account set" in results[0].detail
+
+
+def test_backfill_skips_non_github_remote(home: Path, tmp_path: Path):
+    work = tmp_path / "ado-repo"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "ado-repo", str(work), repo_class="worktree",
+        remote="https://my-org.visualstudio.com/x/_git/ado-repo", plat="windows",
+    )
+    results = repos.backfill_credential_pins(plat="windows")
+    assert results[0].status == "not_github"
+
+
+def test_backfill_skips_missing_local_path(home: Path, tmp_path: Path):
+    repos.add_repo(
+        "gone", str(tmp_path / "does-not-exist"), repo_class="worktree",
+        remote="https://github.com/example-operator/gone.git", plat="windows",
+    )
+    results = repos.backfill_credential_pins(plat="windows")
+    assert results[0].status == "no_path"
+
+
 # ---------------------------------------------------------------------------
 # Git hygiene: status + sync
 # ---------------------------------------------------------------------------
