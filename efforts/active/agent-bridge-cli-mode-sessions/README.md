@@ -211,25 +211,32 @@ mechanism CLI mode binds through.
 - [x] Add an explicit, per-request CLI/API surface to start a CLI-mode
       session locally first — proves the mechanism end-to-end before adding
       any remote venue.
-      **Done** — `agent-bridge live-sessions cli-mode launch --worktree-id ID
-      [--cwd DIR] [-- extra copilot args]`. A thin, testable
-      `_launch_cli_mode_session` helper: reserves the worktree (reusing
-      `create_cli_mode_reservation`, so a 409-active conflict surfaces
-      identically to `reserve`), then runs a standard `copilot` process in
-      the foreground with inherited stdio at `cwd` — no Session Host
-      pre-spawn, no new terminal/execution protocol. The already-existing,
-      unchanged `extension.mjs` ambient self-registration and the daemon's
-      Phase 2 server-side claim are what actually bind the resulting session;
-      this verb only automates the two manual steps (reserve, then run
-      `copilot`) an operator could already do by hand.
+      **Done, redesigned once** — `agent-bridge live-sessions cli-mode
+      launch --worktree-id ID [--seed TEXT] [--driver LABEL]
+      [--verify-timeout N]`. First cut (superseded, see journal) ran a bare
+      foreground `copilot` subprocess with no reattach at all. Corrected
+      after operator pushback ("no point moving to venues until we get
+      session-host and all that jazz working first"): `_launch_cli_mode_session`
+      now reserves the worktree, then hands off to **`agent-worktrees
+      embody`** — the existing DETACHED, mux-wrapped (tmux/psmux),
+      resume-aware, cross-platform interactive-`copilot` launch path a human
+      already gets from the ordinary worktree/mux flow — instead of
+      reinventing a second one. `embody` never attaches itself, so the call
+      returns promptly and the launched session survives the invoking
+      process exiting; an operator attaches with `tmux`/`psmux
+      attach-session -t wt-<id>` directly. No Session Host pre-spawn, no new
+      terminal/execution protocol — this is literally the same launch path
+      the local worktree/mux flow already uses, matching the vision's own
+      language ("rides... the same way the local worktree/mux launch path
+      already does").
 - [x] Confirm this is purely additive: no existing headless/ACP-driven default
       path changes behavior when CLI mode is never requested.
       **Confirmed** — the new code path lives entirely in a new helper +
       a new `cli-mode launch` argparse branch; `_connect_via_session_host`,
       `spawn_local`, `resolve_local_launch`, and every ACP-driven route are
-      untouched. Full suite: 2584 passed (4 new), 28 skipped, the same 3
-      pre-existing unrelated failures confirmed present without this change
-      too (bisected via `git stash`).
+      untouched. Full suite (post-redesign): 2585 passed (5 new), 28
+      skipped, the same 3 pre-existing unrelated failures confirmed present
+      without this change too (bisected via `git stash`).
 - [x] Mark a CLI-mode-bound session with its durable human-attended marker
       (for later recovery/observation guidance honesty).
       **Already covered by Phase 2** — `live_sessions.cli_mode` is set by the
@@ -269,15 +276,19 @@ mechanism CLI mode binds through.
       client, and is retired using the exact same code paths as an ordinary
       directly-spawned Session Host session — no CLI-mode-specific behavior
       divergence.
-      **[x] Closed with a live clean-room pass** — see the 2026-09-19
-      "Phase 3 live validation" journal entry: a real, genuinely interactive
-      `copilot` process launched via `cli-mode launch` inside a disposable
-      Docker clean room registered against the pre-existing reservation,
+      **[x] Closed with a live clean-room pass, using the redesigned
+      `embody`-backed launch** — see the 2026-09-20 "Phase 3 redesign:
+      genuine mux/reattach via `agent-worktrees embody`" journal entry. A
+      real, genuinely interactive `copilot` process launched via `cli-mode
+      launch` inside a disposable Docker clean room ran in an actual
+      **detached tmux session** (`wt-<id>`), registered against the
+      pre-existing reservation, was observed live via `tmux capture-pane`
+      (proving a real, reattachable TUI — not a fire-and-forget subprocess),
       showed `cli_mode: true` to a second independent `agent-bridge
-      live-sessions list` call while still live, and cleanly `DELETE`d
-      itself on `/exit` — all through the same live-sessions routes any
-      ordinary session uses. `test_cli_mode_reservations.py` (23 cases) and
-      `test_cli_mode_launch.py` (4 cases, fakes) cover the deterministic
+      live-sessions list` call while still live, and cleanly tore down (both
+      the bridge registration `DELETE` and the tmux session itself) on
+      `/exit`. `test_cli_mode_reservations.py` (23 cases) and
+      `test_cli_mode_launch.py` (5 cases, fakes) cover the deterministic
       layer underneath.
 - [ ] Two concurrent CLI-mode allocation attempts for the same cwd resolve
       through the existing single-current-session-per-worktree gate (reuse,
@@ -308,7 +319,83 @@ from the host's).
 
 ## Journal
 
-### 2026-09-19 — Phase 3 live validation (Docker clean room)
+### 2026-09-20 — Phase 3 redesign: genuine mux/reattach via `agent-worktrees embody`
+
+Operator pushback after Phase 3's first cut and its live validation: "no
+point moving to venues until we get session-host and all that jazz working
+first." Right call — the first `_launch_cli_mode_session` ran a **bare
+foreground `subprocess.run`** with inherited stdio: if the invoking terminal
+died, the session was just gone. No reattach, no mux, despite the vision's
+own language calling the launched process a "muxed" CLI process and saying
+CLI mode should ride "the same way the local worktree/mux launch path
+already does." The prior live validation (previous journal entry, below)
+only "worked" because I manually wrapped the test in `tmux` myself, outside
+the actual code path — that was validating my test harness, not the shipped
+mechanism.
+
+Investigated how `agent-worktrees` already solves exactly this problem for
+ordinary local sessions: **`agent-worktrees embody --worktree-id <id>`**
+(`plugins/agent-worktrees/src/agent_worktrees/__main__.py`'s `cmd_embody`) is
+the existing programmatic, agent-facing entry point — spawns (or resumes) a
+**DETACHED** `wt-<id>` mux session (tmux on POSIX, `psmux` on Windows via
+`sessions._mux_bin`), running the SAME launch command a human gets from the
+worktree/mux flow, and never attaches itself. The bridge-side truth (Copilot
+self-registers via `extension.mjs`) and the mux-side truth (`wt-<id>` exists)
+are two independently-verifiable facts joined only by worktree id — exactly
+the shape Phase 2's reservation already assumes.
+
+Redesigned `_launch_cli_mode_session` to reserve, then shell out to `embody`
+(`--worktree-id`, `--json`, `--driver` default `"cli-mode"`, optional
+`--seed`, `--verify-timeout`) instead of spawning `copilot` directly. This is
+a ~10-line change that deletes an entire (wrong) execution path rather than
+adding one: no bridge-side mux/attach logic, no cross-plugin Python import
+(kept the existing shell-out convention other cross-plugin calls in this
+harness already use) — `embody` owns 100% of the mux mechanics, resume
+semantics, and cross-platform behavior. Reattach needs zero new bridge
+surface: an operator runs `tmux`/`psmux attach-session -t wt-<id>` directly,
+exactly as the ordinary worktree/mux flow already documents.
+
+Rewrote `tests/test_cli_mode_launch.py` (5 cases: reserve-then-embody
+argv/flags, seed/driver/verify-timeout forwarding, 409 conflict propagation
+without ever invoking `embody`, non-zero embody exit code, non-JSON embody
+stdout tolerance) — all fakes, no real `agent-worktrees`/`copilot`. Full
+suite: 2585 passed (5 new, net +1 over the prior cut), 28 skipped, same 3
+pre-existing unrelated failures (re-bisected). `module-size-baseline.json`
+widened again for `__main__.py` (6837 → 6865).
+
+**Re-ran the live clean-room validation against the redesign** (fresh
+container, same recipe as before) and hit a real, useful surprise:
+`agent-worktrees`'s own **self-provisioning-on-first-use** path is
+deliberately "lean" — `bash scripts/install.sh provision` explicitly logs
+"tools only, no launcher/hooks" and skips `deploy_wrappers` (the step that
+deploys `launch-command.sh`/`default-setup.sh` into
+`~/.agent-worktrees/scripts/`). `embody` failed with a plain "No such file
+or directory" until the **full** `bash scripts/install.sh install` ran once
+for the project (deploys wrappers, hooks, session scripts). This is not a
+bug in this effort's code -- it's a real prerequisite of `agent-worktrees`'s
+own lean/full install split that a from-scratch clean-room recipe has to
+satisfy explicitly; a normally-onboarded harness would already have run full
+`install`. Noted here so a future clean-room scenario for this flow bakes it
+in rather than rediscovering it.
+
+With the full install present, the redesigned `launch` produced a **real
+detached tmux session** (`wt-<id>`), confirmed live via `tmux capture-pane`
+(an actual rendered Copilot TUI, "agent-bridge live-session extension
+loaded"), claimed the reservation, showed `cli_mode: true` / `driven_by:
+"cli-mode"` to an independent `agent-bridge live-sessions list` call, and on
+`/exit` both deregistered from the bridge (`DELETE`) **and** tore down the
+tmux session itself (`no server running` -- the session was truly gone, not
+merely detached). This is the validation Phase 3 actually needed: reattach
+is real, not simulated by the test.
+
+### 2026-09-19 — Phase 3 live validation (Docker clean room, superseded design)
+
+**Superseded by the redesign above** -- this entry validated the FIRST cut
+of `_launch_cli_mode_session` (bare foreground subprocess), which has since
+been replaced by the `agent-worktrees embody`-backed design. Kept for
+history; the finding about `copilot -p` not loading extensions still holds
+and was the reason this session used `tmux` manually below -- exactly the
+gap the redesign closes properly.
 
 Ran the genuinely live check the unit tests couldn't: a disposable clean-room
 container (`tools/clean-room`'s `base` image, built with the internal npm
@@ -350,7 +437,10 @@ Validation Plan item honestly, with real evidence rather than a claimed pass.
 Container torn down after (`docker rm -f`); nothing persisted outside the
 disposable clean room.
 
-### 2026-09-19 — Phase 3: opt-in local launch surface
+### 2026-09-19 — Phase 3: opt-in local launch surface (superseded design)
+
+**Superseded by the 2026-09-20 redesign above** (bare foreground subprocess
+→ `agent-worktrees embody`-backed genuine mux/reattach). Kept for history.
 
 Added `agent-bridge live-sessions cli-mode launch --worktree-id ID [--cwd
 DIR] [-- extra copilot args]`. Deliberately the thinnest possible surface: a

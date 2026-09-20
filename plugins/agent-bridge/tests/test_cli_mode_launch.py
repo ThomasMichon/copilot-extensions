@@ -3,14 +3,17 @@
 
 ``_launch_cli_mode_session`` is the testable core of
 ``agent-bridge live-sessions cli-mode launch``: it reserves the worktree's
-next CLI-mode session (Phase 2), then runs a standard, muxed, interactive
-``copilot`` process bound to it -- foreground, inherited stdio, no new
-execution or terminal protocol. These tests fake both the bridge client and
-the process runner so no real HTTP server or ``copilot`` process is needed.
+next CLI-mode session (Phase 2), then hands off to ``agent-worktrees
+embody`` -- the existing DETACHED, mux-wrapped (tmux/psmux), resume-aware,
+cross-platform interactive-``copilot`` launch path -- rather than a bare
+foreground subprocess, so the launched session gets genuine reattach for
+free. These tests fake both the bridge client and the process runner so no
+real HTTP server, ``agent-worktrees``, or ``copilot`` process is needed.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -20,8 +23,9 @@ from agent_bridge.client import BridgeClientError
 
 
 class _FakeCompletedProcess:
-    def __init__(self, returncode: int) -> None:
+    def __init__(self, returncode: int, stdout: str = "") -> None:
         self.returncode = returncode
+        self.stdout = stdout
 
 
 class _FakeClient:
@@ -53,64 +57,85 @@ class _FakeClient:
         return self._reservation
 
 
-def test_launch_reserves_then_runs_copilot_in_cwd() -> None:
+def _embody_stdout(**fields: Any) -> str:
+    payload = {"ok": True, "worktree_id": "wt-A", "session": "wt-wt-A", "created": True}
+    payload.update(fields)
+    return json.dumps(payload)
+
+
+def test_launch_reserves_then_embodies_the_worktree() -> None:
     client = _FakeClient(
         reservation={"reservation_id": "r1", "claimed_by_session_id": None},
         final_reservation={"reservation_id": "r1", "claimed_by_session_id": "sid-1"},
     )
     seen_argv: list[list[str]] = []
-    seen_kwargs: list[dict[str, Any]] = []
 
     def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
         seen_argv.append(list(argv))
-        seen_kwargs.append(kwargs)
-        return _FakeCompletedProcess(0)
+        return _FakeCompletedProcess(0, stdout=_embody_stdout())
 
-    outcome = _launch_cli_mode_session(
-        client, "wt-A", "/some/worktree", run=fake_run,
-    )
+    outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
 
     assert client.create_calls == [("wt-A", 300.0)]
-    assert seen_kwargs[0]["cwd"] == "/some/worktree"
-    assert seen_argv[0][0]  # resolved copilot executable, non-empty
+    argv = seen_argv[0]
+    assert argv[:4] == ["agent-worktrees", "embody", "--worktree-id", "wt-A"]
+    assert "--json" in argv
+    assert "--driver" in argv and "cli-mode" in argv  # default driver stamp
+    assert outcome["session"] == "wt-wt-A"
     assert outcome["exit_code"] == 0
-    # The reservation reported back reflects the post-launch (claimed) state,
+    # The reservation reported back reflects the post-embody (claimed) state,
     # proving the daemon's ordinary registration/claim path (Phase 2) is what
-    # this surface relies on rather than duplicating it.
+    # binds the resulting session rather than this surface duplicating it.
     assert outcome["reservation"]["claimed_by_session_id"] == "sid-1"
 
 
-def test_launch_forwards_extra_copilot_args() -> None:
+def test_launch_forwards_seed_and_driver_and_verify_timeout() -> None:
     client = _FakeClient(reservation={"reservation_id": "r1"})
     seen_argv: list[list[str]] = []
 
     def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
         seen_argv.append(list(argv))
-        return _FakeCompletedProcess(0)
+        return _FakeCompletedProcess(0, stdout=_embody_stdout())
 
     _launch_cli_mode_session(
-        client, "wt-A", "/w", copilot_args=["--resume", "abc"], run=fake_run,
+        client, "wt-A", driver="my-agent", seed="hello there",
+        verify_timeout=45.0, run=fake_run,
     )
 
-    assert seen_argv[0][-2:] == ["--resume", "abc"]
+    argv = seen_argv[0]
+    assert "--seed" in argv and "hello there" in argv
+    assert "--driver" in argv and "my-agent" in argv
+    assert "--verify-timeout" in argv and "45.0" in argv
 
 
 def test_launch_propagates_active_reservation_conflict() -> None:
     client = _FakeClient(create_error=BridgeClientError(409, "active"))
 
     def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
-        raise AssertionError("copilot must not be spawned when reserve fails")
+        raise AssertionError("embody must not be invoked when reserve fails")
 
     with pytest.raises(BridgeClientError) as excinfo:
-        _launch_cli_mode_session(client, "wt-A", "/w", run=fake_run)
+        _launch_cli_mode_session(client, "wt-A", run=fake_run)
     assert excinfo.value.status == 409
 
 
-def test_launch_surfaces_nonzero_copilot_exit_code() -> None:
+def test_launch_surfaces_nonzero_embody_exit_code() -> None:
     client = _FakeClient(reservation={"reservation_id": "r1"})
 
     def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
-        return _FakeCompletedProcess(7)
+        return _FakeCompletedProcess(3, stdout="")
 
-    outcome = _launch_cli_mode_session(client, "wt-A", "/w", run=fake_run)
-    assert outcome["exit_code"] == 7
+    outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
+    assert outcome["exit_code"] == 3
+    assert outcome["session"] is None
+
+
+def test_launch_tolerates_non_json_embody_stdout() -> None:
+    client = _FakeClient(reservation={"reservation_id": "r1"})
+
+    def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
+        return _FakeCompletedProcess(1, stdout="not json")
+
+    outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
+    assert outcome["embody"] == {}
+    assert outcome["session"] is None

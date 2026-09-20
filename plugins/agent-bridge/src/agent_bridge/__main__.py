@@ -2173,40 +2173,62 @@ def _live_session_summary_line(s: dict[str, Any]) -> str:
 def _launch_cli_mode_session(
     client: Any,
     worktree_id: str,
-    cwd: str,
     *,
     ttl_seconds: float = 300.0,
-    copilot_args: list[str] | None = None,
+    driver: str | None = "cli-mode",
+    seed: str | None = None,
+    verify_timeout: float = 30.0,
+    embody_bin: str = "agent-worktrees",
     run: Any = None,
 ) -> dict[str, Any]:
-    """Reserve ``worktree_id``'s next CLI-mode session, then run a standard,
-    muxed, interactive ``copilot`` process bound to it (Phase 3, the opt-in
-    local launch surface).
+    """Reserve ``worktree_id``'s next CLI-mode session, then hand off to
+    ``agent-worktrees embody`` -- the existing DETACHED, mux-wrapped
+    (tmux/psmux), resume-aware, cross-platform interactive-``copilot``
+    launch path -- rather than a bare foreground subprocess (Phase 3, the
+    opt-in local launch surface).
 
-    This is deliberately a thin convenience over two steps an operator could
-    run by hand -- ``cli-mode reserve`` then launching ``copilot`` themselves
-    -- so a single command proves the whole local mechanism end-to-end:
-    reserve, launch, the CLI extension's ordinary (unchanged) ambient
-    self-registration, and the daemon's server-side claim (Phase 2). No new
-    execution or terminal protocol is introduced -- ``copilot`` runs directly
-    in the invoking terminal (inherited stdio), exactly as an operator would
-    run it unassisted. Raises ``BridgeClientError`` (status 409) if
-    ``worktree_id`` already holds an active reservation, exactly like
+    ``embody`` never attaches the invoking terminal itself: it spawns (or
+    resumes) a durable ``wt-<id>`` mux session and returns once it exists
+    (``--verify-timeout``), so this call returns promptly and the launched
+    session survives this process exiting -- genuine reattach, not a
+    foreground-spawn dead end. An operator (or Neuron Forge/Picker) attaches
+    with the platform mux binary directly (``tmux``/``psmux``
+    ``attach-session -t wt-<worktree_id>``); no bridge-side attach surface is
+    needed. This deliberately reuses the SAME launch path a human already
+    gets from the worktree/mux flow rather than inventing a second one --
+    only the CLI-mode reservation (so the daemon's Phase 2 server-side claim
+    binds the resulting session) is new here. The CLI extension's ambient
+    self-registration is unchanged. Raises ``BridgeClientError`` (status 409)
+    if ``worktree_id`` already holds an active reservation, exactly like
     ``cli-mode reserve``.
     """
-    from .transport import _find_copilot, _wrap_batch_for_windows
-
     reservation = client.create_cli_mode_reservation(
         worktree_id, ttl_seconds=ttl_seconds,
     )
-    argv = [_find_copilot(), *(copilot_args or [])]
-    env = os.environ.copy()
-    argv = _wrap_batch_for_windows(argv, env)
+    argv = [
+        embody_bin, "embody", "--worktree-id", worktree_id, "--json",
+        "--verify-timeout", str(verify_timeout),
+    ]
+    if driver:
+        argv += ["--driver", driver]
+    if seed:
+        argv += ["--seed", seed]
     runner = run or subprocess.run
-    result = runner(argv, cwd=cwd, env=env)
-    exit_code = getattr(result, "returncode", None)
+    result = runner(argv, capture_output=True, text=True)
+    embody_out: dict[str, Any] = {}
+    stdout = getattr(result, "stdout", None)
+    if stdout:
+        try:
+            embody_out = json.loads(stdout)
+        except (json.JSONDecodeError, TypeError):
+            embody_out = {}
     final = client.get_cli_mode_reservation(worktree_id) or reservation
-    return {"reservation": final, "exit_code": exit_code}
+    return {
+        "reservation": final,
+        "embody": embody_out,
+        "session": embody_out.get("session"),
+        "exit_code": getattr(result, "returncode", None),
+    }
 
 
 def _cmd_live_sessions(args: argparse.Namespace) -> None:
@@ -2310,15 +2332,13 @@ def _cmd_live_sessions(args: argparse.Namespace) -> None:
             print(f"released {removed} reservation(s) for {worktree_id}")
             return
         if cli_mode_action == "launch":
-            cwd = getattr(args, "cwd", None) or os.getcwd()
-            copilot_args = getattr(args, "copilot_args", None) or []
-            if copilot_args and copilot_args[0] == "--":
-                copilot_args = copilot_args[1:]
             try:
                 outcome = _launch_cli_mode_session(
-                    client, worktree_id, cwd,
+                    client, worktree_id,
                     ttl_seconds=getattr(args, "ttl_seconds", 300.0),
-                    copilot_args=copilot_args,
+                    driver=getattr(args, "driver", None) or "cli-mode",
+                    seed=getattr(args, "seed", None),
+                    verify_timeout=getattr(args, "verify_timeout", 30.0),
                 )
             except BridgeClientError as exc:
                 if exc.status == 409:
@@ -2337,9 +2357,11 @@ def _cmd_live_sessions(args: argparse.Namespace) -> None:
             reservation = outcome.get("reservation") or {}
             claimed = reservation.get("claimed_by_session_id")
             state = f"claimed by {claimed}" if claimed else "pending, unclaimed"
+            session_name = outcome.get("session") or "?"
             print(
-                f"CLI-mode session for {worktree_id} exited "
-                f"(code={outcome.get('exit_code')}); reservation {state}"
+                f"CLI-mode session for {worktree_id}: mux session "
+                f"{session_name!r} (reservation {state}). Attach with "
+                f"tmux/psmux attach-session -t {session_name}."
             )
             return
         print(
@@ -6191,21 +6213,27 @@ def build_parser() -> argparse.ArgumentParser:
     live_cli_mode_release_p.set_defaults(func=_cmd_live_sessions)
     live_cli_mode_launch_p = live_cli_mode_sub.add_parser(
         "launch",
-        help="Reserve, then run a standard, muxed, interactive `copilot` "
-             "bound to this worktree (foreground, inherited stdio) -- proves "
-             "the local CLI-mode mechanism end-to-end (Phase 3)",
+        help="Reserve, then hand off to `agent-worktrees embody` -- a "
+             "DETACHED, mux-wrapped (tmux/psmux), reattachable interactive "
+             "`copilot` bound to this worktree -- proving the CLI-mode "
+             "mechanism end-to-end with genuine reattach (Phase 3)",
     )
     live_cli_mode_launch_p.add_argument("--worktree-id", required=True)
-    live_cli_mode_launch_p.add_argument(
-        "--cwd", help="Working directory to launch copilot in (default: cwd)",
-    )
     live_cli_mode_launch_p.add_argument(
         "--ttl-seconds", type=float, default=300.0,
         help="Reservation lifetime before it's reclaimable (default 300)",
     )
     live_cli_mode_launch_p.add_argument(
-        "copilot_args", nargs=argparse.REMAINDER,
-        help="Extra args forwarded to `copilot` after `--`",
+        "--driver", default="cli-mode",
+        help="Forwarded to `embody --driver` (stamps the 'driven by' "
+             "banner; default 'cli-mode')",
+    )
+    live_cli_mode_launch_p.add_argument(
+        "--seed", help="Forwarded to `embody --seed` (first interactive turn)",
+    )
+    live_cli_mode_launch_p.add_argument(
+        "--verify-timeout", type=float, default=30.0,
+        help="Forwarded to `embody --verify-timeout` (default 30)",
     )
     live_cli_mode_launch_p.set_defaults(func=_cmd_live_sessions)
     live_cli_mode_p.set_defaults(func=_cmd_live_sessions)
