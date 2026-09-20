@@ -589,6 +589,52 @@ def test_is_https_remote():
     assert repos.is_https_remote("") is False
 
 
+def test_derive_https_host():
+    assert repos.derive_https_host("https://github.com/o/r.git") == "github.com"
+    assert repos.derive_https_host("https://www.github.com/o/r.git") == "www.github.com"
+    assert repos.derive_https_host("https://ghe.example.com/o/r.git") == "ghe.example.com"
+    assert repos.derive_https_host("git@github.com:o/r.git") is None
+    assert repos.derive_https_host("") is None
+
+
+def test_backfill_distinguishes_http_from_ssh_remote(home: Path, tmp_path: Path):
+    """is_https_remote() rejects both SSH and plain http:// remotes, but the
+    backfill report must never claim 'SSH remote' for an unencrypted HTTP
+    checkout -- distinguish the two skip reasons."""
+    work = tmp_path / "http-repo"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "http-repo", str(work), repo_class="worktree",
+        remote="http://github.com/example-operator/http-repo.git", plat="windows",
+    )
+    results = repos.backfill_credential_pins(plat="windows")
+    assert results[0].status == "not_https"
+
+
+def test_backfill_pins_with_derived_host_not_hardcoded_github_com(home: Path, tmp_path: Path):
+    """A www.github.com checkout must be pinned under credential.https://
+    www.github.com, not the hardcoded 'github.com' default -- git's
+    credential store matches by literal hostname."""
+    work = tmp_path / "www-repo"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "www-repo", str(work), repo_class="worktree",
+        remote="https://www.github.com/example-operator/www-repo.git", plat="windows",
+    )
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops._active_gh_account", return_value=None):
+        results = repos.backfill_credential_pins(plat="windows")
+    assert results[0].status == "pinned"
+    username = subprocess.run(
+        ["git", "-C", str(work), "config", "--local",
+         "credential.https://www.github.com.username"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert username == "example-operator"
+
+
 def test_backfill_unknown_name_never_falls_back_to_all(home: Path, tmp_path: Path):
     """A typo in the requested name must report 'not found', never silently
     expand to every registered repo."""
@@ -758,6 +804,60 @@ def test_clone_repo_no_extra_args_for_same_account(home: Path, tmp_path: Path):
         "git", "clone", "https://github.com/example-operator/cloned2.git",
         str(home_srcroot / "cloned2"),
     ]
+
+
+def test_clone_repo_redacts_extraheader_from_stderr_on_failure(home: Path, tmp_path: Path):
+    """A failed clone's stderr must never surface the injected token, even
+    if git itself echoes the -c argument back (e.g. with tracing enabled)."""
+    home_srcroot = tmp_path / "src"
+    repos.set_srcroot(str(home_srcroot), plat="windows")
+
+    def fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(
+            argv, 128,
+            "", "fatal: could not clone (args were: "
+                "http.extraheader=AUTHORIZATION: basic FAKESECRET)",
+        )
+
+    with patch("agent_worktrees.repos._current_platform", return_value="windows"), \
+         patch("agent_worktrees.repos.subprocess.run", side_effect=fake_run), \
+         patch(
+             "agent_worktrees.git_ops._auth_config_args_for_url",
+             return_value=["-c", "http.extraheader=AUTHORIZATION: basic FAKESECRET"],
+         ), \
+         patch("agent_worktrees.output.err") as mock_err:
+        entry = repos.clone_repo("https://github.com/example-operator/redact-test.git")
+
+    assert entry is None
+    logged = " ".join(str(c) for c in mock_err.call_args_list)
+    assert "FAKESECRET" not in logged
+    assert "<redacted>" in logged
+
+
+def test_clone_repo_redacts_authorization_header_trace_from_stderr(home: Path, tmp_path: Path):
+    """With GIT_TRACE_CURL/GIT_CURL_VERBOSE, git can echo the literal
+    resolved 'Authorization: Basic <token>' request header into stderr,
+    independent of the -c argv form -- that must be redacted too."""
+    home_srcroot = tmp_path / "src"
+    repos.set_srcroot(str(home_srcroot), plat="windows")
+
+    def fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(
+            argv, 128, "",
+            "=> Send header: Authorization: Basic eC1hY2Nlc3MtdG9rZW46c2VjcmV0\r\n"
+            "fatal: could not clone",
+        )
+
+    with patch("agent_worktrees.repos._current_platform", return_value="windows"), \
+         patch("agent_worktrees.repos.subprocess.run", side_effect=fake_run), \
+         patch("agent_worktrees.git_ops._auth_config_args_for_url", return_value=[]), \
+         patch("agent_worktrees.output.err") as mock_err:
+        entry = repos.clone_repo("https://github.com/example-operator/trace-redact.git")
+
+    assert entry is None
+    logged = " ".join(str(c) for c in mock_err.call_args_list)
+    assert "eC1hY2Nlc3MtdG9rZW46c2VjcmV0" not in logged
+    assert "<redacted>" in logged
 
 
 # ---------------------------------------------------------------------------

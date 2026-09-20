@@ -1126,9 +1126,15 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
     outside ``[A-Za-z0-9_.-]`` (the helper is a ``!``-prefixed shell script;
     a stray quote/backtick/``$``/separator in either would either break the
     single-quoting around ``login`` or inject a command that runs whenever
-    git invokes this helper -- reject rather than attempt to escape), or
-    ``gh`` is not on ``PATH`` -- callers treat this as a best-effort
-    convenience, not a required step.
+    git invokes this helper -- reject rather than attempt to escape), ``gh``
+    is not on ``PATH``, or ``login`` **is** the currently active ``gh``
+    account. That last case mirrors :func:`_auth_config_args`'s own
+    same-account skip (#900): when the login is already active, the
+    inherited default credential helper (GCM, a vault-backed helper, ...)
+    already authenticates correctly, and forcing it to a ``gh auth
+    token``-backed helper here could turn a working plain push into a 403
+    if that OAuth token happens to lack push scope -- callers treat this as
+    a best-effort convenience, not a required step.
     """
     _safe = re.compile(r"[A-Za-z0-9_.-]+")
     # ``fullmatch`` (not ``match``): with a trailing ``$`` anchor, ``match``
@@ -1140,6 +1146,9 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
         return False
     path = Path(repo_path)
     if not path.is_dir() or shutil.which("gh") is None:
+        return False
+    active = _active_gh_account()
+    if active and active.casefold() == login.casefold():
         return False
     env = repository_identity_env()
     try:

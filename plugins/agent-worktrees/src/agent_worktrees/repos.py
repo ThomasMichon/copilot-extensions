@@ -367,6 +367,24 @@ def is_https_remote(remote: str) -> bool:
     return remote.strip().lower().startswith("https://")
 
 
+def derive_https_host(remote: str) -> str | None:
+    """Extract the exact hostname from an ``https://`` remote, or None.
+
+    Git's credential store is host-specific (``credential.https://<host>``
+    matches by literal hostname), so a checkout on ``www.github.com`` needs
+    ``credential.https://www.github.com`` -- a pin hardcoded to
+    ``github.com`` never matches it, even though :func:`github_owner`
+    accepts the ``www.`` form when *resolving the account*. Callers should
+    pass this (falling back to ``pin_git_credential``'s ``"github.com"``
+    default only when it returns ``None``) so the pinned host always
+    matches the checkout's actual remote.
+    """
+    if not is_https_remote(remote):
+        return None
+    m = re.match(r"https://(?:[^@/]+@)?([^/:]+)", remote.strip())
+    return m.group(1) if m else None
+
+
 def github_slug(remote: str) -> str | None:
     """Extract the ``owner/name`` slug from a github.com remote URL.
 
@@ -662,7 +680,8 @@ def _best_effort_pin_credential(entry: RepoEntry, plat: str) -> None:
         if not path:
             return
         from . import git_ops
-        git_ops.pin_git_credential(path, res.login)
+        host = derive_https_host(entry.remote) or "github.com"
+        git_ops.pin_git_credential(path, res.login, host=host)
     except Exception:
         pass
 
@@ -740,6 +759,15 @@ def clone_repo(
         for arg in extra_args:
             if arg.startswith("http.extraheader="):
                 text = text.replace(arg, "http.extraheader=<redacted>")
+        # With GIT_TRACE_CURL/GIT_CURL_VERBOSE set in the ambient
+        # environment, git can additionally echo the resolved request
+        # header itself (e.g. "=> Send header: Authorization: Basic
+        # <base64>") straight into stderr, independent of the -c argv
+        # form above -- redact that pattern too.
+        text = re.sub(
+            r"(Authorization:\s*(?:Basic|Bearer)\s+)\S+", r"\1<redacted>",
+            text, flags=re.IGNORECASE,
+        )
         return text
 
     try:
@@ -805,7 +833,7 @@ class CredentialPinResult:
 
     name: str
     # "pinned" | "skipped" | "needs_clarify" | "no_path" | "not_github"
-    # | "not_registered" | "ssh_remote"
+    # | "not_registered" | "ssh_remote" | "not_https"
     status: str
     login: str | None
     detail: str
@@ -849,12 +877,26 @@ def backfill_credential_pins(
             )
             continue
         if not is_https_remote(entry.remote):
-            results.append(
-                CredentialPinResult(
-                    entry.name, "ssh_remote", None,
-                    "SSH remote -- the pin only affects HTTPS transport",
+            # An SSH remote (git@host:owner/repo, ssh://...) and a plain
+            # http:// remote both fail is_https_remote (see its docstring),
+            # but for different reasons -- distinguish them so the report
+            # never claims "SSH remote" for a checkout that is, in fact,
+            # unencrypted HTTP.
+            is_ssh = bool(re.match(r"^(?:ssh://|git@)", entry.remote.strip(), re.IGNORECASE))
+            if is_ssh:
+                results.append(
+                    CredentialPinResult(
+                        entry.name, "ssh_remote", None,
+                        "SSH remote -- the pin only affects HTTPS transport",
+                    )
                 )
-            )
+            else:
+                results.append(
+                    CredentialPinResult(
+                        entry.name, "not_https", None,
+                        "non-HTTPS remote -- the pin only affects HTTPS transport",
+                    )
+                )
             continue
         path = entry.local_path(plat or _current_platform())
         if not path or not Path(path).is_dir():
@@ -879,7 +921,8 @@ def backfill_credential_pins(
                 )
             )
             continue
-        if git_ops.pin_git_credential(path, res.login):
+        host = derive_https_host(entry.remote) or "github.com"
+        if git_ops.pin_git_credential(path, res.login, host=host):
             results.append(
                 CredentialPinResult(entry.name, "pinned", res.login, f"pinned to {res.login}")
             )
@@ -887,7 +930,8 @@ def backfill_credential_pins(
             results.append(
                 CredentialPinResult(
                     entry.name, "skipped", res.login,
-                    "pin_git_credential failed (gh unavailable or not a git checkout)",
+                    "pin not applied (already the active gh account, gh "
+                    "unavailable, or not a git checkout)",
                 )
             )
     return results

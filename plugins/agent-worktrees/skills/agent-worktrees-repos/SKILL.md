@@ -317,8 +317,19 @@ or whose account only became resolvable later (a fresh `account_map` entry),
 don't automatically get the `.git/config` override above. Run
 `repos pin-credentials [name] [--all] [--json]` to retrofit it: omit the name
 (or pass `--all`) to sweep every registered repo, or name one to restrict.
-Reports `pinned` / `needs_clarify` (resolve with `repos account set` first) /
-`no_path` / `not_github` / `not_registered` per repo.
+Reports one of:
+
+- `pinned` — the override was written.
+- `needs_clarify` — resolve with `repos account set <owner> <login>` first.
+- `skipped` — `gh` unavailable, not a git checkout, **or** `login` is
+  already the active `gh` account (the inherited default helper already
+  works there; forcing this override risks a scope-limited OAuth token
+  turning a working push into a 403).
+- `no_path` — no local checkout on this machine.
+- `not_github` / `not_registered` — non-GitHub remote / unknown repo name.
+- `ssh_remote` / `not_https` — the checkout's remote is SSH, or plain
+  `http://`; the pin only ever affects `credential.https://<host>` and is a
+  no-op for either transport.
 
 ### Accounts catalog (`accounts.yaml`)
 

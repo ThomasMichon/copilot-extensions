@@ -458,6 +458,35 @@ class TestPinGitCredential:
         sp.run(["git", "init", "-q", str(repo)], check=True)
         assert go.pin_git_credential(repo, "tmichon_microsoft") is True
 
+    def test_skips_when_login_is_active_account(self, tmp_path: Path, monkeypatch):
+        """#900's own rationale, reapplied here: when login IS the active gh
+        account, the inherited default helper already authenticates
+        correctly -- forcing a gh-auth-token-backed helper risks a
+        scope-limited OAuth token turning a working plain push into a 403."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "SomeUser")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+        # Case-insensitive match against the active account.
+        assert go.pin_git_credential(repo, "someuser") is False
+        result = sp.run(
+            ["git", "-C", str(repo), "config", "--local",
+             "credential.https://github.com.username"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode != 0  # never written
+
+    def test_pins_when_login_differs_from_active_account(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "SomeUser")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+        assert go.pin_git_credential(repo, "other-user") is True
+
     def test_noop_when_gh_unavailable(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr(go.shutil, "which", lambda _: None)
         assert go.pin_git_credential(tmp_path, "someone") is False

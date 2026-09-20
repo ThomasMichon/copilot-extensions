@@ -20411,7 +20411,8 @@ def _clarify_registration_account(
             # from 'repos add'); Path(path).is_dir() is always False for
             # that literal string, which would otherwise make the pin
             # silently no-op right after the operator just chose an account.
-            git_ops.pin_git_credential(os.path.expanduser(path), choice)
+            host = repos.derive_https_host(remote) or "github.com"
+            git_ops.pin_git_credential(os.path.expanduser(path), choice, host=host)
         except Exception:
             pass
 
@@ -20800,12 +20801,13 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             for r in results:
                 if r.status == "pinned":
                     output.ok(f"{r.name}: {r.detail}")
-                elif r.status in ("no_path", "not_github", "ssh_remote"):
+                elif r.status in ("no_path", "not_github", "ssh_remote", "not_https"):
                     output.info(f"{r.name}: {r.status} ({r.detail})")
                 else:
                     output.warn(f"{r.name}: {r.detail}")
         had_error = any(
-            r.status not in ("pinned", "no_path", "not_github", "ssh_remote") for r in results
+            r.status not in ("pinned", "no_path", "not_github", "ssh_remote", "not_https")
+            for r in results
         )
         return 1 if had_error else 0
 
