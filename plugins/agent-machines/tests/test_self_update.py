@@ -315,6 +315,75 @@ def test_refresh_dtssh_mesh_error_when_alias_unreachable(monkeypatch):
     assert "host-b" in step.detail
 
 
+def test_refresh_dtssh_mesh_uses_same_cell_agent_ssh_prefix(monkeypatch, tmp_path):
+    cell = tmp_path / "marketplaces" / "test-cell"
+    root = cell / "plugins" / "agent-machines"
+    root.mkdir(parents=True)
+    (cell / "plugins" / "agent-ssh").mkdir()
+    own = {"cellRoot": str(cell), "pluginRoot": str(root)}
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
+    monkeypatch.setenv("AGENT_RT_ROOT", str(root))
+    monkeypatch.setattr(self_update._peer_launch, "validate_owner", lambda *args: own)
+    monkeypatch.setattr(
+        self_update.shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
+    )
+    expected_prefix = self_update._peer_launch.launch_prefix(
+        "agent-machines", Path(own["pluginRoot"]),
+        str(Path(own["pluginRoot"]) / "install.json"), "agent-ssh",
+    )
+    calls = []
+
+    def runner(argv, *, cwd=None, timeout=0):
+        calls.append(list(argv))
+        payload = json.dumps({"ok": True, "machines_yaml": None, "detail": "no mesh", "aliases": []})
+        return self_update.CommandResult(list(argv), 0, payload, "")
+
+    step = self_update.refresh_dtssh_mesh(runner=runner)
+    assert step.status == "skipped"
+    assert calls[0][:len(expected_prefix)] == expected_prefix
+    assert calls[0][len(expected_prefix):] == ["refresh-mesh", "--json"]
+
+
+def test_refresh_dtssh_mesh_skips_without_same_cell_agent_ssh(monkeypatch, tmp_path):
+    cell = tmp_path / "marketplaces" / "test-cell"
+    root = cell / "plugins" / "agent-machines"
+    root.mkdir(parents=True)
+    own = {"cellRoot": str(cell), "pluginRoot": str(root)}
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
+    monkeypatch.setenv("AGENT_RT_ROOT", str(root))
+    monkeypatch.setattr(self_update._peer_launch, "validate_owner", lambda *args: own)
+    monkeypatch.setattr(
+        self_update.shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
+    )
+
+    step = self_update.refresh_dtssh_mesh(
+        runner=lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("must not run without a same-cell agent-ssh")
+        )
+    )
+    assert step.status == "skipped"
+    assert "agent-ssh is not installed" in step.detail
+
+
+def test_refresh_dtssh_mesh_propagates_context_refusal(monkeypatch, tmp_path):
+    root = tmp_path / "marketplaces" / "test-cell" / "plugins" / "agent-machines"
+    root.mkdir(parents=True)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
+    monkeypatch.setenv("AGENT_RT_ROOT", str(root))
+
+    def refuse(*_args):
+        raise ValueError("malformed receipt")
+
+    monkeypatch.setattr(self_update._peer_launch, "validate_owner", refuse)
+
+    with pytest.raises(self_update._peer_launch.ContextRefused):
+        self_update.refresh_dtssh_mesh(
+            runner=lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("must not run on a refused context")
+            )
+        )
+
+
 def test_run_tier_watchdog_appends_mesh_refresh_step(monkeypatch, tmp_path):
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")

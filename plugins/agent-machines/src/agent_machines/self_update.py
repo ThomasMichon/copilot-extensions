@@ -30,6 +30,7 @@ from typing import Any
 
 from agent_procutil import no_window_kwargs
 
+from . import _peer_launch
 from . import self_update_tasks as _tasks
 from .self_update_state import (
     STATE_VERSION,
@@ -637,6 +638,41 @@ def ensure_watchdog(
     )
 
 
+def _agent_ssh_argv_prefix() -> list[str] | None:
+    """Resolve the invocation prefix for the optional agent-ssh peer.
+
+    Under an explicit same-cell installation context, this validates the
+    owner and resolves agent-ssh as a same-cell peer via the shared
+    ``libs/peer-launch`` boundary (agent-ssh is itself a canonical
+    installation-context adopter). A validated owner with no same-cell
+    agent-ssh installation is a genuine, optional absence -- not every
+    machine's cell installs agent-ssh -- and returns ``None`` so the caller
+    reports ``skipped``, matching legacy ambient-PATH behavior. A malformed
+    or refused context (as opposed to a clean absence) still raises
+    ``ContextRefused``: an explicit context that fails to validate must
+    never quietly degrade to "not installed".
+    """
+    raw = os.environ.get(_peer_launch.CONTEXT_ENV, "")
+    if not raw:
+        exe = shutil.which("agent-ssh")  # marketplace-isolation: allow legacy-compatibility
+        return None if exe is None else [exe]
+    own_root = Path(
+        os.environ.get("AGENT_RT_ROOT", "~/.agent-machines")
+    ).expanduser()
+    try:
+        own = _peer_launch.validate_owner("agent-machines", own_root, raw)
+    except (OSError, ValueError, ImportError) as error:
+        raise _peer_launch.ContextRefused(
+            f"agent-machines installation context refused: {error}"
+        ) from error
+    peer = Path(own["cellRoot"]) / "plugins" / "agent-ssh"
+    if not peer.exists() and not peer.is_symlink():
+        return None
+    return _peer_launch.launch_prefix(
+        "agent-machines", Path(own["pluginRoot"]), raw, "agent-ssh",
+    )
+
+
 def refresh_dtssh_mesh(
     *, runner: Callable[..., CommandResult] = default_command_runner
 ) -> StepResult:
@@ -654,12 +690,12 @@ def refresh_dtssh_mesh(
     Missing ``agent-ssh`` or no declared mesh is reported as ``skipped``, not
     an error: not every machine participates in a dtssh mesh.
     """
-    binary = shutil.which("agent-ssh")
-    if binary is None:
+    prefix = _agent_ssh_argv_prefix()
+    if prefix is None:
         return StepResult(
             "dtssh-mesh-refresh", "skipped", "agent-ssh is not installed on this machine"
         )
-    result = runner([binary, "refresh-mesh", "--json"], timeout=300)
+    result = runner([*prefix, "refresh-mesh", "--json"], timeout=300)
     payload: dict[str, Any] | None = None
     try:
         payload = json.loads(result.stdout) if result.stdout.strip() else None
