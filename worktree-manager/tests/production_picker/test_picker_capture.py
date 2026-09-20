@@ -437,9 +437,48 @@ def test_marker_and_pulse_line_never_overflows_narrow_width(monkeypatch, tmp_pat
 
 def test_capture_is_deterministic(monkeypatch, tmp_path):
     _isolate_pivots(monkeypatch, tmp_path)
-    first = pcap.capture(_fixture_source(), live=False)["text"]
-    second = pcap.capture(_fixture_source(), live=False)["text"]
+    # Pin BOTH async, background-polled update-indicator states:
+    # ``_poll_update_state``/``_poll_manager_update_state``'s
+    # ``call_after_refresh`` callbacks race the capture snapshot -- whether
+    # either has run by the time the grid is captured is a genuine
+    # asyncio-scheduling coin flip, so two otherwise-identical captures
+    # could nondeterministically differ by an update segment. ``capture``
+    # takes both explicitly so a determinism test never depends on that
+    # race -- but the override value must MATCH what the real async poll
+    # would settle on in this test environment, or the override itself
+    # just becomes the other side of the same race (this test's
+    # ``_disable_manager_update_check`` fixture sets ``WORKTREE_NO_UPDATE=1``,
+    # under which ``update_stage.indicator_state()`` always resolves to
+    # "paused", never "idle" -- an "idle" override raced against that real
+    # value and still flaked).
+    first = pcap.capture(
+        _fixture_source(), live=False,
+        update_state="paused", manager_update_state="idle")["text"]
+    second = pcap.capture(
+        _fixture_source(), live=False,
+        update_state="paused", manager_update_state="idle")["text"]
     assert first == second
+
+
+def test_capture_update_state_override_reliably_paints(monkeypatch, tmp_path):
+    """Regression for the deeper bug behind the flake above:
+    ``capture_screen`` reads Textual's COMPOSITOR (the last-painted frame),
+    not a fresh render -- so plainly assigning ``scr.update_state``/
+    ``scr.manager_update_state`` was not enough by itself to make an
+    override actually show up in the captured grid; it depended on whether
+    the on-mount async poll had already painted a frame by that point, a
+    real timing coin flip. A single capture with an override value the
+    async poll would NEVER naturally produce (``manager_update_state=
+    "available"`` needs a real/staged update file this env never has) must
+    reliably show that override every time, not race it."""
+    _isolate_pivots(monkeypatch, tmp_path)
+    for _ in range(15):
+        grid = pcap.capture(
+            _fixture_source(), live=False,
+            update_state="current", manager_update_state="available",
+        )["text"]
+        assert "✓" in grid.splitlines()[0]
+        assert "Manager update available" in grid.splitlines()[0]
 
 
 def test_capture_modal_screenshots_a_native_modal(monkeypatch, tmp_path):
