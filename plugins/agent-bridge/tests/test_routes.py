@@ -824,6 +824,100 @@ class TestSessionRoutes:
 
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
+    def test_start_session_uses_agent_declared_mcp_servers(
+        self, mock_acp_cls, mock_spawn, client, app,
+    ) -> None:
+        """A resolved agent's own declared MCP servers (AgentConfig.mcp_servers
+        -> SpawnTarget.mcp_servers) are used when the request doesn't supply
+        its own -- the explicit-injection workaround for Copilot CLI not
+        reliably loading a custom agent's own mcp-servers: frontmatter under
+        headless/ACP sessions (github/copilot-cli#2630)."""
+        from agent_bridge.transport import SpawnTarget
+
+        agent_servers = [
+            {"name": "gitea-mcp", "type": "stdio", "command": "agent-mcp",
+             "args": ["bridge", "--config", "agents/gitea.mcp.yaml"]},
+        ]
+        mock_resolver = MagicMock()
+        mock_resolver.resolve_async = AsyncMock(return_value=SpawnTarget(
+            type="local", cwd="/d", mcp_servers=agent_servers,
+        ))
+        app.state.resolver = mock_resolver
+
+        mock_proc = MagicMock()
+        mock_proc.proc = MagicMock()
+        mock_proc.proc.pid = 103
+        mock_proc.proc.returncode = None
+        mock_proc.proc.stdin = MagicMock()
+        mock_proc.proc.stdout = MagicMock()
+        mock_proc.proc.stderr = MagicMock()
+        mock_proc.proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_spawn.return_value = mock_proc
+
+        mock_client = MagicMock()
+        mock_client.is_running = True
+        mock_client.pid = 103
+        mock_client.start = AsyncMock()
+        mock_client.new_session = AsyncMock(return_value="acp-mcp")
+        mock_client.shutdown = AsyncMock()
+        mock_client.cancel_prompt = AsyncMock()
+        mock_acp_cls.return_value = mock_client
+
+        resp = client.post("/api/v1/sessions", json={"agent": "test-agent"})
+        assert resp.status_code == 201
+        assert mock_client.new_session.await_args.kwargs["mcp_servers"] == (
+            agent_servers
+        )
+
+    @patch("agent_bridge.session_manager.spawn")
+    @patch("agent_bridge.session_manager.AcpClient")
+    def test_start_session_request_mcp_servers_override_agent_default(
+        self, mock_acp_cls, mock_spawn, client, app,
+    ) -> None:
+        """An explicit per-request mcp_servers wins over the agent's own
+        declared default."""
+        from agent_bridge.transport import SpawnTarget
+
+        mock_resolver = MagicMock()
+        mock_resolver.resolve_async = AsyncMock(return_value=SpawnTarget(
+            type="local", cwd="/d",
+            mcp_servers=[{"name": "agent-default", "type": "stdio",
+                          "command": "agent-mcp"}],
+        ))
+        app.state.resolver = mock_resolver
+
+        mock_proc = MagicMock()
+        mock_proc.proc = MagicMock()
+        mock_proc.proc.pid = 104
+        mock_proc.proc.returncode = None
+        mock_proc.proc.stdin = MagicMock()
+        mock_proc.proc.stdout = MagicMock()
+        mock_proc.proc.stderr = MagicMock()
+        mock_proc.proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_spawn.return_value = mock_proc
+
+        mock_client = MagicMock()
+        mock_client.is_running = True
+        mock_client.pid = 104
+        mock_client.start = AsyncMock()
+        mock_client.new_session = AsyncMock(return_value="acp-override")
+        mock_client.shutdown = AsyncMock()
+        mock_client.cancel_prompt = AsyncMock()
+        mock_acp_cls.return_value = mock_client
+
+        request_servers = [{"name": "request-scoped", "type": "stdio",
+                             "command": "other-tool"}]
+        resp = client.post(
+            "/api/v1/sessions",
+            json={"agent": "test-agent", "mcp_servers": request_servers},
+        )
+        assert resp.status_code == 201
+        assert mock_client.new_session.await_args.kwargs["mcp_servers"] == (
+            request_servers
+        )
+
+    @patch("agent_bridge.session_manager.spawn")
+    @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session_reuses_by_caller_id(
         self, mock_acp_cls, mock_spawn, client,
     ) -> None:

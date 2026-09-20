@@ -4239,9 +4239,18 @@ class SessionManager:
         # AcpClient._apply_model_config).
         session.model_override = model
         session.effort_override = effort
-        session.mcp_servers = [
-            dict(server) for server in (mcp_servers or [])
-        ]
+        # An explicit caller-supplied mcp_servers always wins; otherwise fall
+        # back to the resolved target's own declared toolset
+        # (AgentConfig.mcp_servers -> SpawnTarget.mcp_servers, see
+        # agent_registry.py). This is the explicit-injection workaround for
+        # Copilot CLI not reliably loading a custom agent's own
+        # ``mcp-servers:`` frontmatter under headless/ACP sessions
+        # (github/copilot-cli#2630). Reassigning the local `mcp_servers` (not
+        # just `session.mcp_servers`) so every downstream spawn call below
+        # -- which reads this same local, not the Session attribute -- also
+        # picks up the resolved value on this, the very first spawn.
+        mcp_servers = mcp_servers or target.mcp_servers or []
+        session.mcp_servers = [dict(server) for server in mcp_servers]
         session.event_log = EventLog(
             db=self._db,
             session_id=session_id,

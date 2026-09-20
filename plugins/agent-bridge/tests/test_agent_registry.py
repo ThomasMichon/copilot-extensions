@@ -30,6 +30,10 @@ SAMPLE_AGENTS = {
     "local-agent": {
         "description": "Local test agent",
         "project": "my-project",
+        "mcp_servers": [
+            {"name": "gitea-mcp", "type": "stdio", "command": "agent-mcp",
+             "args": ["bridge", "--config", "agents/gitea.mcp.yaml"]},
+        ],
     },
     "remote-agent": {
         "host": "server-a",
@@ -130,6 +134,20 @@ class TestParseAgentRegistry:
         assert agent.cwd is None
         assert agent.managed is False
         assert agent.project == "my-project"
+        assert agent.mcp_servers == [
+            {"name": "gitea-mcp", "type": "stdio", "command": "agent-mcp",
+             "args": ["bridge", "--config", "agents/gitea.mcp.yaml"]},
+        ]
+
+    def test_mcp_servers_defaults_empty(self):
+        registry = parse_agent_registry(SAMPLE_AGENTS)
+        assert registry["remote-agent"].mcp_servers == []
+
+    def test_mcp_servers_must_be_list_of_objects(self):
+        with pytest.raises(ValueError, match="mcp_servers must be a list of objects"):
+            parse_agent_registry(
+                {"bad-agent": {"mcp_servers": ["not-an-object"]}}
+            )
 
     def test_ssh_agent_fields(self):
         registry = parse_agent_registry(SAMPLE_AGENTS)
@@ -161,6 +179,10 @@ class TestAgentResolver:
         assert target.cwd is None
         assert target.host is None
         assert target.project == "my-project"
+        assert target.mcp_servers == [
+            {"name": "gitea-mcp", "type": "stdio", "command": "agent-mcp",
+             "args": ["bridge", "--config", "agents/gitea.mcp.yaml"]},
+        ]
 
     def test_resolve_ssh_agent(self):
         target = self.resolver.resolve("remote-agent")
@@ -170,6 +192,7 @@ class TestAgentResolver:
         assert target.cwd is None
         assert target.env == {"MY_VAR": "hello"}
         assert target.project == "my-project"
+        assert target.mcp_servers == []
 
     def test_resolve_ssh_agent_explicit_environment(self):
         target = self.resolver.resolve("lambda-agent")

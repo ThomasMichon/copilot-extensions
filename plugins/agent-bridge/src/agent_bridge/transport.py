@@ -129,6 +129,10 @@ class SpawnTarget:
     #                            Persisted unchanged so the bridge never invents
     #                            a parallel venue identity.
     auth_hooks: list[dict] = field(default_factory=list)  # serializable auth hook dicts
+    mcp_servers: list[dict[str, Any]] = field(default_factory=list)
+    #   Copied from the resolved AgentConfig.mcp_servers (see agent_registry.py)
+    #   at resolve time. A per-session request-level ``mcp_servers`` still
+    #   overrides this -- see routes/sessions.py's ``start_session``.
 
     def to_json(self) -> str:
         """Serialize for DB persistence."""
