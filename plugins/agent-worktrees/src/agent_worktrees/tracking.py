@@ -2807,21 +2807,21 @@ def list_records(
     return records
 
 
-def find_worktree_id_by_cwd(cwd: str) -> str | None:
+def find_worktree_id_by_cwd(cwd: str, *, project: str | None = None) -> str | None:
     """Resolve a worktree_id from a session cwd.
 
     Matches *cwd* (or any worktree root that is an ancestor of it) against
     the tracked ``worktree_path`` values.  Used by the sessionStart hook to
     associate a session with its worktree when the ``WORKTREE_ID`` env var
     is not present in the hook environment -- the Copilot CLI delivers the
-    cwd via the hook's stdin payload instead.
-
-    When several worktree roots match (nested trees), the deepest
-    (longest) match wins.  Returns None if no worktree contains *cwd*.
+    cwd via the hook's stdin payload instead. ``project`` scopes the lookup
+    to a given project (an out-of-context caller, e.g. a sync process)
+    instead of the ambient one. Deepest (longest) match wins on overlap;
+    None if no worktree contains *cwd*.
     """
     if not cwd:
         return None
-    tracking_path = cfg.tracking_dir()
+    tracking_path = cfg.project_dir(project) / "worktrees" if project else cfg.tracking_dir()
     if not tracking_path.exists():
         return None
 
@@ -3019,18 +3019,18 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
         return False
 
 
-
-def find_worktree_id_by_session(session_id: str) -> str | None:
+def find_worktree_id_by_session(session_id: str, *, project: str | None = None) -> str | None:
     """Resolve a session ID from the active project's tracked worktrees.
 
     This is the identity fallback for bare resume: the resumed session may keep
     HOME as its recorded cwd, but the sessionStart hook has explicitly bound
     that exact session ID to its intended worktree. Ambiguous or absent matches
-    return ``None`` rather than guessing.
+    return ``None`` rather than guessing. ``project`` overrides the ambient
+    active project -- see :func:`find_worktree_id_by_cwd`.
     """
     if not session_id:
         return None
-    tracking_path = cfg.tracking_dir()
+    tracking_path = cfg.project_dir(project) / "worktrees" if project else cfg.tracking_dir()
     matches = {
         rec.worktree_id
         for rec in list_records(tracking_path)
