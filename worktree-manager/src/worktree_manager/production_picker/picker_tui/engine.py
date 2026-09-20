@@ -23,7 +23,7 @@ from rich.panel import Panel
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widget import Widget
@@ -35,7 +35,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 from .. import profiles as profiles_mod
-from ..update_stage import indicator_state
+from .. import update_stage
 from . import derive
 from .selection import ListSelection
 from .listview import ListView, capture_row_refs, remap_row_refs, render_command_bar
@@ -310,15 +310,22 @@ ACTIVE_SPECS = [
     ("relation", "r", 1, "l", 6),
     ("machine_env", "source", 19, "l", 5),
     ("age", "age", 4, "l", 7), ("sess", "live", 4, "l", 8),
-    ("pr", "pr", 8, "l", 3), ("title", "title", 10, "l", 1),
+    ("pr", "pr", 8, "l", 3),
 ]
 LIST_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
     ("relation", "r", 1, "l", 5),
     ("age", "age", 4, "l", 6), ("sess", "live", 4, "l", 7),
     ("turns", "t", 3, "r", 8), ("pr", "pr", 8, "l", 3),
-    ("title", "title", 10, "l", 1),
 ]
+#: The Worktrees list's own row title now lives entirely on the detail line
+#: (``WorktreesView._detail_line``, "Title: Activity") rather than as a
+#: truncated flex column here, so ``fit()`` below is called with a flex key
+#: that deliberately matches none of the specs above: every column keeps its
+#: declared width and any leftover row width is left as blank trailing space
+#: (via ``row_text``/``header_text``'s own tail-padding) instead of stretching
+#: one column to soak it up.
+_NO_FLEX_COLUMN = "__no_flex__"
 HTABS = ["Worktrees", "Maintenance", "Profiles"]
 #: The built-in pivots, in their canonical order. Registered pivots (contributed
 #: by other plugins via ``picker_tui.pivots``) are woven into this order at
@@ -427,6 +434,9 @@ ACTION_DESC = {
                "git + session liveness) and write it back to the cache -- "
                "populates an Unknown row / re-syncs a stale one, without a "
                "full-fleet reload.",
+    "View details": "Open a scrollable card with this worktree's full title, "
+                    "path, id, status, held claims, and session detail -- "
+                    "everything too long to fit in this menu's own header.",
 }
 
 # Per-action descriptions for the Maintenance actions menu (#1345).
@@ -865,7 +875,7 @@ class _PickerNativeData(OptionList):
         W = scr.size.width or 100
         try:
             cols, _sections = scr.current_list()
-            lcols = fit(cols, W - 2, "title", 14)
+            lcols = fit(cols, W - 2, _NO_FLEX_COLUMN, 0)
         except Exception:
             return False
         view = scr.worktrees_view
@@ -1493,10 +1503,16 @@ class PickerScreen(Widget):
         # Update indicator (#1430): the launcher stages the marketplace update
         # in the background; the picker polls its status file to show a
         # spinner -> checkmark (current) / refresh (update available) next to
-        # the version. Poll immediately so the first paint is accurate.
+        # the version. Deferred to the first refresh (picker-startup-latency
+        # follow-up): its FIRST call pays the (otherwise lazily-deferred)
+        # engine-runtime import cost, which used to run synchronously in
+        # ``on_mount`` -- before Textual's first paint. ``update_state``
+        # starts "idle" so the very first frame just shows no glyph rather
+        # than blocking on it; the deferred poll corrects it moments later,
+        # same always-async-then-refine pattern used elsewhere in this file.
         self.update_state = "idle"
         self._upd_poll_frame = -1
-        self._poll_update_state()
+        self.call_after_refresh(self._poll_update_state)
         # ~10 fps drives the SSH spinner and the slower live-glyph pulse.
         self.set_interval(0.1, self._tick)
 
@@ -1882,7 +1898,7 @@ class PickerScreen(Widget):
         throttle in ``_tick``.
         """
         try:
-            self.update_state = indicator_state()
+            self.update_state = update_stage.indicator_state()
         except Exception:
             pass
 
@@ -5097,6 +5113,7 @@ class PickerScreen(Widget):
         ):
             acts.append("Dispose hosted session")
         if rec.get("source_kind", "machine-ssh") != "machine-ssh":
+            acts.append("View details")
             return acts, {}
         if self._reciprocal_target_row(rec) is not None:
             acts.append("Go to controller")
@@ -5131,6 +5148,14 @@ class PickerScreen(Widget):
             except Exception:
                 continue
 
+        # View details (fold-the-claims-list follow-up): the menu's header
+        # used to spell out the FULL held-claims/asset list inline, unbounded,
+        # which could push the always-needed verb list past the modal's
+        # max-height with no scrollbar. That full breakdown (plus path/id/
+        # session/relation detail) now lives behind this always-available,
+        # last-listed verb instead, so the core Actions menu itself never
+        # grows past a few fixed header lines.
+        acts.append("View details")
         return acts, ext
 
     def _reciprocal_target_row(self, rec):
@@ -5264,6 +5289,12 @@ class PickerScreen(Widget):
             # + cache write-back for THIS worktree (populates an Unknown row
             # / re-syncs a stale one) without a full-fleet reload.
             self._start_refresh(rec)
+        elif cur == "View details":
+            # Instant, IO-free scrollable card (fold-the-claims-list
+            # follow-up): everything the Actions menu's own bounded header
+            # can't fit -- full title/path/id/status, held claims, session
+            # detail -- from data already on ``rec`` (no new gather).
+            self.app.push_screen(WtDetailsScreen(rec))
 
     def _wt_action_ctx(self, rec: dict) -> dict:
         """Placeholder context for a contributed worktree action's argv template:
@@ -6689,14 +6720,17 @@ class SubMenuScreen(ModalScreen[tuple]):
             else:
                 lock = ""
             t.append(f"\n session {sid}{lock}", style=C_DIM)
-        def _asset_label(c):
-            ref, note = (c.get("ref") or "").strip(), (c.get("note") or "").strip()
-            return f"{ref} — {note}" if ref and note else ref or note or "(unlabeled)"
+        # The full per-claim breakdown (kind/ref/note/state) used to render
+        # here inline, unbounded -- a worktree carrying many claims could push
+        # this header (and the always-needed verb list below it) past the
+        # modal's max-height with no scrollbar to recover the hidden verbs.
+        # Bounded to a single count line instead; "View details" (always the
+        # last verb) opens the full breakdown in its own scrollable card.
         details = list((rec.get("asset_hints") or {}).get("details") or [])
         if details:
-            t.append("\n assets:\n" + "\n".join(
-                f"   {c.get('kind', 'resource')} [{c.get('state') or 'active'}]: {_asset_label(c)}"
-                for c in details), style=C_DIM)
+            t.append(
+                f"\n {len(details)} held claim{'s' if len(details) != 1 else ''}"
+                " — see View details", style=C_DIM)
         return t
 
     def on_mount(self) -> None:
@@ -6814,6 +6848,108 @@ class SubMenuScreen(ModalScreen[tuple]):
         self.action_toggle_modifier()
 
     def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class WtDetailsScreen(ModalScreen[None]):
+    """Read-only, scrollable "View details" card for one worktree
+    (fold-the-claims-list follow-up).
+
+    The Actions menu's own header (:meth:`SubMenuScreen._header`) is bounded
+    to a handful of fixed lines so the always-needed verb list never gets
+    pushed past the modal's max-height with no way to scroll back to it. This
+    screen is the escape hatch for everything that used to render there
+    unbounded (the full held-claims/asset breakdown) plus the rest of the
+    record's identity/status detail an operator might want: title, path, id,
+    status, the full claim list, and session detail. Built entirely from the
+    ``rec`` dict already held by the picker -- no new gather/IO, so it opens
+    instantly like every other menu here.
+    """
+
+    CSS = """
+    WtDetailsScreen { align: center middle; background: $background 55%; }
+    WtDetailsScreen > #details-frame {
+        width: 84; height: auto; max-height: 90%;
+        border: round #ffaf00; background: $surface; padding: 1 2;
+    }
+    WtDetailsScreen #details-body { height: auto; max-height: 100%; }
+    WtDetailsScreen #details-foot { color: grey; height: 1; padding: 1 0 0 0; }
+    """
+    BINDINGS = [
+        Binding("escape", "close", show=False),
+        Binding("q", "close", show=False),
+        Binding("enter", "close", show=False),
+    ]
+
+    def __init__(self, rec) -> None:
+        super().__init__()
+        self._rec = rec
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="details-frame"):
+            with VerticalScroll(id="details-body"):
+                yield Static(self._body())
+            yield Static(" Esc/Enter: close", id="details-foot")
+
+    @staticmethod
+    def _asset_label(c) -> str:
+        ref, note = (c.get("ref") or "").strip(), (c.get("note") or "").strip()
+        return f"{ref} — {note}" if ref and note else ref or note or "(unlabeled)"
+
+    def _body(self) -> Text:
+        rec = self._rec
+        raw = rec.get("raw") or {}
+        t = Text()
+        t.append(f"{rec.get('title') or '(untitled)'}\n", style="bold")
+        path = raw.get("path") or raw.get("worktree_path") or ""
+        if path:
+            t.append(f"path    {path}\n", style=C_DIM)
+        t.append(f"id      {raw.get('id') or rec.get('id4') or ''}\n", style=C_DIM)
+        t.append(
+            f"status  {rec.get('state')} · {rec.get('machine')} · "
+            f"{rec.get('env')}\n", style=C_DIM)
+        t.append(
+            f"age {rec.get('age')} · sess {rec.get('sess')} · "
+            f"turns {rec.get('turns')} · PR {rec.get('pr')}\n", style=C_DIM)
+        markers = (rec.get("status_markers") or "").strip()
+        if markers:
+            t.append("\nstatus markers:\n", style="bold")
+            for text, is_warn in derive.status_marker_segments(markers, 999):
+                t.append(text, style=C_WARN if is_warn else C_DIM)
+            t.append("\n")
+        relation = (rec.get("reciprocal_relation") or {}).get("state")
+        if relation and relation != "unbound":
+            t.append(f"\nrelation  {relation}\n", style=C_DIM)
+        sid = rec.get("last_session_id")
+        if sid:
+            if rec.get("mux_live") and rec.get("session_bare_orphan"):
+                lock = " · ⚠ inconsistent (mux + stray orphan — Repair fixes it)"
+            elif rec.get("session_bare_orphan"):
+                lock = " · bound (⚠ bare orphan — Reclaim frees it)"
+            elif rec.get("session_lock_live") and not rec.get("mux_live"):
+                lock = " · bound (lock live — Reclaim frees it)"
+            elif rec.get("session_lock_live"):
+                lock = " · bound (lock live)"
+            elif rec.get("session_lock_stale") and not rec.get("mux_live"):
+                lock = " · stale lock (residue — Reclaim clears it)"
+            else:
+                lock = ""
+            t.append(f"\nsession   {sid}{lock}\n", style=C_DIM)
+        details = list((rec.get("asset_hints") or {}).get("details") or [])
+        if details:
+            t.append(f"\nheld claims ({len(details)}):\n", style="bold")
+            for c in details:
+                t.append(
+                    f"  {c.get('kind', 'resource')} [{c.get('state') or 'active'}]"
+                    f": {self._asset_label(c)}\n", style=C_DIM)
+        else:
+            t.append("\nheld claims: none\n", style=C_DIM)
+        t.append(
+            "\nUse the Messages action (from the Actions menu) to peek this "
+            "worktree's recent conversation.", style=C_DIM)
+        return t
+
+    def action_close(self) -> None:
         self.dismiss(None)
 
 
@@ -7788,7 +7924,7 @@ class WorktreesView:
         # the native list) the box GLYPH is also always shown per row, so
         # multi-select is discoverable/clickable at rest (not only once a set is
         # being held).
-        lcols = fit(cols, width - 2, "title", 14)
+        lcols = fit(cols, width - 2, _NO_FLEX_COLUMN, 0)
         add(header_text(lcols, width, indent=2), kind="colhdr")
         # Preview which worktrees an action targets, directly on the list:
         # when the Clean/Sync button is merely focused, dim the rows that
@@ -7811,41 +7947,56 @@ class WorktreesView:
                 add(self._row_text(rec, li, sel, width, lcols,
                                    preview, preview_ids),
                     stop=("L", li), data=rec)
-                # Second (detail) row: status_markers, asset_hints
-                # (#6443/upstream #1979 -- per-kind claim breakdown), pulse.
-                _pulse = rec.get("live_pulse")
-                _intent = (rec.get("live_intent") or "").strip()
-                _markers = (rec.get("status_markers") or "").strip()
-                _assets = rec.get("asset_hints") or {}
-                pline = Text("      ")
-                has_content = False
-                if _markers or _assets.get("hints"):
-                    for text, is_warn in derive.status_line_segments(
-                            _markers, _assets.get("hints"),
-                            _assets.get("overflow"), width - pline.cell_len):
-                        pline.append(text, style=C_WARN if is_warn else C_DIM)
-                    has_content = True
-                if _pulse and _intent:
-                    if has_content:
-                        pline.append("  ")
-                    if _pulse == "awaiting":
-                        _pstyle, _pglyph = C_PULSE_AWAIT, "⏳ "
-                    else:
-                        _pstyle = C_DIM if _pulse == "fresh" else "grey30"
-                        _pglyph = "⟳ "
-                    pline.append(_pglyph, style=_pstyle)
-                    avail = max(1, width - pline.cell_len - 1)
-                    pline.append(_clip(_intent, avail, "l"), style=_pstyle)
-                    has_content = True
-                if not has_content:
-                    pline.append("·", style="grey30")
-                # Hard width guarantee: the pulse segment's own floor can
-                # still push a marker-carrying row past `width` (review
-                # finding) -- clip the assembled line once at the end.
-                if pline.cell_len > width:
-                    pline.truncate(width, overflow="ellipsis")
-                add(pline)
+                add(self._detail_line(rec, width))
                 li += 1
+
+    def _detail_line(self, rec, width):
+        """The worktree row's second (detail) line: ``Title: Activity`` --
+        the full/untruncated title as the OVERALL identity, plus its current
+        ACTIVITY (a live pulse/intent when one is in flight, else the plain
+        state label) as the scannable CURRENT status, both on one line
+        (#6443 follow-up). Replaces the old raw ``status_markers``/
+        ``asset_hints`` breakdown -- an operator-opaque closure-descriptor
+        wire shorthand like ``C1 U* OC*`` rendered in red, which read as an
+        error rather than routine bookkeeping. Any open/held claim (a
+        non-empty ``status_markers`` or asset hint) now collapses to a single,
+        neutrally-styled ``*`` at the end of the line -- the full claim/asset
+        breakdown lives behind the Actions menu's "View details" card
+        instead, so this line never has to fit an unbounded list."""
+        title = str(rec.get("title") or "").strip() or "(untitled)"
+        pulse = rec.get("live_pulse")
+        intent = (rec.get("live_intent") or "").strip()
+        markers = (rec.get("status_markers") or "").strip()
+        assets = rec.get("asset_hints") or {}
+        has_claims = bool(markers) or bool(assets.get("hints"))
+
+        pline = Text("      ")
+        reserve = 2 if has_claims else 0  # trailing " *"
+        pline.append(derive.truncate_text(title, max(1, width - pline.cell_len - reserve)),
+                     style=C_LABEL)
+        if pulse and intent:
+            if pulse == "awaiting":
+                pstyle, glyph = C_PULSE_AWAIT, "⏳ "
+            else:
+                pstyle = C_DIM if pulse == "fresh" else "grey30"
+                glyph = "⟳ "
+            pline.append(": ", style=C_DIM)
+            pline.append(glyph, style=pstyle)
+            avail = max(1, width - pline.cell_len - reserve)
+            pline.append(derive.truncate_text(intent, avail), style=pstyle)
+        else:
+            state_label = str(rec.get("state") or "").strip().lower()
+            if state_label:
+                pline.append(": ", style=C_DIM)
+                avail = max(1, width - pline.cell_len - reserve)
+                pline.append(derive.truncate_text(state_label, avail), style=C_DIM)
+        if has_claims and pline.cell_len + 2 <= width:
+            pline.append(" *", style=C_LABEL)
+        # Hard width guarantee: even with the reserve above, truncate once at
+        # the end so a pathological combination can never overflow the row.
+        if pline.cell_len > width:
+            pline.truncate(width, overflow="ellipsis")
+        return pline
 
     def _row_text(self, rec, li, sel, width, lcols, preview, preview_ids):
         """Render one worktree row's fully-styled Text. Extracted from

@@ -15,7 +15,6 @@ from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import (
     Input,
-    Markdown,
     RadioButton,
     Static,
     TabbedContent,
@@ -136,6 +135,10 @@ class PivotFormScreen(ModalScreen[dict]):
 
     # ---- compose ------------------------------------------------------------
     def compose(self) -> ComposeResult:
+        # Deferred (picker-startup-latency follow-up): see steering.py's
+        # PivotCardScreen.compose for why this import isn't at module level.
+        from textual.widgets import Markdown
+
         with Vertical(id="steer-frame"):
             with VerticalScroll(id="steer-card"):
                 yield Markdown(_card_markdown(self._card), id="steer-card-body")

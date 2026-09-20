@@ -17,7 +17,6 @@ from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import (
-    Markdown,
     RadioSet,
     SelectionList,
     Static,
@@ -167,6 +166,13 @@ class PivotCardScreen(ModalScreen[None]):
         self._card = card or {}
 
     def compose(self) -> ComposeResult:
+        # Deferred (picker-startup-latency follow-up): Textual's Markdown
+        # widget pulls in the markdown-it-py parser, a ~100ms import cost this
+        # module previously paid on EVERY picker start even though a card is
+        # only ever composed when the operator explicitly opens one. Local
+        # import defers that cost to the first actual card open.
+        from textual.widgets import Markdown
+
         with Vertical(id="card-frame"):
             with VerticalScroll(id="card-scroll"):
                 yield Markdown(

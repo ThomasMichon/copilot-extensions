@@ -744,9 +744,13 @@ def _resources_source():
 
 
 def test_asset_hint_line_renders_only_held_claim_kinds():
-    """#6443/upstream #1979: the tile's detail line shows a bounded per-kind
-    hint for HELD claims only (active/at-rest) -- the released ssh claim is
-    excluded -- and a worktree with no claims renders no hint segment."""
+    """#6443/upstream #1979, superseded by the "Title: Activity" simplification:
+    the tile's detail line no longer spells out the per-kind hint at all --
+    any held claim (active/at-rest; a released claim doesn't count) collapses
+    to a single ``*`` on the title's own line. The bounded per-kind computation
+    itself (``asset_hints``) is unchanged and still excludes released claims --
+    it just isn't rendered inline anymore (see ``test_sub_menu_header_...``
+    for where the full per-claim detail now lives)."""
     src = _resources_source()
 
     async def run():
@@ -763,12 +767,17 @@ def test_asset_hint_line_renders_only_held_claim_kinds():
             idx = vrows.index(next(
                 v for v in vrows if getattr(v, "data", None) is with_assets))
             detail_line = vrows[idx + 1].text.plain
-            assert "PR" in detail_line and "WT" in detail_line
+            assert detail_line.rstrip().endswith("*")
+            assert "PR" not in detail_line and "WT" not in detail_line
             assert "released-remote" not in detail_line
 
             no_assets = recs["No assets"]
             assert no_assets["asset_hints"] == {
                 "hints": [], "overflow": 0, "details": []}
+            no_assets_idx = vrows.index(next(
+                v for v in vrows if getattr(v, "data", None) is no_assets))
+            no_assets_detail = vrows[no_assets_idx + 1].text.plain
+            assert not no_assets_detail.rstrip().endswith("*")
 
     asyncio.run(run())
 
@@ -793,10 +802,93 @@ def test_sub_menu_header_shows_full_asset_detail():
             await pilot.pause()
             menu = _sub_menu(scr)
             assert menu is not None
+            # The menu's own header is now bounded to a count + pointer (the
+            # fold-the-claims-list follow-up) -- the full per-claim detail
+            # moved to the "View details" card below.
             header = menu._header().plain
-            assert "pr [active]: https://example/pulls/9" in header
-            assert "worktree [at-rest]: host/repo/wt-child — child harness worktree" in header
+            assert "2 held claims" in header
+            assert "View details" in header
+            assert "pr [active]: https://example/pulls/9" not in header
             assert "released-remote" not in header
+            assert menu._actions[-1] == "View details"
+
+            from worktree_manager.production_picker.picker_tui.engine import (
+                WtDetailsScreen,
+            )
+            menu.dismiss(("View details", False, False))
+            await pilot.pause()
+            details = next(
+                s for s in scr.app.screen_stack if isinstance(s, WtDetailsScreen))
+            body = details._body().plain
+            assert "pr [active]: https://example/pulls/9" in body
+            assert "worktree [at-rest]: host/repo/wt-child — child harness worktree" in body
+            assert "released-remote" not in body
+
+    asyncio.run(run())
+
+
+def _many_claims_source(n=40):
+    """A worktree carrying an unusually large number of held claims -- the
+    exact overflow scenario the fold-the-claims-list follow-up fixes: the old
+    inline "assets:" header listing would have pushed the Actions menu's
+    always-needed verb list past the modal's max-height, with no scrollbar to
+    recover it."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-manyclaims", "title": "Many claims",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "resources": [
+             {"kind": "pr", "ref": f"https://example/pulls/{i}", "state": "active"}
+             for i in range(n)
+         ]},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+    return src
+
+
+def test_sub_menu_header_never_grows_unbounded_with_many_claims():
+    """A worktree with dozens of held claims must not blow the Actions menu's
+    header past a handful of fixed lines: the core verb list (and "View
+    details" itself) stays reachable without a scrollbar, and the FULL claim
+    list is only ever rendered inside the "View details" card."""
+    src = _many_claims_source(40)
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            idx = next(i for i, r in enumerate(recs) if r["title"] == "Many claims")
+            scr.sel = ("L", idx)
+            scr._dispatch_key("enter")
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            header_lines = menu._header().plain.splitlines()
+            # Title + a handful of meta lines + the bounded claims-count line --
+            # never one line per claim (40 claims would be 40+ lines).
+            assert len(header_lines) <= 8
+            assert "40 held claims" in menu._header().plain
+            assert "View details" in menu._actions
+
+            from worktree_manager.production_picker.picker_tui.engine import (
+                WtDetailsScreen,
+            )
+            menu.dismiss(("View details", False, False))
+            await pilot.pause()
+            details = next(
+                s for s in scr.app.screen_stack if isinstance(s, WtDetailsScreen))
+            body = details._body().plain
+            assert body.count("pr [active]:") == 40
 
     asyncio.run(run())
 
