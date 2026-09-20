@@ -143,11 +143,14 @@ consumer repos.
 ### Phase 0 (downstream, not tracked in this repo's history) -- Fix the immediate sync-drift
 Runs entirely in the private downstream consumer repo's own worktree/PR flow:
 resync its `.github/instructions/` and `.github/copilot/context-projections.json`
-against every plugin's currently-declared `instruction-projections.json`
-(picks up `head-claim-fallback` and the `cross-repo-debug-tracking` fix
-immediately; reconciles stale plugin-version metadata repo-wide). Recorded
-here only as context for Phase 1's sync-freshness guard; not a checklist item
-of this repo's own effort.
+against its currently-*enabled* plugins' declared `instruction-projections.json`
+-- the sync manager's contract is settings-scoped (discovers enabled
+payloads, not every installed/marketplace plugin), so this deliberately does
+not check in pointers for disabled capabilities (picks up `head-claim-fallback`
+and the `cross-repo-debug-tracking` fix immediately; reconciles stale
+plugin-version metadata for every enabled plugin). Recorded here only as
+context for Phase 1's sync-freshness guard; not a checklist item of this
+repo's own effort.
 
 ### Phase 1 -- Registry + guard mechanism (`customizing-copilot:reviewing-customizations`)
 - [ ] Design a small per-plugin `troubleshooting-index.json` (or an extension
