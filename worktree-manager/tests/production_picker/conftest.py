@@ -6,6 +6,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import urllib.error
 
 import pytest
 
@@ -49,6 +50,89 @@ def _disable_manager_update_check():
             os.environ.pop(key, None)
         else:
             os.environ[key] = prior
+
+
+class _NetworkBlockedError(urllib.error.URLError):
+    """Raised when a test in this suite tries to make a real outbound
+    network call. Mock the call instead (e.g. monkeypatch
+    ``self_install.fetch_remote_version``/``urllib.request.urlopen``, or
+    inject a fake ``websocket.create_connection`` -- see
+    ``test_ahp_provider.py``).
+
+    Deliberately an :class:`urllib.error.URLError` (an :class:`OSError`
+    subclass), not a plain ``RuntimeError``: production code that already
+    tolerates a REAL network failure gracefully (e.g.
+    ``discovery._from_remote``'s ``except (urllib.error.URLError,
+    TimeoutError, ValueError, OSError)`` clause, falling back to an authored
+    catalog) must keep doing so identically when this fixture blocks the
+    attempt instead of a real DNS/connection failure -- a mismatched
+    exception type broke that fallback the first time this guard was tried
+    (see the Journal), turning an expected graceful degradation into a hard
+    test failure unrelated to the network block itself."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+@pytest.fixture(autouse=True)
+def _block_real_network():
+    """Hard backstop alongside ``_disable_manager_update_check`` above: even
+    if a future change bypasses the ``WORKTREE_NO_UPDATE`` env-var gate (or
+    adds a new network call this module doesn't yet know about), mounting a
+    real ``PickerScreen`` in this test suite must never be able to reach the
+    network for real. Patches the exact entry points this codebase's
+    production code actually uses for outbound network I/O --
+    ``urllib.request.urlopen`` (``self_install.fetch_remote_version``,
+    ``discovery._from_remote``) and ``websocket.create_connection``
+    (``ahp_provider``, already dependency-injected/mocked by every existing
+    AHP test) -- rather than the low-level ``socket`` module, which is much
+    easier to reason about and does not risk touching unrelated local IPC
+    this test suite may rely on. Real local ``git``
+    (``test_e2e_delivery.py``'s explicit, clearly-scoped e2e fetch against a
+    *local* path) is unaffected either way.
+
+    Deliberately does its own manual save/restore instead of taking the
+    shared ``monkeypatch`` fixture: several other fixtures/tests in this
+    module restore an env var (notably ``AGENT_WORKTREES_PLUGINS_DIR``, in
+    ``_isolate_pivots`` below) via plain ``os.environ`` mutation in a
+    ``finally`` block. Being the *first* fixture in this file to request
+    ``monkeypatch`` would make pytest instantiate that shared object earlier
+    than it otherwise would, which inverts its teardown order relative to
+    those later, non-monkeypatch fixtures -- since monkeypatch then tears
+    down *after* them, its own restore of an env var a test changed via
+    ``monkeypatch.setenv`` silently clobbers ``_isolate_pivots``'s own
+    cleanup, leaking a stale path into every later test in the session. This
+    was observed breaking ``test_plugin_contracts.py`` when run as part of
+    the full suite; see the Journal."""
+    import urllib.request
+
+    def _blocked_urlopen(*a, **kw):
+        raise _NetworkBlockedError(
+            "test tried to call urllib.request.urlopen for real")
+
+    original_urlopen = urllib.request.urlopen
+    urllib.request.urlopen = _blocked_urlopen
+
+    try:
+        import websocket
+    except ImportError:
+        websocket = None
+
+    original_create_connection = None
+    if websocket is not None:
+        def _blocked_create_connection(*a, **kw):
+            raise _NetworkBlockedError(
+                "test tried to call websocket.create_connection for real")
+
+        original_create_connection = websocket.create_connection
+        websocket.create_connection = _blocked_create_connection
+
+    try:
+        yield
+    finally:
+        urllib.request.urlopen = original_urlopen
+        if websocket is not None:
+            websocket.create_connection = original_create_connection
 
 
 @pytest.fixture(autouse=True)
