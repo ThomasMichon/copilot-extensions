@@ -107,12 +107,19 @@ present) is independent of this and needs no change — it stays `False` by
 dataclass default and is set `True` only when `_parse_pr` sees the actual
 key, exactly as today.
 
-**Also needs resolution:** every existing test that constructs a bare
-`PRConfig()` and asserts `.source_attribution is False` (there are several
-across `test_config.py`, `test_pr_ops.py`, `test_providers.py`) will need
-updating to assert `"codename"` instead — this is a real, wide-reaching
-test-suite touch, not a one-line change. Audit the full set before
-starting Phase 1.
+**Also needs resolution:** every existing test that relies on the bare
+dataclass DEFAULT (constructs a `PRConfig()`/uses a fixture without an
+explicit `source_attribution=` override, and asserts `.source_attribution
+is False`) will need updating to assert `"codename"` instead. This is
+narrower than "every test mentioning `source_attribution`" — most of the
+call sites in `test_pr_ops.py` and `test_providers.py` already pass an
+explicit `source_attribution=True` / `source_attribution="codename"` /
+`source_attribution_configured=False` kwarg to construct their fixture
+config, and those intentional explicit-opt-out/explicit-mode cases must
+stay exactly as written; only the genuinely bare-default assertions (the
+clearest examples live in `test_config.py`) change. Audit each call site
+individually before starting Phase 1 rather than assuming a blanket
+rewrite across all three test files.
 
 ### Custom wordlists are a separate, independently-configured risk surface
 
@@ -126,28 +133,27 @@ configured but has never touched `source_attribution` would silently start
 publishing codenames DRAWN FROM THAT WORDLIST in public PR markers —
 defeating the "informationless to an outside reader" property the whole
 codename feature exists to provide, if that custom vocabulary happens to
-contain identifying or private terms. This must be resolved explicitly
-before Phase 1 ships, not left implicit: options include forcing the
-built-in neutral wordlist whenever `source_attribution` is at its DEFAULT
-value (only honoring a custom wordlist when `codename` is explicitly
-configured), or otherwise gating a custom wordlist's use behind an
-explicit acknowledgment. Do not ship the default flip without picking one.
+contain identifying or private terms.
 
-**A future allocation policy alone is not sufficient — pre-existing
-assignments are a separate migration gap.** `WorktreeRecord` persists only
-the final codename string, not which wordlist (built-in or custom)
-produced it or when. A worktree created BEFORE this effort ships, under a
-repo with a custom wordlist configured, may already carry a codename drawn
-from that custom vocabulary in its tracking record. Changing only *future*
-allocation (the item above) does nothing for that already-assigned
-codename: the moment `source_attribution` starts defaulting to
-`codename`, the very next `create-pr`/`refresh_source_attribution` call on
-that pre-existing worktree would publish its already-assigned,
-possibly-identifying codename, with no new allocation happening at all to
-catch. This needs its own explicit migration/suppression decision (e.g.
-detecting a pre-existing codename can't be proven safe and suppressing
-publication for it, or another resolution) — do not assume the
-forced-wordlist fix for new allocations also covers this case.
+**Decision:** a repo with `codename.wordlist_path` configured is excluded
+from the new implicit default entirely. For such a repo,
+`pr.source_attribution` must be set explicitly (`codename`, `true`, or
+`false`); the new default only auto-applies to a repo with no custom
+wordlist configured. This single rule resolves both halves of the risk at
+once — it is a config-shape check (does this repo have a custom wordlist
+configured?), not a wordlist-content check, so it needs no new provenance
+tracking:
+
+- **Future allocations:** a repo with a custom wordlist never silently
+  inherits `codename` mode — it must opt in explicitly, at which point the
+  operator has necessarily reviewed the vocabulary's public-safety.
+- **Pre-existing codenames:** because such a repo never receives the
+  implicit default in the first place, an already-assigned codename drawn
+  from that repo's custom wordlist never starts publishing merely because
+  the global default changed — there is nothing to migrate or suppress
+  retroactively. A pre-existing codename in a repo with NO custom wordlist
+  configured is, by construction, already drawn from the built-in neutral
+  list, so it is safe to publish under the new default unchanged.
 
 ### Downstream effects to re-examine, not just the default itself
 
@@ -207,26 +213,24 @@ forced-wordlist fix for new allocations also covers this case.
   `False` by dataclass default, `True` only when the raw key is literally
   present) — no code change expected here, but add a regression test
   proving the two fields don't drift together.
-- [ ] **Resolve the custom-wordlist risk** identified in Context before
-  shipping this phase: decide and implement whether the DEFAULT
-  `source_attribution` value forces the built-in neutral wordlist
-  (ignoring any configured `codename.wordlist_path`) regardless of what
-  `wordlist_for_repo` would otherwise resolve, honoring a custom wordlist
-  only when `source_attribution: codename` is explicitly configured — or
-  an equivalent explicit gate. Add a test proving a repo with BOTH a
-  custom `codename.wordlist_path` AND an absent/default
-  `source_attribution` never publishes a codename drawn from that custom
-  list.
-- [ ] **Resolve the pre-existing-codename migration gap** identified in
-  Context: a forced-wordlist policy only affects NEW allocations, not a
-  codename already persisted on a `WorktreeRecord` before this effort
-  shipped. Decide and implement an explicit migration/suppression policy
-  for a worktree whose codename cannot be proven to have come from the
-  built-in wordlist (e.g. suppress publication for it, force a
-  re-backfill, or another resolution) — do not assume Phase 1's
-  future-allocation fix silently also covers this case. Add a regression
-  test using a pre-existing record with a custom-wordlist-shaped codename
-  already assigned.
+- [ ] **Implement the custom-wordlist exclusion decision** from Context: a
+  repo with `codename.wordlist_path` configured does not receive the new
+  implicit default at all — `pr.source_attribution` must resolve to an
+  explicitly-configured value (`codename`, `true`, or `false`) for such a
+  repo, never the bare fallback. This single check covers both future
+  allocations (a custom-wordlist repo never silently starts publishing
+  without an explicit opt-in) and pre-existing codenames (such a repo
+  never received the implicit default in the first place, so nothing
+  already-assigned starts publishing merely because the global default
+  changed) — no separate migration path is needed. Add tests proving: (a)
+  a repo with a custom wordlist AND an absent/default `source_attribution`
+  publishes nothing (fails closed, does not silently fall back to
+  `false` either — surface this as a config validation error so the gap
+  is caught at config-load time, not discovered via a leaked marker), and
+  (b) a repo with a custom wordlist that HAS explicitly configured
+  `source_attribution: codename` publishes normally, including for a
+  pre-existing `WorktreeRecord` whose codename was assigned before this
+  effort shipped.
 - [ ] **Versioning gate (required for this phase's PR):** this phase
   changes `agent-worktrees` runtime source (`config.py`). Per
   `AGENTS.md`'s Version Bump section, bump `plugins/agent-worktrees/plugin.json`,
@@ -303,18 +307,15 @@ forced-wordlist fix for new allocations also covers this case.
 ## Validation Plan
 
 - [ ] Unit: a repo with a custom `codename.wordlist_path` configured AND an
-  absent/default `source_attribution` never publishes a codename drawn
-  from that custom wordlist (the resolved mechanism from Phase 1's
-  wordlist-risk item) — the single highest-priority test in this effort,
-  since it's the one silent-leak scenario the default flip could
-  introduce.
-- [ ] Unit/regression: a pre-existing `WorktreeRecord` created before this
-  effort shipped, carrying a codename already assigned from a custom
-  wordlist, is handled per the migration/suppression policy chosen in
-  Phase 1 (e.g. publication suppressed, or re-backfilled) once
-  `source_attribution` starts defaulting to `codename` — proving the
-  future-allocation fix alone does not silently also cover this
-  already-persisted case.
+  absent/default `source_attribution` fails closed (a config validation
+  error at load time, not a silent `false`-fallback and not a leaked
+  marker) — the single highest-priority test in this effort, since it's
+  the one silent-leak scenario the default flip could introduce.
+- [ ] Unit: a repo with a custom `codename.wordlist_path` configured AND an
+  explicit `source_attribution: codename` publishes normally — including
+  for a pre-existing `WorktreeRecord` whose codename was assigned before
+  this effort shipped, proving the exclusion decision is scoped to
+  "no explicit config," not to "has ever had a custom wordlist."
 - [ ] Unit: `_parse_pr` with an absent `source_attribution` key (both
   "`pr:` block present, key omitted" and "`pr:` block entirely absent")
   parses to `"codename"`, not `False`.
@@ -393,3 +394,31 @@ _Pending._
   checklist item and Validation Plan item requiring an explicit
   migration/suppression decision, not just the forced-wordlist fix for new
   allocations.
+
+### 2026-09-20 — Plan-review round 7 fixes
+
+- Round 6's two custom-wordlist findings were both still open after the
+  round-6 fix landed. Replaced the hedged "options include X or Y, pick
+  one" language with a single decisive rule: a repo with
+  `codename.wordlist_path` configured is excluded from the new implicit
+  default entirely and must set `source_attribution` explicitly. This one
+  config-shape check resolves both the future-allocation risk and the
+  pre-existing-codename migration gap at once (a custom-wordlist repo
+  never silently inherits the default, so nothing already-assigned starts
+  publishing merely because the global default changed) — no separate
+  migration/provenance-tracking mechanism is needed after all.
+- Fixed an overstated claim: the plan previously implied the wide test
+  sweep spans `test_config.py`, `test_pr_ops.py`, and `test_providers.py`
+  uniformly. Verified the actual fixtures — `test_pr_ops.py` call sites
+  already pass explicit `source_attribution=`/`source_attribution_configured=`
+  kwargs (intentional opt-out/explicit-mode cases that must not change);
+  only genuinely bare-default assertions (concentrated in `test_config.py`)
+  are affected by the dataclass-default flip. Narrowed the plan text and
+  added an explicit per-call-site-audit instruction instead of a blanket
+  three-file rewrite.
+- Resolved a stale "unrelated baseline exceeds module size cap" finding:
+  confirmed via `git diff origin/main..HEAD --stat` that this PR's actual
+  diff no longer touches `tools/module-size-baseline.json` at all (that
+  fix landed separately in PR #2980, merged before this branch's last
+  rebase); manually resolved the review thread and posted an explanatory
+  comment rather than re-editing unrelated plan content.
