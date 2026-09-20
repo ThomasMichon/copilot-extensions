@@ -22,8 +22,7 @@ so its own real PRs (including the two that built this feature, #2915 and
 #2922) carry **zero** attribution marker at all. Flip the policy so
 public-safe codename attribution is the default everywhere, and reserve the
 full raw marker (`source_attribution: true`) for repos that have explicitly
-decided they want it (private/closed-circuit ones, e.g. the facility's
-internal Gitea instance).
+decided they want it (private/closed-circuit repos, not open ones).
 
 ## Participants
 
@@ -65,23 +64,19 @@ Verified live, this session, against real merged PRs:
   built Phases 4 and 5 of the codename feature carry **no marker
   whatsoever**, raw or codename. The feature exists but is never used on
   its own home repo.
-- A second public repo this operator maintains has `pr.enabled: true` and
-  no `source_attribution` key at all — silently inherits the `false`
-  default, same gap.
-- A private, closed-circuit downstream repo already has
-  `source_attribution: true` explicitly set, and its recent merges DO
-  correctly carry the full raw marker
-  (`<!-- agent-worktrees:source worktree=... machine=... session=... head=... -->`).
-  This is correct today and should stay `true` — it's private and
-  closed-circuit, so full traceability is the right call there, not a gap.
-- A handful of other repos this operator has registered either have no
-  `pr:` block configured at all (still using direct-push finalize, no
-  attribution question applies) or are upstream reference/singleton
-  checkouts with no agent-owned PR flow — out of scope for this effort.
+- A private, closed-circuit downstream repo with `source_attribution: true`
+  explicitly set DOES correctly carry the full raw marker
+  (`<!-- agent-worktrees:source worktree=... machine=... session=... head=... -->`)
+  on its recent merges, proving the mechanism itself is sound — this is
+  purely a default/policy gap, not a broken feature.
 
-So the actual repo-config rollout surface, as of this writing, is exactly
-two repos: this one (flip from explicit `false`) and the second public
-repo above (currently implicit `false` via the absent-key default).
+Which specific repos are in scope for a config rollout, and how many, is
+downstream-private operational detail that does not belong in this public
+effort record (and would go stale here regardless) — that inventory and
+rollout order live in the driver's own private planning. This effort's
+public scope is the mechanism: the code-level default and its downstream
+consumers (Phases 1–2 below); Phase 3 is a generic per-repo checklist any
+driver can apply to their own fleet without this doc naming it.
 
 ### The design decision this effort must resolve
 
@@ -172,6 +167,13 @@ starting Phase 1.
   `False` by dataclass default, `True` only when the raw key is literally
   present) — no code change expected here, but add a regression test
   proving the two fields don't drift together.
+- [ ] **Versioning gate (required for this phase's PR):** this phase
+  changes `agent-worktrees` runtime source (`config.py`). Per
+  `AGENTS.md`'s Version Bump section, bump `plugins/agent-worktrees/plugin.json`,
+  `plugins/agent-worktrees/pyproject.toml`, the `agent-worktrees` entry in
+  `.github/plugin/marketplace.json`, **and** that catalog's own top-level
+  `metadata.version` (agent-worktrees changes bump both) — in the same
+  commit as the code change, not a follow-up.
 
 ### Phase 2 — Correct downstream messaging that assumed the old default
 - [ ] Update `attribution-audit`/`audit_source_attribution_risk`'s finding
@@ -189,25 +191,24 @@ starting Phase 1.
   "the (safe) default" today; correct every instance to describe
   `"codename"` as the default and `false`/`true` as the two opt-out
   directions (fully anonymous / fully raw).
+- [ ] **Versioning gate (required for this phase's PR):** this phase
+  changes `agent-worktrees` runtime source (`providers/attribution.py`,
+  `pr_ops.py`) even though most of the diff is documentation -- the same
+  bump requirement as Phase 1 applies (`plugin.json`, `pyproject.toml`,
+  the marketplace entry, and the catalog `metadata.version`).
 
 ### Phase 3 — Repo config rollout
 - [ ] This repo (`copilot-extensions`): remove (or flip to `codename`, for
   explicitness) the explicit `source_attribution: false` in
   `.agent-worktrees/config.yaml` — this repo is the one that most visibly
-  motivated this effort.
-- [ ] The second public repo identified in Context: decide explicitly
-  whether to rely on the new implicit default or set
-  `source_attribution: codename` explicitly for clarity (it currently has
-  no `source_attribution` key at all).
-- [ ] The private, closed-circuit downstream repo identified in Context:
-  confirm its existing explicit `source_attribution: true` is untouched by
-  this effort (already correct: private, closed-circuit, wants full
-  traceability) — add a comment there (if not already present) noting it's
-  an intentional opt-out from the new default, not a leftover.
-- [ ] Sweep this operator's other private/closed-circuit repos for any that
-  have `pr.enabled: true` and would want the same `true` treatment — as of
-  this writing none of the others do (no `pr:` block configured), but
-  re-check at execution time in case that's changed.
+  motivated this effort, and the only one this public doc names, since it
+  is this same public repo.
+- [ ] Any other repo relying on the codename feature: re-evaluate its
+  `source_attribution` setting against the new default (a currently-absent
+  key silently changes behavior; an explicit `false` becomes a genuine,
+  stronger opt-out statement rather than "restating the old default" --
+  see Context). This is generic guidance any driver applies to their own
+  fleet; the specific inventory is out of scope for this public record.
 
 ### Phase 4 — Live validation
 - [ ] Open a real PR in this repo after Phase 3's config change and confirm
@@ -257,11 +258,11 @@ _Pending._
   downstream repo and confirmed its recent merges all correctly carry the
   full raw marker, proving the mechanism itself works — the gap is purely
   a policy/default problem, not a broken feature.
-- Enumerated this operator's registered repos with PR mode enabled: besides
-  this repo, exactly one other public repo is public without an explicit
-  `source_attribution` opt-in today; one private repo is already correctly
-  opted into `true`; the remainder either have no PR-mode config or are
-  upstream reference/singleton checkouts out of scope.
+- Surveyed repos this codename feature already applies to and confirmed
+  the pattern generalizes: some rely on the implicit `false` default with
+  no attribution at all, while at least one private/closed-circuit repo
+  already correctly uses `true`. Repo-specific inventory and rollout order
+  are kept in private planning, not this public record (see Context).
 - Closed the predecessor effort's umbrella issue (`pr-attribution-codenames`,
   #2838 — Done, all 5 phases merged) and opened this effort's own umbrella
   issue (#2977).
