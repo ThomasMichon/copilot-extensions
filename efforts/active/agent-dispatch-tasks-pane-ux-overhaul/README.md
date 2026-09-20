@@ -2086,16 +2086,23 @@ worktree via `agent-worktrees -p copilot-extensions create`.
     unreachable accelerator must degrade to an explicit stale/unknown
     outcome for this consumer, never a silent recompute.
 - **Surfaced this to the operator rather than guessing a workaround.**
-  Resolved direction: `agent-worktrees`'s existing **resident accelerator**
+  Resolved direction: `agent-worktrees`'s **resident accelerator concept**
   (already documented in its vision as the one-per-host freshness/status
   computer — "warmth, not truth" per `docs/patterns/work-coalescing-
   singleton.md`) becomes the coalesced, cached-projection read path for
   exactly this data — worktree/session mapping, session lineage +
   lifecycle event history, last-known liveness, last-known git state, and
-  the claims graph — with fast-cache reads. A cross-venv consumer like
-  agent-dispatch boots the accelerator on demand and subscribes like any
-  other reader; if it can't reach it within its own bounded wait, it
-  reports the affected facts as stale/unknown rather than blocking its
+  the claims graph. **Not yet landed as an available service**: per that
+  same pattern doc's own Sequencing section, `#2323` (the concrete
+  classify/list accelerator this generalizes from) is still in progress —
+  vendored and unit-tested, but "deliberately not yet wired into any
+  command" — and it doesn't yet cover worktree/session/git-state/claims
+  facts at all, only classify/list. This vision update records the
+  *contract* a future implementation must honor; it does not itself make
+  the cache reachable today. A cross-venv consumer like agent-dispatch
+  would boot the accelerator on demand and subscribe like any other
+  reader once it exists; if it can't reach it within its own bounded wait,
+  it reports the affected facts as stale/unknown rather than blocking its
   render/click path or guessing. Force-refresh is available strictly at
   explicit user/agent discretion (queued to coalesce, never triggered by
   an ordinary read). Message/conversation history stays explicitly out of
@@ -2122,6 +2129,8 @@ worktree via `agent-worktrees -p copilot-extensions create`.
   actually building the cache the vision now promises.
 - **Not implemented this session** (operator's own chosen scope: "write a
   design proposal... then stop for your review before coding"). No
-  agent-dispatch/worktree-manager code changed this pass; only the vision
-  doc and this effort's own Plan/Journal.
+  agent-dispatch/worktree-manager code changed this pass; only the
+  `agent-worktrees` vision, `docs/patterns/work-coalescing-singleton.md`
+  (the shared fallback invariant + validation scenarios), and this
+  effort's own Plan/Journal.
 
