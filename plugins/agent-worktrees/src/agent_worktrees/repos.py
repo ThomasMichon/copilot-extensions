@@ -347,6 +347,44 @@ def github_owner(remote: str) -> str | None:
     return None
 
 
+def is_https_remote(remote: str) -> bool:
+    """True when ``remote`` is specifically an ``https://`` URL.
+
+    Both the persisted credential pin (:func:`git_ops.pin_git_credential`,
+    which only ever writes ``credential.https://<host>.*``) and the
+    clone-time auth override (:func:`git_ops._auth_config_args_for_url`,
+    which only ever produces an ``http.extraheader``) affect HTTPS
+    transport exclusively. An SSH remote (``ssh://``/``git@host:owner/repo``)
+    uses the ambient SSH key instead and is untouched by either. A plain
+    ``http://`` remote is excluded too, for the same reason: git's
+    credential config is scheme-specific (``credential.https://...`` never
+    matches an ``http://`` fetch), and injecting the OAuth bearer token as an
+    ``http.extraheader`` onto plaintext HTTP would additionally send it over
+    an unencrypted connection. Treating either as "pinned"/"authed" would be
+    a false positive that reports success while changing nothing (or
+    changing the wrong thing).
+    """
+    return remote.strip().lower().startswith("https://")
+
+
+def derive_https_host(remote: str) -> str | None:
+    """Extract the exact hostname from an ``https://`` remote, or None.
+
+    Git's credential store is host-specific (``credential.https://<host>``
+    matches by literal hostname), so a checkout on ``www.github.com`` needs
+    ``credential.https://www.github.com`` -- a pin hardcoded to
+    ``github.com`` never matches it, even though :func:`github_owner`
+    accepts the ``www.`` form when *resolving the account*. Callers should
+    pass this (falling back to ``pin_git_credential``'s ``"github.com"``
+    default only when it returns ``None``) so the pinned host always
+    matches the checkout's actual remote.
+    """
+    if not is_https_remote(remote):
+        return None
+    m = re.match(r"https://(?:[^@/]+@)?([^/:]+)", remote.strip())
+    return m.group(1) if m else None
+
+
 def github_slug(remote: str) -> str | None:
     """Extract the ``owner/name`` slug from a github.com remote URL.
 
@@ -610,7 +648,42 @@ def add_repo(
     output.ok(
         f"Repo '{name}' registered at {path} ({plat}) [{entry.repo_class}{agent_note}]"
     )
+    _best_effort_pin_credential(entry, plat)
     return entry
+
+
+def _best_effort_pin_credential(entry: RepoEntry, plat: str) -> None:
+    """Pin the repo-local git credential for ``entry`` if the account already
+    resolves unambiguously (never prompts, never raises).
+
+    Called from every ``add_repo`` caller -- ``repos add``, ``repos clone``,
+    plugin install/adoption, project-entry registration -- so the pin is a
+    default outcome of *any* registration path, not only the CLI ``add``/
+    ``clone`` commands that separately call ``_clarify_registration_account``
+    (which additionally prompts to resolve an org-owned remote's ambiguous
+    account; once it does, it re-pins with the newly chosen login).
+
+    Uses ``entry.local_path(plat)`` (not a raw caller-supplied path) so a
+    home-relative registration (e.g. ``~/src/repo``) still resolves to a real
+    directory -- ``Path("~/src/repo").is_dir()`` is always False, which would
+    otherwise make ``pin_git_credential`` silently no-op. Skips SSH remotes
+    (see :func:`is_https_remote`): the pin only ever writes
+    ``credential.https://<host>.*``, which an SSH transport never consults.
+    """
+    if not is_https_remote(entry.remote):
+        return
+    try:
+        res = resolve_registration_account(entry.remote, entry.account)
+        if res.needs_clarify or not res.login or not res.owner:
+            return
+        path = entry.local_path(plat)
+        if not path:
+            return
+        from . import git_ops
+        host = derive_https_host(entry.remote) or "github.com"
+        git_ops.pin_git_credential(path, res.login, host=host)
+    except Exception:
+        pass
 
 
 def remove_repo(name: str) -> bool:
@@ -659,19 +732,62 @@ def clone_repo(
         # Still register it
         return add_repo(name, target, remote=remote)
 
-    # Clone
+    # Clone. A private repo owned by a different account than gh's currently
+    # active one would otherwise 403/404 on this very first fetch -- the
+    # repo-local credential pin add_repo installs below only exists *after*
+    # a successful clone, so inject the same one-shot cross-account auth
+    # override the fetch/push paths use, resolved directly from the clone
+    # URL (there is no checked-out remote yet to resolve a name against).
+    # HTTPS-only: the override is an http.extraheader, which an SSH
+    # transport (git@host:owner/repo, ssh://...) never consults -- for an
+    # SSH remote the ambient SSH key is what actually authenticates, so
+    # injecting this would be a no-op that falsely implies auth was handled.
+    from . import git_ops
+    extra_args: list[str] = []
+    if is_https_remote(remote):
+        try:
+            extra_args = git_ops._auth_config_args_for_url(remote)
+        except Exception:
+            extra_args = []
+    argv = ["git", *extra_args, "clone", remote, str(target_path)]
+
+    def _redact(text: str) -> str:
+        # Git itself can echo the injected -c argument (e.g. with tracing
+        # enabled) into stdout/stderr, and some exceptions (subprocess.
+        # TimeoutExpired) embed the full argv in their own __str__ -- strip
+        # the token wherever it could surface, not only in our own messages.
+        for arg in extra_args:
+            if arg.startswith("http.extraheader="):
+                text = text.replace(arg, "http.extraheader=<redacted>")
+        # With GIT_TRACE_CURL/GIT_CURL_VERBOSE set in the ambient
+        # environment, git can additionally echo the resolved request
+        # header itself (e.g. "=> Send header: Authorization: Basic
+        # <base64>") straight into stderr, independent of the -c argv
+        # form above -- redact that pattern too.
+        text = re.sub(
+            r"(Authorization:\s*(?:Basic|Bearer)\s+)\S+", r"\1<redacted>",
+            text, flags=re.IGNORECASE,
+        )
+        # A remote URL with embedded userinfo (https://user:token@host/...)
+        # is a second, independent credential surface -- e.g. a caller that
+        # named such a URL as `remote`. Strip it wherever a URL appears,
+        # including inside the argv this function also redacts.
+        text = re.sub(r"(https?://)[^/@\s]+@", r"\1<redacted>@", text)
+        return text
+
     try:
         result = subprocess.run(
-            ["git", "clone", remote, str(target_path)],
+            argv,
             capture_output=True,
             text=True,
             timeout=300,
         )
         if result.returncode != 0:
-            output.err(f"git clone failed: {result.stderr.strip()}")
+            output.err(f"git clone failed: {_redact(result.stderr.strip())}")
             return None
     except Exception as e:
-        output.err(f"Clone failed: {e}")
+        redacted_argv = _redact(str(git_ops._redact_args(argv)))
+        output.err(f"Clone failed running {redacted_argv}: {_redact(str(e))}")
         return None
 
     output.ok(f"Cloned {remote} to {target}")
@@ -714,6 +830,116 @@ def resolve_path(name: str, plat: str | None = None) -> str | None:
             return str(candidate)
 
     return None
+
+
+@dataclass
+class CredentialPinResult:
+    """Outcome of one repo's credential-pin backfill attempt."""
+
+    name: str
+    # "pinned" | "skipped" | "needs_clarify" | "no_path" | "not_github"
+    # | "not_registered" | "ssh_remote" | "not_https"
+    status: str
+    login: str | None
+    detail: str
+
+
+def backfill_credential_pins(
+    name: str | None = None, *, plat: str | None = None,
+) -> list[CredentialPinResult]:
+    """Retrofit the repo-local git credential pin onto already-registered repos.
+
+    New registrations (``repos add``/``repos clone``/adopt) pin automatically
+    at registration time (see ``_clarify_registration_account`` in
+    ``__main__``); this covers repos registered *before* that existed, or
+    whose checkout predates a machine's account_map entry.
+
+    Restricts to ``name`` when given, else every registered repo -- an
+    unrecognized ``name`` reports a single ``not_registered`` result rather
+    than silently falling back to "every repo" (a typo must never expand
+    scope). Skips (rather than errors) a repo with no resolvable local path,
+    a non-GitHub remote, or an account that still needs interactive
+    clarification (an org-owned remote with no account_map/explicit
+    override) -- those cases require ``repos account set``/an operator
+    choice, not a silent guess.
+    """
+    from . import git_ops
+
+    registry = read_registry()
+    if name is not None:
+        if name not in registry.repos:
+            return [
+                CredentialPinResult(name, "not_registered", None, "no such repo in the registry")
+            ]
+        entries = [registry.repos[name]]
+    else:
+        entries = list(registry.repos.values())
+    results: list[CredentialPinResult] = []
+    for entry in entries:
+        if not entry.remote:
+            results.append(
+                CredentialPinResult(entry.name, "not_github", None, "no remote configured")
+            )
+            continue
+        if not is_https_remote(entry.remote):
+            # An SSH remote (git@host:owner/repo, ssh://...) and a plain
+            # http:// remote both fail is_https_remote (see its docstring),
+            # but for different reasons -- distinguish them so the report
+            # never claims "SSH remote" for a checkout that is, in fact,
+            # unencrypted HTTP.
+            is_ssh = bool(re.match(r"^(?:ssh://|git@)", entry.remote.strip(), re.IGNORECASE))
+            if is_ssh:
+                results.append(
+                    CredentialPinResult(
+                        entry.name, "ssh_remote", None,
+                        "SSH remote -- the pin only affects HTTPS transport",
+                    )
+                )
+            else:
+                results.append(
+                    CredentialPinResult(
+                        entry.name, "not_https", None,
+                        "non-HTTPS remote -- the pin only affects HTTPS transport",
+                    )
+                )
+            continue
+        path = entry.local_path(plat or _current_platform())
+        if not path or not Path(path).is_dir():
+            results.append(
+                CredentialPinResult(
+                    entry.name, "no_path", None, "no local checkout on this machine"
+                )
+            )
+            continue
+        res = resolve_registration_account(entry.remote, entry.account)
+        if res.owner is None:
+            results.append(
+                CredentialPinResult(entry.name, "not_github", None, "non-GitHub remote")
+            )
+            continue
+        if res.needs_clarify or not res.login:
+            results.append(
+                CredentialPinResult(
+                    entry.name, "needs_clarify", res.login,
+                    f"owner '{res.owner}' has no resolvable account -- "
+                    f"run: repos account set {res.owner} <login>",
+                )
+            )
+            continue
+        host = derive_https_host(entry.remote) or "github.com"
+        if git_ops.pin_git_credential(path, res.login, host=host):
+            results.append(
+                CredentialPinResult(entry.name, "pinned", res.login, f"pinned to {res.login}")
+            )
+        else:
+            results.append(
+                CredentialPinResult(
+                    entry.name, "skipped", res.login,
+                    "pin not applied (already the active gh account, gh "
+                    "unavailable, or not a git checkout)",
+                )
+            )
+    return results
 
 
 # ---------------------------------------------------------------------------

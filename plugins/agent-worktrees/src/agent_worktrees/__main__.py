@@ -17949,7 +17949,7 @@ def cmd_register(args: argparse.Namespace) -> int:
             _entry_acct = _repos_acct.find_repo(project)
             if _entry_acct is not None:
                 _explicit = _entry_acct.account
-            _clarify_registration_account(_reg_remote, project, _explicit)
+            _clarify_registration_account(_reg_remote, project, _explicit, str(repo_dir))
     except Exception:
         pass
 
@@ -20308,6 +20308,13 @@ def _repos_usage() -> None:
     print("                                      Decoupled owner->gh-login map (account_map)")
     print("  account-for [owner|owner/name]      Print the resolved gh login (exit 1 if none)")
     print("  gh [owner|owner/name] [--] <args>   Run gh under that repo's account (token-inject)")
+    print(
+        "  pin-credentials [name] [--all]      Backfill each repo's local git credential"
+    )
+    print(
+        "     [--json]                         pin (see 'account-for'); new registrations"
+    )
+    print("                                      pin automatically")
     print("  allow-edits <repo> --reason <why>   Break-glass: temporarily allow direct edits")
     print(
         "     [--minutes N] | --list | <repo> --revoke   to a guarded repo (default 10m, max 60m)"
@@ -20333,6 +20340,7 @@ def _clarify_registration_account(
     remote: str,
     name: str,
     explicit_account: str = "",
+    path: str | None = None,
 ) -> None:
     """Ensure a repo's gh account is unambiguous at register/adopt/add time.
 
@@ -20341,6 +20349,13 @@ def _clarify_registration_account(
     the account and persist it as an ``account_map`` entry; headless, warn with
     the exact remedy. No-op when the account already resolves (explicit / map /
     sibling) or the remote is non-GitHub. See dotfiles #537.
+
+    An unambiguous account already gets its repo-local git credential pin
+    (see :func:`git_ops.pin_git_credential`) from ``repos.add_repo`` itself,
+    the common path every registration flow goes through. This function only
+    needs to pin *here*, once ``path`` is given, for the interactive/headless
+    clarification outcome below -- the one case where the account becomes
+    known only *after* ``add_repo`` already ran.
     """
     from . import git_ops, repos
 
@@ -20350,7 +20365,8 @@ def _clarify_registration_account(
         return
 
     if not res.needs_clarify:
-        # Surface a resolved non-owner account for transparency.
+        # Surface a resolved non-owner account for transparency (already
+        # pinned by add_repo).
         if res.source in ("account_map", "sibling") and res.login:
             output.info(f"  account:  {res.login} (via {res.source})")
         return
@@ -20389,6 +20405,16 @@ def _clarify_registration_account(
         if 0 <= idx < len(accounts):
             choice = accounts[idx]
     repos.set_account_map(owner, choice)
+    if path and repos.is_https_remote(remote):
+        try:
+            # A caller-supplied path can be home-relative (e.g. '~/src/repo'
+            # from 'repos add'); Path(path).is_dir() is always False for
+            # that literal string, which would otherwise make the pin
+            # silently no-op right after the operator just chose an account.
+            host = repos.derive_https_host(remote) or "github.com"
+            git_ops.pin_git_credential(os.path.expanduser(path), choice, host=host)
+        except Exception:
+            pass
 
 
 def cmd_repos_dispatch(argv: list[str]) -> int:
@@ -20530,7 +20556,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             account=account,
             agent=agent_flag,
         )
-        _clarify_registration_account(remote, name, account)
+        _clarify_registration_account(remote, name, account, path)
         return 0
 
     if sub == "remove":
@@ -20559,7 +20585,8 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                 target = rest[idx + 1]
         entry = repos.clone_repo(remote, name=name, target=target)
         if entry:
-            _clarify_registration_account(entry.remote, entry.name, entry.account)
+            _entry_path = repos.resolve_path(entry.name)
+            _clarify_registration_account(entry.remote, entry.name, entry.account, _entry_path)
         return 0 if entry else 1
 
     if sub == "srcroot":
@@ -20741,6 +20768,48 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             print(login)
             return 0
         return 1
+
+    if sub == "pin-credentials":
+        # Backfill the repo-local git credential pin (see git_ops.pin_git_
+        # credential) for repos registered before this existed, or whose
+        # account only became resolvable later (a fresh account_map entry).
+        # New registrations already pin automatically via repos.add_repo.
+        json_out = "--json" in rest
+        target = None
+        for tok in rest:
+            if tok not in ("--all", "--json"):
+                target = tok
+                break
+        results = repos.backfill_credential_pins(target)
+        if json_out:
+            _json_output(
+                {
+                    "results": [
+                        {
+                            "name": r.name,
+                            "status": r.status,
+                            "login": r.login,
+                            "detail": r.detail,
+                        }
+                        for r in results
+                    ]
+                }
+            )
+        else:
+            if not results:
+                print("No repos registered.")
+            for r in results:
+                if r.status == "pinned":
+                    output.ok(f"{r.name}: {r.detail}")
+                elif r.status in ("no_path", "not_github", "ssh_remote", "not_https"):
+                    output.info(f"{r.name}: {r.status} ({r.detail})")
+                else:
+                    output.warn(f"{r.name}: {r.detail}")
+        had_error = any(
+            r.status not in ("pinned", "no_path", "not_github", "ssh_remote", "not_https")
+            for r in results
+        )
+        return 1 if had_error else 0
 
     if sub == "gh":
         # Run `gh` against a repo under the account that owns it, via token

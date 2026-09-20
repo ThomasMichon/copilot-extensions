@@ -15,6 +15,7 @@ import platform
 import re
 import shutil
 import subprocess
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -939,15 +940,18 @@ def resolve_remote_name(remote_or_url: str, *, cwd: str | Path) -> str:
 
 
 def _parse_github_owner(url: str) -> str | None:
-    """Extract the owner from a github.com remote URL (https or ssh form)."""
-    url = url.strip()
-    m = re.match(r"https?://[^/]*github\.com/([^/]+)/", url)
-    if m:
-        return m.group(1)
-    m = re.match(r"(?:ssh://)?git@[^:/]*github\.com[:/]([^/]+)/", url)
-    if m:
-        return m.group(1)
-    return None
+    """Extract the owner from a github.com remote URL (https or ssh form).
+
+    Delegates to :func:`repos.github_owner`, whose host matching is
+    boundary-aware (the host must actually *be* ``github.com``, not merely
+    contain that substring) -- this function decides which host a minted
+    token gets sent to (see :func:`_auth_config_args_for_url`), so a
+    lookalike host such as ``evilgithub.com`` must never match.
+    """
+    if not url:
+        return None
+    from . import repos
+    return repos.github_owner(url)
 
 
 def slug_from_url(url: str | None) -> str | None:
@@ -1033,6 +1037,184 @@ def gh_token_for_account(account: str) -> str | None:
     return _gh_token_for_owner(account)
 
 
+@contextmanager
+def _credential_pin_lock(repo_path: Path, git_dir: str):
+    """Serialize concurrent :func:`pin_git_credential` calls on one checkout.
+
+    An interprocess file lock (same OS-native primitive as the binstub
+    installer's own lock) keyed on the resolved ``--git-dir``, so two
+    processes racing to pin the same repo (e.g. a registration and a
+    concurrent backfill) can never interleave the helper-reset/username/
+    helper-append writes into a mixed-account result.
+    """
+    git_dir_path = Path(git_dir)
+    if not git_dir_path.is_absolute():
+        git_dir_path = repo_path / git_dir_path
+    lock_path = git_dir_path / "agent-worktrees-credential-pin.lock"
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        stream = lock_path.open("a+b")
+    except OSError:
+        # No writable git-dir (unexpected, but never worth failing the pin
+        # attempt over) -- proceed unlocked rather than raise.
+        yield
+        return
+    try:
+        if stream.tell() == 0:
+            stream.write(b"\0")
+            stream.flush()
+        if platform.system() == "Windows":
+            import msvcrt
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if platform.system() == "Windows":
+                import msvcrt
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+    finally:
+        stream.close()
+
+
+def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.com") -> bool:
+    """Persist a repo-local git credential pin for ``login`` on ``host``.
+
+    The account resolved at register/clone/adopt time (repos.yaml's
+    ``account_map``, an explicit ``account:``, or an authenticated owner
+    login) is only advisory to *this* tool's own commands: they inject a
+    per-invocation token override (:func:`_auth_config_args`) and never touch
+    the repo's actual git config. Any *other* tool that runs a plain ``git
+    fetch``/``git pull`` in that checkout (a CI job, an IDE, an unattended
+    machine-maintenance task, ...) instead gets whatever account ``gh``'s
+    own generic ``credential.https://<host>.helper`` currently considers
+    *active* -- which drifts independently of which account this repo
+    actually needs and can silently authenticate as the wrong identity
+    against a private repo.
+
+    This writes a **local**, repo-scoped override so any plain git client
+    resolves the same login this tool already knows is correct, regardless of
+    which ``gh`` account happens to be active right now:
+
+        [credential "https://<host>"]
+            helper =
+            username = <login>
+            helper = !f() { if test x$1 = xget; then token=$(gh auth token \\
+                --hostname <host> --user '<login>') || exit $?; printf \\
+                '%s\\n' "password=$token"; fi; }; f
+
+    The leading empty ``helper =`` resets any inherited (global/system)
+    helper list for this exact host before appending the pinned one -- git's
+    credential-helper chain is otherwise cumulative across scopes, so without
+    the reset the pinned helper would just be appended after (not replace) a
+    generic ``gh auth git-credential`` helper that resolves the wrong
+    account. That reset, the username write, and the helper append are three
+    independent ``git config`` processes; an interprocess lock (keyed on the
+    resolved ``--git-dir``) serializes concurrent pins of the same checkout
+    (e.g. two registrations/backfills racing) so they can never interleave
+    into a helper/username combination pulled from different accounts.
+
+    No-ops (returns ``False``, never raises) when ``repo_path`` is not a git
+    working directory, ``login``/``host`` is empty or contains a character
+    outside ``[A-Za-z0-9_.-]`` (the helper is a ``!``-prefixed shell script;
+    a stray quote/backtick/``$``/separator in either would either break the
+    single-quoting around ``login`` or inject a command that runs whenever
+    git invokes this helper -- reject rather than attempt to escape), ``gh``
+    is not on ``PATH``, or ``login`` **is** the currently active ``gh``
+    account. That last case mirrors :func:`_auth_config_args`'s own
+    same-account skip (#900): when the login is already active, the
+    inherited default credential helper (GCM, a vault-backed helper, ...)
+    already authenticates correctly, and forcing it to a ``gh auth
+    token``-backed helper here could turn a working plain push into a 403
+    if that OAuth token happens to lack push scope -- callers treat this as
+    a best-effort convenience, not a required step.
+    """
+    _safe = re.compile(r"[A-Za-z0-9_.-]+")
+    # ``fullmatch`` (not ``match``): with a trailing ``$`` anchor, ``match``
+    # still accepts a string ending in a single newline (Python regex ``$``
+    # matches before a trailing "\n" as well as at the true end of string),
+    # so e.g. "evil.com\n" would slip past a "^...$" match check and get
+    # written into the stored helper as an embedded newline.
+    if not login or not host or not _safe.fullmatch(login) or not _safe.fullmatch(host):
+        return False
+    path = Path(repo_path)
+    if not path.is_dir() or shutil.which("gh") is None:
+        return False
+    env = repository_identity_env()
+    try:
+        # ``--git-dir`` (not ``--is-inside-work-tree``) so this also pins a
+        # *bare* anchor repo (agent-worktrees' own pattern for a checkout
+        # that must never be edited directly, e.g. a repo with core.bare set
+        # after conversion from a normal clone) -- a bare repo has no work
+        # tree to be "inside", but plain `git fetch`/`pull` there is exactly
+        # the case this pin protects. Inherited repository-selection env vars
+        # (GIT_DIR/GIT_WORK_TREE/GIT_CONFIG/...) are stripped so this always
+        # targets ``path``, never whatever repo the caller's own process
+        # context points at (see :func:`repository_identity_env`).
+        probe = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--git-dir"],
+            capture_output=True, text=True, timeout=10, env=env,
+        )
+        if probe.returncode != 0:
+            return False
+        git_dir = probe.stdout.strip()
+        key = f"credential.https://{host}"
+        active = _active_gh_account()
+        if active and active.casefold() == login.casefold():
+            # login is already the active gh account: the inherited default
+            # helper already authenticates correctly, so don't force a
+            # gh-auth-token-backed helper on top of it (see the docstring
+            # above). But a *stale* pin from a previous, different login left
+            # in .git/config (e.g. this repo's account_map mapping was later
+            # corrected to what is now the active account) would otherwise
+            # keep forcing that old identity -- clear it so "the active
+            # helper already works" is actually true for this checkout.
+            with _credential_pin_lock(path, git_dir):
+                subprocess.run(
+                    ["git", "-C", str(path), "config", "--local", "--unset-all", f"{key}.helper"],
+                    capture_output=True, text=True, timeout=10, env=env,
+                )
+                subprocess.run(
+                    ["git", "-C", str(path), "config", "--local", "--unset-all",
+                     f"{key}.username"],
+                    capture_output=True, text=True, timeout=10, env=env,
+                )
+            return False
+        with _credential_pin_lock(path, git_dir):
+            helper_script = (
+                "!f() { if test x$1 = xget; then "
+                f"token=$(gh auth token --hostname {host} --user '{login}') || exit $?; "
+                "printf '%s\\n' \"password=$token\"; fi; }; f"
+            )
+            subprocess.run(
+                ["git", "-C", str(path), "config", "--local", "--unset-all", f"{key}.helper"],
+                capture_output=True, text=True, timeout=10, env=env,
+            )
+            subprocess.run(
+                ["git", "-C", str(path), "config", "--local", "--add", f"{key}.helper", ""],
+                capture_output=True, text=True, timeout=10, env=env,
+            )
+            subprocess.run(
+                ["git", "-C", str(path), "config", "--local", f"{key}.username", login],
+                capture_output=True, text=True, timeout=10, env=env,
+            )
+            result = subprocess.run(
+                ["git", "-C", str(path), "config", "--local", "--add",
+                 f"{key}.helper", helper_script],
+                capture_output=True, text=True, timeout=10, env=env,
+            )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 @functools.cache
 def _active_gh_account() -> str | None:
     """Return the login of the **active** ``gh`` account, or None.
@@ -1107,6 +1289,40 @@ def list_gh_accounts() -> list[str]:
     return seen
 
 
+def _auth_config_args_for_url(url: str) -> list[str]:
+    """Build ``-c http.extraheader=...`` args to auth as ``url``'s owner.
+
+    The URL-based core of :func:`_auth_config_args`, usable *before* a repo
+    exists (e.g. the initial ``git clone`` -- there is no checked-out remote
+    to resolve a name against yet). See :func:`_auth_config_args` for the
+    full cross-account rationale and the same-account skip.
+
+    HTTPS-only: a plain ``http://`` remote would otherwise send the bearer
+    token over an unencrypted connection (``_parse_github_owner`` itself
+    matches ``https?://``, since it also backs the account-*resolution*
+    path where scheme doesn't matter -- the credential-*injection* callers
+    must gate separately).
+    """
+    if not url.strip().lower().startswith("https://"):
+        return []
+    owner = _parse_github_owner(url)
+    if not owner:
+        return []
+    try:
+        from . import repos
+        account = repos.account_for_github_owner(owner) or owner
+    except Exception:
+        account = owner
+    active = _active_gh_account()
+    if active and active.casefold() == account.casefold():
+        return []
+    token = _gh_token_for_owner(account)
+    if not token:
+        return []
+    cred = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return ["-c", f"http.extraheader=AUTHORIZATION: basic {cred}"]
+
+
 def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:
     """Build ``-c http.extraheader=...`` args to auth as the remote's owner.
 
@@ -1125,25 +1341,7 @@ def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:
     url = _remote_url(remote, cwd=cwd)
     if not url:
         return []
-    owner = _parse_github_owner(url)
-    if not owner:
-        return []
-    # Honor an explicit repos.yaml ``account:`` override (owner != account is
-    # possible for EMU accounts spanning orgs); absent an override the account
-    # *is* the owner, preserving the derive-from-owner behavior (#29).
-    try:
-        from . import repos
-        account = repos.account_for_github_owner(owner) or owner
-    except Exception:
-        account = owner
-    active = _active_gh_account()
-    if active and active.casefold() == account.casefold():
-        return []
-    token = _gh_token_for_owner(account)
-    if not token:
-        return []
-    cred = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-    return ["-c", f"http.extraheader=AUTHORIZATION: basic {cred}"]
+    return _auth_config_args_for_url(url)
 
 
 def ref_exists(ref: str, *, cwd: str | Path) -> bool:

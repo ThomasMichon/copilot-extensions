@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -487,6 +488,399 @@ def test_add_repo_persists_account(home: Path):
     reg = repos.read_registry()
     assert reg.repos["proj"].account == "host-acct"
     assert repos.resolve_account(reg.repos["proj"]) == "host-acct"
+
+
+# --- backfill_credential_pins ------------------------------------------------
+
+
+def test_backfill_pins_a_resolvable_repo(home: Path, tmp_path: Path):
+    work = tmp_path / "pin-me"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "pin-me", str(work), repo_class="worktree",
+        remote="https://github.com/example-operator/pin-me.git", plat="windows",
+    )
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+        results = repos.backfill_credential_pins(plat="windows")
+    assert len(results) == 1
+    assert results[0].name == "pin-me"
+    assert results[0].status == "pinned"
+    assert results[0].login == "example-operator"
+
+    username = subprocess.run(
+        ["git", "-C", str(work), "config", "--local",
+         "credential.https://github.com.username"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert username == "example-operator"
+
+
+def test_backfill_restricts_to_named_repo(home: Path, tmp_path: Path):
+    work_a = tmp_path / "a"
+    work_b = tmp_path / "b"
+    _init_repo(work_a, branch="main")
+    _init_repo(work_b, branch="main")
+    repos.add_repo("a", str(work_a), repo_class="worktree",
+                    remote="https://github.com/example-operator/a.git", plat="windows")
+    repos.add_repo("b", str(work_b), repo_class="worktree",
+                    remote="https://github.com/example-operator/b.git", plat="windows")
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+        results = repos.backfill_credential_pins("a", plat="windows")
+    assert [r.name for r in results] == ["a"]
+
+
+def test_backfill_skips_org_owner_needing_clarify(home: Path, tmp_path: Path):
+    work = tmp_path / "org-owned"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "org-owned", str(work), repo_class="worktree",
+        remote="https://github.com/github/org-owned.git", plat="windows",
+    )
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"):
+        results = repos.backfill_credential_pins(plat="windows")
+    assert results[0].status == "needs_clarify"
+    assert "repos account set" in results[0].detail
+
+
+def test_backfill_skips_non_github_remote(home: Path, tmp_path: Path):
+    work = tmp_path / "ado-repo"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "ado-repo", str(work), repo_class="worktree",
+        remote="https://my-org.visualstudio.com/x/_git/ado-repo", plat="windows",
+    )
+    results = repos.backfill_credential_pins(plat="windows")
+    assert results[0].status == "not_github"
+
+
+def test_backfill_skips_missing_local_path(home: Path, tmp_path: Path):
+    repos.add_repo(
+        "gone", str(tmp_path / "does-not-exist"), repo_class="worktree",
+        remote="https://github.com/example-operator/gone.git", plat="windows",
+    )
+    results = repos.backfill_credential_pins(plat="windows")
+    assert results[0].status == "no_path"
+
+
+def test_backfill_skips_ssh_remote(home: Path, tmp_path: Path):
+    """The pin only ever writes credential.https://<host>.*, which an SSH
+    transport never consults -- treating it as pinned would be a false
+    positive that reports success while changing nothing."""
+    work = tmp_path / "ssh-repo"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "ssh-repo", str(work), repo_class="worktree",
+        remote="git@github.com:example-operator/ssh-repo.git", plat="windows",
+    )
+    results = repos.backfill_credential_pins(plat="windows")
+    assert results[0].status == "ssh_remote"
+
+
+def test_is_https_remote():
+    assert repos.is_https_remote("https://github.com/o/r.git") is True
+    assert repos.is_https_remote("http://github.com/o/r.git") is False
+    assert repos.is_https_remote("git@github.com:o/r.git") is False
+    assert repos.is_https_remote("ssh://git@github.com/o/r.git") is False
+    assert repos.is_https_remote("") is False
+
+
+def test_derive_https_host():
+    assert repos.derive_https_host("https://github.com/o/r.git") == "github.com"
+    assert repos.derive_https_host("https://www.github.com/o/r.git") == "www.github.com"
+    assert repos.derive_https_host("https://ghe.example.com/o/r.git") == "ghe.example.com"
+    assert repos.derive_https_host("git@github.com:o/r.git") is None
+    assert repos.derive_https_host("") is None
+
+
+def test_backfill_distinguishes_http_from_ssh_remote(home: Path, tmp_path: Path):
+    """is_https_remote() rejects both SSH and plain http:// remotes, but the
+    backfill report must never claim 'SSH remote' for an unencrypted HTTP
+    checkout -- distinguish the two skip reasons."""
+    work = tmp_path / "http-repo"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "http-repo", str(work), repo_class="worktree",
+        remote="http://github.com/example-operator/http-repo.git", plat="windows",
+    )
+    results = repos.backfill_credential_pins(plat="windows")
+    assert results[0].status == "not_https"
+
+
+def test_backfill_pins_with_derived_host_not_hardcoded_github_com(home: Path, tmp_path: Path):
+    """A www.github.com checkout must be pinned under credential.https://
+    www.github.com, not the hardcoded 'github.com' default -- git's
+    credential store matches by literal hostname."""
+    work = tmp_path / "www-repo"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "www-repo", str(work), repo_class="worktree",
+        remote="https://www.github.com/example-operator/www-repo.git", plat="windows",
+    )
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops._active_gh_account", return_value=None):
+        results = repos.backfill_credential_pins(plat="windows")
+    assert results[0].status == "pinned"
+    username = subprocess.run(
+        ["git", "-C", str(work), "config", "--local",
+         "credential.https://www.github.com.username"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert username == "example-operator"
+
+
+def test_backfill_unknown_name_never_falls_back_to_all(home: Path, tmp_path: Path):
+    """A typo in the requested name must report 'not found', never silently
+    expand to every registered repo."""
+    work = tmp_path / "real-one"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "real-one", str(work), repo_class="worktree",
+        remote="https://github.com/example-operator/real-one.git", plat="windows",
+    )
+    results = repos.backfill_credential_pins("typo-name", plat="windows")
+    assert len(results) == 1
+    assert results[0].name == "typo-name"
+    assert results[0].status == "not_registered"
+
+
+# --- add_repo auto-pins (every registration path, not just repos add/clone) --
+
+
+def test_add_repo_pins_credential_for_a_resolvable_owner(home: Path, tmp_path: Path):
+    """Every caller of add_repo -- repos add/clone, plugin install/adoption,
+    project-entry registration -- gets the pin, not only the CLI paths that
+    separately call _clarify_registration_account."""
+    work = tmp_path / "auto-pin"
+    _init_repo(work, branch="main")
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+        repos.add_repo(
+            "auto-pin", str(work), repo_class="worktree",
+            remote="https://github.com/example-operator/auto-pin.git", plat="windows",
+        )
+    username = subprocess.run(
+        ["git", "-C", str(work), "config", "--local",
+         "credential.https://github.com.username"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert username == "example-operator"
+
+
+def test_add_repo_does_not_pin_when_account_needs_clarify(home: Path, tmp_path: Path):
+    """An org-owned remote with no account_map entry must not guess -- no
+    pin is written until an operator resolves it (repos account set /
+    the interactive _clarify_registration_account flow)."""
+    work = tmp_path / "org-owned-auto"
+    _init_repo(work, branch="main")
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"):
+        repos.add_repo(
+            "org-owned-auto", str(work), repo_class="worktree",
+            remote="https://github.com/github/org-owned-auto.git", plat="windows",
+        )
+    result = subprocess.run(
+        ["git", "-C", str(work), "config", "--local",
+         "credential.https://github.com.username"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0  # key was never set
+
+
+def test_add_repo_does_not_pin_ssh_remote(home: Path, tmp_path: Path):
+    """An SSH remote's registration must not attempt (and falsely report) a
+    pin that credential.https://... can never affect."""
+    work = tmp_path / "ssh-auto"
+    _init_repo(work, branch="main")
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+        repos.add_repo(
+            "ssh-auto", str(work), repo_class="worktree",
+            remote="git@github.com:example-operator/ssh-auto.git", plat="windows",
+        )
+    result = subprocess.run(
+        ["git", "-C", str(work), "config", "--local",
+         "credential.https://github.com.username"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0  # key was never set
+
+
+def test_add_repo_pin_expands_home_relative_path(home: Path, tmp_path: Path, monkeypatch):
+    """Path('~/src/repo').is_dir() is always False -- add_repo must resolve
+    through entry.local_path() (which expands '~' via os.path.expanduser)
+    rather than the raw caller-supplied path string, or a home-relative
+    registration would silently never get pinned."""
+    work = tmp_path / "home-rel"
+    _init_repo(work, branch="main")
+    monkeypatch.setattr(
+        repos.os.path, "expanduser",
+        lambda p: str(work) if p == "~/home-rel" else os.path.expanduser(p),
+    )
+    entry = repos.add_repo(
+        "home-rel", "~/home-rel", repo_class="worktree",
+        remote="https://github.com/example-operator/home-rel.git", plat="windows",
+    )
+    assert entry.local_path("windows") == str(work)
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+        repos._best_effort_pin_credential(entry, "windows")
+    username = subprocess.run(
+        ["git", "-C", str(work), "config", "--local",
+         "credential.https://github.com.username"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert username == "example-operator"
+
+
+def test_add_repo_pin_failure_never_raises(home: Path, tmp_path: Path):
+    """A broken resolver/pin call must never break registration itself."""
+    with patch("agent_worktrees.repos.resolve_registration_account",
+               side_effect=RuntimeError("boom")):
+        entry = repos.add_repo(
+            "still-registers", "D:/Src/still-registers", repo_class="worktree",
+            remote="https://github.com/example-operator/still-registers.git", plat="windows",
+        )
+    assert entry.name == "still-registers"
+    assert repos.read_registry().repos["still-registers"].name == "still-registers"
+
+
+# --- clone_repo injects cross-account auth before the pin exists ------------
+
+
+def test_clone_repo_injects_auth_args_into_initial_clone(home: Path, tmp_path: Path):
+    """The repo-local credential pin only exists *after* add_repo runs, which
+    is after the clone -- a private repo owned by a different account than
+    gh's active one needs a one-shot override on the clone itself."""
+    home_srcroot = tmp_path / "src"
+    repos.set_srcroot(str(home_srcroot), plat="windows")
+    captured: dict[str, list] = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        (Path(argv[-1])).mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with patch("agent_worktrees.repos._current_platform", return_value="windows"), \
+         patch("agent_worktrees.repos.subprocess.run", side_effect=fake_run), \
+         patch(
+             "agent_worktrees.git_ops._auth_config_args_for_url",
+             return_value=["-c", "http.extraheader=AUTHORIZATION: basic FAKE"],
+         ):
+        entry = repos.clone_repo("https://github.com/example-operator/cloned.git")
+
+    assert entry is not None
+    argv = captured["argv"]
+    assert argv[0] == "git"
+    assert "-c" in argv and "http.extraheader=AUTHORIZATION: basic FAKE" in argv
+    assert argv[argv.index("clone")] == "clone"
+
+
+def test_clone_repo_no_extra_args_for_same_account(home: Path, tmp_path: Path):
+    home_srcroot = tmp_path / "src"
+    repos.set_srcroot(str(home_srcroot), plat="windows")
+    captured: dict[str, list] = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        (Path(argv[-1])).mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with patch("agent_worktrees.repos._current_platform", return_value="windows"), \
+         patch("agent_worktrees.repos.subprocess.run", side_effect=fake_run), \
+         patch("agent_worktrees.git_ops._auth_config_args_for_url", return_value=[]):
+        repos.clone_repo("https://github.com/example-operator/cloned2.git")
+
+    assert captured["argv"] == [
+        "git", "clone", "https://github.com/example-operator/cloned2.git",
+        str(home_srcroot / "cloned2"),
+    ]
+
+
+def test_clone_repo_redacts_extraheader_from_stderr_on_failure(home: Path, tmp_path: Path):
+    """A failed clone's stderr must never surface the injected token, even
+    if git itself echoes the -c argument back (e.g. with tracing enabled)."""
+    home_srcroot = tmp_path / "src"
+    repos.set_srcroot(str(home_srcroot), plat="windows")
+
+    def fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(
+            argv, 128,
+            "", "fatal: could not clone (args were: "
+                "http.extraheader=AUTHORIZATION: basic FAKESECRET)",
+        )
+
+    with patch("agent_worktrees.repos._current_platform", return_value="windows"), \
+         patch("agent_worktrees.repos.subprocess.run", side_effect=fake_run), \
+         patch(
+             "agent_worktrees.git_ops._auth_config_args_for_url",
+             return_value=["-c", "http.extraheader=AUTHORIZATION: basic FAKESECRET"],
+         ), \
+         patch("agent_worktrees.output.err") as mock_err:
+        entry = repos.clone_repo("https://github.com/example-operator/redact-test.git")
+
+    assert entry is None
+    logged = " ".join(str(c) for c in mock_err.call_args_list)
+    assert "FAKESECRET" not in logged
+    assert "<redacted>" in logged
+
+
+def test_clone_repo_redacts_authorization_header_trace_from_stderr(home: Path, tmp_path: Path):
+    """With GIT_TRACE_CURL/GIT_CURL_VERBOSE, git can echo the literal
+    resolved 'Authorization: Basic <token>' request header into stderr,
+    independent of the -c argv form -- that must be redacted too."""
+    home_srcroot = tmp_path / "src"
+    repos.set_srcroot(str(home_srcroot), plat="windows")
+
+    def fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(
+            argv, 128, "",
+            "=> Send header: Authorization: Basic eC1hY2Nlc3MtdG9rZW46c2VjcmV0\r\n"
+            "fatal: could not clone",
+        )
+
+    with patch("agent_worktrees.repos._current_platform", return_value="windows"), \
+         patch("agent_worktrees.repos.subprocess.run", side_effect=fake_run), \
+         patch("agent_worktrees.git_ops._auth_config_args_for_url", return_value=[]), \
+         patch("agent_worktrees.output.err") as mock_err:
+        entry = repos.clone_repo("https://github.com/example-operator/trace-redact.git")
+
+    assert entry is None
+    logged = " ".join(str(c) for c in mock_err.call_args_list)
+    assert "eC1hY2Nlc3MtdG9rZW46c2VjcmV0" not in logged
+    assert "<redacted>" in logged
+
+
+def test_clone_repo_redacts_url_userinfo_from_exception_message(home: Path, tmp_path: Path):
+    """A remote URL with embedded userinfo (https://user:token@host/...) is
+    a second, independent credential surface from the injected extraheader
+    -- the logged argv/exception text must never leak it either."""
+    home_srcroot = tmp_path / "src"
+    repos.set_srcroot(str(home_srcroot), plat="windows")
+    remote = "https://x-access-token:realtoken@github.com/example-operator/leak-test.git"
+
+    def fake_run(argv, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=300)
+
+    with patch("agent_worktrees.repos._current_platform", return_value="windows"), \
+         patch("agent_worktrees.repos.subprocess.run", side_effect=fake_run), \
+         patch("agent_worktrees.git_ops._auth_config_args_for_url", return_value=[]), \
+         patch("agent_worktrees.output.err") as mock_err:
+        entry = repos.clone_repo(remote)
+
+    assert entry is None
+    logged = " ".join(str(c) for c in mock_err.call_args_list)
+    assert "realtoken" not in logged
+    assert "<redacted>@" in logged
 
 
 # ---------------------------------------------------------------------------
