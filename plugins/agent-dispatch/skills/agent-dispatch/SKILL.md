@@ -777,6 +777,23 @@ to `machine` only when the mismatch is machine-wide.
 > Best-effort and read-only: with no `agent-bridge`/`ssh` on PATH (or no live
 > session) the overlay is simply omitted and output is unchanged.
 
+> **Reading a task's actual conversation (its transcript), not just its
+> status.** `show`'s embodiment overlay only covers a *currently live*
+> CLI-embodied task. For the general case -- any dispatch task, live or long
+> finished -- a caller holding only its task id resolves durably with one
+> agent-bridge call: `GET /api/v1/dispatch-tasks/{id}/session`. This tries
+> the task's current owner session, then its durable attachment history
+> (`GET /tasks/{id}/attachments`, above), then its target worktree's latest
+> known session -- live-then-cold-store throughout, so it still answers once
+> the task's worktree is reclaimed. The response carries `durable_session_id`
+> -- use that, never the response's own `session_id` (agent-bridge's
+> internal, non-durable escrow id for a still-live session) -- to open the
+> conversation in Neuron Forge or read its transcript. See the `agent-bridge`
+> skill's *Session identity* section for the full contract, and don't invent
+> a per-consumer naming convention to get there (a prior Dampener UI
+> attempt at exactly that was reverted -- `visions/plugins/agent-bridge`'s
+> *resolve-by-any-origin-reference* feature is the one shared primitive).
+
 > **`consume` is the handoff-pickup shortcut -- in two flavors.**
 >
 > - **Baton (default `consume <id>`):** rolls the whole
