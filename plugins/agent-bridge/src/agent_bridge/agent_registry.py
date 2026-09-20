@@ -215,6 +215,14 @@ class AgentConfig:
     codespace: dict | None = None  # structured CS metadata (#177) for the
     #                                CodeSpaceSpawner path (name/repo/acp_command/
     #                                workspace_folder); avoids parsing spawn_command
+    mcp_servers: list[dict[str, Any]] = field(default_factory=list)
+    #   This agent's own declared per-session MCP toolset (ACP server specs,
+    #   see acp_client.build_mcp_servers). Copilot CLI's ``--agent <name>``
+    #   does NOT reliably load a custom agent's ``mcp-servers:`` frontmatter
+    #   for headless/sub-agent/``--acp`` sessions (upstream limitation,
+    #   github/copilot-cli#2630) -- registering the same servers here lets
+    #   agent-bridge inject them explicitly via the ACP-level ``mcp_servers``
+    #   parameter instead, which IS honored on new/resumed sessions alike.
 
 
 @dataclass
@@ -768,6 +776,14 @@ def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
             raise ValueError(
                 f"agent {name!r} aliases must be a list of strings"
             )
+        raw_mcp_servers = config.get("mcp_servers", [])
+        if (
+            not isinstance(raw_mcp_servers, list)
+            or any(not isinstance(spec, dict) for spec in raw_mcp_servers)
+        ):
+            raise ValueError(
+                f"agent {name!r} mcp_servers must be a list of objects"
+            )
         registry[name] = AgentConfig(
             name=name,
             host=config.get("host"),
@@ -787,6 +803,7 @@ def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
             worktree_discovery=bool(config.get("worktree_discovery", True)),
             setup_script=config.get("setup_script"),
             requires_admin=bool(config.get("requires_admin")),
+            mcp_servers=[dict(spec) for spec in raw_mcp_servers],
         )
     return registry
 
@@ -2622,6 +2639,7 @@ class AgentResolver:
                 spawn_command=config.spawn_command,
                 codespace=config.codespace,
                 env=config.env,
+                mcp_servers=config.mcp_servers,
             )
 
         if not config.host:
@@ -2633,6 +2651,7 @@ class AgentResolver:
                 copilot_args=config.copilot_args + self._own_plugin_args(config),
                 env=config.env,
                 project=config.project,
+                mcp_servers=config.mcp_servers,
             )
 
         # SSH agent -- resolve machine (by key or alias) and environment
@@ -2682,6 +2701,7 @@ class AgentResolver:
                 copilot_args=config.copilot_args + self._own_plugin_args(config),
                 env=config.env,
                 project=config.project,
+                mcp_servers=config.mcp_servers,
             )
 
         # Real SSH is required (remote machine, or cross-environment on the
@@ -2738,6 +2758,7 @@ class AgentResolver:
             project=config.project,
             ssh_shell=ssh_env.shell,
             auth_hooks=auth_hook_dicts,
+            mcp_servers=config.mcp_servers,
         )
 
     def _is_local_loopback_agent(self, config: AgentConfig) -> bool:
