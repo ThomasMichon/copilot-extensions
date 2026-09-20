@@ -41,6 +41,7 @@ def test_cold_store_session_info_shape():
     )
     info = cold_store_session_info(cold)
     assert info.session_id == "abc"
+    assert info.durable_session_id == "abc"
     assert info.worktree_id == "wt-1"
     assert info.read_only is True
     assert info.at_rest is True
