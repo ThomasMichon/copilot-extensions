@@ -5,10 +5,15 @@
 - **Branch(es):** `pr/<slug>` per phase
 - **Created:** 2026-09-20
 - **Status:** Draft <!-- Draft | Active | Blocked | Done -->
-- **Vision:** vision-extending — flips the *policy default* for the
-  `source_attribution` capability landed by `pr-attribution-codenames`
-  (Done): public-safe traceability becomes the out-of-the-box behavior
-  instead of an opt-in nobody actually opts into.
+- **Vision:** below-altitude — no `visions/` item governs the specific
+  default value of the `source_attribution` marker mode. The nearest
+  candidates (`visions/agent-fabric`'s "worktree identity" section,
+  `visions/plugins/agent-worktrees/pull-requests`'s PR-capability vision)
+  describe the mechanism's existence and shape, not this policy/default
+  choice within it; this effort changes a configuration default on an
+  already-vision-covered capability (`pr-attribution-codenames`, Done),
+  not new architecture. Proceeding without a vision revision per the
+  below-altitude path.
 - **Umbrella issue:** [#2977](https://github.com/ThomasMichon/copilot-extensions/issues/2977)
 
 ## Guiding Intent
@@ -128,6 +133,22 @@ value (only honoring a custom wordlist when `codename` is explicitly
 configured), or otherwise gating a custom wordlist's use behind an
 explicit acknowledgment. Do not ship the default flip without picking one.
 
+**A future allocation policy alone is not sufficient — pre-existing
+assignments are a separate migration gap.** `WorktreeRecord` persists only
+the final codename string, not which wordlist (built-in or custom)
+produced it or when. A worktree created BEFORE this effort ships, under a
+repo with a custom wordlist configured, may already carry a codename drawn
+from that custom vocabulary in its tracking record. Changing only *future*
+allocation (the item above) does nothing for that already-assigned
+codename: the moment `source_attribution` starts defaulting to
+`codename`, the very next `create-pr`/`refresh_source_attribution` call on
+that pre-existing worktree would publish its already-assigned,
+possibly-identifying codename, with no new allocation happening at all to
+catch. This needs its own explicit migration/suppression decision (e.g.
+detecting a pre-existing codename can't be proven safe and suppressing
+publication for it, or another resolution) — do not assume the
+forced-wordlist fix for new allocations also covers this case.
+
 ### Downstream effects to re-examine, not just the default itself
 
 - **`attribution-audit` / `audit_source_attribution_risk`** (Phase 5) was
@@ -196,6 +217,16 @@ explicit acknowledgment. Do not ship the default flip without picking one.
   custom `codename.wordlist_path` AND an absent/default
   `source_attribution` never publishes a codename drawn from that custom
   list.
+- [ ] **Resolve the pre-existing-codename migration gap** identified in
+  Context: a forced-wordlist policy only affects NEW allocations, not a
+  codename already persisted on a `WorktreeRecord` before this effort
+  shipped. Decide and implement an explicit migration/suppression policy
+  for a worktree whose codename cannot be proven to have come from the
+  built-in wordlist (e.g. suppress publication for it, force a
+  re-backfill, or another resolution) — do not assume Phase 1's
+  future-allocation fix silently also covers this case. Add a regression
+  test using a pre-existing record with a custom-wordlist-shaped codename
+  already assigned.
 - [ ] **Versioning gate (required for this phase's PR):** this phase
   changes `agent-worktrees` runtime source (`config.py`). Per
   `AGENTS.md`'s Version Bump section, bump `plugins/agent-worktrees/plugin.json`,
@@ -277,6 +308,13 @@ explicit acknowledgment. Do not ship the default flip without picking one.
   wordlist-risk item) — the single highest-priority test in this effort,
   since it's the one silent-leak scenario the default flip could
   introduce.
+- [ ] Unit/regression: a pre-existing `WorktreeRecord` created before this
+  effort shipped, carrying a codename already assigned from a custom
+  wordlist, is handled per the migration/suppression policy chosen in
+  Phase 1 (e.g. publication suppressed, or re-backfilled) once
+  `source_attribution` starts defaulting to `codename` — proving the
+  future-allocation fix alone does not silently also cover this
+  already-persisted case.
 - [ ] Unit: `_parse_pr` with an absent `source_attribution` key (both
   "`pr:` block present, key omitted" and "`pr:` block entirely absent")
   parses to `"codename"`, not `False`.
@@ -336,3 +374,22 @@ _Pending._
 - Handed off for execution: this effort's plan has not yet been reviewed
   (per `planning-efforts`' review gate, submit this README as a PR and let
   the repo's non-blocking automated review clear it before starting Phase 1).
+
+### 2026-09-20 — Plan-review round 6 fixes
+
+- Automated review (PR #2978) flagged that `Vision: vision-extending` cited
+  nothing. Surveyed `visions/plugins/agent-worktrees/README.md` and its
+  `pull-requests/README.md` child vision; neither governs the specific
+  *default value* of `source_attribution` — they describe the PR/codename
+  mechanism's existence and shape, which `pr-attribution-codenames`
+  (Done) already reconciled. Reclassified as **below-altitude**: this
+  effort changes a configuration default on an already-vision-covered
+  capability, not new architecture, so no vision revision is required.
+- Also flagged: the custom-wordlist risk (Context, Phase 1) only covers
+  *future* codename allocations. Added an explicit migration-gap
+  subsection: a `WorktreeRecord` created before this effort ships, under a
+  repo with a custom wordlist, may already carry a possibly-identifying
+  codename with no provenance flag to detect it — added a matching Phase 1
+  checklist item and Validation Plan item requiring an explicit
+  migration/suppression decision, not just the forced-wordlist fix for new
+  allocations.
