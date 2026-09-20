@@ -866,13 +866,13 @@ async def lifespan(app: FastAPI):
             from zdd.routing import Endpoint
 
             from .config import config_dir
-            from .self_retire import is_superseded
+            from .self_retire import initial_self_retire_status, is_superseded
 
             my_pid = _os.getpid()
+            # Phase 5 observability (aperture-labs): status /health renders as "slot".
+            status = app.state.self_retire_status = initial_self_retire_status()
             # Observe our own publish landing first, capturing our generation.
-            # Until we are the recorded active we cannot meaningfully be
-            # "superseded"; a passive instance that is never promoted simply
-            # never arms the watch (returns without ever calling is_superseded).
+            # A passive instance never promoted simply never arms the watch.
             my_gen: int | None = None
             for _ in range(600):  # ~5 min ceiling to see our own publish
                 await asyncio.sleep(0.5)
@@ -890,7 +890,7 @@ async def lifespan(app: FastAPI):
                     break
             if my_gen is None:
                 return
-            confirms = 0
+            status.update(armed=True, generation=my_gen)
             while True:
                 await asyncio.sleep(_sr_poll)
                 if await _governance_backoff(
@@ -898,30 +898,30 @@ async def lifespan(app: FastAPI):
                     "iteration-boundary:self-retire",
                     loop_name="self-retire",
                 ):
-                    confirms = 0
+                    status["confirms"] = 0
                     continue
                 try:
-                    superseded = await asyncio.to_thread(
+                    superseded = status["superseded"] = bool(await asyncio.to_thread(
                         is_superseded, config_dir(), my_pid, my_gen
-                    )
+                    ))
                     idle = superseded and (
                         await asyncio.to_thread(_count_active_sessions, mgr, db) == 0
                     )
                 except Exception:
-                    confirms = 0
+                    status.update(superseded=False, confirms=0)
                     log.debug("Self-retire supersession check failed", exc_info=True)
                     continue
                 if not (superseded and idle):
-                    confirms = 0  # any miss resets: only a sustained state acts
+                    status["confirms"] = 0  # any miss resets: only sustained acts
                     continue
-                confirms += 1
-                if confirms >= _sr_confirmations:
+                status["confirms"] += 1
+                if status["confirms"] >= _sr_confirmations:
                     if await _governance_backoff(
                         governance,
                         "pre-mutation:self-retire",
                         loop_name="self-retire",
                     ):
-                        confirms = 0
+                        status["confirms"] = 0
                         continue
                     log.info(
                         "Superseded by a live newer generation and idle -- "
