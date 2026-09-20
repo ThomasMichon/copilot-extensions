@@ -1179,6 +1179,54 @@ def _make_control_auth(
     return check
 
 
+def _slot_descriptor(app_state: Any) -> dict:
+    """Render this coordinator's own slot-ownership view for ``/health``.
+
+    process-slot-ownership Phase 5: "doctor"/"activity"/cockpit render
+    ``process -> slot -> owner -> alive?`` -- for the coordinator, the routing
+    table's ``active``/``previous`` entries are the *slot*, this process's own
+    pid is the candidate *owner*, and the self-retire / abandoned-passive-reap
+    loop status dicts are the *alive?* liveness-monitoring answer. Read-only and
+    best-effort: any failure to read the routing table degrades to an empty
+    ``active``/``previous`` rather than failing the whole ``/health`` response.
+    """
+    import os as _os
+
+    from zdd import routing
+
+    from .config import routing_dir
+
+    my_pid = _os.getpid()
+    try:
+        table = routing.read_table(routing_dir()) or {}
+    except Exception:
+        table = {}
+    active = table.get("active") if isinstance(table, dict) else None
+    previous = table.get("previous") if isinstance(table, dict) else None
+    active_pid = active.get("pid") if isinstance(active, dict) else None
+    if active_pid == my_pid:
+        role = "active"
+    elif isinstance(active, dict):
+        role = "passive"
+    else:
+        role = "unknown"
+    return {
+        "pid": my_pid,
+        "role": role,
+        "active": active if isinstance(active, dict) else None,
+        "previous": previous if isinstance(previous, dict) else None,
+        "self_retire": dict(
+            getattr(app_state, "self_retire_status", None)
+            or {"enabled": False, "armed": False, "generation": None,
+                "superseded": False, "confirms": 0}
+        ),
+        "abandoned_passive_reap": dict(
+            getattr(app_state, "abandoned_passive_reap_status", None)
+            or {"enabled": False, "armed": False, "last_outcome": None}
+        ),
+    }
+
+
 def create_app(
     queue: TaskQueue,
     *,
@@ -1356,6 +1404,18 @@ def create_app(
         # self-retire, and a claim mid-flight is never dropped.
         self_retire_task = None
         _sr_enabled, _sr_poll, _sr_confirmations = _self_retire_settings()
+        # Slot-ownership observability (process-slot-ownership Phase 5): a small,
+        # continuously-updated status dict `/health` renders under `"slot"` so an
+        # operator (or `agent-dispatch health`) can see this loop's own view of
+        # itself without grepping logs -- armed?, generation, confirms toward
+        # self-retire. Purely observational; never read by the loop's own logic.
+        _app.state.self_retire_status = {
+            "enabled": _sr_enabled,
+            "armed": False,
+            "generation": None,
+            "superseded": False,
+            "confirms": 0,
+        }
         if _sr_enabled:
             async def _self_retire_loop() -> None:
                 import os as _os
@@ -1385,6 +1445,8 @@ def create_app(
                         break
                 if my_gen is None:
                     return
+                _app.state.self_retire_status["armed"] = True
+                _app.state.self_retire_status["generation"] = my_gen
                 gate = getattr(_app.state, "drain_gate", None)
                 confirms = 0
                 while True:
@@ -1407,12 +1469,17 @@ def create_app(
                         )
                     except Exception:
                         confirms = 0
+                        _app.state.self_retire_status["superseded"] = False
+                        _app.state.self_retire_status["confirms"] = 0
                         log.debug("self-retire supersession check failed", exc_info=True)
                         continue
+                    _app.state.self_retire_status["superseded"] = bool(superseded)
                     if not (superseded and at_safe_point):
                         confirms = 0
+                        _app.state.self_retire_status["confirms"] = 0
                         continue
                     confirms += 1
+                    _app.state.self_retire_status["confirms"] = confirms
                     if confirms >= _sr_confirmations:
                         if await _governance_backoff(
                             governance,
@@ -1446,6 +1513,11 @@ def create_app(
         # in flight is never disturbed.
         abandoned_passive_reap_task = None
         _apr_enabled, _apr_poll, _apr_grace = _abandoned_passive_reap_settings()
+        _app.state.abandoned_passive_reap_status = {
+            "enabled": _apr_enabled,
+            "armed": False,
+            "last_outcome": None,
+        }
         if _apr_enabled:
             async def _abandoned_passive_reap_loop() -> None:
                 import os as _os
@@ -1471,6 +1543,7 @@ def create_app(
                         break
                 else:
                     return
+                _app.state.abandoned_passive_reap_status["armed"] = True
                 while True:
                     await asyncio.sleep(_apr_poll)
                     if await _governance_backoff(
@@ -1497,6 +1570,7 @@ def create_app(
                             record=record,
                             grace_seconds=_apr_grace,
                         )
+                        _app.state.abandoned_passive_reap_status["last_outcome"] = outcome
                         if outcome.get("reaped"):
                             log.warning(
                                 "abandoned-passive reap: retired pid=%s "
@@ -1776,6 +1850,7 @@ def create_app(
             "loops": {
                 name: health.to_dict() for name, health in loop_health.items()
             },
+            "slot": _slot_descriptor(request.app.state),
         }
 
     @app.get("/events")

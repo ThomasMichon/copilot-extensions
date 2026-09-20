@@ -238,6 +238,83 @@ def test_health_loops_empty_when_sweep_disabled(api):
     assert api.get("/health").json()["loops"] == {}
 
 
+def test_health_includes_slot_descriptor_shape(api):
+    # process-slot-ownership Phase 5: /health renders a "slot" descriptor
+    # (process -> slot -> owner -> alive?) regardless of what state the
+    # self-retire / abandoned-passive-reap loops happen to be in.
+    slot = api.get("/health").json()["slot"]
+    assert set(slot) == {
+        "pid", "role", "active", "previous",
+        "self_retire", "abandoned_passive_reap",
+    }
+    assert isinstance(slot["pid"], int)
+    assert slot["role"] in ("active", "passive", "unknown")
+    assert set(slot["self_retire"]) == {
+        "enabled", "armed", "generation", "superseded", "confirms",
+    }
+    assert set(slot["abandoned_passive_reap"]) == {
+        "enabled", "armed", "last_outcome",
+    }
+
+
+def test_slot_descriptor_unknown_role_without_routing_table(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from agent_dispatch.coordinator import _slot_descriptor
+
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(tmp_path / "no-routing"))
+    slot = _slot_descriptor(SimpleNamespace())
+    assert slot["role"] == "unknown"
+    assert slot["active"] is None
+    assert slot["previous"] is None
+    # No status ever published on app.state -> the descriptor still returns
+    # the documented shape with conservative defaults, never a KeyError.
+    assert slot["self_retire"] == {
+        "enabled": False, "armed": False, "generation": None,
+        "superseded": False, "confirms": 0,
+    }
+    assert slot["abandoned_passive_reap"] == {
+        "enabled": False, "armed": False, "last_outcome": None,
+    }
+
+
+def test_slot_descriptor_reports_active_role_for_own_pid(tmp_path, monkeypatch):
+    import os
+    from types import SimpleNamespace
+
+    from zdd import routing
+
+    from agent_dispatch.coordinator import _slot_descriptor
+
+    routing_dir = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing_dir))
+    routing.publish_active(
+        routing_dir, bind="127.0.0.1", port=9281, pid=os.getpid(), version="1.0",
+    )
+    slot = _slot_descriptor(SimpleNamespace())
+    assert slot["role"] == "active"
+    assert slot["active"]["pid"] == os.getpid()
+
+
+def test_slot_descriptor_reports_passive_role_for_other_active_pid(
+    tmp_path, monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from zdd import routing
+
+    from agent_dispatch.coordinator import _slot_descriptor
+
+    routing_dir = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing_dir))
+    routing.publish_active(
+        routing_dir, bind="127.0.0.1", port=9281, pid=999999, version="1.0",
+    )
+    slot = _slot_descriptor(SimpleNamespace())
+    assert slot["role"] == "passive"
+    assert slot["active"]["pid"] == 999999
+
+
 def test_create_and_get(api):
     r = api.post(
         "/tasks",
