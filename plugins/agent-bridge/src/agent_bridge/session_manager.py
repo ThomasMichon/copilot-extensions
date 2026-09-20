@@ -53,6 +53,13 @@ _REQUEST_OVERRIDES_KEY = "_agent_bridge_request_overrides"
 # caller's end+create is then the last resort).
 _MAX_RESUME_ROUNDS = 3
 
+# recover_disconnected_hosts() heartbeat-driven reattach (#2998): a remote
+# host is always "presumed alive" until ATTACH proves otherwise, so a
+# genuinely, silently dead far side was retried every 15s heartbeat forever.
+# Past this many CONSECUTIVE failures, force the authoritative liveness check
+# (_recover_remote_host_records) instead of retrying blindly again.
+_DISCONNECTED_REATTACH_ESCALATE_AFTER = 3
+
 
 class _AcpLaunchTiming:
     """Collect low-noise ACP launch sub-step timings for one session launch."""
@@ -900,6 +907,9 @@ class SessionManager:
         self._host_index: Any = None
         self._remote_recovery_inconclusive: set[str] = set()
         self._remote_recovery_skipped: set[str] = set()
+        # Consecutive failed reattach attempts per session_id (#2998); see
+        # _DISCONNECTED_REATTACH_ESCALATE_AFTER.
+        self._disconnected_reattach_failures: dict[str, int] = {}
         # Live remote-boundary forwards (session_id -> LocalForward). Held so a
         # CodeSpace/mesh Session Host's -L forward can be refreshed on reattach
         # and torn down on teardown. Empty for local hosts.
@@ -2437,6 +2447,9 @@ class SessionManager:
                     if existing is not None:
                         await self._drop_forward(session.session_id)
                         self._host_index.remove(session.session_id)
+                        self._disconnected_reattach_failures.pop(
+                            session.session_id, None
+                        )
                         log.info(
                             "Pruned confirmed-dead remote Session Host for %s",
                             session.session_id,
@@ -2455,6 +2468,9 @@ class SessionManager:
                     if existing is not None:
                         await self._drop_forward(session.session_id)
                         self._host_index.remove(session.session_id)
+                        self._disconnected_reattach_failures.pop(
+                            session.session_id, None
+                        )
                         log.info(
                             "Pruned confirmed-absent remote Session Host "
                             "authority for %s",
@@ -3489,6 +3505,31 @@ class SessionManager:
         self._remote_recovery_skipped.discard(rec.session_id)
         return True
 
+    async def _note_disconnected_reattach_failure(self, rec: Any) -> None:
+        """Count a failed heartbeat reattach; escalate past threshold (#2998).
+
+        A remote host is "presumed alive" until ATTACH proves otherwise, so a
+        silently-dead far side was retried forever. Past
+        ``_DISCONNECTED_REATTACH_ESCALATE_AFTER`` consecutive failures, force
+        the authoritative liveness check instead -- it prunes the record
+        outright if confirmed dead/absent, ending the loop.
+        """
+        failures = self._disconnected_reattach_failures.get(rec.session_id, 0) + 1
+        if failures < _DISCONNECTED_REATTACH_ESCALATE_AFTER:
+            self._disconnected_reattach_failures[rec.session_id] = failures
+            return
+        log.warning(
+            "Session %s failed reattach %d times; forcing an authoritative "
+            "liveness check", rec.session_id, failures,
+        )
+        with contextlib.suppress(Exception):
+            await self._recover_remote_host_records(
+                allow_wake=True, session_ids={rec.session_id},
+            )
+        # Throttle: if truly dead, the check above already pruned it; if
+        # inconclusive, give it a fresh run before escalating again.
+        self._disconnected_reattach_failures.pop(rec.session_id, None)
+
     async def recover_disconnected_hosts(self) -> int:
         """In-session liveness-driven reattach for host-backed sessions (P1).
 
@@ -3536,6 +3577,7 @@ class SessionManager:
                         "host_child_exited": True,
                         "exit_code": client.host_child_exit_code,
                     })
+                self._disconnected_reattach_failures.pop(rec.session_id, None)
                 continue
             # A live, running client needs nothing; surface a stall and move on.
             if client is not None and client.is_running:
@@ -3544,6 +3586,7 @@ class SessionManager:
                         "Session %s stalled (channel up, no output) -- "
                         "surfaced, not reattached", rec.session_id,
                     )
+                self._disconnected_reattach_failures.pop(rec.session_id, None)
                 continue
             # Transport is down. Only resume if the child is still there; a dead
             # child is a real end, left to normal teardown/GC.
@@ -3583,7 +3626,10 @@ class SessionManager:
                 ):
                     self._remote_recovery_inconclusive.discard(rec.session_id)
                     self._remote_recovery_skipped.discard(rec.session_id)
+                    self._disconnected_reattach_failures.pop(rec.session_id, None)
                     recovered += 1
+                else:
+                    await self._note_disconnected_reattach_failure(rec)
         if recovered:
             log.info("Recovered %d disconnected host-backed session(s)", recovered)
         return recovered
@@ -3763,6 +3809,7 @@ class SessionManager:
         with contextlib.suppress(Exception):
             from . import bridge_lock
             bridge_lock.remove_sync(rec.session_id)
+        self._disconnected_reattach_failures.pop(rec.session_id, None)
 
     def _kill_forward_sync(
         self,
