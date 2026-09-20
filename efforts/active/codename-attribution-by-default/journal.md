@@ -593,3 +593,25 @@ Part of the [codename-attribution-by-default effort](README.md).
   emit both fields from `_pr_to_yaml_dict` (matching its existing
   only-emit-when-set pattern) and a round-trip Validation Plan test
   proving both directions actually work together.
+
+### 2026-09-20 — Plan-review round 29 fixes
+
+- One genuine finding, fixed: the Guiding Intent's opening claim ("the
+  codename feature works end-to-end, proven live against real merged
+  PRs") conflated implementation/test coverage with live proof of the
+  codename marker itself — the only live-merged-PR evidence this doc
+  cites is the RAW marker form (`source_attribution: true`) on a private
+  downstream repo; no repo has ever published a real PR carrying the
+  codename-FORM marker, and this effort's own Phase 4 explicitly defers
+  that live proof until after this PR lands. Reworded the Guiding Intent
+  to state this distinction plainly instead of overclaiming.
+- Four stale carryovers (verified already fully resolved in current
+  text, each anchored to a commit predating the fix that resolved it —
+  freeze-for-manual-`set-pr`, persist-attribution-decisions,
+  persist-attribution-fields-in-YAML-round-tripping, and
+  freeze-publish-authorization-alongside-mode are all specified in the
+  Plan's round-26/27/28 freeze bullet and design.md's round-27
+  refinement) and one permanently-stale carryover (the
+  documentation-impact statement finding, `#discussion_r4057190221`,
+  unchanged at anchor `f2b538c47` for six rounds straight — the PR
+  description remains verifiably correct; not re-edited again).

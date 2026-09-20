@@ -705,6 +705,51 @@ these decisions directly and assumes this design is understood.
   `refresh_source_attribution` still uses a properly-stamped frozen
   pair, not the legacy-fallback path, proving the shared helper is
   actually wired into the manual-attach site.
+- [ ] **Strictly validate the persisted `attribution_mode`/
+  `attribution_explicit` pair, not just round-trip it (round-30
+  finding):** `_parse_pr_mapping` deserializes hand-rolled YAML with no
+  schema enforcement — the same class of gap the round-12 fix already
+  closed for `codename_source` (treat anything except the one known-safe
+  literal as unsafe, never the inverted "anything except the one known-
+  unsafe literal" shape). Apply the identical discipline here: (a)
+  `attribution_explicit` must be checked with `is True` (or an equivalent
+  strict boolean check), never a truthy/falsy coercion — a stored string
+  `"false"` is truthy in a loose check and must NOT be treated as
+  explicit; (b) `attribution_mode` must be validated against the closed
+  set `{"", "false", "true", "codename"}` — any other stored value
+  (a typo, a future mode this code doesn't know about, hand-edited YAML)
+  must be treated as the safe **empty legacy sentinel** (falls back to
+  live config, today's existing behavior), never silently accepted as if
+  it authorized publication; (c) a partial pair (`attribution_mode` set
+  but `attribution_explicit` absent, or vice versa) must ALSO be treated
+  as the empty legacy sentinel — never let a half-written record produce
+  a mode without its matching explicitness, or an explicitness without
+  its matching mode. Add regression tests for all three: a stored
+  `attribution_explicit: "false"` string does not authorize publication;
+  an unrecognized `attribution_mode` value falls back to legacy live-
+  config behavior rather than being read as one of the three known
+  modes; a record with only one of the two fields set falls back to
+  legacy behavior rather than using the one field that IS present.
+- [ ] **Merge the frozen `pr.attribution_mode`/`pr.attribution_explicit`
+  pair under the record lock during concurrent saves, the same way
+  round-11 protects `codename`/`codename_source` (round-30 finding):**
+  `_save_record_unlocked` currently has NO merge protection for the `pr`
+  field at all (verified in source: no revision counter or merge branch
+  covers it), so a status/finalize writer holding an in-memory
+  `WorktreeRecord` snapshot from BEFORE a concurrent `create-pr`/`set-pr`
+  stamped the frozen attribution pair onto that same record's `pr` can
+  save over it and silently erase the freeze — the next
+  `refresh_source_attribution` then sees the empty legacy `pr` and falls
+  back to live config, defeating the entire round-26/27/28 guarantee.
+  Add a `pr_revision` counter (following the existing
+  `profile_assignment_revision`/`lifecycle_revision` pattern already in
+  `_save_record_unlocked`), bumped every time `pr.attribution_mode`/
+  `pr.attribution_explicit` are stamped, and merge `record.pr` from the
+  current on-disk record whenever `current.pr_revision >
+  record.pr_revision`. Add a regression test: stamp a PRRecord's frozen
+  attribution pair under the lock, then save a stale in-memory
+  `WorktreeRecord` snapshot captured BEFORE that stamp — the stale save
+  must not erase the freshly-frozen pair.
 - [ ] **Versioning gate (required for this phase's PR):** this phase
   changes `agent-worktrees` runtime source (`config.py`). Per
   `AGENTS.md`'s Version Bump section, bump `plugins/agent-worktrees/plugin.json`,
@@ -902,6 +947,28 @@ these decisions directly and assumes this design is understood.
   `_pr_to_yaml_dict` actually emits them (not just `_parse_pr_mapping`
   parsing them) and a legacy record with neither field present still
   round-trips to empty/`False`, not a crash.
+- [ ] Unit (round-30 finding): a hand-edited/malformed
+  `attribution_explicit: "false"` (a truthy string, not the boolean
+  `false`) does NOT authorize publication — `_parse_pr_mapping` must
+  reject it to the safe empty-legacy-sentinel fallback, not coerce it
+  truthy.
+- [ ] Unit (round-30 finding): an unrecognized `attribution_mode` value
+  (not one of `""`/`"false"`/`"true"`/`"codename"`) falls back to the
+  legacy live-config behavior rather than being read as an authorized
+  mode.
+- [ ] Unit (round-30 finding): a `PRRecord` with only ONE of
+  `attribution_mode`/`attribution_explicit` set (the other absent/empty)
+  falls back to legacy live-config behavior for BOTH fields together —
+  a partial pair never authorizes publication using just the one field
+  that is present.
+- [ ] Unit (round-30 finding): stamp a `PRRecord`'s frozen
+  `attribution_mode`/`attribution_explicit` pair under the record lock
+  (bumping `pr_revision`), then `save_record` a STALE in-memory
+  `WorktreeRecord` snapshot captured before that stamp — the stale save
+  must not erase the freshly-frozen pair, proving `_save_record_unlocked`
+  merges `record.pr` from the current on-disk record by `pr_revision`,
+  the same way it already merges `codename`/`codename_source` (round-11)
+  and `profile_assignment_revision`.
 - [ ] Round-trip (round-9 finding): assign a codename with a known
   `codename_source`, `save_record` it, `load_record` it back, assert
   `codename_source` is unchanged — proving the manual YAML
@@ -1081,27 +1148,37 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-28 history lives in **[journal.md](journal.md)** to keep this
+> round-29 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 29 fixes
+### 2026-09-20 — Plan-review round 30 fixes
 
-- One genuine finding, fixed: the Guiding Intent's opening claim ("the
-  codename feature works end-to-end, proven live against real merged
-  PRs") conflated implementation/test coverage with live proof of the
-  codename marker itself — the only live-merged-PR evidence this doc
-  cites is the RAW marker form (`source_attribution: true`) on a private
-  downstream repo; no repo has ever published a real PR carrying the
-  codename-FORM marker, and this effort's own Phase 4 explicitly defers
-  that live proof until after this PR lands. Reworded the Guiding Intent
-  to state this distinction plainly instead of overclaiming.
-- Four stale carryovers (verified already fully resolved in current
-  text, each anchored to a commit predating the fix that resolved it —
-  freeze-for-manual-`set-pr`, persist-attribution-decisions,
-  persist-attribution-fields-in-YAML-round-tripping, and
-  freeze-publish-authorization-alongside-mode are all specified in the
-  Plan's round-26/27/28 freeze bullet and design.md's round-27
-  refinement) and one permanently-stale carryover (the
-  documentation-impact statement finding, `#discussion_r4057190221`,
-  unchanged at anchor `f2b538c47` for six rounds straight — the PR
-  description remains verifiably correct; not re-edited again).
+- Confirmed: all four round-29 "stale carryover" calls verified
+  correct — this round's review lists them under "Resolved since last
+  review," proving they were already fixed by rounds 26-28.
+- Two new, genuine findings, both closing gaps the round-26/27/28 freeze
+  design left open:
+  1. **Strict validation for the persisted `attribution_mode`/
+     `attribution_explicit` pair:** the round-28 round-trip fix
+     specified emitting/parsing both fields but never specified STRICT
+     parsing, the same class of gap the round-12 fix already closed for
+     `codename_source` — a hand-edited/malformed `attribution_explicit:
+     "false"` string would be truthy-coerced, an unrecognized
+     `attribution_mode` value could be silently accepted, and a partial
+     pair (only one field set) could authorize publication off the one
+     field present. Added explicit strict-parsing requirements (closed
+     mode set, strict boolean check, partial-pair-falls-back rule) plus
+     three regression tests.
+  2. **Merge the frozen `pr` field under the record lock during
+     concurrent saves:** verified in source that `_save_record_unlocked`
+     has NO merge protection for `pr` at all (no revision counter, no
+     merge branch) — unlike `codename`/`codename_source` (round-11) and
+     `profile_assignment_revision`, which it already protects. A stale
+     concurrent `WorktreeRecord` save could silently erase a freshly-
+     frozen attribution pair, defeating the entire freeze guarantee one
+     layer beneath the round-28 write-side fix. Added a `pr_revision`
+     counter following the existing revision-merge pattern, plus a
+     stale-writer regression test.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for seven rounds straight — not re-edited again).
