@@ -3769,6 +3769,35 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     return rc
 
 
+def _resolve_codename_anywhere(codename_arg: str) -> tuple[str | None, str | None]:
+    """Resolve *codename_arg* to a LOCAL worktree id, falling back to a
+    cross-machine SSH scan (pr-attribution-codenames Phase 3) when no local
+    match exists.
+
+    Returns ``(worktree_id, None)`` on a local match, or ``(None, message)``
+    where *message* is a ready-to-surface error string covering all three
+    "not usable" outcomes: genuinely unmatched anywhere, matched on exactly
+    one OTHER machine (fail-closed -- this never attempts a remote launch,
+    only reports where to go), or an ambiguous cross-machine collision.
+    """
+    resolved_id = resolve_worktree_id_by_codename(codename_arg)
+    if resolved_id is not None:
+        return resolved_id, None
+    from . import codename_reverse_lookup
+    try:
+        remote = codename_reverse_lookup.resolve_codename_cross_machine_unique(codename_arg)
+    except codename_reverse_lookup.AmbiguousCodenameError as exc:
+        return None, str(exc)
+    if remote is not None:
+        return None, (
+            f"Codename '{codename_arg}' resolves to worktree "
+            f"'{remote.worktree_id}' on machine '{remote.machine}', not this "
+            f"machine. Resolve/embody it there directly (e.g. SSH to "
+            f"'{remote.machine}') -- remote launch is not supported."
+        )
+    return None, f"No worktree found with codename '{codename_arg}'"
+
+
 def cmd_embody(args: argparse.Namespace) -> int:
     """Create or resume a **detached** mux+Copilot CLI session in a worktree (D5).
 
@@ -3799,10 +3828,25 @@ def cmd_embody(args: argparse.Namespace) -> int:
     """
     make_new = getattr(args, "new", False)
     raw_id = getattr(args, "worktree_id", None)
+    codename_arg = getattr(args, "codename", None)
+    if codename_arg and not raw_id:
+        # pr-attribution-codenames Phase 2/3: --codename is an alternate
+        # selector for --worktree-id, resolved locally first then via a
+        # cross-machine SSH scan; see _resolve_codename_anywhere.
+        resolved_id, error_message = _resolve_codename_anywhere(codename_arg)
+        if resolved_id is None:
+            return _json_error(error_message, exit_code=1)
+        raw_id = resolved_id
     if make_new and raw_id:
-        return _json_error("--new and --worktree-id are mutually exclusive", exit_code=2)
+        return _json_error(
+            "--new is mutually exclusive with --worktree-id/--codename",
+            exit_code=2,
+        )
     if not make_new and not raw_id:
-        return _json_error("embody requires --worktree-id <id> or --new", exit_code=2)
+        return _json_error(
+            "embody requires --worktree-id <id>, --codename <name>, or --new",
+            exit_code=2,
+        )
 
     try:
         config = cfg.load_config()
@@ -4102,20 +4146,23 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     use_base = getattr(args, "base", False)
     use_new = getattr(args, "new_worktree", False) or getattr(args, "auto", False)
     requested_machine = getattr(args, "machine", None)
-    # pr-attribution-codenames Phase 2: --codename is an alternate selector for
-    # --worktree-id -- resolve it once, up front, so every existing worktree_id
-    # branch below works unchanged. An unmatched codename is a hard selector
-    # error here (not left unset): letting it fall through would either report
-    # a misleading "wrong selector count" in --json mode, or silently drop to
-    # the interactive picker and launch a DIFFERENT worktree than requested.
+    # pr-attribution-codenames Phase 2/3: --codename is an alternate selector
+    # for --worktree-id -- resolve it once, up front, so every existing
+    # worktree_id branch below works unchanged. Falls back to a cross-machine
+    # SSH scan (Phase 3) when there is no local match; a codename found on a
+    # DIFFERENT machine still fails closed here (never attempts a remote
+    # launch) but reports where to go instead of a generic "not found". An
+    # unmatched/unusable codename is a hard selector error here (not left
+    # unset): letting it fall through would either report a misleading
+    # "wrong selector count" in --json mode, or silently drop to the
+    # interactive picker and launch a DIFFERENT worktree than requested.
     codename_arg = getattr(args, "codename", None)
     if codename_arg and not getattr(args, "worktree_id", None):
-        resolved_id = resolve_worktree_id_by_codename(codename_arg)
+        resolved_id, error_message = _resolve_codename_anywhere(codename_arg)
         if resolved_id is None:
-            message = f"No worktree found with codename '{codename_arg}'"
             if use_json:
-                return _json_error(message)
-            output.err(message)
+                return _json_error(error_message)
+            output.err(error_message)
             return 1
         args.worktree_id = resolved_id
 
@@ -13822,6 +13869,30 @@ def cmd_claimant_liveness(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_codename_lookup(args: argparse.Namespace) -> int:
+    """Report whether THIS machine's active project has a worktree with the
+    given codename (pr-attribution-codenames Phase 3).
+
+    The SSH endpoint that :func:`codename_reverse_lookup.resolve_codename_cross_machine`
+    invokes on every other known machine: it resolves the codename locally
+    there (never a further remote hop) and reports ``found``/``worktree_id``.
+    Not typically run by hand.
+    """
+    worktree_id = resolve_worktree_id_by_codename(args.codename)
+    if getattr(args, "json", False):
+        _json_output({
+            "codename": args.codename,
+            "found": worktree_id is not None,
+            "worktree_id": worktree_id,
+        })
+        return 0
+    if worktree_id:
+        print(f"{args.codename}: found -> {worktree_id}")
+    else:
+        print(f"{args.codename}: not found")
+    return 0
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # cleanup
 # ═══════════════════════════════════════════════════════════════════════════
@@ -19708,6 +19779,7 @@ _WORKTREE_VERBS = {
     "claims": "claims",
     "follow-ups": "follow-ups",
     "claimant-liveness": "claimant-liveness",
+    "codename-lookup": "codename-lookup",
     "remove-system": "remove-system",
     "conclude-disposable": "conclude-disposable",
     "list": "list",
@@ -23382,6 +23454,14 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument(
         "--new", action="store_true", help="Create a fresh worktree first, then embody in it"
     )
+    g.add_argument(
+        "--codename", default=None,
+        help="Embody the worktree with this codename (pr-attribution-codenames "
+        "Phase 2/3) -- resolved locally first, then via a cross-machine SSH "
+        "scan. A codename found on a DIFFERENT machine fails closed with the "
+        "machine name (remote launch is not supported); resolve/embody there "
+        "directly instead.",
+    )
     p.add_argument(
         "--seed",
         default=None,
@@ -23651,6 +23731,17 @@ def build_parser() -> argparse.ArgumentParser:
         "SSH; not typically run by hand.",
     )
     p.add_argument("owner_ref", help="Qualified owner ref (machine/project/worktree_id[#session])")
+    p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
+
+    # codename-lookup (SSH endpoint for pr-attribution-codenames Phase 3:
+    # report whether a codename resolves to a worktree ON THIS machine)
+    p = sub.add_parser(
+        "codename-lookup",
+        help="Report whether the active project has a worktree with this "
+        "codename ON THIS machine. The endpoint the cross-machine codename "
+        "reverse-lookup scan calls over SSH; not typically run by hand.",
+    )
+    p.add_argument("codename", help="Codename to look up (see 'resolve --codename')")
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
     # create (non-interactive worktree creation; --system for daemon-owned)
@@ -26980,6 +27071,7 @@ COMMAND_MAP = {
     "claims": cmd_claims,
     "follow-ups": cmd_follow_ups,
     "claimant-liveness": cmd_claimant_liveness,
+    "codename-lookup": cmd_codename_lookup,
     "create": cmd_create,
     "run": cmd_run,
     "remove-system": cmd_remove_system,

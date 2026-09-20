@@ -17,10 +17,10 @@ A third mode, ``pr.source_attribution: codename`` (effort
 author-side traceability: it emits :func:`build_codename_marker` instead --
 **only** the worktree's assigned codename, no machine/worktree-id/session/
 head. The codename decodes to nothing on its own; the author resolves it back
-to a worktree locally (``resolve --codename``). On another machine there is
-no automated lookup yet (Phase 3, a cross-machine reverse lookup, is not
-implemented) -- the author must manually SSH there and check that machine's
-own tracking store.
+to a worktree locally (``resolve --codename``) or, on another machine, via an
+automated cross-machine SSH scan (Phase 3, ``codename_reverse_lookup.py``) --
+a match on a different machine reports it (fails closed) rather than
+attempting a remote launch.
 """
 
 from __future__ import annotations
