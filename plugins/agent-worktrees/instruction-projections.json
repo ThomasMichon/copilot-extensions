@@ -17,6 +17,14 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "head-claim-fallback",
+      "template": "instructions/head-claim-fallback.instructions.md",
+      "destination": ".github/instructions/agent-worktrees/head-claim-fallback.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }
