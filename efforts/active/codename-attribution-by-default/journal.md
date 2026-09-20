@@ -510,3 +510,14 @@ Part of the [codename-attribution-by-default effort](README.md).
   description directly (`pr edit --body-file`) to list the vision
   revision and sibling-doc split under Changes and correct the
   Documentation-impact statement to match the actual final diff.
+
+### 2026-09-20 — Plan-review round 25 fixes
+
+- Zero new findings; the one carried-over "Open" item
+  (documentation-impact statement) is anchored to commit `f2b538c47`,
+  which predates the round-24 PR-description edit that already fixed it
+  — verified the current PR description still correctly states the
+  vision revision under Documentation impact. Treated as a stale
+  carryover (the review tool's diff-based tracking does not appear to
+  re-resolve findings anchored to PR-metadata-only edits), not a real
+  re-finding, per the review protocol's commit-match check.

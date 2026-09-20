@@ -282,6 +282,36 @@ these decisions directly and assumes this design is understood.
   with a custom wordlist and omitted `source_attribution` fails outright,
   before any worktree/branch/record exists — the direct normal-path
   analog of the paired-knowledge preflight test below.
+- [ ] **Centralize the allocation-time gate INSIDE `ensure_codename`
+  itself, not just at `create`/paired-knowledge call sites (round-26
+  finding)** — `ensure_codename` is the SHARED lazy-backfill function three
+  more callers invoke directly to allocate a missing codename, none of
+  which the bullets above protect: `resume` (`__main__.py:~6110-6113`) and
+  `status --write` (`~7424-7427`) both call `ensure_codename` on a
+  pre-Phase-2 record with no codename yet, and `create-pr`'s own backfill
+  (round-16/22) is a fourth. Adding the preflight only at `create`'s two
+  call sites leaves `resume`/`status --write` as an unprotected bypass: a
+  PR-active repo with a custom wordlist and omitted `source_attribution`
+  could still silently allocate a NEW `codename_source: "built-in"`
+  codename simply by running `resume` or `status --write` on an
+  old/unmigrated record. Fix: move the policy check INSIDE
+  `ensure_codename` itself, on the actual-new-allocation branch only (not
+  the "concurrent writer already assigned one, just copy it" branch,
+  which must never re-validate policy for an already-decided codename).
+  Extend `ensure_codename`'s signature to take the inputs the check needs
+  (raw `wordlist_path_configured`/`codename_source` classification, the
+  repo's `pr.enabled`, and `source_attribution_configured`) instead of
+  requiring every caller to duplicate the preflight — this single change
+  then automatically protects `resume`, `status --write`, AND
+  `create-pr`'s backfill (the `create` and paired-knowledge preflights
+  above remain as an early, side-effect-safe fail rather than relying
+  solely on this backstop, per this plan's established "preflight over
+  late-raise" preference, but this centralization ensures no caller can
+  ever forget the check going forward). Add regression tests: `resume`
+  and `status --write`, each independently, against a PR-active repo with
+  a custom wordlist and omitted `source_attribution`, on a record with no
+  codename yet, fail with the policy error rather than silently
+  allocating one.
 - [ ] **Persist `codename_source` through serialization** (round-9
   finding): `WorktreeRecord` is manually round-tripped through YAML, not
   via a generic dataclass (de)serializer — `tracking.load_record` parses
@@ -589,10 +619,39 @@ these decisions directly and assumes this design is understood.
   record fails closed by default regardless of the owning repo's current
   config, and that no code path auto-promotes it without an explicit,
   individually-targeted operator edit.
-- [ ] **Versioning gate (required for this phase's PR):** this phase
-  changes `agent-worktrees` runtime source (`config.py`). Per
-  `AGENTS.md`'s Version Bump section, bump `plugins/agent-worktrees/plugin.json`,
-  `plugins/agent-worktrees/pyproject.toml`, the `agent-worktrees` entry in
+- [ ] **Freeze each PR's attribution decision at open time; never
+  re-derive it live on later pushes (round-26 finding)** — the vision's
+  `unconfigured-attribution-never-leaks` behavior (round-23) promises a
+  config change won't retroactively expose or hide a marker already
+  published under a prior policy, but `refresh_source_attribution`
+  currently re-reads `prcfg.source_attribution` LIVE on every later push
+  (verified in source: it has no persisted memory of what mode the PR was
+  actually opened under). A repo that flips `source_attribution` from
+  `false`/`true` to `codename` (or vice versa) partway through an
+  already-open PR's life would have `refresh_source_attribution` start
+  publishing (or stop publishing, or swap marker shape for) that SAME PR
+  on its very next push — the exact retroactive-change failure the vision
+  language exists to rule out, and this design does not yet deliver it.
+  Fix: add `PRRecord.attribution_mode: str = ""`, persisted ONCE at
+  PR-open time (`_open_via_provider`, the same place the initial marker
+  decision is made) with the actually-resolved effective mode
+  (`"codename"` / `"true"` / `"false"`) — persist it the same
+  manually-wired way `codename_source` is (see the serialization bullet
+  above; `PRRecord` has its own hand-rolled YAML round-trip, distinct from
+  `WorktreeRecord`'s). `refresh_source_attribution` must use this FROZEN
+  `attribution_mode`, never live `prcfg.source_attribution`, to decide
+  what to (re)publish on every subsequent push to that same PR — the
+  live config is consulted only once, at open time, never again for that
+  PR's life. **Migration for a PR opened before this field existed:** an
+  empty/unset `attribution_mode` on an in-flight legacy `PRRecord` falls
+  back to today's existing live-config behavior (no regression for a PR
+  already mid-life when this ships) — the freeze guarantee applies
+  prospectively, to every PR opened after this field exists, not
+  retroactively to one already open without a stored mode. Add a
+  regression test: open a PR under one `source_attribution` value, change
+  the repo's config to a DIFFERENT value, push again — the marker
+  published/refreshed on that push still reflects the ORIGINAL
+  (frozen) mode, not the new config.
   `.github/plugin/marketplace.json`, **and** that catalog's own top-level
   `metadata.version` (agent-worktrees changes bump both) — in the same
   commit as the code change, not a follow-up.
@@ -660,17 +719,36 @@ these decisions directly and assumes this design is understood.
   the marketplace entry, and the catalog `metadata.version`).
 
 ### Phase 3 — Repo config rollout
-- [ ] This repo (`copilot-extensions`): remove (or flip to `codename`, for
-  explicitness) the explicit `source_attribution: false` in
-  `.agent-worktrees/config.yaml` — this repo is the one that most visibly
-  motivated this effort, and the only one this public doc names, since it
-  is this same public repo.
+- [ ] **This repo (`copilot-extensions`): REMOVE the explicit
+  `source_attribution: false` key entirely from `.agent-worktrees/config.yaml`
+  — this is the chosen migration, not "remove or flip to codename" (round-26
+  finding: the two are NOT policy-equivalent under this plan's gates).**
+  Removal lets the key resolve through the implicit default, which keeps
+  every existing `WorktreeRecord` on this repo fail-closed exactly as
+  before (an unbackfilled/legacy record — permanently `codename_source:
+  "custom"` per the round-10 rule — still cannot publish under the
+  implicit default). Setting an EXPLICIT `source_attribution: codename`
+  instead would set `source_attribution_configured: True`, which (per the
+  round-22 publish-time gate) authorizes ANY `codename_source` to publish,
+  including an unknown/legacy one this repo has never manually verified —
+  a strictly riskier choice with no corresponding benefit for a repo that
+  has no custom wordlist to begin with. Update the adjacent comment
+  (currently describes only the raw-marker risk: "Hidden source markers
+  carry raw machine/worktree/session identifiers. This public repo must
+  never publish them; closed-circuit repos may opt in.") to also explain
+  the codename mode this repo now relies on via the implicit default, and
+  why removal (not explicit `codename`) is this repo's own migration
+  choice.
 - [ ] Any other repo relying on the codename feature: re-evaluate its
   `source_attribution` setting against the new default (a currently-absent
   key silently changes behavior; an explicit `false` becomes a genuine,
   stronger opt-out statement rather than "restating the old default" --
-  see Context). This is generic guidance any driver applies to their own
-  fleet; the specific inventory is out of scope for this public record.
+  see Context). Apply the SAME removal-over-explicit-codename preference
+  established above unless that repo has actually performed the
+  per-record `codename_source` verification the explicit-`codename` choice
+  would require to be safe. This is generic guidance any driver applies to
+  their own fleet; the specific inventory is out of scope for this public
+  record.
 
 ### Phase 4 — Live validation
 - [ ] Open a real PR in this repo after Phase 3's config change and confirm
@@ -734,6 +812,16 @@ these decisions directly and assumes this design is understood.
   closed) — never auto-promoted to `"built-in"` by any automated pass,
   regardless of the owning repo's current wordlist config (round-10
   finding: no config-inferred backfill).
+- [ ] Unit (round-26 finding): open a PR under one `source_attribution`
+  value (e.g. `false`), change the repo's config to a DIFFERENT value
+  (e.g. `codename`), then push again — the marker published/refreshed on
+  that second push still reflects the ORIGINAL, frozen
+  `PRRecord.attribution_mode`, not the new live config. Cover both
+  directions (an added marker on a config that used to publish nothing,
+  and vice versa) and assert a legacy `PRRecord` with no stored
+  `attribution_mode` (predates this field) falls back to today's
+  live-config behavior unchanged (no regression for a PR already mid-life
+  when this ships).
 - [ ] Round-trip (round-9 finding): assign a codename with a known
   `codename_source`, `save_record` it, `load_record` it back, assert
   `codename_source` is unchanged — proving the manual YAML
@@ -769,6 +857,13 @@ these decisions directly and assumes this design is understood.
   `codename_source` matches what the winning call actually set — proving
   the losing branch copies `current.codename_source`, not just
   `current.codename`.
+- [ ] Unit (round-26 finding): `resume` and `status --write`, each
+  independently, against a PR-active repo with a custom wordlist and
+  omitted `source_attribution`, run on a record with no codename yet —
+  each fails with the policy error rather than silently allocating a
+  `codename_source: "built-in"` codename, proving the gate centralized
+  inside `ensure_codename` itself protects EVERY caller, not just
+  `create`/paired-knowledge/`create-pr`.
 - [ ] Unit (round-10 finding): a paired knowledge-repo create against a
   knowledge project with a custom wordlist and an omitted
   `source_attribution` fails the whole create with the policy validation
@@ -906,16 +1001,35 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-24 history lives in **[journal.md](journal.md)** to keep this
+> round-25 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 25 fixes
+### 2026-09-20 — Plan-review round 26 fixes
 
-- Zero new findings; the one carried-over "Open" item
-  (documentation-impact statement) is anchored to commit `f2b538c47`,
-  which predates the round-24 PR-description edit that already fixed it
-  — verified the current PR description still correctly states the
-  vision revision under Documentation impact. Treated as a stale
-  carryover (the review tool's diff-based tracking does not appear to
-  re-resolve findings anchored to PR-metadata-only edits), not a real
-  re-finding, per the review protocol's commit-match check.
+- One new finding plus two "previously missed" items, each verified
+  against actual source (the doc-impact-statement carryover confirmed
+  already fixed, no action):
+  1. **Uncovered allocation paths:** verified `resume` and
+     `status --write` both call `ensure_codename` directly for legacy
+     pre-Phase-2 records with no codename yet, and neither was protected
+     by any of the allocation-time preflights specified so far (those
+     only covered `create`/paired-knowledge/`create-pr`). Centralized
+     the gate INSIDE `ensure_codename` itself (on the actual-new-
+     allocation branch only, never the concurrent-writer-copy branch),
+     so every current and future caller is protected by construction.
+  2. **Retroactive attribution changes:** verified `refresh_source_attribution`
+     re-reads live config on every push, which could silently change an
+     already-open PR's attribution mode mid-review if the repo's config
+     changes — directly contradicting the `unconfigured-attribution-
+     never-leaks` vision behavior this effort itself added in round-23.
+     Added `PRRecord.attribution_mode`, frozen at PR-open time and
+     consulted (never live config) on every later refresh, with an
+     explicit no-regression fallback for a PR already open before this
+     field ships.
+  3. **Migration policy ambiguity (previously missed):** Phase 3 offered
+     "remove or flip to codename" as equivalent choices for this repo's
+     own config, but verified they are NOT equivalent under the round-22
+     `source_attribution_configured` gate (explicit `codename` would
+     authorize even an unverified/unknown legacy `codename_source`).
+     Chose removal decisively as this repo's migration and updated the
+     config-comment-update requirement to match.
