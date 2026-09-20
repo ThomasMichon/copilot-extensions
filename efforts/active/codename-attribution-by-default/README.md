@@ -139,10 +139,11 @@ contain identifying or private terms.
 from the new implicit default entirely. For such a repo,
 `pr.source_attribution` must be set explicitly (`codename`, `true`, or
 `false`); the new default only auto-applies to a repo with no custom
-wordlist configured. This single rule resolves both halves of the risk at
-once — it is a config-shape check (does this repo have a custom wordlist
-configured?), not a wordlist-content check, so it needs no new provenance
-tracking:
+wordlist configured. This config-shape check (does this repo have a custom
+wordlist configured *right now*?) resolves both halves of the risk for the
+common case where a repo's wordlist config never changes after
+assignment — see the legacy-record gap and its provenance-tracking fix
+below for the remaining case where it does:
 
 - **Future allocations:** a repo with a custom wordlist never silently
   inherits `codename` mode — it must opt in explicitly, at which point the
@@ -151,9 +152,38 @@ tracking:
   implicit default in the first place, an already-assigned codename drawn
   from that repo's custom wordlist never starts publishing merely because
   the global default changed — there is nothing to migrate or suppress
-  retroactively. A pre-existing codename in a repo with NO custom wordlist
-  configured is, by construction, already drawn from the built-in neutral
-  list, so it is safe to publish under the new default unchanged.
+  retroactively, **provided the repo's wordlist config is unchanged since
+  assignment.**
+
+**Legacy-record gap (round-8 finding) — the config-shape check alone is
+NOT sufficient:** the argument above silently assumes the repo's *current*
+wordlist config accurately reflects what generated *every* codename it has
+ever assigned. That assumption breaks the moment a repo's
+`codename.wordlist_path` config **changes after** a codename was assigned:
+a repo that had a custom wordlist configured, assigned a worktree a
+codename from it, and *later* removes (or swaps) that config now reads as
+"no custom wordlist" — and would incorrectly inherit the new implicit
+default and publish that old, possibly-identifying codename, believing it
+came from the safe built-in list. `WorktreeRecord` does not currently
+persist which wordlist generated its codename, so there is no way to tell
+the two cases apart from config state alone.
+
+**Decisive fix:** persist provenance on the record itself, not just in
+current config. At codename-assignment time, `WorktreeRecord` gains a
+`codename_source` field (`"built-in"` or `"custom"`) recorded once and
+never revisited afterward. Publish-time attribution resolution consults
+**the record's own stored `codename_source`** for whether a given
+already-assigned codename is safe to publish under the implicit default —
+not the repo's current `codename.wordlist_path` config, which may have
+drifted since assignment. A record with `codename_source: "custom"`
+requires the same explicit `pr.source_attribution` opt-in as a repo
+currently configured with a custom wordlist, regardless of what the repo's
+config says today; a record with `codename_source: "built-in"` is safe
+under the new implicit default unconditionally. New allocations still
+consult the *current* config to decide `codename_source` at the moment of
+assignment (the current-config check remains correct and sufficient there,
+since assignment and config-read are contemporaneous) — this is a targeted
+addition, not a replacement, of the config-shape check above.
 
 ### Downstream effects to re-examine, not just the default itself
 
@@ -217,20 +247,43 @@ tracking:
   repo with `codename.wordlist_path` configured does not receive the new
   implicit default at all — `pr.source_attribution` must resolve to an
   explicitly-configured value (`codename`, `true`, or `false`) for such a
-  repo, never the bare fallback. This single check covers both future
-  allocations (a custom-wordlist repo never silently starts publishing
-  without an explicit opt-in) and pre-existing codenames (such a repo
-  never received the implicit default in the first place, so nothing
-  already-assigned starts publishing merely because the global default
-  changed) — no separate migration path is needed. Add tests proving: (a)
-  a repo with a custom wordlist AND an absent/default `source_attribution`
-  publishes nothing (fails closed, does not silently fall back to
-  `false` either — surface this as a config validation error so the gap
-  is caught at config-load time, not discovered via a leaked marker), and
-  (b) a repo with a custom wordlist that HAS explicitly configured
-  `source_attribution: codename` publishes normally, including for a
-  pre-existing `WorktreeRecord` whose codename was assigned before this
-  effort shipped.
+  repo, never the bare fallback. This covers future allocations (a
+  custom-wordlist repo never silently starts publishing without an
+  explicit opt-in). Add a test proving: a repo with a custom wordlist AND
+  an absent/default `source_attribution` publishes nothing (fails closed,
+  does not silently fall back to `false` either — surface this as a
+  config validation error so the gap is caught at config-load time, not
+  discovered via a leaked marker).
+- [ ] **Implement per-record codename provenance** (the legacy-record gap
+  from Context): add a `codename_source` field (`"built-in"` or
+  `"custom"`) to `WorktreeRecord`, populated once at codename-assignment
+  time from whether the repo has `codename.wordlist_path` configured at
+  THAT moment. Publish-time attribution resolution must consult the
+  record's own `codename_source`, not the repo's current wordlist config,
+  before treating an already-assigned codename as safe under the implicit
+  default — a record with `codename_source: "custom"` requires the same
+  explicit `pr.source_attribution` opt-in as a currently-custom-wordlist
+  repo, even if the repo's config has since reverted to no custom
+  wordlist. Add tests proving: (a) a `WorktreeRecord` with
+  `codename_source: "custom"`, in a repo whose config NOW has no custom
+  wordlist, still fails closed under the implicit default (the exact
+  legacy-drift scenario the round-8 finding raised); (b) a repo with a
+  custom wordlist that HAS explicitly configured
+  `source_attribution: codename` publishes normally regardless of any
+  record's `codename_source`, including for a pre-existing
+  `WorktreeRecord` assigned before this effort shipped; (c) a
+  `WorktreeRecord` with `codename_source: "built-in"` publishes normally
+  under the implicit default.
+- [ ] **Backfill migration for existing `WorktreeRecord`s created before
+  this field existed:** a record with no `codename_source` recorded is
+  ambiguous (predates this effort) and must be treated as `"custom"` (fail
+  closed) until backfilled, never defaulted to `"built-in"`. Add a
+  one-time backfill pass: for each existing record, set `codename_source`
+  from the OWNING repo's current wordlist config at backfill time (the
+  best available signal, though imperfect for a repo whose config already
+  drifted before backfill runs — document this residual limitation rather
+  than silently treating it as fully solved). Add a test proving an
+  unbackfilled record fails closed by default.
 - [ ] **Versioning gate (required for this phase's PR):** this phase
   changes `agent-worktrees` runtime source (`config.py`). Per
   `AGENTS.md`'s Version Bump section, bump `plugins/agent-worktrees/plugin.json`,
@@ -316,6 +369,18 @@ tracking:
   for a pre-existing `WorktreeRecord` whose codename was assigned before
   this effort shipped, proving the exclusion decision is scoped to
   "no explicit config," not to "has ever had a custom wordlist."
+- [ ] Unit (legacy-record gap, round-8 finding): a `WorktreeRecord` with
+  `codename_source: "custom"`, in a repo whose CURRENT config has no
+  custom wordlist configured (the config changed after assignment), still
+  fails closed under the implicit default — proving publish-time
+  resolution consults the record's own provenance, not just current
+  config.
+- [ ] Unit: a `WorktreeRecord` with `codename_source: "built-in"` publishes
+  normally under the implicit default regardless of the repo's current
+  wordlist config.
+- [ ] Unit: an existing `WorktreeRecord` with no `codename_source` recorded
+  (predates this effort) is treated as `"custom"` (fails closed) until the
+  backfill migration runs — never silently treated as `"built-in"`.
 - [ ] Unit: `_parse_pr` with an absent `source_attribution` key (both
   "`pr:` block present, key omitted" and "`pr:` block entirely absent")
   parses to `"codename"`, not `False`.
@@ -422,3 +487,28 @@ _Pending._
   fix landed separately in PR #2980, merged before this branch's last
   rebase); manually resolved the review thread and posted an explanatory
   comment rather than re-editing unrelated plan content.
+
+### 2026-09-20 — Plan-review round 8 fixes
+
+- Round 7's decisive fix ("a repo with a custom wordlist config is
+  excluded from the implicit default") was itself flagged as
+  insufficient: it silently assumes a repo's *current* wordlist config
+  accurately reflects what generated *every* codename it has ever
+  assigned. That assumption breaks the moment a repo's
+  `codename.wordlist_path` config changes AFTER a codename was assigned
+  (added, used, then later removed or swapped) — the repo would then read
+  as "no custom wordlist" and incorrectly inherit the new default,
+  publishing an old codename that may not actually be drawn from the safe
+  built-in list. Round 7's claim that "no provenance-tracking mechanism is
+  needed after all" was wrong for this legacy-drift case specifically.
+- Fixed with the mechanism round 6 originally floated and round 7
+  mistakenly ruled out: added a per-record `codename_source` field on
+  `WorktreeRecord`, set once at assignment time from the repo's config AT
+  THAT MOMENT, consulted at publish time instead of (not in addition to)
+  the repo's current config. This correctly handles both the common case
+  (config never changes — current-config and record-provenance agree) and
+  the drift case the round-8 finding raised (config changes after
+  assignment — the record's own stored provenance still gates
+  publication correctly). Added a matching backfill-migration item: a
+  record with no `codename_source` (predates this field) must be treated
+  as `"custom"` (fail closed) by default, never silently treated as safe.
