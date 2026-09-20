@@ -273,6 +273,22 @@ The fix mirrors the existing old-survivor recovery, but for the *new* side:
   way as self-retire -- only the confirmed-active coordinator runs it) so a
   stranded passive is reaped even if no operator ever runs another deploy.
 
+### Slot-ownership observability: `/health["slot"]` (process-slot-ownership Phase 5)
+
+The coordinator's `GET /health` (and therefore `agent-dispatch health`, which
+renders that response verbatim) exposes a `"slot"` descriptor answering the
+`process -> slot -> owner -> alive?` question the `process-slot-ownership`
+effort's Phase 5 named: the routing table's `active`/`previous` entries are
+the *slot*, this process's own pid compared against `active.pid` is the
+*owner* question (`role`: `"active"` / `"passive"` / `"unknown"`), and the
+self-retire and abandoned-passive-reap loops' own live status (`enabled`,
+`armed`, and their current supersession/reap state) is the *alive?*
+liveness-monitoring answer -- all without grepping logs. `_slot_descriptor()`
+in `coordinator.py` is read-only and best-effort: a routing-table read
+failure degrades to `active`/`previous: null` rather than failing the whole
+`/health` response. agent-bridge parity (the same descriptor shape on its own
+`/health`) is the natural next slice; not yet done.
+
 ## Per-plugin adoption
 
 | Plugin | Daemon(s) | State today | Safe cutover point | Work |

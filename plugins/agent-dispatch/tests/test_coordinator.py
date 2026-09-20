@@ -238,6 +238,268 @@ def test_health_loops_empty_when_sweep_disabled(api):
     assert api.get("/health").json()["loops"] == {}
 
 
+def test_health_includes_slot_descriptor_shape(api):
+    # process-slot-ownership Phase 5: /health renders a "slot" descriptor
+    # (process -> slot -> owner -> alive?) regardless of what state the
+    # self-retire / abandoned-passive-reap loops happen to be in.
+    slot = api.get("/health").json()["slot"]
+    assert set(slot) == {
+        "pid", "role", "active", "previous",
+        "self_retire", "abandoned_passive_reap",
+    }
+    assert isinstance(slot["pid"], int)
+    assert slot["role"] in ("active", "passive", "unknown")
+    assert set(slot["self_retire"]) == {
+        "enabled", "armed", "generation", "superseded", "confirms",
+    }
+    assert set(slot["abandoned_passive_reap"]) == {
+        "enabled", "armed", "last_outcome",
+    }
+
+
+def test_slot_descriptor_unknown_role_without_routing_table(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from agent_dispatch.coordinator import _slot_descriptor
+
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(tmp_path / "no-routing"))
+    slot = _slot_descriptor(SimpleNamespace())
+    assert slot["role"] == "unknown"
+    assert slot["active"] is None
+    assert slot["previous"] is None
+    # No status ever published on app.state -> the descriptor still returns
+    # the documented shape with conservative defaults, never a KeyError.
+    assert slot["self_retire"] == {
+        "enabled": False, "armed": False, "generation": None,
+        "superseded": False, "confirms": 0,
+    }
+    assert slot["abandoned_passive_reap"] == {
+        "enabled": False, "armed": False, "last_outcome": None,
+    }
+
+
+def test_slot_descriptor_reports_active_role_for_own_pid(tmp_path, monkeypatch):
+    import os
+    from types import SimpleNamespace
+
+    from zdd import routing
+
+    from agent_dispatch.coordinator import _slot_descriptor
+
+    routing_dir = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing_dir))
+    routing.publish_active(
+        routing_dir, bind="127.0.0.1", port=9281, pid=os.getpid(), version="1.0",
+    )
+    slot = _slot_descriptor(SimpleNamespace())
+    assert slot["role"] == "active"
+    assert slot["active"]["pid"] == os.getpid()
+
+
+def test_slot_descriptor_reports_unknown_role_when_active_pid_is_null(
+    tmp_path, monkeypatch,
+):
+    """A malformed/legacy routing entry with no recorded pid must never be
+    mistaken for "passive" -- there is nothing to compare against, so the
+    owner question is genuinely unanswerable (Copilot review finding)."""
+    import json
+    from types import SimpleNamespace
+
+    from agent_dispatch.coordinator import _slot_descriptor
+
+    routing_dir = tmp_path / "routing"
+    routing_dir.mkdir(parents=True)
+    (routing_dir / "active.json").write_text(
+        json.dumps({"active": {"bind": "127.0.0.1", "port": 9281, "pid": None}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing_dir))
+    slot = _slot_descriptor(SimpleNamespace())
+    assert slot["role"] == "unknown"
+    assert slot["active"]["pid"] is None
+
+
+def test_slot_descriptor_reports_unknown_role_when_active_pid_is_boolean(
+    tmp_path, monkeypatch,
+):
+    """``bool`` is an ``int`` subclass in Python; a malformed entry with
+    ``pid: true`` must not be mistaken for a real, comparable pid (Copilot
+    review finding)."""
+    import json
+    from types import SimpleNamespace
+
+    from agent_dispatch.coordinator import _slot_descriptor
+
+    routing_dir = tmp_path / "routing"
+    routing_dir.mkdir(parents=True)
+    (routing_dir / "active.json").write_text(
+        json.dumps({"active": {"bind": "127.0.0.1", "port": 9281, "pid": True}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing_dir))
+    slot = _slot_descriptor(SimpleNamespace())
+    assert slot["role"] == "unknown"
+
+
+def test_slot_descriptor_reports_passive_role_for_other_active_pid(
+    tmp_path, monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from zdd import routing
+
+    from agent_dispatch.coordinator import _slot_descriptor
+
+    routing_dir = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing_dir))
+    routing.publish_active(
+        routing_dir, bind="127.0.0.1", port=9281, pid=999999, version="1.0",
+    )
+    slot = _slot_descriptor(SimpleNamespace())
+    assert slot["role"] == "passive"
+    assert slot["active"]["pid"] == 999999
+
+
+def test_self_retire_status_lifecycle_reflects_the_live_loop(tmp_path, monkeypatch):
+    """Copilot review finding on PR #2963: prove the published status actually
+    tracks the running self-retire loop end-to-end (armed -> generation ->
+    superseded/confirms), not just the pure `_slot_descriptor` rendering of
+    prebuilt state. Uses a real app lifespan with a shortened poll interval and
+    a temporary routing table; `is_superseded` is monkeypatched (rather than
+    faking a real listening successor) to keep this fast and deterministic."""
+    import os
+    import time
+
+    from zdd import routing
+
+    routing_dir = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing_dir))
+    monkeypatch.setenv("AGENT_DISPATCH_SELF_RETIRE", "1")
+    monkeypatch.setenv("AGENT_DISPATCH_SELF_RETIRE_POLL_S", "0.05")
+    monkeypatch.setenv("AGENT_DISPATCH_SELF_RETIRE_CONFIRMATIONS", "20")
+    monkeypatch.setenv("AGENT_DISPATCH_ABANDONED_PASSIVE_REAP", "0")
+
+    my_pid = os.getpid()
+    routing.publish_active(
+        routing_dir, bind="127.0.0.1", port=9999, pid=my_pid, version="1.0",
+    )
+
+    # Patched BEFORE the app/lifespan starts: the loop's `from .self_retire
+    # import is_superseded` binds this lambda once, for the coroutine's whole
+    # lifetime, so flipping the mutable flag later (step 3) is what changes
+    # its answer -- re-patching the module attribute after the loop has
+    # already started would not reach the already-bound local name.
+    import agent_dispatch.self_retire as self_retire_mod
+
+    supersede_flag = {"value": False}
+    monkeypatch.setattr(
+        self_retire_mod, "is_superseded", lambda *a, **k: supersede_flag["value"],
+    )
+
+    app = create_app(TaskQueue(tmp_path / "t.db"))
+    with TestClient(app) as client:
+
+        def _wait(predicate, *, timeout=5.0):
+            deadline = time.monotonic() + timeout
+            last = None
+            while time.monotonic() < deadline:
+                last = client.get("/health").json()["slot"]["self_retire"]
+                if predicate(last):
+                    return last
+                time.sleep(0.02)
+            pytest.fail(f"condition not met within {timeout}s; last status={last}")
+
+        # 1. Arms once it observes itself as the routing table's active pid,
+        #    capturing its own generation.
+        armed = _wait(lambda s: s["armed"])
+        assert armed["generation"] is not None
+
+        # 2. Not superseded while nothing supersedes it: the loop keeps polling
+        #    and keeps writing `superseded: False` / `confirms: 0` -- proving
+        #    the status is live-updated on every cycle, not written once and
+        #    forgotten.
+        for _ in range(3):
+            status = client.get("/health").json()["slot"]["self_retire"]
+            assert status["superseded"] is False
+            assert status["confirms"] == 0
+            time.sleep(0.05)
+
+        # 3. Once superseded (simulated by flipping the patched predicate
+        #    rather than standing up a real listening successor process),
+        #    confirms climb toward the confirmation threshold and
+        #    `superseded` flips true.
+        supersede_flag["value"] = True
+        status = _wait(lambda s: s["superseded"] and s["confirms"] >= 1)
+        assert status["superseded"] is True
+        assert status["confirms"] >= 1
+
+
+def test_abandoned_passive_reap_status_lifecycle_reflects_the_live_loop(
+    tmp_path, monkeypatch,
+):
+    """Copilot review finding on PR #2963: the abandoned-passive-reap loop's
+    published status needs its own deterministic lifecycle proof, mirroring
+    the self-retire coverage above -- it arms, then `last_outcome` reflects a
+    real reap cycle's decision (here: a breadcrumb naming a pid that plainly
+    is not a live coordinator, so the cycle's own no-op reasoning is what gets
+    proven live-published, not fabricated)."""
+    import json
+    import os
+    import time
+    from datetime import datetime, timedelta, timezone
+
+    from zdd import routing
+
+    routing_dir = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing_dir))
+    monkeypatch.setenv("AGENT_DISPATCH_SELF_RETIRE", "0")
+    monkeypatch.setenv("AGENT_DISPATCH_ABANDONED_PASSIVE_REAP", "1")
+    monkeypatch.setenv("AGENT_DISPATCH_ABANDONED_PASSIVE_REAP_POLL_S", "0.05")
+
+    my_pid = os.getpid()
+    routing.publish_active(
+        routing_dir, bind="127.0.0.1", port=9999, pid=my_pid, version="1.0",
+    )
+    # An aged, non-terminal breadcrumb naming a pid that is not a live
+    # coordinator process -- a deterministic, real (not monkeypatched) no-op
+    # decision for reap_abandoned_passive_backstop to reach.
+    routing_dir.mkdir(parents=True, exist_ok=True)
+    aged = (datetime.now(timezone.utc) - timedelta(seconds=99999)).isoformat()
+    (routing_dir / "cutover.json").write_text(
+        json.dumps({
+            "state": "started",
+            "started_at": aged,
+            "updated_at": aged,
+            "pid": my_pid,
+            "old": None,
+            "new_port": 9281,
+            "new_pid": 999999,
+            "error": None,
+        }),
+        encoding="utf-8",
+    )
+
+    app = create_app(TaskQueue(tmp_path / "t.db"))
+    with TestClient(app) as client:
+
+        def _wait(predicate, *, timeout=5.0):
+            deadline = time.monotonic() + timeout
+            last = None
+            while time.monotonic() < deadline:
+                last = client.get("/health").json()["slot"]["abandoned_passive_reap"]
+                if predicate(last):
+                    return last
+                time.sleep(0.02)
+            pytest.fail(f"condition not met within {timeout}s; last status={last}")
+
+        armed = _wait(lambda s: s["armed"])
+        assert armed["last_outcome"] is None or isinstance(armed["last_outcome"], dict)
+
+        outcome = _wait(lambda s: s["last_outcome"] is not None)["last_outcome"]
+        assert outcome["reaped"] is False
+        assert outcome["pid"] == 999999
+
+
 def test_create_and_get(api):
     r = api.post(
         "/tasks",
