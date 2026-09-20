@@ -190,6 +190,55 @@ def test_deregister_returns_bool(rv):
     assert rv.discover_peers() == []
 
 
+def test_register_carries_capabilities_worktrees_status(rv):
+    entry = rv.register(
+        "host-a",
+        capabilities=["logger"],
+        worktrees=["wt-1"],
+        agent_versions={"agent-dispatch": "0.1.2"},
+        status={"turn_state": "active"},
+    )
+    assert entry["capabilities"] == ["logger"]
+    assert entry["worktrees"] == ["wt-1"]
+    assert entry["agent_versions"] == {"agent-dispatch": "0.1.2"}
+    assert entry["status"] == {"turn_state": "active"}
+
+
+def test_heartbeat_preserves_capabilities_from_register(rv):
+    rv.register("host-a", capabilities=["logger"], agent_versions={"a": "1"})
+    entry = rv.heartbeat("host-a")
+    assert entry["capabilities"] == ["logger"]
+    assert entry["agent_versions"] == {"a": "1"}
+
+
+def test_upsert_refuses_to_overwrite_foreign_tunnel(cli):
+    # A tunnel that happens to share the deterministic id but was not created
+    # under this backend's label must never be silently overwritten.
+    tunnel_id = _tunnel_id("host-a")
+    cli._tunnels[tunnel_id] = {
+        "tunnelId": tunnel_id,
+        "labels": ["some-other-tool"],
+        "description": "",
+    }
+    rv = DevTunnelRendezvous(runner=cli)
+    with pytest.raises(DevTunnelError):
+        rv.register("host-a")
+
+
+def test_deregister_refuses_to_delete_foreign_tunnel(cli):
+    tunnel_id = _tunnel_id("host-a")
+    cli._tunnels[tunnel_id] = {
+        "tunnelId": tunnel_id,
+        "labels": ["some-other-tool"],
+        "description": "",
+    }
+    rv = DevTunnelRendezvous(runner=cli)
+    with pytest.raises(DevTunnelError):
+        rv.deregister("host-a")
+    # The foreign tunnel must still be there afterward.
+    assert tunnel_id in cli._tunnels
+
+
 # -- claim plane ---------------------------------------------------------------
 
 
@@ -265,6 +314,20 @@ def test_discover_peers_skips_missing_instance_field(cli, rv):
         "tunnelId": "adf-no-instance",
         "labels": [cli._tunnels[_tunnel_id("host-a")]["labels"][0]],
         "description": json.dumps({"role": "peer"}),
+    }
+    peers = rv.discover_peers()
+    assert [p["instance"] for p in peers] == ["host-a"]
+
+
+def test_discover_peers_skips_non_string_description_field(cli, rv):
+    rv.register("host-a")
+    cli._tunnels["adf-dict-description"] = {
+        "tunnelId": "adf-dict-description",
+        "labels": [cli._tunnels[_tunnel_id("host-a")]["labels"][0]],
+        # A malformed/foreign CLI response could hand back a structured
+        # description instead of a JSON string; json.loads on a dict/list
+        # raises TypeError, not JSONDecodeError -- must not propagate.
+        "description": {"instance": "not-a-string-payload"},
     }
     peers = rv.discover_peers()
     assert [p["instance"] for p in peers] == ["host-a"]

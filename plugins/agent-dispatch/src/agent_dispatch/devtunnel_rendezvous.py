@@ -189,8 +189,8 @@ class DevTunnelRendezvous:
         ``description`` must never raise and break the whole fleet read; it is
         simply not one of ours).
         """
-        raw = tunnel.get("description") or ""
-        if not raw:
+        raw = tunnel.get("description")
+        if not isinstance(raw, str) or not raw:
             return None
         try:
             payload = json.loads(raw)
@@ -216,17 +216,33 @@ class DevTunnelRendezvous:
         gate_state = payload.get("gate_state", "open")
         if not isinstance(gate_state, str) or not gate_state:
             gate_state = "open"
+        worktrees = payload.get("worktrees")
+        if not isinstance(worktrees, list) or not all(isinstance(w, str) for w in worktrees):
+            worktrees = []
+        capabilities = payload.get("capabilities")
+        if not isinstance(capabilities, list) or not all(
+            isinstance(c, str) for c in capabilities
+        ):
+            capabilities = []
+        agent_versions = payload.get("agent_versions")
+        if not isinstance(agent_versions, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in agent_versions.items()
+        ):
+            agent_versions = {}
+        status = payload.get("status")
+        if not isinstance(status, dict):
+            status = {}
         now = time.time()
         return {
             "instance": instance,
             "role": role,
             "epoch": epoch,
             "machine": machine,
-            "worktrees": [],
-            "capabilities": [],
+            "worktrees": worktrees,
+            "capabilities": capabilities,
             "gate_state": gate_state,
-            "agent_versions": {},
-            "status": {},
+            "agent_versions": agent_versions,
+            "status": status,
             "registered_at": registered_at,
             "last_seen": last_seen,
             "expires_at": last_seen + self._ttl,
@@ -235,6 +251,17 @@ class DevTunnelRendezvous:
 
     def _is_live(self, entry: dict) -> bool:
         return (entry["last_seen"] + self._ttl) > time.time()
+
+    def _owns(self, tunnel: dict) -> bool:
+        """Whether ``tunnel`` carries this backend's label.
+
+        Guards every mutating call (update/delete) against a deterministic
+        tunnel-id collision with a tunnel some *other* tool or federation
+        label created: this backend must never overwrite or delete a tunnel
+        it doesn't own, even if the id happens to match.
+        """
+        labels = tunnel.get("labels")
+        return isinstance(labels, list) and self._label in labels
 
     def _upsert(
         self,
@@ -245,20 +272,34 @@ class DevTunnelRendezvous:
         machine: str | None,
         gate_state: str,
         registered_at: float,
+        worktrees: list[str] | None = None,
+        capabilities: list[str] | None = None,
+        agent_versions: dict[str, str] | None = None,
+        status: dict | None = None,
     ) -> dict:
         tunnel_id = _tunnel_id(instance)
         existing = self._call(["show", tunnel_id], allow_missing=True)
+        existing_tunnel = (existing or {}).get("tunnel")
+        if existing_tunnel and not self._owns(existing_tunnel):
+            raise DevTunnelError(
+                f"tunnel {tunnel_id!r} exists but is not labeled {self._label!r} -- "
+                "refusing to overwrite a tunnel this backend doesn't own"
+            )
         payload = {
             "instance": instance,
             "role": role,
             "epoch": int(epoch),
             "machine": machine or instance,
             "gate_state": gate_state,
+            "worktrees": list(worktrees) if worktrees else [],
+            "capabilities": list(capabilities) if capabilities else [],
+            "agent_versions": dict(agent_versions) if agent_versions else {},
+            "status": dict(status) if status else {},
             "registered_at": registered_at,
             "last_seen": time.time(),
         }
         description = self._encode(payload)
-        if existing and existing.get("tunnel"):
+        if existing_tunnel:
             result = self._call(
                 [
                     "update",
@@ -283,9 +324,11 @@ class DevTunnelRendezvous:
                 ]
             )
         tunnel = (result or {}).get("tunnel") or {}
-        return self._decode(tunnel) or {**payload, "worktrees": [], "capabilities": [],
-                                        "agent_versions": {}, "status": {},
-                                        "expires_at": payload["last_seen"] + self._ttl, "age": 0.0}
+        return self._decode(tunnel) or {
+            **payload,
+            "expires_at": payload["last_seen"] + self._ttl,
+            "age": 0.0,
+        }
 
     # -- Rendezvous Protocol ------------------------------------------------
 
@@ -302,10 +345,6 @@ class DevTunnelRendezvous:
         agent_versions: dict[str, str] | None = None,
         status: dict | None = None,
     ) -> dict:
-        # worktrees/capabilities/agent_versions/status are intentionally not
-        # carried over this transport -- see module docstring on tunnel
-        # description size; the awareness plane still reports role/epoch/
-        # machine/gate_state/last-beat, which is the Phase-4 minimum bar.
         tunnel_id = _tunnel_id(instance)
         existing = self._call(["show", tunnel_id], allow_missing=True)
         registered_at = time.time()
@@ -320,6 +359,10 @@ class DevTunnelRendezvous:
             machine=machine,
             gate_state=gate_state,
             registered_at=registered_at,
+            worktrees=worktrees,
+            capabilities=capabilities,
+            agent_versions=agent_versions,
+            status=status,
         )
 
     def heartbeat(
@@ -346,13 +389,23 @@ class DevTunnelRendezvous:
             machine=prior["machine"],
             gate_state=gate_state if gate_state is not None else prior["gate_state"],
             registered_at=prior["registered_at"],
+            worktrees=worktrees if worktrees is not None else prior["worktrees"],
+            capabilities=prior["capabilities"],
+            agent_versions=prior["agent_versions"],
+            status=status if status is not None else prior["status"],
         )
 
     def deregister(self, instance: str) -> bool:
         tunnel_id = _tunnel_id(instance)
         existing = self._call(["show", tunnel_id], allow_missing=True)
-        if not existing or not existing.get("tunnel"):
+        existing_tunnel = (existing or {}).get("tunnel")
+        if not existing_tunnel:
             return False
+        if not self._owns(existing_tunnel):
+            raise DevTunnelError(
+                f"tunnel {tunnel_id!r} exists but is not labeled {self._label!r} -- "
+                "refusing to delete a tunnel this backend doesn't own"
+            )
         self._call(["delete", tunnel_id])
         return True
 
