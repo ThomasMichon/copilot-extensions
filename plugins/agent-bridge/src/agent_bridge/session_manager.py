@@ -1528,6 +1528,24 @@ class SessionManager:
             session.acp_session_id = row.get("acp_session_id")
             session.restart_status = status
 
+            # Restore the session's declared per-session MCP toolset. Without
+            # this, a daemon restart silently drops it forever (it otherwise
+            # lives only on the in-memory Session object) -- the confirmed
+            # root cause of a reviewer task permanently losing its dedicated,
+            # credential-bound tools after any restart (aperture-labs #7239).
+            config_json = row.get("config_json")
+            if config_json:
+                try:
+                    config_data = json.loads(config_json)
+                except (TypeError, ValueError):
+                    config_data = None
+                if isinstance(config_data, dict):
+                    servers = config_data.get("mcp_servers")
+                    if isinstance(servers, list):
+                        session.mcp_servers = [
+                            dict(s) for s in servers if isinstance(s, dict)
+                        ]
+
             # Mark formerly-active sessions as stopped
             interrupted_on_restart = False
             if status in (
@@ -4238,7 +4256,15 @@ class SessionManager:
             if event_type == "usage_update":
                 self._handle_usage_update(session, data)
 
-        # Persist to DB
+        # Persist to DB. `config_json` carries `mcp_servers` -- otherwise a
+        # session's declared per-session MCP toolset (e.g. a reviewer's
+        # dedicated, credential-bound tools) lives ONLY in this in-memory
+        # Session object and is silently lost on any daemon restart, not just
+        # a resume within the same process (aperture-labs #7239).
+        config_json = (
+            json.dumps({"mcp_servers": session.mcp_servers})
+            if session.mcp_servers else None
+        )
         self._db.create_session(
             session_id=session_id,
             name=name,
@@ -4249,6 +4275,7 @@ class SessionManager:
             status=SessionStatus.STARTING.value,
             now=now,
             target_json=target.to_json(),
+            config_json=config_json,
         )
 
         session.status = SessionStatus.STARTING

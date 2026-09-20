@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -3850,6 +3851,40 @@ class TestRehydrate:
         assert session is not None
         assert session.status == SessionStatus.STOPPED
         assert session.acp_session_id == "acp-456"
+
+    def test_rehydrate_restores_mcp_servers_from_config_json(
+        self, tmp_db: Database
+    ) -> None:
+        """A session's declared per-session MCP toolset must survive a daemon
+        restart, not just an in-process resume -- regression for a reviewer
+        task permanently losing its dedicated credential-bound tools after
+        any restart (aperture-labs #7239)."""
+        now = time.time()
+        tmp_db.create_session(
+            "s1", "test", None, ".", "local", "idle", now,
+            config_json=json.dumps(
+                {"mcp_servers": [{"name": "gitea-mcp", "type": "stdio"}]}
+            ),
+        )
+
+        mgr = SessionManager(tmp_db)
+        session = mgr.get_session("s1")
+        assert session is not None
+        assert session.mcp_servers == [{"name": "gitea-mcp", "type": "stdio"}]
+
+    def test_rehydrate_tolerates_missing_or_malformed_config_json(
+        self, tmp_db: Database
+    ) -> None:
+        now = time.time()
+        tmp_db.create_session("s1", "test", None, ".", "local", "idle", now)
+        tmp_db.create_session(
+            "s2", "test", None, ".", "local", "idle", now,
+            config_json="not json",
+        )
+
+        mgr = SessionManager(tmp_db)
+        assert mgr.get_session("s1").mcp_servers == []
+        assert mgr.get_session("s2").mcp_servers == []
 
 
 class TestTeardownDuringDrain:

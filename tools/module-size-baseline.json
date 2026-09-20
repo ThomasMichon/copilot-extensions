@@ -19,7 +19,7 @@
   "plugins/agent-bridge/src/agent_bridge/routes/sessions.py": 1676,
   "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py": 1541,
   "plugins/agent-bridge/src/agent_bridge/session_host/spawner.py": 1028,
-  "plugins/agent-bridge/src/agent_bridge/session_manager.py": 6781,
+  "plugins/agent-bridge/src/agent_bridge/session_manager.py": 6808,
   "plugins/agent-bridge/src/agent_bridge/transport.py": 1257,
   "plugins/agent-codespaces/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/agent-codespaces/libs/ssh-manager/src/ssh_manager/carrier.py": 1313,
