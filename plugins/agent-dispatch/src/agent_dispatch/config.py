@@ -327,17 +327,23 @@ def _health_responsive(base_url: str, *, timeout: float = 3.0) -> bool:
     """True if ``base_url``'s ``/health`` endpoint answers within ``timeout``.
 
     A TCP listener can stay open (still ``accept()``-ing new connections) long
-    after the process behind it has wedged -- confirmed live (see
-    gim-home/odsp-web-harness#... / ThomasMichon/copilot-extensions#3031): a
-    coordinator hung mid-cycle for ~9h while still holding its socket, so every
-    ``_url_listening`` probe kept reporting it as live and the CLI's lazy-start
-    never tried to replace it. Liveness must therefore include a real bounded
-    HTTP round-trip, not just a socket connect.
+    after the process behind it has wedged -- confirmed live in a real
+    incident: a coordinator hung mid-cycle for hours while still holding its
+    socket, so every ``_url_listening`` probe kept reporting it as live and the
+    CLI's lazy-start never tried to replace it. Liveness must therefore include
+    a real bounded HTTP round-trip, not just a socket connect.
+
+    Sends the configured bearer token (``client_token()``), if any -- a
+    token-protected coordinator otherwise answers 401 here and would be
+    permanently misclassified as dead, causing every autostarting CLI
+    invocation to attempt an unnecessary recovery against a healthy process.
     """
+    request = urllib.request.Request(f"{base_url.rstrip('/')}/health")
+    token = client_token()
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(  # noqa: S310 -- fixed loopback host from our own routing table
-            f"{base_url.rstrip('/')}/health", timeout=timeout
-        ) as resp:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:  # noqa: S310 -- fixed loopback host from our own routing table
             return 200 <= resp.status < 300
     except (OSError, urllib.error.URLError, ValueError, TimeoutError):
         return False

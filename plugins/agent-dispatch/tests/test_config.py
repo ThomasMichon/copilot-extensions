@@ -344,6 +344,54 @@ def test_health_responsive_false_on_timeout(monkeypatch):
     assert config_mod._health_responsive("http://127.0.0.1:59999") is False
 
 
+def test_health_responsive_sends_bearer_token_when_configured(monkeypatch):
+    # A token-protected coordinator returns 401 to an unauthenticated probe and
+    # would otherwise be permanently misclassified as dead, causing every
+    # autostarting CLI invocation to attempt an unnecessary recovery against a
+    # healthy, already-live coordinator.
+    captured: dict = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _fake_urlopen(request, timeout=None):
+        captured["auth_header"] = request.get_header("Authorization")
+        return _FakeResponse()
+
+    monkeypatch.setattr(config_mod, "client_token", lambda: "s3cr3t")
+    monkeypatch.setattr(config_mod.urllib.request, "urlopen", _fake_urlopen)
+    assert config_mod._health_responsive("http://127.0.0.1:59999") is True
+    assert captured["auth_header"] == "Bearer s3cr3t"
+
+
+def test_health_responsive_omits_auth_header_when_no_token(monkeypatch):
+    captured: dict = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _fake_urlopen(request, timeout=None):
+        captured["auth_header"] = request.get_header("Authorization")
+        return _FakeResponse()
+
+    monkeypatch.setattr(config_mod, "client_token", lambda: None)
+    monkeypatch.setattr(config_mod.urllib.request, "urlopen", _fake_urlopen)
+    assert config_mod._health_responsive("http://127.0.0.1:59999") is True
+    assert captured["auth_header"] is None
+
+
 def test_client_url_wsl_uses_discovered_port_when_opted_in(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_WSL_WINDOWS_CLIENT", "1")
