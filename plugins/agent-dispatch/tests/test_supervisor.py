@@ -1428,7 +1428,9 @@ def test_idle_headless_turn_auto_suspends_and_cools(q, client):
     assert stopped == ["review-session"]
 
 
-def test_supervisor_binds_headless_owner_to_bridge_session(q, client):
+def test_supervisor_binds_headless_owner_to_acp_session(q, client):
+    """Binds the durable ACP session id, not agent-bridge's own ephemeral
+    escrow handle -- see ``bind_headless_owner_sessions``'s docstring."""
     task = q.create("review turn", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
@@ -1444,11 +1446,36 @@ def test_supervisor_binds_headless_owner_to_bridge_session(q, client):
         labels=["review"],
         local_body_activity_fn=lambda _session_id: "ACTIVE",
         local_body_verdict_fn=lambda _session_id: "live",
+        local_acp_session_fn=lambda _sid: "acp-session-uuid",
     )
 
     assert sup.bind_headless_owner_sessions() == 1
-    assert q.get(task.id).owner_session_id == "review-session"
+    assert q.get(task.id).owner_session_id == "acp-session-uuid"
     assert sup.bind_headless_owner_sessions() == 0
+
+
+def test_supervisor_defers_headless_owner_bind_until_acp_session_known(q, client):
+    """The bridge hasn't reported its ACP session id back yet -- skip rather
+    than binding the ephemeral escrow handle as a placeholder."""
+    task = q.create("review turn", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:review-session"
+    )
+    q.claim_one("headless-owner", task_id=task.id)
+    q.start(task.id, "headless-owner")
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_activity_fn=lambda _session_id: "ACTIVE",
+        local_body_verdict_fn=lambda _session_id: "live",
+        local_acp_session_fn=lambda _sid: None,
+    )
+
+    assert sup.bind_headless_owner_sessions() == 0
+    assert q.get(task.id).owner_session_id is None
 
 
 def test_failed_cold_stop_keeps_live_process_capacity(q, client):
