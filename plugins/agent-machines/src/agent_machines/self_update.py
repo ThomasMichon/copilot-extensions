@@ -768,7 +768,11 @@ def fast_forward_repo(
         # happens in linked worktrees) has no working tree or index for
         # ``git pull`` to update. The ahead/behind check above already
         # proved this is a clean fast-forward, so it is safe to move the
-        # branch HEAD points at directly to the upstream commit.
+        # branch HEAD points at directly to the upstream commit. Resolve
+        # both endpoints to concrete object ids and pass the old value to
+        # ``update-ref`` so the move is an atomic compare-and-swap -- this
+        # rejects the update outright if anything moved the branch (or the
+        # symbolic upstream name) between the check above and this write.
         branch = runner(
             ["git", "symbolic-ref", "--quiet", "--short", "HEAD"], cwd=repo, timeout=120
         )
@@ -780,8 +784,29 @@ def fast_forward_repo(
                 path=str(repo),
             )
         branch_name = branch.stdout.strip()
+        old_sha = runner(["git", "rev-parse", "--verify", "HEAD"], cwd=repo, timeout=120)
+        if old_sha.returncode != 0:
+            return StepResult(
+                "git-pull", "error", old_sha.output or "git rev-parse HEAD failed", path=str(repo)
+            )
+        new_sha = runner(
+            ["git", "rev-parse", "--verify", upstream_ref], cwd=repo, timeout=120
+        )
+        if new_sha.returncode != 0:
+            return StepResult(
+                "git-pull",
+                "error",
+                new_sha.output or "git rev-parse upstream failed",
+                path=str(repo),
+            )
         updated = runner(
-            ["git", "update-ref", f"refs/heads/{branch_name}", upstream_ref],
+            [
+                "git",
+                "update-ref",
+                f"refs/heads/{branch_name}",
+                new_sha.stdout.strip(),
+                old_sha.stdout.strip(),
+            ],
             cwd=repo,
             timeout=120,
         )

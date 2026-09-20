@@ -437,6 +437,12 @@ def test_fast_forward_repo_bare_anchor_fast_forwards_branch_ref(tmp_path):
             ("git", "fetch"): self_update.CommandResult(list(argv), 0, "", ""),
             ("git", "rev-list"): self_update.CommandResult(list(argv), 0, "0\t1\n", ""),
             ("git", "symbolic-ref"): self_update.CommandResult(list(argv), 0, "main\n", ""),
+            ("git", "rev-parse", "--verify", "HEAD"): self_update.CommandResult(
+                list(argv), 0, "aaaa000\n", ""
+            ),
+            ("git", "rev-parse", "--verify", "origin/main"): self_update.CommandResult(
+                list(argv), 0, "bbbb111\n", ""
+            ),
             ("git", "update-ref"): self_update.CommandResult(list(argv), 0, "", ""),
         }
         for prefix, result in mapping.items():
@@ -475,6 +481,42 @@ def test_fast_forward_repo_bare_anchor_skips_detached_head(tmp_path):
     result = self_update.fast_forward_repo(repo, runner=bare_runner)
     assert result.status == "skipped"
     assert "detached" in result.detail
+
+
+def test_fast_forward_repo_bare_anchor_reports_error_when_upstream_moved(tmp_path):
+    repo = tmp_path / "bare-repo"
+    repo.mkdir()
+
+    def bare_runner(argv, *, cwd=None, timeout=0):
+        mapping = {
+            ("git", "rev-parse", "--is-bare-repository"): self_update.CommandResult(
+                list(argv), 0, "true\n", ""
+            ),
+            ("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): (
+                self_update.CommandResult(list(argv), 0, "origin/main\n", "")
+            ),
+            ("git", "fetch"): self_update.CommandResult(list(argv), 0, "", ""),
+            ("git", "rev-list"): self_update.CommandResult(list(argv), 0, "0\t1\n", ""),
+            ("git", "symbolic-ref"): self_update.CommandResult(list(argv), 0, "main\n", ""),
+            ("git", "rev-parse", "--verify", "HEAD"): self_update.CommandResult(
+                list(argv), 0, "aaaa000\n", ""
+            ),
+            ("git", "rev-parse", "--verify", "origin/main"): self_update.CommandResult(
+                list(argv), 0, "bbbb111\n", ""
+            ),
+            # The ref moved concurrently: update-ref's compare-and-swap fails.
+            ("git", "update-ref"): self_update.CommandResult(
+                list(argv), 128, "", "fatal: cannot lock ref: is at cccc222 but expected aaaa000"
+            ),
+        }
+        for prefix, result in mapping.items():
+            if tuple(argv[: len(prefix)]) == prefix:
+                return result
+        raise AssertionError(argv)
+
+    result = self_update.fast_forward_repo(repo, runner=bare_runner)
+    assert result.status == "error"
+    assert "lock ref" in result.detail
 
 
 def test_fast_forward_repo_bare_anchor_already_up_to_date(tmp_path):
