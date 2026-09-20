@@ -122,9 +122,12 @@ def test_worst_candidate_returns_none_when_nothing_is_tracked(repo: Path):
 def test_dry_run_cli_reports_without_filing():
     # Runs the real script in place against this repo's own tree -- confirms
     # the default (no --file-issue) path never shells out to `gh` and always
-    # exits 0.
+    # exits 0. Pass an explicit large --near-cap so this stays deterministic
+    # regardless of the real repo's current worst-offender margin (otherwise
+    # a comfortable margin would exit through the earlier "nothing to file"
+    # branch instead of ever reaching the dry-run message).
     result = subprocess.run(
-        [sys.executable, str(SCRIPT)],
+        [sys.executable, str(SCRIPT), "--near-cap", "100000"],
         cwd=SCRIPT.parent.parent,
         capture_output=True,
         text=True,
@@ -146,6 +149,32 @@ def test_existing_issue_number_raises_lookup_failed_on_a_nonzero_exit(monkeypatc
 
     with pytest.raises(watchdog.LookupFailed):
         watchdog._existing_issue_number("owner/repo", "src/big.py")
+
+
+def test_existing_issue_number_returns_none_on_a_clean_no_match(monkeypatch):
+    watchdog = _load_watchdog(SCRIPT.parent)
+
+    class _EmptyRun:
+        returncode = 0
+        stdout = "[]"
+        stderr = ""
+
+    monkeypatch.setattr(watchdog.subprocess, "run", lambda *a, **k: _EmptyRun())
+
+    assert watchdog._existing_issue_number("owner/repo", "src/big.py") is None
+
+
+def test_existing_issue_number_returns_the_number_on_a_match(monkeypatch):
+    watchdog = _load_watchdog(SCRIPT.parent)
+
+    class _MatchRun:
+        returncode = 0
+        stdout = '[{"number": 4242}]'
+        stderr = ""
+
+    monkeypatch.setattr(watchdog.subprocess, "run", lambda *a, **k: _MatchRun())
+
+    assert watchdog._existing_issue_number("owner/repo", "src/big.py") == 4242
 
 
 def test_main_aborts_without_filing_when_lookup_fails(monkeypatch, capsys):
