@@ -49,6 +49,8 @@ from __future__ import annotations
 
 import os
 import socket
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -321,24 +323,78 @@ def _url_listening(base_url: str, *, timeout: float = 0.25) -> bool:
         return False
 
 
+def _health_responsive(base_url: str, *, timeout: float = 3.0) -> bool:
+    """True if ``base_url``'s ``/health`` endpoint answers within ``timeout``.
+
+    A TCP listener can stay open (still ``accept()``-ing new connections) long
+    after the process behind it has wedged -- confirmed live in a real
+    incident: a coordinator hung mid-cycle for hours while still holding its
+    socket, so every ``_url_listening`` probe kept reporting it as live and the
+    CLI's lazy-start never tried to replace it. Liveness must therefore include
+    a real bounded HTTP round-trip, not just a socket connect.
+
+    Sends the configured bearer token (``client_token()``), if any -- a
+    token-protected coordinator otherwise answers 401 here and would be
+    permanently misclassified as dead, causing every autostarting CLI
+    invocation to attempt an unnecessary recovery against a healthy process.
+    """
+    request = urllib.request.Request(f"{base_url.rstrip('/')}/health")
+    token = client_token()
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:  # noqa: S310 -- fixed loopback host from our own routing table
+            return 200 <= resp.status < 300
+    except (OSError, urllib.error.URLError, ValueError, TimeoutError):
+        return False
+
+
+def _discovered_endpoint_health_responsive(endpoint, *, timeout: float = 3.0) -> bool:
+    """True if a discovered ``rendezvous.Endpoint`` answers ``/health``.
+
+    ``_discover_local_endpoint()`` returns a ``rendezvous.Endpoint`` (already
+    ``connect_probe``-verified live), not a bare URL string -- only its ``tcp``
+    transport maps onto a plain HTTP round trip. A ``unix``/``pipe`` endpoint has
+    no such mapping here, so it's treated as live off the existing connect probe
+    alone (unchanged pre-existing behavior for those transports) rather than
+    guessing at a URL for a socket kind ``_health_responsive`` can't speak to.
+    """
+    if endpoint.transport != "tcp":
+        return True
+    return _health_responsive(f"http://{endpoint.address}")
+
+
 def has_live_local_coordinator() -> bool:
     """True if a local coordinator is discoverable **and** answering its probe.
 
     Consults the zdd routing table first (authoritative on the host; it self-heals
     a dead ``active`` to ``previous``), then the legacy discovery ladder
     (``AGENT_DISPATCH_ENDPOINT`` -> the rendezvous file, probed for a live
-    listener). The CLI's lazy-start uses this to decide whether a coordinator is
-    up before a client command runs, so it must mean **actually reachable**: the
-    routing table alone returns a mid-startup (live-pid, not-yet-listening)
-    endpoint, so the routed URL is additionally socket-probed here -- otherwise
-    lazy-start would stop waiting the instant a just-spawned coordinator wrote its
-    routing entry and the very next client call would race the bind and get
-    ``Connection refused``.
+    listener) **only when the routing table has no entry at all**. The CLI's
+    lazy-start uses this to decide whether a coordinator is up before a client
+    command runs, so it must mean **actually reachable**: the routing table alone
+    returns a mid-startup (live-pid, not-yet-listening) endpoint, so the routed
+    URL is additionally socket-probed here -- otherwise lazy-start would stop
+    waiting the instant a just-spawned coordinator wrote its routing entry and the
+    very next client call would race the bind and get ``Connection refused``.
+
+    A listening socket alone is not sufficient: a wedged coordinator can hold its
+    socket open indefinitely while never answering a request (see
+    ``_health_responsive``), so an actually-reachable endpoint must also answer
+    ``/health`` within a bounded timeout before it counts as live.
+
+    When the routing table *does* have an entry, it is authoritative and the
+    result must come from it alone -- never fall through to the legacy discovery
+    ladder on a routed health-check failure. ``client_url()`` prefers the routed
+    URL whenever one exists, so falling back here to a *different*, healthy
+    legacy endpoint would report "live" while every real request still goes to
+    the wedged routed generation, silently defeating this whole check.
     """
     routed = _routing_url()
-    if routed is not None and _url_listening(routed):
-        return True
-    return _discover_local_endpoint() is not None
+    if routed is not None:
+        return _url_listening(routed) and _health_responsive(routed)
+    discovered = _discover_local_endpoint()
+    return discovered is not None and _discovered_endpoint_health_responsive(discovered)
 
 
 def client_url() -> str:
