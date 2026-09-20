@@ -57,6 +57,20 @@ def local_rendezvous(url: str | None = None, *, token: str | None = None) -> Coo
     return build_rendezvous(url or config.client_url(), token=token or config.client_token())
 
 
+def rendezvous_from_config() -> Rendezvous | None:
+    """The rendezvous for whichever backend ``AGENT_DISPATCH_FEDERATION_BACKEND``
+    selects (``gateway`` default -> :func:`hosted_rendezvous`; ``devtunnels`` ->
+    the Phase-4 Dev Tunnels backend), or ``None`` when that backend isn't
+    configured/reachable. Kept separate from :func:`hosted_rendezvous` so a
+    caller that specifically wants the Gateway backend (e.g. a test) is
+    unaffected by the backend selector."""
+    if config.federation_backend() == "devtunnels":
+        from .devtunnel_rendezvous import devtunnel_rendezvous
+
+        return devtunnel_rendezvous()
+    return hosted_rendezvous()
+
+
 # -- the runner --------------------------------------------------------------
 
 
@@ -220,18 +234,25 @@ def runner_from_config(rendezvous: Rendezvous | None = None) -> FederationRunner
     """Build a :class:`FederationRunner` from the environment, or ``None`` when
     federation is not enabled (no valid ``AGENT_DISPATCH_FEDERATION_ROLE``).
 
-    Uses the hosted rendezvous (:func:`hosted_rendezvous`) unless one is passed
-    in; raises :class:`RuntimeError` if federation is enabled but no directory URL
-    is reachable, so a misconfiguration fails loud rather than silently idling."""
+    Uses whichever backend ``AGENT_DISPATCH_FEDERATION_BACKEND`` selects
+    (:func:`rendezvous_from_config`) unless a rendezvous is passed in directly;
+    raises :class:`RuntimeError` if federation is enabled but the selected
+    backend's directory isn't reachable/configured, so a misconfiguration fails
+    loud rather than silently idling."""
     role = config.federation_role()
     if role is None:
         return None
     instance = config.federation_instance()
     if not instance:
         raise RuntimeError("federation enabled but no instance id could be resolved")
-    rv = rendezvous if rendezvous is not None else hosted_rendezvous()
+    rv = rendezvous if rendezvous is not None else rendezvous_from_config()
     if rv is None:
-        raise RuntimeError(
-            "federation enabled but no AGENT_DISPATCH_SHARED_URL (hosted coordinator) configured"
+        backend = config.federation_backend()
+        reason = (
+            "no AGENT_DISPATCH_SHARED_URL (hosted coordinator) configured"
+            if backend == "gateway"
+            else f"backend {backend!r} could not be constructed"
         )
+        raise RuntimeError(f"federation enabled but {reason}")
     return FederationRunner(rv, instance, role=role, machine=instance)
+
