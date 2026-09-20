@@ -1647,7 +1647,7 @@ class TestWorktreeRoutes:
         self, client, app,
     ) -> None:
         # session-worktree-archive-linkout: a worktree agent-worktrees has
-        # tombstoned as "archived" (retire_record, cx#3015) never appears in
+        # tombstoned as "archived" (retire_record, #3015) never appears in
         # the live discovery cache (it only crawls `list --json`'s on-disk,
         # non-archived default). The owner-resolution fallback must still
         # find it via an explicit archived-record probe instead of 404ing.
@@ -1760,6 +1760,48 @@ class TestWorktreeRoutes:
             result = await survivor
 
         assert result == ("test-agent", resolver.agents["test-agent"])
+
+    @pytest.mark.asyncio
+    async def test_archive_probe_returns_early_on_first_match(self) -> None:
+        # review r4056904161: a match from a fast agent must return without
+        # waiting for a slow/unreachable agent to finish or time out.
+        import asyncio as _asyncio
+
+        from agent_bridge.agent_registry import AgentConfig, AgentResolver
+        from agent_bridge.routes import worktrees as wt_routes
+
+        wt_id = "anomalous-potato-wsl-20250101-194700-early-exit"
+        resolver = AgentResolver(
+            agents={
+                "fast-agent": AgentConfig(name="fast-agent", project="test-chamber"),
+                "slow-agent": AgentConfig(name="slow-agent", project="test-chamber"),
+            },
+            machines={},
+        )
+        slow_agent_awaited = _asyncio.Event()
+
+        async def _fake_run_for_agent(agent_name, config, resolver, args):
+            if agent_name == "fast-agent":
+                return '{"worktrees": [{"id": "%s", "status": "archived"}]}' % wt_id
+            try:
+                await _asyncio.sleep(30)
+            except _asyncio.CancelledError:
+                slow_agent_awaited.set()
+                raise
+            return '{"worktrees": []}'
+
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=_fake_run_for_agent,
+        ):
+            result = await _asyncio.wait_for(
+                wt_routes._probe_archived_owner(wt_id, resolver), timeout=1,
+            )
+            # The slow agent's task should have been cancelled, not awaited
+            # to completion, once the fast match returned.
+            await _asyncio.wait_for(slow_agent_awaited.wait(), timeout=1)
+
+        assert result == ("fast-agent", resolver.agents["fast-agent"])
 
     def test_get_worktree_session_transcript_proxies(self, client, app) -> None:
         from unittest.mock import AsyncMock, patch

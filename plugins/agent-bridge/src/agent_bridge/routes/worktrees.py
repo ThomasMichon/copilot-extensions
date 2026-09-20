@@ -93,13 +93,11 @@ class _WorktreeEntry:
     def interactive_cli_state(self) -> str:
         """Classify interactive-CLI ownership from mux liveness.
 
-        - ``held``    -- a wt-<id> mux session exists and a terminal is
-          attached (or attachment is unknown): a live interactive Copilot CLI
-          owns the worktree and is being actively viewed.  Do-not-disturb.
-        - ``at-rest`` -- a wt-<id> mux session exists but is detached (no
-          terminal attached): still a live process -- reclaim via take-over.
-        - ``none``    -- no interactive mux session; the worktree is not held
-          by an interactive Copilot CLI.
+        - ``held``    -- a mux session exists, terminal attached (or
+          unknown): a live interactive CLI owns it. Do-not-disturb.
+        - ``at-rest`` -- a mux session exists but detached: still a live
+          process -- reclaim via take-over.
+        - ``none``    -- no interactive mux session holds the worktree.
         """
         if not self.mux_session:
             return "none"
@@ -142,8 +140,7 @@ class WorktreeDiscoveryCache:
     """In-memory cache for discovered worktrees.
 
     When *interval* > 0, a background task refreshes the cache
-    periodically.  When *interval* is 0 (the default), no background
-    task is created and the cache is populated on-demand via
+    periodically. When 0 (the default), it's populated on-demand via
     :meth:`crawl_if_empty`.
     """
 
@@ -482,10 +479,9 @@ async def _run_local_ex(
 def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
     """Check if an SSH host alias resolves to the local machine AND platform.
 
-    Returns True only when the alias points to the same machine key AND
-    the same platform (wsl/windows/linux) we're running on -- avoids
-    treating a Windows agent as "local" when running on WSL (or vice
-    versa), even though they share the same physical machine.
+    True only when the alias points to the same machine key AND platform
+    (wsl/windows/linux) -- avoids treating a Windows agent as "local" on
+    WSL (or vice versa), even on the same physical machine.
     """
     if not ssh_host:
         return True
@@ -681,9 +677,7 @@ def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
             live_intent=w.get("live_intent"),
             live_intent_at=w.get("live_intent_at"),
             live_intent_idle=bool(w.get("live_intent_idle", False)),
-            # worktree-finality-and-obligations (Phase 5): raw/opaque passthrough
-            # -- absent unless the crawl ran with --classify and the remote's
-            # agent-worktrees emits it.
+            # Phase 5: raw/opaque passthrough, absent unless --classify ran.
             closure=w.get("closure") if isinstance(w.get("closure"), dict) else None,
         ))
     return entries
@@ -718,7 +712,7 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
       or None
     - ``durable_session_id``: the identifier to persist or deep-link with --
       ``acp_session_id`` when known, else the (non-durable) bridge
-      ``session_id`` -- see ``SessionInfo.durable_session_id``'s docstring
+      ``session_id``
     - ``session_status``: that session's status (idle/running/stopped/...)
     - ``session_turn_count``: number of prompt turns on that session
     - ``session_live``: True if the session is currently running or idle
@@ -743,10 +737,9 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
     await cache.crawl_if_empty()
     groups = cache.get_all()
 
-    # Build worktree_id -> latest bridge session map for linkage.  A worktree
-    # may have had several sessions over its life (session rolls); pick the
-    # most recently updated one.  list_sessions() is already sorted
-    # newest-first, so the first match per worktree wins.
+    # Build worktree_id -> latest bridge session map for linkage. A worktree
+    # may have had several sessions over its life; list_sessions() is
+    # already sorted newest-first, so the first match per worktree wins.
     latest_by_wt: dict[str, Any] = {}
     mgr = getattr(request.app.state, "session_manager", None)
     if mgr is not None:
@@ -933,21 +926,17 @@ async def resume_worktree(
     - An already-live session is returned as-is.
     - A stopped session is resumed (ACP load_session reuses the same acp
       session id).
-    - If that session can no longer be resumed (e.g. the agent no longer
-      knows it -- common for old/finalized worktrees), fall back to starting
-      a fresh session in the same worktree directory, since the worktree
-      still exists on disk.  This keeps "open existing worktree" robust.
+    - If that session can no longer be resumed (e.g. old/finalized
+      worktrees), fall back to starting a fresh session in the same
+      worktree directory, since it still exists on disk.
 
-    **Atomic ownership guard (#2879).** Before resuming, if a *fresh* live
-    interactive Copilot CLI already holds this worktree, refuse to resume it
-    as an OWNED ACP session and return **409** with a structured
-    ``reason: live_cli_holds_worktree`` -- owning it would spawn a second
-    ``copilot`` child on the same worktree and the two would contend (every
-    prompt then returns "Operation cancelled by user"). This is the
-    race-free enforcement of the one-ACP-controller invariant that a
-    consumer's best-effort represent-if-live preflight cannot guarantee.
-    ``reclaim=true`` (take-over) bypasses the guard: the caller has just
-    terminated the interactive CLI and intends to own the freed worktree.
+    **Atomic ownership guard (#2879).** If a *fresh* live interactive
+    Copilot CLI already holds this worktree, refuse to resume it as an
+    OWNED ACP session and return **409** (``reason: live_cli_holds_
+    worktree``) -- owning it would spawn a second ``copilot`` child on the
+    same worktree and the two would contend. This is race-free, unlike a
+    consumer's best-effort represent-if-live preflight. ``reclaim=true``
+    bypasses the guard: the caller has just terminated the interactive CLI.
 
     Returns 404 if the worktree has no session at all.
     """
@@ -1114,22 +1103,19 @@ async def handoff_worktree_request(
 
     This is the control-plane seam used by ``context-handoff``'s best-effort
     `agent-bridge handoff-request` ping from some OTHER extension-enabled
-    session. The caller already composed and stored the durable baton, so it
-    supplies the exact successor opening turn (``seed_text``) plus the session
-    it believes currently owns the worktree. The route resolves the worktree's
-    current bridge session, verifies it still matches the requested session id,
-    and then reuses ``SessionManager.handoff_session`` with the external seed
-    instead of asking the predecessor to author a new brief.
+    session. The caller already composed the durable baton, so it supplies
+    the exact successor opening turn (``seed_text``) plus the session it
+    believes currently owns the worktree. Resolves the worktree's current
+    bridge session, verifies it still matches, and reuses
+    ``SessionManager.handoff_session`` with the external seed.
 
-    This route is additive only: agent-bridge's own ACP-hosted sessions do not
-    rely on it for proactive/usage-driven handoff. Those sessions remain fully
-    self-contained under ``SessionManager``'s internal context-pressure +
-    self-authored-brief flow, which does not depend on Copilot CLI extensions
-    being active in the hosted child.
+    Additive only: agent-bridge's own ACP-hosted sessions don't rely on it,
+    remaining fully self-contained under ``SessionManager``'s internal
+    context-pressure + self-authored-brief flow.
 
-    Errors: 404 (no current session for the worktree / requested session no
-    longer matches it), 409 (single-checkout agent or mid-turn), 502 (successor
-    failed to spawn -- predecessor retained), 503 (draining).
+    Errors: 404 (no current session, or requested session no longer
+    matches), 409 (single-checkout agent or mid-turn), 502 (successor
+    failed to spawn), 503 (draining).
     """
     from .sessions import _session_info
 
@@ -1219,7 +1205,7 @@ async def _owning_agent(
 
     Checks the live discovery cache first; falls back to an explicit
     ``archived`` record probe (cache never crawls tombstoned worktrees,
-    cx#3015) so an archived worktree's owner still resolves.
+    #3015) so an archived worktree's owner still resolves.
     """
     resolver = getattr(request.app.state, "resolver", None)
     if resolver is None:
@@ -1238,10 +1224,10 @@ async def _owning_agent(
 async def _probe_archived_owner(
     worktree_id: str, resolver: AgentResolver,
 ) -> tuple[str, AgentConfig] | None:
-    """Fan an archived-record probe across every eligible agent.
-
-    Only ever called single-flight via :meth:`WorktreeDiscoveryCache.
-    probe_archived` -- never call directly from a route.
+    """Fan an archived-record probe across every eligible agent, returning
+    on first match instead of waiting on a slow/unreachable agent (up to
+    ``_CMD_TIMEOUT`` of avoidable latency otherwise). Only ever called
+    single-flight via :meth:`WorktreeDiscoveryCache.probe_archived`.
     """
     eligible = [
         (name, cfg) for name, cfg in resolver.agents.items()
@@ -1253,23 +1239,41 @@ async def _probe_archived_owner(
         "list", "--json", "--tracking-status", "archived", "--all",
         "--worktree-id", worktree_id,
     ]
-    results = await asyncio.gather(
-        *(_run_for_agent(name, cfg, resolver, args) for name, cfg in eligible),
-        return_exceptions=True,
+    tasks = {
+        asyncio.create_task(_run_for_agent(name, cfg, resolver, args)): (name, cfg)
+        for name, cfg in eligible
+    }
+    pending = set(tasks)
+    match: tuple[str, AgentConfig] | None = None
+    try:
+        while pending and match is None:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                if task.cancelled() or task.exception() is not None:
+                    continue
+                if _worktree_id_in_payload(task.result(), worktree_id):
+                    match = tasks[task]
+                    break
+        return match
+    finally:
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+
+def _worktree_id_in_payload(raw: str | None, worktree_id: str) -> bool:
+    """True if a ``list --json`` payload's ``worktrees`` array names ``worktree_id``."""
+    if raw is None:
+        return False
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    worktrees = data.get("worktrees") if isinstance(data, dict) else None
+    return isinstance(worktrees, list) and any(
+        isinstance(wt, dict) and wt.get("id") == worktree_id for wt in worktrees
     )
-    for (agent_name, config), raw in zip(eligible, results):
-        if isinstance(raw, Exception) or raw is None:
-            continue
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        worktrees = data.get("worktrees") if isinstance(data, dict) else None
-        if isinstance(worktrees, list) and any(
-            isinstance(wt, dict) and wt.get("id") == worktree_id for wt in worktrees
-        ):
-            return agent_name, config
-    return None
 
 
 @router.get("/api/v1/worktrees/{worktree_id}/sessions")
@@ -1278,11 +1282,10 @@ async def list_worktree_sessions(
 ) -> dict[str, Any]:
     """List the CLI sessions belonging to a worktree.
 
-    Shells out to ``<project> list-sessions --worktree <id> --json`` on the
-    machine that owns the worktree (local or via SSH) -- the authoritative,
-    branch-independent session registry maintained by agent-worktrees (it
-    counts sessions launched by the picker *and* by agent-bridge / Mission
-    Control, which carry no ``branch`` field).
+    Shells to ``<project> list-sessions --worktree <id> --json`` on the
+    owning machine -- the authoritative, branch-independent session
+    registry maintained by agent-worktrees (counts sessions launched by
+    the picker *and* by agent-bridge / Mission Control).
 
     For the worktree's full head-succession/fork-lineage graph, see
     ``GET /api/v1/worktrees/{id}/lineage`` instead.
@@ -1337,11 +1340,9 @@ async def get_worktree_lineage(
     lineage graph -- the current head, every session with its
     predecessor/successor, the head-transition history, and the handoff
     ledger (each entry carries its own ``state``, so a caller can tell a
-    genuine **fork** from ordinary resolved/cancelled history).
-
-    Shells out to ``<project> worktree-lineage --worktree <id> --json`` on
-    the machine that owns the worktree -- the same purpose-built,
-    already-bounded surface ``agent-worktrees`` itself uses.
+    genuine **fork** from ordinary resolved/cancelled history). Shells out
+    to ``<project> worktree-lineage --worktree <id> --json`` on the
+    machine that owns the worktree.
     """
     cache = get_cache()
     await cache.crawl_if_empty()
@@ -1385,12 +1386,12 @@ async def get_worktree_session_transcript(
 ) -> dict[str, Any]:
     """Return the rendered transcript for a session in a worktree.
 
-    Shells out to ``<project> session-transcript <session_id> --json`` on the
-    machine that owns the worktree. Lets Neuron Forge (and any other
-    consumer) view a CLI transcript for *any* session in *any* worktree.
+    Shells out to ``<project> session-transcript <session_id> --json`` on
+    the machine that owns the worktree, so Neuron Forge (or any consumer)
+    can view a CLI transcript for *any* session in *any* worktree.
 
-    Falls through to a registered cold-store provider when there is no live
-    owning agent at all, or the owning agent's local session-state has
+    Falls through to a registered cold-store provider when there is no
+    live owning agent, or the owning agent's local session-state has
     nothing for this session (mirrors ``get_session``'s bare-lookup
     fallback).
     """
@@ -1428,14 +1429,11 @@ async def get_worktree_session_transcript(
         mgr: SessionManager = request.app.state.session_manager
         cold = await mgr.fetch_cold_store_session(session_id)
         # ``cold is not None`` is already the provider's validated identity
-        # hit -- a legitimate archive can have zero events, so gating on
-        # ``cold.events`` truthiness would wrongly 404 a real, empty
-        # transcript. Guard on ``worktree_id`` instead: this route is
-        # worktree-scoped, but the cold-store contract is keyed by
-        # session_id alone, so a provider answer for a *different*
-        # worktree_id must not be accepted as this worktree's transcript
-        # (a caller-supplied worktree_id/session_id mismatch stays
-        # unresolved, same as if cold-store had nothing).
+        # hit -- a legitimate archive can have zero events, so gate on
+        # ``worktree_id`` instead of event truthiness: this route is
+        # worktree-scoped but cold-store is keyed by session_id alone, so a
+        # provider answer for a *different* worktree_id must not be
+        # accepted as this worktree's transcript.
         if cold is not None and (
             cold.worktree_id is None or cold.worktree_id == worktree_id
         ):
@@ -1466,14 +1464,13 @@ async def restart_worktree_copilot(
 ) -> dict[str, Any]:
     """Restart a worktree's interactive (mux-launched) Copilot in place.
 
-    Shells out to ``<project> restart <id> --json`` on the machine that owns
-    the worktree. Terminates the interactive Copilot (graceful double Ctrl-C,
-    then a hard mux ``kill-session`` fallback) while **keeping the worktree
-    on disk**, so a caller can relaunch (picker) or ACP-resume (Neuron
-    Forge "Take over"). Pass ``force=true`` to skip the graceful quit.
+    Shells to ``<project> restart <id> --json`` on the owning machine:
+    graceful double Ctrl-C then a hard mux ``kill-session`` fallback,
+    keeping the worktree **on disk** for a later relaunch/ACP-resume.
+    ``force=true`` skips the graceful quit.
 
-    Returns ``{worktree_id, had_session, method, ok}`` where ``method`` is
-    one of ``none`` | ``graceful`` | ``hard`` | ``failed``.
+    Returns ``{worktree_id, had_session, method, ok}`` (``method``: none |
+    graceful | hard | failed).
     """
     cache = get_cache()
     await cache.crawl_if_empty()
