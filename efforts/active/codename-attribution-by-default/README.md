@@ -476,21 +476,34 @@ config-shape check above.
   from Context): add a `codename_source` field (`"built-in"` or
   `"custom"`) to `WorktreeRecord`, populated once at codename-assignment
   time from whether the repo has `codename.wordlist_path` configured at
-  THAT moment. Publish-time attribution resolution must consult the
-  record's own `codename_source`, not the repo's current wordlist config,
-  before treating an already-assigned codename as safe under the implicit
-  default — a record with `codename_source: "custom"` requires the same
-  explicit `pr.source_attribution` opt-in as a currently-custom-wordlist
-  repo, even if the repo's config has since reverted to no custom
-  wordlist. **Any stored value other than the literal string
-  `"built-in"` must be treated as unsafe/`"custom"` (round-12 finding)**:
-  `tracking.load_record` accepts arbitrary YAML values for record fields
-  with no schema enforcement, so publish-time gating must check
+  THAT moment. **Publish-time attribution resolution must consult the
+  record's own `codename_source` at BOTH marker-publishing call sites, not
+  just one (round-17 finding)** — `pr_ops.py` has two independent places
+  that interpolate `record.codename` into a published marker:
+  `_open_via_provider`'s initial-PR-body `codename` branch, AND
+  `refresh_source_attribution`'s managed-comment `codename` branch (used
+  on every later push to an already-open PR); today only `is_valid_handle`
+  gates the latter, with no `codename_source` check at all, so a legacy
+  record with no `codename_source` (which this plan requires to fail
+  closed) would still publish its codename on refresh even after the
+  initial-path gate is added. Both branches must apply the identical
+  `codename_source == "built-in"` check before treating an already-
+  assigned codename as safe under the implicit default — factor the check
+  into one shared helper both call sites use, rather than duplicating the
+  condition, so the two paths cannot drift out of sync again. A record
+  with `codename_source: "custom"` requires the same explicit
+  `pr.source_attribution` opt-in as a currently-custom-wordlist repo, even
+  if the repo's config has since reverted to no custom wordlist. **Any
+  stored value other than the literal string `"built-in"` must be treated
+  as unsafe/`"custom"` (round-12 finding)**: `tracking.load_record`
+  accepts arbitrary YAML values for record fields with no schema
+  enforcement, so the shared helper must check
   `codename_source == "built-in"` to treat a record as safe — never the
   inverted `codename_source != "custom"` shape, which would silently
   treat an unrecognized/malformed stored value (a typo, a future value
   this code doesn't know about, hand-edited YAML) as safe by default.
-  Add tests proving: (a) a `WorktreeRecord` with
+  Add tests proving, for BOTH `_open_via_provider` and
+  `refresh_source_attribution`: (a) a `WorktreeRecord` with
   `codename_source: "custom"`, in a repo whose config NOW has no custom
   wordlist, still fails closed under the implicit default (the exact
   legacy-drift scenario the round-8 finding raised); (b) a repo with a
@@ -728,6 +741,15 @@ config-shape check above.
   set (`tests/test_providers.py`) to also cover the key OMITTED entirely,
   asserting a marker IS published; keep the explicit-`false` case (marker
   never published) as the still-required opt-out regression.
+- [ ] **Integration, refresh path (round-17 finding):** the same
+  omitted-`source_attribution` scenario, run through
+  `refresh_source_attribution` (the later-push managed-comment path, a
+  separate function from `_open_via_provider`) — asserts a marker IS
+  published there too, and separately asserts that a `WorktreeRecord` with
+  `codename_source: "custom"` (or unset) does NOT get its codename
+  published on refresh, closing the exact gap the finding raised: an
+  initial-path-only fix would leave the refresh path publishing a
+  should-be-blocked codename on the PR's second and later pushes.
 - [ ] Unit: `audit_source_attribution_risk`'s finding text for an absent
   key says "codename," not "false."
 - [ ] Full existing `test_config.py`/`test_pr_ops.py`/`test_providers.py`
@@ -1048,3 +1070,22 @@ _Pending._
   other exception keeps today's skip-the-marker behavior. Added a matching
   Validation Plan test pair: one proving `create-pr` fails closed for the
   policy violation, one proving other exceptions are unaffected.
+
+### 2026-09-20 — Plan-review round 17 fixes
+
+- One finding on the round-16 head, verified against the actual
+  `pr_ops.py` source: the plan's publish-time `codename_source` gate
+  (round-8/9/12) and its Validation Plan integration test both only
+  addressed `_open_via_provider`'s initial-PR-body marker path.
+  `pr_ops.py` has a SECOND, independent marker publisher —
+  `refresh_source_attribution`, which republishes the managed attribution
+  comment on every later push to an already-open PR — whose `codename`
+  branch currently checks only `is_valid_handle(record.codename)`, with no
+  `codename_source` check at all. Left as specified, the initial-path fix
+  alone would leave a legacy or `"custom"`-sourced record's codename
+  publishing anyway on the PR's second and later pushes, defeating the
+  fail-closed guarantee this effort exists to add. Fixed by requiring both
+  marker-publishing call sites to share one `codename_source == "built-in"`
+  helper rather than duplicating (and risking re-drifting) the condition,
+  and adding a matching refresh-path Validation Plan test alongside the
+  existing initial-path one.
