@@ -8,7 +8,7 @@ payload-local agent commands and session command glossaries; compatibility
 management wrappers remain in `~/.local/bin` during the installation-cell
 migration. **Nine are payload-only** — `efforts` (skills), `visions`
 (skills), `context-handoff` (hook + session extension + skill), `customizing-copilot`
-(skills), `copilot-extensions-harness` (skills + contribution-boundary hook),
+(skills), `copilot-extensions-harness` (skills + static instruction projections),
 `wsl-setup` (skills), and
 `harness-knowledge` (skills), `ai-attribution` (hook + skill), and
 `delegation-guidance` (hook + skill) deploy entirely from the marketplace
@@ -42,7 +42,7 @@ section.
 | [visions](../plugins/visions/) | North-star skills (`envisioning`, `visions-setup`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
 | [context-handoff](../plugins/context-handoff/) | Ambient continuity hook + session **extension** + `/handoff` skill | Marketplace payload (hook, scripts, extension, and skill) | Hook injects a concise owner-marked continuity kernel; extension is auto-discovered from the enabled plugin's `extensions/` dir; no copy to `~/.copilot/extensions/`, no deploy manifest |
 | [customizing-copilot](../plugins/customizing-copilot/) | Customization and CLI-diagnostics skills (authoring skills, sub-agents, MCP servers, plugins, harnesses, review, startup hangs) | Marketplace payload (skills) | Loaded on demand when a CLI customization or startup-diagnostics prompt matches; no runtime to install |
-| [copilot-extensions-harness](../plugins/copilot-extensions-harness/) | Operator-harness skills, `clean-room-judge` evaluator agent, and ambient contribution-boundary pointer | Marketplace payload (skills + agent + `sessionStart` hook) | Hook emits a concise guide pointer at session start; detailed skills/agent load on demand; no runtime to install |
+| [copilot-extensions-harness](../plugins/copilot-extensions-harness/) | Operator-harness skills, `clean-room-judge` evaluator agent, and two ambient static instruction projections (contribution-boundary, cross-repo-debug-tracking) | Marketplace payload (skills + agent + static instruction projections) | No `sessionStart` hook; both projections are checked-in static fallbacks synced by `customizing-copilot:reviewing-customizations`; detailed skills/agent load on demand; no runtime to install |
 | [wsl-setup](../plugins/wsl-setup/) | WSL2 setup / troubleshooting skills | Marketplace payload (skills) | Loaded on demand when a WSL-setup prompt matches; no runtime to install |
 | [harness-knowledge](../plugins/harness-knowledge/) | Stateless-harness → knowledge-repo binding skill (`binding-knowledge`) | Marketplace payload (skill + configurator script) | Loaded on demand when a harness-setup prompt matches; no runtime to install |
 | [ai-attribution](../plugins/ai-attribution/) | Ambient publication-policy hook + publication/setup skills | Marketplace payload (hooks + dependency-free scripts + skills/docs/examples) | The hook emits a concise payload-cwd-gated policy kernel at session start; setup reconciles the static fallback; detailed publication workflow loads on demand; no runtime to install |
