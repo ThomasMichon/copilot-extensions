@@ -1373,10 +1373,18 @@ multiline .NET calls whose target is not explicitly Process (including target
 variables and `EnvironmentVariableTarget.User` / `.Machine`), and rejects direct
 access to the persistent User or Machine environment registry paths outside the
 byte-identical adapter. This automatically covers new installers and nested
-transport scripts. The contained test runner adds detection-only defense in
-depth: it snapshots the real User and Machine registry environment keys and
-fails the test flow if drift is observed. It never rolls back the whole key,
-because doing so could overwrite a legitimate concurrent edit.
+transport scripts. **It also sweeps every other tracked `.ps1` in the repo**
+(tests, helpers, shared libs — anything outside `plugins/`) for the same direct
+violations, so a test/integration-harness script that has no reason to carry
+the full adapter is still blocked from calling the real registry-backed
+target directly (aperture-labs #7238 — a leaked test artifact accumulated
+dead entries in the operator's real, persistent Windows User `PATH`). Only the
+`plugins/**/*.ps1` installers must additionally carry the adapter itself; a
+non-installer script may instead pass an explicit `Process` target. The
+contained test runner adds detection-only defense in depth: it snapshots the
+real User and Machine registry environment keys and fails the test flow if
+drift is observed. It never rolls back the whole key, because doing so could
+overwrite a legitimate concurrent edit.
 
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 

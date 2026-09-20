@@ -181,6 +181,25 @@ def _split_arguments(arguments: str) -> list[str]:
     return parts
 
 
+# Directories a repo-wide `.ps1` sweep must skip: not tracked source, or
+# tracked-but-irrelevant (a local/CI-built venv, not a script this repo wrote).
+IGNORED_SCAN_DIR_NAMES = {
+    ".git",
+    ".venv",
+    "venv",
+    ".venv-tools",
+    ".test-venvs",
+    "node_modules",
+}
+
+
+def is_ignored_scan_path(path) -> bool:
+    """True when any path component names a directory a repo-wide `.ps1`
+    persistent-environment sweep must not descend into (see
+    ``check-install-contract.py``'s repo-wide backstop, aperture-labs #7238)."""
+    return any(part in IGNORED_SCAN_DIR_NAMES for part in path.parts)
+
+
 def persistent_environment_violations(text: str) -> list[str]:
     """Return direct persistent Windows environment access outside the adapter."""
     source = _without_comments(_without_canonical_adapter(text))
