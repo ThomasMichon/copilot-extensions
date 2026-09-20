@@ -754,7 +754,13 @@ async def start_session(req: StartSessionRequest, request: Request):
     try:
         session = await mgr.start_session(
             target, agent_name=agent_name, caller_id=req.caller_id,
-            mcp_servers=req.mcp_servers,
+            # A per-request mcp_servers always wins; otherwise fall back to
+            # the resolved agent's own declared toolset (AgentConfig.mcp_servers
+            # -> SpawnTarget.mcp_servers). This is the explicit-injection
+            # workaround for Copilot CLI not reliably loading a custom agent's
+            # own ``mcp-servers:`` frontmatter under headless/ACP sessions
+            # (github/copilot-cli#2630).
+            mcp_servers=req.mcp_servers or target.mcp_servers,
             copilot_args=req.copilot_args,
             env_overrides=req.env,
             caller_owner_ref=req.caller_owner_ref,
