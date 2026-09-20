@@ -53,7 +53,17 @@ is built as a shared helper instead of re-invented per plugin.
 4. **Always optional, with a correct inline fallback.** A lone caller, or any
    caller that cannot reach the daemon within its own bounded wait, computes
    the answer itself (or runs the direct-bridge path) — the exact behavior
-   this pattern must never regress under any timeout or crash.
+   this pattern must never regress under any timeout or crash. **Narrow,
+   named exception:** a caller operating under its own separately
+   documented, subprocess-free contract (e.g. a render loop or click
+   handler that is itself forbidden from spawning work — see
+   `agent-worktrees`' `external-status-consumer-contract`) has no inline
+   fallback available to it by construction. Such a caller reports the
+   requested facts as stale/unknown instead — a degraded result, not a
+   silent substitute for the inline fallback — and this exception applies
+   only where that caller's own contract already forbids the subprocess
+   or in-process computation an inline fallback would require, never as a
+   general opt-out from this invariant.
 5. **Only across callers that share identity and credentials.** The daemon
    consolidates the **warm runtime and shared upstream connection**, never a
    caller's private state; agent-mcp must never pool a server instance
@@ -195,6 +205,12 @@ helper:
 - **fallback-to-direct-computation-on-boot-timeout** — a boot-wait or
   request-deadline expiry produces the correct inline/direct-bridge answer,
   not an error or a hang.
+- **subprocess-free-consumer-reports-stale-on-timeout** — a caller
+  operating under its own documented subprocess-free contract (the named
+  exception above) that misses its boot/subscribe wait reports the
+  affected facts as stale/unknown, never a silent recompute, a hang, or a
+  bare error — and never for a caller whose own contract doesn't actually
+  forbid an inline fallback.
 - **credential-mismatch-never-pools** (agent-mcp-specific) — two callers for
   the same named server with different resolved credentials each get their
   own runtime; a coalescing bug that would pool them is a hard test failure.
