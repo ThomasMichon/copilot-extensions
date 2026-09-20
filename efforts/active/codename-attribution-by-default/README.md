@@ -29,7 +29,7 @@ internal Gitea instance).
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| lambda-core (agent-worktrees maintainer) | design + implementation + facility rollout | this worktree |
+| copilot-extensions maintainer(s) | design + implementation + repo rollout | this worktree |
 
 ## Coordination
 
@@ -60,29 +60,28 @@ internal Gitea instance).
 
 Verified live, this session, against real merged PRs:
 
-- **`copilot-extensions`** (`.agent-worktrees/config.yaml`) explicitly sets
-  `source_attribution: false`. PRs #2915 and #2922 — the very PRs that
-  built Phases 4 and 5 of the codename feature — carry **no marker
+- **This repo** (`copilot-extensions`, `.agent-worktrees/config.yaml`)
+  explicitly sets `source_attribution: false`. Its own recent PRs that
+  built Phases 4 and 5 of the codename feature carry **no marker
   whatsoever**, raw or codename. The feature exists but is never used on
   its own home repo.
-- **`pr-practice-lab`** (public, GitHub) has `pr.enabled: true` and no
-  `source_attribution` key at all — silently inherits the `false` default,
-  same gap.
-- **`aperture-labs`** (private, facility Gitea) explicitly sets
-  `source_attribution: true` and DOES carry the raw marker on every recent
-  merge (#7223–#7229 all verified to carry
-  `<!-- agent-worktrees:source worktree=... machine=... session=... head=... -->`).
-  This is correct today and should stay `true` — it's a private,
-  closed-circuit repo, so full traceability is the right call, not a gap.
-- **`test-chambers`** and **`r60v-home-assistant`** have no `pr:` block
-  configured at all (still using direct-push finalize) — out of scope,
-  no PRs are opened there via agent-worktrees today.
-- **`llama.cpp`**, **`piper`**, **`borealis-bazzite`** are upstream
-  reference/singleton repos (no agent-owned PR flow) — out of scope.
+- A second public repo this operator maintains has `pr.enabled: true` and
+  no `source_attribution` key at all — silently inherits the `false`
+  default, same gap.
+- A private, closed-circuit downstream repo already has
+  `source_attribution: true` explicitly set, and its recent merges DO
+  correctly carry the full raw marker
+  (`<!-- agent-worktrees:source worktree=... machine=... session=... head=... -->`).
+  This is correct today and should stay `true` — it's private and
+  closed-circuit, so full traceability is the right call there, not a gap.
+- A handful of other repos this operator has registered either have no
+  `pr:` block configured at all (still using direct-push finalize, no
+  attribution question applies) or are upstream reference/singleton
+  checkouts with no agent-owned PR flow — out of scope for this effort.
 
 So the actual repo-config rollout surface, as of this writing, is exactly
-two repos: `copilot-extensions` (flip from explicit `false`) and
-`pr-practice-lab` (currently implicit `false` via the absent-key default).
+two repos: this one (flip from explicit `false`) and the second public
+repo above (currently implicit `false` via the absent-key default).
 
 ### The design decision this effort must resolve
 
@@ -146,11 +145,12 @@ starting Phase 1.
 ## Request
 
 > [Operator, verbatim, following a live demonstration this session that
-> `copilot-extensions`' own PRs carry zero attribution marker despite the
-> codename feature being fully built and tested]: "Agh, that was the point
-> of this worktree. In a handoff, let's tackle making the default behavior
-> to be to use codeword attribution, with 'real' attribution being reserved
-> for select repos only, like aperture-labs or our Gitea set."
+> this repo's own PRs carry zero attribution marker despite the codename
+> feature being fully built and tested]: "Agh, that was the point of this
+> worktree. In a handoff, let's tackle making the default behavior to be
+> to use codeword attribution, with 'real' attribution being reserved for
+> select repos only, like [a private downstream repo] or [this operator's]
+> Gitea set."
 
 ## Plan
 
@@ -190,31 +190,32 @@ starting Phase 1.
   `"codename"` as the default and `false`/`true` as the two opt-out
   directions (fully anonymous / fully raw).
 
-### Phase 3 — Facility config rollout
-- [ ] `copilot-extensions`: remove (or flip to `codename`, for
+### Phase 3 — Repo config rollout
+- [ ] This repo (`copilot-extensions`): remove (or flip to `codename`, for
   explicitness) the explicit `source_attribution: false` in
   `.agent-worktrees/config.yaml` — this repo is the one that most visibly
   motivated this effort.
-- [ ] `pr-practice-lab`: decide explicitly whether to rely on the new
-  implicit default or set `source_attribution: codename` explicitly for
-  clarity (this repo currently has no `source_attribution` key at all).
-- [ ] `aperture-labs`: confirm its existing explicit `source_attribution: true`
-  is untouched by this effort (already correct: private, closed-circuit,
-  wants full traceability) — add a comment there (if not already present)
-  noting it's an intentional opt-out from the new default, not a leftover.
-- [ ] Sweep for any OTHER private/closed-circuit repo on the facility's
-  Gitea instance (`gitea.michon.ski`) that has `pr.enabled: true` and would
-  want the same `true` treatment as `aperture-labs` — as of this writing
-  `test-chambers` has no `pr:` block at all (direct-push only, out of
-  scope), but re-check at execution time in case that's changed.
+- [ ] The second public repo identified in Context: decide explicitly
+  whether to rely on the new implicit default or set
+  `source_attribution: codename` explicitly for clarity (it currently has
+  no `source_attribution` key at all).
+- [ ] The private, closed-circuit downstream repo identified in Context:
+  confirm its existing explicit `source_attribution: true` is untouched by
+  this effort (already correct: private, closed-circuit, wants full
+  traceability) — add a comment there (if not already present) noting it's
+  an intentional opt-out from the new default, not a leftover.
+- [ ] Sweep this operator's other private/closed-circuit repos for any that
+  have `pr.enabled: true` and would want the same `true` treatment — as of
+  this writing none of the others do (no `pr:` block configured), but
+  re-check at execution time in case that's changed.
 
 ### Phase 4 — Live validation
-- [ ] Open a real PR in `copilot-extensions` after Phase 3's config change
-  and confirm it now carries the `<!-- agent-worktrees:source codename=... -->`
-  marker (this effort's own landing PR is a natural candidate).
-- [ ] Confirm `aperture-labs`'s next merged PR still carries the full raw
-  marker unchanged (regression check, not a new test — just observe the
-  next real merge).
+- [ ] Open a real PR in this repo after Phase 3's config change and confirm
+  it now carries the `<!-- agent-worktrees:source codename=... -->` marker
+  (this effort's own landing PR is a natural candidate).
+- [ ] Confirm the private downstream repo's next merged PR still carries
+  the full raw marker unchanged (regression check, not a new test — just
+  observe the next real merge).
 
 ## Validation Plan
 
@@ -233,11 +234,12 @@ starting Phase 1.
 - [ ] Full existing `test_config.py`/`test_pr_ops.py`/`test_providers.py`
   suite passes after the default-value test-fixture sweep (Phase 1's audit
   item) — no test silently still asserts the old default.
-- [ ] Live: this effort's own landing PR in `copilot-extensions` (opened
-  after Phase 3's config change lands) carries a codename marker — the
-  end-to-end proof the whole point of this effort actually works.
-- [ ] Live (regression, observational): the next `aperture-labs` merge
-  after this effort lands still carries the full raw marker unchanged.
+- [ ] Live: this effort's own landing PR in this repo (opened after Phase
+  3's config change lands) carries a codename marker — the end-to-end
+  proof the whole point of this effort actually works.
+- [ ] Live (regression, observational): the next merge on the private
+  downstream repo after this effort lands still carries the full raw
+  marker unchanged.
 
 ## Proposal
 
@@ -247,22 +249,19 @@ _Pending._
 
 ### 2026-09-20 — Kickoff
 
-- Effort created directly from a live demonstration: checked
-  `copilot-extensions`' own recent PRs (#2915, #2922 — the PRs that BUILT
-  the codename feature) and found neither carries any attribution marker,
-  because the repo's config explicitly opts out (`source_attribution: false`,
-  which was also the pre-existing global default). Cross-checked
-  `aperture-labs` (private, Gitea) and confirmed its last 5 merges (#7223–
-  #7229) all correctly carry the full raw marker, proving the mechanism
-  itself works — the gap is purely a policy/default problem, not a broken
-  feature.
-- Enumerated the full facility repo registry (`~/.agent-worktrees/repos.yaml`):
-  of 8 registered repos, only `copilot-extensions` and `pr-practice-lab`
-  have PR mode enabled AND are public without an explicit
-  `source_attribution` opt-in today; `aperture-labs` is private and already
-  correctly opted into `true`; the remaining four (`borealis-bazzite`,
-  `llama.cpp`, `piper`, `test-chambers`, `r60v-home-assistant`) either have
-  no PR-mode config or are upstream reference/singleton repos out of scope.
+- Effort created directly from a live demonstration: checked this repo's
+  own recent PRs (#2915, #2922 — the PRs that BUILT the codename feature)
+  and found neither carries any attribution marker, because the repo's
+  config explicitly opts out (`source_attribution: false`, which was also
+  the pre-existing global default). Cross-checked a private, closed-circuit
+  downstream repo and confirmed its recent merges all correctly carry the
+  full raw marker, proving the mechanism itself works — the gap is purely
+  a policy/default problem, not a broken feature.
+- Enumerated this operator's registered repos with PR mode enabled: besides
+  this repo, exactly one other public repo is public without an explicit
+  `source_attribution` opt-in today; one private repo is already correctly
+  opted into `true`; the remainder either have no PR-mode config or are
+  upstream reference/singleton checkouts out of scope.
 - Closed the predecessor effort's umbrella issue (`pr-attribution-codenames`,
   #2838 — Done, all 5 phases merged) and opened this effort's own umbrella
   issue (#2977).
