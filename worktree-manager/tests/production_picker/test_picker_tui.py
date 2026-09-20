@@ -6764,6 +6764,287 @@ def test_column_header_renders_dropped_count_indicator():
     assert tight.cell_len == 11
 
 
+def test_column_row_shows_worktree_short_id_not_a_front_truncated_prefix():
+    """Phase 4 item 1 finding (agent-dispatch-tasks-pane-ux-overhaul): the
+    real ``agent-dispatch-board`` emits the claiming worktree's FULL id (e.g.
+    ``build-host-1-20260916-140200-a1c4``, ~30+ chars) in ``target_worktree``
+    -- the demo preview fixture used already-4-char ids (``a1c4``), which
+    happen to fit the WT column's declared width and masked that the generic
+    per-cell ``_clip`` truncates from the FRONT, so a real id rendered as a
+    meaningless prefix fragment (e.g. ``buil…``) instead of the vision's
+    promised "claiming worktree's 4-digit id". ``_enrich_pivot_rows`` must
+    fill ``_worktree_short`` (the trailing 4 chars, matching the Worktrees
+    list's own ``id4`` convention), and ``_column_row`` must render the
+    ``worktree_field`` column from it instead of the raw value."""
+    from worktree_manager.production_picker.picker_tui.pivots import Column
+
+    inst = _column_render_holder()
+    cols = (Column(key="target_worktree", header="WT", width=5, align="l"),)
+    real_id = "build-host-1-20260916-140200-a1c4"
+    rec = {"target_worktree": real_id, "_worktree_short": real_id[-4:]}
+
+    cell = inst._column_row(cols, rec, 20, False, "target_worktree")
+
+    assert "a1c4" in cell.plain
+    assert "buil" not in cell.plain
+
+
+def test_column_row_falls_back_to_raw_value_for_a_non_worktree_column():
+    """A column whose key isn't the pivot's ``worktree_field`` (or a pivot with
+    none) renders the raw value unchanged -- the short-id substitution is
+    scoped to exactly the one column it fixes."""
+    from worktree_manager.production_picker.picker_tui.pivots import Column
+
+    inst = _column_render_holder()
+    cols = (Column(key="title", header="TITLE", width=10, align="l"),)
+    rec = {"title": "Some task title", "_worktree_short": "a1c4"}
+
+    cell = inst._column_row(cols, rec, 20, False, "target_worktree")
+
+    assert "a1c4" not in cell.plain
+    assert cell.plain.strip().startswith("Some task")
+
+
+def test_enrich_pivot_rows_fills_worktree_short_from_the_real_field():
+    """``_enrich_pivot_rows`` must compute ``_worktree_short`` without
+    mutating the raw ``worktree_field`` value -- other consumers
+    (``_task_action_ctx``'s ``{worktree}`` template substitution, the
+    Worktree Status card action, etc.) need the real, full id to operate on
+    the actual worktree, not a 4-char fragment."""
+    import worktree_manager.production_picker.picker_tui.engine as eng_mod
+
+    holder = None
+    for obj in vars(eng_mod).values():
+        if isinstance(obj, type) and hasattr(obj, "_enrich_pivot_rows"):
+            holder = obj
+            break
+    assert holder is not None
+    inst = holder.__new__(holder)
+    inst.data = []
+    reg = types.SimpleNamespace(worktree_field="target_worktree")
+    real_id = "build-host-1-20260916-140200-a1c4"
+    rows = [{"target_worktree": real_id}, {"target_worktree": None}]
+
+    inst._enrich_pivot_rows(reg, rows)
+
+    assert rows[0]["_worktree_short"] == "a1c4"
+    assert rows[0]["target_worktree"] == real_id  # untouched
+    assert rows[1]["_worktree_short"] == ""
+
+
+def _pickerscreen_holder():
+    """Resolve the ``PickerScreen`` class (shape-resolve, matching
+    ``_column_render_holder``'s pattern) so tests don't hardcode a name that
+    could shift if the class is renamed/split."""
+    import worktree_manager.production_picker.picker_tui.engine as eng_mod
+    for obj in vars(eng_mod).values():
+        if isinstance(obj, type) and hasattr(obj, "_worktree_claiming_task"):
+            return obj
+    raise AssertionError("no _worktree_claiming_task holder found")
+
+
+class _FakeClaimRuntime:
+    def __init__(self, state, rows):
+        self._state, self._rows = state, rows
+
+    def get(self, _machine):
+        return (self._state, self._rows, "")
+
+
+def test_worktree_claiming_task_matches_by_full_id():
+    """Phase 4 REVERSE cross-link (agent-dispatch-tasks-pane-ux-overhaul):
+    a Worktrees row whose id exactly matches a cached registered-pivot task
+    row's ``worktree_field`` value is found, along with the pivot's own
+    declared ``group_field`` (real-review finding: not a hardcoded
+    ``"group"`` -- a manifest may name its phase field anything)."""
+    holder = _pickerscreen_holder()
+    inst = holder.__new__(holder)
+    reg = types.SimpleNamespace(name="agent-dispatch", worktree_field="target_worktree",
+                                 group_field="group")
+    task_row = {"id": "t1", "target_worktree": "host-win-20260916-233618-927b",
+                "group": "Started"}
+    inst.pivots = [{"kind": "registered", "pivot": reg}]
+    inst._pivot_runtimes = {"agent-dispatch": _FakeClaimRuntime("ready", [task_row])}
+    inst._pivot_machine_id = lambda: "host"
+
+    rec = {"id": "host-win-20260916-233618-927b", "id4": "927b"}
+    assert inst._worktree_claiming_task(rec) == (task_row, "group")
+
+
+def test_worktree_claiming_task_matches_a_short_fixture_style_id4():
+    """A cached task row whose ``worktree_field`` is already a short,
+    4-char id (the demo preview fixture's style, e.g. ``a1c4``) matches a
+    Worktrees row by its ``id4`` -- distinct from a real board's full id,
+    which is matched by exact equality instead (see the sibling test
+    above)."""
+    holder = _pickerscreen_holder()
+    inst = holder.__new__(holder)
+    reg = types.SimpleNamespace(name="agent-dispatch", worktree_field="target_worktree",
+                                 group_field="group")
+    task_row = {"id": "t1", "target_worktree": "927b", "group": "Blocked"}
+    inst.pivots = [{"kind": "registered", "pivot": reg}]
+    inst._pivot_runtimes = {"agent-dispatch": _FakeClaimRuntime("ready", [task_row])}
+    inst._pivot_machine_id = lambda: "host"
+
+    rec = {"id": "host-win-20260916-233618-927b", "id4": "927b"}
+    assert inst._worktree_claiming_task(rec) == (task_row, "group")
+
+
+def test_worktree_claiming_task_never_conflates_a_trailing_id4_collision():
+    """Real-review finding: two distinct full worktree ids that merely
+    SHARE the same trailing 4 hex chars must never be conflated -- a task
+    claiming ``other-host-20260101-000000-927b`` is not the task claiming
+    THIS worktree (``host-win-20260916-233618-927b``) just because both
+    end in ``927b``. Matching must be exact-equality only (full id, or a
+    short id4-style value), never a suffix/``endswith`` comparison."""
+    holder = _pickerscreen_holder()
+    inst = holder.__new__(holder)
+    reg = types.SimpleNamespace(name="agent-dispatch", worktree_field="target_worktree",
+                                 group_field="group")
+    collision_task = {"id": "t3", "target_worktree": "other-host-20260101-000000-927b",
+                       "group": "Started"}
+    inst.pivots = [{"kind": "registered", "pivot": reg}]
+    inst._pivot_runtimes = {"agent-dispatch": _FakeClaimRuntime("ready", [collision_task])}
+    inst._pivot_machine_id = lambda: "host"
+
+    rec = {"id": "host-win-20260916-233618-927b", "id4": "927b"}
+    assert inst._worktree_claiming_task(rec) is None
+
+
+def test_worktree_claiming_task_returns_none_when_unclaimed_or_not_ready():
+    """No match (a different worktree's task, or the pivot not yet loaded)
+    returns ``None`` rather than a false positive or an exception."""
+    holder = _pickerscreen_holder()
+    inst = holder.__new__(holder)
+    reg = types.SimpleNamespace(name="agent-dispatch", worktree_field="target_worktree",
+                                 group_field="group")
+    other_task = {"id": "t2", "target_worktree": "other-host-20260101-000000-aaaa",
+                  "group": "Queued"}
+    inst.pivots = [{"kind": "registered", "pivot": reg}]
+    inst._pivot_machine_id = lambda: "host"
+
+    inst._pivot_runtimes = {"agent-dispatch": _FakeClaimRuntime("ready", [other_task])}
+    rec = {"id": "host-win-20260916-233618-927b", "id4": "927b"}
+    assert inst._worktree_claiming_task(rec) is None
+
+    inst._pivot_runtimes = {"agent-dispatch": _FakeClaimRuntime("loading", [])}
+    assert inst._worktree_claiming_task(rec) is None
+
+
+def test_worktree_claiming_task_uses_the_rows_own_machine_not_the_selected_tab():
+    """Real-review finding: browsing the cross-machine "All" scope shows
+    worktree rows from every machine, but the currently-selected pivot tab
+    (``_pivot_machine_id``) names only ONE of them -- always querying that
+    one would silently omit the badge for every OTHER machine's worktrees.
+    Resolve the scope from the worktree row's own ``machine`` display name
+    (translated through ``_machine_key_map``, same as ``_pivot_machine_id``
+    does for the selected tab) instead."""
+
+    class _ScopeAwareRuntime:
+        def __init__(self, rows_by_scope):
+            self._rows_by_scope = rows_by_scope
+
+        def get(self, scope):
+            rows = self._rows_by_scope.get(scope)
+            return ("ready", rows, "") if rows is not None else ("idle", [], "")
+
+    holder = _pickerscreen_holder()
+    inst = holder.__new__(holder)
+    reg = types.SimpleNamespace(name="agent-dispatch", worktree_field="target_worktree",
+                                 group_field="group")
+    remote_task = {"id": "t4", "target_worktree": "remote-win-20260101-000000-abcd",
+                    "group": "Started"}
+    inst.pivots = [{"kind": "registered", "pivot": reg}]
+    inst._pivot_runtimes = {"agent-dispatch": _ScopeAwareRuntime({"remote-key": [remote_task]})}
+    inst._machine_key_map = lambda: {"Remote-Display": "remote-key"}
+    # The selected tab is "All" (or some unrelated machine) -- irrelevant here.
+    inst._pivot_machine_id = lambda: "local-key"
+
+    rec = {"id": "remote-win-20260101-000000-abcd", "id4": "abcd", "machine": "Remote-Display"}
+    assert inst._worktree_claiming_task(rec) == (remote_task, "group")
+
+
+def test_worktree_claiming_task_uses_account_scope_for_account_scoped_pivots():
+    """Real-review finding: an ``account_scoped`` registration's runtime
+    caches its rows under the empty scope key (matching
+    ``PickerScreen._pivot_scope_key``'s own convention), never per-machine
+    -- looking it up with the machine id instead would always miss, so a
+    matching task would silently never show its badge."""
+
+    class _ScopeAwareRuntime:
+        def __init__(self, rows_by_scope):
+            self._rows_by_scope = rows_by_scope
+
+        def get(self, scope):
+            rows = self._rows_by_scope.get(scope)
+            return ("ready", rows, "") if rows is not None else ("idle", [], "")
+
+    holder = _pickerscreen_holder()
+    inst = holder.__new__(holder)
+    reg = types.SimpleNamespace(name="agent-codespaces", worktree_field="target_worktree",
+                                 account_scoped=True, group_field="group")
+    task_row = {"id": "cs1", "target_worktree": "host-win-20260916-233618-927b",
+                "group": "Started"}
+    inst.pivots = [{"kind": "registered", "pivot": reg}]
+    inst._pivot_runtimes = {"agent-codespaces": _ScopeAwareRuntime({"": [task_row]})}
+    inst._pivot_machine_id = lambda: "host"
+
+    rec = {"id": "host-win-20260916-233618-927b", "id4": "927b"}
+    assert inst._worktree_claiming_task(rec) == (task_row, "group")
+
+
+def test_detail_line_shows_task_phase_badge_for_a_claimed_worktree():
+    """The Worktrees-list detail line renders a `` · <Phase>`` badge, in the
+    same task_phase palette the Tasks pivot's own PHASE column uses, when a
+    registered pivot's task claims this worktree row -- reading the phase
+    from the pivot's OWN declared ``group_field``, not a hardcoded key."""
+    import worktree_manager.production_picker.picker_tui.engine as eng_mod
+
+    class _Eng:
+        def _worktree_claiming_task(self, _rec):
+            return ({"custom_phase_key": "Started"}, "custom_phase_key")
+
+    view = eng_mod.WorktreesView(_Eng())
+    rec = {"title": "Fix the thing", "state": "wip"}
+    line = view._detail_line(rec, 80)
+
+    assert "Started" in line.plain
+
+
+def test_detail_line_omits_badge_when_the_pivot_declares_no_group_field():
+    """A matched task from a pivot with no declared ``group_field`` shows no
+    badge -- there is no real phase value to read, and the raw
+    ``worktree_field`` value would be meaningless here (it's just this same
+    worktree's own id again)."""
+    import worktree_manager.production_picker.picker_tui.engine as eng_mod
+
+    class _Eng:
+        def _worktree_claiming_task(self, _rec):
+            return ({"target_worktree": "host-win-...-927b"}, None)
+
+    view = eng_mod.WorktreesView(_Eng())
+    rec = {"title": "Fix the thing", "state": "wip"}
+    line = view._detail_line(rec, 80)
+
+    assert "·" not in line.plain
+
+
+def test_detail_line_omits_badge_for_an_unclaimed_worktree():
+    """No claiming task -> the detail line renders exactly as before (no
+    stray `` · `` separator, no layout change)."""
+    import worktree_manager.production_picker.picker_tui.engine as eng_mod
+
+    class _Eng:
+        def _worktree_claiming_task(self, _rec):
+            return None
+
+    view = eng_mod.WorktreesView(_Eng())
+    rec = {"title": "Fix the thing", "state": "wip"}
+    line = view._detail_line(rec, 80)
+
+    assert "·" not in line.plain
+
+
 def test_fitted_columns_reserves_room_for_drop_indicator():
     """Regression: the flex (``title``) column absorbs 100% of any remaining
     width by design, so a caller that simply computed

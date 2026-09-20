@@ -67,22 +67,24 @@ agent-chat-driven flow).
 kept up to date at the end of every session (or handoff point) so a fresh
 session never has to re-derive "what's already done" from the Journal alone.
 
-- **Worktree:** `C:\Data\Src\copilot-extensions.worktrees\tmichon-cloud1-win-20260917-003059-332c`
-  is the effort's established driving worktree. **Phases 0-3 are merged to
-  `main`** (PR #2913, squash-merged 2026-09-19), so a fresh session should
-  pick explicitly rather than default: (a) resume in that worktree,
-  rebasing it onto current `main` before continuing Phase 4, or (b) create
-  a fresh worktree off current `main` when only landing an isolated,
-  already-committed doc/fix — never both, and never treat "resume Phase 4
-  in the established worktree" and "spin up a new worktree" as
-  interchangeable. Whichever worktree is driving Phase 4 carries several
-  unrelated stash entries that pre-date this effort — never run
-  `git stash pop`/`git stash apply` without an explicit `stash@{N}` naming
-  the entry you intend, and never clear the stash list.
-- **Current phase:** **Phase 3 is now COMPLETE and MERGED to `main`** (the
-  manifest + column fields, the "+N more" column-drop indicator, and all
-  16 PR-review findings from #2913 -- see below). Phases 4-9 remain (see
-  the Plan section).
+- **Worktree:** the prior established worktree is now finalized (its PRs
+  #2913 and #2932 both merged). This session drives Phase 4 from a fresh
+  worktree off current `main`, created via `agent-worktrees -p
+  copilot-extensions create`. That worktree carries several unrelated
+  stash entries that pre-date this effort — never run `git stash pop`/
+  `git stash apply` without an explicit `stash@{N}` naming the entry you
+  intend, and never clear the stash list.
+- **Current phase:** **Phases 0-4 are done.** Phases 0-3 merged to `main`
+  (PR #2913). The Tasks-pivot-freeze bug (filed during #2913 review) is
+  **fully FIXED** end-to-end — PR #2932 plus two same-day follow-ups
+  (`worktree-manager` PRs #2970, #2972) that closed a prewarm-ordering gap
+  and, finally, `_machine_key_map()`'s own uncached `load_config()` call (a
+  real ~7s freeze on the operator's machine) — see the Bug entry and
+  Journal below for the full chain. **Phase 4 (Worktree cross-link) is now
+  COMPLETE**, not yet landed as its own PR: item 1's WT-column-truncation
+  fix and item 2's reverse (worktree→task) cross-link are both committed
+  locally in this worktree (uncommitted-to-main), pending a Phase 4 PR.
+  **Phase 5 (Artifacts/claims surface) is next.**
 - **Build/test commands** (agent-dispatch package):
   ```powershell
   cd plugins\agent-dispatch
@@ -671,14 +673,30 @@ without it.
       **Landed** — see the Runbook above (Phase 3 is now fully complete).
 
 ### Phase 4 — Worktree cross-link
-- [ ] Confirm the WT column round-trips against a live coordinator (not just
-      the preview's fixed fleet); no engine.py change expected beyond
-      Phase 3.
-- [ ] Decide and scope the vision's promised REVERSE projection (task
-      identity/phase visible from the Worktrees side) as its own follow-on
-      phase, or narrow the vision to one-way task→worktree — the rubber-duck
-      review flagged this as promised-but-unowned; do not leave it silently
-      unresolved.
+- [x] Confirm the WT column round-trips against a live coordinator (not just
+      the preview's fixed fleet). **Found a real bug, not a clean
+      confirmation** (see the Journal entry below): the real
+      `agent-dispatch-board` emits the claiming worktree's FULL id in
+      `target_worktree` (~30+ chars), not the demo fixture's already-4-char
+      ids -- the generic per-cell `_clip` truncates from the FRONT, so the
+      WT column rendered a meaningless prefix fragment instead of the
+      vision's promised "claiming worktree's 4-digit id". Fixed in
+      `engine.py` (`_enrich_pivot_rows` now fills a non-destructive
+      `_worktree_short` trailing-4-char field; `_column_row` renders the
+      `worktree_field` column from it) -- landed, not "beyond Phase 3" as
+      originally scoped, but a correctness fix to what Phase 3 shipped.
+- [x] Decide and scope the vision's promised REVERSE projection (task
+      identity/phase visible from the Worktrees side). **Operator decision:
+      implement now, as part of Phase 4** (not deferred to a later phase,
+      and not narrowing the vision to one-way). Landed: a new
+      `PickerScreen._worktree_claiming_task(rec)` scans every registered
+      pivot with a `worktree_field` for a cached row whose value matches
+      this worktree row's id/id4 (read-only against already-cached data,
+      never triggers a fetch); `WorktreesView._detail_line` renders a
+      compact `` · <Phase>`` badge (same `task_phase` palette the Tasks
+      pivot's PHASE column uses) when a match is found, silently omitted
+      for an unclaimed worktree. Phase 4 is now COMPLETE — see the Journal
+      entry below.
 
 ### Bug (FIXED) — navigating into the Tasks pivot froze the Picker UI
 Reported by the operator 2026-09-18 (during PR #2913 review triage). Root
@@ -1626,3 +1644,124 @@ deliberately never returns within the test, asserting the call still
 completes in well under a second. Full suite re-run twice, same two classes
 of pre-existing unrelated failures as before, nothing new.
 
+### 2026-09-20 — Phase 4 begins: item 1 finds a real bug in Phase 3's WT column
+Resumed in a fresh worktree (`...332c` had finalized after its two PRs
+merged; the prior worktree's stale ledger claims -- an orphaned "live
+session" and a superseded `context-handoff` task, both provably gone --
+were cleared via `agent-worktrees reconcile-sessions`/`deregister-session`/
+`claims release` before finalizing it).
+
+Phase 4 item 1 ("confirm the WT column round-trips against a live
+coordinator") was expected to be a clean confirmation ("no engine.py change
+expected beyond Phase 3"). It wasn't: querying the REAL, installed
+`agent-dispatch-board --machine <this machine>` CLI (not the demo preview's
+fixed fixture) showed `target_worktree` carrying the claiming worktree's
+FULL id (e.g. a ~40-char `<host>-win-<timestamp>-<4hex>`-shaped string) —
+confirmed against this very session's own controlling task
+(`has_worktree: true`, `target_worktree` matching this exact worktree).
+`_column_row`'s generic per-cell renderer (`rec.get(col.key)` -> `_clip`,
+which truncates from the **front**) would render that as a meaningless
+prefix fragment (e.g. `host…`) in the 5-wide WT column — not the vision's
+promised "claiming worktree's 4-digit id". The demo preview's fixture data
+(`fake_board.py`) used already-4-char ids (`a1c4`, `88de`, `c72e`) that
+happened to fit the column width and fully masked this in every screenshot
+and every existing test.
+
+**Fix:** `_enrich_pivot_rows` now also fills a new, non-destructive
+`_worktree_short` field (the trailing 4 chars, matching the Worktrees
+list's own `id4` convention) alongside its existing `worktree_title`
+correlation. `_column_row` takes an optional `worktree_field` parameter
+(the two `build_data` call sites now pass `reg.worktree_field`) and renders
+that one column from `_worktree_short` instead of the raw value — every
+other column, and the raw `target_worktree` field itself, is untouched,
+since `_task_action_ctx`'s `{worktree}` template substitution (and any
+future action needing the real id) requires the full value. Added 3 new
+regression tests in `test_picker_tui.py`
+(`test_column_row_shows_worktree_short_id_not_a_front_truncated_prefix`,
+`test_column_row_falls_back_to_raw_value_for_a_non_worktree_column`,
+`test_enrich_pivot_rows_fills_worktree_short_from_the_real_field`) using
+the file's existing `_column_render_holder()` shape-resolve pattern.
+Verified: the targeted column-rendering tests (6) and the full
+`worktree-manager` test suite (636 passed / 1 skipped) both green. Not
+pursued: regenerating the `tasks-preview` screenshots with a realistic
+(long) worktree id so a future visual regression can't reintroduce this —
+worth doing in a follow-up if the preview tooling is touched again, but the
+unit-level regression coverage above is the actual guard.
+
+Noted in passing, not investigated further here: `engine.py` already
+exceeds its own `check-module-size.py` shrink-only ceiling on `main` itself
+(pre-existing drift from the `worktree-manager` freeze-bug follow-up PRs,
+same shape as the unrelated `agent_dispatch/queue.py` ceiling breach seen
+earlier this effort) — this session's own +22 lines are on top of that
+pre-existing gap, not the cause of it; `--allow-widen` is post-merge/`main`-
+only by its own documented convention, so not something to fix from inside
+this PR.
+
+### 2026-09-20 — Phase 4 item 2: the REVERSE cross-link lands (Phase 4 COMPLETE)
+Asked the operator how to scope the vision's promised reverse (worktree→task)
+projection, per this effort's established pattern of confirming a design
+decision before implementing it. **Decision: implement now**, inside Phase 4
+(not deferred, not narrowed away).
+
+**Design:** the forward direction (`_enrich_pivot_rows`, Phase 3 + this
+session's item-1 fix) correlates a Tasks row's `worktree_field` value to the
+Worktrees list's `id`/`id4` to fill `worktree_title`. The reverse direction
+needed the mirror: given a Worktrees row, find the registered-pivot task (if
+any) whose `worktree_field` value names it. New
+`PickerScreen._worktree_claiming_task(rec)` scans every registered pivot
+that declares a `worktree_field` (today: agent-dispatch's Tasks pivot),
+reading each one's already-cached rows via its own
+`RegisteredPivotRuntime.get(machine)` — deliberately never calling
+`ensure`/`repoll` itself, so simply scrolling/rendering the Worktrees list
+can never trigger a fetch or block on one (the exact class of bug this
+effort spent the last two sessions closing for the *forward* direction).
+Matches on the worktree's full `id` first, falling back to a trailing-id4
+comparison (mirroring `_enrich_pivot_rows`' own id4 fallback).
+
+`WorktreesView._detail_line` (the "Title: Activity" second line under each
+Worktrees row) renders a compact `` · <Phase>`` badge from the matched
+task's `group` field when found, styled with the exact same `task_phase`
+palette the Tasks pivot's own PHASE column already uses (so a task's phase
+reads with identical at-a-glance meaning on either side of the cross-link,
+per the vision's own stated intent) — silently omitted, with no layout
+change, for an unclaimed worktree or when there isn't room, exactly like
+this line's existing claims-marker (`*`) and pulse/intent pieces.
+
+Added 5 regression tests in `test_picker_tui.py`: `_worktree_claiming_task`
+matching by full id, falling back to the id4 suffix, and returning `None`
+for a genuinely unclaimed worktree or a not-yet-ready pivot; `_detail_line`
+showing the badge for a claimed worktree and omitting it (no stray
+separator) for an unclaimed one. (Renamed a same-named test-local
+`_FakeRuntime` helper class to `_FakeClaimRuntime` mid-session after it
+silently shadowed an existing, differently-shaped `_FakeRuntime` already
+used by several unrelated tests further up the file — Python module-level
+class defs shadow by source order, so the collision only broke the *later*
+tests that ran after mine, not mine.)
+
+**PR #2979 review, 4 rounds of real findings, all fixed:** (1) the id4
+fallback was a `wt.endswith(wid4)` suffix match, which could conflate two
+distinct full worktree ids sharing the same trailing 4 hex chars — changed
+to exact equality on either the full id or a short id4-style value (moving
+the matching logic into a new `pivots.find_claiming_task` pure helper along
+the way, to keep `engine.py`'s own footprint inside its shrink-only
+module-size ceiling); (2) the badge hard-coded `row.get("group")` instead
+of the matched pivot's own declared `group_field` (`_task_groups` already
+honors this per-manifest key) — `find_claiming_task` now returns
+`(row, group_field)`; (3) an `account_scoped` registration's runtime caches
+under the empty scope key (matching `_pivot_scope_key`'s own convention),
+never per-machine — the lookup now branches on `reg.account_scoped`; (4)
+querying the *globally selected* pivot machine tab meant a claiming task on
+another machine's worktree never showed its badge while browsing the
+cross-machine "All" scope — resolved per-row instead, from the worktree
+record's own `machine` field translated through `_machine_key_map`. Also
+redacted a real machine/worktree identifier and bumped the standalone
+`worktree-manager` package version (`pyproject.toml` +
+`src/worktree_manager/__init__.py`), both flagged by the same review.
+9 regression tests total for the reverse cross-link. Full
+`worktree-manager` suite: 645 passed / 1 skipped (the same single
+pre-existing, load-sensitive `test_capture_is_deterministic` "Updates
+paused" flake noted before, confirmed to pass cleanly in isolation).
+
+**Phase 4 is now COMPLETE** — both Plan items landed, with item 1 turning
+into a real correctness fix rather than a clean confirmation. Phases 5-9
+remain.
