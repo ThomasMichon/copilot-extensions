@@ -230,3 +230,65 @@ def test_refresh_baseline_allow_widen_never_auto_baselines_a_new_offender(repo: 
     check_result = _run(repo)
     assert check_result.returncode == 1
     assert "src/new_huge.py" in check_result.stdout
+
+
+def test_changed_since_exempts_a_file_the_pr_never_touched(repo: Path):
+    # Baseline a file at its current (over-cap) size -- the common ancestor
+    # both "main" and the PR branch below diverge from.
+    _write_lines(repo, "src/shared.py", 5000)
+    _write_baseline(repo, {"src/shared.py": 5000})
+    _commit_all(repo)
+    _git(repo, "branch", "-M", "main")
+
+    # The PR branch: diverges here, adds its own file, never touches shared.py.
+    _git(repo, "checkout", "-q", "-b", "pr-branch")
+    _write_lines(repo, "src/mine.py", 10)
+    _commit_all(repo)
+
+    # Meanwhile, an unrelated already-merged PR grows shared.py past its
+    # ceiling directly on "main" -- the PR branch above never sees this commit
+    # until it rebases.
+    _git(repo, "checkout", "-q", "main")
+    _write_lines(repo, "src/shared.py", 5001)
+    _commit_all(repo)
+
+    # The PR rebases onto the now-grown "main" (the facility's normal
+    # keep-up-to-date flow) -- its own working tree now DOES contain
+    # shared.py's grown state, even though its own commits never touched it.
+    _git(repo, "checkout", "-q", "pr-branch")
+    _git(repo, "rebase", "main")
+
+    # Enforce against the rebased PR HEAD, scoped since "main" -- the
+    # triple-dot diff still resolves to files THIS PR's own commit(s) touch
+    # (mine.py), never shared.py, regardless of what the working tree now
+    # contains.
+    result = _run(repo, "--changed-since", "main")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "src/shared.py" not in result.stdout
+
+
+def test_changed_since_still_enforces_a_file_the_pr_itself_touches(repo: Path):
+    _write_lines(repo, "src/mine.py", 999)
+    _commit_all(repo)
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    _write_lines(repo, "src/mine.py", 1001)  # this PR's own growth, over the cap
+    _commit_all(repo)
+
+    result = _run(repo, "--changed-since", base_sha)
+
+    assert result.returncode == 1
+    assert "src/mine.py" in result.stdout
+
+
+def test_changed_since_is_incompatible_with_refresh_baseline(repo: Path):
+    _write_lines(repo, "src/small.py", 50)
+    _commit_all(repo)
+
+    result = _run(repo, "--changed-since", "HEAD", "--refresh-baseline")
+
+    assert result.returncode == 2
+    assert "--changed-since is incompatible with --refresh-baseline" in result.stderr

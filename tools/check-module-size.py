@@ -43,9 +43,27 @@ post-merge run directly against ``main`` after the fact, producing its own
 reviewable PR -- **never** something a PR branch's own CI run does to its
 own diff, which would let a PR silently launder its own growth past review.
 
+**PR-time scoping (``--changed-since REF``).** ``--allow-widen`` closes the
+gap *after* it opens, but there is still a window between another PR's merge
+growing a shared file past its ceiling and the widen job's own PR landing --
+during which *every* PR's ordinary (non-``--allow-widen``) CI run sees the
+guard fail, even one that never touched the grown file (a PR is blamed for
+growth it did not cause and cannot fix without an unrelated, out-of-scope
+diff). ``--changed-since REF`` scopes enforcement to exactly the files this
+invocation's own diff touches (``git diff --name-only REF...HEAD``, i.e.
+relative to the merge-base with ``REF`` -- unaffected by how far ``REF``'s
+branch has since moved). A file this PR never touched is fully exempt from
+`check()` here regardless of its current size; a file it does touch is still
+held to the ordinary cap/ceiling rule, unchanged. This flag only ever
+*narrows* which files `check()` considers -- it never changes the pass/fail
+rule for a file it does consider, and it is meaningless (and rejected) with
+``--refresh-baseline``, whose whole job is auditing the *entire* tree's
+baseline, never a PR's own diff scope.
+
 Usage::
 
-    python tools/check-module-size.py                  # enforce (pre-push/CI)
+    python tools/check-module-size.py                  # enforce (pre-push/CI push/dispatch)
+    python tools/check-module-size.py --changed-since REF  # enforce, PR-diff-scoped (CI pull_request)
     python tools/check-module-size.py --refresh-baseline  # tighten after shrinking a file
     python tools/check-module-size.py --refresh-baseline --allow-widen  # post-merge only; see above
 
@@ -94,6 +112,21 @@ def _tracked_py_files() -> list[str]:
     ]
 
 
+def _changed_py_files(base_ref: str) -> set[str]:
+    """Files this branch's own commits touch, relative to its merge-base with
+    ``base_ref`` -- unaffected by how far ``base_ref``'s own branch has moved
+    since (triple-dot diff), so a PR is never blamed for a file it never
+    touched."""
+    out = subprocess.run(
+        ["git", "diff", "--name-only", f"{base_ref}...HEAD", "--", "*.py"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return {line for line in out.stdout.splitlines() if line and not _is_test_file(line)}
+
+
 def _line_count(path: str) -> int:
     text = (REPO / path).read_text(encoding="utf-8", errors="replace")
     if not text:
@@ -118,10 +151,17 @@ def _write_baseline(baseline: dict[str, int]) -> None:
     )
 
 
-def check(baseline: dict[str, int]) -> list[str]:
-    """Return one message per file exceeding its cap/ceiling."""
+def check(baseline: dict[str, int], *, only_paths: set[str] | None = None) -> list[str]:
+    """Return one message per file exceeding its cap/ceiling.
+
+    ``only_paths``, when given, scopes enforcement to that set (see
+    ``--changed-since`` above) -- a file outside it is skipped entirely,
+    regardless of its current size.
+    """
     violations: list[str] = []
     for path in sorted(_tracked_py_files()):
+        if only_paths is not None and path not in only_paths:
+            continue
         lines = _line_count(path)
         ceiling = baseline.get(path, CAP_LINES)
         if lines > ceiling:
@@ -196,9 +236,21 @@ def main() -> int:
             "against a PR branch's own diff (see module docstring)."
         ),
     )
+    parser.add_argument(
+        "--changed-since",
+        metavar="REF",
+        help=(
+            "Scope enforcement to files this branch's own commits touch "
+            "(git diff --name-only REF...HEAD) -- for a PR-time CI run, so a "
+            "PR is never blocked by growth in a file it never touched. "
+            "Mutually exclusive with --refresh-baseline."
+        ),
+    )
     args = parser.parse_args()
     if args.allow_widen and not args.refresh_baseline:
         parser.error("--allow-widen requires --refresh-baseline")
+    if args.changed_since and args.refresh_baseline:
+        parser.error("--changed-since is incompatible with --refresh-baseline")
 
     baseline = _load_baseline()
 
@@ -211,14 +263,20 @@ def main() -> int:
             print("[OK] baseline already up to date")
         return 0
 
-    violations = check(baseline)
+    only_paths = _changed_py_files(args.changed_since) if args.changed_since else None
+    violations = check(baseline, only_paths=only_paths)
     if violations:
         print(f"[FAIL] module size ({CAP_LINES}-line cap, shrink-only baseline):")
         for violation in violations:
             print(f"  - {violation}")
         return 1
 
-    print(f"[OK] every source module is within its {CAP_LINES}-line cap/ceiling.")
+    scope = (
+        f"the {len(only_paths)} file(s) this PR changed are"
+        if only_paths is not None
+        else "every source module is"
+    )
+    print(f"[OK] {scope} within its {CAP_LINES}-line cap/ceiling.")
     return 0
 
 

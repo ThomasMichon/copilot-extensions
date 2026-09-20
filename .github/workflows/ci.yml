@@ -56,11 +56,23 @@ jobs:
         # Scoped to the PR diff so a pre-existing state never blocks unrelated PRs.
         if: github.event_name == 'pull_request'
         run: python tools/check-version-bump.py --base ${{ github.event.pull_request.base.sha }}
-      - name: Module size (hard cap + shrink-only baseline)
+      - name: Module size (hard cap + shrink-only baseline, PR diff only)
+        # Scoped to files THIS PR's own commits touch (like the version-bump
+        # step above) -- a PR is never blocked by growth in a file it never
+        # touched, which used to happen whenever another already-merged PR
+        # grew a shared module faster than the post-merge widen job could
+        # catch up (aperture-labs module-size-baseline-widen race).
+        if: github.event_name == 'pull_request'
+        run: python tools/check-module-size.py --changed-since ${{ github.event.pull_request.base.sha }}
+      - name: Module size (hard cap + shrink-only baseline, full sweep)
         # Every tracked, non-test source module must stay within its line-count
         # cap, or its grandfathered ceiling for pre-existing offenders -- the
         # componentization failure that let queue.py reach ~7,200 lines had no
-        # automated guard before this. See CONTRIBUTING.md § Code Style.
+        # automated guard before this. See CONTRIBUTING.md § Code Style. Runs
+        # unconditionally (push/workflow_dispatch too) so the full-tree state
+        # this repo's own widen job and doc/watchdog tooling depend on is
+        # never scoped away.
+        if: github.event_name != 'pull_request'
         run: python tools/check-module-size.py
       - name: Module size guard tests
         run: python -m pytest -q tools/test_check_module_size.py
