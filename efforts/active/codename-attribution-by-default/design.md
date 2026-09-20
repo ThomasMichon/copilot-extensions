@@ -42,7 +42,7 @@ finding: the two checks answer different questions — "may a new codename
 be allocated implicitly?" vs. "is this existing codename safe to publish
 implicitly?" — and must not be conflated). This resolves both halves of
 the risk for the common case where a repo's wordlist config never changes
-after assignment — see the assignment — see the
+after assignment — see the
 legacy-record gap and its provenance-tracking fix below for the remaining
 case where it does:
 

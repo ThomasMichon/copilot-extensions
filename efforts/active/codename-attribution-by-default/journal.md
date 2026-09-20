@@ -423,3 +423,49 @@ Part of the [codename-attribution-by-default effort](README.md).
   dedicated Validation Plan test exercising `_create_worktree_core`'s
   own wiring (not just the shared validation helper), so a regression in
   either path is caught independently.
+
+### 2026-09-20 — Plan-review round 22 fixes
+
+- Four findings on the round-21 head (three new, one a scope-refinement
+  reopen of round-21's own fix) plus two "previously missed" items,
+  each verified against actual source/repo convention:
+  1. **Scoping (reopened round-21 finding):** the allocation-time
+     custom-wordlist gate blocked ordinary `create` even for repos with
+     PR mode entirely disabled — verified `PRConfig.enabled: bool =
+     False` by default, and that `codename.wordlist_path` is documented
+     as purely local/declarative. Since a `pr.enabled: false` repo can
+     never publish a marker, the persisted `codename_source` already
+     makes publish-time resolution safe regardless — scoped the
+     allocation-time gate (across all three call sites: normal
+     `create`, paired-knowledge, and the new `create-pr` preflight
+     below) to `pr.enabled: true` repos only, with a regression test
+     proving ordinary allocation still works for PR-inactive repos.
+  2. **Explicit-vs-implicit threading:** the publish-time gate's shared
+     helper decided "safe to publish" from `attribution == "codename"`
+     alone, but an EXPLICIT opt-in and the bare IMPLICIT default produce
+     the identical string at runtime and need opposite `codename_source`
+     handling. Threaded `PRConfig.source_attribution_configured` into
+     the shared helper so an explicit opt-in publishes any
+     `codename_source` while an implicit default still requires
+     `"built-in"`; added a parser-level test for the previously-missing
+     explicit-`codename` case (distinct from absent-key), which is what
+     the fix's own discriminator now depends on.
+  3. **Transactionality gap in `create-pr`:** verified `create_pr`
+     squashes, force-pushes, and saves the PR tracking record BEFORE
+     `_open_via_provider` runs — so round-16's late re-raise there would
+     abort with a real public branch and open tracking state already
+     left behind, unlike the preflight-based transactionality this plan
+     defines everywhere else. Added a `create_pr`-level preflight before
+     the squash/push (the ordinary case), keeping the late re-raise only
+     as the documented residual-race backstop.
+  4. **Vision classification (previously missed):** `below-altitude` was
+     inconsistent with Phase 1's actual scope (a new persisted field, a
+     new exception type, and multi-site policy gates) per
+     `AGENTS.md:139-143`'s "a design change owes both" rule. Reclassified
+     to vision-extending (against the existing PR-capability vision) and
+     documented that `docs/patterns/README.md`'s binding invariants don't
+     apply (this is a data-model/CLI change, not a plugin-service
+     topology change).
+  5. **Validation gap (previously missed):** the parser test list never
+     covered explicit `source_attribution: codename` at all — folded
+     into fix #2's new test.

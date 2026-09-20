@@ -6,19 +6,23 @@
 - **Created:** 2026-09-20
 - **Status:** Draft <!-- Draft | Active | Blocked | Done -->
 - **Vision:** vision-extending — `visions/plugins/agent-worktrees/pull-requests`
-  already covers the PR-marker/codename mechanism's existence and shape
-  (`pr-attribution-codenames`, Done); this effort does not introduce new
-  architecture untethered from that vision, but it is MORE than a bare
-  default-value flip (round-22 finding: `below-altitude` undersold the
-  actual scope) — Phase 1 adds a new persisted `WorktreeRecord` field
-  (`codename_source`), a new dedicated exception type
-  (`CodenameAttributionPolicyError`), and new allocation-time/publish-time
-  policy gates spanning multiple call sites, all extending that same
-  covered capability's safety envelope. Extends, rather than closes, the
-  vision: the vision describes the marker mechanism existing and its
-  public-safety intent; this effort deepens the provenance/fail-closed
-  guarantee behind that same intent for a config-default change, rather
-  than adding an unrelated new capability. **Checked against
+  now explicitly covers the PR-marker/codename mechanism (revised
+  2026-09-20, round-23 finding: it previously described only the
+  provider-neutral PR surface, not this mechanism or its public-safety
+  guarantee — a genuine blind spot in the vision, folded back at the
+  detail ceiling rather than cited as sufficient without revision). This
+  effort does not introduce new architecture untethered from that vision,
+  but it is MORE than a bare default-value flip (round-22 finding:
+  `below-altitude` undersold the actual scope) — Phase 1 adds a new
+  persisted `WorktreeRecord` field (`codename_source`), a new dedicated
+  exception type (`CodenameAttributionPolicyError`), and new
+  allocation-time/publish-time policy gates spanning multiple call sites,
+  all extending that same covered capability's safety envelope. Extends,
+  rather than closes, the vision: the vision now states the
+  informationless-by-default/persistence-across-config-change guarantee
+  at the intent level; this effort deepens the provenance/fail-closed
+  mechanics that realize it for a config-default change, rather than
+  adding an unrelated new capability. **Checked against
   `docs/patterns/README.md`'s binding design invariants:** none apply —
   this is a CLI/data-model change to an existing plugin's own tracking
   records, not a plugin SERVICE change (no new network endpoint, no
@@ -902,51 +906,33 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-21 history lives in **[journal.md](journal.md)** to keep this
+> round-22 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
-### 2026-09-20 — Plan-review round 22 fixes
+### 2026-09-20 — Plan-review round 23 fixes
 
-- Four findings on the round-21 head (three new, one a scope-refinement
-  reopen of round-21's own fix) plus two "previously missed" items,
-  each verified against actual source/repo convention:
-  1. **Scoping (reopened round-21 finding):** the allocation-time
-     custom-wordlist gate blocked ordinary `create` even for repos with
-     PR mode entirely disabled — verified `PRConfig.enabled: bool =
-     False` by default, and that `codename.wordlist_path` is documented
-     as purely local/declarative. Since a `pr.enabled: false` repo can
-     never publish a marker, the persisted `codename_source` already
-     makes publish-time resolution safe regardless — scoped the
-     allocation-time gate (across all three call sites: normal
-     `create`, paired-knowledge, and the new `create-pr` preflight
-     below) to `pr.enabled: true` repos only, with a regression test
-     proving ordinary allocation still works for PR-inactive repos.
-  2. **Explicit-vs-implicit threading:** the publish-time gate's shared
-     helper decided "safe to publish" from `attribution == "codename"`
-     alone, but an EXPLICIT opt-in and the bare IMPLICIT default produce
-     the identical string at runtime and need opposite `codename_source`
-     handling. Threaded `PRConfig.source_attribution_configured` into
-     the shared helper so an explicit opt-in publishes any
-     `codename_source` while an implicit default still requires
-     `"built-in"`; added a parser-level test for the previously-missing
-     explicit-`codename` case (distinct from absent-key), which is what
-     the fix's own discriminator now depends on.
-  3. **Transactionality gap in `create-pr`:** verified `create_pr`
-     squashes, force-pushes, and saves the PR tracking record BEFORE
-     `_open_via_provider` runs — so round-16's late re-raise there would
-     abort with a real public branch and open tracking state already
-     left behind, unlike the preflight-based transactionality this plan
-     defines everywhere else. Added a `create_pr`-level preflight before
-     the squash/push (the ordinary case), keeping the late re-raise only
-     as the documented residual-race backstop.
-  4. **Vision classification (previously missed):** `below-altitude` was
-     inconsistent with Phase 1's actual scope (a new persisted field, a
-     new exception type, and multi-site policy gates) per
-     `AGENTS.md:139-143`'s "a design change owes both" rule. Reclassified
-     to vision-extending (against the existing PR-capability vision) and
-     documented that `docs/patterns/README.md`'s binding invariants don't
-     apply (this is a data-model/CLI change, not a plugin-service
-     topology change).
-  5. **Validation gap (previously missed):** the parser test list never
-     covered explicit `source_attribution: codename` at all — folded
-     into fix #2's new test.
+- One reopened/stale-carryover finding (verified already resolved,
+  no action needed), one new finding, and one nit:
+  1. Verified the round-22 explicit-vs-implicit `codename_source` gate
+     fix is correctly in place in the current head — the carried-over
+     thread's anchor commit predates that fix, so treated as a stale
+     carryover per the review protocol, not a real re-finding.
+  2. **Vision insufficiency:** round-22's `vision-extending`
+     reclassification cited
+     `visions/plugins/agent-worktrees/pull-requests` as already covering
+     this capability, but verified that vision doc never actually
+     mentions `source_attribution`, markers, or codenames — only the
+     generic provider-neutral PR surface. Citing an existing vision as
+     sufficient without it actually covering the capability doesn't earn
+     `vision-extending`. Revised the vision doc itself (a genuine blind
+     spot, not a vision-ahead gap): added a
+     `provenance-attribution-without-identifier-leakage` Feature and an
+     `unconfigured-attribution-never-leaks` Behavior stating the
+     informationless-by-default guarantee and its persistence-across-
+     config-change expectation at the intent level (no field names/config
+     keys pinned in the should-be body), bumped `Last revised`, and added
+     a Provenance entry. Updated the effort's own Vision line to point at
+     the now-actually-covering vision instead of merely asserting
+     sufficiency.
+  3. Fixed a duplicated-phrase typo in `design.md` ("see the assignment —
+     see the") left over from an earlier edit's text-splice.
