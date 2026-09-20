@@ -1075,8 +1075,13 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
     ``gh`` is not on ``PATH`` -- callers treat this as a best-effort
     convenience, not a required step.
     """
-    _safe = re.compile(r"^[A-Za-z0-9_.-]+$")
-    if not login or not host or not _safe.match(login) or not _safe.match(host):
+    _safe = re.compile(r"[A-Za-z0-9_.-]+")
+    # ``fullmatch`` (not ``match``): with a trailing ``$`` anchor, ``match``
+    # still accepts a string ending in a single newline (Python regex ``$``
+    # matches before a trailing "\n" as well as at the true end of string),
+    # so e.g. "evil.com\n" would slip past a "^...$" match check and get
+    # written into the stored helper as an embedded newline.
+    if not login or not host or not _safe.fullmatch(login) or not _safe.fullmatch(host):
         return False
     path = Path(repo_path)
     if not path.is_dir() or shutil.which("gh") is None:

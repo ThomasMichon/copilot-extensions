@@ -419,6 +419,7 @@ class TestPinGitCredential:
         "a; rm -rf /",
         "a b",
         "a\nb",
+        "safelogin\n",  # a trailing newline must not slip past a "^...$" match
     ])
     def test_noop_when_login_has_unsafe_characters(
         self, tmp_path: Path, monkeypatch, login: str,
@@ -433,7 +434,9 @@ class TestPinGitCredential:
         sp.run(["git", "init", "-q", str(repo)], check=True)
         assert go.pin_git_credential(repo, login) is False
 
-    @pytest.mark.parametrize("host", ["gh;evil.com", "gh evil.com", "gh$(x).com"])
+    @pytest.mark.parametrize("host", [
+        "gh;evil.com", "gh evil.com", "gh$(x).com", "github.com\n",
+    ])
     def test_noop_when_host_has_unsafe_characters(
         self, tmp_path: Path, monkeypatch, host: str,
     ):
