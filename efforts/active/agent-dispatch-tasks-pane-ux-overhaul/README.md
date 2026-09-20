@@ -67,24 +67,38 @@ agent-chat-driven flow).
 kept up to date at the end of every session (or handoff point) so a fresh
 session never has to re-derive "what's already done" from the Journal alone.
 
-- **Worktree:** the prior established worktree is now finalized (its PRs
-  #2913 and #2932 both merged). This session drives Phase 4 from a fresh
-  worktree off current `main`, created via `agent-worktrees -p
-  copilot-extensions create`. That worktree carries several unrelated
-  stash entries that pre-date this effort — never run `git stash pop`/
-  `git stash apply` without an explicit `stash@{N}` naming the entry you
-  intend, and never clear the stash list.
+- **Worktree:** no single "established driving worktree" anymore — the
+  Phase 4 worktree finalized after PR #2979 merged. Create a fresh worktree
+  off current `main` via `agent-worktrees -p copilot-extensions create`
+  when picking this up (this has been the pattern since Phase 4: land a
+  phase's PR, finalize that worktree, start the next phase in a new one).
+  Any such worktree carries several unrelated stash entries that pre-date
+  this effort — never run `git stash pop`/`git stash apply` without an
+  explicit `stash@{N}` naming the entry you intend, and never clear the
+  stash list.
 - **Current phase:** **Phases 0-4 are done.** Phases 0-3 merged to `main`
   (PR #2913). The Tasks-pivot-freeze bug (filed during #2913 review) is
   **fully FIXED** end-to-end — PR #2932 plus two same-day follow-ups
   (`worktree-manager` PRs #2970, #2972) that closed a prewarm-ordering gap
   and, finally, `_machine_key_map()`'s own uncached `load_config()` call (a
   real ~7s freeze on the operator's machine) — see the Bug entry and
-  Journal below for the full chain. **Phase 4 (Worktree cross-link) is now
-  COMPLETE**, not yet landed as its own PR: item 1's WT-column-truncation
-  fix and item 2's reverse (worktree→task) cross-link are both committed
-  locally in this worktree (uncommitted-to-main), pending a Phase 4 PR.
-  **Phase 5 (Artifacts/claims surface) is next.**
+  Journal below for the full chain. **Phase 4 (Worktree cross-link) is
+  COMPLETE and MERGED to `main`** (PR #2979, squash-merged 2026-09-20).
+
+  **Next up — operator feedback filed 2026-09-20** (see "Findings (filed,
+  unscheduled)" right after Phase 4, and the same-dated Journal entry): (1)
+  swap the Started/Queued group order in `board_cli.py`'s `GROUPS` tuple
+  (small, standalone); (2) make WT-assignment more visible at a glance in
+  the Started section; (3) investigate why every observed Started task is
+  CLI-embodied and none headless-worker-embodied (real gap vs current
+  operational reality — not yet determined), with a likely follow-on badge
+  either way. **Phase 8 (Worktree Status card) is confirmed real and
+  current** — cards come up empty beyond title against the live
+  coordinator; do this phase properly, verified against an actually
+  embodied task, not just the preview fixture. Phase 5 (Artifacts/claims)
+  remains next in Plan order but items 1-3 above and Phase 8 are the
+  operator's stated priority — triage/sequence them explicitly with the
+  operator rather than silently defaulting to strict Plan order.
 - **Build/test commands** (agent-dispatch package):
   ```powershell
   cd plugins\agent-dispatch
@@ -773,6 +787,58 @@ seconds. See the Journal entry below for the full investigation, and
 scan itself (a separate, still-open blocking-I/O gap) is tracked there
 rather than folded into this bug.
 
+### Findings (filed, unscheduled) — operator feedback on the live Phase 0-4 UX
+Reported by the operator 2026-09-20, live-driving the real Tasks pane for the
+first time since Phase 4 landed. Three items, not yet triaged into a numbered
+phase (do that as part of picking this up — see each item's likely home):
+
+1. **Swap the Started/Queued section order.** `board_cli.py`'s `GROUPS` tuple
+   currently orders `Blocked, Proposed, Queued, Started, Suspended, Completed,
+   Abandoned`. Started is more interesting to inspect at a glance than
+   Queued (a task not yet running) — reorder to put Started right after
+   Blocked/Proposed. **NOT a one-location change**: `__main__.py` carries a
+   byte-identical duplicate (`_BOARD_GROUPS`/`_board_group`/
+   `_board_sort_key`, used by the delegated `inbox` CLI path, distinct from
+   `board_cli.py`'s own `GROUPS`/`_group`) that must be reordered
+   identically, or the Picker's Tasks pivot and the `inbox` command would
+   disagree on group order. Check `tests/test_cli.py` for any order-
+   sensitive assertions on either definition before landing. Likely lands
+   as part of whichever phase next touches the Tasks pivot's grouping
+   (Phase 6 is the closest existing home, though its own scope is REPO
+   filtering, not group order — fine to
+   land standalone instead if nothing else is touching that file).
+2. **Hard to tell at a glance which Started tasks have an assigned
+   worktree.** The WT column (Phase 4) exists, but a 4-char id sitting in a
+   5-wide column among several other columns doesn't read as "this task HAS
+   a worktree" vs "this column happens to be non-empty." Worth a more
+   deliberate visual treatment (e.g. a small icon/badge, or grouping
+   worktree-bearing Started tasks first within the section) — pair with
+   item 3 below, since both are about the Started section's own legibility.
+3. **Investigate: every observed "Started" task is CLI-embodied (the
+   operator's own manually-claimed session in their own worktree); NONE
+   are headless-worker-embodied.** This may be a real operational gap (no
+   headless worker pool currently spawning against this coordinator) or a
+   genuine bug in the headless-spawn path — needs investigation before
+   concluding either way. Note for whoever picks this up: the data model
+   ALREADY distinguishes headless from everything else internally --
+   `queue_liveness.py`'s `_active_headless_handle` queries the reservations
+   table for a `local-body:`/`fleet-body:`-prefixed `session_handle`
+   (headless) vs no matching reservation, resolved via
+   `tracking.liveness_verdict` instead (per `LivenessMixin
+   .reconcile_liveness`'s own docstring, this "no headless reservation"
+   case covers BOTH a CLI-embodied task AND a not-yet-identifiable owner --
+   it is not proof of CLI-embodiment by itself; don't build a badge that
+   silently misclassifies the latter as the former) -- but `board_cli.py`'s
+   own task row doesn't currently expose this distinction at all
+   (`row["embodied"] = task.get("status") == "started"`, true for either
+   kind, no further detail). If the investigation finds the headless path
+   is fine and this is just current operational reality (no worker pool
+   active right now), the follow-on UI work is still real: surface the
+   CLI-vs-headless-vs-unknown distinction as a badge so an operator isn't
+   left guessing which kind of
+   "Started" they're looking at -- directly addresses item 2 above too.
+   Likely spans Phase 1 (if the backend needs a new field) and Phase 3/4
+   (the pivot's own badges) depending on what the investigation finds.
 
 ### Phase 5 — Artifacts (claims) surface
 - [ ] Land `artifacts_summary` computation in `board_cli.py` (or wherever
@@ -806,7 +872,14 @@ no lifecycle-control logic invented at this layer.
 
 ### Phase 8 — Worktree Status card (implementation)
 - [ ] Populate `worktree_status.body` from real session-lineage/claims/
-      commit data instead of the preview's fixed fixture.
+      commit data instead of the preview's fixed fixture. **Operator
+      feedback 2026-09-20:** confirmed against the live coordinator, every
+      Worktree Status card currently comes up empty beyond its title — this
+      phase is the fix, not a nice-to-have. Must render full details for an
+      embodied task's worktree specifically (session lineage, expanded
+      descriptor, claims), the vision's own stated purpose for this card —
+      verify against a real embodied task before calling this phase done,
+      not just the preview fixture.
 
 ### Phase 9 — Configuration → Registrars viewer/editor (implementation)
 - [ ] Build the Configuration-menu view listing every registration
@@ -1765,3 +1838,30 @@ paused" flake noted before, confirmed to pass cleanly in isolation).
 **Phase 4 is now COMPLETE** — both Plan items landed, with item 1 turning
 into a real correctness fix rather than a clean confirmation. Phases 5-9
 remain.
+
+### 2026-09-20 — Operator feedback on the live UX; findings filed, handing off
+Operator live-drove the real Tasks pane (against the real coordinator) for
+the first time since Phase 4 landed and reported three items (see the new
+"Findings (filed, unscheduled)" section above, right after Phase 4, for
+full detail and each item's likely phase home):
+
+1. Swap the Started/Queued section order (`board_cli.py`'s `GROUPS` tuple)
+   — Started is more interesting to inspect than Queued.
+2. Hard to tell at a glance which Started tasks have an assigned worktree
+   — the WT column exists (Phase 4) but doesn't read as prominently as it
+   should.
+3. Every observed Started task is CLI-embodied (the operator's own manual
+   session); none are headless-worker-embodied — needs investigation (real
+   operational gap vs a genuine spawn-path bug), with a likely follow-on UI
+   need either way (surface the CLI-vs-headless distinction).
+
+Also confirmed directly: Phase 8's own scope (Worktree Status cards coming
+up empty beyond title) is real and current — verified live, not just
+inferred from the fixture-only implementation gap already on the Plan.
+
+**Not implemented this session** — operator explicitly asked for a handoff
+with a manual recovery prompt (context-handoff's automatic cutover is
+currently unreliable) rather than continuing in this same session. Filed
+the findings into the Plan first so the next session doesn't have to
+re-derive where they fit, then composed and stored the handoff.
+
