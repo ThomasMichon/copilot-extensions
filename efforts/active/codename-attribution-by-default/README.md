@@ -279,6 +279,24 @@ addition, not a replacement, of the config-shape check above.
   compute `codename_source` from `wordlist_for_repo`/the repo's
   `codename.wordlist_path` config at THAT call's own moment, not share a
   value computed elsewhere.
+- [ ] **Fix the paired-knowledge path's error-swallowing (round-10
+  finding):** `_carve_paired_knowledge` currently wraps
+  `cfg.load_config(project=knowledge_name)` +
+  `codename_tracking.wordlist_for_repo(...)` in a bare
+  `except Exception: knowledge_wordlist = None`, which silently falls back
+  to the built-in wordlist on ANY config-load failure — including the
+  new fail-closed policy validation error this effort adds for a
+  custom-wordlist repo with an omitted `source_attribution`. That would
+  let the paired-knowledge path allocate a codename (and set
+  `codename_source: "built-in"`) for exactly the repo/config combination
+  the validation error exists to block, defeating it entirely. Change
+  this path to distinguish the new policy-validation error from a
+  genuine "no config for this project" case and PROPAGATE the policy
+  error (fail the paired-knowledge create), never swallow it into a
+  silent built-in fallback. Add a regression test: a paired-knowledge
+  create against a knowledge project with a custom wordlist and omitted
+  `source_attribution` fails the whole create with the policy error, it
+  does not silently proceed with a built-in-sourced codename.
 - [ ] **Round-trip test**: assign a codename (setting `codename_source`),
   `save_record`, `load_record` the same file back, assert
   `codename_source` survives unchanged — proving the serialization wiring
@@ -305,15 +323,23 @@ addition, not a replacement, of the config-shape check above.
   `WorktreeRecord` with `codename_source: "built-in"` publishes normally
   under the implicit default.
 - [ ] **Backfill migration for existing `WorktreeRecord`s created before
-  this field existed:** a record with no `codename_source` recorded is
-  ambiguous (predates this effort) and must be treated as `"custom"` (fail
-  closed) until backfilled, never defaulted to `"built-in"`. Add a
-  one-time backfill pass: for each existing record, set `codename_source`
-  from the OWNING repo's current wordlist config at backfill time (the
-  best available signal, though imperfect for a repo whose config already
-  drifted before backfill runs — document this residual limitation rather
-  than silently treating it as fully solved). Add a test proving an
-  unbackfilled record fails closed by default.
+  this field existed (round-10 finding: keep this fail-closed, never
+  infer from current config):** a record with no `codename_source`
+  recorded is permanently treated as `"custom"` (fail closed under the
+  implicit default) — there is no automatic backfill pass that reads the
+  owning repo's CURRENT wordlist config to guess a value, because that
+  guess is unsound: a record's codename may have been assigned under a
+  custom wordlist that the repo's config has since dropped or swapped,
+  and inferring `"built-in"` from today's (changed) config would
+  reintroduce the exact legacy-drift leak the round-8 fix exists to
+  close. The only way an existing, unbackfilled record is ever promoted
+  to `"built-in"` is a **manual, explicit, per-record** operator
+  verification/edit (e.g. an operator who has checked the actual git
+  history of that repo's wordlist config across the record's lifetime) —
+  never an automated bulk migration. Add a test proving an unbackfilled
+  record fails closed by default regardless of the owning repo's current
+  config, and that no code path auto-promotes it without an explicit,
+  individually-targeted operator edit.
 - [ ] **Versioning gate (required for this phase's PR):** this phase
   changes `agent-worktrees` runtime source (`config.py`). Per
   `AGENTS.md`'s Version Bump section, bump `plugins/agent-worktrees/plugin.json`,
@@ -409,8 +435,10 @@ addition, not a replacement, of the config-shape check above.
   normally under the implicit default regardless of the repo's current
   wordlist config.
 - [ ] Unit: an existing `WorktreeRecord` with no `codename_source` recorded
-  (predates this effort) is treated as `"custom"` (fails closed) until the
-  backfill migration runs — never silently treated as `"built-in"`.
+  (predates this effort) is permanently treated as `"custom"` (fails
+  closed) — never auto-promoted to `"built-in"` by any automated pass,
+  regardless of the owning repo's current wordlist config (round-10
+  finding: no config-inferred backfill).
 - [ ] Round-trip (round-9 finding): assign a codename with a known
   `codename_source`, `save_record` it, `load_record` it back, assert
   `codename_source` is unchanged — proving the manual YAML
@@ -422,6 +450,12 @@ addition, not a replacement, of the config-shape check above.
   backfill (`ensure_codename`) — sets `codename_source` correctly from
   that call's own config read; a regression in any ONE site (e.g. the
   knowledge-repo path alone) is caught, not just the aggregate behavior.
+- [ ] Unit (round-10 finding): a paired knowledge-repo create against a
+  knowledge project with a custom wordlist and an omitted
+  `source_attribution` fails the whole create with the policy validation
+  error — `_carve_paired_knowledge`'s config-load exception handling must
+  NOT swallow this into a silent `knowledge_wordlist = None` / built-in
+  fallback that would let the create proceed anyway.
 - [ ] Unit: `_parse_pr` with an absent `source_attribution` key (both
   "`pr:` block present, key omitted" and "`pr:` block entirely absent")
   parses to `"codename"`, not `False`.
@@ -574,3 +608,28 @@ _Pending._
   (assign → save → load → assert unchanged) plus a per-call-site test,
   rather than relying on the existing provenance tests to catch a
   serialization gap they don't actually exercise.
+
+### 2026-09-20 — Plan-review round 10 fixes
+
+- Two new high-severity findings, both concrete real-code gaps in the
+  round-8/9 provenance plan:
+  1. Checked `_carve_paired_knowledge`'s actual source: it wraps
+     `cfg.load_config`/`wordlist_for_repo` in a bare
+     `except Exception: knowledge_wordlist = None`, which would silently
+     swallow the new fail-closed policy-validation error (for a
+     custom-wordlist repo with omitted `source_attribution`) and fall
+     back to the built-in wordlist — letting the paired-knowledge path
+     allocate exactly the codename the validation error exists to
+     block. Added an explicit plan item requiring this path to
+     distinguish and PROPAGATE the policy error rather than swallow it,
+     plus a regression test.
+  2. Round 8's backfill-migration item inferred `codename_source` for
+     pre-existing records from the owning repo's CURRENT wordlist
+     config — flagged as unsound for the same reason round 8 itself
+     exists: a repo's config can drift after a codename was assigned, so
+     "current config says no custom wordlist" doesn't prove the record's
+     codename actually came from the built-in list. Removed the
+     config-inferred backfill entirely; an unbackfilled record now stays
+     permanently `"custom"` (fail-closed) unless an operator manually,
+     explicitly verifies and edits that specific record — never an
+     automated bulk-inference pass.
