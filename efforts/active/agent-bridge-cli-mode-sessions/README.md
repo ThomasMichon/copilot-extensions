@@ -269,24 +269,42 @@ mechanism CLI mode binds through.
       CodeSpace, a trusted container, or a bare dev box reached through
       `cli-mode launch` self-heals a missing tmux; a plain, human-typed
       `embody` never does.
-- [ ] Confirm/document the remaining venue-prep prerequisites this surfaces
-      before any venue-specific launch verb is added: (1) `copilot` present
-      or bootstrapped (already a venue-parity/devcontainer convention — verify,
-      don't assume, for `agent-containers`' operator-supplied images too);
-      (2) `agent-worktrees` **full** `install` (not just the lean
-      self-provisioned tools) has run for the target project, since `embody`
-      needs the deployed `launch-command.sh`/hooks (Phase 3's journal finding)
-      — currently a manual/first-touch step, not yet automated for a venue
-      that's never had a human session in it; (3) the CLI-mode reservation is
-      created against the **host's** bridge daemon (Phase 2's local design),
-      not a remote one — confirm this holds for a venue launch too, or decide
-      it needs to change.
-- [ ] Extend `agent-codespaces` and `agent-containers` to offer the same
-      CLI-mode launch shape — prepare the venue (the checklist above),
-      allocate the CLI-mode reservation, start a standard muxed CLI process
-      (`embody`, run remotely) bound to it — over the existing venue-parity
-      SSH transport and auth-relay back-channel. No new venue-specific
-      transport.
+- [x] Confirm/document the remaining venue-prep prerequisites this surfaces
+      before any venue-specific launch verb is added.
+      **Done** — see the 2026-09-20 "Phase 4 prep: prerequisites confirmed,
+      container-spawner gap found" journal entry: (1) `copilot` presence is a
+      CodeSpace devcontainer convention (verified live), but is **not**
+      guaranteed for `agent-containers`' operator-supplied images —
+      `installer_readiness.inspect_toolchain` only validates host-side fleet
+      tooling (docker/devcontainer/ssh), never in-container `copilot`/`tmux`;
+      this must be an explicit precondition check, not an assumption, for any
+      container-venue launch verb. (2) `agent-worktrees` full `install`
+      remains a manual/first-touch step for a venue that's never had a human
+      session — unchanged, not automated here. (3) Confirmed the CLI-mode
+      reservation is correctly host-side even for a venue launch: agent-bridge
+      runs exactly one daemon (on the host) regardless of spawn target: a
+      dispatched Session Host — whether via `LocalSpawner` or
+      `CodeSpaceSpawner` (`session_manager.py`) — always registers back to
+      that same host daemon, so Phase 2's server-side reservation correlation
+      needs no change for the CodeSpace case.
+- [ ] Extend `agent-codespaces` to offer the same CLI-mode launch shape —
+      prepare the venue (the checklist above), allocate the CLI-mode
+      reservation, start a standard muxed CLI process (`embody`, run
+      remotely) bound to it — over the existing venue-parity SSH transport
+      and auth-relay back-channel. No new venue-specific transport. This is
+      tractable now: agent-bridge already has a working `CodeSpaceSpawner`
+      seam (ACP mode) to extend.
+- [ ] ~~Extend `agent-containers` to offer the same CLI-mode launch shape~~ —
+      **scope note, not yet started:** unlike `agent-codespaces`,
+      agent-bridge has **no existing headless/ACP Session Host spawner for
+      containers at all** today (`session_manager.py` defines only
+      `LocalSpawner` and `CodeSpaceSpawner`; no `ContainerSpawner`). Adding
+      CLI-mode launch there is not "extend an existing venue seam" like the
+      CodeSpace case — it first needs that base dispatch primitive, which is
+      a materially bigger, separate prerequisite. Do the `agent-codespaces`
+      case first; revisit `agent-containers` scope (possibly its own
+      follow-on effort) once that base primitive exists or is confirmed
+      genuinely in-scope here.
 
 ### Phase 5 — Docs and vision closure
 
@@ -400,6 +418,48 @@ hotkey commands, not session creation, and isn't this effort's to resolve.
 Noted for whoever eventually does that transfer: `embody`'s session-creation
 path (and now `ensure_mux_available`) is a second caller into agent-worktrees'
 direct tmux/psmux ownership, alongside Mux-bind's status-push relationship.
+
+### 2026-09-20 — Phase 4 prep: prerequisites confirmed, container-spawner gap found
+
+Worked the first unchecked Phase 4 item: confirming (not assuming) the three
+venue-prep prerequisites the checklist named, before writing any
+venue-specific launch verb.
+
+- **`copilot` presence:** already verified live for CodeSpaces (yesterday's
+  SSH check). For `agent-containers`, checked
+  `installer_readiness.inspect_toolchain` directly: it only validates
+  **host-side** fleet tooling (`docker`, `devcontainer`, `ssh`) against the
+  configured fleet backends -- nothing inspects *inside* a running container
+  for `copilot`/`tmux`. Since container images are operator-supplied
+  (`containers.yaml`'s `image`/`devcontainer_path`), there is no baseline
+  guarantee at all, unlike the CodeSpace devcontainer convention. Any
+  container-venue CLI-mode launch must treat this as an explicit precondition
+  check, not an assumption -- noted in the effort, not yet built.
+- **`agent-worktrees` full install:** unchanged from yesterday's finding --
+  still a manual/first-touch step for a venue that's never had a human
+  session in it. Not automated as part of this confirmation pass.
+- **Reservation stays host-side for a venue launch too:** checked
+  `agent-bridge`'s `session_manager.py` directly rather than assuming
+  symmetry. Exactly one daemon process runs on the host regardless of spawn
+  target; `CodeSpaceSpawner` "bootstraps the Host inside a CodeSpace" but the
+  spawned Session Host still registers back to that same host daemon (the
+  only daemon that exists), the same as `LocalSpawner`. So Phase 2's
+  server-side, worktree-id-keyed reservation correlation at registration time
+  needs **no design change** for a CodeSpace-launched CLI-mode session --
+  confirmed, not assumed.
+
+**New finding that changes Phase 4's remaining shape:** `session_manager.py`
+defines only `LocalSpawner` and `CodeSpaceSpawner` -- there is **no existing
+headless/ACP Session Host spawner for containers at all** yet. Extending
+`agent-codespaces` to CLI-mode launch is "add a mode to an existing working
+venue seam" (the same posture as Phase 3's local case); extending
+`agent-containers` would first require inventing that base dispatch
+primitive from scratch, a materially bigger and more separable prerequisite
+than the checklist assumed when it named both venues together. Rescoped the
+remaining Phase 4 plan item: do `agent-codespaces` first; treat
+`agent-containers` CLI-mode support as contingent on that base primitive
+existing (possibly its own follow-on effort), not silently deferred inside
+this one without saying so.
 
 ### 2026-09-20 — Phase 4 prep: real-venue tmux gap, fixed with a self-heal
 
