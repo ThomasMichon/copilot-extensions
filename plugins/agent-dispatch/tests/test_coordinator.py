@@ -296,6 +296,29 @@ def test_slot_descriptor_reports_active_role_for_own_pid(tmp_path, monkeypatch):
     assert slot["active"]["pid"] == os.getpid()
 
 
+def test_slot_descriptor_reports_unknown_role_when_active_pid_is_null(
+    tmp_path, monkeypatch,
+):
+    """A malformed/legacy routing entry with no recorded pid must never be
+    mistaken for "passive" -- there is nothing to compare against, so the
+    owner question is genuinely unanswerable (Copilot review finding)."""
+    import json
+    from types import SimpleNamespace
+
+    from agent_dispatch.coordinator import _slot_descriptor
+
+    routing_dir = tmp_path / "routing"
+    routing_dir.mkdir(parents=True)
+    (routing_dir / "active.json").write_text(
+        json.dumps({"active": {"bind": "127.0.0.1", "port": 9281, "pid": None}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing_dir))
+    slot = _slot_descriptor(SimpleNamespace())
+    assert slot["role"] == "unknown"
+    assert slot["active"]["pid"] is None
+
+
 def test_slot_descriptor_reports_passive_role_for_other_active_pid(
     tmp_path, monkeypatch,
 ):

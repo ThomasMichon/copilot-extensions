@@ -1204,12 +1204,14 @@ def _slot_descriptor(app_state: Any) -> dict:
     active = table.get("active") if isinstance(table, dict) else None
     previous = table.get("previous") if isinstance(table, dict) else None
     active_pid = active.get("pid") if isinstance(active, dict) else None
-    if active_pid == my_pid:
-        role = "active"
-    elif isinstance(active, dict):
-        role = "passive"
-    else:
+    if not isinstance(active_pid, int) or active_pid <= 0:
+        # No usable pid to compare against (missing/null/malformed entry) --
+        # cannot answer the owner question either way.
         role = "unknown"
+    elif active_pid == my_pid:
+        role = "active"
+    else:
+        role = "passive"
     return {
         "pid": my_pid,
         "role": role,
