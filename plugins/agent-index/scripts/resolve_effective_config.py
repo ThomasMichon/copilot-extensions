@@ -11,6 +11,7 @@ import platform
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -615,7 +616,83 @@ def _worktrees_command() -> str | None:
     if explicit is not None:
         value = explicit.strip()
         return value or None
-    return shutil.which("agent-worktrees")
+    return shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
+
+
+def _load_peer_launch() -> Any:
+    """Load the vendored same-cell peer boundary by absolute path.
+
+    This script runs standalone (not necessarily under an installed
+    ``agent_index`` package import path), so it loads its packaged sibling by
+    file location the same way :mod:`companion_context` loads
+    ``installation_context.py``, rather than assuming a package import.
+    """
+    import importlib.util
+
+    plugin_root = Path(__file__).resolve().parents[1]
+    path = plugin_root / "src" / "agent_index" / "_peer_launch.py"
+    spec = importlib.util.spec_from_file_location("_index_peer_launch", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("agent-index peer-launch boundary is unavailable")
+    module = sys.modules.get(spec.name)
+    if module is None:
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
+def _validate_index_owner_or_refuse(raw_context: str) -> dict[str, Any]:
+    peer_launch = _load_peer_launch()
+    plugin_root = Path(__file__).resolve().parents[1]
+    try:
+        return peer_launch.validate_owner("agent-index", plugin_root, raw_context)
+    except (OSError, ValueError, ImportError) as error:
+        raise peer_launch.ContextRefused(
+            f"agent-index installation context refused: {error}"
+        ) from error
+
+
+def _run_state_root_same_cell(
+    own: dict[str, Any], raw_context: str, *, cwd: Path | None, project: str | None,
+) -> subprocess.CompletedProcess[str] | None:
+    """Resolve ``state-root`` via the validated same-cell peer, never ambient PATH.
+
+    Mirrors :func:`_run_state_root`'s argv/retry contract exactly so callers
+    can share the bare-anchor ``--project`` retry logic in
+    :func:`_external_state_root` unchanged. A peer-launch refusal (exit 126)
+    raises :class:`peer_launch.ContextRefused` -- an explicit context that
+    fails to validate must not silently degrade to "unavailable", which a
+    caller could mistake for a genuinely absent peer.
+    """
+    peer_launch = _load_peer_launch()
+    arguments = ("state-root", "--json") if project is None else (
+        "--project", project, "state-root", "--json",
+    )
+    prefix = peer_launch.launch_prefix(
+        "agent-index", Path(own["pluginRoot"]), raw_context, "agent-worktrees",
+    )
+    try:
+        result = subprocess.run(
+            [*prefix, *arguments],
+            cwd=str(cwd) if cwd is not None else None,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+            check=False,
+            **peer_launch.no_window_kwargs(),
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise peer_launch.ContextRefused(
+            f"Same-cell worktrees state-root invocation failed: {error}"
+        ) from error
+    if result.returncode == 126:
+        raise peer_launch.ContextRefused(
+            result.stderr.strip() or "Same-cell worktrees context refused"
+        )
+    return result
 
 
 def _worktrees_argv(command: str, *arguments: str) -> list[str]:
@@ -703,10 +780,32 @@ def _run_state_root(
         return None
 
 
-def _external_state_root(root: Path) -> tuple[str, Path | None]:
+def _external_state_root_runner(
+    root: Path,
+) -> tuple[Any, None] | tuple[None, tuple[str, Path | None]]:
+    """Choose the same-cell peer boundary or the legacy ambient-PATH runner.
+
+    Under an explicit installation context (and no test-only
+    ``AGENT_WORKTREES_COMMAND`` override), resolution uses only the validated
+    same-cell peer -- never an ambient ``PATH`` command. Returns either a
+    ``(run, None)`` pair, where ``run(cwd, project)`` matches
+    :func:`_run_state_root`'s signature, or ``(None, terminal)`` when the
+    caller should return ``terminal`` immediately (peer/command unavailable).
+    """
+    raw_context = os.environ.get(INSTALLATION_CONTEXT_ENV, "").strip()
+    if raw_context and os.environ.get(WORKTREES_COMMAND_ENV) is None:
+        own = _validate_index_owner_or_refuse(raw_context)
+        peer_root = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+        if not peer_root.exists() and not peer_root.is_symlink():
+            return None, ("unavailable", None)
+
+        def run(cwd: Path | None, project: str | None) -> subprocess.CompletedProcess[str] | None:
+            return _run_state_root_same_cell(own, raw_context, cwd=cwd, project=project)
+
+        return run, None
     command = _worktrees_command()
     if not command:
-        return "unavailable", None
+        return None, ("unavailable", None)
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -720,7 +819,19 @@ def _external_state_root(root: Path) -> tuple[str, Path | None]:
             "PYTHONPATH",
         }
     }
-    result = _run_state_root(command, environment, cwd=root, project=None)
+
+    def run(cwd: Path | None, project: str | None) -> subprocess.CompletedProcess[str] | None:
+        return _run_state_root(command, environment, cwd=cwd, project=project)
+
+    return run, None
+
+
+def _external_state_root(root: Path) -> tuple[str, Path | None]:
+    run, terminal = _external_state_root_runner(root)
+    if run is None:
+        assert terminal is not None
+        return terminal
+    result = run(root, None)
     if result is None:
         return "unavailable", None
     if result.returncode != 0:
@@ -730,7 +841,7 @@ def _external_state_root(root: Path) -> tuple[str, Path | None]:
         project = _project_name_for_root(root)
         if project is None:
             return "unavailable", None
-        result = _run_state_root(command, environment, cwd=None, project=project)
+        result = run(None, project)
         if result is None or result.returncode != 0:
             return "unavailable", None
     try:

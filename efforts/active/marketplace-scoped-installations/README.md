@@ -375,6 +375,57 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-20 — Agent-index as a fifth same-cell peer-launch consumer
+
+- Continued Phase 6 caller conversions. Added `agent-index` to the shared
+  `libs/peer-launch` boundary's `OWNERS` set (joining dispatch, CodeSpaces,
+  Containers, and Logger) and its environment-scrub prefixes; re-synced all
+  five packaged vendors and bumped all five plugins' versions together (a
+  canonical peer-launch change reaches every consumer's payload).
+- Converted `agent-index`'s `scripts/resolve_effective_config.py` state-root
+  discovery (used by the same-cell knowledge-repo config graft, the
+  citadel E1e overlay) from unconditional `shutil.which("agent-worktrees")`
+  ambient-`PATH` resolution to the validated same-cell peer boundary under an
+  explicit installation context. Legacy ambient-`PATH` resolution remains the
+  fallback when no explicit context is present, and the existing test-only
+  `AGENT_WORKTREES_COMMAND` override still takes priority over both, matching
+  `_worktrees_command()`'s own precedence.
+- This script runs standalone (invoked directly, not necessarily under an
+  installed `agent_index` package import path), so it loads the vendored
+  `_peer_launch.py`/`_installation_context.py` by absolute file location --
+  the same pattern `companion_context.py` already used for the installation-
+  context primitive -- rather than assuming a package import is available.
+- Preserved the existing bare-anchor-checkout `--project` retry behavior
+  identically across both the legacy and same-cell paths by extracting a
+  small `run(cwd, project)` strategy selected once per call, so the shared
+  retry/parsing logic in `_external_state_root` did not need to duplicate
+  itself. A same-cell peer-launch refusal (exit 126) raises
+  `_peer_launch.ContextRefused` rather than degrading to `"unavailable"` --
+  an explicit context that fails to validate must not become
+  indistinguishable from a genuinely absent peer.
+- Added focused tests proving ambient `PATH` is never touched under explicit
+  context, a peer-launch refusal propagates instead of being swallowed, and
+  the command-override precedence holds; extended `libs/peer-launch`'s shared
+  packaging and isolation-guard tests to cover the fifth vendor.
+- Validation: `agent-index`'s `tests/test_effective_config.py` (35 passed,
+  up from 32); `libs/peer-launch/tests` (8 passed); focused peer-launch/
+  worktrees-peer suites for the four already-converted consumers
+  (`agent-codespaces` 30 passed, `agent-containers` 98 passed/313
+  deselected, `agent-dispatch` 62 passed/1 skipped/2948 deselected,
+  `agent-logger` 26 passed) to confirm the shared `OWNERS`/environment-scrub
+  change did not regress any existing caller; install-contract,
+  version-consistency, version-bump, vendored-libs-sync, docs-consistency,
+  and headless-launch guards all passed. `check-marketplace-isolation`'s
+  `path-sibling-launch` count for `agent-index` dropped from one real
+  ambient-`PATH` finding to only the same boilerplate
+  `installer-readiness.json` self-declarations every plugin carries,
+  matching the shape left behind by the four prior conversions.
+- `#1110` remains open. Phase 2/6 caller conversions continue (agent-machines'
+  `shutil.which("agent-ssh")` in `self_update.py` is the next identified
+  candidate, but `agent-ssh` is not yet a `libs/peer-launch` `PEERS` target --
+  extending `PEERS` is a prerequisite, not a same-shape slice); the Phase 7
+  intake ledger and full Validation Plan remain outstanding.
+
 ### 2026-09-15 — Fix reviewed compaction-safety findings
 
 - Advisory review of #2697 caught two real defects in the Logger conversion:

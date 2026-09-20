@@ -82,7 +82,10 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
             / "_installation_context.py",
         )
         for plugin in ADOPTERS
-        if plugin in {"agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger"}
+        if plugin in {
+            "agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger",
+            "agent-index",
+        }
     ] + [
         (
             CANONICAL_DIR / name,

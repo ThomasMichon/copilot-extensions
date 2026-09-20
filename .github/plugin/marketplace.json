@@ -30,7 +30,7 @@
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
-      "version": "0.1.2-dev143",
+      "version": "0.1.2-dev144",
       "source": "plugins/agent-containers"
     },
     {
@@ -48,7 +48,7 @@
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync local or validated provider-rescued sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.1.2-dev23",
+      "version": "0.1.2-dev24",
       "source": "plugins/agent-logger"
     },
     {
@@ -78,7 +78,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.2-dev138",
+      "version": "0.1.2-dev139",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -102,7 +102,7 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.1.0-dev184",
+      "version": "0.1.0-dev185",
       "source": "plugins/agent-index"
     },
     {
