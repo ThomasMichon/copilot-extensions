@@ -699,6 +699,14 @@ def _parse_git_counts(output: str) -> tuple[int, int]:
 def fast_forward_repo(
     repo: Path, *, runner: Callable[..., CommandResult] = default_command_runner
 ) -> StepResult:
+    bare_check = runner(["git", "rev-parse", "--is-bare-repository"], cwd=repo, timeout=120)
+    if bare_check.returncode != 0:
+        return StepResult(
+            "git-pull", "error", bare_check.output or "git rev-parse failed", path=str(repo)
+        )
+    if bare_check.stdout.strip() == "true":
+        return _fast_forward_bare_repo(repo, runner=runner)
+
     status = runner(["git", "status", "--porcelain"], cwd=repo, timeout=120)
     if status.returncode != 0:
         return StepResult(
@@ -756,6 +764,160 @@ def fast_forward_repo(
     if pulled.returncode != 0:
         return StepResult("git-pull", "error", pulled.output or "git pull failed", path=str(repo))
     return StepResult("git-pull", "changed", "fast-forwarded checkout", path=str(repo))
+
+
+def _fast_forward_bare_repo(
+    repo: Path, *, runner: Callable[..., CommandResult]
+) -> StepResult:
+    """Fast-forward a bare repository's checked-out branch ref directly.
+
+    A bare repository (an agent-worktrees anchor where all real work happens
+    in separate linked worktrees) has no working tree or index for ``git
+    status``/``git pull`` to act on. This fetches the upstream branch into a
+    private scratch ref -- rather than trusting a plain ``git fetch``, which
+    would honor whatever fetch refspec the repo is configured with (a
+    mirror-style bare clone can carry ``+refs/*:refs/*``, which force-writes
+    straight into ``refs/heads/*`` and would silently clobber the branch
+    before any safety check below runs) -- then only moves the real branch
+    ref forward, as an atomic compare-and-swap, once every fast-forward
+    check has passed against that isolated fetch result.
+    """
+    branch = runner(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], cwd=repo, timeout=120)
+    if branch.returncode != 0:
+        return StepResult(
+            "git-pull",
+            "skipped",
+            "skipped fast-forward pull because the bare repository's HEAD is detached",
+            path=str(repo),
+        )
+    branch_name = branch.stdout.strip()
+
+    upstream = runner(
+        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        cwd=repo,
+        timeout=120,
+    )
+    if upstream.returncode != 0:
+        return StepResult(
+            "git-pull",
+            "skipped",
+            "skipped fast-forward pull because the checkout has no upstream branch",
+            path=str(repo),
+        )
+    remote, _, remote_branch = upstream.stdout.strip().partition("/")
+    if not remote or not remote_branch:
+        return StepResult(
+            "git-pull",
+            "error",
+            f"could not parse upstream ref {upstream.stdout.strip()!r}",
+            path=str(repo),
+        )
+
+    old_sha = runner(["git", "rev-parse", "--verify", "HEAD"], cwd=repo, timeout=120)
+    if old_sha.returncode != 0:
+        return StepResult(
+            "git-pull", "error", old_sha.output or "git rev-parse HEAD failed", path=str(repo)
+        )
+    old_sha_value = old_sha.stdout.strip()
+
+    scratch_ref = f"refs/agent-machines/self-update-fetch/{branch_name}"
+
+    def _cleanup_scratch() -> None:
+        runner(["git", "update-ref", "-d", scratch_ref], cwd=repo, timeout=120)
+
+    fetched = runner(
+        [
+            "git",
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            remote,
+            f"+refs/heads/{remote_branch}:{scratch_ref}",
+        ],
+        cwd=repo,
+        timeout=900,
+    )
+    if fetched.returncode != 0:
+        _cleanup_scratch()
+        return StepResult(
+            "git-pull", "error", fetched.output or "git fetch failed", path=str(repo)
+        )
+
+    new_sha = runner(["git", "rev-parse", "--verify", scratch_ref], cwd=repo, timeout=120)
+    if new_sha.returncode != 0:
+        _cleanup_scratch()
+        return StepResult(
+            "git-pull",
+            "error",
+            new_sha.output or "git rev-parse fetched upstream failed",
+            path=str(repo),
+        )
+    new_sha_value = new_sha.stdout.strip()
+
+    counts = runner(
+        ["git", "rev-list", "--left-right", "--count", f"{old_sha_value}...{new_sha_value}"],
+        cwd=repo,
+        timeout=120,
+    )
+    if counts.returncode != 0:
+        _cleanup_scratch()
+        return StepResult(
+            "git-pull", "error", counts.output or "git rev-list failed", path=str(repo)
+        )
+    ahead, behind = _parse_git_counts(counts.stdout)
+    if ahead > 0 and behind > 0:
+        _cleanup_scratch()
+        return StepResult(
+            "git-pull",
+            "skipped",
+            "skipped fast-forward pull because the checkout is diverged",
+            path=str(repo),
+        )
+    if ahead > 0:
+        _cleanup_scratch()
+        return StepResult(
+            "git-pull",
+            "skipped",
+            "skipped fast-forward pull because the checkout is ahead of upstream",
+            path=str(repo),
+        )
+    if behind == 0:
+        _cleanup_scratch()
+        return StepResult("git-pull", "ok", "checkout is already up to date", path=str(repo))
+
+    # Defense in depth: old_sha_value/new_sha_value are both already-resolved
+    # object ids by this point, so this is deterministic rather than a race
+    # check, but it costs nothing to re-prove the fast-forward immediately
+    # before the write.
+    ancestry = runner(
+        ["git", "merge-base", "--is-ancestor", old_sha_value, new_sha_value],
+        cwd=repo,
+        timeout=120,
+    )
+    if ancestry.returncode != 0:
+        _cleanup_scratch()
+        return StepResult(
+            "git-pull",
+            "skipped",
+            "skipped fast-forward pull because the upstream moved to a "
+            "non-fast-forward commit during the update",
+            path=str(repo),
+        )
+
+    updated = runner(
+        ["git", "update-ref", f"refs/heads/{branch_name}", new_sha_value, old_sha_value],
+        cwd=repo,
+        timeout=120,
+    )
+    _cleanup_scratch()
+    if updated.returncode != 0:
+        return StepResult(
+            "git-pull", "error", updated.output or "git update-ref failed", path=str(repo)
+        )
+    return StepResult(
+        "git-pull", "changed", "fast-forwarded bare repository branch ref", path=str(repo)
+    )
+
 
 
 def sweep_repo_paths(
