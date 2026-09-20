@@ -768,6 +768,11 @@ def clone_repo(
             r"(Authorization:\s*(?:Basic|Bearer)\s+)\S+", r"\1<redacted>",
             text, flags=re.IGNORECASE,
         )
+        # A remote URL with embedded userinfo (https://user:token@host/...)
+        # is a second, independent credential surface -- e.g. a caller that
+        # named such a URL as `remote`. Strip it wherever a URL appears,
+        # including inside the argv this function also redacts.
+        text = re.sub(r"(https?://)[^/@\s]+@", r"\1<redacted>@", text)
         return text
 
     try:
@@ -781,7 +786,7 @@ def clone_repo(
             output.err(f"git clone failed: {_redact(result.stderr.strip())}")
             return None
     except Exception as e:
-        redacted_argv = git_ops._redact_args(argv)
+        redacted_argv = _redact(str(git_ops._redact_args(argv)))
         output.err(f"Clone failed running {redacted_argv}: {_redact(str(e))}")
         return None
 

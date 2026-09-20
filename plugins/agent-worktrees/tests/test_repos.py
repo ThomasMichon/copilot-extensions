@@ -860,6 +860,29 @@ def test_clone_repo_redacts_authorization_header_trace_from_stderr(home: Path, t
     assert "<redacted>" in logged
 
 
+def test_clone_repo_redacts_url_userinfo_from_exception_message(home: Path, tmp_path: Path):
+    """A remote URL with embedded userinfo (https://user:token@host/...) is
+    a second, independent credential surface from the injected extraheader
+    -- the logged argv/exception text must never leak it either."""
+    home_srcroot = tmp_path / "src"
+    repos.set_srcroot(str(home_srcroot), plat="windows")
+    remote = "https://x-access-token:realtoken@github.com/example-operator/leak-test.git"
+
+    def fake_run(argv, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=300)
+
+    with patch("agent_worktrees.repos._current_platform", return_value="windows"), \
+         patch("agent_worktrees.repos.subprocess.run", side_effect=fake_run), \
+         patch("agent_worktrees.git_ops._auth_config_args_for_url", return_value=[]), \
+         patch("agent_worktrees.output.err") as mock_err:
+        entry = repos.clone_repo(remote)
+
+    assert entry is None
+    logged = " ".join(str(c) for c in mock_err.call_args_list)
+    assert "realtoken" not in logged
+    assert "<redacted>@" in logged
+
+
 # ---------------------------------------------------------------------------
 # Git hygiene: status + sync
 # ---------------------------------------------------------------------------

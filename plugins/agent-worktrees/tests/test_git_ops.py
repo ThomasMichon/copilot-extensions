@@ -235,6 +235,21 @@ class TestCrossAccountAuth:
     def test_auth_args_for_url_empty_for_non_github(self, monkeypatch):
         assert go._auth_config_args_for_url("https://gitlab.com/o/r.git") == []
 
+    def test_auth_args_for_url_empty_for_plain_http(self, monkeypatch):
+        """The injected header would otherwise carry the bearer token over
+        an unencrypted connection for a plain http:// GitHub remote."""
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "DifferentUser")
+        monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: "ghp_secret")
+        assert go._auth_config_args_for_url("http://github.com/Owner/r.git") == []
+
+    def test_auth_args_empty_for_plain_http_via_remote_name(self, monkeypatch):
+        """Same guarantee through the remote-name entry point used by the
+        existing fetch/push paths, not only the URL-based clone path."""
+        monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "http://github.com/Owner/r.git")
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "DifferentUser")
+        monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: "ghp_secret")
+        assert go._auth_config_args("origin", cwd=".") == []
+
     def test_auth_args_empty_when_owner_is_active_account(self, monkeypatch):
         """#900: when the repo owner *is* the active gh account, skip injection
         so the working credential helper isn't overridden by a possibly
@@ -486,6 +501,37 @@ class TestPinGitCredential:
         import subprocess as sp
         sp.run(["git", "init", "-q", str(repo)], check=True)
         assert go.pin_git_credential(repo, "other-user") is True
+
+    def test_clears_stale_pin_when_login_becomes_active_account(self, tmp_path: Path, monkeypatch):
+        """A repo previously pinned to 'other-user', whose account_map is
+        later corrected to what is now the active gh account, must not keep
+        forcing the stale login -- the config must actually be cleared, not
+        just left untouched, or 'the active helper already works' would be
+        false for this checkout."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "SomeUser")
+        assert go.pin_git_credential(repo, "other-user") is True  # establish the stale pin
+
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "other-user")
+        assert go.pin_git_credential(repo, "other-user") is False  # now the active account
+
+        result = sp.run(
+            ["git", "-C", str(repo), "config", "--local",
+             "credential.https://github.com.username"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode != 0  # stale username cleared
+        helpers = sp.run(
+            ["git", "-C", str(repo), "config", "--local", "--get-all",
+             "credential.https://github.com.helper"],
+            capture_output=True, text=True,
+        )
+        assert helpers.returncode != 0 or helpers.stdout.strip() == ""  # stale helper cleared
 
     def test_noop_when_gh_unavailable(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr(go.shutil, "which", lambda _: None)

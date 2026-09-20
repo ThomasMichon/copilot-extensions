@@ -1147,9 +1147,6 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
     path = Path(repo_path)
     if not path.is_dir() or shutil.which("gh") is None:
         return False
-    active = _active_gh_account()
-    if active and active.casefold() == login.casefold():
-        return False
     env = repository_identity_env()
     try:
         # ``--git-dir`` (not ``--is-inside-work-tree``) so this also pins a
@@ -1168,8 +1165,29 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
         if probe.returncode != 0:
             return False
         git_dir = probe.stdout.strip()
+        key = f"credential.https://{host}"
+        active = _active_gh_account()
+        if active and active.casefold() == login.casefold():
+            # login is already the active gh account: the inherited default
+            # helper already authenticates correctly, so don't force a
+            # gh-auth-token-backed helper on top of it (see the docstring
+            # above). But a *stale* pin from a previous, different login left
+            # in .git/config (e.g. this repo's account_map mapping was later
+            # corrected to what is now the active account) would otherwise
+            # keep forcing that old identity -- clear it so "the active
+            # helper already works" is actually true for this checkout.
+            with _credential_pin_lock(path, git_dir):
+                subprocess.run(
+                    ["git", "-C", str(path), "config", "--local", "--unset-all", f"{key}.helper"],
+                    capture_output=True, text=True, timeout=10, env=env,
+                )
+                subprocess.run(
+                    ["git", "-C", str(path), "config", "--local", "--unset-all",
+                     f"{key}.username"],
+                    capture_output=True, text=True, timeout=10, env=env,
+                )
+            return False
         with _credential_pin_lock(path, git_dir):
-            key = f"credential.https://{host}"
             helper_script = (
                 "!f() { if test x$1 = xget; then "
                 f"token=$(gh auth token --hostname {host} --user '{login}') || exit $?; "
@@ -1278,7 +1296,15 @@ def _auth_config_args_for_url(url: str) -> list[str]:
     exists (e.g. the initial ``git clone`` -- there is no checked-out remote
     to resolve a name against yet). See :func:`_auth_config_args` for the
     full cross-account rationale and the same-account skip.
+
+    HTTPS-only: a plain ``http://`` remote would otherwise send the bearer
+    token over an unencrypted connection (``_parse_github_owner`` itself
+    matches ``https?://``, since it also backs the account-*resolution*
+    path where scheme doesn't matter -- the credential-*injection* callers
+    must gate separately).
     """
+    if not url.strip().lower().startswith("https://"):
+        return []
     owner = _parse_github_owner(url)
     if not owner:
         return []
