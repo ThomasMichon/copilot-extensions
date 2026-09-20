@@ -4030,6 +4030,13 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 }
             )
             return 0
+        # A freshly-provisioned remote venue (CodeSpace/container) virtually
+        # never has tmux preinstalled (confirmed against a real CodeSpace
+        # devcontainer, agent-bridge-cli-mode-sessions Phase 4 prep) --
+        # self-heal it here, once, right before the one call that actually
+        # needs it, rather than failing with a raw "not found" or silently
+        # downgrading to a non-reattachable headless launch.
+        sessions.ensure_mux_available()
         result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
     finally:
         lifecycle_lock.release()

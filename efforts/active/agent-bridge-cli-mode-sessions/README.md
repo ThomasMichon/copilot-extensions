@@ -246,11 +246,42 @@ mechanism CLI mode binds through.
 
 ### Phase 4 — Symmetric venue launch
 
+- [x] **Venue-prep checklist established, from a real venue, not a guess.**
+      Checked a live, currently-running CodeSpace (`odsp-web-codespaces`,
+      Ubuntu 24.04 devcontainer) directly rather than assuming: `copilot` is
+      present (devcontainer convention — `nvm`-installed, v1.0.86), as are
+      `git`/`node`/`python3`/`uv`. **`tmux` is NOT present**, though `apt`
+      has it (`tmux 3.4-1ubuntu0.1`) and passwordless `sudo` works.
+      `agent-worktrees`/`agent-bridge` binstubs are absent too, matching the
+      already-known "lean, tools-only self-provisioning" pattern (Phase 3's
+      journal) — not remote-specific.
+      Fixed the `tmux` half now, ahead of the rest of Phase 4, since it's a
+      real gap independent of which venue provider gets built first: added
+      `agent_worktrees.sessions.ensure_mux_available()` (best-effort,
+      POSIX-only, `apt-get`/`dnf`/`yum`/`apk` via `sudo -n` or direct-as-root,
+      silent-safe) and wired it into `cmd_embody` right before
+      `mux_new_session`, so ANY venue missing tmux (a CodeSpace, a trusted
+      container, a bare dev box) self-heals on first `embody`/`cli-mode
+      launch` rather than failing with a raw "not found" or silently
+      downgrading to a non-reattachable headless launch. See journal.
+- [ ] Confirm/document the remaining venue-prep prerequisites this surfaces
+      before any venue-specific launch verb is added: (1) `copilot` present
+      or bootstrapped (already a venue-parity/devcontainer convention — verify,
+      don't assume, for `agent-containers`' operator-supplied images too);
+      (2) `agent-worktrees` **full** `install` (not just the lean
+      self-provisioned tools) has run for the target project, since `embody`
+      needs the deployed `launch-command.sh`/hooks (Phase 3's journal finding)
+      — currently a manual/first-touch step, not yet automated for a venue
+      that's never had a human session in it; (3) the CLI-mode reservation is
+      created against the **host's** bridge daemon (Phase 2's local design),
+      not a remote one — confirm this holds for a venue launch too, or decide
+      it needs to change.
 - [ ] Extend `agent-codespaces` and `agent-containers` to offer the same
-      CLI-mode launch shape — prepare the venue, allocate the paired CLI-mode
-      Session Host, start a standard muxed CLI process bound to it — over the
-      existing venue-parity SSH transport and auth-relay back-channel. No new
-      venue-specific transport.
+      CLI-mode launch shape — prepare the venue (the checklist above),
+      allocate the CLI-mode reservation, start a standard muxed CLI process
+      (`embody`, run remotely) bound to it — over the existing venue-parity
+      SSH transport and auth-relay back-channel. No new venue-specific
+      transport.
 
 ### Phase 5 — Docs and vision closure
 
@@ -318,6 +349,57 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-09-20 — Phase 4 prep: real-venue tmux gap, fixed with a self-heal
+
+Before writing any venue-specific launch code, checked what a **real** venue
+actually has, rather than assuming symmetry with a local dev box. SSH'd into
+a live, currently-running CodeSpace (`odsp-web-codespaces`, an existing venue
+of this harness's own operator, Ubuntu 24.04 devcontainer) and checked
+directly: `copilot` present (`nvm`-installed, v1.0.86) alongside
+`git`/`node`/`python3`/`uv` — all devcontainer conventions. **`tmux` is
+absent** (`command not found`), though `apt-cache policy tmux` shows it's
+installable (`3.4-1ubuntu0.1`) and `sudo -n true` succeeds (passwordless).
+`agent-worktrees`/`agent-bridge` binstubs are absent too, but that's the
+already-known lean self-provisioning pattern, not remote-specific.
+
+This means Phase 3's `embody`-backed `cli-mode launch` — which absolutely
+depends on a multiplexer for its whole reattach value proposition — would
+hit a bare "tmux: command not found" on the very first real venue it's
+pointed at. Fixed this now, before any venue-specific verb exists, since it's
+venue-agnostic (a bare Linux dev box without tmux hits the identical gap):
+added `agent_worktrees.sessions.ensure_mux_available()` — best-effort,
+POSIX-only, tries `apt-get`/`dnf`/`yum`/`apk` (via `sudo -n`, or directly if
+already root), silent-safe (never raises, returns the current
+`mux_available()` state unchanged on Windows or when nothing is installable)
+— and wired one call into `cmd_embody` right before `mux_new_session`, so any
+venue missing tmux self-heals on the very first `embody`/`cli-mode launch`
+rather than failing raw or silently downgrading to a non-reattachable
+headless launch. 8 new unit tests (`tests/test_ensure_mux_available.py`, all
+`unittest.mock`-faked: already-available fast path, Windows no-op, no
+package-manager/no-sudo refusal, root vs. sudo argv shape, falling through to
+the next candidate after a failed attempt, and never raising on a
+`subprocess` error). Full `agent-worktrees` suite green (see below);
+`module-size-baseline.json` widened for `__main__.py` (28673 → 28680) and
+`sessions.py` (2610 → 2669) — the pre-existing, unrelated
+`picker_tui/engine.py` violation (documented in Phase 2's journal) remains
+untouched and is not this change's concern.
+
+Deliberately scoped to POSIX only. `psmux` (the Windows tmux equivalent) is
+not a declared dependency of `agent-worktrees` — it's a separately-installed
+tool this plugin only detects/repairs PATH for, never provisions — and
+Windows self-install (winget/choco) is a meaningfully different problem with
+its own UAC/interactivity constraints. Since Phase 4's actual target (a
+CodeSpace or trusted container) is essentially always Linux, this is the
+right first cut; a genuinely Windows-hosted remote venue is out of scope
+until one actually exists.
+
+Updated Phase 4's plan with the concrete venue-prep checklist this
+investigation surfaced (`copilot` present-or-bootstrapped, `agent-worktrees`
+**full** `install` having run — not just lean tools — and confirming the
+CLI-mode reservation stays host-side for a remote launch too) so the next
+phase of work has a grounded starting point instead of assuming venue parity
+holds for a mechanism (mux) venue-parity's own vision never actually covered.
 
 ### 2026-09-20 — Phase 3 redesign: genuine mux/reattach via `agent-worktrees embody`
 
