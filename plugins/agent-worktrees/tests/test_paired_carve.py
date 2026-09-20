@@ -298,6 +298,40 @@ class TestCarvePairedKnowledgeAttributionPolicy:
         assert krec is not None
         assert krec.codename_source == "custom"
 
+    def test_second_revalidation_recomputes_from_fresh_config(
+        self, monkeypatch, tmp_path,
+    ):
+        # PR #3037 review finding: the second revalidation (immediately
+        # before the first side effect, under the allocation lock) must
+        # RECOMPUTE the policy from a freshly-loaded config, not reuse the
+        # pre-lock snapshot -- otherwise it can never observe a config
+        # change landing between the preflight and this point, making the
+        # claimed TOCTOU-window shrink hollow. Simulate exactly that: the
+        # preflight sees an EXPLICIT opt-in (passes), but by the time the
+        # lock is held, cfg.load_config resolves an UNCONFIGURED policy --
+        # the second check must catch it.
+        called = self._setup(
+            monkeypatch, tmp_path, source_attribution_configured=True,
+        )
+        unconfigured_config = self._knowledge_config_with_custom_wordlist(
+            tmp_path, source_attribution_configured=False,
+        )
+        monkeypatch.setattr(
+            m.cfg, "load_config", lambda project=None: unconfigured_config,
+        )
+        from agent_worktrees import codename_tracking
+        try:
+            m._carve_paired_knowledge(
+                _config(machine="test"), harness_id="test-win-20260806-ab",
+                timestamp="20260806", suffix="ab", plat="windows",
+                plat_short="win",
+            )
+        except codename_tracking.CodenameAttributionPolicyError:
+            pass
+        else:
+            raise AssertionError("expected CodenameAttributionPolicyError")
+        assert called["carve"] is False
+
 
 class TestCreatePairPluginComposition:
     def test_stamps_pair_before_composing_plugins(self, monkeypatch, tmp_path):

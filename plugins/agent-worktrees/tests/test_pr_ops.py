@@ -1234,6 +1234,41 @@ class TestSetPRAndStatus:
         assert pr.pr_id
         assert pr.pr_revision == 1
 
+    def test_set_pr_freezes_using_resolved_config_not_ambient(self, pr_repo):
+        # PR #3037 review finding: cmd_set_pr already resolves its own
+        # config (honoring --config/project context), which must be
+        # threaded into set_pr's freeze step -- re-loading AMBIENT config
+        # here would use the wrong repo's policy from a neutral CWD or
+        # when --config targets a different project. Simulate an "ambient"
+        # config that would resolve to a DIFFERENT (raw True) policy than
+        # the one explicitly passed in, and assert the PASSED-IN config
+        # wins.
+        import dataclasses
+        config, wid, _wt_path, _ = pr_repo
+        explicit_config = dataclasses.replace(
+            config,
+            repos={
+                "ext": dataclasses.replace(
+                    config.repos["ext"],
+                    pr=dataclasses.replace(
+                        config.repos["ext"].pr,
+                        source_attribution=True,
+                        source_attribution_configured=True,
+                    ),
+                )
+            },
+        )
+        res = pr_ops.set_pr(
+            wid, url="https://example/pulls/7", number=7, provider="gitea",
+            config=explicit_config,
+        )
+        assert res["success"] is True
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        pr = rec.active_pr()
+        assert pr is not None
+        assert pr.attribution_mode == "true"
+        assert pr.attribution_explicit is True
+
     def test_set_pr_merges_with_create_pr(self, pr_repo):
         config, wid, _wt_path, _ = pr_repo
         created = pr_ops.create_pr(wid, config, title="Add feature")

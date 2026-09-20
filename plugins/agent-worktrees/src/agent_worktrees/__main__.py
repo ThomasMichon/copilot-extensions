@@ -1966,14 +1966,29 @@ def _carve_paired_knowledge(
     codename_tracking.check_allocation_policy(**knowledge_policy_kwargs)
 
     with codename_tracking.allocation_lock(knowledge_tracking_path):
-        # Second revalidation (round-13/14 finding) immediately before the
-        # first side effect below -- shrinks, but does not eliminate, the
-        # residual TOCTOU window between the preflight above and this
-        # point. If hit, the harness worktree/branch created by the caller
-        # before this function ran is now orphaned (no automatic
-        # rollback) -- name it explicitly so the operator can remove it.
+        # Second revalidation (round-13/14 finding, sharpened by a PR
+        # #3037 review finding) immediately before the first side effect
+        # below -- RECOMPUTES the policy kwargs from a freshly-loaded
+        # config, never reuses the pre-lock snapshot above: a config
+        # change landing in the window between the preflight and this
+        # point must be observed here, or the "shrinks the TOCTOU window"
+        # claim is hollow (the earlier code re-checked the SAME stale
+        # values, which can never disagree with themselves). If hit, the
+        # harness worktree/branch created by the caller before this
+        # function ran is now orphaned (no automatic rollback) -- name it
+        # explicitly so the operator can remove it.
         try:
-            codename_tracking.check_allocation_policy(**knowledge_policy_kwargs)
+            fresh_knowledge_config = cfg.load_config(project=knowledge_name)
+            fresh_policy_kwargs = codename_tracking.allocation_policy_kwargs_for_repo(
+                fresh_knowledge_config
+            )
+            knowledge_wordlist = codename_tracking.wordlist_for_repo(
+                fresh_knowledge_config
+            )
+        except Exception:
+            fresh_policy_kwargs = knowledge_policy_kwargs
+        try:
+            codename_tracking.check_allocation_policy(**fresh_policy_kwargs)
         except codename_tracking.CodenameAttributionPolicyError as exc:
             harness_worktree_path = str(
                 Path(config.default_repo.worktree_root) / harness_id
@@ -2014,7 +2029,7 @@ def _carve_paired_knowledge(
             pair_ref=harness_ref,
             pair_kind="worktree",
             codename=knowledge_codename,
-            codename_source=knowledge_policy_kwargs["codename_source"],
+            codename_source=fresh_policy_kwargs["codename_source"],
         )
     # Best-effort permissions + trust for the knowledge worktree.
     try:
@@ -2322,20 +2337,39 @@ def _create_worktree_core(
     tracking_path = cfg.tracking_dir()
     tracking_path.mkdir(parents=True, exist_ok=True)
     with codename_tracking.allocation_lock(tracking_path):
-        # Second revalidation immediately before the first side effect
-        # below (round-13/14 finding): shrinks, but does not eliminate, the
-        # residual TOCTOU window between the preflight above and this
-        # point -- closing it fully would need config-file locking, out of
-        # scope for this effort.
-        codename_tracking.check_allocation_policy(
-            pr_enabled=bool(getattr(repo.pr, "enabled", False)),
-            codename_source=new_codename_source,
-            source_attribution_configured=bool(
+        # Second revalidation (round-13/14 finding, sharpened by a PR
+        # #3037 review finding) immediately before the first side effect
+        # below -- RECOMPUTES from a freshly-loaded config, never reuses
+        # the pre-lock `repo`/`new_codename_source` snapshot above: a
+        # config change landing in the window between the preflight and
+        # this point must be observed here, or re-checking the SAME
+        # stale values (which can never disagree with themselves) makes
+        # the claimed TOCTOU-window shrink hollow.
+        try:
+            fresh_config = cfg.load_config(project=config.repo_name)
+            fresh_repo = fresh_config.default_repo
+            fresh_codename_source = codename_tracking.classify_codename_source(
+                getattr(fresh_repo, "codename", None)
+            )
+            fresh_pr_enabled = bool(getattr(fresh_repo.pr, "enabled", False))
+            fresh_sac = bool(
+                getattr(fresh_repo.pr, "source_attribution_configured", False)
+            )
+            fresh_wordlist_config = fresh_config
+        except Exception:
+            fresh_codename_source = new_codename_source
+            fresh_pr_enabled = bool(getattr(repo.pr, "enabled", False))
+            fresh_sac = bool(
                 getattr(repo.pr, "source_attribution_configured", False)
-            ),
+            )
+            fresh_wordlist_config = config
+        codename_tracking.check_allocation_policy(
+            pr_enabled=fresh_pr_enabled,
+            codename_source=fresh_codename_source,
+            source_attribution_configured=fresh_sac,
         )
         new_codename = codename_tracking.assign_new_codename(
-            tracking_path, codename_tracking.wordlist_for_repo(config)
+            tracking_path, codename_tracking.wordlist_for_repo(fresh_wordlist_config)
         )
 
         # Creator ownership is established before the resource exists, and
@@ -2378,7 +2412,7 @@ def _create_worktree_core(
                 interface=interface,
                 origin=origin,
                 codename=new_codename,
-                codename_source=new_codename_source,
+                codename_source=fresh_codename_source,
                 dispatch_attempt=(
                     tracking.DispatchAttempt(
                         task_id=str(dispatch_attempt["task_id"]),
@@ -7120,6 +7154,7 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
         branch=args.branch,
         select_number=getattr(args, "pr", None),
         select_branch=getattr(args, "select_branch", None),
+        config=config,
     )
     if (
         result.get("success")

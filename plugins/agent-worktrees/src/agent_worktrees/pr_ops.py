@@ -1728,6 +1728,7 @@ def set_pr(
     branch: str | None = None,
     select_number: int | None = None,
     select_branch: str | None = None,
+    config: Config | None = None,
 ) -> dict:
     """Record PR metadata (URL/number/state/provider) on a worktree record.
 
@@ -1759,6 +1760,7 @@ def set_pr(
             base, yaml_path, url=url, number=number, state=state,
             provider=provider, branch=branch,
             select_number=select_number, select_branch=select_branch,
+            config=config,
         )
 
 
@@ -1773,6 +1775,7 @@ def _set_pr_locked(
     branch: str | None,
     select_number: int | None,
     select_branch: str | None,
+    config: Config | None = None,
 ) -> dict:
     """The load -> mutate -> save body of :func:`set_pr`, run under the record
     lock. Split out so the lock scope is exactly the RMW window."""
@@ -1806,9 +1809,20 @@ def _set_pr_locked(
             # set-pr has no per-call override, so the effective value is
             # simply whatever is live in config AT THIS MOMENT (best-effort:
             # a config-load failure degrades to the safe "false" sentinel,
-            # never crashes this RMW).
+            # never crashes this RMW). Use the CALLER's already-resolved
+            # config when supplied (a PR #3037 review finding: `cmd_set_pr`
+            # resolves config honoring `--config`/project context, but this
+            # freeze previously re-loaded AMBIENT config with neither --
+            # from a neutral CWD, or when `--config` targets a different
+            # project, the PR would be frozen under the wrong repo's
+            # policy) -- only fall back to an ambient load for a caller
+            # that genuinely has none to offer (e.g. a bare unit test of
+            # this function).
             try:
-                prcfg_for_stamp = cfg.load_config().default_repo.pr
+                prcfg_for_stamp = (
+                    config.default_repo.pr if config is not None
+                    else cfg.load_config().default_repo.pr
+                )
                 tracking.stamp_frozen_attribution(
                     pr, attribution=prcfg_for_stamp.source_attribution,
                     explicit=prcfg_for_stamp.source_attribution_configured,
