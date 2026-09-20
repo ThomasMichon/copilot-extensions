@@ -288,8 +288,14 @@ inline, so agents never hand-switch:
   (`gh auth token --user <account>` → `GH_TOKEN`); an explicit
   `pr.token_command`/`pr.token_env` still wins. No global switch.
 - **git push/fetch**: the account credential is injected per-invocation via
-  `http.extraheader` (never persisted to `.git/config`), with a plain-push
-  retry fallback.
+  `http.extraheader` (this tool's own commands only), with a plain-push
+  retry fallback. Registration additionally **persists** a repo-local
+  `credential.https://<host>` override in `.git/config` (`username` + a
+  `gh auth token`-backed `helper`) once the account resolves unambiguously,
+  so a plain `git fetch`/`git pull` run by anything *other* than this tool
+  (an IDE, CI, an unattended maintenance task) also authenticates as the
+  correct account rather than whichever `gh` account happens to be
+  ambiently active. See `pin-credentials` below.
 
 `repos list` and `related resolve` surface the resolved account (`explicit` vs
 `derived`). Prefer `account_map` for a whole org; set an explicit per-repo
@@ -305,6 +311,25 @@ it lists the authenticated `gh` logins and persists your pick as an
 (`repos account set <owner> <login>`). A repo whose owner **is** a `gh` account
 (a personal/EMU repo) is left silent, and nothing prompts once an
 `account:`/`account_map` already resolves. (dotfiles #537)
+
+**Backfilling the credential pin.** Repos registered before the pin existed,
+or whose account only became resolvable later (a fresh `account_map` entry),
+don't automatically get the `.git/config` override above. Run
+`repos pin-credentials [name] [--all] [--json]` to retrofit it: omit the name
+(or pass `--all`) to sweep every registered repo, or name one to restrict.
+Reports one of:
+
+- `pinned` — the override was written.
+- `needs_clarify` — resolve with `repos account set <owner> <login>` first.
+- `skipped` — `gh` unavailable, not a git checkout, **or** `login` is
+  already the active `gh` account (the inherited default helper already
+  works there; forcing this override risks a scope-limited OAuth token
+  turning a working push into a 403).
+- `no_path` — no local checkout on this machine.
+- `not_github` / `not_registered` — non-GitHub remote / unknown repo name.
+- `ssh_remote` / `not_https` — the checkout's remote is SSH, or plain
+  `http://`; the pin only ever affects `credential.https://<host>` and is a
+  no-op for either transport.
 
 ### Accounts catalog (`accounts.yaml`)
 

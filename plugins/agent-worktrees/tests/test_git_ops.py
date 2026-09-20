@@ -221,6 +221,35 @@ class TestCrossAccountAuth:
         expected = base64.b64encode(b"x-access-token:ghp_secret").decode()
         assert args[1] == f"http.extraheader=AUTHORIZATION: basic {expected}"
 
+    def test_auth_args_for_url_injects_before_any_checkout_exists(self, monkeypatch):
+        """The URL-based variant backs the initial 'git clone' itself, which
+        runs before any repo/remote exists for _auth_config_args's
+        cwd-based remote-name lookup to resolve."""
+        import base64
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "DifferentUser")
+        monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: "ghp_secret")
+        args = go._auth_config_args_for_url("https://github.com/Owner/r.git")
+        expected = base64.b64encode(b"x-access-token:ghp_secret").decode()
+        assert args == ["-c", f"http.extraheader=AUTHORIZATION: basic {expected}"]
+
+    def test_auth_args_for_url_empty_for_non_github(self, monkeypatch):
+        assert go._auth_config_args_for_url("https://gitlab.com/o/r.git") == []
+
+    def test_auth_args_for_url_empty_for_plain_http(self, monkeypatch):
+        """The injected header would otherwise carry the bearer token over
+        an unencrypted connection for a plain http:// GitHub remote."""
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "DifferentUser")
+        monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: "ghp_secret")
+        assert go._auth_config_args_for_url("http://github.com/Owner/r.git") == []
+
+    def test_auth_args_empty_for_plain_http_via_remote_name(self, monkeypatch):
+        """Same guarantee through the remote-name entry point used by the
+        existing fetch/push paths, not only the URL-based clone path."""
+        monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "http://github.com/Owner/r.git")
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "DifferentUser")
+        monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: "ghp_secret")
+        assert go._auth_config_args("origin", cwd=".") == []
+
     def test_auth_args_empty_when_owner_is_active_account(self, monkeypatch):
         """#900: when the repo owner *is* the active gh account, skip injection
         so the working credential helper isn't overridden by a possibly
@@ -384,6 +413,269 @@ class TestCrossAccountAuth:
         assert "c2VjcmV0" not in str(err)
         assert "<redacted>" in str(err)
         assert all("c2VjcmV0" not in a for a in err.cmd)
+
+
+class TestPinGitCredential:
+    """A plain ``git fetch``/``pull`` run by anything other than this tool's
+    own account-aware calls only ever sees whatever ``gh`` account is
+    currently "active", independent of which account a repo actually needs.
+    ``pin_git_credential`` persists a repo-local override so any plain git
+    client resolves the correct login."""
+
+    def test_noop_when_login_or_host_empty(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        assert go.pin_git_credential(tmp_path, "") is False
+        assert go.pin_git_credential(tmp_path, "someone", host="") is False
+
+    @pytest.mark.parametrize("login", [
+        "o'neil",  # single quote breaks out of the helper's '<login>' quoting
+        "a`whoami`",
+        "a$(whoami)",
+        "a; rm -rf /",
+        "a b",
+        "a\nb",
+        "safelogin\n",  # a trailing newline must not slip past a "^...$" match
+    ])
+    def test_noop_when_login_has_unsafe_characters(
+        self, tmp_path: Path, monkeypatch, login: str,
+    ):
+        """The helper is a ``!``-prefixed shell script; login/host are never
+        escaped, only allowlisted -- an unsafe character must be rejected
+        outright rather than risk a shell-injected credential helper."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+        assert go.pin_git_credential(repo, login) is False
+
+    @pytest.mark.parametrize("host", [
+        "gh;evil.com", "gh evil.com", "gh$(x).com", "github.com\n",
+    ])
+    def test_noop_when_host_has_unsafe_characters(
+        self, tmp_path: Path, monkeypatch, host: str,
+    ):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+        assert go.pin_git_credential(repo, "someone", host=host) is False
+
+    def test_allows_underscore_login(self, tmp_path: Path, monkeypatch):
+        """EMU-mapped logins in this codebase use underscores (e.g.
+        'tmichon_microsoft'), which is not a real GitHub username character
+        but must still be allowed -- only shell metacharacters are rejected."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
+
+    def test_skips_when_login_is_active_account(self, tmp_path: Path, monkeypatch):
+        """#900's own rationale, reapplied here: when login IS the active gh
+        account, the inherited default helper already authenticates
+        correctly -- forcing a gh-auth-token-backed helper risks a
+        scope-limited OAuth token turning a working plain push into a 403."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "SomeUser")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+        # Case-insensitive match against the active account.
+        assert go.pin_git_credential(repo, "someuser") is False
+        result = sp.run(
+            ["git", "-C", str(repo), "config", "--local",
+             "credential.https://github.com.username"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode != 0  # never written
+
+    def test_pins_when_login_differs_from_active_account(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "SomeUser")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+        assert go.pin_git_credential(repo, "other-user") is True
+
+    def test_clears_stale_pin_when_login_becomes_active_account(self, tmp_path: Path, monkeypatch):
+        """A repo previously pinned to 'other-user', whose account_map is
+        later corrected to what is now the active gh account, must not keep
+        forcing the stale login -- the config must actually be cleared, not
+        just left untouched, or 'the active helper already works' would be
+        false for this checkout."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "SomeUser")
+        assert go.pin_git_credential(repo, "other-user") is True  # establish the stale pin
+
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "other-user")
+        assert go.pin_git_credential(repo, "other-user") is False  # now the active account
+
+        result = sp.run(
+            ["git", "-C", str(repo), "config", "--local",
+             "credential.https://github.com.username"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode != 0  # stale username cleared
+        helpers = sp.run(
+            ["git", "-C", str(repo), "config", "--local", "--get-all",
+             "credential.https://github.com.helper"],
+            capture_output=True, text=True,
+        )
+        assert helpers.returncode != 0 or helpers.stdout.strip() == ""  # stale helper cleared
+
+    def test_noop_when_gh_unavailable(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: None)
+        assert go.pin_git_credential(tmp_path, "someone") is False
+
+    def test_noop_when_path_not_a_directory(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        assert go.pin_git_credential(tmp_path / "does-not-exist", "someone") is False
+
+    def test_noop_when_not_a_git_working_tree(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        plain_dir = tmp_path / "not-a-repo"
+        plain_dir.mkdir()
+        assert go.pin_git_credential(plain_dir, "someone") is False
+
+    def test_pins_local_config_on_a_real_repo(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+
+        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
+
+        username = sp.run(
+            ["git", "-C", str(repo), "config", "--local",
+             "credential.https://github.com.username"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        assert username == "tmichon_microsoft"
+
+        helpers = sp.run(
+            ["git", "-C", str(repo), "config", "--local", "--get-all",
+             "credential.https://github.com.helper"],
+            capture_output=True, text=True, check=True,
+        ).stdout.splitlines()
+        # A leading empty entry resets any inherited (global/system) helper
+        # chain for this host before the pinned helper is appended.
+        assert helpers[0] == ""
+        assert "tmichon_microsoft" in helpers[-1]
+        assert "gh auth token" in helpers[-1]
+
+    def test_idempotent_on_repeated_calls(self, tmp_path: Path, monkeypatch):
+        """Re-pinning (e.g. a re-run of the backfill command) must not pile up
+        duplicate helper entries."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+
+        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
+        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
+
+        helpers = sp.run(
+            ["git", "-C", str(repo), "config", "--local", "--get-all",
+             "credential.https://github.com.helper"],
+            capture_output=True, text=True, check=True,
+        ).stdout.splitlines()
+        assert helpers == ["", helpers[-1]]
+
+    def test_concurrent_pins_never_interleave(self, tmp_path: Path, monkeypatch):
+        """Two threads racing to pin the same checkout to different logins
+        must leave a self-consistent result: the on-disk username always
+        matches the login embedded in the (single) surviving helper entry,
+        never a mix of one thread's username with another's helper."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        import threading
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+
+        results: list[bool] = []
+        lock = threading.Lock()
+
+        def _pin(login: str) -> None:
+            for _ in range(5):
+                ok = go.pin_git_credential(repo, login)
+                with lock:
+                    results.append(ok)
+
+        threads = [
+            threading.Thread(target=_pin, args=("acct-a",)),
+            threading.Thread(target=_pin, args=("acct-b",)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert all(results)
+
+        username = sp.run(
+            ["git", "-C", str(repo), "config", "--local",
+             "credential.https://github.com.username"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        helpers = sp.run(
+            ["git", "-C", str(repo), "config", "--local", "--get-all",
+             "credential.https://github.com.helper"],
+            capture_output=True, text=True, check=True,
+        ).stdout.splitlines()
+        # Exactly the reset + one helper survive (never extra entries from an
+        # interleaved unset-all/add sequence), and the surviving username and
+        # helper agree on the same login.
+        assert helpers == ["", helpers[-1]]
+        assert username in helpers[-1]
+
+    def test_pins_for_custom_host(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+
+        assert go.pin_git_credential(repo, "acct", host="github.example.com") is True
+        username = sp.run(
+            ["git", "-C", str(repo), "config", "--local",
+             "credential.https://github.example.com.username"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        assert username == "acct"
+
+    def test_pins_a_bare_repository(self, tmp_path: Path, monkeypatch):
+        """A bare anchor (agent-worktrees' own pattern -- a normal ``git
+        init``/``clone`` layout with ``core.bare`` forced ``true`` afterward,
+        so it can never be edited directly) has no work tree to be "inside",
+        but a plain fetch/pull can still run there directly (an unattended
+        machine-maintenance task might do exactly this) and needs the same
+        pin."""
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        repo = tmp_path / "bare-repo"
+        import subprocess as sp
+        sp.run(["git", "init", "-q", str(repo)], check=True)
+        sp.run(["git", "-C", str(repo), "config", "core.bare", "true"], check=True)
+
+        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
+
+        username = sp.run(
+            ["git", "-C", str(repo), "config", "--local",
+             "credential.https://github.com.username"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        assert username == "tmichon_microsoft"
 
 
 class TestFetchTimeout:
