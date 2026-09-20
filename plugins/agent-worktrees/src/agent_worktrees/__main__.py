@@ -20350,12 +20350,12 @@ def _clarify_registration_account(
     the exact remedy. No-op when the account already resolves (explicit / map /
     sibling) or the remote is non-GitHub. See dotfiles #537.
 
-    Also persists a repo-local git credential pin for the resolved account
-    (see :func:`git_ops.pin_git_credential`) whenever ``path`` is given and an
-    unambiguous login is known -- so a plain ``git fetch``/``git pull`` run by
-    anything *other* than this tool (agent-machines' self-update sweep, an
-    IDE, CI) authenticates as the same account this registration resolved,
-    rather than whatever ``gh`` account happens to be "active" right now.
+    An unambiguous account already gets its repo-local git credential pin
+    (see :func:`git_ops.pin_git_credential`) from ``repos.add_repo`` itself,
+    the common path every registration flow goes through. This function only
+    needs to pin *here*, once ``path`` is given, for the interactive/headless
+    clarification outcome below -- the one case where the account becomes
+    known only *after* ``add_repo`` already ran.
     """
     from . import git_ops, repos
 
@@ -20364,18 +20364,11 @@ def _clarify_registration_account(
     except Exception:
         return
 
-    def _pin(login: str | None) -> None:
-        if path and login and res.owner:
-            try:
-                git_ops.pin_git_credential(path, login)
-            except Exception:
-                pass
-
     if not res.needs_clarify:
-        # Surface a resolved non-owner account for transparency.
+        # Surface a resolved non-owner account for transparency (already
+        # pinned by add_repo).
         if res.source in ("account_map", "sibling") and res.login:
             output.info(f"  account:  {res.login} (via {res.source})")
-        _pin(res.login)
         return
 
     owner = res.owner or ""
@@ -20412,7 +20405,11 @@ def _clarify_registration_account(
         if 0 <= idx < len(accounts):
             choice = accounts[idx]
     repos.set_account_map(owner, choice)
-    _pin(choice)
+    if path:
+        try:
+            git_ops.pin_git_credential(path, choice)
+        except Exception:
+            pass
 
 
 def cmd_repos_dispatch(argv: list[str]) -> int:
@@ -20771,8 +20768,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         # Backfill the repo-local git credential pin (see git_ops.pin_git_
         # credential) for repos registered before this existed, or whose
         # account only became resolvable later (a fresh account_map entry).
-        # New registrations already pin automatically via
-        # _clarify_registration_account.
+        # New registrations already pin automatically via repos.add_repo.
         json_out = "--json" in rest
         target = None
         for tok in rest:

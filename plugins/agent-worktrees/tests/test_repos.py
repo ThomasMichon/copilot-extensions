@@ -489,7 +489,7 @@ def test_add_repo_persists_account(home: Path):
     assert repos.resolve_account(reg.repos["proj"]) == "host-acct"
 
 
-# --- backfill_credential_pins (dotfiles#537) ---------------------------------
+# --- backfill_credential_pins ------------------------------------------------
 
 
 def test_backfill_pins_a_resolvable_repo(home: Path, tmp_path: Path):
@@ -564,6 +564,77 @@ def test_backfill_skips_missing_local_path(home: Path, tmp_path: Path):
     )
     results = repos.backfill_credential_pins(plat="windows")
     assert results[0].status == "no_path"
+
+
+def test_backfill_unknown_name_never_falls_back_to_all(home: Path, tmp_path: Path):
+    """A typo in the requested name must report 'not found', never silently
+    expand to every registered repo."""
+    work = tmp_path / "real-one"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "real-one", str(work), repo_class="worktree",
+        remote="https://github.com/example-operator/real-one.git", plat="windows",
+    )
+    results = repos.backfill_credential_pins("typo-name", plat="windows")
+    assert len(results) == 1
+    assert results[0].name == "typo-name"
+    assert results[0].status == "not_registered"
+
+
+# --- add_repo auto-pins (every registration path, not just repos add/clone) --
+
+
+def test_add_repo_pins_credential_for_a_resolvable_owner(home: Path, tmp_path: Path):
+    """Every caller of add_repo -- repos add/clone, plugin install/adoption,
+    project-entry registration -- gets the pin, not only the CLI paths that
+    separately call _clarify_registration_account."""
+    work = tmp_path / "auto-pin"
+    _init_repo(work, branch="main")
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+        repos.add_repo(
+            "auto-pin", str(work), repo_class="worktree",
+            remote="https://github.com/example-operator/auto-pin.git", plat="windows",
+        )
+    username = subprocess.run(
+        ["git", "-C", str(work), "config", "--local",
+         "credential.https://github.com.username"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert username == "example-operator"
+
+
+def test_add_repo_does_not_pin_when_account_needs_clarify(home: Path, tmp_path: Path):
+    """An org-owned remote with no account_map entry must not guess -- no
+    pin is written until an operator resolves it (repos account set /
+    the interactive _clarify_registration_account flow)."""
+    work = tmp_path / "org-owned-auto"
+    _init_repo(work, branch="main")
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"):
+        repos.add_repo(
+            "org-owned-auto", str(work), repo_class="worktree",
+            remote="https://github.com/github/org-owned-auto.git", plat="windows",
+        )
+    result = subprocess.run(
+        ["git", "-C", str(work), "config", "--local",
+         "credential.https://github.com.username"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0  # key was never set
+
+
+def test_add_repo_pin_failure_never_raises(home: Path, tmp_path: Path):
+    """A broken resolver/pin call must never break registration itself."""
+    with patch("agent_worktrees.repos.resolve_registration_account",
+               side_effect=RuntimeError("boom")):
+        entry = repos.add_repo(
+            "still-registers", "D:/Src/still-registers", repo_class="worktree",
+            remote="https://github.com/example-operator/still-registers.git", plat="windows",
+        )
+    assert entry.name == "still-registers"
+    assert repos.read_registry().repos["still-registers"].name == "still-registers"
 
 
 # ---------------------------------------------------------------------------

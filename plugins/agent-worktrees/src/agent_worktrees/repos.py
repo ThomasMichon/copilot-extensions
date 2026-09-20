@@ -610,7 +610,29 @@ def add_repo(
     output.ok(
         f"Repo '{name}' registered at {path} ({plat}) [{entry.repo_class}{agent_note}]"
     )
+    _best_effort_pin_credential(entry, path)
     return entry
+
+
+def _best_effort_pin_credential(entry: RepoEntry, path: str) -> None:
+    """Pin the repo-local git credential for ``entry`` if the account already
+    resolves unambiguously (never prompts, never raises).
+
+    Called from every ``add_repo`` caller -- ``repos add``, ``repos clone``,
+    plugin install/adoption, project-entry registration -- so the pin is a
+    default outcome of *any* registration path, not only the CLI ``add``/
+    ``clone`` commands that separately call ``_clarify_registration_account``
+    (which additionally prompts to resolve an org-owned remote's ambiguous
+    account; once it does, it re-pins with the newly chosen login).
+    """
+    try:
+        res = resolve_registration_account(entry.remote, entry.account)
+        if res.needs_clarify or not res.login or not res.owner:
+            return
+        from . import git_ops
+        git_ops.pin_git_credential(path, res.login)
+    except Exception:
+        pass
 
 
 def remove_repo(name: str) -> bool:
@@ -721,7 +743,8 @@ class CredentialPinResult:
     """Outcome of one repo's credential-pin backfill attempt."""
 
     name: str
-    status: str  # "pinned" | "skipped" | "needs_clarify" | "no_path" | "not_github"
+    # "pinned" | "skipped" | "needs_clarify" | "no_path" | "not_github" | "not_registered"
+    status: str
     login: str | None
     detail: str
 
@@ -734,21 +757,28 @@ def backfill_credential_pins(
     New registrations (``repos add``/``repos clone``/adopt) pin automatically
     at registration time (see ``_clarify_registration_account`` in
     ``__main__``); this covers repos registered *before* that existed, or
-    whose checkout predates a machine's account_map entry (dotfiles#537).
+    whose checkout predates a machine's account_map entry.
 
-    Restricts to ``name`` when given, else every registered repo. Skips
-    (rather than errors) a repo with no resolvable local path, a non-GitHub
-    remote, or an account that still needs interactive clarification (an
-    org-owned remote with no account_map/explicit override) -- those cases
-    require ``repos account set``/an operator choice, not a silent guess.
+    Restricts to ``name`` when given, else every registered repo -- an
+    unrecognized ``name`` reports a single ``not_registered`` result rather
+    than silently falling back to "every repo" (a typo must never expand
+    scope). Skips (rather than errors) a repo with no resolvable local path,
+    a non-GitHub remote, or an account that still needs interactive
+    clarification (an org-owned remote with no account_map/explicit
+    override) -- those cases require ``repos account set``/an operator
+    choice, not a silent guess.
     """
     from . import git_ops
 
     registry = read_registry()
-    entries = (
-        [registry.repos[name]] if name and name in registry.repos
-        else list(registry.repos.values())
-    )
+    if name is not None:
+        if name not in registry.repos:
+            return [
+                CredentialPinResult(name, "not_registered", None, "no such repo in the registry")
+            ]
+        entries = [registry.repos[name]]
+    else:
+        entries = list(registry.repos.values())
     results: list[CredentialPinResult] = []
     for entry in entries:
         if not entry.remote:

@@ -1041,14 +1041,12 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
     login) is only advisory to *this* tool's own commands: they inject a
     per-invocation token override (:func:`_auth_config_args`) and never touch
     the repo's actual git config. Any *other* tool that runs a plain ``git
-    fetch``/``git pull`` in that checkout (a CI job, an IDE, the
-    ``agent-machines`` self-update sweep, ...) instead gets whatever account
-    ``gh``'s own generic ``credential.https://<host>.helper`` currently
-    considers *active* -- which drifts independently of which account this
-    repo actually needs and silently authenticates as the wrong identity for
-    a private repo (observed: dotfiles#537, odsp-web-harness's self-update
-    sweep failing with "Repository not found" against the correct-looking
-    remote).
+    fetch``/``git pull`` in that checkout (a CI job, an IDE, an unattended
+    machine-maintenance task, ...) instead gets whatever account ``gh``'s
+    own generic ``credential.https://<host>.helper`` currently considers
+    *active* -- which drifts independently of which account this repo
+    actually needs and can silently authenticate as the wrong identity
+    against a private repo.
 
     This writes a **local**, repo-scoped override so any plain git client
     resolves the same login this tool already knows is correct, regardless of
@@ -1078,17 +1076,20 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
     path = Path(repo_path)
     if not path.is_dir() or shutil.which("gh") is None:
         return False
+    env = repository_identity_env()
     try:
         # ``--git-dir`` (not ``--is-inside-work-tree``) so this also pins a
         # *bare* anchor repo (agent-worktrees' own pattern for a checkout
         # that must never be edited directly, e.g. a repo with core.bare set
         # after conversion from a normal clone) -- a bare repo has no work
         # tree to be "inside", but plain `git fetch`/`pull` there is exactly
-        # the case this pin protects (the agent-machines self-update sweep
-        # runs one directly against such an anchor).
+        # the case this pin protects. Inherited repository-selection env vars
+        # (GIT_DIR/GIT_WORK_TREE/GIT_CONFIG/...) are stripped so this always
+        # targets ``path``, never whatever repo the caller's own process
+        # context points at (see :func:`repository_identity_env`).
         probe = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--git-dir"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, env=env,
         )
         if probe.returncode != 0:
             return False
@@ -1100,19 +1101,19 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
         )
         subprocess.run(
             ["git", "-C", str(path), "config", "--local", "--unset-all", f"{key}.helper"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, env=env,
         )
         subprocess.run(
             ["git", "-C", str(path), "config", "--local", "--add", f"{key}.helper", ""],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, env=env,
         )
         subprocess.run(
             ["git", "-C", str(path), "config", "--local", f"{key}.username", login],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, env=env,
         )
         result = subprocess.run(
             ["git", "-C", str(path), "config", "--local", "--add", f"{key}.helper", helper_script],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, env=env,
         )
         return result.returncode == 0
     except Exception:

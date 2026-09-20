@@ -387,12 +387,11 @@ class TestCrossAccountAuth:
 
 
 class TestPinGitCredential:
-    """dotfiles#537 / odsp-web-harness self-update sweep: a plain ``git
-    fetch``/``pull`` run by anything other than this tool's own account-aware
-    calls only ever sees whatever ``gh`` account is currently "active",
-    independent of which account a repo actually needs. ``pin_git_credential``
-    persists a repo-local override so any plain git client resolves the
-    correct login."""
+    """A plain ``git fetch``/``pull`` run by anything other than this tool's
+    own account-aware calls only ever sees whatever ``gh`` account is
+    currently "active", independent of which account a repo actually needs.
+    ``pin_git_credential`` persists a repo-local override so any plain git
+    client resolves the correct login."""
 
     def test_noop_when_login_or_host_empty(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
@@ -478,9 +477,9 @@ class TestPinGitCredential:
         """A bare anchor (agent-worktrees' own pattern -- a normal ``git
         init``/``clone`` layout with ``core.bare`` forced ``true`` afterward,
         so it can never be edited directly) has no work tree to be "inside",
-        but a plain fetch/pull can still run there directly (the
-        agent-machines self-update sweep does exactly this) and needs the
-        same pin."""
+        but a plain fetch/pull can still run there directly (an unattended
+        machine-maintenance task might do exactly this) and needs the same
+        pin."""
         monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
         repo = tmp_path / "bare-repo"
         import subprocess as sp
