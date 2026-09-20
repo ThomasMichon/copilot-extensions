@@ -338,6 +338,80 @@ def test_slot_descriptor_reports_passive_role_for_other_active_pid(
     assert slot["active"]["pid"] == 999999
 
 
+def test_self_retire_status_lifecycle_reflects_the_live_loop(tmp_path, monkeypatch):
+    """Copilot review finding on PR #2963: prove the published status actually
+    tracks the running self-retire loop end-to-end (armed -> generation ->
+    superseded/confirms), not just the pure `_slot_descriptor` rendering of
+    prebuilt state. Uses a real app lifespan with a shortened poll interval and
+    a temporary routing table; `is_superseded` is monkeypatched (rather than
+    faking a real listening successor) to keep this fast and deterministic."""
+    import os
+    import time
+
+    from zdd import routing
+
+    routing_dir = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing_dir))
+    monkeypatch.setenv("AGENT_DISPATCH_SELF_RETIRE", "1")
+    monkeypatch.setenv("AGENT_DISPATCH_SELF_RETIRE_POLL_S", "0.05")
+    monkeypatch.setenv("AGENT_DISPATCH_SELF_RETIRE_CONFIRMATIONS", "20")
+    monkeypatch.setenv("AGENT_DISPATCH_ABANDONED_PASSIVE_REAP", "0")
+
+    my_pid = os.getpid()
+    routing.publish_active(
+        routing_dir, bind="127.0.0.1", port=9999, pid=my_pid, version="1.0",
+    )
+
+    # Patched BEFORE the app/lifespan starts: the loop's `from .self_retire
+    # import is_superseded` binds this lambda once, for the coroutine's whole
+    # lifetime, so flipping the mutable flag later (step 3) is what changes
+    # its answer -- re-patching the module attribute after the loop has
+    # already started would not reach the already-bound local name.
+    import agent_dispatch.self_retire as self_retire_mod
+
+    supersede_flag = {"value": False}
+    monkeypatch.setattr(
+        self_retire_mod, "is_superseded", lambda *a, **k: supersede_flag["value"],
+    )
+
+    app = create_app(TaskQueue(tmp_path / "t.db"))
+    with TestClient(app) as client:
+
+        def _wait(predicate, *, timeout=5.0):
+            deadline = time.monotonic() + timeout
+            last = None
+            while time.monotonic() < deadline:
+                last = client.get("/health").json()["slot"]["self_retire"]
+                if predicate(last):
+                    return last
+                time.sleep(0.02)
+            pytest.fail(f"condition not met within {timeout}s; last status={last}")
+
+        # 1. Arms once it observes itself as the routing table's active pid,
+        #    capturing its own generation.
+        armed = _wait(lambda s: s["armed"])
+        assert armed["generation"] is not None
+
+        # 2. Not superseded while nothing supersedes it: the loop keeps polling
+        #    and keeps writing `superseded: False` / `confirms: 0` -- proving
+        #    the status is live-updated on every cycle, not written once and
+        #    forgotten.
+        for _ in range(3):
+            status = client.get("/health").json()["slot"]["self_retire"]
+            assert status["superseded"] is False
+            assert status["confirms"] == 0
+            time.sleep(0.05)
+
+        # 3. Once superseded (simulated by flipping the patched predicate
+        #    rather than standing up a real listening successor process),
+        #    confirms climb toward the confirmation threshold and
+        #    `superseded` flips true.
+        supersede_flag["value"] = True
+        status = _wait(lambda s: s["superseded"] and s["confirms"] >= 1)
+        assert status["superseded"] is True
+        assert status["confirms"] >= 1
+
+
 def test_create_and_get(api):
     r = api.post(
         "/tasks",
