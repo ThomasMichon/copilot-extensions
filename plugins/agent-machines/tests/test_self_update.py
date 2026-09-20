@@ -315,6 +315,75 @@ def test_refresh_dtssh_mesh_error_when_alias_unreachable(monkeypatch):
     assert "host-b" in step.detail
 
 
+def test_refresh_dtssh_mesh_uses_same_cell_agent_ssh_prefix(monkeypatch, tmp_path):
+    cell = tmp_path / "marketplaces" / "test-cell"
+    root = cell / "plugins" / "agent-machines"
+    root.mkdir(parents=True)
+    (cell / "plugins" / "agent-ssh").mkdir()
+    own = {"cellRoot": str(cell), "pluginRoot": str(root)}
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
+    monkeypatch.setenv("AGENT_RT_ROOT", str(root))
+    monkeypatch.setattr(self_update._peer_launch, "validate_owner", lambda *args: own)
+    monkeypatch.setattr(
+        self_update.shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
+    )
+    expected_prefix = self_update._peer_launch.launch_prefix(
+        "agent-machines", Path(own["pluginRoot"]),
+        str(Path(own["pluginRoot"]) / "install.json"), "agent-ssh",
+    )
+    calls = []
+
+    def runner(argv, *, cwd=None, timeout=0):
+        calls.append(list(argv))
+        payload = json.dumps({"ok": True, "machines_yaml": None, "detail": "no mesh", "aliases": []})
+        return self_update.CommandResult(list(argv), 0, payload, "")
+
+    step = self_update.refresh_dtssh_mesh(runner=runner)
+    assert step.status == "skipped"
+    assert calls[0][:len(expected_prefix)] == expected_prefix
+    assert calls[0][len(expected_prefix):] == ["refresh-mesh", "--json"]
+
+
+def test_refresh_dtssh_mesh_skips_without_same_cell_agent_ssh(monkeypatch, tmp_path):
+    cell = tmp_path / "marketplaces" / "test-cell"
+    root = cell / "plugins" / "agent-machines"
+    root.mkdir(parents=True)
+    own = {"cellRoot": str(cell), "pluginRoot": str(root)}
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
+    monkeypatch.setenv("AGENT_RT_ROOT", str(root))
+    monkeypatch.setattr(self_update._peer_launch, "validate_owner", lambda *args: own)
+    monkeypatch.setattr(
+        self_update.shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
+    )
+
+    step = self_update.refresh_dtssh_mesh(
+        runner=lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("must not run without a same-cell agent-ssh")
+        )
+    )
+    assert step.status == "skipped"
+    assert "agent-ssh is not installed" in step.detail
+
+
+def test_refresh_dtssh_mesh_propagates_context_refusal(monkeypatch, tmp_path):
+    root = tmp_path / "marketplaces" / "test-cell" / "plugins" / "agent-machines"
+    root.mkdir(parents=True)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
+    monkeypatch.setenv("AGENT_RT_ROOT", str(root))
+
+    def refuse(*_args):
+        raise ValueError("malformed receipt")
+
+    monkeypatch.setattr(self_update._peer_launch, "validate_owner", refuse)
+
+    with pytest.raises(self_update._peer_launch.ContextRefused):
+        self_update.refresh_dtssh_mesh(
+            runner=lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("must not run on a refused context")
+            )
+        )
+
+
 def test_run_tier_watchdog_appends_mesh_refresh_step(monkeypatch, tmp_path):
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
@@ -773,7 +842,7 @@ def test_register_scheduled_task_hourly_uses_native_repetition_parameters():
         "watchdog",
         runner=fake_runner,
         resolve_binary=lambda name: f"/usr/bin/{name}",
-        home=Path("/home/tmichon"),
+        home=Path("/home/operator"),
     )
     script = captured["argv"][-1]
     assert "-RepetitionInterval (New-TimeSpan -Hours 1)" in script
@@ -793,7 +862,7 @@ def test_register_scheduled_task_daily_has_no_repetition_parameters():
         "sweep",
         runner=fake_runner,
         resolve_binary=lambda name: f"/usr/bin/{name}",
-        home=Path("/home/tmichon"),
+        home=Path("/home/operator"),
     )
     script = captured["argv"][-1]
     assert "-Daily -At '3:00AM' -DaysInterval 1" in script
@@ -859,7 +928,7 @@ def test_default_command_runner_resolves_pathext_shim(monkeypatch):
     captured: dict[str, list[str]] = {}
 
     def fake_which(name):
-        return f"C:\\Users\\tmichon\\.local\\bin\\{name}.cmd" if name == "agent-worktrees" else None
+        return f"C:\\Users\\operator\\.local\\bin\\{name}.cmd" if name == "agent-worktrees" else None
 
     def fake_run(argv, **kwargs):
         captured["argv"] = argv
@@ -874,7 +943,7 @@ def test_default_command_runner_resolves_pathext_shim(monkeypatch):
     monkeypatch.setattr(self_update.shutil, "which", fake_which)
     monkeypatch.setattr(self_update.subprocess, "run", fake_run)
     result = self_update.default_command_runner(["agent-worktrees", "-p", "dotfiles", "list"])
-    assert captured["argv"][0] == "C:\\Users\\tmichon\\.local\\bin\\agent-worktrees.cmd"
+    assert captured["argv"][0] == "C:\\Users\\operator\\.local\\bin\\agent-worktrees.cmd"
     # The reported CommandResult.argv still shows the original logical argv
     # (not the resolved absolute path) so status/log output stays readable.
     assert result.argv[0] == "agent-worktrees"
