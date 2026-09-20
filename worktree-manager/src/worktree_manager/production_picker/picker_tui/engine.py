@@ -1619,8 +1619,14 @@ class PickerScreen(Widget):
 
     def _setup_live_pivots(self):
         """Scan contributed pivots without delaying local or fleet rows."""
-        pivot_payload = self._scan_pivot_payload()
+        # Prewarm FIRST, before the (potentially slow) registry scan below --
+        # same reasoning as the non-live setup() ordering fix: this thread is
+        # already off the render thread, but the prewarm's own purpose is to
+        # finish importing data_ssh before the operator's first pivot-switch
+        # keypress, and every second spent scanning before the import even
+        # starts is a second less of head start against that keypress.
         from . import tasks as _tasks_mod; _tasks_mod.prewarm_optional_modules()
+        pivot_payload = self._scan_pivot_payload()
 
         def apply():
             self._install_pivot_payload(pivot_payload)
@@ -2055,10 +2061,26 @@ class PickerScreen(Widget):
                     it["state"] = "done"
 
     def setup(self):
+        # Kick off the data_ssh prewarm import FIRST, before anything else in
+        # this method -- including the pivot-registry scan below. The prewarm
+        # exists specifically so the FIRST switch onto a registered pivot
+        # (e.g. Tasks) never pays a synchronous multi-module import on the
+        # render/key-handling thread (see prewarm_optional_modules' own
+        # docstring): it only closes that race if it gets the earliest
+        # possible head start. The previous ordering ran the (potentially
+        # slow, synchronous) pivot-registry scan FIRST and only started the
+        # prewarm thread after it returned -- so by the time this call
+        # finally unblocked the render thread and the operator's next
+        # keypress landed (often immediately, since the app *looks* ready
+        # the moment input resumes), the prewarm thread had barely started,
+        # and a fast pivot-switch keypress still raced (and often lost
+        # against) the same import lock this was meant to avoid. Starting it
+        # first lets it run concurrently with the scan instead of after it,
+        # maximizing its lead time over the operator's next keypress.
+        from . import tasks as _tasks_mod; threading.Thread(target=_tasks_mod.prewarm_optional_modules, daemon=True).start()
         # Re-scan the pivot registry so a refresh ('r') picks up a newly
         # installed (or removed) contributed pivot without a picker restart.
         self._load_pivots()
-        from . import tasks as _tasks_mod; threading.Thread(target=_tasks_mod.prewarm_optional_modules, daemon=True).start()
         # A manual reload ('r') must also refresh the registered Tasks pivot, not
         # just the worktree lists (the pivot runtime is separate + has no TTL):
         # clear each pivot runtime's cache so the next frame's ensure() refetches,

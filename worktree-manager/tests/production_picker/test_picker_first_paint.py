@@ -85,6 +85,37 @@ def test_setup_live_pivots_prewarms_optional_modules(monkeypatch):
     assert calls == [1]
 
 
+def test_setup_live_pivots_prewarm_starts_before_the_pivot_scan(monkeypatch):
+    """Same ordering requirement as ``setup()`` (see
+    ``test_setup_prewarm_starts_before_the_pivot_scan``): even though
+    ``_setup_live_pivots`` already runs off the render thread, starting the
+    prewarm import before the scan (rather than after) maximizes its head
+    start over the operator's first pivot-switch keypress, wall-clock-wise
+    from mount."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    order = []
+    monkeypatch.setattr(
+        tasks_mod, "prewarm_optional_modules", lambda: order.append("prewarm"))
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+    screen = eng.PickerScreen(Src(), live=True)
+
+    def recording_scan():
+        order.append("scan")
+        return None
+
+    monkeypatch.setattr(screen, "_scan_pivot_payload", recording_scan)
+    screen._setup_live_pivots()
+
+    assert order == ["prewarm", "scan"], (
+        "prewarm_optional_modules must start before _scan_pivot_payload, not after")
+
+
 def test_setup_prewarms_optional_modules_too(monkeypatch):
     """``setup()`` -- the shared non-live-mount / manual-reload ('r') path --
     must warm the same modules as ``_setup_live_pivots``: a registered pivot
@@ -116,6 +147,56 @@ def test_setup_prewarms_optional_modules_too(monkeypatch):
     screen.setup()
 
     assert calls == [1]
+
+
+def test_setup_prewarm_starts_before_the_pivot_scan(monkeypatch):
+    """``setup()`` must kick off the ``prewarm_optional_modules`` thread
+    BEFORE running the (potentially slow, synchronous) pivot-registry scan,
+    not after it.
+
+    The prewarm thread exists purely to give ``data_ssh``'s import a head
+    start over the operator's first pivot-switch keypress (see
+    ``prewarm_optional_modules``'s own docstring). If ``setup()`` runs the
+    scan first and only starts the prewarm thread once the scan returns, the
+    render thread is blocked for the scan's own duration AND the prewarm
+    thread barely has a head start once input resumes -- the operator's very
+    next keypress (often landing the instant the app looks responsive again)
+    can still race the same import lock the prewarm was meant to avoid. This
+    was reported as a live pivot-switch freeze even with the prewarm fix
+    already in place; asserting the ordering here keeps a future edit from
+    silently re-introducing it."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    order = []
+    monkeypatch.setattr(
+        tasks_mod, "prewarm_optional_modules", lambda: order.append("prewarm"))
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+        @staticmethod
+        def machines():
+            return [("host Win", "host", "Win", True)]
+
+        @staticmethod
+        def load():
+            return []
+
+    screen = eng.PickerScreen(Src(), live=False)
+
+    def recording_load_pivots(*a, **k):
+        order.append("scan")
+        return original_load_pivots(*a, **k)
+
+    original_load_pivots = screen._load_pivots
+    monkeypatch.setattr(screen, "_load_pivots", recording_load_pivots)
+    order.clear()  # __init__/on_mount may already have called setup() once
+    screen.setup()
+
+    assert order == ["prewarm", "scan"], (
+        "prewarm_optional_modules must start before _load_pivots, not after")
 
 
 def test_prewarm_optional_modules_imports_data_ssh(monkeypatch):

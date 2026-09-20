@@ -80,7 +80,20 @@ Implementation lands slice-by-slice against this plan, not in one PR.
   defers this. The plain/local path — almost certainly the common case for
   an operator working one project — does not, and this is what makes the
   picker (and, transitively, the very next keypress including Enter-to-open-
-  a-menu) feel slow right after launch, reload, or any action that re-scans.
+  a-menu **or arrowing to a registered pivot**) feel slow right after
+  launch, reload, or any action that re-scans.
+  > **Interim mitigation landed separately** (not this phase — a targeted
+  > same-day fix after the operator additionally reported a pivot-switch
+  > freeze even with `agent-dispatch-tasks-pane-ux-overhaul`'s own
+  > `prewarm_optional_modules` fix already in place): both `setup()` and
+  > `_setup_live_pivots` were running this scan **before** starting the
+  > `data_ssh` prewarm import, shrinking rather than maximizing its head
+  > start over the operator's next pivot-switch keypress. Reordering the
+  > prewarm to run first closes that specific race (see that effort's
+  > 2026-09-19 follow-up journal entry for the full investigation) without
+  > touching the scan's own blocking nature — Slice 2 below is what
+  > actually makes the scan itself non-blocking; the reorder is a stopgap
+  > that reduces the window, not a substitute for it.
 - **The non-live worktree DATA load itself.** `self.data = self.src.load()`
   inside `setup()` runs at the exact same four call sites, immediately after
   the pivot scan. For the local/machine-ssh source this is the
