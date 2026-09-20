@@ -34,10 +34,40 @@ def _prepare(project: str, *, heal: bool = True) -> tuple[Any, bool]:
     config_module.set_active_project(resolved)
     if assumed is not None and not cli._cwd_is_inside_project(assumed):
         os.chdir(assumed)
-    config = config_module.load_config()
     if heal:
-        cli._heal_stale_anchor_if_self_missing(config)
+        _start_anchor_heal_check(config_module, cli)
     return cli, not cli._in_ssh_session()
+
+
+def _start_anchor_heal_check(config_module: Any, cli: Any) -> None:
+    """Best-effort stale-anchor self-heal, entirely off the render path.
+
+    ``_heal_stale_anchor_if_self_missing`` is already designed to be
+    non-fatal (any failure just skips the heal -- see its own docstring),
+    and its common case (this machine's self-entry already present in
+    ``machines.yaml``) is a cheap no-op check. But *reaching* that check
+    requires a full ``config_module.load_config()`` first, which walks the
+    control-plane's related-PR discovery across every registered anchor --
+    measured at several real seconds on a machine with many repos. Blocking
+    the Picker's first paint on that, before the Textual app has even
+    mounted, was the actual cause of a many-second blank screen at launch
+    (a separate, upstream-of-the-UI call site from the ``_machine_key_map``
+    prewarm fix already applied inside the engine). Run it fire-and-forget
+    on a background thread instead, fully decoupled from render; nothing
+    downstream reads its result."""
+
+    def _worker() -> None:
+        try:
+            config = config_module.load_config()
+            cli._heal_stale_anchor_if_self_missing(config)
+        except Exception:
+            pass
+
+    threading.Thread(
+        target=_worker,
+        name="production-picker-anchor-heal",
+        daemon=True,
+    ).start()
 
 
 def _start_housekeeping(cli: Any) -> None:

@@ -5688,6 +5688,87 @@ def test_native_list_scroll_survives_same_pivot_rebuild(monkeypatch):
     asyncio.run(run())
 
 
+def test_native_list_mouse_wheel_scroll_survives_pulse_tick_while_cursor_unmoved():
+    """Follow-up to a live report: arrow down to the bottom of the list, then
+    scroll UP with the mouse wheel WITHOUT moving the cursor away from the
+    bottom row -- a subsequent same-pivot rebuild (the periodic live-pulse
+    tick, exactly like the sibling test above) must not snap the scroll
+    position back down to the cursor's row. ``clear_options()`` unconditionally
+    resets ``highlighted`` to ``None``; re-establishing it in ``_rebuild()``
+    used to go through the normal (scrolling) path even when the cursor's
+    logical row hadn't actually changed, discarding a scroll the operator made
+    independently of focus. Scroll must only jump to follow a GENUINE focus
+    move (arrow keys/click changing ``sel``), never an incidental cursor
+    re-sync after an unrelated rebuild."""
+    import datetime
+    import types
+
+    from worktree_manager.production_picker.picker_tui import derive
+
+    def _multi_section_src():
+        derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+        local = ("anomalous-potato", "Win")
+        raws = []
+        for i in range(30):
+            if i % 3 == 0:
+                started, status = "2026-06-27T17:00:00", "active"
+            elif i % 3 == 1:
+                started, status = "2026-06-20T17:00:00", "idle"
+            else:
+                started, status = "2026-05-01T17:00:00", "done"
+            raws.append({"id": f"anomalous-potato-win-2026062{i % 9}-r{i:02d}",
+                         "title": f"Row {i}", "status": status,
+                         "started_at": started, "turn_count": i,
+                         "state": "active" if i % 2 else "wip"})
+        s = types.SimpleNamespace()
+        s.LOCAL = local
+        s.LOCAL_LABEL = "lc"
+        s.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+        s.bucket = derive.bucket
+        s.for_machine = derive.for_machine
+        s.load = lambda: [derive.norm(w, *local) for w in raws]
+        return s
+
+    async def run():
+        app = PickerApp(_multi_section_src(), live=False)
+        async with app.run_test(size=(118, 16)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.sel = ("L", 0)
+            scr.refresh()
+            await pilot.pause()
+            nl = scr.query_one("#nf-body-data")
+            nl.focus()
+            await pilot.pause()
+
+            # Arrow all the way to the bottom (a genuine focus move: scroll
+            # is expected -- and required -- to follow it).
+            for _ in range(29):
+                await pilot.press("down")
+                await pilot.pause()
+            y_at_cursor = int(getattr(nl.scroll_offset, "y", 0) or 0)
+            assert y_at_cursor > 0
+
+            # Now scroll UP with the mouse wheel, independent of the cursor
+            # (the cursor/``sel`` does not change -- only the viewport does).
+            wheeled_y = max(0, y_at_cursor - 5)
+            nl.scroll_y = wheeled_y
+            await pilot.pause()
+            assert int(getattr(nl.scroll_offset, "y", 0) or 0) == wheeled_y
+
+            # A same-pivot rebuild (the cosmetic live-pulse tick) fires next,
+            # exactly as it periodically does in the real app -- it must not
+            # snap the viewport back down to the (unchanged) cursor row.
+            scr.pulse = 1 - scr.pulse
+            nl.refresh_data()
+            await pilot.pause()
+            assert int(getattr(nl.scroll_offset, "y", 0) or 0) == wheeled_y
+
+    asyncio.run(run())
+
+
 def test_native_list_no_rowwrap_and_incremental_repaint(monkeypatch):
     """#171 (proper fix): holding up/down must not wrap worktree rows, and each
     nav step must repaint only the changed rows (O(1)), not rebuild the list.
