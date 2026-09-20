@@ -3187,7 +3187,7 @@ class TestResyncSession:
             client.shutdown = AsyncMock()
             client.cancel_prompt = AsyncMock()
 
-            async def _load(cwd, session_id, suppress_replay=True):
+            async def _load(cwd, session_id, suppress_replay=True, mcp_servers=None):
                 if not suppress_replay and on_event:
                     for etype, data in replay_events:
                         on_event(etype, data)
@@ -3323,7 +3323,7 @@ class TestReconcileWedged:
             client.shutdown = AsyncMock()
             client.cancel_prompt = AsyncMock()
 
-            async def _load(cwd, session_id, suppress_replay=True):
+            async def _load(cwd, session_id, suppress_replay=True, mcp_servers=None):
                 if not suppress_replay and on_event:
                     for etype, data in replay:
                         on_event(etype, data)
