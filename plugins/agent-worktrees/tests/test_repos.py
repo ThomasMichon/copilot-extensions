@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -566,6 +567,28 @@ def test_backfill_skips_missing_local_path(home: Path, tmp_path: Path):
     assert results[0].status == "no_path"
 
 
+def test_backfill_skips_ssh_remote(home: Path, tmp_path: Path):
+    """The pin only ever writes credential.https://<host>.*, which an SSH
+    transport never consults -- treating it as pinned would be a false
+    positive that reports success while changing nothing."""
+    work = tmp_path / "ssh-repo"
+    _init_repo(work, branch="main")
+    repos.add_repo(
+        "ssh-repo", str(work), repo_class="worktree",
+        remote="git@github.com:example-operator/ssh-repo.git", plat="windows",
+    )
+    results = repos.backfill_credential_pins(plat="windows")
+    assert results[0].status == "ssh_remote"
+
+
+def test_is_https_remote():
+    assert repos.is_https_remote("https://github.com/o/r.git") is True
+    assert repos.is_https_remote("http://github.com/o/r.git") is True
+    assert repos.is_https_remote("git@github.com:o/r.git") is False
+    assert repos.is_https_remote("ssh://git@github.com/o/r.git") is False
+    assert repos.is_https_remote("") is False
+
+
 def test_backfill_unknown_name_never_falls_back_to_all(home: Path, tmp_path: Path):
     """A typo in the requested name must report 'not found', never silently
     expand to every registered repo."""
@@ -623,6 +646,54 @@ def test_add_repo_does_not_pin_when_account_needs_clarify(home: Path, tmp_path: 
         capture_output=True, text=True,
     )
     assert result.returncode != 0  # key was never set
+
+
+def test_add_repo_does_not_pin_ssh_remote(home: Path, tmp_path: Path):
+    """An SSH remote's registration must not attempt (and falsely report) a
+    pin that credential.https://... can never affect."""
+    work = tmp_path / "ssh-auto"
+    _init_repo(work, branch="main")
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+        repos.add_repo(
+            "ssh-auto", str(work), repo_class="worktree",
+            remote="git@github.com:example-operator/ssh-auto.git", plat="windows",
+        )
+    result = subprocess.run(
+        ["git", "-C", str(work), "config", "--local",
+         "credential.https://github.com.username"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0  # key was never set
+
+
+def test_add_repo_pin_expands_home_relative_path(home: Path, tmp_path: Path, monkeypatch):
+    """Path('~/src/repo').is_dir() is always False -- add_repo must resolve
+    through entry.local_path() (which expands '~' via os.path.expanduser)
+    rather than the raw caller-supplied path string, or a home-relative
+    registration would silently never get pinned."""
+    work = tmp_path / "home-rel"
+    _init_repo(work, branch="main")
+    monkeypatch.setattr(
+        repos.os.path, "expanduser",
+        lambda p: str(work) if p == "~/home-rel" else os.path.expanduser(p),
+    )
+    entry = repos.add_repo(
+        "home-rel", "~/home-rel", repo_class="worktree",
+        remote="https://github.com/example-operator/home-rel.git", plat="windows",
+    )
+    assert entry.local_path("windows") == str(work)
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+        repos._best_effort_pin_credential(entry, "windows")
+    username = subprocess.run(
+        ["git", "-C", str(work), "config", "--local",
+         "credential.https://github.com.username"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert username == "example-operator"
 
 
 def test_add_repo_pin_failure_never_raises(home: Path, tmp_path: Path):

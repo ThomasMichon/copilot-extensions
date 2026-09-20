@@ -347,6 +347,21 @@ def github_owner(remote: str) -> str | None:
     return None
 
 
+def is_https_remote(remote: str) -> bool:
+    """True when ``remote`` is an ``http(s)://`` URL, not an SSH form.
+
+    Both the persisted credential pin (:func:`git_ops.pin_git_credential`,
+    which only ever writes ``credential.https://<host>.*``) and the
+    clone-time auth override (:func:`git_ops._auth_config_args_for_url`,
+    which only ever produces an ``http.extraheader``) affect HTTPS
+    transport exclusively. An ``ssh://``/``git@host:owner/repo`` remote uses
+    the ambient SSH key instead and is untouched by either -- treating it as
+    "pinned"/"authed" would be a false positive that reports success while
+    changing nothing.
+    """
+    return remote.strip().lower().startswith(("http://", "https://"))
+
+
 def github_slug(remote: str) -> str | None:
     """Extract the ``owner/name`` slug from a github.com remote URL.
 
@@ -610,11 +625,11 @@ def add_repo(
     output.ok(
         f"Repo '{name}' registered at {path} ({plat}) [{entry.repo_class}{agent_note}]"
     )
-    _best_effort_pin_credential(entry, path)
+    _best_effort_pin_credential(entry, plat)
     return entry
 
 
-def _best_effort_pin_credential(entry: RepoEntry, path: str) -> None:
+def _best_effort_pin_credential(entry: RepoEntry, plat: str) -> None:
     """Pin the repo-local git credential for ``entry`` if the account already
     resolves unambiguously (never prompts, never raises).
 
@@ -624,10 +639,22 @@ def _best_effort_pin_credential(entry: RepoEntry, path: str) -> None:
     ``clone`` commands that separately call ``_clarify_registration_account``
     (which additionally prompts to resolve an org-owned remote's ambiguous
     account; once it does, it re-pins with the newly chosen login).
+
+    Uses ``entry.local_path(plat)`` (not a raw caller-supplied path) so a
+    home-relative registration (e.g. ``~/src/repo``) still resolves to a real
+    directory -- ``Path("~/src/repo").is_dir()`` is always False, which would
+    otherwise make ``pin_git_credential`` silently no-op. Skips SSH remotes
+    (see :func:`is_https_remote`): the pin only ever writes
+    ``credential.https://<host>.*``, which an SSH transport never consults.
     """
+    if not is_https_remote(entry.remote):
+        return
     try:
         res = resolve_registration_account(entry.remote, entry.account)
         if res.needs_clarify or not res.login or not res.owner:
+            return
+        path = entry.local_path(plat)
+        if not path:
             return
         from . import git_ops
         git_ops.pin_git_credential(path, res.login)
@@ -687,12 +714,29 @@ def clone_repo(
     # a successful clone, so inject the same one-shot cross-account auth
     # override the fetch/push paths use, resolved directly from the clone
     # URL (there is no checked-out remote yet to resolve a name against).
+    # HTTPS-only: the override is an http.extraheader, which an SSH
+    # transport (git@host:owner/repo, ssh://...) never consults -- for an
+    # SSH remote the ambient SSH key is what actually authenticates, so
+    # injecting this would be a no-op that falsely implies auth was handled.
     from . import git_ops
-    try:
-        extra_args = git_ops._auth_config_args_for_url(remote)
-    except Exception:
-        extra_args = []
+    extra_args: list[str] = []
+    if is_https_remote(remote):
+        try:
+            extra_args = git_ops._auth_config_args_for_url(remote)
+        except Exception:
+            extra_args = []
     argv = ["git", *extra_args, "clone", remote, str(target_path)]
+
+    def _redact(text: str) -> str:
+        # Git itself can echo the injected -c argument (e.g. with tracing
+        # enabled) into stdout/stderr, and some exceptions (subprocess.
+        # TimeoutExpired) embed the full argv in their own __str__ -- strip
+        # the token wherever it could surface, not only in our own messages.
+        for arg in extra_args:
+            if arg.startswith("http.extraheader="):
+                text = text.replace(arg, "http.extraheader=<redacted>")
+        return text
+
     try:
         result = subprocess.run(
             argv,
@@ -701,19 +745,11 @@ def clone_repo(
             timeout=300,
         )
         if result.returncode != 0:
-            output.err(f"git clone failed: {result.stderr.strip()}")
+            output.err(f"git clone failed: {_redact(result.stderr.strip())}")
             return None
     except Exception as e:
-        # The argv (possibly including the injected http.extraheader token)
-        # can appear in this exception's own __str__ (e.g.
-        # subprocess.TimeoutExpired embeds its full cmd) -- redact before
-        # ever logging it, the same helper GitError/_redact_args already use.
         redacted_argv = git_ops._redact_args(argv)
-        detail = str(e)
-        for arg in extra_args:
-            if arg.startswith("http.extraheader="):
-                detail = detail.replace(arg, "http.extraheader=<redacted>")
-        output.err(f"Clone failed running {redacted_argv}: {detail}")
+        output.err(f"Clone failed running {redacted_argv}: {_redact(str(e))}")
         return None
 
     output.ok(f"Cloned {remote} to {target}")
@@ -763,7 +799,8 @@ class CredentialPinResult:
     """Outcome of one repo's credential-pin backfill attempt."""
 
     name: str
-    # "pinned" | "skipped" | "needs_clarify" | "no_path" | "not_github" | "not_registered"
+    # "pinned" | "skipped" | "needs_clarify" | "no_path" | "not_github"
+    # | "not_registered" | "ssh_remote"
     status: str
     login: str | None
     detail: str
@@ -804,6 +841,14 @@ def backfill_credential_pins(
         if not entry.remote:
             results.append(
                 CredentialPinResult(entry.name, "not_github", None, "no remote configured")
+            )
+            continue
+        if not is_https_remote(entry.remote):
+            results.append(
+                CredentialPinResult(
+                    entry.name, "ssh_remote", None,
+                    "SSH remote -- the pin only affects HTTPS transport",
+                )
             )
             continue
         path = entry.local_path(plat or _current_platform())

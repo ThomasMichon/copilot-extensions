@@ -882,6 +882,79 @@ def test_repos_short_help_flag_shows_usage(monkeypatch, capsys):
     assert "Repo classes:" in capsys.readouterr().out
 
 
+def test_repos_pin_credentials_json_output(monkeypatch, capfd):
+    from agent_worktrees import repos
+
+    captured = {}
+
+    def fake_backfill(name=None, *, plat=None):
+        captured["name"] = name
+        return [
+            repos.CredentialPinResult("proj-a", "pinned", "acct", "pinned to acct"),
+        ]
+
+    monkeypatch.setattr(repos, "backfill_credential_pins", fake_backfill)
+    rc = m.cmd_repos_dispatch(["pin-credentials", "--json"])
+    assert rc == 0
+    assert captured["name"] is None  # no name given -> sweep every repo
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["results"] == [
+        {"name": "proj-a", "status": "pinned", "login": "acct", "detail": "pinned to acct"},
+    ]
+
+
+def test_repos_pin_credentials_restricts_to_named_repo(monkeypatch):
+    from agent_worktrees import repos
+
+    captured = {}
+
+    def fake_backfill(name=None, *, plat=None):
+        captured["name"] = name
+        return [repos.CredentialPinResult("proj-a", "pinned", "acct", "pinned to acct")]
+
+    monkeypatch.setattr(repos, "backfill_credential_pins", fake_backfill)
+    rc = m.cmd_repos_dispatch(["pin-credentials", "proj-a"])
+    assert rc == 0
+    assert captured["name"] == "proj-a"
+
+
+def test_repos_pin_credentials_exit_status_reflects_needs_clarify(monkeypatch):
+    """A needs_clarify result is a real actionable outcome, not a hard
+    error -- but the command must still surface it via a nonzero exit so
+    callers/CI can gate on it."""
+    from agent_worktrees import repos
+
+    monkeypatch.setattr(
+        repos, "backfill_credential_pins",
+        lambda name=None, *, plat=None: [
+            repos.CredentialPinResult(
+                "org-owned", "needs_clarify", None,
+                "owner 'github' has no resolvable account -- "
+                "run: repos account set github <login>",
+            ),
+        ],
+    )
+    rc = m.cmd_repos_dispatch(["pin-credentials"])
+    assert rc == 1
+
+
+def test_repos_pin_credentials_exit_status_ok_for_skip_reasons(monkeypatch):
+    """no_path / not_github / ssh_remote are informational skips, not
+    failures -- they must not force a nonzero exit."""
+    from agent_worktrees import repos
+
+    monkeypatch.setattr(
+        repos, "backfill_credential_pins",
+        lambda name=None, *, plat=None: [
+            repos.CredentialPinResult("a", "no_path", None, "no local checkout"),
+            repos.CredentialPinResult("b", "not_github", None, "non-GitHub remote"),
+            repos.CredentialPinResult("c", "ssh_remote", None, "SSH remote"),
+        ],
+    )
+    rc = m.cmd_repos_dispatch(["pin-credentials"])
+    assert rc == 0
+
+
 # ── worktree namespace ────────────────────────────────────────────────
 
 

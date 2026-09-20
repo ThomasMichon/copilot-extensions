@@ -20405,7 +20405,7 @@ def _clarify_registration_account(
         if 0 <= idx < len(accounts):
             choice = accounts[idx]
     repos.set_account_map(owner, choice)
-    if path:
+    if path and repos.is_https_remote(remote):
         try:
             git_ops.pin_git_credential(path, choice)
         except Exception:
@@ -20796,11 +20796,13 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             for r in results:
                 if r.status == "pinned":
                     output.ok(f"{r.name}: {r.detail}")
-                elif r.status in ("no_path", "not_github"):
+                elif r.status in ("no_path", "not_github", "ssh_remote"):
                     output.info(f"{r.name}: {r.status} ({r.detail})")
                 else:
                     output.warn(f"{r.name}: {r.detail}")
-        had_error = any(r.status not in ("pinned", "no_path", "not_github") for r in results)
+        had_error = any(
+            r.status not in ("pinned", "no_path", "not_github", "ssh_remote") for r in results
+        )
         return 1 if had_error else 0
 
     if sub == "gh":
