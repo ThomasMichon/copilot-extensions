@@ -313,6 +313,18 @@ def test_has_live_false_when_discovered_endpoint_health_unresponsive(monkeypatch
     assert config_mod.has_live_local_coordinator() is False
 
 
+def test_has_live_false_when_routed_health_fails_even_if_legacy_discovery_healthy(monkeypatch):
+    # The routing table is authoritative whenever it has an entry: client_url()
+    # prefers the routed URL, so falling back to a *different*, healthy legacy
+    # endpoint here would report "live" while every real request still goes to
+    # the wedged routed generation -- silently defeating this whole check.
+    monkeypatch.setattr(config_mod, "_routing_url", lambda: "http://127.0.0.1:59999")
+    monkeypatch.setattr(config_mod, "_url_listening", lambda url, **k: True)
+    monkeypatch.setattr(config_mod, "_health_responsive", lambda url, **k: False)
+    monkeypatch.setattr(config_mod, "_discover_local_endpoint", lambda: "http://127.0.0.1:12345")
+    assert config_mod.has_live_local_coordinator() is False
+
+
 def test_has_live_true_when_discovered_endpoint_health_responsive(monkeypatch):
     monkeypatch.setattr(config_mod, "_routing_url", lambda: None)
     monkeypatch.setattr(config_mod, "_discover_local_endpoint", lambda: "http://127.0.0.1:59999")

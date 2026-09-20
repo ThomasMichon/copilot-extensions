@@ -355,22 +355,29 @@ def has_live_local_coordinator() -> bool:
     Consults the zdd routing table first (authoritative on the host; it self-heals
     a dead ``active`` to ``previous``), then the legacy discovery ladder
     (``AGENT_DISPATCH_ENDPOINT`` -> the rendezvous file, probed for a live
-    listener). The CLI's lazy-start uses this to decide whether a coordinator is
-    up before a client command runs, so it must mean **actually reachable**: the
-    routing table alone returns a mid-startup (live-pid, not-yet-listening)
-    endpoint, so the routed URL is additionally socket-probed here -- otherwise
-    lazy-start would stop waiting the instant a just-spawned coordinator wrote its
-    routing entry and the very next client call would race the bind and get
-    ``Connection refused``.
+    listener) **only when the routing table has no entry at all**. The CLI's
+    lazy-start uses this to decide whether a coordinator is up before a client
+    command runs, so it must mean **actually reachable**: the routing table alone
+    returns a mid-startup (live-pid, not-yet-listening) endpoint, so the routed
+    URL is additionally socket-probed here -- otherwise lazy-start would stop
+    waiting the instant a just-spawned coordinator wrote its routing entry and the
+    very next client call would race the bind and get ``Connection refused``.
 
     A listening socket alone is not sufficient: a wedged coordinator can hold its
     socket open indefinitely while never answering a request (see
     ``_health_responsive``), so an actually-reachable endpoint must also answer
     ``/health`` within a bounded timeout before it counts as live.
+
+    When the routing table *does* have an entry, it is authoritative and the
+    result must come from it alone -- never fall through to the legacy discovery
+    ladder on a routed health-check failure. ``client_url()`` prefers the routed
+    URL whenever one exists, so falling back here to a *different*, healthy
+    legacy endpoint would report "live" while every real request still goes to
+    the wedged routed generation, silently defeating this whole check.
     """
     routed = _routing_url()
-    if routed is not None and _url_listening(routed) and _health_responsive(routed):
-        return True
+    if routed is not None:
+        return _url_listening(routed) and _health_responsive(routed)
     discovered = _discover_local_endpoint()
     return discovered is not None and _health_responsive(discovered)
 
