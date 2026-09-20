@@ -709,7 +709,16 @@ class Supervisor:
         return suspended
 
     def bind_headless_owner_sessions(self) -> int:
-        """Attach held local headless tasks to their exact bridge session."""
+        """Attach held local headless tasks to their durable ACP session id.
+
+        ``local_sid`` (from the ``local-body:<sid>`` handle) is agent-
+        bridge's own ephemeral escrow session id, used only to correlate a
+        spawn attempt while creating it -- not durable (agent-bridge prunes
+        its own ``sessions.db`` aggressively). A caller resolving this task's
+        session later needs the bridge-hosted process's real Copilot ACP
+        session id instead. Bind that, not the escrow handle -- skip (retry
+        next sweep) when it isn't known yet.
+        """
         bound = 0
         for res in self._pool_reservations(state=SpawnState.SPAWNED):
             local_sid = _parse_local_body_handle(res.get("session_handle"))
@@ -727,10 +736,20 @@ class Supervisor:
             ):
                 continue
             try:
+                acp_session_id = self.local_acp_session_fn(local_sid)
+            except Exception:
+                log.exception(
+                    "failed to resolve ACP session id for bridge session %s",
+                    local_sid,
+                )
+                continue
+            if not acp_session_id:
+                continue  # not yet known -- leave unbound for a later sweep
+            try:
                 self.client.bind_owner_session(
                     task["id"],
                     task["owner"],
-                    local_sid,
+                    acp_session_id,
                     expected_generation=task.get("generation"),
                 )
                 bound += 1
