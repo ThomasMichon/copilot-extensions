@@ -392,6 +392,8 @@ def test_fast_forward_repo_skips_dirty_and_diverged(tmp_path):
     repo.mkdir()
 
     def dirty_runner(argv, *, cwd=None, timeout=0):
+        if argv[:3] == ["git", "rev-parse", "--is-bare-repository"]:
+            return self_update.CommandResult(list(argv), 0, "false\n", "")
         if argv[:2] == ["git", "status"]:
             return self_update.CommandResult(list(argv), 0, " M tracked.txt\n", "")
         raise AssertionError(argv)
@@ -402,6 +404,9 @@ def test_fast_forward_repo_skips_dirty_and_diverged(tmp_path):
 
     def diverged_runner(argv, *, cwd=None, timeout=0):
         mapping = {
+            ("git", "rev-parse", "--is-bare-repository"): self_update.CommandResult(
+                list(argv), 0, "false\n", ""
+            ),
             ("git", "status"): self_update.CommandResult(list(argv), 0, "", ""),
             ("git", "rev-parse"): self_update.CommandResult(list(argv), 0, "origin/main\n", ""),
             ("git", "fetch"): self_update.CommandResult(list(argv), 0, "", ""),
@@ -415,6 +420,86 @@ def test_fast_forward_repo_skips_dirty_and_diverged(tmp_path):
     diverged = self_update.fast_forward_repo(repo, runner=diverged_runner)
     assert diverged.status == "skipped"
     assert "diverged" in diverged.detail
+
+
+def test_fast_forward_repo_bare_anchor_fast_forwards_branch_ref(tmp_path):
+    repo = tmp_path / "bare-repo"
+    repo.mkdir()
+
+    def bare_runner(argv, *, cwd=None, timeout=0):
+        mapping = {
+            ("git", "rev-parse", "--is-bare-repository"): self_update.CommandResult(
+                list(argv), 0, "true\n", ""
+            ),
+            ("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): (
+                self_update.CommandResult(list(argv), 0, "origin/main\n", "")
+            ),
+            ("git", "fetch"): self_update.CommandResult(list(argv), 0, "", ""),
+            ("git", "rev-list"): self_update.CommandResult(list(argv), 0, "0\t1\n", ""),
+            ("git", "symbolic-ref"): self_update.CommandResult(list(argv), 0, "main\n", ""),
+            ("git", "update-ref"): self_update.CommandResult(list(argv), 0, "", ""),
+        }
+        for prefix, result in mapping.items():
+            if tuple(argv[: len(prefix)]) == prefix:
+                return result
+        raise AssertionError(argv)
+
+    result = self_update.fast_forward_repo(repo, runner=bare_runner)
+    assert result.status == "changed"
+    assert "bare" in result.detail
+
+
+def test_fast_forward_repo_bare_anchor_skips_detached_head(tmp_path):
+    repo = tmp_path / "bare-repo"
+    repo.mkdir()
+
+    def bare_runner(argv, *, cwd=None, timeout=0):
+        mapping = {
+            ("git", "rev-parse", "--is-bare-repository"): self_update.CommandResult(
+                list(argv), 0, "true\n", ""
+            ),
+            ("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): (
+                self_update.CommandResult(list(argv), 0, "origin/main\n", "")
+            ),
+            ("git", "fetch"): self_update.CommandResult(list(argv), 0, "", ""),
+            ("git", "rev-list"): self_update.CommandResult(list(argv), 0, "0\t1\n", ""),
+            ("git", "symbolic-ref"): self_update.CommandResult(
+                list(argv), 128, "", "not a symbolic ref"
+            ),
+        }
+        for prefix, result in mapping.items():
+            if tuple(argv[: len(prefix)]) == prefix:
+                return result
+        raise AssertionError(argv)
+
+    result = self_update.fast_forward_repo(repo, runner=bare_runner)
+    assert result.status == "skipped"
+    assert "detached" in result.detail
+
+
+def test_fast_forward_repo_bare_anchor_already_up_to_date(tmp_path):
+    repo = tmp_path / "bare-repo"
+    repo.mkdir()
+
+    def bare_runner(argv, *, cwd=None, timeout=0):
+        mapping = {
+            ("git", "rev-parse", "--is-bare-repository"): self_update.CommandResult(
+                list(argv), 0, "true\n", ""
+            ),
+            ("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): (
+                self_update.CommandResult(list(argv), 0, "origin/main\n", "")
+            ),
+            ("git", "fetch"): self_update.CommandResult(list(argv), 0, "", ""),
+            ("git", "rev-list"): self_update.CommandResult(list(argv), 0, "0\t0\n", ""),
+        }
+        for prefix, result in mapping.items():
+            if tuple(argv[: len(prefix)]) == prefix:
+                return result
+        raise AssertionError(argv)
+
+    result = self_update.fast_forward_repo(repo, runner=bare_runner)
+    assert result.status == "ok"
+    assert "up to date" in result.detail
 
 
 def test_live_session_deferral_reason_reports_busy_worktree():

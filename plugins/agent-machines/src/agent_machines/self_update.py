@@ -699,18 +699,27 @@ def _parse_git_counts(output: str) -> tuple[int, int]:
 def fast_forward_repo(
     repo: Path, *, runner: Callable[..., CommandResult] = default_command_runner
 ) -> StepResult:
-    status = runner(["git", "status", "--porcelain"], cwd=repo, timeout=120)
-    if status.returncode != 0:
+    bare_check = runner(["git", "rev-parse", "--is-bare-repository"], cwd=repo, timeout=120)
+    if bare_check.returncode != 0:
         return StepResult(
-            "git-pull", "error", status.output or "git status failed", path=str(repo)
+            "git-pull", "error", bare_check.output or "git rev-parse failed", path=str(repo)
         )
-    if status.stdout.strip():
-        return StepResult(
-            "git-pull",
-            "skipped",
-            "skipped fast-forward pull because the checkout is dirty",
-            path=str(repo),
-        )
+    is_bare = bare_check.stdout.strip() == "true"
+
+    if not is_bare:
+        status = runner(["git", "status", "--porcelain"], cwd=repo, timeout=120)
+        if status.returncode != 0:
+            return StepResult(
+                "git-pull", "error", status.output or "git status failed", path=str(repo)
+            )
+        if status.stdout.strip():
+            return StepResult(
+                "git-pull",
+                "skipped",
+                "skipped fast-forward pull because the checkout is dirty",
+                path=str(repo),
+            )
+
     upstream = runner(
         ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
         cwd=repo,
@@ -723,6 +732,7 @@ def fast_forward_repo(
             "skipped fast-forward pull because the checkout has no upstream branch",
             path=str(repo),
         )
+    upstream_ref = upstream.stdout.strip()
     fetched = runner(["git", "fetch", "--quiet"], cwd=repo, timeout=900)
     if fetched.returncode != 0:
         return StepResult(
@@ -752,6 +762,37 @@ def fast_forward_repo(
         )
     if behind == 0:
         return StepResult("git-pull", "ok", "checkout is already up to date", path=str(repo))
+
+    if is_bare:
+        # A bare anchor (e.g. an agent-worktrees repo where all real work
+        # happens in linked worktrees) has no working tree or index for
+        # ``git pull`` to update. The ahead/behind check above already
+        # proved this is a clean fast-forward, so it is safe to move the
+        # branch HEAD points at directly to the upstream commit.
+        branch = runner(
+            ["git", "symbolic-ref", "--quiet", "--short", "HEAD"], cwd=repo, timeout=120
+        )
+        if branch.returncode != 0:
+            return StepResult(
+                "git-pull",
+                "skipped",
+                "skipped fast-forward pull because the bare repository's HEAD is detached",
+                path=str(repo),
+            )
+        branch_name = branch.stdout.strip()
+        updated = runner(
+            ["git", "update-ref", f"refs/heads/{branch_name}", upstream_ref],
+            cwd=repo,
+            timeout=120,
+        )
+        if updated.returncode != 0:
+            return StepResult(
+                "git-pull", "error", updated.output or "git update-ref failed", path=str(repo)
+            )
+        return StepResult(
+            "git-pull", "changed", "fast-forwarded bare repository branch ref", path=str(repo)
+        )
+
     pulled = runner(["git", "pull", "--ff-only", "--no-rebase", "--quiet"], cwd=repo, timeout=1800)
     if pulled.returncode != 0:
         return StepResult("git-pull", "error", pulled.output or "git pull failed", path=str(repo))
