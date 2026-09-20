@@ -108,10 +108,12 @@ session never has to re-derive "what's already done" from the Journal alone.
   **Phase 8 (Worktree Status card) is BLOCKED on real architecture work,
   not a quick fix** — investigated 2026-09-20 (see the Journal entry): a
   `kind:"card"` action and `board_cli.py` are both documented as
-  subprocess-free on their hot paths, and agent-dispatch tracks none of
-  session-lineage/git-state/liveness/claims itself. Resolved direction
-  (operator decision, same date): `agent-worktrees`'s resident accelerator
-  becomes the live-authority cache for this data — now recorded in its own
+  subprocess-free on their hot paths, and agent-dispatch tracks only
+  task-scoped liveness signals (`last_liveness`, `activity`/
+  `activity_updated_at`) — it has no worktree/session/git-state/claims
+  authority. Resolved direction (operator decision, same date):
+  `agent-worktrees`'s resident accelerator becomes the coalesced,
+  cached-projection read path for this data — now recorded in its own
   vision (`visions/plugins/agent-worktrees/README.md`'s new
   *external-status-consumer-contract* Feature) — but agent-dispatch's own
   consumer of that cache is still undesigned. **Next step for whoever picks
@@ -909,10 +911,12 @@ no lifecycle-control logic invented at this layer.
       coordinator-state rendering: no agent-worktrees/agent-bridge
       subprocesses on the Picker read path" (it re-runs on every Picker
       refresh). Neither can shell out to git/agent-worktrees per row or per
-      click, and agent-dispatch's own coordinator today tracks none of
-      session-lineage/git-state/liveness/claims itself. **Resolved
+      click, and agent-dispatch's own coordinator tracks only task-scoped
+      liveness (`last_liveness`, `activity`/`activity_updated_at`) — it has
+      no worktree/session/git-state/claims authority of its own. **Resolved
       direction (operator decision 2026-09-20):** `agent-worktrees`'s
-      resident accelerator becomes the live-authority cache for this data
+      resident accelerator becomes the coalesced, cached-projection read
+      path for this data
       (worktree/session mapping, lineage + lifecycle event history,
       liveness, git state, claims graph — see the `agent-worktrees` vision's
       new *external-status-consumer-contract* Feature and
@@ -1993,24 +1997,27 @@ worktree via `agent-worktrees -p copilot-extensions create`.
     rendering: no agent-worktrees/agent-bridge subprocesses on the Picker
     read path" — it re-runs on every Picker refresh (sub-second), so it
     cannot shell out to git/agent-worktrees per row either.
-  - agent-dispatch's own coordinator tracks none of session-lineage,
-    git/commit state, liveness, or the claims graph today — that all lives
-    in git and in `agent-worktrees`' own state, outside any agent-dispatch
-    task row.
+  - agent-dispatch's own coordinator tracks only task-scoped liveness
+    (`last_liveness`, `activity`/`activity_updated_at` — see
+    `queue.py`/`queue_liveness.py`); it has no worktree/session/git-commit/
+    claims-graph authority of its own — that all lives in git and in
+    `agent-worktrees`' own state, outside any agent-dispatch task row.
   - Real "Claims" content is Phase 5's own scope (not landed yet), so even
     a partial Phase 8 slice can't show real claims without it.
 - **Surfaced this to the operator rather than guessing a workaround.**
   Resolved direction: `agent-worktrees`'s existing **resident accelerator**
   (already documented in its vision as the one-per-host freshness/status
-  computer) becomes the explicit live-authority cache for exactly this
-  data — worktree/session mapping, session lineage + lifecycle event
-  history, last-known liveness (mux/Copilot lock), last-known git state,
-  and the claims graph — with fast-cache reads, and force-refresh
-  available strictly at explicit user/agent discretion (queued to
-  coalesce, never triggered by an ordinary read). Message/conversation
-  history stays explicitly out of this cache — pulled on demand from
-  agent-bridge instead, matching the vision's pre-existing *Not a
-  transcript or event warehouse* non-goal.
+  computer — "warmth, not truth" per `docs/patterns/work-coalescing-
+  singleton.md`) becomes the coalesced, cached-projection read path for
+  exactly this data — worktree/session mapping, session lineage +
+  lifecycle event history, last-known liveness (mux/Copilot lock),
+  last-known git state, and the claims graph — with fast-cache reads and a
+  correct direct-computation fallback when it's unreachable, and
+  force-refresh available strictly at explicit user/agent discretion
+  (queued to coalesce, never triggered by an ordinary read). Message/
+  conversation history stays explicitly out of this cache — pulled on
+  demand from agent-bridge instead, matching the vision's pre-existing
+  *Not a transcript or event warehouse* non-goal.
 - **Updated the `agent-worktrees` vision** (`visions/plugins/agent-worktrees/
   README.md`) to make this explicit and durable rather than leaving it as
   an unrecorded intention: added *external-status-consumer-contract*
