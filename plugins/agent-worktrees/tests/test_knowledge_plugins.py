@@ -1780,36 +1780,3 @@ def test_concurrent_compose_is_cross_process_atomic(tmp_path: Path):
     assert marker["enabledPlugins"] == enabled
     output_dir = harness / ".github" / "copilot"
     assert list(output_dir.glob(".settings.local.json.*.tmp")) == []
-
-
-def test_launchers_compose_after_plan_before_copilot_handoff():
-    root = Path(__file__).resolve().parents[1]
-    sh = (root / "bin" / "launch-session.sh").read_text(encoding="utf-8")
-    ps = (root / "bin" / "launch-session.ps1").read_text(encoding="utf-8")
-
-    sh_compose = sh.index("_KNOWLEDGE_ARGS+=(knowledge compose-plugins")
-    assert sh.index('cd "$WORK_DIR"') < sh_compose
-    assert sh_compose < sh.index('if [[ "$NO_MUX" == "1" ]]')
-    sh_refresh = sh.index('_REFRESHED_PYTHON="$(resolve_runtime_python)"')
-    assert sh.rfind("invoke_update_apply 1 1", 0, sh_refresh) < sh_refresh
-    assert sh_refresh < sh_compose
-    assert 'PYTHON="$_REFRESHED_PYTHON"' in sh[sh_refresh:sh_compose]
-    assert "runtime is unavailable after update apply" in sh[sh_refresh:sh_compose]
-    assert '"${_KNOWLEDGE_ARGS[@]}" 2>&1' in sh
-    assert 'exit "$_KNOWLEDGE_RC"' in sh
-    assert "Knowledge plugin preflight failed" in sh
-    assert sh_compose < sh.index('PANE_CMD=("${CLEAN_ENV[@]}"')
-    assert sh_compose < sh.index('"${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}"')
-
-    ps_compose = ps.index("'knowledge', 'compose-plugins'")
-    assert ps.index("Set-Location $plan.work_dir") < ps_compose
-    assert ps_compose < ps.index("# Apply environment variables from the launch plan")
-    ps_refresh = ps.index("$refreshedVenvPython = Resolve-RuntimePython")
-    assert ps.rfind("Invoke-UpdateApply", 0, ps_refresh) < ps_refresh
-    assert ps_refresh < ps_compose
-    assert "$VenvPython = $refreshedVenvPython" in ps[ps_refresh:ps_compose]
-    assert "runtime is unavailable after update apply" in ps[ps_refresh:ps_compose]
-    assert "$knowledgeOutput = & $VenvPython @knowledgeArgs 2>&1" in ps
-    assert "exit $knowledgeExit" in ps
-    assert "Knowledge plugin preflight failed" in ps
-    assert ps_compose < ps.index("& $cmd[0] $cmd[1..($cmd.Count - 1)]")

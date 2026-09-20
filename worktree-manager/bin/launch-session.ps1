@@ -260,7 +260,12 @@ if ($env:COPILOT_EXTENSIONS_CONTEXT) {
         exit 1
     }
 } else {
-    $RuntimeDir = Join-Path $env:USERPROFILE '.agent-worktrees'
+    # Standard cross-plugin resolution: `AGENT_RT_ROOT` is the marketplace-
+    # specific install-folder override every plugin's own resolve-runtime.ps1
+    # already honors (see below); defaulting here too keeps this pre-check
+    # (which locates resolve-runtime.ps1 itself) consistent with it, rather
+    # than hardcoding the legacy path regardless of an active override.
+    $RuntimeDir = if ($env:AGENT_RT_ROOT) { $env:AGENT_RT_ROOT } else { Join-Path $env:USERPROFILE '.agent-worktrees' }
 }
 $AwPy = $null
 $runtimeResolver = Join-Path $RuntimeDir 'bin\resolve-runtime.ps1'
@@ -302,6 +307,15 @@ function Write-ActivityLog {
         [string[]]$Fields
     )
     if ([string]::IsNullOrWhiteSpace($WorktreeId)) { return }
+    # Re-resolve before use: this can fire long after the interactive Copilot
+    # session ends (post psmux-attach), and the runtime may have been
+    # upgraded/pruned to a different version dir in the meantime, leaving the
+    # cached $VenvPython pointing at a now-deleted python.exe (#stale-venv).
+    $reresolvedPython = Resolve-RuntimePython
+    if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
+        $script:VenvPython = $reresolvedPython
+        $VenvPython = $reresolvedPython
+    }
     if (-not ($VenvPython -and (Test-Path -LiteralPath $VenvPython))) { return }
     try {
         $alArgs = @('-m', 'agent_worktrees', 'activity-log', $EventName,
@@ -320,6 +334,21 @@ function Write-ActivityLog {
 
 function Invoke-AwPostExit {
     param([string]$WorktreeId)
+    # Re-resolve before use: post-exit runs after the interactive Copilot
+    # session ends (post psmux-attach, or after direct-launch waits out the
+    # whole session), and the runtime may have been upgraded/pruned to a
+    # different version dir in the meantime, leaving the cached $VenvPython
+    # pointing at a now-deleted python.exe (#stale-venv).
+    $reresolvedPython = Resolve-RuntimePython
+    if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
+        $script:VenvPython = $reresolvedPython
+        $VenvPython = $reresolvedPython
+    }
+    if (-not ($VenvPython -and (Test-Path -LiteralPath $VenvPython))) {
+        Write-SetupLog "Post-exit: runtime python unavailable (cached path stale and re-resolve failed)" 'ERROR'
+        Write-Warning "Post-exit finalization skipped: agent-worktrees runtime python not found. Run 'agent-worktrees finalize' to retry."
+        return 1
+    }
     $postArgs = @('-m', 'agent_worktrees')
     if ($script:LaunchProject) {
         $postArgs += @('--project', $script:LaunchProject)

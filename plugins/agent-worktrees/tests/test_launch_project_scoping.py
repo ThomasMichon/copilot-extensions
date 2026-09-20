@@ -210,31 +210,3 @@ def test_resolve_resume_plan_project_matches_repo_name_not_ambient_global(
 
     assert m._LAST_PLAN["project"] == "demo-repo"
     assert m._LAST_PLAN["project"] == config.repo_name
-
-
-def test_launchers_prefer_resolved_plan_project_over_ambient(monkeypatch):
-    """Once the plan carries `project`, the launcher scripts must let it win
-    over whatever ambient/starting project the launcher itself had -- never
-    only filling in an empty value (the #2338 bug)."""
-    ps1 = (
-        Path(__file__).resolve().parents[1] / "bin" / "launch-session.ps1"
-    ).read_text(encoding="utf-8")
-    sh = (
-        Path(__file__).resolve().parents[1] / "bin" / "launch-session.sh"
-    ).read_text(encoding="utf-8")
-
-    # The stale guard ("only if empty") must be gone from both launchers.
-    assert (
-        "if (-not $script:LaunchProject -and $plan.PSObject.Properties.Name "
-        "-contains 'project') {" not in ps1
-    )
-    assert 'if [[ -z "$LAUNCH_PROJECT" ]]; then\n    LAUNCH_PROJECT=$(printf' not in sh
-
-    # The plan's project must now be preferred unconditionally when present.
-    assert (
-        "if ($plan.PSObject.Properties.Name -contains 'project' "
-        "-and $plan.project) {" in ps1
-    )
-    assert "$script:LaunchProject = [string]$plan.project" in ps1
-    assert '_PLAN_PROJECT=$(printf' in sh
-    assert 'if [[ -n "$_PLAN_PROJECT" ]]; then\n    LAUNCH_PROJECT="$_PLAN_PROJECT"' in sh

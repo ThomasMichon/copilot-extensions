@@ -254,23 +254,17 @@ def cmd_launch(argv: list[str]) -> int:
                 os.environ.pop("AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR", None)
         plat = cfg.detect_platform()
         legacy_name = "launch-session.cmd" if plat == "windows" else "launch-session.sh"
-        # Temporary deviation from efforts/active/worktree-manager-control-plane/
-        # phase-3b-mux-relocation.md Sub-slice 2a Step 2: the in-plugin
-        # launch-session/pane-wrapper files are deliberately NOT deleted yet,
-        # and are an ACTIVE fallback tier here (not just inert rollback
-        # files) until the relocated Worktree Manager path is proven live on
-        # real hardware. Try each candidate bin dir in order (relocated
-        # Worktree Manager, then the in-plugin scripts) and use the FIRST one
-        # whose script actually exists -- a "usable" relocated install (its
-        # Python module runs and reports a compatible version) does not by
-        # itself guarantee its bin/payload copy completed, so a partial
-        # deploy there must still fall through to the in-plugin tier rather
-        # than jumping straight to the new direct, non-mux path.
-        launch_bin = None
-        for candidate in (_usable_worktree_manager_launcher_dir(), inst_dir / "bin"):
-            if candidate is not None and (candidate / legacy_name).exists():
-                launch_bin = candidate
-                break
+        # Phase 3b Sub-slice 2a Step 2 cutover complete (efforts/active/
+        # worktree-manager-control-plane/phase-3b-mux-relocation.md): the
+        # relocated Worktree Manager path has been live on real hardware for
+        # months (multiple self-updated versions observed), so the in-plugin
+        # launch-session/pane-wrapper rollback tier is retired along with the
+        # files themselves. agent-worktrees never re-derives a mux launcher of
+        # its own; the ONLY tiers are the relocated Worktree Manager launcher
+        # (a "bring your own mux" controller today, generalized later per the
+        # session-hosting vision) and the direct, non-mux fallback below.
+        candidate = _usable_worktree_manager_launcher_dir()
+        launch_bin = candidate if candidate is not None and (candidate / legacy_name).exists() else None
         if launch_bin is None:
             output.warn(
                 "No launch-session script found (neither the relocated "

@@ -21,10 +21,15 @@ def test_launch_layers_share_machine_settings_reconciler():
     sh_helper = (SCRIPTS / "reconcile-machine-settings.sh").read_text(
         encoding="utf-8"
     )
-    ps_launch = (PLUGIN_ROOT / "bin" / "launch-session.ps1").read_text(
+    # The interactive mux launch scripts relocated to Worktree Manager in
+    # Phase 3b Sub-slice 2a Step 2 (efforts/active/worktree-manager-control-
+    # plane/phase-3b-mux-relocation.md); agent-worktrees no longer ships its
+    # own copy.
+    wm_bin = PLUGIN_ROOT.parent.parent / "worktree-manager" / "bin"
+    ps_launch = (wm_bin / "launch-session.ps1").read_text(
         encoding="utf-8"
     )
-    sh_launch = (PLUGIN_ROOT / "bin" / "launch-session.sh").read_text(
+    sh_launch = (wm_bin / "launch-session.sh").read_text(
         encoding="utf-8"
     )
     ps_wrapper = (SCRIPTS / "launch-command.ps1").read_text(encoding="utf-8")

@@ -1926,28 +1926,14 @@ prompt = .venv
 }
 
 function Deploy-Wrappers {
-    <# Copy the static launch wrappers and bootstrap scripts to ~/.agent-worktrees/bin/. #>
+    <# Copy bootstrap scripts to ~/.agent-worktrees/bin/. The interactive
+       mux launch-session/pane-wrapper scripts are no longer deployed here:
+       Phase 3b Sub-slice 2a Step 2 (efforts/active/worktree-manager-control-
+       plane/phase-3b-mux-relocation.md) completed the cutover to the
+       relocated Worktree Manager copy as the one true implementation;
+       agent-worktrees' own cmd_launch resolves that install live (or the
+       direct, non-mux fallback) instead of an in-plugin copy. #>
     Ensure-InstallDir $BinDir
-
-    foreach ($wrapper in @('launch-session.cmd', 'launch-session.ps1')) {
-        $src = Join-Path $PluginDir "bin\$wrapper"
-        $dst = Join-Path $BinDir $wrapper
-        if (-not (Test-Path $src)) {
-            Write-ServiceErr "Wrapper source not found: $src"
-            return $false
-        }
-        Copy-Item $src $dst -Force
-        Write-ServiceOk "Wrapper: $wrapper"
-    }
-
-    # Deploy the pane wrapper (records the pane_exited exit code inside psmux
-    # panes + shows a crash diagnostic). Optional -- mirrors install.sh's
-    # pane-wrapper.sh handling; absence just falls back to the verbatim command.
-    $paneSrc = Join-Path $PluginDir "bin\pane-wrapper.ps1"
-    if (Test-Path $paneSrc) {
-        Copy-Item $paneSrc (Join-Path $BinDir 'pane-wrapper.ps1') -Force
-        Write-ServiceOk "Wrapper: pane-wrapper.ps1"
-    }
 
     if (-not (Deploy-RuntimeResolvers)) { return $false }
 
@@ -2183,22 +2169,14 @@ terminal_profiles:
 }
 
 function Deploy-TerminalScripts {
-    <# Deploy the per-session psmux options + opt-in keybind scripts to BIN_DIR.
-       agent-worktrees no longer owns ~/.psmux.conf: the launcher stamps the
-       status bar + behaviors per-session from session-options.ps1, and
-       apply-mux-keybinds.ps1 is an opt-in server-global tuning script the user
-       (or a restore flow) may run. Mirrors install.sh deploy_terminal_scripts. #>
+    <# Deploy the psmux-path helper + relinquish the legacy global psmux
+       config. The per-session options/opt-in keybind scripts
+       (session-options.ps1, apply-mux-keybinds.ps1, psmux-passthrough.conf)
+       were relocated to Worktree Manager in Phase 3b Sub-slice 2a Step 2
+       (efforts/active/worktree-manager-control-plane/phase-3b-mux-relocation.md)
+       along with the launch-session.ps1 they configure; agent-worktrees no
+       longer deploys its own copies. Mirrors install.sh deploy_terminal_scripts. #>
     Ensure-InstallDir $BinDir
-    $srcDir = Join-Path $PluginDir 'terminal'
-    foreach ($script in @('session-options.ps1', 'apply-mux-keybinds.ps1', 'psmux-passthrough.conf')) {
-        $src = Join-Path $srcDir $script
-        if (-not (Test-Path $src)) {
-            Write-ServiceWarn "terminal script not found at $src"
-            continue
-        }
-        Copy-Item $src (Join-Path $BinDir $script) -Force
-        Write-ServiceOk "Terminal script: $script"
-    }
     $psmuxPathHelper = Join-Path $PluginDir 'scripts\psmux-path.ps1'
     if (Test-Path -LiteralPath $psmuxPathHelper) {
         Copy-Item $psmuxPathHelper (Join-Path $BinDir 'psmux-path.ps1') -Force
@@ -3359,7 +3337,10 @@ switch ($Action) {
             Write-ServiceChanged "Removed package: $LibDir"
         }
 
-        # Remove wrappers
+        # Remove wrappers (legacy cleanup: earlier versions deployed the
+        # in-plugin mux launch scripts here; they are no longer deployed by
+        # this installer, but a stale copy from a pre-cutover version is
+        # still cleaned up on uninstall).
         foreach ($wrapper in @('launch-session.cmd', 'launch-session.ps1', 'pane-wrapper.ps1')) {
             $path = Join-Path $BinDir $wrapper
             if (Test-Path $path) { Remove-Item $path -Force }
@@ -3418,14 +3399,16 @@ switch ($Action) {
         }
         $ErrorActionPreference = $prevEAP
 
-        # Wrapper
-        foreach ($wrapper in @('launch-session.cmd', 'launch-session.ps1')) {
-            $wrapperPath = Join-Path $BinDir $wrapper
-            if (Test-Path $wrapperPath) {
-                Write-ServiceOk "$wrapper deployed"
-            } else {
-                Write-ServiceErr "$wrapper missing"
-            }
+        # Interactive mux launch (relocated to Worktree Manager since Phase
+        # 3b Sub-slice 2a Step 2; no in-plugin wrapper is deployed anymore).
+        # A lightweight presence check only -- the real health-gated
+        # resolution (version probe, current-version marker) lives in
+        # cmd_launch's own `_usable_worktree_manager_launcher_dir`.
+        $wmRoot = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } else { Join-Path $env:USERPROFILE '.worktree-manager' }
+        if (Test-Path (Join-Path $wmRoot 'current-version')) {
+            Write-ServiceOk "Interactive launch: Worktree Manager found at $wmRoot"
+        } else {
+            Write-ServiceSkipped "Interactive launch: no Worktree Manager found; direct non-mux fallback"
         }
 
         # Binstub (.ps1 primary, .cmd fallback)
@@ -3495,12 +3478,14 @@ switch ($Action) {
             } catch { }
         }
 
-        # Terminal scripts (per-session psmux options + opt-in keybinds)
-        $sessOpts = Join-Path $BinDir 'session-options.ps1'
-        if (Test-Path $sessOpts) {
-            Write-ServiceOk "terminal scripts at $BinDir (session-options.ps1)"
+        # psmux-path.ps1 (the only terminal script agent-worktrees still
+        # deploys itself; the per-session options/keybind scripts relocated
+        # to Worktree Manager -- see the "Interactive launch" check above).
+        $psmuxPathDeployed = Join-Path $BinDir 'psmux-path.ps1'
+        if (Test-Path $psmuxPathDeployed) {
+            Write-ServiceOk "terminal script at $BinDir (psmux-path.ps1)"
         } else {
-            Write-ServiceWarn "terminal scripts missing - run 'update' to deploy"
+            Write-ServiceWarn "psmux-path.ps1 missing - run 'update' to deploy"
         }
 
         # Active worktree sessions

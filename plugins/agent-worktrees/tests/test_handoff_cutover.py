@@ -423,7 +423,13 @@ class TestMuxNewWindow:
 
 class TestPaneWrapperInitialPrompt:
     def test_wrapper_appends_native_interactive_prompt(self, tmp_path):
-        root = Path(__file__).resolve().parents[1]
+        # The interactive mux launch scripts (including the pane wrappers)
+        # relocated to Worktree Manager in Phase 3b Sub-slice 2a Step 2
+        # (efforts/active/worktree-manager-control-plane/
+        # phase-3b-mux-relocation.md); agent-worktrees no longer ships its
+        # own copy, but this test still exercises the real
+        # `sessions._mux_pane_cmd` construction here.
+        root = Path(__file__).resolve().parents[3] / "worktree-manager"
         wrapper_dir = tmp_path / "wrapper with spaces"
         wrapper_dir.mkdir()
         capture = tmp_path / "capture.py"

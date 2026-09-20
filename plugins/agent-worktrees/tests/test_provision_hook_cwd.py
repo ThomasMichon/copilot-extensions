@@ -55,8 +55,13 @@ def test_provision_hook_surfaces_previous_failure():
 
 
 def test_powershell_diagnostics_are_optional():
+    # The launcher relocated to Worktree Manager in Phase 3b Sub-slice 2a
+    # Step 2 (efforts/active/worktree-manager-control-plane/phase-3b-mux-
+    # relocation.md); agent-worktrees no longer ships its own copy.
     provision = (_PLUGIN / "scripts" / "provision-check.ps1").read_text("utf-8")
-    launcher = (_PLUGIN / "bin" / "launch-session.ps1").read_text("utf-8")
+    launcher = (
+        _PLUGIN.parent.parent / "worktree-manager" / "bin" / "launch-session.ps1"
+    ).read_text("utf-8")
     assert "$plan.PSObject.Properties['diagnostics']" in provision
     assert "function Write-PlanDiagnostics" in launcher
     assert "$Plan.PSObject.Properties['diagnostics']" in launcher
