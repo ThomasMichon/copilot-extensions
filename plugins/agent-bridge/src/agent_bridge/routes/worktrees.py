@@ -1229,7 +1229,7 @@ async def _run_for_agent(
     )
 
 
-def _owning_agent(
+async def _owning_agent(
     worktree_id: str, request: Request,
 ) -> tuple[str, AgentConfig] | None:
     """Resolve which configured agent owns ``worktree_id``.
@@ -1237,6 +1237,16 @@ def _owning_agent(
     Uses the discovery cache to find the agent group that contains the
     worktree, then looks up that agent's config on the resolver.  Returns
     ``(agent_name, config)`` or None if the worktree isn't known.
+
+    session-worktree-archive-linkout: the discovery cache only ever crawls
+    ``list --json`` (the picker's own default filters -- on-disk, non-
+    archived worktrees), so a worktree that ``agent-worktrees`` has since
+    tombstoned as ``"archived"`` (retire_record, cx#3015) never appears in
+    it even though its tracking record -- and session history -- still
+    exists. When the live cache has nothing for ``worktree_id``, fall back
+    to an explicit archived-record probe across every eligible agent, so a
+    caller (e.g. Neuron Forge's session/lineage links) can still resolve an
+    archived worktree's owning machine instead of a bare 404.
     """
     resolver = getattr(request.app.state, "resolver", None)
     if resolver is None:
@@ -1248,6 +1258,49 @@ def _owning_agent(
             config = resolver.agents.get(agent_name)
             if config is not None:
                 return agent_name, config
+
+    return await _owning_agent_from_archive(worktree_id, resolver)
+
+
+async def _owning_agent_from_archive(
+    worktree_id: str, resolver: AgentResolver,
+) -> tuple[str, AgentConfig] | None:
+    """Probe every eligible agent for an archived record of ``worktree_id``.
+
+    Runs ``list --tracking-status archived --all --worktree-id <id> --json``
+    (a single-record, bounded lookup -- not a full archived-listing crawl)
+    concurrently across agents and returns the first hit. Mirrors the same
+    ``cfg.project and cfg.worktree_discovery`` eligibility gate the live
+    discovery crawl uses.
+    """
+    eligible = [
+        (name, cfg) for name, cfg in resolver.agents.items()
+        if cfg.project and cfg.worktree_discovery
+    ]
+    if not eligible:
+        return None
+
+    args = [
+        "list", "--json", "--tracking-status", "archived", "--all",
+        "--worktree-id", worktree_id,
+    ]
+    results = await asyncio.gather(
+        *(_run_for_agent(name, cfg, resolver, args) for name, cfg in eligible),
+        return_exceptions=True,
+    )
+    for (agent_name, config), raw in zip(eligible, results):
+        if isinstance(raw, Exception) or raw is None:
+            continue
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        worktrees = data.get("worktrees") if isinstance(data, dict) else None
+        if isinstance(worktrees, list) and any(
+            isinstance(wt, dict) and wt.get("id") == worktree_id
+            for wt in worktrees
+        ):
+            return agent_name, config
     return None
 
 
@@ -1270,7 +1323,7 @@ async def list_worktree_sessions(
     cache = get_cache()
     await cache.crawl_if_empty()
 
-    owner = _owning_agent(worktree_id, request)
+    owner = await _owning_agent(worktree_id, request)
     if owner is None:
         raise HTTPException(
             status_code=404,
@@ -1334,7 +1387,7 @@ async def get_worktree_lineage(
     cache = get_cache()
     await cache.crawl_if_empty()
 
-    owner = _owning_agent(worktree_id, request)
+    owner = await _owning_agent(worktree_id, request)
     if owner is None:
         raise HTTPException(
             status_code=404,
@@ -1390,7 +1443,7 @@ async def get_worktree_session_transcript(
     cache = get_cache()
     await cache.crawl_if_empty()
 
-    owner = _owning_agent(worktree_id, request)
+    owner = await _owning_agent(worktree_id, request)
     agent_name: str | None = None
     events: list[Any] = []
     meta: dict[str, Any] | None = None
@@ -1478,7 +1531,7 @@ async def restart_worktree_copilot(
     cache = get_cache()
     await cache.crawl_if_empty()
 
-    owner = _owning_agent(worktree_id, request)
+    owner = await _owning_agent(worktree_id, request)
     if owner is None:
         raise HTTPException(
             status_code=404,

@@ -1643,6 +1643,46 @@ class TestWorktreeRoutes:
             resp = client.get(f"/api/v1/worktrees/{wt_id}/sessions")
         assert resp.status_code == 502
 
+    def test_list_worktree_sessions_resolves_archived_worktree(
+        self, client, app,
+    ) -> None:
+        # session-worktree-archive-linkout: a worktree agent-worktrees has
+        # tombstoned as "archived" (retire_record, cx#3015) never appears in
+        # the live discovery cache (it only crawls `list --json`'s on-disk,
+        # non-archived default). The owner-resolution fallback must still
+        # find it via an explicit archived-record probe instead of 404ing.
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "anomalous-potato-wsl-20250101-193000-archived"
+        self._register_agent(app, "test-agent")
+        # Deliberately NOT seeded into the live discovery cache.
+
+        archive_probe_payload = (
+            '{"worktrees": [{"id": "%s", "status": "archived"}]}' % wt_id
+        )
+        sessions_payload = '{"sessions": [{"id": "s1"}]}'
+
+        async def _fake_run_for_agent(agent_name, config, resolver, args):
+            if "--tracking-status" in args:
+                assert args == [
+                    "list", "--json", "--tracking-status", "archived",
+                    "--all", "--worktree-id", wt_id,
+                ]
+                return archive_probe_payload
+            assert args == ["list-sessions", "--worktree", wt_id, "--json"]
+            return sessions_payload
+
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(side_effect=_fake_run_for_agent),
+        ):
+            resp = client.get(f"/api/v1/worktrees/{wt_id}/sessions")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["agent_name"] == "test-agent"
+        assert data["sessions"][0]["id"] == "s1"
+
     def test_get_worktree_session_transcript_proxies(self, client, app) -> None:
         from unittest.mock import AsyncMock, patch
 
