@@ -1,10 +1,11 @@
 # Pattern: process-slot-ownership
 
-**Serves:** *Vision agent-fabric* §Behaviors/**every-spawn-is-owned-and-
-tethered** — a background process is memory-safe only when it is both
-single-occupancy (a role/slot never gains a second live holder) and
-owner-tethered (its lifetime ends when the thing that justified it is
-confirmed gone).
+**Serves:** *Vision agent-fabric* §Behaviors/**reclaim-idle-process** and
+§Behaviors/**claimed-resource-not-reclaimed** — a background process is
+memory-safe only when it is both single-occupancy (a role/slot never gains a
+second live holder) and owner-tethered (its lifetime ends only once the
+thing that justified it is *confirmed* gone, never while a live claimant
+remains).
 **Exemplars:** `libs/single-instance-lease` (vendored into agent-bridge,
 agent-dispatch, agent-mcp, agent-vault, agent-worktrees) — `SingleInstance`
 (the lease), `is_superseded` + `pid_alive` (the fail-safe supersession
