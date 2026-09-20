@@ -279,13 +279,13 @@ def check() -> int:
                 "test-persistent-environment adapter"
             )
 
-    # Repo-wide backstop (aperture-labs #7238): the loop above enforces the full
-    # installer contract (adapter present + wired) only for `plugins/**/*.ps1`.
-    # A test/helper script living anywhere else in the repo (e.g. under a
-    # plugin's `tests/`, a shared `libs/*/tests/`, or a future integration
-    # harness) never had to carry the adapter at all, so it was free to call
-    # the real `[Environment]::SetEnvironmentVariable(..., 'User'|'Machine')`
-    # (or the registry paths/APIs) directly and leak into the operator's real,
+    # Repo-wide backstop: the loop above enforces the full installer contract
+    # (adapter present + wired) only for `plugins/**/*.ps1`. A test/helper
+    # script living anywhere else in the repo (e.g. under a plugin's `tests/`,
+    # a shared `libs/*/tests/`, or a future integration harness) never had to
+    # carry the adapter at all, so it was free to call the real
+    # `[Environment]::SetEnvironmentVariable(..., 'User'|'Machine')` (or the
+    # registry paths/APIs) directly and leak into the operator's real,
     # persistent Windows User PATH -- exactly the leak this repo hit live. This
     # pass only checks the same direct-access detector against every other
     # tracked `.ps1` in the repo; it does not require the adapter marker or

@@ -196,7 +196,7 @@ IGNORED_SCAN_DIR_NAMES = {
 def is_ignored_scan_path(path) -> bool:
     """True when any path component names a directory a repo-wide `.ps1`
     persistent-environment sweep must not descend into (see
-    ``check-install-contract.py``'s repo-wide backstop, aperture-labs #7238)."""
+    ``check-install-contract.py``'s repo-wide backstop)."""
     return any(part in IGNORED_SCAN_DIR_NAMES for part in path.parts)
 
 
