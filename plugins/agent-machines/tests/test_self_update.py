@@ -425,8 +425,10 @@ def test_fast_forward_repo_skips_dirty_and_diverged(tmp_path):
 def test_fast_forward_repo_bare_anchor_fast_forwards_branch_ref(tmp_path):
     repo = tmp_path / "bare-repo"
     repo.mkdir()
+    calls: list[list[str]] = []
 
     def bare_runner(argv, *, cwd=None, timeout=0):
+        calls.append(list(argv))
         mapping = {
             ("git", "rev-parse", "--is-bare-repository"): self_update.CommandResult(
                 list(argv), 0, "true\n", ""
@@ -443,6 +445,9 @@ def test_fast_forward_repo_bare_anchor_fast_forwards_branch_ref(tmp_path):
             ("git", "rev-parse", "--verify", "origin/main"): self_update.CommandResult(
                 list(argv), 0, "bbbb111\n", ""
             ),
+            ("git", "merge-base", "--is-ancestor"): self_update.CommandResult(
+                list(argv), 0, "", ""
+            ),
             ("git", "update-ref"): self_update.CommandResult(list(argv), 0, "", ""),
         }
         for prefix, result in mapping.items():
@@ -453,6 +458,8 @@ def test_fast_forward_repo_bare_anchor_fast_forwards_branch_ref(tmp_path):
     result = self_update.fast_forward_repo(repo, runner=bare_runner)
     assert result.status == "changed"
     assert "bare" in result.detail
+    assert ["git", "merge-base", "--is-ancestor", "aaaa000", "bbbb111"] in calls
+    assert ["git", "update-ref", "refs/heads/main", "bbbb111", "aaaa000"] in calls
 
 
 def test_fast_forward_repo_bare_anchor_skips_detached_head(tmp_path):
@@ -483,7 +490,7 @@ def test_fast_forward_repo_bare_anchor_skips_detached_head(tmp_path):
     assert "detached" in result.detail
 
 
-def test_fast_forward_repo_bare_anchor_reports_error_when_upstream_moved(tmp_path):
+def test_fast_forward_repo_bare_anchor_reports_error_when_ref_lock_fails(tmp_path):
     repo = tmp_path / "bare-repo"
     repo.mkdir()
 
@@ -504,7 +511,11 @@ def test_fast_forward_repo_bare_anchor_reports_error_when_upstream_moved(tmp_pat
             ("git", "rev-parse", "--verify", "origin/main"): self_update.CommandResult(
                 list(argv), 0, "bbbb111\n", ""
             ),
-            # The ref moved concurrently: update-ref's compare-and-swap fails.
+            ("git", "merge-base", "--is-ancestor"): self_update.CommandResult(
+                list(argv), 0, "", ""
+            ),
+            # Something else locked/moved the ref concurrently: the
+            # compare-and-swap write itself fails.
             ("git", "update-ref"): self_update.CommandResult(
                 list(argv), 128, "", "fatal: cannot lock ref: is at cccc222 but expected aaaa000"
             ),
@@ -517,6 +528,43 @@ def test_fast_forward_repo_bare_anchor_reports_error_when_upstream_moved(tmp_pat
     result = self_update.fast_forward_repo(repo, runner=bare_runner)
     assert result.status == "error"
     assert "lock ref" in result.detail
+
+
+def test_fast_forward_repo_bare_anchor_skips_when_upstream_diverges_during_update(tmp_path):
+    repo = tmp_path / "bare-repo"
+    repo.mkdir()
+
+    def bare_runner(argv, *, cwd=None, timeout=0):
+        mapping = {
+            ("git", "rev-parse", "--is-bare-repository"): self_update.CommandResult(
+                list(argv), 0, "true\n", ""
+            ),
+            ("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): (
+                self_update.CommandResult(list(argv), 0, "origin/main\n", "")
+            ),
+            ("git", "fetch"): self_update.CommandResult(list(argv), 0, "", ""),
+            ("git", "rev-list"): self_update.CommandResult(list(argv), 0, "0\t1\n", ""),
+            ("git", "symbolic-ref"): self_update.CommandResult(list(argv), 0, "main\n", ""),
+            ("git", "rev-parse", "--verify", "HEAD"): self_update.CommandResult(
+                list(argv), 0, "aaaa000\n", ""
+            ),
+            ("git", "rev-parse", "--verify", "origin/main"): self_update.CommandResult(
+                list(argv), 0, "cccc222\n", ""
+            ),
+            # A concurrent force-update moved origin/main since the earlier
+            # ahead/behind check, so old_sha is no longer an ancestor.
+            ("git", "merge-base", "--is-ancestor"): self_update.CommandResult(
+                list(argv), 1, "", ""
+            ),
+        }
+        for prefix, result in mapping.items():
+            if tuple(argv[: len(prefix)]) == prefix:
+                return result
+        raise AssertionError(argv)
+
+    result = self_update.fast_forward_repo(repo, runner=bare_runner)
+    assert result.status == "skipped"
+    assert "non-fast-forward" in result.detail
 
 
 def test_fast_forward_repo_bare_anchor_already_up_to_date(tmp_path):

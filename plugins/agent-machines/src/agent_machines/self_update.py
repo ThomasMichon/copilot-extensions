@@ -799,13 +799,34 @@ def fast_forward_repo(
                 new_sha.output or "git rev-parse upstream failed",
                 path=str(repo),
             )
+        old_sha_value = old_sha.stdout.strip()
+        new_sha_value = new_sha.stdout.strip()
+        # The ahead/behind check above proved a fast-forward against the
+        # symbolic upstream name at that point in time, but a concurrent
+        # fetch/force-update could have since moved it to a divergent
+        # commit. Re-verify old_sha is actually an ancestor of the just
+        # resolved new_sha immediately before writing so a race never
+        # forces the branch to a non-fast-forward target.
+        ancestry = runner(
+            ["git", "merge-base", "--is-ancestor", old_sha_value, new_sha_value],
+            cwd=repo,
+            timeout=120,
+        )
+        if ancestry.returncode != 0:
+            return StepResult(
+                "git-pull",
+                "skipped",
+                "skipped fast-forward pull because the upstream moved to a "
+                "non-fast-forward commit during the update",
+                path=str(repo),
+            )
         updated = runner(
             [
                 "git",
                 "update-ref",
                 f"refs/heads/{branch_name}",
-                new_sha.stdout.strip(),
-                old_sha.stdout.strip(),
+                new_sha_value,
+                old_sha_value,
             ],
             cwd=repo,
             timeout=120,
