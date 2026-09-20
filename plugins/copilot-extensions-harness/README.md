@@ -11,13 +11,21 @@ in any control repo and your agent knows how to **diagnose** the deployed
 runtimes, **contribute** changes to the plugins, and **validate** them on a
 fresh box, without you hand-writing a per-repo guide or installing a runtime.
 
-The plugin declares a checked-in contribution-boundary projection. Adopting
-repositories synchronize that projection with the
-`customizing-copilot:reviewing-customizations` manager; it remains available
-without a competing `sessionStart` output. The full guide remains versioned at
-[`references/contribution-ground-rules.md`](references/contribution-ground-rules.md):
-generic, organization-neutral capabilities are welcome; personal or
-organization-specific needs are routed elsewhere.
+The plugin declares two checked-in static projections. Adopting
+repositories synchronize them with the
+`customizing-copilot:reviewing-customizations` manager; each remains available
+without a competing `sessionStart` output.
+- **`contribution-boundary`** — the full guide remains versioned at
+  [`references/contribution-ground-rules.md`](references/contribution-ground-rules.md):
+  generic, organization-neutral capabilities are welcome; personal or
+  organization-specific needs are routed elsewhere.
+- **`cross-repo-debug-tracking`** — before concluding an `agent-*` or
+  `context-handoff` plugin's source is undocumented, or filing an upstream
+  bug against one, resolve its actual checked-out location first (for example
+  `<agent-worktrees catalog argv[0]> related resolve <repo>` -- the exact
+  `argv[0]` from the session command catalog, never a bare PATH lookup), and
+  cross-link a local symptom's tracking issue with its upstream
+  `ThomasMichon/copilot-extensions` issue/PR in both directions.
 
 | Skill | Priority | Covers |
 |-------|----------|--------|

@@ -9,6 +9,14 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "cross-repo-debug-tracking",
+      "template": "instructions/cross-repo-debug-tracking.instructions.md",
+      "destination": ".github/instructions/copilot-extensions-harness/cross-repo-debug-tracking.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }
