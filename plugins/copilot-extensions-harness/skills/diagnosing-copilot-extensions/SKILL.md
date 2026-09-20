@@ -68,6 +68,7 @@ the suite, whether or not they ever contribute:
 |------|------|
 | Installed plugin payloads | `~/.copilot/installed-plugins/copilot-extensions/<plugin>/` |
 | Runtime roots | `~/.agent-*` (for example `~/.agent-worktrees/`, `~/.agent-bridge/`, `~/.agent-codespaces/`, `~/.agent-containers/`, `~/.agent-mcp/`, `~/.agent-logger/`, `~/.agent-dispatch/`, `~/.agent-index/`, `~/.agent-vault/`) |
+| **Writable source checkout** | Resolve it, don't assume it's undocumented -- run `<agent-worktrees catalog argv[0]> related resolve copilot-extensions` (the exact `argv[0]` from the session command catalog, never a bare PATH lookup; or the equivalent for another plugin-suite repo). A runtime-only path above is never the only copy; concluding a source-location gap without running this first is the mistake, not a real gap. <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
 | Versioned slots | Python runtimes build immutable slots under `~/.agent-<name>/versions/<version>/`, publish `current-version`, and stamp `deploy-manifest.json` / completion markers |
 | Binstubs | `~/.local/bin/agent-*` (`.ps1` primary + `.cmd` fallback on Windows) |
 | Enablement | `~/.copilot/settings.json` (`experimental: true`) + repo `.github/copilot/settings.json` (`enabledPlugins` / `extraKnownMarketplaces`) |
