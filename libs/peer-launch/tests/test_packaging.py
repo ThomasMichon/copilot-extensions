@@ -122,3 +122,18 @@ def test_index_resolve_effective_config_has_no_unexplained_sibling_launches(monk
         if finding.category == "path-sibling-launch"
     ]
     assert findings == [], findings
+
+
+def test_containers_provider_ssh_has_no_unexplained_sibling_launches(monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "containers_ssh_peer_isolation_guard", ROOT / "tools" / "check-marketplace-isolation.py",
+    )
+    guard = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, guard)
+    spec.loader.exec_module(guard)
+    path = ROOT / "plugins" / "agent-containers" / "src" / "agent_containers" / "provider_ssh.py"
+    findings = [
+        finding for finding in guard._scan_file(path, ROOT, guard._command_patterns(ROOT))
+        if finding.category == "path-sibling-launch"
+    ]
+    assert findings == [], findings

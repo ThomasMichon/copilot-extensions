@@ -217,6 +217,47 @@ def _worktree_manager_version_violations(manager_dir: Path) -> list[str]:
     return violations
 
 
+def _registrar_declaration_violations(plugin_versions: dict[str, str]) -> list[str]:
+    """Check plugin-companion registrar declarations that mirror a plugin's version.
+
+    A ``managed_runtime`` registrar declaration (consumed by a *different*
+    plugin's supervisor, e.g. agent-dispatch's companion-service registrar)
+    checks in its target's version as a plain string -- there is no dynamic
+    resolution at declaration-load time, so it silently drifts whenever the
+    target plugin's own version bumps without this file being touched in the
+    same change. Caught twice via ``test_agent_index_managed.py``'s
+    assertion (#3018, #3028); this closes the gap with a fast, generic guard
+    instead of relying on running a sibling plugin's test suite.
+    """
+    mirrors = {
+        REPO / "plugins" / "agent-index" / "references" / "agent-dispatch"
+        / "registrar" / "agent-index-service.json": "agent-index",
+    }
+    violations: list[str] = []
+    for path, target_plugin in mirrors.items():
+        data = _read_json(path)
+        if not isinstance(data, dict):
+            violations.append(f"{path.relative_to(REPO)}: cannot read registrar declaration")
+            continue
+        runtimes = (
+            data.get("spec", {}).get("managed_runtime", {}).get("runtimes")
+        )
+        if not isinstance(runtimes, list) or not runtimes:
+            violations.append(
+                f"{path.relative_to(REPO)}: no managed_runtime.runtimes entries"
+            )
+            continue
+        expected = plugin_versions.get(target_plugin)
+        for runtime in runtimes:
+            declared = isinstance(runtime, dict) and runtime.get("version")
+            if expected and declared and declared != expected:
+                violations.append(
+                    f"{path.relative_to(REPO)}: declares {target_plugin} version "
+                    f"{declared!r} but plugin.json is {expected!r}"
+                )
+    return violations
+
+
 def main() -> int:
     mkt = _read_json(MARKETPLACE)
     if not mkt or not isinstance(mkt.get("plugins"), list):
@@ -230,6 +271,7 @@ def main() -> int:
     }
 
     violations: list[str] = []
+    plugin_versions: dict[str, str] = {}
     for plugin_dir in sorted(p for p in PLUGINS_DIR.iterdir() if p.is_dir()):
         name = plugin_dir.name
         pj = _read_json(plugin_dir / "plugin.json")
@@ -241,6 +283,7 @@ def main() -> int:
         pj_ver = pj.get("version")
         if pj_ver:
             sources["plugin.json"] = pj_ver
+            plugin_versions[name] = pj_ver
 
         pyproj = plugin_dir / "pyproject.toml"
         if pyproj.exists():
@@ -281,6 +324,7 @@ def main() -> int:
             violations.append(f"{name}: version mismatch ({detail})")
 
     violations.extend(_worktree_manager_version_violations(WORKTREE_MANAGER))
+    violations.extend(_registrar_declaration_violations(plugin_versions))
 
     if violations:
         print("Version-consistency violations:", file=sys.stderr)
