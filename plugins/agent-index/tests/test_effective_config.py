@@ -294,7 +294,7 @@ def test_external_state_root_falls_back_to_project_flag_for_bare_repo(
     bare.mkdir()
     (home / ".agent-worktrees" / "repos.yaml").write_text(
         "repos:\n"
-        f"  odsp-web-harness:\n"
+        f"  example-anchor-repo:\n"
         f"    windows: {json.dumps(str(bare))}\n",
         encoding="utf-8",
     )
@@ -333,7 +333,7 @@ def test_external_state_root_falls_back_to_project_flag_for_bare_repo(
     assert state == "ready"
     assert path == (tmp_path / "knowledge").resolve()
     assert len(calls) == 2
-    assert "--project" in calls[1] and "odsp-web-harness" in calls[1]
+    assert "--project" in calls[1] and "example-anchor-repo" in calls[1]
 
 
 def test_external_state_root_suppresses_console_for_resolved_command(
@@ -360,6 +360,130 @@ def test_external_state_root_suppresses_console_for_resolved_command(
     assert state == "invalid"  # {} has neither stateless nor requires_external key
     assert path is None
     assert captured["kwargs"].get("creationflags") == 0x08000000
+
+
+class _FakePeerLaunch:
+    """Stand-in for the vendored same-cell boundary in explicit-context tests."""
+
+    class ContextRefused(RuntimeError):
+        pass
+
+    @staticmethod
+    def launch_prefix(owner, own_root, raw_context, peer):
+        return ["fake-python", "-I", "-X", "utf8", "fake-peer-launch.py", owner, str(own_root), raw_context, peer]
+
+    @staticmethod
+    def no_window_kwargs():
+        return {}
+
+
+def _fake_own(tmp_path: Path) -> dict:
+    cell = tmp_path / "cell"
+    (cell / "plugins" / "agent-worktrees").mkdir(parents=True)
+    plugin_root = cell / "plugins" / "agent-index"
+    plugin_root.mkdir(parents=True)
+    return {"cellRoot": str(cell), "pluginRoot": str(plugin_root)}
+
+
+def test_external_state_root_same_cell_never_touches_ambient_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _module()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "explicit")
+    monkeypatch.delenv("AGENT_WORKTREES_COMMAND", raising=False)
+    own = _fake_own(tmp_path)
+    monkeypatch.setattr(module, "_load_peer_launch", lambda: _FakePeerLaunch)
+    monkeypatch.setattr(module, "_validate_index_owner_or_refuse", lambda _ctx: own)
+    monkeypatch.setattr(
+        "shutil.which", lambda _: pytest.fail("ambient PATH selected under explicit context")
+    )
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        assert "agent-worktrees" in argv
+        assert "state-root" in argv and "--json" in argv
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({
+                "requires_external": True, "bound": True, "source": "knowledge_repo",
+                "repo": "dotfiles", "state_root": str(tmp_path / "knowledge"), "error": None,
+            }),
+            stderr="",
+        )
+
+    (tmp_path / "knowledge").mkdir()
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    state, path = module._external_state_root(tmp_path)
+
+    assert state == "ready"
+    assert path == (tmp_path / "knowledge").resolve()
+    assert seen["argv"][0] == "fake-python"
+
+
+def test_external_state_root_same_cell_refusal_is_not_swallowed_to_unavailable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # An explicit context that fails to validate at the peer boundary (exit
+    # 126) must propagate as a refusal, never silently degrade to
+    # "unavailable" -- that would be indistinguishable from a genuinely
+    # absent peer and could mask an isolation violation.
+    module = _module()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "explicit")
+    monkeypatch.delenv("AGENT_WORKTREES_COMMAND", raising=False)
+    own = _fake_own(tmp_path)
+    monkeypatch.setattr(module, "_load_peer_launch", lambda: _FakePeerLaunch)
+    monkeypatch.setattr(module, "_validate_index_owner_or_refuse", lambda _ctx: own)
+    monkeypatch.setattr(
+        module.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 126, stdout="", stderr="peer launch refused",
+        ),
+    )
+
+    with pytest.raises(_FakePeerLaunch.ContextRefused, match="peer launch refused"):
+        module._external_state_root(tmp_path)
+
+
+def test_worktrees_command_override_still_wins_over_explicit_context(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # A test-only AGENT_WORKTREES_COMMAND override must still take priority,
+    # matching _worktrees_command's own explicit-wins precedence.
+    module = _module()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "explicit")
+    monkeypatch.setenv("AGENT_WORKTREES_COMMAND", "agent-worktrees")
+    monkeypatch.setattr(
+        module, "_validate_index_owner_or_refuse",
+        lambda _ctx: pytest.fail("same-cell path selected despite command override"),
+    )
+
+    def fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({
+                "requires_external": True, "bound": True, "source": "knowledge_repo",
+                "repo": "dotfiles", "state_root": str(tmp_path / "knowledge"), "error": None,
+            }),
+            stderr="",
+        )
+
+    (tmp_path / "knowledge").mkdir()
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    state, path = module._external_state_root(tmp_path)
+    assert state == "ready"
+
+
+def test_packaged_peer_launch_bytes_are_canonical() -> None:
+    root = Path(__file__).resolve().parents[3]
+    packaged = PLUGIN / "src" / "agent_index" / "_peer_launch.py"
+    assert (root / "libs" / "peer-launch" / "peer_launch.py").read_bytes() == packaged.read_bytes()
+    assert (
+        (root / "libs" / "installation-context" / "installation_context.py").read_bytes()
+        == (PLUGIN / "src" / "agent_index" / "_installation_context.py").read_bytes()
+    )
 
 
 def test_invalid_local_config_never_falls_through(
