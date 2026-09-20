@@ -35,6 +35,20 @@ parallel execution protocol. This is deliberately an **explicit, per-request
 capability an operator opts into for one session**, not a default shape
 delegated/headless work should ever pick up automatically.
 
+**Standing design constraint (carries through every phase):** the CLI-side
+extension (`extensions/agent-bridge/extension.mjs`) must remain **short-lived
+and event-based** — quick, non-blocking actions on a timer or event handler
+that immediately delegate any real work to agent-bridge's daemon or a Session
+Host process. It must never hold open a long-running connection, watch, or
+blocking operation *in the extension-host process itself*: doing so risks the
+extension-host locking its own plugin directory (observed as a real failure
+mode; agent-bridge's current posture avoids it and must keep avoiding it).
+This directly shapes Phase 2/3: the CLI extension's cwd-keyed discovery lookup
+must be a fast, one-shot read/query at startup, not a persistent watch: actual
+connection and lifecycle management for the bound Session Host lives in
+agent-bridge's daemon or the Session Host process, never held open inside the
+CLI extension.
+
 ## Context
 
 Two known, already-documented gaps currently block treating a CLI-driven
@@ -103,6 +117,10 @@ mechanism CLI mode binds through.
         context-handoff's core-module split, since `extension.mjs`'s
         top-level `joinSession()` makes it untestable directly) and added
         `tests/delivery.test.mjs`. Version bumped to `0.4.0-dev502`.
+        Preserves the short-lived/event-based extension posture: `pollInbox`
+        remains the same periodic, quick, non-blocking timer callback; the
+        added `delivery.mjs` import is a plain static ES module with no I/O
+        or watches of its own — no new extension-host directory-lock risk.
 - [ ] Make `ask_user_request`/elicitation answerability durable and correctly
       routed to whichever client is currently attached, including after a
       reconnect — resolving the `unknown_after_restart` gap for this path.
@@ -122,6 +140,10 @@ mechanism CLI mode binds through.
       exists, rather than defaulting to ambient self-registration. Decide and
       document the explicit fallback behavior (decline vs. an honestly-labeled
       compatibility path) for a cwd with no assignment.
+      **Must stay a fast, one-shot lookup + handoff** — read the mapping once
+      at startup and connect out to the assigned Session Host/daemon; never a
+      persistent in-extension watch or long-held connection management loop
+      (see the standing design constraint in *Guiding Intent*).
 - [ ] Enforce allocate-before-launch ordering and one-host-per-cwd-lane,
       reusing the existing single-current-session-per-worktree gate rather
       than a new one.

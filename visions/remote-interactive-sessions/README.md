@@ -160,6 +160,15 @@ An extension resolves and binds to its explicitly assigned host through
 discovery. It does not default to registering with an arbitrary ambient
 daemon merely because one is reachable.
 
+### short-lived-event-based-extension
+
+The CLI-side extension itself stays a fast, event-driven actor: it performs
+quick, non-blocking discovery lookups and handoffs, then delegates all actual
+connection ownership, state, and longer-running work to agent-bridge's daemon
+or the Session Host process. It never holds open a long-running connection,
+watch, or blocking operation in the extension-host process — doing so risks
+the extension-host locking its own plugin directory.
+
 ### no-duplicate-lifecycle-machinery
 
 A CLI-mode-bound session reuses the exact reattach, observation, and
