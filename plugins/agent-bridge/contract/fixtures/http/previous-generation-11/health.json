@@ -33,6 +33,19 @@
         "active_subscriptions": 0,
         "queued_frames": 0,
         "buffered_bytes": 0
+      },
+      "slot": {
+        "pid": 0,
+        "role": "unknown",
+        "active": null,
+        "previous": null,
+        "self_retire": {
+          "enabled": false,
+          "armed": false,
+          "generation": null,
+          "superseded": false,
+          "confirms": 0
+        }
       }
     }
   }

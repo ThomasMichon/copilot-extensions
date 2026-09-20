@@ -858,6 +858,18 @@ async def lifespan(app: FastAPI):
     # never cut mid-flight: it drains as clients follow the flipped route.
     self_retire_task = None
     _sr_enabled, _sr_poll, _sr_confirmations = _self_retire_settings()
+    # Slot-ownership observability (process-slot-ownership Phase 5, aperture-labs):
+    # a small, continuously-updated status dict `/health` renders under `"slot"`
+    # so an operator can see this loop's own view of itself (armed?, generation,
+    # confirms toward self-retire) without grepping logs. Purely observational;
+    # never read by the loop's own logic. Mirrors agent-dispatch's coordinator.
+    app.state.self_retire_status = {
+        "enabled": _sr_enabled,
+        "armed": False,
+        "generation": None,
+        "superseded": False,
+        "confirms": 0,
+    }
     if _sr_enabled:
         async def _self_retire_loop() -> None:
             import os as _os
@@ -890,6 +902,8 @@ async def lifespan(app: FastAPI):
                     break
             if my_gen is None:
                 return
+            app.state.self_retire_status["armed"] = True
+            app.state.self_retire_status["generation"] = my_gen
             confirms = 0
             while True:
                 await asyncio.sleep(_sr_poll)
@@ -899,6 +913,7 @@ async def lifespan(app: FastAPI):
                     loop_name="self-retire",
                 ):
                     confirms = 0
+                    app.state.self_retire_status["confirms"] = 0
                     continue
                 try:
                     superseded = await asyncio.to_thread(
@@ -909,12 +924,17 @@ async def lifespan(app: FastAPI):
                     )
                 except Exception:
                     confirms = 0
+                    app.state.self_retire_status["superseded"] = False
+                    app.state.self_retire_status["confirms"] = 0
                     log.debug("Self-retire supersession check failed", exc_info=True)
                     continue
+                app.state.self_retire_status["superseded"] = bool(superseded)
                 if not (superseded and idle):
                     confirms = 0  # any miss resets: only a sustained state acts
+                    app.state.self_retire_status["confirms"] = 0
                     continue
                 confirms += 1
+                app.state.self_retire_status["confirms"] = confirms
                 if confirms >= _sr_confirmations:
                     if await _governance_backoff(
                         governance,
@@ -922,6 +942,7 @@ async def lifespan(app: FastAPI):
                         loop_name="self-retire",
                     ):
                         confirms = 0
+                        app.state.self_retire_status["confirms"] = 0
                         continue
                     log.info(
                         "Superseded by a live newer generation and idle -- "

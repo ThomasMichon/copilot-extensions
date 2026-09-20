@@ -13,7 +13,7 @@ import socket
 from types import SimpleNamespace
 
 from agent_bridge.app import _count_active_sessions
-from agent_bridge.self_retire import _is_listening, is_superseded
+from agent_bridge.self_retire import _is_listening, is_superseded, slot_descriptor
 
 CONFIG_DIR = "/does/not/matter"  # read_table is injected in every case
 
@@ -186,3 +186,75 @@ def test_active_count_includes_fresh_live_session_registrations_for_retire_gate(
     db = SimpleNamespace(list_fresh_live_sessions=lambda *, now: [{"session_id": "s"}])
 
     assert _count_active_sessions(mgr, db) == 1
+
+
+# -- slot_descriptor (process-slot-ownership Phase 5) ------------------------
+
+def test_slot_descriptor_shape_with_no_status():
+    # No status passed -> conservative defaults, never a KeyError.
+    slot = slot_descriptor("/does/not/matter", read_table=lambda _d: {})
+    assert set(slot) == {"pid", "role", "active", "previous", "self_retire"}
+    assert isinstance(slot["pid"], int)
+    assert slot["role"] == "unknown"
+    assert slot["active"] is None
+    assert slot["previous"] is None
+    assert slot["self_retire"] == {
+        "enabled": False, "armed": False, "generation": None,
+        "superseded": False, "confirms": 0,
+    }
+
+
+def test_slot_descriptor_reports_active_role_for_own_pid():
+    import os
+
+    table = _table(active={"bind": "127.0.0.1", "port": 9280, "pid": os.getpid()})
+    slot = slot_descriptor("/does/not/matter", read_table=lambda _d: table)
+    assert slot["role"] == "active"
+    assert slot["active"]["pid"] == os.getpid()
+
+
+def test_slot_descriptor_reports_passive_role_for_other_active_pid():
+    table = _table(active={"bind": "127.0.0.1", "port": 9280, "pid": 999999})
+    slot = slot_descriptor("/does/not/matter", read_table=lambda _d: table)
+    assert slot["role"] == "passive"
+    assert slot["active"]["pid"] == 999999
+
+
+def test_slot_descriptor_reports_unknown_role_when_active_pid_is_null():
+    # A malformed/legacy routing entry with no recorded pid must never be
+    # mistaken for "passive" -- there is nothing to compare against.
+    table = _table(active={"bind": "127.0.0.1", "port": 9280, "pid": None})
+    slot = slot_descriptor("/does/not/matter", read_table=lambda _d: table)
+    assert slot["role"] == "unknown"
+    assert slot["active"]["pid"] is None
+
+
+def test_slot_descriptor_reports_unknown_role_when_active_pid_is_boolean():
+    # bool is an int subclass in Python; pid: true must not compare as a real pid.
+    table = _table(active={"bind": "127.0.0.1", "port": 9280, "pid": True})
+    slot = slot_descriptor("/does/not/matter", read_table=lambda _d: table)
+    assert slot["role"] == "unknown"
+
+
+def test_slot_descriptor_degrades_when_read_table_raises():
+    def _raise(_d):
+        raise OSError("no routing dir")
+
+    slot = slot_descriptor("/does/not/matter", read_table=_raise)
+    assert slot["role"] == "unknown"
+    assert slot["active"] is None
+    assert slot["previous"] is None
+
+
+def test_slot_descriptor_reflects_passed_self_retire_status():
+    status = {
+        "enabled": True, "armed": True, "generation": 3,
+        "superseded": True, "confirms": 2,
+    }
+    slot = slot_descriptor(
+        "/does/not/matter", read_table=lambda _d: {}, self_retire_status=status,
+    )
+    assert slot["self_retire"] == status
+    # Defensive copy -- caller's live dict is not aliased.
+    status["confirms"] = 99
+    assert slot["self_retire"]["confirms"] == 2
