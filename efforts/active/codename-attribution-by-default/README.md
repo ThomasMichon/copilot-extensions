@@ -109,6 +109,25 @@ updating to assert `"codename"` instead — this is a real, wide-reaching
 test-suite touch, not a one-line change. Audit the full set before
 starting Phase 1.
 
+### Custom wordlists are a separate, independently-configured risk surface
+
+`codename.wordlist_path` (`wordlist_for_repo`/`CodenameConfig`) lets a repo
+supply its own themed vocabulary for generated codenames, entirely
+independent of `pr.source_attribution` — a repo might configure a custom
+wordlist purely for local ergonomics (memorable names in the Picker UI),
+with no intention of ever publishing them. Once `codename` becomes the
+*default* `source_attribution` value, a repo that has a custom wordlist
+configured but has never touched `source_attribution` would silently start
+publishing codenames DRAWN FROM THAT WORDLIST in public PR markers —
+defeating the "informationless to an outside reader" property the whole
+codename feature exists to provide, if that custom vocabulary happens to
+contain identifying or private terms. This must be resolved explicitly
+before Phase 1 ships, not left implicit: options include forcing the
+built-in neutral wordlist whenever `source_attribution` is at its DEFAULT
+value (only honoring a custom wordlist when `codename` is explicitly
+configured), or otherwise gating a custom wordlist's use behind an
+explicit acknowledgment. Do not ship the default flip without picking one.
+
 ### Downstream effects to re-examine, not just the default itself
 
 - **`attribution-audit` / `audit_source_attribution_risk`** (Phase 5) was
@@ -167,6 +186,16 @@ starting Phase 1.
   `False` by dataclass default, `True` only when the raw key is literally
   present) — no code change expected here, but add a regression test
   proving the two fields don't drift together.
+- [ ] **Resolve the custom-wordlist risk** identified in Context before
+  shipping this phase: decide and implement whether the DEFAULT
+  `source_attribution` value forces the built-in neutral wordlist
+  (ignoring any configured `codename.wordlist_path`) regardless of what
+  `wordlist_for_repo` would otherwise resolve, honoring a custom wordlist
+  only when `source_attribution: codename` is explicitly configured — or
+  an equivalent explicit gate. Add a test proving a repo with BOTH a
+  custom `codename.wordlist_path` AND an absent/default
+  `source_attribution` never publishes a codename drawn from that custom
+  list.
 - [ ] **Versioning gate (required for this phase's PR):** this phase
   changes `agent-worktrees` runtime source (`config.py`). Per
   `AGENTS.md`'s Version Bump section, bump `plugins/agent-worktrees/plugin.json`,
@@ -194,11 +223,13 @@ starting Phase 1.
 - [ ] Update the SOURCE-level comments/docstrings that make the same now-
   wrong claim, not just the standalone docs: `PRConfig`'s inline field
   comments in `config.py` describing `source_attribution`,
-  `pr_ops.audit_attribution_risk`'s docstring, and
-  `providers/attribution.py`'s `audit_source_attribution_risk` docstring
-  all currently say or imply `false` is the default -- an implementation
-  that updates only the standalone docs would leave these
-  behaviorally-adjacent comments actively misleading.
+  `pr_ops.audit_attribution_risk`'s docstring,
+  `providers/attribution.py`'s `audit_source_attribution_risk` docstring,
+  and `pr_ops.create_pr`'s own docstring (currently says attribution must
+  be explicitly enabled / is off by default) all currently say or imply
+  `false` is the default -- an implementation that updates only the
+  standalone docs would leave these behaviorally-adjacent comments
+  actively misleading.
 - [ ] Update this REPO'S OWN contributor/reviewer policy text, which
   currently instructs the OLD posture and would otherwise tell future
   contributors and automated reviewers to reject the very behavior this
@@ -240,6 +271,12 @@ starting Phase 1.
 
 ## Validation Plan
 
+- [ ] Unit: a repo with a custom `codename.wordlist_path` configured AND an
+  absent/default `source_attribution` never publishes a codename drawn
+  from that custom wordlist (the resolved mechanism from Phase 1's
+  wordlist-risk item) — the single highest-priority test in this effort,
+  since it's the one silent-leak scenario the default flip could
+  introduce.
 - [ ] Unit: `_parse_pr` with an absent `source_attribution` key (both
   "`pr:` block present, key omitted" and "`pr:` block entirely absent")
   parses to `"codename"`, not `False`.
