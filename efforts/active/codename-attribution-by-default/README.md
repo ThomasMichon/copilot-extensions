@@ -428,7 +428,30 @@ config-shape check above.
   simulating the race (policy becomes violated only after the second
   preflight check) asserting the failure message names the orphaned
   worktree path/branch and that no automatic rollback is attempted.
-- [ ] **Merge `codename`/`codename_source` under the record lock during
+- [ ] **Propagate the policy exception at the `create-pr` boundary too
+  (round-16 finding)** — the paired-knowledge fix above covers the
+  `create` command's harness-carve path, but `ensure_codename`'s OTHER
+  call site (`pr_ops.py`'s `_open_via_provider`, the `codename`-marker
+  branch, ~lines 1108-1118) has its own, separate `try:
+  codename_tracking.ensure_codename(...); except Exception: pass` —
+  deliberately broad because a codename-backfill failure (e.g. a lock
+  `TimeoutError`) must degrade to "skip the marker on this PR," never
+  abort an otherwise-successful `create-pr`. Left as-is, this same handler
+  would ALSO silently swallow the new `CodenameAttributionPolicyError`,
+  letting `create-pr` succeed with no marker for exactly the
+  custom-wordlist/omitted-`source_attribution` repo the policy exists to
+  block — a *different*, `create-pr`-specific way to defeat the same
+  fail-closed guarantee the paired-knowledge fix closes for `create`. Fix:
+  this `except Exception` clause must catch `CodenameAttributionPolicyError`
+  **before** the general `except Exception: pass`, and re-raise it
+  (aborting `create-pr` outright) rather than falling through to the
+  generic pass — every other exception type keeps today's
+  skip-the-marker behavior unchanged. Add a regression test: `create-pr`
+  against a custom-wordlist repo with omitted `source_attribution`
+  (an unmigrated/pre-existing worktree record with no codename yet, so
+  the lazy-backfill path is actually exercised) fails the whole
+  `create-pr` command with the policy error, rather than succeeding with
+  the marker silently omitted.
   concurrent saves (round-11 finding):** `_save_record_unlocked` already
   merges several fields (handoff reservations, lifecycle/session-backend/
   execution-leg state) from the current on-disk record into a stale
@@ -666,6 +689,17 @@ config-shape check above.
   surfaced error message names the exact orphaned worktree path and branch
   so an operator can remove it manually — proving the documented residual
   behavior is real and observable, not merely asserted in prose.
+- [ ] Unit (round-16 finding): `create-pr` against a custom-wordlist repo
+  with an omitted `source_attribution`, run on a worktree record with no
+  codename yet (forcing `_open_via_provider`'s lazy-backfill branch to
+  actually call `ensure_codename`) — asserts the whole `create-pr` command
+  fails with the policy error, proving the `except Exception: pass` around
+  that call site re-raises `CodenameAttributionPolicyError` instead of
+  swallowing it into a silent skip-the-marker success, the same way the
+  `create` command's paired-knowledge boundary already does. Add a second
+  case proving every OTHER exception from `ensure_codename` (e.g. a lock
+  `TimeoutError`) still degrades to skip-the-marker, unaffected by this
+  fix.
 - [ ] Unit (round-11 finding): a save from a stale in-memory
   `WorktreeRecord` (loaded before a concurrent lazy-backfill assigned a
   codename under the record lock) does not erase the `codename`/
@@ -992,3 +1026,25 @@ _Pending._
   error fires AND a test that a pre-existing built-in record still
   publishes in that same repo/config combination, so one overbroad
   implementation can't satisfy the requirement by accident.
+
+### 2026-09-20 — Plan-review round 16 fixes
+
+- One finding on the round-15 head, verified against the actual
+  `pr_ops.py` source: the paired-knowledge fix (round-10/11) and the
+  `create` command's preflight (round-12/13/14) only cover the `create`
+  command's harness-carve path. `ensure_codename` has a SECOND, entirely
+  separate call site — `pr_ops.py`'s `_open_via_provider`, in the
+  `codename`-marker branch's lazy-backfill — wrapped in its own bare
+  `try: ensure_codename(...); except Exception: pass`, deliberately broad
+  so an ordinary backfill failure (e.g. a lock `TimeoutError`) degrades to
+  "skip the marker" rather than aborting an otherwise-successful
+  `create-pr`. Unaddressed, this same broad handler would also swallow the
+  new `CodenameAttributionPolicyError`, letting `create-pr` succeed with
+  no marker for exactly the repo/config combination the policy exists to
+  block — fail-OPEN instead of fail-closed, and a different bypass route
+  than the one the paired-knowledge fix closes. Fixed by requiring this
+  handler to catch and re-raise `CodenameAttributionPolicyError`
+  specifically, ahead of the generic `except Exception: pass`, while every
+  other exception keeps today's skip-the-marker behavior. Added a matching
+  Validation Plan test pair: one proving `create-pr` fails closed for the
+  policy violation, one proving other exceptions are unaffected.
