@@ -1075,6 +1075,27 @@ class TestWorktreeRoutes:
         entry = resp.json()["groups"]["test-agent"][0]
         assert entry["session_id"] == "sess-acp-1"
         assert entry["acp_session_id"] == "acp-uuid-abcdef"
+        assert entry["durable_session_id"] == "acp-uuid-abcdef"
+
+    def test_worktree_linkage_durable_session_id_falls_back_when_acp_unknown(
+        self, client, app,
+    ) -> None:
+        """A brand-new session with no ACP id captured yet -- durable_session_id
+        degrades to the bridge's own (non-durable) session_id rather than
+        going unresolvable."""
+        wt_id = "anomalous-potato-wsl-20250101-150000-noacp"
+        self._seed_worktree("test-agent", wt_id)
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        session = Session("sess-no-acp-1", "lone-mesa", target, "test-agent")
+        session.status = SessionStatus.IDLE
+        mgr._sessions[session.session_id] = session
+
+        resp = client.get("/api/v1/worktrees")
+        entry = resp.json()["groups"]["test-agent"][0]
+        assert entry["acp_session_id"] is None
+        assert entry["durable_session_id"] == "sess-no-acp-1"
 
     def test_worktree_without_mux_reports_no_interactive_cli(self, client) -> None:
         """Default (no mux session) decorates as interactive_cli=none (#1883)."""

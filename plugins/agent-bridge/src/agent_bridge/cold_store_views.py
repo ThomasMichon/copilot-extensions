@@ -34,7 +34,12 @@ def parse_cold_store_timestamp(value: str | None) -> datetime:
 
 
 def cold_store_session_info(cold: ColdStoreSession) -> SessionInfo:
-    """Convert a cold-store provider's answer to the public ``SessionInfo``."""
+    """Convert a cold-store provider's answer to the public ``SessionInfo``.
+
+    ``cold.session_id`` already IS the durable Copilot ACP session id (the
+    archive is keyed by nothing else) -- ``durable_session_id`` mirrors it
+    directly, no ``acp_session_id`` ambiguity to resolve here.
+    """
     try:
         status = SessionStatus(cold.status) if cold.status else SessionStatus.ENDED
     except ValueError:
@@ -42,6 +47,7 @@ def cold_store_session_info(cold: ColdStoreSession) -> SessionInfo:
     return SessionInfo(
         session_id=cold.session_id,
         name=cold.session_id,
+        durable_session_id=cold.session_id,
         target_dir=cold.cwd,
         project=cold.project,
         worktree_id=cold.worktree_id,

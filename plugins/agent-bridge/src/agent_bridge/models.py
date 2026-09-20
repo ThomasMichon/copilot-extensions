@@ -80,13 +80,31 @@ class AgentProfile(BaseModel):
 
 
 class SessionInfo(BaseModel):
-    """Public view of a session."""
+    """Public view of a session.
+
+    ``session_id`` is agent-bridge's own internal identifier -- for a live
+    bridge-hosted session it is an ephemeral escrow id, NOT a durable
+    cross-system identity (agent-bridge prunes its own session store
+    aggressively; nothing outside this bridge instance resolves it once the
+    session ends). For a cold-store session (``at_rest=True``), ``session_id``
+    already IS the durable Copilot ACP id, so the ambiguity only exists live.
+
+    ``durable_session_id`` resolves that for every caller: use it, never
+    ``session_id`` directly, for anything outliving the current request (a
+    deep link, a dispatch-task binding, any persisted reference). It is
+    ``acp_session_id`` when known, falling back to the live escrow
+    ``session_id`` only when the CLI hasn't reported its ACP identity back
+    yet. See ``visions/plugins/agent-bridge`` §*session and event ledger* for
+    the incident this closes (agent-dispatch's ``owner_session_id`` was
+    captured from this same escrow id, breaking every downstream deep link).
+    """
 
     session_id: str
     name: str
     agent_name: str | None = None
     caller_id: str | None = None
     acp_session_id: str | None = None  # ACP-sourced session id (durable identity)
+    durable_session_id: str | None = None  # acp_session_id, or session_id if that's all there is
     target_dir: str | None = None
     target_type: Literal["local", "ssh", "command"] = "local"
     target_host: str | None = None

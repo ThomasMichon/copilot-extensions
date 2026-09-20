@@ -143,6 +143,20 @@ boundaries, context usage, delivery cursors, target linkage, and terminal
 outcomes. It is the source that CLIs, UI/fronts, other agents, and recovery
 flows read when they need to know what happened.
 
+A session carries two distinct identifiers: the bridge's own internal
+`session_id` (for a live bridge-owned session, a short-lived escrow id that
+only correlates a spawn attempt to its bridge session while creating it --
+not durable once the session ends) and the real Copilot `acp_session_id`
+(durable everywhere: live-then-cold-store resolution, the archive, any
+future consumer). Every session response also carries a computed
+`durable_session_id` (`acp_session_id` when known, else `session_id`) so no
+caller has to rederive this precedence itself. A caller persisting or
+deep-linking a session reference always uses `durable_session_id`, never
+`session_id` directly -- conflating them broke agent-dispatch's
+`owner_session_id` capture for every headless dispatch task, silently
+breaking every downstream "View reviewer" deep link until caught and fixed
+(copilot-extensions PR #2964).
+
 ### topology and resolver layer
 
 The resolver layer turns a caller's target into a reachable session or agent by
@@ -644,6 +658,16 @@ machine may deliberately gate outbound reach until policy allows it.
 
 ## Provenance
 
+- **2026-09-20** — Closed a reality gap in *session and event ledger*: the
+  concept already implied `acp_session_id` is the durable identity, but no
+  session response exposed an unambiguous field callers could persist or
+  deep-link with, so `session_id` (agent-bridge's own non-durable escrow id
+  for a live session) got used instead in practice. Added a computed
+  `durable_session_id` field (`acp_session_id` when known, else `session_id`)
+  to every session response and documented the precedence explicitly.
+  Prompted by tracing agent-dispatch's `owner_session_id` capture bug back to
+  exactly this ambiguity, which had silently broken every downstream "View
+  reviewer" deep link (copilot-extensions PR #2964).
 - **2026-09-19** — Added *resolve-by-any-origin-reference*: a caller resolves
   a session from any durable origin handle (worktree ID, an agent-dispatch
   task reference, etc.), not only a session ID directly — through the same

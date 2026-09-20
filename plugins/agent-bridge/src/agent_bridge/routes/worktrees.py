@@ -723,6 +723,9 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
     - ``session_id``: latest bridge session for this worktree, or None
     - ``acp_session_id``: that session's ACP-sourced id (durable identity),
       or None
+    - ``durable_session_id``: the identifier to persist or deep-link with --
+      ``acp_session_id`` when known, else the (non-durable) bridge
+      ``session_id`` -- see ``SessionInfo.durable_session_id``'s docstring
     - ``session_status``: that session's status (idle/running/stopped/...)
     - ``session_turn_count``: number of prompt turns on that session
     - ``session_live``: True if the session is currently running or idle
@@ -767,6 +770,7 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
             status = public_status.value
             entry["session_id"] = session.session_id
             entry["acp_session_id"] = session.acp_session_id
+            entry["durable_session_id"] = session.acp_session_id or session.session_id
             entry["session_status"] = status
             entry["session_at_rest"] = at_rest
             entry["session_turn_count"] = session.turn_count
@@ -774,6 +778,7 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
         else:
             entry["session_id"] = None
             entry["acp_session_id"] = None
+            entry["durable_session_id"] = None
             entry["session_status"] = None
             entry["session_at_rest"] = False
             entry["session_turn_count"] = 0
