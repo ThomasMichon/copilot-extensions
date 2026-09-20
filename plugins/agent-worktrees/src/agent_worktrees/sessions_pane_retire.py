@@ -10,6 +10,9 @@ from __future__ import annotations
 import os
 import platform
 
+from . import activity, handoff_trace
+from . import config as cfg
+
 
 class MuxPaneTargetAmbiguityError(RuntimeError):
     """Bare pane id matched multiple mux sessions, so targeting is unsafe."""
@@ -249,6 +252,57 @@ def _mux_pane_alive(
     return bool(
         _list_matching_pane_targets(pane_id, mux_bin, session_name=resolved_session)
     )
+
+
+def already_attempted_handoff_tokens(worktree_id: str) -> set[str]:
+    """Return every handoff token this worktree already had a cutover spawn
+    attempt for, merging the bounded rolling ``activity.jsonl`` log with the
+    durable per-project trace store (the same completeness backstop
+    ``__main__._pending_handoff_retire_requests`` uses) so a token spawned
+    before the log's retention window still counts.
+
+    Counts ``handoff_successor_spawn_started`` -- logged unconditionally
+    before ``pane_create``/``headless_new_session`` even runs, so it covers a
+    failed spawn (``handoff_successor_spawn_failed``, no pane ever created)
+    just as much as a successful one -- plus ``handoff_cutover_spawn`` for
+    back-compat with any already-recorded attempt that predates this gate.
+    Counting only the success event would leave a token that failed to spawn
+    at all (e.g. a mux/pane-create error) with no attempted-marker, letting it
+    retry unbounded exactly like the confirmed-candidate gap this function
+    closes.
+
+    A spawn attempt means the monitor already tried to create a successor
+    pane for this token -- confirmed, failed, or never confirmed. Retries for
+    a long-running, unbounded async outcome (did the successor actually
+    finish starting up?) are unsound: the monitor cannot durably tell "still
+    working" from "silently hung" without an unbounded wait, so it must not
+    gamble on a fresh spawn to find out. It sees a pending handoff and acts on
+    it exactly once; a spawn that never confirms a successor is a job for the
+    stalled-predecessor diagnostic (``handoffs-check``), never another blind
+    spawn on top. Confirmed live: worktree b431 stacked 20+ successor panes
+    over one hour on a single token, none ever reaching a confirmed candidate
+    -- ``_monitor_pending_handoff_request`` had no memory that it had already
+    tried, so every ~3-4 minute sweep (the claim lock's own staleness window)
+    treated the token as untouched and spawned yet another pane.
+    """
+    trace_events: list[dict[str, object]] = []
+    project = cfg.active_project()
+    if project:
+        try:
+            trace_events = handoff_trace.read_trace(project, worktree_id)
+        except Exception:
+            trace_events = []
+    attempt_event_names = ("handoff_successor_spawn_started", "handoff_cutover_spawn")
+    attempt_events = [e for e in trace_events if e.get("event") in attempt_event_names]
+    for event_name in attempt_event_names:
+        attempt_events += activity.read_events(
+            worktree_id=worktree_id, event=event_name, limit=64,
+        )
+    return {
+        str(event.get("handoff_token") or "").strip()
+        for event in attempt_events
+        if str(event.get("handoff_token") or "").strip()
+    }
 
 
 def wait_for_handoff_candidate(

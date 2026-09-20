@@ -26,18 +26,27 @@ visions:
   `0.1.0-dev36`, the primary facility dev host), the effective fix, now **covered by unit tests + a
   clean-room scenario** (`context-handoff-cutover`, 11/0 on a fresh box). **Sub A
   closed as not-viable plugin-side** (see Phase 2) — deferred to runtime **Sub C**
-  (#5253† / upstream #13494). **Sub D (env-var-free candidate confirmation)
+  (#5253† / upstream #13494) — **confirmed fixed permanently upstream 2026-09-20**
+  (github/copilot-agent-runtime#13494 shipped; the extension-reload orphaned-call
+  race no longer occurs). **Sub D (env-var-free candidate confirmation)
   merged 2026-09-16** — copilot-extensions PR
   [#2757](https://github.com/ThomasMichon/copilot-extensions/pull/2757) (squash-merged,
   agent-worktrees `1.5.5-dev122`), tracked as #7072†.
-  Effort essentially complete pending the upstream runtime fix + confirming Sub D
-  on the next live Windows cutover.
+  **Sub E (bound the spawn-retry loop) opened 2026-09-20** — a distinct,
+  previously-uncapped failure mode found live on worktree b431 (20+ stacked
+  successor panes for one token over an hour, none ever confirming a
+  candidate): the resident monitor's spawn picker had no memory of a prior
+  attempt, unlike the retire side's existing terminal/abandon cap. Filed as
+  copilot-extensions#3006; fix in progress (see Phase 7).
+  Sub A-D are complete; Sub C is now confirmed fixed upstream. Effort remains
+  open for Sub E's PR/merge/deploy/clean-room validation.
 - **Umbrella issue:** #5250†
 - **Sub-issues:**
   #7072† (D — agent-worktrees psmux env-var-free candidate confirmation) ·
   #5251† (A — agent-worktrees bare-resume spawn) ·
   #5252† (B — context-handoff seed hardening) ·
-  #5253† (C — CLI runtime orphaned external-tool call)
+  #5253† (C — CLI runtime orphaned external-tool call) ·
+  [#3006](https://github.com/ThomasMichon/copilot-extensions/issues/3006) (E — status-monitor unbounded spawn-retry loop)
 - **Sibling effort:** [`handoff-live-cutover`](../handoff-live-cutover/README.md)
   (#2249†) — builds the interactive/mux live cutover this effort *hardens*.
 - **Vision:** `visions/session-hosting` — a handoff should **continue by
@@ -154,11 +163,15 @@ to the runtime fix (#5253† / upstream #13494). Findings:
   issue [#853](https://github.com/ThomasMichon/copilot-extensions/issues/853));
   **deployed on the primary facility dev host** (`agent-worktrees update`, dev32→dev35).
 
-### Phase 4 — Sub C: runtime orphaned-call fix (upstream track, #5253†)
-- [ ] Verify whether deployed CLI `1.0.81-5` carries runtime #13494.
-- [ ] Track the upstream fix: fail in-flight external-tool requests with a
-      retryable error on extension-generation teardown, and/or a client-side
-      watchdog. (Mitigations A/B keep the race from firing in the meantime.)
+### Phase 4 — Sub C: runtime orphaned-call fix (upstream track, #5253†) — **DONE**
+- [x] Verify whether deployed CLI carries runtime #13494 — **confirmed fixed
+      permanently upstream 2026-09-20** (operator confirmation): the runtime
+      now fails/re-routes in-flight external-tool requests across an
+      extension-reload generation boundary instead of orphaning them forever.
+- [x] Tracked the upstream fix (github/copilot-agent-runtime#13494); no
+      further plugin-side mitigation is needed for this specific race. All
+      "Loading…/Resuming… hang" advisory text tied to #13492/#13494 has been
+      removed from this repo's skills/docs as stale (see Sub E's PR).
 
 ### Phase 6 — Sub D: env-var-free candidate confirmation (#7072†) — **shipped & merged**
 - [x] Diagnose the cd0e stacking-panes incident (5 stacked sessions,
@@ -187,6 +200,25 @@ to the runtime fix (#5253† / upstream #13494). Findings:
       headlessly).
 - [x] Close Sub B (#5252†); update umbrella #5250†. Sub A (#5251†) deferred to #5253†.
 
+### Phase 7 — Sub E: bound the spawn-retry loop (copilot-extensions#3006)
+- [x] Diagnose the b431 incident (20+ stacked successor panes, one token,
+      never once confirming a candidate over an hour of retries).
+- [x] Add `_monitor_already_attempted_handoff_tokens` (merges the bounded
+      `activity.jsonl` log with the durable per-project trace store, same
+      pattern `_pending_handoff_retire_requests` already uses) and consult it
+      in `_monitor_pending_handoff_request` before returning any token as
+      actionable — a token with a prior `handoff_cutover_spawn` event is never
+      spawned again, regardless of claim-lock staleness.
+- [x] Regression test `test_monitor_pending_handoff_request_tries_only_once_per_token`
+      (asserts `_monitor_claim_handoff_cutover` is never invoked for an
+      already-attempted token).
+- [ ] Open, land, and deploy the PR.
+- [ ] Clean-room validation: a fresh box exercises a pending handoff with a
+      logged prior spawn attempt and confirms the monitor does not spawn a
+      second successor.
+- [ ] Confirm the stuck panes this incident already left behind stay cleaned
+      up (terminated manually on 2026-09-20) and no new pile forms on b431.
+
 ## Validation Plan
 
 - [x] **Clean-room robustness scenario** (`context-handoff-cutover`, Tier-P F1 in
@@ -202,8 +234,39 @@ to the runtime fix (#5253† / upstream #13494). Findings:
       can't be driven headlessly) — confirm the successor reaches a consumed
       handoff with no manual re-drive.
 - [ ] **No regression on Windows/psmux** (the sibling effort's substrate).
+- [x] **Runtime orphaned-call race (Sub C) confirmed fixed upstream** 2026-09-20.
+- [ ] **Sub E spawn-retry cap validated in a clean room** (new scenario, unit
+      test covers the picker logic; clean-room proves the deployed daemon
+      honors it end-to-end on a fresh box).
 
 ## Journal
+
+### 2026-09-20 — Sub C confirmed fixed upstream; Sub E opened (spawn-retry loop, b431)
+- Operator confirmed github/copilot-agent-runtime#13494 is now permanently
+  fixed upstream. Marked Sub C (Phase 4) done; removed the now-stale
+  "Loading…/Resuming… hang" advisory text tied to #13492/#13494 from
+  `agent-worktrees`' `repairing-worktrees` skill, `agent-bridge`'s
+  troubleshooting skill, `agent-dispatch`'s spawn-supervisor doc, and the
+  `odsp-web-harness-backlog` dispatch identity.
+- **New, distinct incident diagnosed on worktree b431** (not a #13492/#13494
+  recurrence -- the successor hang there never even reached the pre-launch
+  banner, let alone a `consume_handoff` call): the resident monitor's
+  spawn picker (`_monitor_pending_handoff_request`) had no memory of a prior
+  spawn attempt, only of a *confirmed* one. A stale/expired claim lock (a
+  concurrency mutex, not an outcome record) made every ~3-4 minute sweep
+  treat the same never-confirmed token as untouched, stacking 20+ successor
+  panes over an hour with zero terminating condition.
+- Filed copilot-extensions#3006 and fixed: added
+  `_monitor_already_attempted_handoff_tokens` (same merged activity-log +
+  durable-trace-store pattern `_pending_handoff_retire_requests` already
+  uses for its own terminal/abandon cap) and gated the picker on it. New
+  regression test asserts the claim function is never called for an
+  already-attempted token. Targeted + full handoff-related suites green
+  (245 passed; the one pre-existing unrelated failure,
+  `test_monitor_retire_handoff_predecessor_preserves_identity_guard`,
+  reproduces identically on a clean `main` checkout).
+- Manually terminated the 19 stuck panes already piled up on b431 as a
+  side-effect cleanup; not itself the fix.
 
 ### 2026-09-15 — Sub D: env-var-free candidate confirmation (psmux stacking-panes fix)
 - **Live incident:** worktree `lambda-core-win-20260725-193449-cd0e` accumulated

@@ -879,6 +879,207 @@ def test_monitor_pending_handoff_request_skips_already_claimed(tmp_path, monkeyp
     assert m._monitor_pending_handoff_request(record) is None
 
 
+def test_monitor_pending_handoff_request_tries_only_once_per_token(tmp_path, monkeypatch):
+    """A pending handoff already spawned once -- confirmed or not -- must never
+    be spawned again. Before this fix, the picker only skipped a token once a
+    ``candidate``/``successor`` was actually confirmed; a spawn attempt whose
+    successor never finished starting (so no candidate was ever recorded) left
+    the token looking untouched on every later sweep, so a stale/expired claim
+    lock (the concurrency mutex, not an outcome record) let the monitor spawn
+    an unbounded pile of successor panes for the same token. Confirmed live on
+    worktree b431: 20+ stacked successor panes over an hour, none ever
+    reaching a confirmed candidate."""
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(m.handoff_trace, "read_trace", lambda *a, **k: [])
+
+    def read_events(**kwargs):
+        event = kwargs.get("event")
+        if event == "handoff_requested":
+            return [
+                {
+                    "handoff_id": "handoff-1",
+                    "session_id": "session-1",
+                    "session_state": r"C:\state\handoff-request.json",
+                }
+            ]
+        if event == "handoff_cutover_spawn":
+            # A prior attempt was already logged for this token -- it never
+            # confirmed a candidate/successor, but it happened.
+            return [{"handoff_token": "handoff-1"}]
+        return []
+
+    monkeypatch.setattr(m.activity, "read_events", read_events)
+
+    def _fail_if_claimed(*a, **k):
+        raise AssertionError("must not re-claim a token already spawned once")
+
+    monkeypatch.setattr(m, "_monitor_claim_handoff_cutover", _fail_if_claimed)
+    monkeypatch.setattr(
+        m,
+        "_monitor_read_session_state_handoff",
+        lambda path: {
+            "handoffId": "handoff-1",
+            "seed": "HANDOFF_SEED",
+            "worktree": "a",
+            "consumed": False,
+        },
+    )
+    record = types.SimpleNamespace(
+        worktree_id="a",
+        handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate=None,
+                successor=None,
+            )
+        ],
+        pending_handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate=None,
+                successor=None,
+            )
+        ],
+    )
+
+    assert m._monitor_pending_handoff_request(record) is None
+
+
+def test_monitor_pending_handoff_request_counts_failed_spawn_as_attempted(
+    tmp_path, monkeypatch,
+):
+    """A spawn that failed outright (mux/pane-create error, no pane ever
+    created) only ever logs ``handoff_successor_spawn_started`` +
+    ``handoff_successor_spawn_failed`` -- ``handoff_cutover_spawn`` (the
+    success event) never fires. Counting only the success event would leave
+    such a token with no attempted-marker at all, letting it retry unbounded
+    exactly like the confirmed-candidate gap this whole gate exists to close."""
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(m.handoff_trace, "read_trace", lambda *a, **k: [])
+
+    def read_events(**kwargs):
+        event = kwargs.get("event")
+        if event == "handoff_requested":
+            return [
+                {
+                    "handoff_id": "handoff-1",
+                    "session_id": "session-1",
+                    "session_state": r"C:\state\handoff-request.json",
+                }
+            ]
+        if event == "handoff_successor_spawn_started":
+            return [{"handoff_token": "handoff-1"}]
+        if event == "handoff_cutover_spawn":
+            return []  # the spawn never succeeded -- no success event at all
+        return []
+
+    monkeypatch.setattr(m.activity, "read_events", read_events)
+
+    def _fail_if_claimed(*a, **k):
+        raise AssertionError("must not re-claim a token whose spawn already failed")
+
+    monkeypatch.setattr(m, "_monitor_claim_handoff_cutover", _fail_if_claimed)
+    monkeypatch.setattr(
+        m,
+        "_monitor_read_session_state_handoff",
+        lambda path: {
+            "handoffId": "handoff-1",
+            "seed": "HANDOFF_SEED",
+            "worktree": "a",
+            "consumed": False,
+        },
+    )
+    record = types.SimpleNamespace(
+        worktree_id="a",
+        handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1", predecessor="session-1", candidate=None, successor=None,
+            )
+        ],
+        pending_handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1", predecessor="session-1", candidate=None, successor=None,
+            )
+        ],
+    )
+
+    assert m._monitor_pending_handoff_request(record) is None
+
+
+def test_monitor_pending_handoff_request_honors_durable_trace_after_log_eviction(
+    tmp_path, monkeypatch,
+):
+    """The rolling ``activity.jsonl`` log is bounded (age + a 64-event read
+    cap); a token whose spawn attempt aged out of it must still be caught via
+    the durable per-project trace store, exactly like
+    ``_pending_handoff_retire_requests`` already relies on for the retire
+    side. Forcing every ``activity.read_events`` call to return empty here
+    simulates that eviction -- only ``handoff_trace.read_trace`` carries the
+    prior attempt."""
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "repo-a")
+    monkeypatch.setattr(
+        m.handoff_trace,
+        "read_trace",
+        lambda project, worktree_id: [{
+            "event": "handoff_successor_spawn_started",
+            "handoff_token": "handoff-1",
+        }],
+    )
+
+    def read_events(**kwargs):
+        event = kwargs.get("event")
+        if event == "handoff_requested":
+            return [
+                {
+                    "handoff_id": "handoff-1",
+                    "session_id": "session-1",
+                    "session_state": r"C:\state\handoff-request.json",
+                }
+            ]
+        return []  # the rolling log has evicted every spawn-attempt event
+
+    monkeypatch.setattr(m.activity, "read_events", read_events)
+
+    def _fail_if_claimed(*a, **k):
+        raise AssertionError(
+            "must not re-claim a token whose only attempted-record is the "
+            "durable trace store"
+        )
+
+    monkeypatch.setattr(m, "_monitor_claim_handoff_cutover", _fail_if_claimed)
+    monkeypatch.setattr(
+        m,
+        "_monitor_read_session_state_handoff",
+        lambda path: {
+            "handoffId": "handoff-1",
+            "seed": "HANDOFF_SEED",
+            "worktree": "a",
+            "consumed": False,
+        },
+    )
+    record = types.SimpleNamespace(
+        worktree_id="a",
+        handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1", predecessor="session-1", candidate=None, successor=None,
+            )
+        ],
+        pending_handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1", predecessor="session-1", candidate=None, successor=None,
+            )
+        ],
+    )
+
+    assert m._monitor_pending_handoff_request(record) is None
+
+
 def test_monitor_claim_handoff_cutover_acquires_fresh_claim(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
     logged = []

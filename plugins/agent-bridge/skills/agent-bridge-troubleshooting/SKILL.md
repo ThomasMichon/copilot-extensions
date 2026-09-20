@@ -43,12 +43,16 @@ capture, interactive process/session logs, and startup-boundary classification;
 return here when the differential reaches bridge-owned ACP recovery or
 live-session registration.
 
-Identify the mode and capture the trace. The resume-hang root cause is the
-Copilot CLI startup race
-github/copilot-agent-runtime **#13492** (fix **#13494**), originally scoped to
-*headed* sessions but it reproduces on **ACP** sessions too. The relay-flap fix
-(sticky port + buffered token-fetch + single-owner republish) is tracked in
-**#580**.
+Identify the mode and capture the trace. The resume-hang's original root cause
+was the Copilot CLI startup race github/copilot-agent-runtime **#13492** (fix
+**#13494**), originally scoped to *headed* sessions but also reproducing on
+**ACP** sessions. **That race is now permanently fixed upstream** (#13494
+shipped) -- a CLI build carrying the fix does not exhibit it. Treat any
+resume-hang symptom on an up-to-date CLI as a **new issue**, not a recurrence
+of #13492/#13494; the classification steps below still apply for
+capturing/triaging the symptom, but stop attributing it to this closed race.
+The relay-flap fix (sticky port + buffered token-fetch + single-owner
+republish) is tracked in **#580**.
 
 > The examples use Windows PowerShell (the primary control-plane host). On a
 > POSIX daemon host substitute the obvious equivalents: `ss -tlnp` / `lsof -i`
@@ -186,6 +190,11 @@ Look at:
 > `peek` (which reads `events.jsonl` directly).
 
 ## Operator-authorized mitigations (attack the race at the source)
+
+> **#13492/#13494 is fixed permanently upstream.** These mitigations targeted
+> that specific, now-closed race. Keep them only as historical reference for a
+> CodeSpace still pinned to a pre-fix CLI; do not reach for them on an
+> up-to-date CLI, and do not assume a new hang is this same race.
 
 - **Bump the CodeSpace Copilot CLI past the #13494 fix.** This changes the
   target environment and therefore requires explicit authorization. The race is a CLI
