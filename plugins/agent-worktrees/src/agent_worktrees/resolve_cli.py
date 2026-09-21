@@ -427,10 +427,6 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         config = state.load_config()
     except Exception as exc:
         return _json_error(str(exc))
-    try:
-        _validate_profile_assignment_config(config)
-    except profile_assignment.ProfileAssignmentError as exc:
-        return _json_error(str(exc), exit_code=3)
 
     if state.requested_machine:
         remote_args: list[str] = []
@@ -459,6 +455,11 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             f"{state.requested_machine} "
             f"{getattr(state.args, 'environment', None) or ''}".strip()
         )
+
+    try:
+        _validate_profile_assignment_config(config)
+    except profile_assignment.ProfileAssignmentError as exc:
+        return _json_error(str(exc), exit_code=3)
 
     if state.use_base:
         repo = config.default_repo

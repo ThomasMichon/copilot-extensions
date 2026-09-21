@@ -227,6 +227,30 @@ def _reflect_assignment(
     record.profile_assignments.append(assignment)
 
 
+def _dispatch_validate_profile_assignment_config(config: cfg.Config) -> None:
+    return _core_helper(
+        "_validate_profile_assignment_config", _validate_profile_assignment_config
+    )(config)
+
+
+def _dispatch_launch_profile_selection(*args, **kwargs):
+    return _core_helper("_launch_profile_selection", _launch_profile_selection)(*args, **kwargs)
+
+
+def _dispatch_reflect_assignment(
+    record: tracking.WorktreeRecord,
+    selection: profile_assignment.LaunchProfileSelection,
+) -> None:
+    return _core_helper("_reflect_assignment", _reflect_assignment)(record, selection)
+
+
+def _dispatch_apply_assignment_env(
+    env: dict[str, str],
+    selection: profile_assignment.LaunchProfileSelection,
+) -> dict[str, str]:
+    return _core_helper("_apply_assignment_env", _apply_assignment_env)(env, selection)
+
+
 def _resolve_base_repo(
     config: cfg.Config,
     args: argparse.Namespace,
@@ -234,7 +258,7 @@ def _resolve_base_repo(
 ) -> int:
     """Resolve launch plan for base repo mode."""
     try:
-        _validate_profile_assignment_config(config)
+        _dispatch_validate_profile_assignment_config(config)
     except profile_assignment.ProfileAssignmentError as exc:
         output.err(str(exc))
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
@@ -317,7 +341,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     assert record is not None
 
     try:
-        _validate_profile_assignment_config(config)
+        _dispatch_validate_profile_assignment_config(config)
     except profile_assignment.ProfileAssignmentError as exc:
         output.err(str(exc))
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
@@ -410,7 +434,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     if not getattr(args, "no_resume", False):
         resume_target = sessions.resolve_resume_target(record)
     try:
-        selection = _launch_profile_selection(
+        selection = _dispatch_launch_profile_selection(
             config,
             args,
             record,
@@ -425,7 +449,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         output.err(str(exc))
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
         return 3
-    _reflect_assignment(record, selection)
+    _dispatch_reflect_assignment(record, selection)
 
     launch_cmd = _build_launch_cmd(
         config,
@@ -434,7 +458,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         profile=selection.profile,
         preflight=launch_preflight,
     )
-    merged_env = _apply_assignment_env(
+    merged_env = _dispatch_apply_assignment_env(
         _build_env(
             selection.profile,
             _repo_session_env(config, record.worktree_path),
@@ -451,7 +475,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             profile=selection.profile,
             preflight=launch_preflight,
         )
-        merged_env = _apply_assignment_env(
+        merged_env = _dispatch_apply_assignment_env(
             _build_env(
                 selection.profile,
                 _repo_session_env(config, plan_work_dir),
@@ -530,7 +554,7 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
     args = context.args
 
     try:
-        _validate_profile_assignment_config(config)
+        _dispatch_validate_profile_assignment_config(config)
     except profile_assignment.ProfileAssignmentError as exc:
         output.err(str(exc))
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
