@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import argparse
+
 import pytest
 
 from agent_dispatch import config, tracking
@@ -324,6 +326,67 @@ def test_satellite_retries_deregister_after_a_transient_failure(monkeypatch, dir
     runner.tick()
     assert directory.discover_peers() == []
     assert runner._registered is False
+
+
+# -- CLI: `agent-dispatch federation status` self.gate_state legibility ------
+#
+# Phase 2's still-open gap: a closed-gate satellite never registers at all,
+# so it is invisible in `peers` -- an operator running `federation status`
+# locally on that satellite would otherwise have no way to tell "gated
+# closed" apart from "not started". `self.gate_state` closes that gap.
+
+
+class _StubRendezvous:
+    def discover_coordinator(self):
+        return {"instance": "lambda-core"}
+
+    def discover_peers(self, *, role=None):
+        return []
+
+
+def test_federation_status_reports_self_gate_state_closed(monkeypatch):
+    from agent_dispatch import __main__ as main_mod
+
+    monkeypatch.delenv("AGENT_DISPATCH_SATELLITE_GATE", raising=False)
+    monkeypatch.setattr(main_mod, "_federation_rendezvous", lambda args: _StubRendezvous())
+    args = argparse.Namespace(role="satellite", instance="book2", url=None, token=None)
+    captured = {}
+    monkeypatch.setattr(main_mod, "_emit", lambda value: captured.update(value) or 0)
+
+    main_mod._cmd_federation_status(args)
+
+    assert captured["self"] == {
+        "role": "satellite",
+        "instance": "book2",
+        "gate_state": "closed",
+    }
+
+
+def test_federation_status_reports_self_gate_state_open(monkeypatch):
+    from agent_dispatch import __main__ as main_mod
+
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
+    monkeypatch.setattr(main_mod, "_federation_rendezvous", lambda args: _StubRendezvous())
+    args = argparse.Namespace(role="satellite", instance="book2", url=None, token=None)
+    captured = {}
+    monkeypatch.setattr(main_mod, "_emit", lambda value: captured.update(value) or 0)
+
+    main_mod._cmd_federation_status(args)
+
+    assert captured["self"]["gate_state"] == "open"
+
+
+def test_federation_status_omits_gate_state_for_non_satellite_roles(monkeypatch):
+    from agent_dispatch import __main__ as main_mod
+
+    monkeypatch.setattr(main_mod, "_federation_rendezvous", lambda args: _StubRendezvous())
+    args = argparse.Namespace(role="peer", instance="wheatley", url=None, token=None)
+    captured = {}
+    monkeypatch.setattr(main_mod, "_emit", lambda value: captured.update(value) or 0)
+
+    main_mod._cmd_federation_status(args)
+
+    assert captured["self"] == {"role": "peer", "instance": "wheatley"}
 
 
 def test_satellite_cleans_up_a_stale_entry_from_a_prior_process(monkeypatch, directory):

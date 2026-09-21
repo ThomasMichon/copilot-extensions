@@ -1547,6 +1547,15 @@ node's own heartbeats indefinitely; default `30`), and
 queued-task discovery pagination for one tick, independent of any single
 request's own HTTP timeout; default `10`).
 
+`agent-dispatch federation status` prints the discovered coordinator + live
+peers, plus a `self` section (`role` / `instance` / `gate_state`) reporting
+THIS node's own state. A gate-closed satellite never registers at all, so it
+would otherwise be invisible even to its own operator running this command
+locally; `self.gate_state` (`open`/`closed`, satellite roles only) makes that
+distinguishable from "not yet started." Pass `--role`/`--instance` to report
+a role/instance other than the environment default
+(`AGENT_DISPATCH_FEDERATION_ROLE`/`AGENT_DISPATCH_FEDERATION_INSTANCE`).
+
 Bearer scheme matching is case-insensitive. Prefer environment or token-command
 configuration over token flags where process arguments may be observable.
 
