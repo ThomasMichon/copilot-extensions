@@ -77,10 +77,13 @@ import {
 // blocking-I/O class that broke agent-bridge's readiness handshake (four
 // sequential execSync/execFileSync spawns there vs. a bounded directory walk
 // + up to two config-file reads here). `handoffConfig` starts as the safe,
-// zero-I/O default and is resolved concurrently with joinSession() below via
-// `handoffConfigPromise`, never blocking the event loop on the path to
-// extension readiness. Declared `let` (not `const`) so every closure that
-// reads `handoffConfig.mode`/`.thresholds` later sees the resolved value.
+// zero-I/O default and is resolved via `handoffConfigPromise`, fired
+// fire-and-forget -- NEVER awaited on the path to joinSession()/readiness (a
+// slow filesystem must not hold extension registration hostage). Declared
+// `let` (not `const`) so every closure that reads `handoffConfig.mode`/
+// `.thresholds` -- all inside tool handlers or session event listeners, i.e.
+// only ever invoked after joinSession() has already resolved -- sees the
+// resolved value by the time it matters.
 let handoffConfig = defaultConfig();
 const handoffConfigPromise = loadContextHandoffConfigAsync(process.cwd()).then(
   (resolved) => {
@@ -88,6 +91,7 @@ const handoffConfigPromise = loadContextHandoffConfigAsync(process.cwd()).then(
     return resolved;
   },
 );
+handoffConfigPromise.catch(() => {}); // loadContextHandoffConfigAsync never rejects; guard anyway.
 
 // Phase 4 judgment call: `mode: off` is a repo-level opt-out of the handoff
 // mechanism itself, not only the automatic pressure monitor. Refuse every
@@ -372,606 +376,605 @@ async function autoForceHandoff(sid, cwd) {
 }
 
 // --- Extension ---
+// aperture-labs#7291 review: joinSession() must resolve on its own -- it is
+// NOT wrapped in Promise.all with handoffConfigPromise, or a slow filesystem
+// would delay readiness by the same I/O latency this change removes.
+const session = await joinSession({
+onPermissionRequest,
 
-const [session] = await Promise.all([
-  joinSession({
-    onPermissionRequest,
-
-    tools: [
-      {
-        name: "generate_handoff_prompt",
-        description:
-          "Generate structured session facts for creating a continuation " +
-          "prompt. Returns session metadata, files modified, git status, " +
-          "and key tool invocations. Compose the compact effort-backed shape " +
-          "when a valid open active effort exists; otherwise compose the full " +
-          "standalone shape. In either mode, preserve the parent completion gate " +
-          "rather than treating the latest completed phase as the objective, and " +
-          "carry forward any outstanding background flows (watches, polls, " +
-          "scheduled prompts) or external state (open PRs, held claims/leases, " +
-          "peer-agent coordination) this session owns -- never silently drop them.",
-        skipPermission: true,
-        parameters: {
-          type: "object",
-          properties: {
-            summary: {
-              type: "string",
-              description:
-                "Optional 1-2 sentence summary of what the session accomplished. " +
-                "If omitted, the tool returns raw facts only.",
-            },
-            next_steps: {
-              type: "string",
-              description:
-                "Optional description of what should happen next.",
-            },
+tools: [
+  {
+    name: "generate_handoff_prompt",
+    description:
+      "Generate structured session facts for creating a continuation " +
+        "prompt. Returns session metadata, files modified, git status, " +
+        "and key tool invocations. Compose the compact effort-backed shape " +
+        "when a valid open active effort exists; otherwise compose the full " +
+        "standalone shape. In either mode, preserve the parent completion gate " +
+        "rather than treating the latest completed phase as the objective, and " +
+        "carry forward any outstanding background flows (watches, polls, " +
+        "scheduled prompts) or external state (open PRs, held claims/leases, " +
+        "peer-agent coordination) this session owns -- never silently drop them.",
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          summary: {
+            type: "string",
+            description:
+              "Optional 1-2 sentence summary of what the session accomplished. " +
+              "If omitted, the tool returns raw facts only.",
+          },
+          next_steps: {
+            type: "string",
+            description:
+              "Optional description of what should happen next.",
           },
         },
-        handler: async (args, invocation) => {
-          ensureState(invocation);
-          if (!manualHandoffEnabled(handoffConfig.mode)) {
-            return handoffDisabledResult();
-          }
-          const sid = state.sessionId || invocation?.sessionId || "unknown";
-          const { data: handoffData, modifiedEntries } = collectHandoffData(sid, args);
+      },
+      handler: async (args, invocation) => {
+        ensureState(invocation);
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          return handoffDisabledResult();
+        }
+        const sid = state.sessionId || invocation?.sessionId || "unknown";
+        const { data: handoffData, modifiedEntries } = collectHandoffData(sid, args);
 
-          state.handoffGenerated = true;
+        state.handoffGenerated = true;
 
-          return {
-            textResultForLlm: [
-              "## Handoff Data",
-              "",
-              `**Session:** ${handoffData.sessionId}`,
-              `**CWD:** ${handoffData.cwd}`,
-              `**Branch:** ${
-                handoffData.branch === null
-                  ? "(unavailable)"
-                  : handoffData.branch || "(detached)"
-              }`,
-              `**Turn count:** ${handoffData.turnCount}`,
-              `**Context utilization:** ${handoffData.contextUtilization}`,
-              "",
-              handoffData.firstUserPrompt
-                ? `### Original Request\n> ${handoffData.firstUserPrompt.slice(0, 300)}\n`
-                : "",
-              "### Files Modified",
-              ...modifiedEntries.map(
-                ([path, info]) => `- \`${path}\` (${info.tool}, turn ${info.turnIndex})`
-              ),
-              "",
-              "### Git Status",
-              "```",
-              handoffData.gitStatus === null
+        return {
+          textResultForLlm: [
+            "## Handoff Data",
+            "",
+            `**Session:** ${handoffData.sessionId}`,
+            `**CWD:** ${handoffData.cwd}`,
+            `**Branch:** ${
+              handoffData.branch === null
                 ? "(unavailable)"
-                : handoffData.gitStatus || "(clean)",
-              "```",
-              "",
-              args.summary ? `### Agent Summary\n${args.summary}\n` : "",
-              args.next_steps ? `### Agent Next Steps\n${args.next_steps}\n` : "",
-              "",
-              "---",
-              "Now follow the context-handoff skill:",
-              "1. Compose handoff markdown from this data plus your live context.",
-              "   Use the compact effort-backed shape when a valid open active",
-              "   effort exists; otherwise use the full standalone shape. Keep",
-              "   separate completion gates for this handoff leg and the parent",
-              "   objective/worktree.",
-              "   A completed phase is progress, not a reason to omit later work.",
-              "   If this repo also has an effort capability, use that binding to",
-              "   let one session own only a natural slice of the larger objective;",
-              "   stride forward confidently, stop at a clean boundary, and hand off",
-              "   the next slice rather than forcing one session to bite off the",
-              "   entire effort.",
-              "   If the parent objective truly has no actionable work left, do not",
-              "   create a handoff merely to report that fact; finish instead.",
-              "   Include an 'Outstanding Background Flows & External State'",
-              "   section: never silently drop active watches/polls/scheduled",
-              "   prompts, open PRs, held claims/leases/dispatch tasks, or",
-              "   peer-agent coordination this session owns -- carry each forward",
-              "   as resumable or as an explicit open item; write \"none\" only",
-              "   when genuinely none exist.",
-              "2. Call save_handoff_prompt with the composed markdown as `prompt_text`",
-              "   (and an optional short `title`). It stores the handoff — as an",
-              "   agent-dispatch task when a coordinator is reachable, else a",
-              "   one-time worktree-state file — and returns the short handoff",
-              "   prompt plus its exact HANDOFF_SEED/HANDOFF_TOKEN identifiers.",
-              "3. Distinguish the trigger:",
-              "   - If context pressure is the reason for the handoff and work",
-              "     remains, call trigger_handoff directly after saving. Do NOT ask",
-              "     for confirmation first; continuity is the point.",
-              "   - If you are otherwise done with the requested work and would end",
-              "     the turn by listing follow-up ideas/questions, store the baton",
-              "     and replace that list with one short offer to continue via",
-              "     handoff. Only after the user says yes should you call",
-              "     trigger_handoff, unless autopilot or prior authorization",
-              "     already covers that turn-end follow-up path.",
-              "Do NOT paste the handoff contents, commit anything, or claim the",
-              "handoff auto-loads on restart (it does not).",
-            ].join("\n"),
-            resultType: "success",
-          };
-        },
+                : handoffData.branch || "(detached)"
+            }`,
+            `**Turn count:** ${handoffData.turnCount}`,
+            `**Context utilization:** ${handoffData.contextUtilization}`,
+            "",
+            handoffData.firstUserPrompt
+              ? `### Original Request\n> ${handoffData.firstUserPrompt.slice(0, 300)}\n`
+              : "",
+            "### Files Modified",
+            ...modifiedEntries.map(
+              ([path, info]) => `- \`${path}\` (${info.tool}, turn ${info.turnIndex})`
+            ),
+            "",
+            "### Git Status",
+            "```",
+            handoffData.gitStatus === null
+              ? "(unavailable)"
+              : handoffData.gitStatus || "(clean)",
+            "```",
+            "",
+            args.summary ? `### Agent Summary\n${args.summary}\n` : "",
+            args.next_steps ? `### Agent Next Steps\n${args.next_steps}\n` : "",
+            "",
+            "---",
+            "Now follow the context-handoff skill:",
+            "1. Compose handoff markdown from this data plus your live context.",
+            "   Use the compact effort-backed shape when a valid open active",
+            "   effort exists; otherwise use the full standalone shape. Keep",
+            "   separate completion gates for this handoff leg and the parent",
+            "   objective/worktree.",
+            "   A completed phase is progress, not a reason to omit later work.",
+            "   If this repo also has an effort capability, use that binding to",
+            "   let one session own only a natural slice of the larger objective;",
+            "   stride forward confidently, stop at a clean boundary, and hand off",
+            "   the next slice rather than forcing one session to bite off the",
+            "   entire effort.",
+            "   If the parent objective truly has no actionable work left, do not",
+            "   create a handoff merely to report that fact; finish instead.",
+            "   Include an 'Outstanding Background Flows & External State'",
+            "   section: never silently drop active watches/polls/scheduled",
+            "   prompts, open PRs, held claims/leases/dispatch tasks, or",
+            "   peer-agent coordination this session owns -- carry each forward",
+            "   as resumable or as an explicit open item; write \"none\" only",
+            "   when genuinely none exist.",
+            "2. Call save_handoff_prompt with the composed markdown as `prompt_text`",
+            "   (and an optional short `title`). It stores the handoff — as an",
+            "   agent-dispatch task when a coordinator is reachable, else a",
+            "   one-time worktree-state file — and returns the short handoff",
+            "   prompt plus its exact HANDOFF_SEED/HANDOFF_TOKEN identifiers.",
+            "3. Distinguish the trigger:",
+            "   - If context pressure is the reason for the handoff and work",
+            "     remains, call trigger_handoff directly after saving. Do NOT ask",
+            "     for confirmation first; continuity is the point.",
+            "   - If you are otherwise done with the requested work and would end",
+            "     the turn by listing follow-up ideas/questions, store the baton",
+            "     and replace that list with one short offer to continue via",
+            "     handoff. Only after the user says yes should you call",
+            "     trigger_handoff, unless autopilot or prior authorization",
+            "     already covers that turn-end follow-up path.",
+            "Do NOT paste the handoff contents, commit anything, or claim the",
+            "handoff auto-loads on restart (it does not).",
+          ].join("\n"),
+          resultType: "success",
+        };
       },
-      {
-        name: "save_handoff_prompt",
-        description:
-          "Store the composed handoff markdown and return the short prompt/seed " +
-          "that a human or control system can use to resume it later. This is the " +
-          "routine, non-committal step: safe to call whenever you reach a natural " +
-          "stopping point. Use it both for context-pressure handoffs that will " +
-          "trigger immediately and for turn-end follow-up handoffs where you want " +
-          "to preserve the baton before offering the user a low-friction yes/no " +
-          "choice. When an agent-dispatch coordinator is reachable, " +
-          "the handoff is stored as a *proposed, handoff-labeled task* pinned to " +
-          "this worktree (payload = the markdown, no session file) and resumed via " +
-          "/resume-handoff; otherwise it falls back to a one-time file in this " +
-          "worktree's agent-worktrees state directory outside the repo checkout. " +
-          "Call this after composing the handoff from generate_handoff_prompt " +
-          "data. Pass the markdown as `prompt_text` (the `prompt` alias is also " +
-          "accepted); an optional short `title` labels the task. Returns the short " +
-          "handoff prompt plus exact `HANDOFF_SEED:` / `HANDOFF_TOKEN:` lines for " +
-          "later manual or tool-driven pickup. The handoff is NEVER loaded " +
-          "automatically by a future session.",
-        skipPermission: true,
-        parameters: {
-          type: "object",
-          properties: {
-            prompt_text: {
-              type: "string",
-              description: "The composed effort-backed or standalone handoff markdown.",
-            },
-            title: {
-              type: "string",
-              description:
-                "Optional short, specific title for the handoff task (e.g. " +
-                "'Fix agent-dispatch producer recovery'). Used only in the " +
-                "agent-dispatch task path.",
-            },
-            prompt: {
-              type: "string",
-              description: "Alias for prompt_text (accepted for convenience).",
-            },
+    },
+    {
+      name: "save_handoff_prompt",
+      description:
+        "Store the composed handoff markdown and return the short prompt/seed " +
+        "that a human or control system can use to resume it later. This is the " +
+        "routine, non-committal step: safe to call whenever you reach a natural " +
+        "stopping point. Use it both for context-pressure handoffs that will " +
+        "trigger immediately and for turn-end follow-up handoffs where you want " +
+        "to preserve the baton before offering the user a low-friction yes/no " +
+        "choice. When an agent-dispatch coordinator is reachable, " +
+        "the handoff is stored as a *proposed, handoff-labeled task* pinned to " +
+        "this worktree (payload = the markdown, no session file) and resumed via " +
+        "/resume-handoff; otherwise it falls back to a one-time file in this " +
+        "worktree's agent-worktrees state directory outside the repo checkout. " +
+        "Call this after composing the handoff from generate_handoff_prompt " +
+        "data. Pass the markdown as `prompt_text` (the `prompt` alias is also " +
+        "accepted); an optional short `title` labels the task. Returns the short " +
+        "handoff prompt plus exact `HANDOFF_SEED:` / `HANDOFF_TOKEN:` lines for " +
+        "later manual or tool-driven pickup. The handoff is NEVER loaded " +
+        "automatically by a future session.",
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          prompt_text: {
+            type: "string",
+            description: "The composed effort-backed or standalone handoff markdown.",
           },
-          // Intentionally no `required`: the handler validates so a missing or
-          // misnamed argument returns a clear message instead of a generic
-          // "tool execution failed" (writeFileSync on undefined used to throw).
+          title: {
+            type: "string",
+            description:
+              "Optional short, specific title for the handoff task (e.g. " +
+              "'Fix agent-dispatch producer recovery'). Used only in the " +
+              "agent-dispatch task path.",
+          },
+          prompt: {
+            type: "string",
+            description: "Alias for prompt_text (accepted for convenience).",
+          },
         },
-        handler: async (args, invocation) => {
-          ensureState(invocation);
-          if (!manualHandoffEnabled(handoffConfig.mode)) {
-            return handoffDisabledResult();
-          }
-          const sid = state.sessionId || invocation?.sessionId;
-          if (!sid || sid === "unknown") {
-            return "Cannot save handoff prompt: sessionId is unavailable.";
-          }
+        // Intentionally no `required`: the handler validates so a missing or
+        // misnamed argument returns a clear message instead of a generic
+        // "tool execution failed" (writeFileSync on undefined used to throw).
+      },
+      handler: async (args, invocation) => {
+        ensureState(invocation);
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          return handoffDisabledResult();
+        }
+        const sid = state.sessionId || invocation?.sessionId;
+        if (!sid || sid === "unknown") {
+          return "Cannot save handoff prompt: sessionId is unavailable.";
+        }
 
-          const text = (args?.prompt_text ?? args?.prompt ?? "").toString().trim();
-          if (!text) {
-            return (
-              "Cannot save handoff: pass the composed handoff markdown as `prompt_text` " +
-              "(the `prompt` alias is also accepted). Nothing was written."
-            );
-          }
-
-          const cwd = state.cwd || process.cwd();
-          const title = normalizeHandoffTitle(args?.title);
-          const stored = storeHandoff({ promptText: text, sid, cwd, title });
-          if (!stored?.storage) {
-            return (
-              "Cannot save handoff: no safe task or file store was available. " +
-              `${stored?.error || "Nothing was written."}`
-            );
-          }
-          const handoffSeed = buildSeedForStored(stored);
-          state.pendingHandoff = {
-            seed: handoffSeed,
-            token: stored.id,
-            storage: stored.storage,
-            worktree: stored.metadata?.worktree || null,
-          };
+        const text = (args?.prompt_text ?? args?.prompt ?? "").toString().trim();
+        if (!text) {
           return (
-            `Handoff stored (${stored.storage}: ${stored.id}). This preserves the ` +
-            "baton without arming the pickup flow.\n\n" +
-            "If this handoff exists because context pressure is rising and work " +
-            "still remains, call `trigger_handoff` directly now.\n\n" +
-            "If this is a turn-end follow-up handoff, ask the user whether to " +
-            "continue via handoff and call `trigger_handoff` only after they say " +
-            "yes, unless autopilot or prior authorization already covers that path.\n\n" +
-            "If you later need manual continuation, open the successor session and " +
-            "run `/consume-handoff`; if that command is unavailable, use the " +
-            "payload-local context-handoff CLI with the recovery locator embedded " +
-            "in the seed below.\n\n" +
-            `HANDOFF_SEED: ${handoffSeed}\n` +
-            `HANDOFF_TOKEN: ${stored.id}`
+            "Cannot save handoff: pass the composed handoff markdown as `prompt_text` " +
+            "(the `prompt` alias is also accepted). Nothing was written."
           );
-        },
-      },
-      {
-        name: "consume_handoff",
-        description:
-          "Consume a stored context handoff exactly once. For agent-dispatch " +
-          "handoffs, pass task_id; for file-backed handoffs, pass handoff_id " +
-          "(or path). The tool loads the handoff, marks file-backed handoffs " +
-          "consumed so they do not replay, updates the predecessor session-state " +
-          "marker when present, and returns the stored continuation without " +
-          "performing any process management.",
-        skipPermission: true,
-        parameters: {
-          type: "object",
-          properties: {
-            task_id: {
-              type: "string",
-              description: "agent-dispatch task id for a task-backed handoff.",
-            },
-            handoff_id: {
-              type: "string",
-              description: "File-backed handoff id, e.g. handoff-<session-id>.",
-            },
-            path: {
-              type: "string",
-              description: "Explicit file-backed handoff JSON path.",
-            },
-            defer_complete: {
-              type: "boolean",
-              description:
-                "For task-backed handoffs, consume with --defer-complete so the " +
-                "successor completes the task only when the handoff goal is reached.",
-            },
-          },
-        },
-        handler: async (args, invocation) => {
-          ensureState(invocation);
-          if (!manualHandoffEnabled(handoffConfig.mode)) {
-            return {
-              textResultForLlm: handoffDisabledResult(),
-              resultType: "error",
-            };
-          }
-          const cwd = state.cwd || process.cwd();
-          const sid = state.sessionId || invocation?.sessionId || null;
-          const taskId = (args?.task_id ?? "").toString().trim();
-          const handoffId = (args?.handoff_id ?? "").toString().trim();
-          const path = (args?.path ?? "").toString().trim();
-          const deferComplete = Boolean(args?.defer_complete);
+        }
 
-          let result;
-          if (taskId) {
-            result = consumeDispatchHandoffTask(cwd, taskId, sid, deferComplete);
-          } else if (handoffId || path) {
-            result = consumeFileHandoff(cwd, sid, handoffId, path || null);
-          } else {
-            return (
-              "Cannot consume handoff: pass task_id for an agent-dispatch handoff " +
-              "or handoff_id/path for a file-backed handoff."
-            );
-          }
-
-          return {
-            textResultForLlm: formatConsumeResult(result, { deferComplete }),
-            resultType: result?.ok ? "success" : "error",
-          };
-        },
-      },
-      {
-        name: "trigger_handoff",
-        description:
-          "Signal that THIS session is ready for a handoff pickup, without " +
-          "performing any process management. Call this only after the user said " +
-          "yes to continuing via handoff, or when autopilot / prior explicit " +
-          "authorization already permits it -- EXCEPT for context-pressure-driven " +
-          "handoffs with work still left to do, which should trigger immediately " +
-          "without asking. The tool may either reuse the current " +
-          "session's most recently saved handoff or store fresh markdown passed as " +
-          "`prompt_text` / `prompt`. It always: (1) drops the full handoff " +
-          "markdown in this session's session-state folder; (2) durably stores " +
-          "it (agent-dispatch task or worktree-state file). ONLY when " +
-          "`.context-handoff/config.yaml`'s `mode` is `auto` (the default is " +
-          "`manual-only`) does it additionally: (3) note it in the worktree's " +
-          "own record (creates a pending-handoff entry agent-worktrees' " +
-          "resident monitor can discover and claim on its own -- gated " +
-          "identically to the two triggers below, not merely advisory), and " +
-          "refresh worktree-visible PENDING-HANDOFF state when agent-worktrees " +
-          "is available; (4) best-effort ping agent-bridge if present; (5) wait " +
-          "up to 30 seconds for the CUTOVER to start (a status-monitor " +
-          "`handoff_cutover_spawn` acknowledgement) -- not for the successor to " +
-          "fully finish cold-starting and consume the handoff, which " +
-          "legitimately takes longer and is not worth blocking on. Regardless " +
-          "of mode, it always: (6) checks once whether a cutover is already " +
-          "under way, already fully picked up, or neither (under `manual-only` " +
-          "this is a single check, not a polling wait -- steps 3-5 are the " +
-          "only ones actually skipped); and (7) prints manual fallback " +
-          "guidance -- distinctly worded when automatic cutover is simply " +
-          "disabled by mode versus when it was attempted and nothing happened " +
-          "-- and (8) ALWAYS ends with the final short handoff prompt/seed. " +
-          "It NEVER checks panes or PIDs, spawns or retires sessions, or " +
-          "performs any cutover itself.",
-        skipPermission: true,
-        parameters: {
-          type: "object",
-          properties: {
-            prompt_text: {
-              type: "string",
-              description:
-                "Optional composed handoff markdown. When supplied, trigger_handoff " +
-                "stores/supersedes the baton first and then signals pickup in the " +
-                "same tool call.",
-            },
-            handoff_token: {
-              type: "string",
-              description:
-                "Optional stored handoff token to reuse instead of the session's " +
-                "most recently saved baton.",
-            },
-            title: {
-              type: "string",
-              description:
-                "Optional short title when `prompt_text` is supplied and a new " +
-                "stored baton is being created in this tool call.",
-            },
-            prompt: {
-              type: "string",
-              description: "Alias for prompt_text (accepted for convenience).",
-            },
-          },
-        },
-        handler: async (args, invocation) => {
-          ensureState(invocation);
-          if (!manualHandoffEnabled(handoffConfig.mode)) {
-            return handoffDisabledResult();
-          }
-          const text = (args?.prompt_text ?? args?.prompt ?? "").toString().trim();
-          const cwd = state.cwd || process.cwd();
-          const sid = state.sessionId || invocation?.sessionId;
-          if (!sid || sid === "unknown") {
-            return "Cannot trigger handoff: sessionId is unavailable.";
-          }
-          if (!text && !args?.handoff_token && !state.pendingHandoff?.token) {
-            return (
-              "Cannot trigger handoff: pass composed handoff markdown as " +
-              "`prompt_text` (or `prompt`), or save a baton first with " +
-              "`save_handoff_prompt` and then re-run `trigger_handoff`."
-            );
-          }
-          const title = normalizeHandoffTitle(args?.title);
-          const result = await triggerHandoff({
-            promptText: text || null,
-            sid,
-            cwd,
-            title,
-            handoffToken:
-              (args?.handoff_token ?? state.pendingHandoff?.token ?? "").toString().trim() || null,
-            mode: handoffConfig.mode,
-          });
-          if (!result?.ok) {
-            return (
-              "Cannot trigger handoff: " +
-              `${result?.error || "the pickup signal flow failed before it could start."}`
-            );
-          }
-          state.pendingHandoff = {
-            seed: result.seed,
-            token: result.stored.id,
-            storage: result.stored.storage,
-            worktree: result.stored.metadata?.worktree || null,
-          };
-          const pickup = result.pickup || { via: [] };
-          const pickedUp = pickup.pickedUp;
-          const pickupLine = pickedUp
-            ? `Pickup acknowledged within ${(pickup.waitedMs / 1000).toFixed(1)}s via ${pickup.via.join(", ")}.`
-            : pickup.spawnInFlight
-              ? `No full pickup yet, but a successor spawn was acknowledged within ${(pickup.waitedMs / 1000).toFixed(1)}s -- an automatic cutover is already under way (real Copilot cold-start just takes longer than that).`
-              : `No pickup signal arrived within ${(pickup.waitedMs / 1000).toFixed(1)}s.`;
-          const bridgeLine = result.bridge?.attempted
-            ? (
-                result.bridge.accepted
-                  ? "agent-bridge accepted a best-effort handoff request ping."
-                  : `agent-bridge ping did not confirm pickup${result.bridge.error ? ` (${result.bridge.error})` : ""}.`
-              )
-            : "agent-bridge was not pinged.";
-          if (result.automaticCutoverDisabled) {
-            return (
-              `Handoff stored (automatic cutover disabled) for ${result.stored.storage} ` +
-              `baton ${result.stored.id}. None of the live-cutover triggers ran ` +
-              "-- not the worktree-record note, not the `handoff_requested` " +
-              "activity event agent-worktrees' resident monitor watches for, " +
-              "and not an agent-bridge ping -- because `.context-handoff/" +
-              "config.yaml`'s `mode` is not `auto`. No successor pane will be " +
-              "spawned automatically.\n\n" +
-              `${result.manualInstructions
-                || "A manually-launched successor already appears to have " +
-                  "picked this up. Keep the same seed available in case a " +
-                  "human or tool still needs to resume it manually.\n"}\n\n` +
-              "Final short handoff prompt/seed:\n\n" +
-              "```text\n" +
-              `${result.seed}\n` +
-              "```"
-            );
-          }
+        const cwd = state.cwd || process.cwd();
+        const title = normalizeHandoffTitle(args?.title);
+        const stored = storeHandoff({ promptText: text, sid, cwd, title });
+        if (!stored?.storage) {
           return (
-            `Handoff request signaled for ${result.stored.storage} baton ` +
-            `${result.stored.id}. ${pickupLine}\n\n` +
-            `${bridgeLine}\n\n` +
-            (
-              result.manualInstructions
-                ? `${result.manualInstructions}\n\n`
-                : "A control system appears to have picked the request up. Keep the same seed available in case a human or tool needs to resume it manually.\n\n"
-            ) +
+            "Cannot save handoff: no safe task or file store was available. " +
+            `${stored?.error || "Nothing was written."}`
+          );
+        }
+        const handoffSeed = buildSeedForStored(stored);
+        state.pendingHandoff = {
+          seed: handoffSeed,
+          token: stored.id,
+          storage: stored.storage,
+          worktree: stored.metadata?.worktree || null,
+        };
+        return (
+          `Handoff stored (${stored.storage}: ${stored.id}). This preserves the ` +
+          "baton without arming the pickup flow.\n\n" +
+          "If this handoff exists because context pressure is rising and work " +
+          "still remains, call `trigger_handoff` directly now.\n\n" +
+          "If this is a turn-end follow-up handoff, ask the user whether to " +
+          "continue via handoff and call `trigger_handoff` only after they say " +
+          "yes, unless autopilot or prior authorization already covers that path.\n\n" +
+          "If you later need manual continuation, open the successor session and " +
+          "run `/consume-handoff`; if that command is unavailable, use the " +
+          "payload-local context-handoff CLI with the recovery locator embedded " +
+          "in the seed below.\n\n" +
+          `HANDOFF_SEED: ${handoffSeed}\n` +
+          `HANDOFF_TOKEN: ${stored.id}`
+        );
+      },
+    },
+    {
+      name: "consume_handoff",
+      description:
+        "Consume a stored context handoff exactly once. For agent-dispatch " +
+        "handoffs, pass task_id; for file-backed handoffs, pass handoff_id " +
+        "(or path). The tool loads the handoff, marks file-backed handoffs " +
+        "consumed so they do not replay, updates the predecessor session-state " +
+        "marker when present, and returns the stored continuation without " +
+        "performing any process management.",
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          task_id: {
+            type: "string",
+            description: "agent-dispatch task id for a task-backed handoff.",
+          },
+          handoff_id: {
+            type: "string",
+            description: "File-backed handoff id, e.g. handoff-<session-id>.",
+          },
+          path: {
+            type: "string",
+            description: "Explicit file-backed handoff JSON path.",
+          },
+          defer_complete: {
+            type: "boolean",
+            description:
+              "For task-backed handoffs, consume with --defer-complete so the " +
+              "successor completes the task only when the handoff goal is reached.",
+          },
+        },
+      },
+      handler: async (args, invocation) => {
+        ensureState(invocation);
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          return {
+            textResultForLlm: handoffDisabledResult(),
+            resultType: "error",
+          };
+        }
+        const cwd = state.cwd || process.cwd();
+        const sid = state.sessionId || invocation?.sessionId || null;
+        const taskId = (args?.task_id ?? "").toString().trim();
+        const handoffId = (args?.handoff_id ?? "").toString().trim();
+        const path = (args?.path ?? "").toString().trim();
+        const deferComplete = Boolean(args?.defer_complete);
+
+        let result;
+        if (taskId) {
+          result = consumeDispatchHandoffTask(cwd, taskId, sid, deferComplete);
+        } else if (handoffId || path) {
+          result = consumeFileHandoff(cwd, sid, handoffId, path || null);
+        } else {
+          return (
+            "Cannot consume handoff: pass task_id for an agent-dispatch handoff " +
+            "or handoff_id/path for a file-backed handoff."
+          );
+        }
+
+        return {
+          textResultForLlm: formatConsumeResult(result, { deferComplete }),
+          resultType: result?.ok ? "success" : "error",
+        };
+      },
+    },
+    {
+      name: "trigger_handoff",
+      description:
+        "Signal that THIS session is ready for a handoff pickup, without " +
+        "performing any process management. Call this only after the user said " +
+        "yes to continuing via handoff, or when autopilot / prior explicit " +
+        "authorization already permits it -- EXCEPT for context-pressure-driven " +
+        "handoffs with work still left to do, which should trigger immediately " +
+        "without asking. The tool may either reuse the current " +
+        "session's most recently saved handoff or store fresh markdown passed as " +
+        "`prompt_text` / `prompt`. It always: (1) drops the full handoff " +
+        "markdown in this session's session-state folder; (2) durably stores " +
+        "it (agent-dispatch task or worktree-state file). ONLY when " +
+        "`.context-handoff/config.yaml`'s `mode` is `auto` (the default is " +
+        "`manual-only`) does it additionally: (3) note it in the worktree's " +
+        "own record (creates a pending-handoff entry agent-worktrees' " +
+        "resident monitor can discover and claim on its own -- gated " +
+        "identically to the two triggers below, not merely advisory), and " +
+        "refresh worktree-visible PENDING-HANDOFF state when agent-worktrees " +
+        "is available; (4) best-effort ping agent-bridge if present; (5) wait " +
+        "up to 30 seconds for the CUTOVER to start (a status-monitor " +
+        "`handoff_cutover_spawn` acknowledgement) -- not for the successor to " +
+        "fully finish cold-starting and consume the handoff, which " +
+        "legitimately takes longer and is not worth blocking on. Regardless " +
+        "of mode, it always: (6) checks once whether a cutover is already " +
+        "under way, already fully picked up, or neither (under `manual-only` " +
+        "this is a single check, not a polling wait -- steps 3-5 are the " +
+        "only ones actually skipped); and (7) prints manual fallback " +
+        "guidance -- distinctly worded when automatic cutover is simply " +
+        "disabled by mode versus when it was attempted and nothing happened " +
+        "-- and (8) ALWAYS ends with the final short handoff prompt/seed. " +
+        "It NEVER checks panes or PIDs, spawns or retires sessions, or " +
+        "performs any cutover itself.",
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          prompt_text: {
+            type: "string",
+            description:
+              "Optional composed handoff markdown. When supplied, trigger_handoff " +
+              "stores/supersedes the baton first and then signals pickup in the " +
+              "same tool call.",
+          },
+          handoff_token: {
+            type: "string",
+            description:
+              "Optional stored handoff token to reuse instead of the session's " +
+              "most recently saved baton.",
+          },
+          title: {
+            type: "string",
+            description:
+              "Optional short title when `prompt_text` is supplied and a new " +
+              "stored baton is being created in this tool call.",
+          },
+          prompt: {
+            type: "string",
+            description: "Alias for prompt_text (accepted for convenience).",
+          },
+        },
+      },
+      handler: async (args, invocation) => {
+        ensureState(invocation);
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          return handoffDisabledResult();
+        }
+        const text = (args?.prompt_text ?? args?.prompt ?? "").toString().trim();
+        const cwd = state.cwd || process.cwd();
+        const sid = state.sessionId || invocation?.sessionId;
+        if (!sid || sid === "unknown") {
+          return "Cannot trigger handoff: sessionId is unavailable.";
+        }
+        if (!text && !args?.handoff_token && !state.pendingHandoff?.token) {
+          return (
+            "Cannot trigger handoff: pass composed handoff markdown as " +
+            "`prompt_text` (or `prompt`), or save a baton first with " +
+            "`save_handoff_prompt` and then re-run `trigger_handoff`."
+          );
+        }
+        const title = normalizeHandoffTitle(args?.title);
+        const result = await triggerHandoff({
+          promptText: text || null,
+          sid,
+          cwd,
+          title,
+          handoffToken:
+            (args?.handoff_token ?? state.pendingHandoff?.token ?? "").toString().trim() || null,
+          mode: handoffConfig.mode,
+        });
+        if (!result?.ok) {
+          return (
+            "Cannot trigger handoff: " +
+            `${result?.error || "the pickup signal flow failed before it could start."}`
+          );
+        }
+        state.pendingHandoff = {
+          seed: result.seed,
+          token: result.stored.id,
+          storage: result.stored.storage,
+          worktree: result.stored.metadata?.worktree || null,
+        };
+        const pickup = result.pickup || { via: [] };
+        const pickedUp = pickup.pickedUp;
+        const pickupLine = pickedUp
+          ? `Pickup acknowledged within ${(pickup.waitedMs / 1000).toFixed(1)}s via ${pickup.via.join(", ")}.`
+          : pickup.spawnInFlight
+            ? `No full pickup yet, but a successor spawn was acknowledged within ${(pickup.waitedMs / 1000).toFixed(1)}s -- an automatic cutover is already under way (real Copilot cold-start just takes longer than that).`
+            : `No pickup signal arrived within ${(pickup.waitedMs / 1000).toFixed(1)}s.`;
+        const bridgeLine = result.bridge?.attempted
+          ? (
+              result.bridge.accepted
+                ? "agent-bridge accepted a best-effort handoff request ping."
+                : `agent-bridge ping did not confirm pickup${result.bridge.error ? ` (${result.bridge.error})` : ""}.`
+            )
+          : "agent-bridge was not pinged.";
+        if (result.automaticCutoverDisabled) {
+          return (
+            `Handoff stored (automatic cutover disabled) for ${result.stored.storage} ` +
+            `baton ${result.stored.id}. None of the live-cutover triggers ran ` +
+            "-- not the worktree-record note, not the `handoff_requested` " +
+            "activity event agent-worktrees' resident monitor watches for, " +
+            "and not an agent-bridge ping -- because `.context-handoff/" +
+            "config.yaml`'s `mode` is not `auto`. No successor pane will be " +
+            "spawned automatically.\n\n" +
+            `${result.manualInstructions
+              || "A manually-launched successor already appears to have " +
+                "picked this up. Keep the same seed available in case a " +
+                "human or tool still needs to resume it manually.\n"}\n\n` +
             "Final short handoff prompt/seed:\n\n" +
             "```text\n" +
             `${result.seed}\n` +
             "```"
           );
-        },
+        }
+        return (
+          `Handoff request signaled for ${result.stored.storage} baton ` +
+          `${result.stored.id}. ${pickupLine}\n\n` +
+          `${bridgeLine}\n\n` +
+          (
+            result.manualInstructions
+              ? `${result.manualInstructions}\n\n`
+              : "A control system appears to have picked the request up. Keep the same seed available in case a human or tool needs to resume it manually.\n\n"
+          ) +
+          "Final short handoff prompt/seed:\n\n" +
+          "```text\n" +
+          `${result.seed}\n` +
+          "```"
+        );
       },
-    ],
+    },
+  ],
 
-    commands: [
-      {
-        name: "handoff-continue",
-        description:
-          "Generate a handoff for THIS session, store it, and trigger the " +
-          "pending-handoff signal flow (only wired up automatically when " +
-          "mode: auto is configured -- see the context-handoff skill's Mode " +
-          "gate). This is the explicit human yes-path: it does NOT spawn or " +
-          "retire sessions, but it does arm the baton for any human or " +
-          "control system watching the worktree, dispatch task, or " +
-          "session-state marker when automatic mode is enabled.",
-        handler: async (ctx) => {
-          void ctx;
-          if (!manualHandoffEnabled(handoffConfig.mode)) {
-            await session.log(handoffDisabledResult(), { level: "warning" });
-            return;
-          }
-          await session.send({
-            prompt:
-              "Perform a handoff now (the operator invoked /handoff-continue, " +
-              "which is explicit authorization). Steps: (1) call " +
-              "generate_handoff_prompt to collect session facts; (2) compose " +
-              "continuation markdown per the context-handoff skill -- use its " +
-              "compact effort-backed shape when a valid open active effort exists, " +
-              "otherwise the full standalone shape; (3) call trigger_handoff with " +
-              "that markdown as `prompt_text` and a short specific `title`. " +
-              "trigger_handoff always stores/refreshes the baton and ends with " +
-              "the final short handoff prompt/seed; it only signals pending " +
-              "handoff state across the available systems and waits briefly for " +
-              "a pickup when `.context-handoff/config.yaml`'s `mode` is `auto` " +
-              "(the default, `manual-only`, skips that live-cutover signaling " +
-              "entirely). Do NOT claim the baton auto-loads on restart; if no " +
-              "control system picks it up (or automatic mode is disabled), " +
-              "follow the manual instructions it printed.",
-            displayPrompt: "Trigger handoff pickup (/handoff-continue)",
-          });
-        },
+  commands: [
+    {
+      name: "handoff-continue",
+      description:
+        "Generate a handoff for THIS session, store it, and trigger the " +
+        "pending-handoff signal flow (only wired up automatically when " +
+        "mode: auto is configured -- see the context-handoff skill's Mode " +
+        "gate). This is the explicit human yes-path: it does NOT spawn or " +
+        "retire sessions, but it does arm the baton for any human or " +
+        "control system watching the worktree, dispatch task, or " +
+        "session-state marker when automatic mode is enabled.",
+      handler: async (ctx) => {
+        void ctx;
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          await session.log(handoffDisabledResult(), { level: "warning" });
+          return;
+        }
+        await session.send({
+          prompt:
+            "Perform a handoff now (the operator invoked /handoff-continue, " +
+            "which is explicit authorization). Steps: (1) call " +
+            "generate_handoff_prompt to collect session facts; (2) compose " +
+            "continuation markdown per the context-handoff skill -- use its " +
+            "compact effort-backed shape when a valid open active effort exists, " +
+            "otherwise the full standalone shape; (3) call trigger_handoff with " +
+            "that markdown as `prompt_text` and a short specific `title`. " +
+            "trigger_handoff always stores/refreshes the baton and ends with " +
+            "the final short handoff prompt/seed; it only signals pending " +
+            "handoff state across the available systems and waits briefly for " +
+            "a pickup when `.context-handoff/config.yaml`'s `mode` is `auto` " +
+            "(the default, `manual-only`, skips that live-cutover signaling " +
+            "entirely). Do NOT claim the baton auto-loads on restart; if no " +
+            "control system picks it up (or automatic mode is disabled), " +
+            "follow the manual instructions it printed.",
+          displayPrompt: "Trigger handoff pickup (/handoff-continue)",
+        });
       },
-      {
-        name: "consume-handoff",
-        description:
-          "Dig up this worktree's pending handoff and inject its continuation " +
-          "prompt into THIS session (foreground). Consumes the agent-dispatch " +
-          "handoff task if present, else the newest matching worktree handoff file.",
-        handler: async (ctx) => {
-          if (!manualHandoffEnabled(handoffConfig.mode)) {
-            await session.log(handoffDisabledResult(), { level: "warning" });
-            return;
-          }
-          const cwd = state.cwd || process.cwd();
-          const sid = state.sessionId || ctx?.sessionId || "unknown";
+    },
+    {
+      name: "consume-handoff",
+      description:
+        "Dig up this worktree's pending handoff and inject its continuation " +
+        "prompt into THIS session (foreground). Consumes the agent-dispatch " +
+        "handoff task if present, else the newest matching worktree handoff file.",
+      handler: async (ctx) => {
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          await session.log(handoffDisabledResult(), { level: "warning" });
+          return;
+        }
+        const cwd = state.cwd || process.cwd();
+        const sid = state.sessionId || ctx?.sessionId || "unknown";
 
-          // Prefer an agent-dispatch handoff task pinned to this worktree.
-          if (agentDispatchAvailable()) {
-            // Binding-first (#4098): pass the real session id (not the "unknown"
-            // sentinel) so a bare-resumed session (cwd=HOME) still resolves its
-            // worktree from the session binding.
-            const bindSid = sid && sid !== "unknown" ? sid : null;
-            const wtDir = agentWorktreesGet("worktree-dir", cwd, bindSid);
-            const worktree = wtDir ? basename(wtDir) : null;
-            if (worktree) {
-              const task = findHandoffTask(cwd, worktree);
-              if (task) {
-                const consumed = consumeDispatchHandoffTask(cwd, task.id, sid, true);
-                const body = consumed?.payload || "";
-                if (!consumed?.ok || !body) {
-                  await session.log(
-                    `Found handoff task ${task.id.slice(0, 8)} but could not claim ` +
-                      "and load it. Nothing was injected.",
-                    { level: "warning" },
-                  );
-                  return;
-                }
-                try {
-                  await session.send({
-                    prompt: buildResumePrompt(
-                      body,
-                      "agent-dispatch task",
-                      { deferredTaskId: task.id },
-                    ),
-                    displayPrompt: `Resuming handoff ${task.id.slice(0, 8)} from agent-dispatch`,
-                  });
-                  markDeliveryPromptInjected(consumed.checkpointState);
-                } catch {
-                  await session.log(
-                    `Claimed handoff task ${task.id.slice(0, 8)}, but prompt injection failed. ` +
-                      "The task remains owned and the durable delivery checkpoint can retry it in this same successor.",
-                    { level: "warning" },
-                  );
-                  return;
-                }
+        // Prefer an agent-dispatch handoff task pinned to this worktree.
+        if (agentDispatchAvailable()) {
+          // Binding-first (#4098): pass the real session id (not the "unknown"
+          // sentinel) so a bare-resumed session (cwd=HOME) still resolves its
+          // worktree from the session binding.
+          const bindSid = sid && sid !== "unknown" ? sid : null;
+          const wtDir = agentWorktreesGet("worktree-dir", cwd, bindSid);
+          const worktree = wtDir ? basename(wtDir) : null;
+          if (worktree) {
+            const task = findHandoffTask(cwd, worktree);
+            if (task) {
+              const consumed = consumeDispatchHandoffTask(cwd, task.id, sid, true);
+              const body = consumed?.payload || "";
+              if (!consumed?.ok || !body) {
+                await session.log(
+                  `Found handoff task ${task.id.slice(0, 8)} but could not claim ` +
+                    "and load it. Nothing was injected.",
+                  { level: "warning" },
+                );
                 return;
               }
-            }
-          }
-
-          const checkpoint = findTaskDeliveryCheckpoint(cwd, sid);
-          if (checkpoint?.handoffToken) {
-            const resumed = consumeDispatchHandoffTask(
-              cwd,
-              checkpoint.handoffToken,
-              sid,
-              true,
-            );
-            if (resumed?.ok) {
-              await session.send({
-                prompt: buildResumePrompt(
-                  resumed.payload,
-                  "task-backed delivery checkpoint",
-                  { deferredTaskId: checkpoint.handoffToken },
-                ),
-                displayPrompt:
-                  `Resuming checkpoint ${checkpoint.handoffToken.slice(0, 8)}`,
-              });
-              markDeliveryPromptInjected(resumed.checkpointState);
+              try {
+                await session.send({
+                  prompt: buildResumePrompt(
+                    body,
+                    "agent-dispatch task",
+                    { deferredTaskId: task.id },
+                  ),
+                  displayPrompt: `Resuming handoff ${task.id.slice(0, 8)} from agent-dispatch`,
+                });
+                markDeliveryPromptInjected(consumed.checkpointState);
+              } catch {
+                await session.log(
+                  `Claimed handoff task ${task.id.slice(0, 8)}, but prompt injection failed. ` +
+                    "The task remains owned and the durable delivery checkpoint can retry it in this same successor.",
+                  { level: "warning" },
+                );
+                return;
+              }
               return;
             }
           }
+        }
 
-          // Fallback: the newest worktree-state handoff file for this worktree.
-          const file = findHandoffFile(cwd, sid);
-          if (file) {
-            const consumed = consumeFileHandoff(cwd, sid, file.record.id, file.path);
-            if (!consumed?.ok) {
-              await session.log(
-                consumed?.message || "Found a handoff file but could not consume it.",
-                { level: "warning" },
-              );
-              return;
-            }
+        const checkpoint = findTaskDeliveryCheckpoint(cwd, sid);
+        if (checkpoint?.handoffToken) {
+          const resumed = consumeDispatchHandoffTask(
+            cwd,
+            checkpoint.handoffToken,
+            sid,
+            true,
+          );
+          if (resumed?.ok) {
             await session.send({
-              prompt: buildResumePrompt(consumed.payload, `file ${file.path}`),
-              displayPrompt: `Resuming handoff ${consumed.id || basename(file.path)}`,
+              prompt: buildResumePrompt(
+                resumed.payload,
+                "task-backed delivery checkpoint",
+                { deferredTaskId: checkpoint.handoffToken },
+              ),
+              displayPrompt:
+                `Resuming checkpoint ${checkpoint.handoffToken.slice(0, 8)}`,
             });
+            markDeliveryPromptInjected(resumed.checkpointState);
             return;
           }
+        }
 
-          await session.log(
-            "No pending handoff found for this worktree (no agent-dispatch task " +
-              "and no matching worktree handoff file). If you have a handoff prompt, paste it directly.",
-            { level: "warning" },
-          );
-        },
-      },
-      {
-        name: "resume-handoff",
-        description:
-          "Compatibility alias for /consume-handoff. Asks this session to invoke " +
-          "the canonical stored-handoff consumer.",
-        handler: async () => {
-          if (!manualHandoffEnabled(handoffConfig.mode)) {
-            await session.log(handoffDisabledResult(), { level: "warning" });
+        // Fallback: the newest worktree-state handoff file for this worktree.
+        const file = findHandoffFile(cwd, sid);
+        if (file) {
+          const consumed = consumeFileHandoff(cwd, sid, file.record.id, file.path);
+          if (!consumed?.ok) {
+            await session.log(
+              consumed?.message || "Found a handoff file but could not consume it.",
+              { level: "warning" },
+            );
             return;
           }
           await session.send({
-            prompt:
-              "Invoke /consume-handoff now to load this worktree's pending " +
-              "handoff and continue from its stored brief.",
-            displayPrompt: "Resume stored handoff",
+            prompt: buildResumePrompt(consumed.payload, `file ${file.path}`),
+            displayPrompt: `Resuming handoff ${consumed.id || basename(file.path)}`,
           });
-        },
+          return;
+        }
+
+        await session.log(
+          "No pending handoff found for this worktree (no agent-dispatch task " +
+            "and no matching worktree handoff file). If you have a handoff prompt, paste it directly.",
+          { level: "warning" },
+        );
       },
-    ],
-  }),
-  handoffConfigPromise,
-]);
+    },
+    {
+      name: "resume-handoff",
+      description:
+        "Compatibility alias for /consume-handoff. Asks this session to invoke " +
+        "the canonical stored-handoff consumer.",
+      handler: async () => {
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          await session.log(handoffDisabledResult(), { level: "warning" });
+          return;
+        }
+        await session.send({
+          prompt:
+            "Invoke /consume-handoff now to load this worktree's pending " +
+            "handoff and continue from its stored brief.",
+          displayPrompt: "Resume stored handoff",
+        });
+      },
+    },
+  ],
+});
 
 // --- Session lifecycle reconstructed from events (SDK callback hooks removed) ---
 // The native runtime dropped SDK callback hooks ("SDK hook callbacks are no
@@ -991,9 +994,17 @@ const [session] = await Promise.all([
 state.sessionId = session.sessionId ?? state.sessionId ?? null;
 state.cwd = state.cwd || process.cwd();
 state.turnCount = 0;
-if (handoffConfig.warning) {
-  session.log(`[Context Handoff] ${handoffConfig.warning}`, { level: "warning" });
-}
+// handoffConfig may not have resolved yet at this exact point (it is
+// deliberately not awaited before/alongside joinSession() -- see the
+// aperture-labs#7291 comment above `handoffConfigPromise`). Chain the
+// warning surface off the promise instead of reading `handoffConfig`
+// synchronously here, so it still reaches the user once config resolves
+// even if that happens a beat after readiness.
+handoffConfigPromise.then((resolved) => {
+  if (resolved.warning) {
+    session.log(`[Context Handoff] ${resolved.warning}`, { level: "warning" });
+  }
+});
 
 // Turn counting + first-prompt capture (replaces onUserPromptSubmitted).
 session.on("user.message", (event) => {

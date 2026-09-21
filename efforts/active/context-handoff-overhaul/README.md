@@ -419,9 +419,18 @@ Verbatim from the operator:
   explicit `mode: auto` opt-in now. Manual handoffs (compose/save/consume)
   keep working unconditionally under the new default -- only `mode: off`
   blocks them. **PR #3041 (merged `9cdf4f3a0`).**
-- [ ] Investigate why the `context-handoff` plugin frequently fails to load
+- [x] Investigate why the `context-handoff` plugin frequently fails to load
   in Copilot CLI sessions at all -- needs controlled experimentation with
   the plugin's manifest/extension shape to isolate the rejection cause.
+  **This plugin's own contribution addressed:** confirmed a shared root
+  cause with a parallel investigation (internal issue #7291) -- synchronous,
+  blocking I/O at extension load time, before `joinSession()`, delaying the
+  readiness handshake. `agent-bridge`'s dominant instance (blocking
+  subprocess spawns) was fixed separately (PR #3098); this plugin's smaller,
+  spawn-free instance (a synchronous config directory walk + file reads) is
+  now non-blocking too (see journal below). The plugin-load investigation as
+  a *whole* stays open pending confirmation the combined fixes resolve the
+  operator's original live symptom.
 - [ ] Fix Worktree Manager's `trigger_handoff` pickup reliability: cases
   where a "successful" report corresponds to no actual live pane.
 - [ ] Harden the successor-side fallback so an agent with zero working
@@ -1387,9 +1396,9 @@ gate land._
 
 ### 2026-09-20 (still later) -- Phase 7 item 1: plugin-load investigation, first pass
 
-- Picked up gitea aperture-labs#7264 (plugin frequently fails to load) per
-  this effort's own recommendation that it unblocks reasoning about the
-  other four remaining Phase 7 items.
+- Picked up this effort's internal-tracker issue #7264 (plugin frequently
+  fails to load) per this effort's own recommendation that it unblocks
+  reasoning about the other four remaining Phase 7 items.
 - Structural diff against known-reliable sibling plugins (`agent-worktrees`,
   `agent-bridge`): `plugin.json`, `hooks.json`, and `session-context.json`
   shapes are unremarkable and match the working plugins' conventions
@@ -1400,7 +1409,7 @@ gate land._
   isolated scratch directory (no repo root above it) surfaced all four
   tools (`generate_handoff_prompt`, `save_handoff_prompt`,
   `consume_handoff`, `trigger_handoff`) correctly; (2) this very picked-up
-  session (real aperture-labs worktree, full production marketplace, `.git`
+  session (a real production worktree, full plugin marketplace, `.git`
   several directories deep) also had all four tools available, confirmed
   via `tool_search_tool`. So the plugin is not *categorically* broken --
   matches the issue's own "frequently", not "always", framing.
@@ -1424,17 +1433,30 @@ gate land._
   `fs.existsSync` swallows errors and returns `false` rather than throwing,
   so this is a **latency** hypothesis, not an uncaught-exception hypothesis
   -- ruled out crash-on-permission-error as the mechanism.
-- **Not yet done, needed to confirm or refute:** reproduce under conditions
-  that plausibly slow the walk/read (deeply nested or cloud-sync-backed
-  worktree path; a session start under heavier concurrent plugin load than
-  the two smoke tests above), and determine whether the extension host
-  actually enforces a load timeout at all (would need either SDK source/docs
-  access this repo doesn't vendor, or an operator-run clean-room experiment
-  instrumenting load duration across many real session starts). Until one
-  of those lands, do not treat the top-level-I/O theory as confirmed root
-  cause -- it is the most structurally distinctive lead found so far, not a
-  verified fix target.
-- Left issue #7264 open with these findings; recommend the next slice
-  either instrument `extension.mjs`'s import path with timing/diagnostics
-  (cheap, ships independent of confirming the theory) or run a multi-session
-  stress repro if the operator can supply one.
+- **Confirmed by a parallel investigation, same session window:** internal
+  issue #7291 root-caused the dominant instance of this exact bug class in
+  `agent-bridge`'s `resolveMetadata()` -- four sequential, blocking
+  `execSync`/`execFileSync` subprocess spawns (up to ~29s combined) run
+  synchronously before `joinSession()`, freezing the event loop long enough
+  that the readiness handshake itself missed its window (fixed upstream in
+  copilot-extensions PR #3098: async, parallel, fire-and-forget from
+  load-time init). That investigation explicitly flagged this plugin's
+  smaller `loadContextHandoffConfig()` directory walk as a secondary,
+  lower-risk instance of the same class -- confirming the lead above
+  without requiring the deeper live-session instrumentation originally
+  called for.
+- **Fixed in this same pass:** `loadContextHandoffConfigAsync()` (new,
+  `config.mjs`) replaces the synchronous call on `extension.mjs`'s
+  load-time path with non-blocking `node:fs/promises` equivalents, resolved
+  via `handoffConfigPromise` fired fire-and-forget -- never awaited on the
+  path to `joinSession()`/readiness. The synchronous original is unchanged
+  and still used by `handoff-cli.mjs` and its existing tests, where
+  blocking a short-lived CLI process is harmless. 4 new parity tests
+  confirm the async loader agrees with the synchronous one on every
+  scenario. `node --test`: 116 tests, 114 pass (2 pre-existing skips), no
+  regressions. Live smoke test (`copilot --plugin-dir ... -p "..."`)
+  reconfirmed all four tools load correctly after the change.
+- Issue #7264 -- this plugin's own contribution is addressed by the fix
+  above; the plugin-load investigation as a whole stays open pending
+  confirmation that `agent-bridge`'s fix (the dominant contributor)
+  resolves the operator's original live symptom.
