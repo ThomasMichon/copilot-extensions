@@ -13,6 +13,7 @@ def test_all_packaged_launchers_and_validators_match():
     canonical = ROOT / "libs" / "peer-launch" / "peer_launch.py"
     primitive = ROOT / "libs" / "installation-context" / "installation_context.py"
     for plugin, filename in (
+        ("agent-bridge", "_peer_launch.py"),
         ("agent-dispatch", "peer_launch.py"), ("agent-codespaces", "_peer_launch.py"),
         ("agent-containers", "_peer_launch.py"), ("agent-logger", "_peer_launch.py"),
         ("agent-index", "_peer_launch.py"), ("agent-machines", "_peer_launch.py"),
@@ -49,7 +50,7 @@ def test_sync_tool_registers_all_packaged_primitives():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     destinations = {destination for _, destination in module.vendor_pairs()}
-    for plugin in ("agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger", "agent-index", "agent-machines"):
+    for plugin in ("agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger", "agent-index", "agent-machines"):
         assert (
             ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
             / "_installation_context.py"
@@ -147,6 +148,21 @@ def test_machines_self_update_has_no_unexplained_sibling_launches(monkeypatch):
     monkeypatch.setitem(sys.modules, spec.name, guard)
     spec.loader.exec_module(guard)
     path = ROOT / "plugins" / "agent-machines" / "src" / "agent_machines" / "self_update.py"
+    findings = [
+        finding for finding in guard._scan_file(path, ROOT, guard._command_patterns(ROOT))
+        if finding.category == "path-sibling-launch"
+    ]
+    assert findings == [], findings
+
+
+def test_bridge_handoff_check_has_no_unexplained_sibling_launches(monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "bridge_peer_isolation_guard", ROOT / "tools" / "check-marketplace-isolation.py",
+    )
+    guard = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, guard)
+    spec.loader.exec_module(guard)
+    path = ROOT / "plugins" / "agent-bridge" / "src" / "agent_bridge" / "__main__.py"
     findings = [
         finding for finding in guard._scan_file(path, ROOT, guard._command_patterns(ROOT))
         if finding.category == "path-sibling-launch"

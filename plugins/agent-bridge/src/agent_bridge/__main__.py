@@ -17,6 +17,7 @@ import subprocess
 import sys
 import urllib.error
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agent_procutil import (
@@ -25,7 +26,13 @@ from agent_procutil import (
 )
 
 from . import __version__
-from .install_paths import effective_config_dir, scheduled_task_name, systemd_unit_name
+from . import _peer_launch
+from .install_paths import (
+    effective_config_dir,
+    install_dir,
+    scheduled_task_name,
+    systemd_unit_name,
+)
 from .parity_harness import (
     FAILED_ACP_HANDSHAKE_FAULT,
     CONTAINER_RECREATE_FAULT,
@@ -5440,6 +5447,60 @@ def _cmd_handoff_request(args: argparse.Namespace) -> None:
     )
 
 
+def _agent_bridge_owner_root() -> Path:
+    """The plugin-root ``validate_owner`` requires: ``.../marketplaces/<cell>/
+    plugins/agent-bridge``. ``AGENT_BRIDGE_INSTALL_DIR`` (what
+    :func:`install_dir` honors) is what ``runtime-gate.sh``/``.ps1`` set to
+    the *validated* ``runtimeRoot`` before dispatching into this process --
+    which equals the plugin root exactly when namespaced/active (see
+    ``installation_context.py``'s ``_activation_result``:
+    ``runtime_root = plugin_root if actual_mode == "namespaced" else
+    legacy_root``). ``AGENT_BRIDGE_PAYLOAD_ROOT`` is a different, replaceable
+    path (the marketplace source payload runtime-gate resolves *from*, not
+    the cell-namespaced plugin root) and must not be used here."""
+    return install_dir()
+
+
+def _agent_worktrees_launch_prefix() -> list[str] | None:
+    """Resolve the exec prefix for ``agent-worktrees``, same-cell first.
+
+    Under an explicit installation-cell context (``COPILOT_EXTENSIONS_CONTEXT``
+    set), resolves only the validated same-cell peer boundary -- never an
+    ambient ``PATH`` command. An owner/receipt/governance refusal propagates
+    as :class:`_peer_launch.ContextRefused` rather than degrading to the
+    legacy ambient lookup: this command's ``--execute`` mutates predecessor
+    state, so silently falling back to a foreign cell's ``agent-worktrees``
+    would be unsafe. Only a validated owner with no same-cell peer installed
+    is genuine absence (returns ``None``, same as "no command found") --
+    mirroring agent-logger's ``compact.py``/``origin.py`` same-cell lookups.
+    The legacy ambient lookup is used only when no explicit context is set
+    at all.
+    """
+    explicit_context = os.environ.get(_peer_launch.CONTEXT_ENV, "")
+    if not explicit_context:
+        exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
+        return [exe] if exe else None
+    try:
+        own = _peer_launch.validate_owner(
+            "agent-bridge", _agent_bridge_owner_root(), explicit_context
+        )
+    except (OSError, ValueError, ImportError) as error:
+        raise _peer_launch.ContextRefused(
+            f"agent-bridge installation context refused: {error}"
+        ) from error
+    peer_root = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+    if not peer_root.exists() and not peer_root.is_symlink():
+        return None
+    try:
+        return _peer_launch.launch_prefix(
+            "agent-bridge", Path(own["pluginRoot"]), explicit_context, "agent-worktrees",
+        )
+    except (OSError, ValueError, ImportError) as error:
+        raise _peer_launch.ContextRefused(
+            f"same-cell agent-worktrees resolution failed: {error}"
+        ) from error
+
+
 def _cmd_handoff_check(args: argparse.Namespace) -> None:
     """Diagnose (and optionally finish) a stalled handoff-cutover retirement.
 
@@ -5452,11 +5513,25 @@ def _cmd_handoff_check(args: argparse.Namespace) -> None:
     primitives do. A future ACP-hosted equivalent belongs here too, once that
     path needs the same on-demand diagnostic.
     """
-    exe = shutil.which("agent-worktrees")
-    if not exe:
-        print("[FAIL] agent-worktrees is not on PATH; cannot check handoffs.", file=sys.stderr)
+    try:
+        prefix = _agent_worktrees_launch_prefix()
+    except _peer_launch.ContextRefused as error:
+        print(f"[FAIL] {error}", file=sys.stderr)
         sys.exit(1)
-    argv = [exe, "handoffs-check", "--json"]
+    if not prefix:
+        if os.environ.get(_peer_launch.CONTEXT_ENV, ""):
+            print(
+                "[FAIL] agent-worktrees is not installed in this installation "
+                "cell; cannot check handoffs.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "[FAIL] agent-worktrees is not on PATH; cannot check handoffs.",
+                file=sys.stderr,
+            )
+        sys.exit(1)
+    argv = [*prefix, "handoffs-check", "--json"]
     argv += ["--worktree-id", args.worktree_id] if args.worktree_id else ["--all"]
     if args.execute:
         argv.append("--execute")
@@ -5472,7 +5547,8 @@ def _cmd_handoff_check(args: argparse.Namespace) -> None:
     child_env.pop("AGENT_RT_PY", None)
     try:
         result = subprocess.run(
-            argv, capture_output=True, text=True, timeout=60, env=child_env
+            argv, capture_output=True, text=True, timeout=60, env=child_env,
+            **no_window_kwargs(),
         )
     except Exception as exc:
         print(f"[FAIL] could not run agent-worktrees handoffs-check: {exc}", file=sys.stderr)

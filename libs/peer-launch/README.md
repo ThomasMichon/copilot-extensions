@@ -1,8 +1,8 @@
 # Same-cell peer launcher
 
 `peer_launch.py` is the canonical, dependency-free native process boundary for
-Agent Dispatch, Agent CodeSpaces, Agent Containers, Agent Logger, Agent
-Index, and Agent Machines. `tools/sync-peer-launch.py` packages
+Agent Bridge, Agent Dispatch, Agent CodeSpaces, Agent Containers, Agent
+Logger, Agent Index, and Agent Machines. `tools/sync-peer-launch.py` packages
 byte-identical copies alongside each consumer's `_installation_context.py`;
 `tools/sync-installation-context.py` owns those validator bytes. Neither
 bootstrap imports a validator through an unvalidated payload pointer.
@@ -85,6 +85,21 @@ this call is optional (not every machine runs a dtssh mesh): a validated
 owner with no same-cell agent-ssh installation returns `None` (reported
 `skipped`, matching legacy behavior); only a malformed/refused context
 raises `ContextRefused`.
+
+Bridge uses this boundary for `handoff-check`'s `agent-worktrees
+handoffs-check` call. Because `--execute` mutates predecessor state, a
+validated owner with no same-cell worktrees peer is genuine absence
+(returns `None`, reported as "not available in this cell"); any other
+owner/receipt/governance failure raises `ContextRefused` rather than
+degrading to ambient `PATH` -- a silent fallback could otherwise retire a
+foreign cell's predecessor session. The legacy ambient lookup is used only
+when no explicit context is present at all. The owner root passed to
+`validate_owner()` is `install_dir()`'s `AGENT_BRIDGE_INSTALL_DIR` --
+`runtime-gate.sh`/`.ps1` set that variable to the *validated* `runtimeRoot`
+before dispatching into this process, which equals the plugin root exactly
+when namespaced/active. `AGENT_BRIDGE_PAYLOAD_ROOT` is a different,
+replaceable path (the marketplace source payload `runtime-gate` resolves
+*from*, not the cell-namespaced plugin root) and must not be used here.
 
 ## Validation
 

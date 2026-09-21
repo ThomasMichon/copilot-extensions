@@ -9,6 +9,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 SOURCE = REPO / "libs" / "peer-launch" / "peer_launch.py"
 DESTINATIONS = (
+    REPO / "plugins" / "agent-bridge" / "src" / "agent_bridge" / "_peer_launch.py",
     REPO / "plugins" / "agent-dispatch" / "src" / "agent_dispatch" / "peer_launch.py",
     REPO / "plugins" / "agent-codespaces" / "src" / "agent_codespaces" / "_peer_launch.py",
     REPO / "plugins" / "agent-containers" / "src" / "agent_containers" / "_peer_launch.py",
