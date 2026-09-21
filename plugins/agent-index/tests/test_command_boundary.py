@@ -51,10 +51,25 @@ def test_restart_delegates_to_graceful_deploy(monkeypatch):
 
 
 def test_installers_are_base_only_and_never_implicitly_start_engine():
+    """The [store] extra (numpy/pyarrow/lancedb/tree-sitter*) is the light,
+    torch-free vector-store stack a HOST's own versioned service runtime
+    needs to search/index locally -- distinct from the durable, heavy
+    [engine] (torch) extra, which is provisioned exclusively by the
+    `engine`/`engine-update` verbs (durable-vs-versioned-runtime.md). The
+    installers may select [store] for a host role, but must never pull in
+    [engine] or implicitly start the engine daemon as a side effect of a
+    routine install/update.
+    """
     ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
-    assert '"$PluginDir[store]"' not in ps
-    assert '"$PLUGIN_DIR[store]"' not in sh
+    assert '"$PluginDir[store]"' in ps
+    assert '"${PLUGIN_DIR}[store]"' in sh
+    assert '[store,engine]' not in ps.split("function Install-Runtime {", 1)[1].split(
+        "function Install-Engine {", 1
+    )[0]
+    assert '[store,engine]' not in sh.split("_ensure_runtime() {", 1)[1].split(
+        "_install_engine() {", 1
+    )[0]
     ps_actions = ps.split("switch ($Action) {", 1)[1]
     sh_actions = sh.split('case "$ACTION" in', 1)[1]
     for action, following in (("install", "update"), ("update", "ensure")):
