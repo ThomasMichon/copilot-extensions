@@ -368,34 +368,67 @@ mechanism CLI mode binds through.
       rather than being forced to stay resident forever. This is the on-
       demand-but-not-forced-forever ownership model CLI-mode's own
       persistent daemon-port forward (below) needs to build on.
+- [x] **Foundational local piece landed (2026-09-20): `agent-worktrees
+      copilot`** (PR #3126). New `agent-worktrees copilot [--worktree-id ID
+      | --codename NAME | --new] [--seed] [--driver] [--recovery]
+      [--ensure-mux] [--mux BIN]`: reuses `cmd_embody`'s full
+      target-resolution/preflight/create-or-resume logic in-process, then
+      hands this process's own controlling terminal to the resulting mux
+      session via `os.execvp` -- refuses without a TTY. This is the
+      canonical **`copilot` verb**: "deliver a TTY Copilot session to the
+      user in the current terminal," confirmed by the operator as the
+      naming to use everywhere, retiring the ambiguous "interactive"
+      vocabulary (which meant at least three different things across this
+      codebase: has a TTY, has a picker UI, is a muxed human-attended
+      session). `agent-codespaces`/`agent-containers` implement the exact
+      same verb for a remote venue by SSH `-t`'ing in and running this same
+      command remotely, rather than reimplementing attach logic three
+      times.
+- [x] **Design simplification (2026-09-20): self-hosted tenancy resolves
+      the "who renews the Connection Owner hold" question below --
+      no cross-plugin daemon choreography needed.** Operator: "if I call
+      `agent-codespaces copilot`, that maintains a process on my side. That
+      process should be what keeps Connection Owner alive." So
+      `agent-codespaces copilot <name>` places its Connection Owner tenant
+      hold once at connect (like `ssh` already does) but, unlike `ssh`,
+      must **periodically re-heartbeat its own hold** for as long as it
+      keeps running (attached to the remote mux session, or otherwise
+      holding the SSH channel open) and release on exit -- the running
+      process itself *is* the tenant lease. No agent-bridge daemon
+      involvement, no new cross-plugin API. This directly satisfies "fine
+      to lose connectivity once both sides disconnect and the Owner idles
+      out" from the earlier Connection Owner design conversation.
+- [ ] **Scope clarification (2026-09-20): the primary caller is the
+      Worktree Picker, not a human typing the verb.** Operator: most of the
+      time, an operator opens Picker, navigates to its existing
+      account-scoped CodeSpaces/containers pivot (`worktree-manager`'s
+      Picker TUI already has this), selects an entry marked CLI-mode,
+      and hits Enter to "Open" -- or uses the UX to create a new session on
+      an idle venue. The underlying command is immaterial to that flow.
+      This means: (1) the `copilot` verb's CLI ergonomics matter less than
+      it being one cleanly scriptable action (clear JSON/exit-code
+      contract, inherited from `embody`) Picker can invoke the same way a
+      human would; (2) **Picker gaining CLI-mode-aware "Open"/"create
+      session" actions on its existing CodeSpaces/containers pivot is real,
+      separate work in `worktree-manager`** (a third plugin, distinct from
+      `agent-bridge`/`agent-codespaces`/`agent-containers`), not an
+      afterthought -- not yet scoped in detail, deliberately deferred past
+      the venue-side `copilot` verb below so Picker has something concrete
+      to integrate against.
 - [ ] **The actual venue CLI-mode launch verb (`agent-codespaces copilot
-      <name>` / `agent-containers copilot <name>`), not yet started --
-      naming confirmed by operator.** Concrete shape, following Phase 3's
-      local `_launch_cli_mode_session` pattern
-      (`plugins/agent-bridge/src/agent_bridge/__main__.py`), now that
-      Connection Owner is the correct on-demand tenancy model to build on:
-      reserve the worktree (unchanged) -> place a Connection Owner **tenant
-      hold** for this CLI-mode session (`connection_owner.hold(name,
-      f"cli-mode:{worktree_id}")`), which spins the Owner up on-demand if
-      needed and gets both the existing credential-relay forward AND (needs
-      building) a new daemon-port forward riding the same owned connection
-      -> run `agent-worktrees embody --worktree-id <id> --json
-      --verify-timeout N --ensure-mux [--driver] [--seed]` **on the venue**
-      over that connection -> return once `embody` reports the mux session
-      exists, mirroring the local verb's contract exactly.
-      **New design question this surfaces, not yet resolved:** a Connection
-      Owner tenant hold needs periodic heartbeat renewal (TTL-based) to
-      outlive the one-shot launch command that placed it -- who renews it
-      for the CLI-mode session's entire (potentially multi-day) lifetime?
-      The natural renewer is agent-bridge's own daemon, which already
-      heartbeat-tracks the session's `live_sessions` row: it should call
-      into agent-codespaces'/agent-containers' Connection Owner
-      hold/heartbeat for any `live_sessions` row with a populated `venue`,
-      on the same cadence, and let it lapse (TTL expiry, Owner drops the
-      forward, then idles out) once the row goes stale/deregisters. This is
-      new cross-plugin choreography (agent-bridge daemon -> agent-codespaces
-      connection_owner), not yet designed in detail -- worth resolving
-      before writing the launch verb itself, not after.
+      <name>` / `agent-containers copilot <name>`), not yet started.**
+      Concrete shape, now simplified by the self-hosted-tenancy design
+      above: reserve the worktree (unchanged) -> place a Connection Owner
+      tenant hold for this session (spins the Owner up on-demand via
+      `ensure_owner_running` if needed) with **both** the existing
+      credential-relay forward and a new daemon-port forward (using
+      `_service_port()`, per the earlier grounded finding) riding the same
+      owned connection -> SSH `-t` into the venue and run `agent-worktrees
+      copilot --worktree-id <id> [--driver] [--seed] [--ensure-mux]`
+      **there** (ensures the mux session exists, then attaches -- identical
+      contract to the local verb, just dispatched remotely) -> while this
+      process runs, periodically re-heartbeat the Connection Owner tenant
+      hold; release it (and let the Owner idle out) on exit/detach.
       Preflight (already documented, not yet enforced in code): `copilot`
       present, `tmux` installable (`ensure_mux_available`, already built),
       `agent-worktrees` **fully** installed (not just lean tools) so
@@ -404,8 +437,8 @@ mechanism CLI mode binds through.
       container), a real `copilot` process actually reachable end-to-end
       (register, list, `send`, observe via `tmux capture-pane`/venue SSH,
       teardown, and specifically: confirm the daemon-port forward survives
-      well past the launch command's own exit) -- not only unit tests with
-      fakes.
+      well past the launch command's own exit, and is torn down promptly on
+      detach) -- not only unit tests with fakes.
 - [x] **New finding (2026-09-20): `live_sessions` needs a reattach-shaped
       field for remote CLI-mode sessions.** Today's schema (`machine`,
       `cwd`, `worktree_id`, `pid`, ...) has no venue identity or mux-session
@@ -501,6 +534,55 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-09-20 — Landed `agent-worktrees copilot`; self-hosted tenancy + Picker-as-caller reframe the remaining launch verb
+
+Three operator clarifications in quick succession, each simplifying the
+design further:
+
+1. **"If I call `agent-codespaces copilot`, that maintains a process on my
+   side. That process should be what keeps Connection Owner alive."**
+   Resolves the previous journal entry's open question outright: no
+   agent-bridge-daemon choreography needed. `copilot`'s own running process
+   places the tenant hold and periodically re-heartbeats it for as long as
+   it runs (unlike `ssh`, which only holds-once at connect -- noted but not
+   fixed, a separate latent gap for long ssh sessions), releasing on exit.
+   The attached/running process *is* the lease.
+2. **"When would `agent-* copilot` ever be invoked?"** -- stepping back to
+   question the primary UX. Confirmed by checking: `worktree-manager`'s
+   Picker TUI already has an account-scoped CodeSpaces pivot (status
+   coloring, leases, releases). The expected flow is Picker navigation ->
+   select a CLI-mode-marked entry -> Enter to "Open" (or create a new
+   session on an idle venue) -- the underlying command is an implementation
+   detail Picker invokes, not something a human types most of the time.
+   Recorded as a real, separate scope item in `worktree-manager` (a third
+   plugin), deliberately deferred past the venue verb itself.
+3. **"I don't mind `___ copilot` being the agent-* sub-command which means
+   'deliver a TTY Copilot session to the user in the current terminal'...
+   is something `agent-worktrees` should also adopt."** Confirmed the exact
+   verb contract and that it spans all three plugins with one name.
+
+Landed the foundational local piece: **PR #3126**, `agent-worktrees
+copilot`. Checked first that no "ensure + attach" primitive already
+existed -- `embody` only ever creates *detached* (`-d`); no `attach-session`
+helper existed anywhere in the codebase. New command reuses `cmd_embody`'s
+full resolution/preflight/create-or-resume logic in-process (captures its
+JSON via `contextlib.redirect_stdout`, since `copilot`'s own stdout is about
+to become the mux client's TTY), then `os.execvp`s into `<mux> attach-session
+-t <session>` -- refuses without a controlling terminal. 7 new tests
+(mocking `cmd_embody`/`os.execvp` at the boundary, no real tmux/worktree
+touched). Also recorded the verb naming + Picker-as-caller framing in
+`visions/remote-interactive-sessions`.
+
+Two rebases needed to land cleanly (main moved twice during the session;
+one false-positive `check-version-bump` failure traced to an unrelated
+context-handoff commit landing on main mid-flight, resolved by rebasing
+onto the newer tip rather than chasing a phantom local diff).
+
+Not yet done: the actual `agent-codespaces`/`agent-containers copilot
+<name>` remote verb (now simplified per point 1 above) and Picker's
+CLI-mode-aware pivot integration (per point 2) -- both recorded as their
+own Plan items above, neither started.
 
 ### 2026-09-20 — Fixed a real, separate bug found while designing the launch verb: Connection Owner stuck opt-in
 
