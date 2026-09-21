@@ -61,6 +61,19 @@ caller's ordinary authenticated CLI boundary. Reservation markers are accepted
 only from that verified login and only after strict field, issue-number,
 state, occurrence, and task-id validation.
 
+Azure DevOps work-item discovery has no natural per-repo boundary the way a
+GitHub `owner/name` repository does: an Azure DevOps `organization/project`
+can hold far more items than a single GitHub repo ever would, and a flat,
+unscoped WIQL query can exceed the platform's 20000-item result cap on any
+project with real history (confirmed live). Discovery therefore always
+scopes its WIQL by `[System.TeamProject]` explicitly -- `az boards query
+--project` alone does **not** scope the query to that project despite
+appearances, confirmed live: an otherwise-identical query without an
+explicit `TeamProject` clause runs organization-wide. A declaration may
+narrow further with the optional, azure-devops-only `forge.discovery_scope`
+(`work_item_types`, `area_path`, `max_age_days` -- at least one required),
+rendered as additional `And`-joined WIQL clauses.
+
 Read discovery may reuse a verified repository identity within one provider
 instance. Mutations may not: each comment or label/tag mutation re-runs the
 configured producer-login and repository checks immediately before invoking
