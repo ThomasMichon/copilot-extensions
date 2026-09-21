@@ -352,6 +352,76 @@ class TestCarvePairedKnowledgeAttributionPolicy:
             raise AssertionError("expected CodenameAttributionPolicyError")
         assert called["carve"] is False
 
+    def test_residual_race_names_the_orphaned_harness_path_and_branch(
+        self, monkeypatch, tmp_path,
+    ):
+        # Validation Plan (round-14 finding): simulate the residual TOCTOU
+        # race directly -- the FIRST preflight (pre-lock) passes on a
+        # compliant config, but the config becomes policy-violating by
+        # the time the SECOND revalidation (inside the lock) reloads it.
+        # Assert `create` fails, no automatic rollback is attempted, and
+        # the surfaced error names the exact orphaned harness worktree
+        # path and branch -- not just asserted in prose.
+        from agent_worktrees import config as cfg_mod, codename_tracking
+
+        called = self._setup(
+            monkeypatch, tmp_path, source_attribution_configured=True,
+        )
+        compliant_config = self._knowledge_config_with_custom_wordlist(
+            tmp_path, source_attribution_configured=True,
+        )
+        noncompliant_config = self._knowledge_config_with_custom_wordlist(
+            tmp_path, source_attribution_configured=False,
+        )
+        load_calls = {"count": 0}
+
+        def _stateful_load_config(project=None):
+            load_calls["count"] += 1
+            # First call = the pre-lock preflight (must pass); every call
+            # thereafter = the second, lock-held revalidation (must now
+            # observe the just-changed, policy-violating config).
+            return compliant_config if load_calls["count"] == 1 else noncompliant_config
+
+        monkeypatch.setattr(m.cfg, "load_config", _stateful_load_config)
+
+        harness_anchor = tmp_path / "harness-anchor"
+        harness_anchor.mkdir()
+        harness_worktree_root = tmp_path / "harness-worktrees"
+        harness_config = cfg_mod.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="linux",
+            repo_name="citadel-harness",
+            repos={
+                "citadel-harness": cfg_mod.RepoConfig(
+                    anchor=str(harness_anchor),
+                    worktree_root=str(harness_worktree_root),
+                )
+            },
+        )
+        harness_id = "test-linux-20260806-ab"
+
+        try:
+            m._carve_paired_knowledge(
+                harness_config, harness_id=harness_id,
+                timestamp="20260806", suffix="ab", plat="linux",
+                plat_short="linux",
+            )
+        except codename_tracking.CodenameAttributionPolicyError as exc:
+            message = str(exc)
+        else:
+            raise AssertionError("expected CodenameAttributionPolicyError")
+
+        assert load_calls["count"] >= 2, (
+            "expected the second, lock-held revalidation to actually reload "
+            "config -- the first preflight alone must not be what raised"
+        )
+        assert called["carve"] is False
+        expected_path = str(harness_worktree_root / harness_id)
+        assert expected_path in message
+        assert f"worktree/{harness_id}" in message
+        assert "no automatic rollback" in message.lower() or "manually" in message.lower()
+
 
 class TestPairedKnowledgeAllocationEarlyPreflight:
     """Round-6 review finding: `_paired_knowledge_allocation_preflight`
