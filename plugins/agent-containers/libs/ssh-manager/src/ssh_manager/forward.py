@@ -127,6 +127,7 @@ def build_remote_exec_args(
     command: str,
     *,
     reverse_forwards: list[str] | None = None,
+    pty: bool = False,
 ) -> list[str]:
     """Build an ``ssh`` argv that runs a one-shot remote ``command`` over a
     fresh, non-multiplexed connection.
@@ -142,6 +143,11 @@ def build_remote_exec_args(
     full remote-command lifetime. A requested reverse forward is a required
     launch dependency, so ``ExitOnForwardFailure=yes`` fails before the remote
     command starts when its far-side bind cannot be established.
+
+    ``pty=True`` requests a real PTY (``-t`` instead of the default ``-T``/no-
+    PTY) -- needed when the remote command itself attaches an interactive
+    terminal session (e.g. a venue's `copilot` verb attaching a tmux session),
+    as opposed to a one-shot probe/health-check command.
     """
     args = ["ssh"]
     if config.config_file:
@@ -155,7 +161,7 @@ def build_remote_exec_args(
         "-o", "ServerAliveInterval=30",
         "-o", "ServerAliveCountMax=3",
         "-o", "BatchMode=yes",
-        "-T",  # no PTY
+        "-t" if pty else "-T",
     ]
     for key, val in config.extra_options.items():
         if key.lower() in (

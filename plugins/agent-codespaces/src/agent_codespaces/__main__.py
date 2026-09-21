@@ -116,7 +116,7 @@ _ADO_AUTH_EXIT = 77
 # particular self-reports a missing/mis-authed gh, so it never balks.
 _GH_REQUIRED_COMMANDS = frozenset({
     "ssh", "list", "delete", "finalize", "stop", "verify",
-    "create", "prune", "wait", "pool", "allocate",
+    "create", "prune", "wait", "pool", "allocate", "copilot",
 })
 
 
@@ -307,6 +307,10 @@ def main(argv: list[str] | None = None) -> int:
              "so a genuine claim conflict bounces rather than silently stealing "
              "another worktree's control.",
     )
+
+    # --- copilot (agent-bridge-cli-mode-sessions Phase 4: venue launch) ---
+    from .copilot_venue import add_copilot_subparser
+    add_copilot_subparser(sub)
 
     # --- list ---
     list_parser = sub.add_parser("list", help="List active CodeSpaces")
@@ -835,6 +839,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "ssh":
             return _cmd_ssh(args)
+        if args.command == "copilot":
+            from .copilot_venue import cmd_copilot
+
+            return cmd_copilot(args, interactive_ssh=_interactive_ssh)
         if args.command == "list":
             return _cmd_list(args)
         if args.command == "config":
@@ -2313,8 +2321,15 @@ def _interactive_ssh(
     port_forwards: list[str],
     relay_port: int | None = None,
     relay_token: str | None = None,
+    remote_command: str | None = None,
 ) -> int:
-    """Fall back to ``gh codespace ssh`` for interactive sessions."""
+    """Fall back to ``gh codespace ssh`` for interactive sessions.
+
+    ``remote_command``, appended after any ``-R`` forwards, is passed straight
+    through by ``gh codespace ssh -- <ssh-args>`` to the underlying ``ssh`` --
+    used by the venue `copilot` verb to run `agent-worktrees copilot` inside
+    the CodeSpace over this same channel.
+    """
     import subprocess as sp
 
     from . import gh_account, lifecycle
@@ -2337,6 +2352,8 @@ def _interactive_ssh(
     for fwd in port_forwards:
         # Split "-R port:host:port" into SSH option
         args.extend(["--", fwd])
+    if remote_command:
+        args.extend(["--", remote_command])
 
     return sp.call(args, env=env)
 

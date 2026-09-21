@@ -3,19 +3,17 @@ requires = ["setuptools>=83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agent-ssh-manager"
-version = "0.1.0-dev19"
-description = "Shared SSH ControlMaster connection multiplexer for Copilot CLI plugins"
+name = "agent-zdd"
+version = "0.1.0-dev5"
+description = "Zero-downtime active/passive cutover primitives (routing table + orchestrator) for Copilot CLI plugins and multi-machine services"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
     { name = "Thomas Michon" }
 ]
-dependencies = ["agent-procutil"]
-
-[tool.uv.sources]
-agent-procutil = { path = "../agent-procutil" }
+# No runtime dependencies beyond stdlib -- pure library
+dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -27,14 +25,8 @@ line-length = 99
 [project.optional-dependencies]
 dev = [
     "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
 ]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-markers = [
-    "integration: requires real SSH host (set SSH_MANAGER_INTEGRATION_HOST)",
-]
+ignore = ["S104"]  # binding to 0.0.0.0 is intentional (consumer-controlled bind)

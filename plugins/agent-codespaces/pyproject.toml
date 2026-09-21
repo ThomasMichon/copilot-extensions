@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-codespaces"
-version = "0.4.0-dev145"
+version = "0.4.0-dev146"
 description = "GitHub Codespaces lifecycle management, SSH transport, and credential relay"
 readme = "README.md"
 license = "MIT"
@@ -21,6 +21,8 @@ dependencies = [
     "agent-procutil",
     "agent-dropin-registry",
     "agent-plugin-activation",
+    "agent-venue-copilot",
+    "agent-zdd",
 ]
 
 [tool.uv.sources]
@@ -45,6 +47,14 @@ agent-dropin-registry = { path = "libs/dropin-registry" }
 # Effective global-or-adopted-project plugin eligibility and identity-verified
 # roots for active manifest declarations and attributed compatibility pointers.
 agent-plugin-activation = { path = "libs/plugin-activation" }
+# Provider-agnostic reserve/connect/release orchestration for the venue
+# `copilot` verb (module ``venue_copilot``). Shared with agent-containers.
+agent-venue-copilot = { path = "libs/venue-copilot" }
+# Routing-table reader (module ``zdd``) -- used read-only, without importing
+# agent_bridge, to resolve the host daemon's own live API port for the
+# `copilot` verb's daemon-port reverse forward. Shared with agent-bridge/
+# agent-containers.
+agent-zdd = { path = "libs/zdd" }
 
 [project.scripts]
 agent-codespaces = "agent_codespaces.__main__:main"
