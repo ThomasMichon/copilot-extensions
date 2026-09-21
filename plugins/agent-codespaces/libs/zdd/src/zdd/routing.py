@@ -462,16 +462,43 @@ def _reap_stale_active_unlocked(
     listening: Callable[[str, int], bool] | None = None,
     pid_alive: Callable[[int | None], bool] | None = None,
 ) -> dict:
-    """Dead-port watchdog: proactively retire an advertised-but-dead active endpoint.
+    """Dead-port/missing-active watchdog: heal a table that names no live active.
 
     :func:`read_active_endpoint` heals a stale ``active`` only for the one reader
     that happens to probe it. This is the **proactive** counterpart a watchdog
-    loop runs on a schedule: when the routing table's ``active`` names a port
-    with **no listener** *and* a pid that is **not alive**, the endpoint is
-    advertised-but-dead (exactly the state that wedged the review pipeline for
-    days). It is retired here -- ``previous`` is promoted to ``active`` when it is
-    itself live, otherwise the table is cleared so consumers fall back to the
-    static config -- and a durable lifecycle record is written.
+    loop runs on a schedule, handling two related failure shapes:
+
+    1. ``active`` names a port with **no listener** *and* a pid that is
+       **not alive** -- advertised-but-dead (the state that wedged the review
+       pipeline for days).
+    2. ``active`` is **entirely absent** while ``previous`` is still live --
+       the state :func:`clear_if_owner` leaves behind on a clean coordinator
+       shutdown when no successor ever publishes itself as active (e.g. an
+       aborted or never-attempted cutover). Nothing else notices this shape:
+       :func:`read_active_endpoint` has no ``active`` to heal *from*, so every
+       consumer (including the wake-outbox drain's route-ownership check) is
+       left with no owner indefinitely until a human manually restarts a
+       coordinator.
+
+    In both cases ``previous`` is promoted to ``active`` when it is itself
+    live -- confirmed by **both** a listener on its port **and** a positive,
+    recorded pid confirmed alive (an absent/non-positive pid is *not* treated
+    as live for promotion purposes, even though :func:`_pid_alive` alone is
+    permissive about it -- that permissiveness is only correct for deciding
+    whether to *reap* an endpoint we already distrust, not for deciding
+    whether to *trust* one). This reduces, but does not eliminate, the risk
+    of misidentifying an unrelated service that later binds the same port:
+    a listener plus a live pid is still not a cryptographic identity check,
+    so a sufficiently adversarial pid-reuse race (an unrelated process
+    reusing the exact recorded pid *and* binding the exact recorded port
+    before this check runs) is not fully closed by this alone -- a stronger
+    signal (a process start-time comparison, or an authenticated handshake)
+    would be needed for that, and is a candidate follow-up rather than part
+    of this fix. Case 1 additionally clears the table (readers fall back to
+    the static config) when no live ``previous`` exists -- case 2 has
+    nothing to clear beyond ``previous`` itself, so a dead/absent
+    ``previous`` there is simply left alone (no active claim exists to
+    retract).
 
     A ``live-pid-but-no-listener`` active (a daemon mid-startup) is deliberately
     left alone, matching :func:`read_active_endpoint`'s conservatism: the pid is
@@ -484,12 +511,53 @@ def _reap_stale_active_unlocked(
     """
     _listen = listening or _listening
     _alive = pid_alive or _pid_alive
+
+    def _confirmed_live(pid: int | None) -> bool:
+        """A promotion candidate needs a **positive, recorded** live pid.
+
+        ``_alive`` alone is not enough here: it returns ``True`` for
+        ``None``/non-positive pids too (its own conservative default for "we
+        cannot disprove liveness"), which is the right call when deciding
+        whether to *reap* a pid we already have reason to distrust, but wrong
+        when deciding whether to *trust* a listener as proof of identity --
+        that must require an actual recorded pid to check against.
+        """
+        return bool(pid) and pid > 0 and _alive(pid)
+
     result: dict = {"reaped": False, "reason": "", "dead_port": None,
                     "promoted_port": None}
     try:
         data = read_table(config_dir)
-        if not data or not isinstance(data.get("active"), dict):
-            result["reason"] = "no active endpoint"
+        if not data:
+            result["reason"] = "no routing table"
+            return result
+        if not isinstance(data.get("active"), dict):
+            # Case 2: no active claim at all. Promote a live previous, if any
+            # -- there is nothing dead to reap, so this is a pure self-heal,
+            # not a "reaped" outcome (no prior claim is being retired).
+            prev_raw = data.get("previous")
+            prev = (
+                Endpoint.from_dict(prev_raw) if isinstance(prev_raw, dict) else None
+            )
+            if prev is not None and _listen(prev.client_host, prev.port) \
+                    and _confirmed_live(prev.pid):
+                _publish_active_unlocked(
+                    config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
+                    version=prev.version, demote_existing=False,
+                )
+                result["promoted_port"] = prev.port
+                result["reason"] = (
+                    f"no active endpoint; promoted live previous "
+                    f"{prev.client_host}:{prev.port}"
+                )
+                log.warning(
+                    "Missing-active watchdog promoted previous %s:%d (pid %s) "
+                    "to active -- routing table had no active claim",
+                    prev.client_host, prev.port, prev.pid,
+                )
+                _emit_promotion(config_dir, service, prev, result)
+            else:
+                result["reason"] = "no active endpoint"
             return result
         active = Endpoint.from_dict(data["active"])
         if active is None:
@@ -518,7 +586,7 @@ def _reap_stale_active_unlocked(
         prev = Endpoint.from_dict(prev_raw) if isinstance(prev_raw, dict) else None
         promoted = False
         if prev is not None and prev.port != active.port and \
-                _listen(prev.client_host, prev.port):
+                _listen(prev.client_host, prev.port) and _confirmed_live(prev.pid):
             _publish_active_unlocked(
                 config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
                 version=prev.version, demote_existing=False,
@@ -569,6 +637,35 @@ def _emit_reap(
             port=dead.port,
             version=dead.version,
             detail={"dead_pid": dead.pid,
+                    "promoted_port": result.get("promoted_port")},
+        )
+    except Exception:  # noqa: BLE001 -- lifecycle logging is best-effort
+        pass
+
+
+def _emit_promotion(
+    config_dir: str | os.PathLike[str],
+    service: str | None,
+    promoted: Endpoint,
+    result: dict,
+) -> None:
+    """Write a durable lifecycle record for a missing-active promotion (fail-open).
+
+    Distinct from :func:`_emit_reap`: no dead endpoint is being retired here,
+    ``previous`` is simply promoted because the table named no active claim
+    at all.
+    """
+    try:
+        from zdd import lifecycle
+
+        lifecycle.record(
+            config_dir,
+            lifecycle.WATCHDOG_PROMOTE,
+            service=service,
+            outcome=lifecycle.OK,
+            port=promoted.port,
+            version=promoted.version,
+            detail={"promoted_pid": promoted.pid,
                     "promoted_port": result.get("promoted_port")},
         )
     except Exception:  # noqa: BLE001 -- lifecycle logging is best-effort

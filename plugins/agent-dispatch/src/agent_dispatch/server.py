@@ -6,6 +6,7 @@ import logging
 import os
 import socket
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -25,6 +26,12 @@ _lifecycle_started = False
 # transient routing read failure must not strand durable wakes, and must not
 # make a passive/demoted process seize them.
 _wake_route_owned = False
+# Throttle for the missing-active self-heal probe below: this check runs on
+# every wake-drain poll (as often as every 0.25s while idle), but the probe it
+# triggers does a real socket connect, so it is rate-limited independently of
+# the wake-poll cadence.
+_MISSING_ACTIVE_HEAL_INTERVAL_S = 5.0
+_last_missing_active_heal_attempt = 0.0
 
 
 class UnsafeBindError(RuntimeError):
@@ -77,15 +84,62 @@ def _owns_active_route() -> bool:
     Preserve the last authoritative result across routing-table I/O failures.
     This lets an active coordinator keep draining during discovery degradation
     without allowing a passive or demoted process to infer ownership.
+
+    When the table has **no** ``active`` claim at all (the shape a clean
+    shutdown via ``clear_if_owner`` leaves behind when no successor ever
+    publishes itself -- see ``zdd.routing.reap_stale_active``), no process
+    would otherwise ever notice: that watchdog only runs at coordinator
+    startup and at the start of a cutover, neither of which happens on its
+    own. Any live coordinator's own wake-drain poll is a convenient, already-
+    recurring hook to self-heal that case, throttled well below the poll
+    cadence since it does a real socket probe.
     """
-    global _wake_route_owned
+    global _wake_route_owned, _last_missing_active_heal_attempt
     try:
         from zdd import routing
 
         table = routing.read_table(routing_dir())
-        raw = table.get("active") if isinstance(table, dict) else None
-        if not isinstance(raw, dict) or raw.get("pid") is None:
+        if table is None:
+            # Unreadable/absent table: ambiguous (could be a transient I/O
+            # blip), not positive evidence no one owns the route -- preserve
+            # the last known-good value rather than guessing.
             return _wake_route_owned
+        raw = table.get("active")
+        if not isinstance(raw, dict):
+            # Confirmed: this table has no active claim at all. Attempt the
+            # self-heal, but if it cannot restore one (dead/missing
+            # `previous`, throttled, or a failed probe), this is positive
+            # evidence no process currently owns the route -- unlike the
+            # unreadable-table case above, there is nothing ambiguous here,
+            # so the stale cached value must not be trusted either.
+            now = time.monotonic()
+            if now - _last_missing_active_heal_attempt >= _MISSING_ACTIVE_HEAL_INTERVAL_S:
+                _last_missing_active_heal_attempt = now
+                try:
+                    routing.reap_stale_active(
+                        routing_dir(), service="agent-dispatch"
+                    )
+                except Exception:
+                    log.debug(
+                        "missing-active self-heal probe failed", exc_info=True
+                    )
+                else:
+                    table = routing.read_table(routing_dir())
+                    raw = (
+                        table.get("active")
+                        if isinstance(table, dict)
+                        else None
+                    )
+                    if isinstance(raw, dict) and raw.get("pid") is not None:
+                        _wake_route_owned = raw.get("pid") == os.getpid()
+                        return _wake_route_owned
+            _wake_route_owned = False
+            return _wake_route_owned
+        # An active dict with no recorded pid is not a "missing claim" --
+        # reap_stale_active has nothing to repair there, and it must not be
+        # treated as owned just because a previous check happened to return
+        # True: fall through to the plain pid comparison below, which
+        # correctly evaluates to False (``None != os.getpid()``).
         _wake_route_owned = raw.get("pid") == os.getpid()
         return _wake_route_owned
     except Exception:
