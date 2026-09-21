@@ -305,7 +305,8 @@ function openMain(sid) {
   catch (e) { append("(could not open the session stream: " + e.message + ")"); return; }
   append("(streaming the main session -- its full reasoning appears here)");
   const render = (name) => (ev) => {
-    let d = {}; try { d = JSON.parse(ev.data); } catch { d = {}; }
+    let outer = {}; try { outer = JSON.parse(ev.data); } catch { outer = {}; }
+    const d = outer.data || outer; // represented payload is nested under .data
     if (name === "user_message") append("\n\u00bb " + (d.content || ""));
     else if (name === "agent_message") append(d.text || "");
     else if (name === "agent_thought") append("\u00b7 " + (d.text || ""));
