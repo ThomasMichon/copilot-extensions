@@ -1540,9 +1540,12 @@ transport). Tunable via `AGENT_DISPATCH_SATELLITE_MAX_CONCURRENT`
 (concurrency cap, default `1`), `AGENT_DISPATCH_SATELLITE_PROJECT` (an
 explicit `--project` override; unset derives one per task from its own repo
 lane instead -- set this only when every task this satellite pulls belongs
-to the same project), and `AGENT_DISPATCH_SATELLITE_SPAWN_TIMEOUT` (seconds
+to the same project), `AGENT_DISPATCH_SATELLITE_SPAWN_TIMEOUT` (seconds
 bounding one spawn attempt so a hung `embody` launch can never block this
-node's own heartbeats indefinitely; default `30`).
+node's own heartbeats indefinitely; default `30`), and
+`AGENT_DISPATCH_SATELLITE_DISCOVERY_TIMEOUT` (seconds bounding the whole
+queued-task discovery pagination for one tick, independent of any single
+request's own HTTP timeout; default `10`).
 
 Bearer scheme matching is case-insensitive. Prefer environment or token-command
 configuration over token flags where process arguments may be observable.

@@ -61,6 +61,15 @@ DEFAULT_SPAWN_TIMEOUT_S = 30.0
 #: remaining capacity simply rolls forward to the next tick.
 DEFAULT_MAX_SPAWNS_PER_TICK = 1
 
+#: Default wall-clock budget (seconds) for the WHOLE `_fetch_all_queued`
+#: pagination loop, independent of row-count/page-size bounds. Each
+#: individual request can itself take up to `DispatchClient`'s own 10s HTTP
+#: timeout; capping the row count alone (`_QUEUE_DISCOVERY_MAX_LIMIT`) still
+#: allows several slow-but-responsive round trips to sum well past the
+#: federation directory's 90s presence TTL once a spawn attempt's own bound
+#: is added on top. Bounding elapsed time directly closes that gap.
+DEFAULT_DISCOVERY_TIME_BUDGET_S = 10.0
+
 #: Task statuses counted as "already actively occupying a concurrency slot"
 #: for this machine, independent of this loop's own in-memory bookkeeping --
 #: the live, coordinator-authoritative half of the concurrency cap.
@@ -102,6 +111,7 @@ class SatelliteWorkIntake:
         trigger_ttl: float = DEFAULT_TRIGGER_TTL_S,
         spawn_timeout: float | None = DEFAULT_SPAWN_TIMEOUT_S,
         max_spawns_per_tick: int = DEFAULT_MAX_SPAWNS_PER_TICK,
+        discovery_time_budget: float = DEFAULT_DISCOVERY_TIME_BUDGET_S,
         spawn_fn: Callable[..., Any] | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -115,6 +125,16 @@ class SatelliteWorkIntake:
         self._max_concurrent = max(1, int(max_concurrent))
         self._max_spawns_per_tick = max(1, int(max_spawns_per_tick))
         self._trigger_ttl = float(trigger_ttl)
+        # Same non-finite/non-positive normalization concern as spawn_timeout
+        # below -- a direct constructor caller must never be able to disable
+        # the discovery time bound either.
+        if (
+            discovery_time_budget is None
+            or discovery_time_budget <= 0
+            or not math.isfinite(discovery_time_budget)
+        ):
+            discovery_time_budget = DEFAULT_DISCOVERY_TIME_BUDGET_S
+        self._discovery_time_budget = discovery_time_budget
         # Normalize here too, not just in config.satellite_spawn_timeout():
         # a direct constructor caller (tests, a future non-FederationRunner
         # embedder) passing `None`/non-positive/non-finite must not silently
@@ -204,12 +224,21 @@ class SatelliteWorkIntake:
         reorders what already made it into the page). So this pages: keep
         requesting a larger `limit` as long as the returned count equals the
         requested one (a full page is itself evidence more rows may exist),
-        stopping once a page comes back short (the true end of the backlog)
-        or :data:`_QUEUE_DISCOVERY_MAX_LIMIT` is reached (a bound against a
+        stopping once a page comes back short (the true end of the backlog),
+        :data:`_QUEUE_DISCOVERY_MAX_LIMIT` is reached (a bound against a
         pathological/adversarial backlog -- a real satellite's own
-        affinitied queue realistically never approaches it).
+        affinitied queue realistically never approaches it), **or** the
+        elapsed wall-clock time exceeds ``discovery_time_budget``. Each
+        request can itself take up to `DispatchClient`'s own HTTP timeout;
+        bounding the row count alone still lets several slow-but-responsive
+        round trips sum well past the federation directory's presence TTL
+        once a spawn attempt's own bound is added on top -- capping elapsed
+        time directly closes that gap. Whatever page was fetched before the
+        budget ran out is used as-is (heartbeat safety wins over exhaustive
+        fairness in that rare case).
         """
         limit = max(_QUEUE_DISCOVERY_MIN_LIMIT, capacity + len(self._recent_triggers))
+        deadline = self._clock() + self._discovery_time_budget
         while True:
             rows = self._client.list(
                 status="queued",
@@ -217,7 +246,11 @@ class SatelliteWorkIntake:
                 repo=self._repo,
                 limit=limit,
             )
-            if len(rows) < limit or limit >= _QUEUE_DISCOVERY_MAX_LIMIT:
+            if (
+                len(rows) < limit
+                or limit >= _QUEUE_DISCOVERY_MAX_LIMIT
+                or self._clock() >= deadline
+            ):
                 return rows
             limit = min(limit * 2, _QUEUE_DISCOVERY_MAX_LIMIT)
 

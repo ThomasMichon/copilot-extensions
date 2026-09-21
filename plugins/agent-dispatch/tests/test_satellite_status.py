@@ -86,6 +86,24 @@ def test_satellite_spawn_timeout_degrades_on_bad_values(monkeypatch, value):
     assert config.satellite_spawn_timeout() == 30.0
 
 
+def test_satellite_discovery_timeout_default(monkeypatch):
+    monkeypatch.delenv("AGENT_DISPATCH_SATELLITE_DISCOVERY_TIMEOUT", raising=False)
+    assert config.satellite_discovery_timeout() == 10.0
+
+
+def test_satellite_discovery_timeout_override(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_DISCOVERY_TIMEOUT", "20")
+    assert config.satellite_discovery_timeout() == 20.0
+
+
+@pytest.mark.parametrize(
+    "value", ["0", "-1", "not-a-number", "", "inf", "Infinity", "1e400", "nan"]
+)
+def test_satellite_discovery_timeout_degrades_on_bad_values(monkeypatch, value):
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_DISCOVERY_TIMEOUT", value)
+    assert config.satellite_discovery_timeout() == 10.0
+
+
 # -- tracking: the status snapshot --------------------------------------------
 
 

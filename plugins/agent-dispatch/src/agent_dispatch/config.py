@@ -752,3 +752,28 @@ def satellite_spawn_timeout() -> float:
         except ValueError:
             pass
     return _SATELLITE_SPAWN_TIMEOUT_DEFAULT
+
+
+#: Default wall-clock budget (seconds) for one satellite work-intake tick's
+#: WHOLE queued-task discovery pagination -- independent of any single
+#: request's own HTTP timeout. Several slow-but-responsive round trips
+#: could otherwise sum well past the federation directory's presence TTL
+#: once a spawn attempt's own bound is added on top.
+_SATELLITE_DISCOVERY_TIMEOUT_DEFAULT = 10.0
+
+
+def satellite_discovery_timeout() -> float:
+    """The wall-clock budget (seconds) for one satellite work-intake tick's
+    queued-task discovery pagination
+    (``AGENT_DISPATCH_SATELLITE_DISCOVERY_TIMEOUT``). Degrades to the safe
+    default on unset/non-positive/non-finite/unparseable values, mirroring
+    :func:`satellite_spawn_timeout`'s validation."""
+    raw = os.environ.get("AGENT_DISPATCH_SATELLITE_DISCOVERY_TIMEOUT")
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0 and math.isfinite(value):
+                return value
+        except ValueError:
+            pass
+    return _SATELLITE_DISCOVERY_TIMEOUT_DEFAULT

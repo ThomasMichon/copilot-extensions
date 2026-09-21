@@ -325,6 +325,44 @@ def test_queued_discovery_pages_bounded_by_a_hard_ceiling():
     assert len(queued_calls) < 20
 
 
+def test_queued_discovery_pages_bounded_by_a_time_budget():
+    # Row-count/page-size bounds alone don't cap wall-clock time: each
+    # request can itself take up to DispatchClient's own HTTP timeout, so
+    # several slow-but-responsive round trips could still sum well past the
+    # federation directory's presence TTL. The discovery_time_budget must
+    # stop pagination once elapsed time exceeds it, even if every page so
+    # far came back "full" (more rows might exist).
+    clock = FakeClock()
+
+    class SlowAlwaysFullClient:
+        def __init__(self):
+            self.calls = []
+
+        def list(self, **params):
+            self.calls.append(params)
+            if params.get("status") == "claimed,started":
+                return []
+            clock.advance(6.0)  # simulate a slow-but-responsive round trip
+            limit = params["limit"]
+            return [{"id": f"t{i}", "created_at": float(i)} for i in range(limit)]
+
+    client = SlowAlwaysFullClient()
+    loop = SatelliteWorkIntake(
+        client,
+        machine="book2",
+        project="test-project",
+        max_concurrent=1,
+        discovery_time_budget=10.0,
+        clock=clock,
+    )
+    loop.tick()
+    queued_calls = [c for c in client.calls if c.get("status") == "queued"]
+    # First request (6s elapsed) still under budget -> pages again; second
+    # request pushes elapsed to 12s, over the 10s budget -> stops there,
+    # nowhere near the page-count/row-count ceiling.
+    assert len(queued_calls) == 2
+
+
 def test_queued_tasks_considered_oldest_first_within_the_page():
     # The `/tasks` endpoint orders newest-first with no oldest-first option
     # -- this loop must re-sort the page itself so an older queued task

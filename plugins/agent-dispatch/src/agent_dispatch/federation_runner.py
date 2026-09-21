@@ -273,6 +273,7 @@ class FederationRunner:
                         project=config.satellite_project(),
                         max_concurrent=config.satellite_max_concurrent(),
                         spawn_timeout=config.satellite_spawn_timeout(),
+                        discovery_time_budget=config.satellite_discovery_timeout(),
                         clock=self._clock,
                     )
                 except Exception:
