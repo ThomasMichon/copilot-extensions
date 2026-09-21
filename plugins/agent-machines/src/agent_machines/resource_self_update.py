@@ -26,7 +26,12 @@ class SelfUpdateResourceHandler(ResourceHandler):
         return str(decl.get("tier"))
 
     def applies_on(self, decl: dict[str, Any], plat: str) -> bool:
-        return super().applies_on(decl, plat) and plat == "windows"
+        # Scheduling is implemented for Windows (Scheduled Tasks) and
+        # Linux/WSL (systemd --user timers, see self_update_tasks.py); any
+        # other platform has no reconciliation backend, so the resource
+        # never resolves there rather than silently opting a package in
+        # that can never actually register anything.
+        return super().applies_on(decl, plat) and plat in ("windows", "linux", "wsl")
 
     def merge(
         self, members: list[ResourceContribution]
