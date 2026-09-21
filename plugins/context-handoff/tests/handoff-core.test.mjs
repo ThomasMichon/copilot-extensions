@@ -6,10 +6,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 
 import {
   HANDOFF_META_PREFIX,
   agentWorktreesGetResult,
+  attemptWorktreeSync,
   buildResumePrompt,
   buildSeedForStored,
   checkHeadAlignment,
@@ -1136,4 +1138,66 @@ test("utility helpers preserve safe normalization and bounded CLI diagnostics", 
     (_bin, _args) => JSON.stringify({ found: true, session_id: "session-1" }),
   );
   assert.equal(binding.found, true);
+});
+
+// --- attemptWorktreeSync (Phase 7: force-tier auto-handoffs must not hand a
+// stale worktree to their successor, but MUST never auto-commit anything
+// since no agent judgment is in this path -- see the review that landed this
+// function). Uses a real throwaway git repo; agent-worktrees is not expected
+// to resolve in a bare `node --test` environment, so these exercise the
+// "sync attempted but unavailable" outcome rather than a real sync.
+
+function initGitRepo() {
+  const dir = mkdtempSync(join(tmpdir(), "context-handoff-sync-"));
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "Test"], { cwd: dir });
+  writeFileSync(join(dir, "file.txt"), "one\n");
+  execFileSync("git", ["add", "."], { cwd: dir });
+  execFileSync("git", ["commit", "-q", "-m", "initial"], { cwd: dir });
+  return dir;
+}
+
+test("attemptWorktreeSync skips (never commits) when the tree is dirty", () => {
+  const dir = initGitRepo();
+  try {
+    writeFileSync(join(dir, "file.txt"), "one\nuncommitted\n");
+    const result = attemptWorktreeSync(dir);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /uncommitted changes/);
+    // Never auto-commits: the dirty change must still be present, uncommitted.
+    const status = execFileSync("git", ["status", "--porcelain"], { cwd: dir, encoding: "utf-8" });
+    assert.notEqual(status.trim(), "");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attemptWorktreeSync reports not-a-git-checkout for a plain directory", () => {
+  const dir = mkdtempSync(join(tmpdir(), "context-handoff-nosync-"));
+  try {
+    const result = attemptWorktreeSync(dir);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /not a git checkout|git unavailable/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attemptWorktreeSync attempts a sync on a clean tree and reports failure honestly when agent-worktrees is unavailable", () => {
+  const dir = initGitRepo();
+  try {
+    const result = attemptWorktreeSync(dir);
+    // A clean tree means the (never-commits) safety gate passes and a real
+    // sync attempt is made; this environment has no reachable
+    // agent-worktrees catalog entry, so it should fail honestly rather than
+    // silently report success.
+    assert.equal(result.attempted, true);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /sync failed|unavailable/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

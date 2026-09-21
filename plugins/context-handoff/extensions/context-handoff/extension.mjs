@@ -38,6 +38,7 @@ import { joinSession } from "@github/copilot-sdk/extension";
 import {
   agentDispatchAvailable,
   agentWorktreesGet,
+  attemptWorktreeSync,
   buildResumePrompt,
   buildSeedForStored,
   collectAdvisoryGitFacts,
@@ -233,7 +234,7 @@ function persistState() {
 }
 
 // Format handoff data as a markdown document suitable for continuation.
-function formatHandoffMarkdown(handoffData, scope) {
+function formatHandoffMarkdown(handoffData, scope, syncResult) {
   const lines = [
     `# Session Handoff`,
     "",
@@ -282,6 +283,18 @@ function formatHandoffMarkdown(handoffData, scope) {
     lines.push(`## Next Steps`, handoffData.agentNextSteps, "");
   }
 
+  if (syncResult) {
+    lines.push(
+      "## Worktree Sync",
+      syncResult.synced
+        ? "Synced onto the latest default branch before this handoff was drafted."
+        : `Not synced (${syncResult.reason}). The successor should sync onto ` +
+          "the latest default branch as its first action, in case any " +
+          "relevant fixes landed upstream since this worktree's tip.",
+      "",
+    );
+  }
+
   // This formatter has no agent composition step (force-tier auto-drafts
   // without the agent), so it cannot discover background flows/external
   // state itself. Per the schema, that must be an explicit open item, never
@@ -328,10 +341,15 @@ async function onPermissionRequest(request, invocation) {
 // and-forget from the session.usage_info handler (below); reports its own
 // outcome via session.log/session.send rather than being awaited there.
 async function autoForceHandoff(sid, cwd) {
+  // Sync before drafting, same principle as the agent-guided skill flow: the
+  // successor inherits this exact on-disk worktree, so an un-synced tip means
+  // stale plugin/instruction code reaches it too. No agent judgment is in the
+  // loop here, so this never commits anything -- see attemptWorktreeSync.
+  const syncResult = attemptWorktreeSync(cwd);
   let markdown;
   try {
     const { data } = collectHandoffData(sid);
-    markdown = formatHandoffMarkdown(data, null);
+    markdown = formatHandoffMarkdown(data, null, syncResult);
   } catch (error) {
     session.log(
       `[Context Handoff] Force-tier auto-draft failed: ${error.message}. ` +
@@ -482,26 +500,31 @@ const session = await joinSession({
             "   peer-agent coordination this session owns -- carry each forward",
             "   as resumable or as an explicit open item; write \"none\" only",
             "   when genuinely none exist.",
-            "2. Call save_handoff_prompt with the composed markdown as `prompt_text`",
-            "   (and an optional short `title`). It stores the handoff — as an",
-            "   agent-dispatch task when a coordinator is reachable, else a",
-            "   one-time worktree-state file — and returns the short handoff",
-            "   prompt plus its exact HANDOFF_SEED/HANDOFF_TOKEN identifiers.",
-            "3. Distinguish the trigger:",
+            "2. Distinguish the trigger BEFORE saving:",
             "   - If context pressure is the reason for the handoff and work",
-            "     remains: sync the worktree onto the latest default branch first",
-            "     (commit local WIP, then `agent-worktrees git sync` or",
-            "     equivalent -- see the context-handoff skill's 'Sync before",
-            "     triggering' section; note any conflict in the brief rather",
-            "     than blocking on it), then call trigger_handoff directly. Do",
-            "     NOT ask for confirmation first; continuity is the point.",
+            "     remains: sync the worktree onto the latest default branch",
+            "     NOW, before saving (commit local WIP, then `agent-worktrees",
+            "     git sync` or equivalent -- see the context-handoff skill's",
+            "     'Sync before triggering' section; note any conflict in the",
+            "     brief rather than blocking on it). If the sync changed",
+            "     anything relevant (branch moved, files changed), call",
+            "     generate_handoff_prompt again first so the Git Status you",
+            "     compose from is current. Then call save_handoff_prompt, then",
+            "     call trigger_handoff immediately. Do NOT ask for confirmation",
+            "     first; continuity is the point.",
             "   - If you are otherwise done with the requested work and would end",
-            "     the turn by listing follow-up ideas/questions, store the baton",
-            "     and replace that list with one short offer to continue via",
-            "     handoff. Only after the user says yes should you sync the",
-            "     worktree and call trigger_handoff -- never sync or commit",
-            "     before the user has agreed, unless autopilot or prior",
-            "     authorization already covers that turn-end follow-up path.",
+            "     the turn by listing follow-up ideas/questions: call",
+            "     save_handoff_prompt now (a not-yet-approved handoff has no",
+            "     sync to reflect yet), replace that list with one short offer",
+            "     to continue via handoff, and only after the user says yes",
+            "     should you sync the worktree and then call trigger_handoff --",
+            "     never sync or commit before the user has agreed, unless",
+            "     autopilot or prior authorization already covers that turn-end",
+            "     follow-up path.",
+            "save_handoff_prompt stores the handoff — as an agent-dispatch task",
+            "when a coordinator is reachable, else a one-time worktree-state",
+            "file — and returns the short handoff prompt plus its exact",
+            "HANDOFF_SEED/HANDOFF_TOKEN identifiers.",
             "Do NOT paste the handoff contents or claim the handoff auto-loads",
             "on restart (it does not). The one exception to \"do not commit\" is",
             "the deliberate WIP-commit-then-sync step above -- never commit for",

@@ -158,20 +158,30 @@ its own successor.
 
 When the worktree is a git checkout with a remote default branch:
 
-1. Commit any uncommitted local changes first (worktree-local WIP commits are
-   normal and expected here -- this is not "finish the work," just "don't
-   leave it uncommitted going into a rebase").
+1. **Inspect the tree before committing anything.** Never blanket-commit
+   (`git add -A` / `git commit -a`) -- stage and commit only the paths you
+   recognize as your own reviewed, intentional changes this session, the same
+   discipline the `worktree` skill's cleanup-details reference requires
+   before any commit. If anything in the tree looks unfamiliar, untracked,
+   or possibly sensitive (credentials, secrets, unrelated edits), or you are
+   otherwise unsure it is safe to commit, **skip this sync entirely** and
+   note in the brief that the worktree may be behind the default branch and
+   was left as-is -- never guess.
 2. Sync onto the latest default branch -- prefer the exact `argv[0]` from the
    `git-collaboration` skill's agent-worktrees session command catalog
    (never a bare `PATH` lookup): `<agent-worktrees catalog argv[0]> git sync` <!-- marketplace-isolation: allow cross-plugin-diagnostic-mention -->
    when that catalog entry is available (fetch + rebase, conflict-safe:
-   aborts and leaves the branch unchanged on a real conflict); otherwise
-   `git fetch` + `git rebase origin/<default-branch>` directly.
-3. If the sync hits a real conflict, do **not** block the handoff on
-   resolving it there -- note the conflict and the branch's un-synced state
-   plainly in the handoff brief instead, so the successor knows to resolve it
-   as its first action rather than silently inheriting stale code without
-   realizing it.
+   aborts and leaves the branch unchanged on a real conflict). Otherwise fall
+   back to `git fetch` + `git rebase origin/<default-branch>` directly --
+   but if that rebase reports a conflict, immediately run `git rebase
+   --abort` (never leave a conflicted `rebase-merge` state for the
+   successor to inherit).
+3. Either way, if the sync did not complete cleanly (conflict, abort, or
+   step 1 skipped it), do **not** block the handoff on resolving it there --
+   note the conflict/skip and the branch's un-synced state plainly in the
+   handoff brief instead, so the successor knows to resolve it as its first
+   action rather than silently inheriting stale or partially-merged code
+   without realizing it.
 
 This is a lightweight, mechanical step, not a reason to delay a
 context-pressure-driven handoff that needs to trigger immediately -- skip
