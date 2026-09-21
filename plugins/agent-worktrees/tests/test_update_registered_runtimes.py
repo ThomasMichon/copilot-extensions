@@ -20,6 +20,37 @@ import pytest
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
 from agent_worktrees import reconcile
+from agent_worktrees import update_runtime
+
+
+# ---------------------------------------------------------------------------
+# describe_copilot_spawn_error -- accurate diagnostics for a failed spawn
+# ---------------------------------------------------------------------------
+
+def test_describe_copilot_spawn_error_file_not_found():
+    exc = FileNotFoundError(2, "No such file or directory")
+    message = update_runtime.describe_copilot_spawn_error(exc)
+    assert "not found on PATH" in message
+    assert "No such file or directory" in message
+
+
+def test_describe_copilot_spawn_error_self_lock_windows():
+    """The reproduced bug: running an update from inside a live Copilot CLI
+    session on Windows fails to re-spawn copilot.exe with winerror 1920
+    ('The file cannot be accessed by the system'). This must NOT be reported
+    as 'not found' -- copilot is right there, running this very command."""
+    exc = OSError(22, "The file cannot be accessed by the system", None, 1920, None)
+    message = update_runtime.describe_copilot_spawn_error(exc)
+    assert "not found" not in message
+    assert "currently running as this very session" in message
+    assert "The file cannot be accessed by the system" in message
+
+
+def test_describe_copilot_spawn_error_generic_oserror_includes_detail():
+    exc = PermissionError(13, "Permission denied")
+    message = update_runtime.describe_copilot_spawn_error(exc)
+    assert "not found or not executable" in message
+    assert "Permission denied" in message
 
 
 @pytest.fixture(autouse=True)
