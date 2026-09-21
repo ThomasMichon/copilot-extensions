@@ -27,6 +27,7 @@ import {
   manualFallbackInstructions,
   normalizeHandoffTitle,
   plainGitSync,
+  processStartTimeMs,
   resolveRuntimePython,
   retryStoredHandoffCutover,
   resolveSystemCli,
@@ -1899,14 +1900,15 @@ test("attemptWorktreeSyncLocked disables rebase.autoStash and repo hooks for the
   );
 });
 
-test("attemptWorktreeSync never reclaims a lock recording a genuinely LIVE holder, no matter its age", async () => {
+test("attemptWorktreeSync never reclaims a lock recording a genuinely LIVE holder with no recorded start time, no matter its age", async () => {
   // Real regression this guards (the round-16-through-20 root cause): a
   // reclaim scheme based purely on age can reclaim a holder that is merely
   // slow (a suspended process, a very slow network) but still very much
   // alive -- which is exactly what forces the whole chain of release-side
-  // races those rounds kept surfacing. Gating reclaim on confirmed
-  // liveness instead means a live holder is NEVER reclaimed, however old
-  // its lock file is.
+  // races those rounds kept surfacing. A live pid with no recorded start
+  // time to compare (an older/foreign lock format) has no basis for an
+  // identity check, so it must fail closed (never reclaim) rather than
+  // fall back to age.
   const dir = initGitRepo();
   try {
     const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
@@ -1914,8 +1916,9 @@ test("attemptWorktreeSync never reclaims a lock recording a genuinely LIVE holde
     }).trim();
     const lockPath = join(dir, gitDir);
     mkdirSync(dirname(lockPath), { recursive: true });
-    // This test process's own pid is unambiguously alive.
-    writeFileSync(lockPath, `${process.pid}-0-liveholder`);
+    // This test process's own pid is unambiguously alive; "unknown" means
+    // no start time was recorded to compare against.
+    writeFileSync(lockPath, `${process.pid}-unknown-liveholder`);
     const result = await attemptWorktreeSync(dir);
     assert.equal(result.attempted, false);
     assert.equal(result.synced, false);
@@ -1925,15 +1928,17 @@ test("attemptWorktreeSync never reclaims a lock recording a genuinely LIVE holde
   }
 });
 
-test("attemptWorktreeSync reclaims even a lock recording a technically-alive pid once it exceeds the absolute ceiling (pid-reuse safety net)", async () => {
-  // Real regression this guards: `process.kill(pid, 0)` can only observe
-  // whether SOME process holds that pid right now -- it cannot tell
-  // whether the ORIGINAL holder crashed and the OS later reused its pid
-  // for a completely unrelated process. Without an absolute ceiling, that
-  // reused pid would look permanently "alive" and this worktree could
-  // never sync again. This test process's own pid is alive (a stand-in for
-  // "reused pid, unrelated live process"), but the lock is backdated well
-  // past the absolute ceiling, so it must still be reclaimed.
+test("attemptWorktreeSync reclaims a lock immediately once its recorded pid has been reused by a different live process, regardless of age", async () => {
+  // Real regression this guards (round 23): `process.kill(pid, 0)` alone
+  // can only observe whether SOME process holds that pid right now -- it
+  // cannot tell whether the ORIGINAL holder crashed and the OS later
+  // reused its pid for a completely unrelated process. Age-based
+  // reclaiming of a live pid (round 22's fix) reintroduced the exact race
+  // this whole scheme exists to prevent for a merely-slow-but-real holder.
+  // Comparing the recorded start time against the CURRENT process
+  // occupying that pid resolves the ambiguity precisely: a mismatch proves
+  // it is a DIFFERENT process, safe to reclaim immediately with no age
+  // wait at all.
   const dir = initGitRepo();
   try {
     const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
@@ -1941,12 +1946,39 @@ test("attemptWorktreeSync reclaims even a lock recording a technically-alive pid
     }).trim();
     const lockPath = join(dir, gitDir);
     mkdirSync(dirname(lockPath), { recursive: true });
-    writeFileSync(lockPath, `${process.pid}-0-reused-pid-standin`);
-    const ancientTime = new Date(Date.now() - 25 * 60 * 60 * 1000); // 25h > 24h ceiling
-    utimesSync(lockPath, ancientTime, ancientTime);
+    // This test process's own pid is genuinely alive, but the recorded
+    // start time is deliberately wrong (a stand-in for "this pid used to
+    // belong to a different, now-crashed process").
+    writeFileSync(lockPath, `${process.pid}-1-reused-pid-standin`);
     const result = await attemptWorktreeSync(dir);
+    // Reclaimed immediately -- no age/backdating needed at all, proving
+    // the mismatch itself (not elapsed time) triggered the reclaim.
     assert.equal(result.attempted, true);
     assert.notEqual(result.reason, "another sync attempt for this worktree is already in progress; automatic sync was skipped");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attemptWorktreeSync never reclaims a lock whose recorded start time genuinely matches the current live holder, no matter its age", async () => {
+  // The core round-20/22 case, now with a REAL matching start time (not
+  // just "unknown"): this test process's own accurately-recorded start
+  // time must never be treated as reclaimable, confirming the identity
+  // check's positive match path (not just its "no data" fail-closed path).
+  const dir = initGitRepo();
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    const ownStartTime = await processStartTimeMs(process.pid);
+    assert.ok(Number.isFinite(ownStartTime), "test environment could not query its own process start time");
+    writeFileSync(lockPath, `${process.pid}-${ownStartTime}-realholder`);
+    const result = await attemptWorktreeSync(dir);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /already in progress/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1976,7 +2008,10 @@ test("acquireLock treats a failed stat on lock contention as contention, not as 
   const statCatchBody = body.slice(
     body.indexOf("} catch {", body.indexOf("statSync(lockPath)")),
   );
-  assert.match(statCatchBody.slice(0, statCatchBody.indexOf("}", 10) + 1), /throw error/);
+  // Fails closed by making the age look NOT stale (`-Infinity`, always
+  // <= STALE_LOCK_MS) rather than reclaimable, so ambiguous evidence never
+  // resolves to "safe to reclaim".
+  assert.match(statCatchBody.slice(0, statCatchBody.indexOf("}", 10) + 1), /ageMs = -Infinity/);
 });
 
 test("attemptWorktreeSync rechecks for an in-progress rebase immediately before the sync exec (TOCTOU narrowing)", () => {
