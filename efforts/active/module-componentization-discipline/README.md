@@ -67,7 +67,7 @@ table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 26,301 | +25,301 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | First dedicated slice landed: context/services/repos/related dispatch extracted into sibling `*_cli.py` modules; still the worst offender, with the live session/status/PR/install/reap surfaces left for later dedicated slices |
+| 26,303 | +25,303 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | First dedicated slice landed: context/services/repos/related dispatch extracted into sibling `*_cli.py` modules; still the worst offender, with the live session/status/PR/install/reap surfaces left for later dedicated slices |
 | 9,267 | +8,267 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression); it drifted again while this slice was in flight, so the baseline was manually widened (9191 → 9267) to restore a green full-tree guard pending its own future split |
 | 9,169 | +8,169 | `libs/installation-context/installation_context.py` (+17 vendored copies) | Split the **canonical** copy only; `sync-installation-context.py` propagates to every vendored copy |
 | 6,873 | +5,873 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
@@ -214,7 +214,7 @@ Verbatim from the operator:
             (confirmed available on this machine), which is slow — budget
             real time for it rather than treating it as a quick win.
       - [ ] The `__main__.py` CLI-registration giants
-            (`agent-worktrees` 26,301 after its first slice; `agent-bridge`
+            (`agent-worktrees` 26,303 after its first slice; `agent-bridge`
             6,595; `agent-dispatch` 4,691; `agent-codespaces` 4,675) — each
             needs its own dedicated slice with the full plugin test suite
             (not just guards) green before and after, given their live-
@@ -495,9 +495,10 @@ the Phase 0 runbook, picked up as capacity allows.
   `check-module-size.py --refresh-baseline` lowered the grandfathered ceiling
   for `agent-worktrees/__main__.py`, but rebasing onto newer `main` pulled in
   a further 110 lines of unrelated upstream growth while this PR was in flight,
-  so the baseline then needed one explicit reviewed widen to the post-rebase
-  size (26,191 → 26,301) to keep the full-tree guard honest. The required
-  `check-module-size.py`, `check-install-contract.py`, and
+  and the final post-review compatibility alias restoration added 2 more lines,
+  so the baseline then needed explicit reviewed widens to the final merged-file
+  size (26,191 → 26,301 → 26,303) to keep the full-tree guard honest. The
+  required `check-module-size.py`, `check-install-contract.py`, and
   `check-version-consistency.py` all pass afterward. A rebase onto newer
   `main` also revealed that `agent-worktrees` `1.5.5-dev200` had already
   landed elsewhere, so this slice took the next patch `-devN` bump instead:
