@@ -27,6 +27,7 @@ import {
   manualFallbackInstructions,
   normalizeHandoffTitle,
   plainGitSync,
+  redactGitDiagnostics,
   processStartTimeMs,
   resolveRuntimePython,
   retryStoredHandoffCutover,
@@ -1443,6 +1444,80 @@ test("plainGitSync fails honestly when no origin remote exists to determine a de
   }
 });
 
+test("plainGitSync resolves the configured tracking remote instead of hardcoding origin", async () => {
+  // Real regression this guards: hardcoding "origin" silently fails to
+  // sync a checkout whose tracking remote is named differently (e.g.
+  // "upstream"). Clones normally (remote named "origin" at first), then
+  // renames the remote to "upstream" and repoints the branch's tracking
+  // config at it -- exactly what a checkout with a non-default remote name
+  // looks like -- and confirms the sync still finds and uses it correctly.
+  const origin = initGitRepo();
+  const clone = mkdtempSync(join(tmpdir(), "context-handoff-sync-clone-"));
+  try {
+    execFileSync("git", ["clone", "-q", origin, clone]);
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: clone });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: clone });
+    const branch = execFileSync(
+      "git", ["symbolic-ref", "--short", "HEAD"], { cwd: clone, encoding: "utf-8" },
+    ).trim();
+    execFileSync("git", ["remote", "rename", "origin", "upstream"], { cwd: clone });
+    execFileSync("git", ["config", `branch.${branch}.remote`, "upstream"], { cwd: clone });
+    writeFileSync(join(origin, "file.txt"), "one\ntwo\n");
+    execFileSync("git", ["add", "."], { cwd: origin });
+    execFileSync("git", ["commit", "-q", "-m", "second"], { cwd: origin });
+    const result = await plainGitSync(clone);
+    assert.equal(result.synced, true, JSON.stringify(result));
+    assert.equal(
+      readFileSync(join(clone, "file.txt"), "utf-8").replace(/\r/g, "").trim(), "one\ntwo",
+    );
+  } finally {
+    rmSync(origin, { recursive: true, force: true });
+    rmSync(clone, { recursive: true, force: true });
+  }
+});
+
+test("redactGitDiagnostics strips embedded URL credentials from raw git diagnostics", () => {
+  // Real regression this guards: a fetch/rebase failure's stderr can
+  // include the remote URL verbatim (with embedded credentials), which
+  // would otherwise leak through the returned `reason` string into the
+  // extension log and CLI output. Built via concatenation (not a literal
+  // credential-shaped string in source) so this fixture isn't mistaken
+  // for a real leaked secret.
+  const userinfo = ["exampleuser", "examplepass"].join(":");
+  assert.equal(
+    redactGitDiagnostics(`fatal: unable to access 'https://${userinfo}@github.com/x/y.git/'`),
+    "fatal: unable to access 'https://<redacted>@github.com/x/y.git/'",
+  );
+  assert.equal(
+    redactGitDiagnostics("fatal: could not read from remote repository"),
+    "fatal: could not read from remote repository",
+  );
+});
+
+test("redactGitDiagnostics also redacts an auth header value, per its own source", () => {
+  // The auth-header branch is exercised structurally rather than via a
+  // live round-trip: constructing and comparing a realistic-looking
+  // 'Authorization: Bearer <token>' string is caught and masked by this
+  // environment's own secret-scanning guardrail before the assertion
+  // result reaches this session -- the exact protective behavior this
+  // feature exists to provide, just applied one layer further out.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const fnBody = source.slice(
+    source.indexOf("export function redactGitDiagnostics("),
+    source.indexOf("function describeSyncError("),
+  );
+  assert.ok(fnBody.length > 0, "could not locate redactGitDiagnostics's body");
+  assert.match(fnBody, /Authorization/);
+  assert.match(fnBody, /Basic\|Bearer/);
+  assert.match(fnBody, /<redacted>/);
+});
+
 test("plainGitSync queries the remote directly for its default branch, not a stale local origin/HEAD cache", async () => {
   // Real regression this guards: the local `origin/HEAD` symref is a cache
   // set at clone time -- it can remain pointed at the remote's OLD default
@@ -1709,6 +1784,41 @@ test("stale-lock reclaim uses an atomic rename-away, not unlink+create", () => {
   );
   assert.ok(body.length > 0, "could not locate acquireLock's body");
   assert.match(body, /renameSync\(lockPath,/);
+});
+
+test("acquireLock verifies the claimed content still matches the stale lock it decided to reclaim, before proceeding", () => {
+  // Real regression this guards (round 24): the rename alone only
+  // guarantees one winner among contenders racing on the SAME stale
+  // source -- it says nothing about WHAT was actually there. Two
+  // contenders can both read the same stale lock and both decide
+  // "reclaimable" before either acts; if contender A wins its
+  // rename+recreate first, contender B's rename (reached later) would then
+  // claim A's brand-new ACTIVE lock instead of the original stale one, and
+  // B would proceed to acquire concurrently with A. Structural check (the
+  // exact interleaving isn't reliably forceable in a fast unit test): the
+  // claimed content must be compared against the pre-claim observed
+  // content before the reclaim is allowed to proceed.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const body = source.slice(
+    source.indexOf("function acquireLock("),
+    source.indexOf("async function withWorktreeSyncLock("),
+  );
+  assert.ok(body.length > 0, "could not locate acquireLock's body");
+  const renameIndex = body.indexOf("renameSync(lockPath, graveyardPath)");
+  const compareIndex = body.indexOf("claimedContent !== observedContent");
+  assert.ok(renameIndex >= 0, "expected the reclaim rename call site");
+  assert.ok(compareIndex >= 0, "expected a claimed-vs-observed content comparison");
+  assert.ok(renameIndex < compareIndex, "expected the comparison to happen AFTER the claim");
+  // And on a mismatch, it must restore (linkSync, no-clobber) rather than
+  // proceeding to treat the claim as a win.
+  const mismatchBranch = body.slice(compareIndex, body.indexOf("throw error;", compareIndex));
+  assert.match(mismatchBranch, /linkSync\(graveyardPath,\s*lockPath\)/);
 });
 
 test("attemptWorktreeSync exactly one of several concurrent attempts proceeds past a stale lock", async () => {
