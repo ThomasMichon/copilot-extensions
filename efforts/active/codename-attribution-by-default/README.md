@@ -34,13 +34,16 @@
 
 ## Guiding Intent
 
-Close the gap `pr-attribution-codenames` left open: the codename feature is
-fully built and unit/integration-tested end-to-end (round-29 finding: this
-is IMPLEMENTATION coverage, not live proof of the codename marker itself —
-the only live-merged-PR evidence cited in Context is the RAW marker form
-(`source_attribution: true`) on a private downstream repo; no repo has ever
-actually published a real PR carrying the codename-form marker, and this
-effort's own Phase 4 defers that live proof until after this PR lands), but
+Close the gap `pr-attribution-codenames` left open: the codename feature was
+fully built and unit/integration-tested end-to-end (round-29 finding: at the
+time this effort began, that was only IMPLEMENTATION coverage, not live
+proof of the codename marker itself — the only live-merged-PR evidence
+cited in Context was the RAW marker form (`source_attribution: true`) on a
+private downstream repo; no repo had ever actually published a real PR
+carrying the codename-form marker. **This effort's own Phase 4 has since
+supplied that live proof** — PR #3107 confirmed a real PR carries the
+codename marker, and the private downstream repo's raw marker is confirmed
+unaffected; see Phase 4 and the Validation Plan below), but
 at the time this effort began it required an explicit
 `source_attribution: codename` opt-in (Phase 1, #3037, has since flipped
 this to the implicit default), and in
