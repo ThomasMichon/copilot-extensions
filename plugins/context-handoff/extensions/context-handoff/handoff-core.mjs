@@ -1765,6 +1765,29 @@ export function manualFallbackInstructions(
   const location = stored.storage === "agent-dispatch"
     ? `agent-dispatch task ${stored.id}`
     : `file handoff ${stored.id}`;
+  // automaticCutoverDisabled takes priority over spawnInFlight: mode being
+  // disabled means THIS call never requested an automatic spawn, but the
+  // pickup probe can still observe a stale/unrelated spawn-in-flight marker
+  // (e.g. a manual successor's own registration, or a leftover marker from
+  // an earlier auto-mode attempt) -- claiming "the automatic cutover should
+  // complete" in that case would directly contradict the disabled-mode
+  // truth (Copilot review finding on PR #3041).
+  if (automaticCutoverDisabled) {
+    return (
+      `Handoff stored as ${location}. Automatic cutover is disabled ` +
+      "(`.context-handoff/config.yaml`'s `mode` is not `auto`), so no " +
+      "successor pane was requested and none will be spawned automatically -- " +
+      "this is expected, not a failure. Open (or ask the operator to open) " +
+      "the successor session yourself, then run `/consume-handoff`. If that " +
+      "command is unavailable, use the context-handoff payload-local CLI and " +
+      "pass only the trailing `task:<id>` or `file:<id>` token to " +
+      "`consume --locator`.\n\n" +
+      "Copy only the following short handoff prompt/seed:\n\n" +
+      "```text\n" +
+      `${seed}\n` +
+      "```"
+    );
+  }
   if (spawnInFlight) {
     return (
       `Handoff stored as ${location}. A successor session has already been ` +
@@ -1777,22 +1800,6 @@ export function manualFallbackInstructions(
       "`/consume-handoff` in the successor session yourself, or use the " +
       "context-handoff payload-local CLI and pass only the trailing " +
       "`task:<id>` or `file:<id>` token to `consume --locator`.\n\n" +
-      "Copy only the following short handoff prompt/seed:\n\n" +
-      "```text\n" +
-      `${seed}\n` +
-      "```"
-    );
-  }
-  if (automaticCutoverDisabled) {
-    return (
-      `Handoff stored as ${location}. Automatic cutover is disabled ` +
-      "(`.context-handoff/config.yaml`'s `mode` is not `auto`), so no " +
-      "successor pane was requested and none will be spawned automatically -- " +
-      "this is expected, not a failure. Open (or ask the operator to open) " +
-      "the successor session yourself, then run `/consume-handoff`. If that " +
-      "command is unavailable, use the context-handoff payload-local CLI and " +
-      "pass only the trailing `task:<id>` or `file:<id>` token to " +
-      "`consume --locator`.\n\n" +
       "Copy only the following short handoff prompt/seed:\n\n" +
       "```text\n" +
       `${seed}\n` +

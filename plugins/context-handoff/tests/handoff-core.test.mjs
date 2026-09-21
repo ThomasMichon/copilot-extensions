@@ -148,6 +148,25 @@ test("manual fallback instructions distinguish an in-flight spawn from silence",
   assert.match(text, new RegExp(seed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
+test("automaticCutoverDisabled takes priority over a stale spawnInFlight marker", () => {
+  // Copilot review finding on PR #3041: a disabled-mode caller never
+  // requested a spawn, but the pickup probe can still observe a stale or
+  // unrelated spawnInFlight marker -- claiming "the automatic cutover
+  // should complete" in that case would contradict the disabled-mode
+  // truth. automaticCutoverDisabled must win regardless of spawnInFlight.
+  const seed =
+    "Task: Continue | Resume: /consume-handoff to take over | " +
+    "Recovery: context-handoff file:handoff-1";
+  const text = manualFallbackInstructions(
+    { storage: "file", id: "handoff-1" },
+    seed,
+    { spawnInFlight: true, automaticCutoverDisabled: true },
+  );
+  assert.match(text, /Automatic cutover is disabled/);
+  assert.doesNotMatch(text, /already been.*spawned and is starting up/s);
+  assert.doesNotMatch(text, /automatic cutover should complete/);
+});
+
 test("runtime invocation isolates imports and forces UTF-8", () => {
   assert.deepEqual(
     isolatedPythonArgs("agent_worktrees", ["get", "worktree-dir"]),
