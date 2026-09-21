@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from agent_dispatch import bridge, procutil
+from agent_dispatch import bridge, bridge_agent_registry, procutil
 from agent_dispatch.queue import Status
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
@@ -776,13 +776,13 @@ def test_parse_agent_names_indeterminate_on_junk():
 
 
 def test_registered_agent_names_none_when_no_bridge(monkeypatch):
-    monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: None)
+    monkeypatch.setattr(bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: None)
     assert bridge.registered_agent_names() is None
 
 
 def test_registered_agent_names_none_on_nonzero_exit(monkeypatch):
     monkeypatch.setattr(
-        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+        bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     monkeypatch.setattr(
         bridge.subprocess, "run",
@@ -799,7 +799,7 @@ def test_registered_agent_names_parses_list(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0, _AGENTS_JSON, "")
 
     monkeypatch.setattr(
-        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+        bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
     assert bridge.registered_agent_names() == {
@@ -811,7 +811,7 @@ def test_registered_agent_names_parses_list(monkeypatch):
 
 def test_registered_agents_skips_human_preamble(monkeypatch):
     monkeypatch.setattr(
-        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+        bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     monkeypatch.setattr(
         bridge.subprocess,
@@ -830,7 +830,7 @@ def test_registered_agents_skips_human_preamble(monkeypatch):
 
 def test_registered_agent_project_reads_explicit_project(monkeypatch):
     monkeypatch.setattr(
-        bridge,
+        bridge_agent_registry,
         "registered_agent",
         lambda name, **_kw: (
             {"name": "reviewer", "project": "review-harness"}
@@ -846,7 +846,7 @@ def test_registered_agent_project_reads_explicit_project(monkeypatch):
 def test_registered_agent_project_strictly_rejects_indeterminate_registry(
     monkeypatch,
 ):
-    monkeypatch.setattr(bridge, "registered_agent", lambda name, **_kw: None)
+    monkeypatch.setattr(bridge_agent_registry, "registered_agent", lambda name, **_kw: None)
 
     with pytest.raises(bridge.BridgeUnavailable, match="local agent registry"):
         bridge.registered_agent_project("reviewer", strict=True)
@@ -860,7 +860,7 @@ def test_registered_agent_project_strict_does_not_raise_on_confirmed_absence(
     # indeterminate read (None) does. Conflating "confirmed absent" with
     # "couldn't tell" would be a real regression here.
     monkeypatch.setattr(
-        bridge, "registered_agent", lambda name, **_kw: bridge._AGENT_NOT_FOUND
+        bridge_agent_registry, "registered_agent", lambda name, **_kw: bridge._AGENT_NOT_FOUND
     )
     assert bridge.registered_agent_project("missing", strict=True) is None
 
@@ -875,7 +875,7 @@ def test_registered_agent_uses_fast_single_lookup_command(monkeypatch):
         )
 
     monkeypatch.setattr(
-        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+        bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
     assert bridge.registered_agent("reviewer") == {
@@ -888,7 +888,7 @@ def test_registered_agent_uses_fast_single_lookup_command(monkeypatch):
 
 def test_registered_agent_not_found_is_distinct_from_indeterminate(monkeypatch):
     monkeypatch.setattr(
-        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+        bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     # agent-show exits 1 for a confirmed-absent agent (see agent-bridge's
     # _cmd_agent_show) -- distinct from a crash/timeout/absent-bridge (None).
@@ -911,7 +911,7 @@ def test_registered_agent_unsupported_subcommand_is_distinct(monkeypatch):
     # from every other failure so callers can fall back to the full listing
     # instead of treating every local allocation as unreadable.
     monkeypatch.setattr(
-        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+        bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     monkeypatch.setattr(
         bridge.subprocess, "run",
@@ -925,10 +925,10 @@ def test_registered_agent_unsupported_subcommand_is_distinct(monkeypatch):
 
 def test_resolve_agent_record_falls_back_when_agent_show_unsupported(monkeypatch):
     monkeypatch.setattr(
-        bridge, "registered_agent", lambda name, **_kw: bridge._AGENT_SHOW_UNSUPPORTED
+        bridge_agent_registry, "registered_agent", lambda name, **_kw: bridge._AGENT_SHOW_UNSUPPORTED
     )
     monkeypatch.setattr(
-        bridge, "registered_agents",
+        bridge_agent_registry, "registered_agents",
         lambda **_kw: [{"name": "reviewer", "project": "review-harness"}],
     )
     assert bridge._resolve_agent_record("reviewer", timeout=8.0) == {
@@ -943,11 +943,11 @@ def test_resolve_agent_record_never_calls_fast_path_for_namespaced_name(monkeypa
     # listing, not even attempt the fast path first.
     called = []
     monkeypatch.setattr(
-        bridge, "registered_agent",
+        bridge_agent_registry, "registered_agent",
         lambda name, **_kw: called.append(name) or bridge._AGENT_NOT_FOUND,
     )
     monkeypatch.setattr(
-        bridge, "registered_agents",
+        bridge_agent_registry, "registered_agents",
         lambda **_kw: [{"name": "codespace:foo", "project": "some-repo"}],
     )
     assert bridge._resolve_agent_record("codespace:foo", timeout=8.0) == {
@@ -957,20 +957,20 @@ def test_resolve_agent_record_never_calls_fast_path_for_namespaced_name(monkeypa
 
 
 def test_agent_is_registered_tri_state(monkeypatch):
-    monkeypatch.setattr(bridge, "registered_agent", lambda name, **_kw: {"name": name})
+    monkeypatch.setattr(bridge_agent_registry, "registered_agent", lambda name, **_kw: {"name": name})
     assert bridge.agent_is_registered("x") is True
 
     monkeypatch.setattr(
-        bridge, "registered_agent", lambda name, **_kw: bridge._AGENT_NOT_FOUND
+        bridge_agent_registry, "registered_agent", lambda name, **_kw: bridge._AGENT_NOT_FOUND
     )
     assert bridge.agent_is_registered("x") is False
 
-    monkeypatch.setattr(bridge, "registered_agent", lambda name, **_kw: None)
+    monkeypatch.setattr(bridge_agent_registry, "registered_agent", lambda name, **_kw: None)
     assert bridge.agent_is_registered("x") is None
 
 
 def test_preflight_local_warns_when_agent_absent(monkeypatch):
-    monkeypatch.setattr(bridge, "_resolve_agent_record", lambda name, **_kw: bridge._AGENT_NOT_FOUND)
+    monkeypatch.setattr(bridge_agent_registry, "_resolve_agent_record", lambda name, **_kw: bridge._AGENT_NOT_FOUND)
     warnings = bridge.preflight_headless_agent("task-worker")
     assert len(warnings) == 1
     w = warnings[0]
@@ -979,20 +979,20 @@ def test_preflight_local_warns_when_agent_absent(monkeypatch):
 
 def test_preflight_local_silent_when_agent_present(monkeypatch):
     monkeypatch.setattr(
-        bridge, "_resolve_agent_record", lambda name, **_kw: {"name": name, "managed": False}
+        bridge_agent_registry, "_resolve_agent_record", lambda name, **_kw: {"name": name, "managed": False}
     )
     assert bridge.preflight_headless_agent("sweep-worker") == []
 
 
 def test_preflight_local_silent_when_indeterminate(monkeypatch):
     # None registry (couldn't check) must never produce a false warning.
-    monkeypatch.setattr(bridge, "_resolve_agent_record", lambda name, **_kw: None)
+    monkeypatch.setattr(bridge_agent_registry, "_resolve_agent_record", lambda name, **_kw: None)
     assert bridge.preflight_headless_agent("task-worker") == []
 
 
 def test_preflight_local_warns_when_agent_is_managed(monkeypatch):
     monkeypatch.setattr(
-        bridge,
+        bridge_agent_registry,
         "_resolve_agent_record",
         lambda name, **_kw: {"name": name, "managed": True},
     )
@@ -1008,11 +1008,11 @@ def test_preflight_local_uses_full_listing_fallback_for_namespaced_agent(monkeyp
     # not a false "not registered" warning from the fast path's inherent
     # inability to resolve a namespace-prefixed name.
     monkeypatch.setattr(
-        bridge, "registered_agent",
+        bridge_agent_registry, "registered_agent",
         lambda name, **_kw: pytest.fail("must not attempt agent-show for a namespaced name"),
     )
     monkeypatch.setattr(
-        bridge, "registered_agents",
+        bridge_agent_registry, "registered_agents",
         lambda **_kw: [{"name": "codespace:my-cs"}],
     )
     assert bridge.preflight_headless_agent("codespace:my-cs") == []
