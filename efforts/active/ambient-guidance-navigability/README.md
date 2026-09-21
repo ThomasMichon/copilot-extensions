@@ -495,10 +495,9 @@ _Pending._
   `check-docs-consistency` all green. Not yet started: Phase 2.
 
 ### 2026-09-20 (cont.) -- Phase 2 slice 1: the deterministic worker's decision layer
-- Read the private `config-reflect` architecture this phase is modeled on
-  (`services/config-reflect-daemon/docs/architecture.md`,
-  `tools/config-reflect/conflict_dispatch.py`) to ground the reusable-
-  primitives mapping before writing any code, per the Plan's own pointer.
+- Read the private downstream `config-reflect` system's architecture (not
+  reproduced here; see the Plan's own pointer) to ground the reusable-
+  primitives mapping before writing any code.
 - Landed `plugins/customizing-copilot/skills/reviewing-customizations/scripts/projection_reflect.py`:
   the **policy layer** the deterministic sync tool needs on top of the
   already-existing `sync_repository`/`scan_repository` mechanism -- the
