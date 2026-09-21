@@ -1797,3 +1797,31 @@ finding:
   `"detached"` reason and HEAD is provably unchanged afterward). `node
   --test`: 143 tests, 141 pass (2 pre-existing skips), no regressions. All
   guards pass. No version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 15: serialize the dirty-tree check with the sync lock
+
+Round 15 confirmed the detached-HEAD fix resolved and surfaced 1
+"previously missed" HIGH finding on otherwise-unchanged code:
+
+- **Dirty-tree check ran before the worktree sync lock, not inside it:**
+  `attemptWorktreeSync`'s clean-tree probe ran before
+  `withWorktreeSyncLock` was even acquired, so the advertised
+  check-through-sync serialization was never actually atomic against a
+  file becoming dirty in that gap; the plain-git fallback also never
+  rechecked cleanliness at all, so a local `rebase.autoStash` config could
+  let `git rebase` silently stash/pop unreviewed content instead of
+  refusing to run. Extracted the check into `worktreeIsDirty()` and moved
+  it to run FIRST inside the now-lock-wrapped `attemptWorktreeSyncLocked`
+  (the lock is acquired before ANY check now, not just before the rebase
+  check), and added the same immediate-recheck-before-exec pattern to
+  `plainGitSync`'s own rebase call.
+- 3 new/changed tests (an intentionally-dirty tree behind a held lock
+  proves the dirty check now runs after lock acquisition, not before; a
+  dirtied clone proves `plainGitSync`'s pre-rebase recheck catches it;
+  updated the not-a-git-checkout test for the new failure-order). `node
+  --test`: 145 tests, 143 pass (2 pre-existing skips), no regressions. All
+  guards pass. No version bump needed (still `0.1.1-dev36`).
+
+Re-verified the review's other 7 "carried over" items again against
+current file/PR state -- all still genuinely resolved from earlier rounds
+(the same known re-flagging pattern); none required action this round.

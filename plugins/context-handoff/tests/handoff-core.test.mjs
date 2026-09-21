@@ -1276,7 +1276,11 @@ test("attemptWorktreeSync reports not-a-git-checkout for a plain directory", asy
     const result = await attemptWorktreeSync(dir);
     assert.equal(result.attempted, false);
     assert.equal(result.synced, false);
-    assert.match(result.reason, /not a git checkout|git unavailable/);
+    // The worktree sync lock is now acquired BEFORE the dirty-tree check (a
+    // review finding: checking cleanliness before the lock left a window
+    // for a file to become dirty between the check and the locked sync),
+    // so a non-git directory now fails at lock-path resolution first.
+    assert.match(result.reason, /not a git checkout|git unavailable|could not resolve a lock path/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1599,6 +1603,60 @@ test("attemptWorktreeSync rechecks for an in-progress rebase immediately before 
     callCount >= 2,
     `expected rebaseInProgress to be rechecked before the sync exec, saw ${callCount} call(s)`,
   );
+});
+
+test("attemptWorktreeSync's dirty-tree check runs AFTER the worktree lock is held, not before", async () => {
+  // Real regression this guards: checking cleanliness before acquiring the
+  // lock left a window where a file could become dirty between the check
+  // and the locked sync actually running. Proven by holding the lock first
+  // (simulating a concurrent attempt) and confirming the OUTCOME is "lock
+  // busy", not "dirty tree" or a real sync attempt -- if the dirty check
+  // still ran before the lock, this would instead report the tree as clean
+  // and proceed to a real (lock-blocked) attempt with a different reason.
+  const dir = initGitRepo();
+  try {
+    writeFileSync(join(dir, "file.txt"), "one\nuncommitted\n");
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, "");
+    try {
+      const result = await attemptWorktreeSync(dir);
+      assert.equal(result.attempted, false);
+      assert.match(result.reason, /already in progress/);
+    } finally {
+      unlinkSync(lockPath);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("plainGitSync rechecks dirtiness immediately before its own rebase exec (rebase.autoStash safety)", async () => {
+  // Real regression this guards: the fetch above this recheck is another
+  // gap where a file could become dirty, and a local rebase.autoStash
+  // config would otherwise let `git rebase` silently stash/pop that
+  // content instead of refusing to run.
+  const origin = initGitRepo();
+  const clone = mkdtempSync(join(tmpdir(), "context-handoff-sync-clone-"));
+  try {
+    execFileSync("git", ["clone", "-q", origin, clone]);
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: clone });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: clone });
+    writeFileSync(join(origin, "file.txt"), "one\ntwo\n");
+    execFileSync("git", ["add", "."], { cwd: origin });
+    execFileSync("git", ["commit", "-q", "-m", "second"], { cwd: origin });
+    writeFileSync(join(clone, "dirty.txt"), "uncommitted\n");
+    const result = await plainGitSync(clone);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /autoStash|dirty/);
+  } finally {
+    rmSync(origin, { recursive: true, force: true });
+    rmSync(clone, { recursive: true, force: true });
+  }
 });
 
 test("resolveRuntimePython with allowProvision:false fails fast instead of risking the 180s provisioning wait", () => {
