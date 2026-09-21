@@ -23,10 +23,11 @@ class _SessionsMixin:
     ) -> None:
         self.execute_write(
             "INSERT INTO sessions (id, name, agent_name, caller_id, target_dir, "
-            "target_type, status, config_json, target_json, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "target_type, status, config_json, target_json, "
+            "background_recovery_enabled, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (session_id, name, agent_name, caller_id, target_dir, target_type,
-             status, config_json, target_json, now, now),
+             status, config_json, target_json, 1, now, now),
         )
 
     def update_session_status(
@@ -43,11 +44,36 @@ class _SessionsMixin:
                 (status, now, session_id),
             )
 
+    def update_session_stopped(
+        self, session_id: str, now: float, background_recovery_enabled: bool,
+    ) -> None:
+        """Atomically persist STOPPED status + the dormancy gate together.
+
+        Two separate writes (status, then the gate) could leave a row
+        durably 'stopped' but still recovery-enabled if the daemon is
+        interrupted between them -- an interrupted stop must stay
+        conservatively dormant (review of #3058).
+        """
+        self.execute_write(
+            "UPDATE sessions SET status='stopped', pid=NULL, "
+            "background_recovery_enabled=?, updated_at=? WHERE id=?",
+            (1 if background_recovery_enabled else 0, now, session_id),
+        )
+
     def update_session_acp_id(self, session_id: str, acp_session_id: str) -> None:
         """Persist the ACP session ID for resume support."""
         self.execute_write(
             "UPDATE sessions SET acp_session_id=? WHERE id=?",
             (acp_session_id, session_id),
+        )
+
+    def update_session_background_recovery(
+        self, session_id: str, enabled: bool
+    ) -> None:
+        """Persist whether daemon background recovery may touch a session."""
+        self.execute_write(
+            "UPDATE sessions SET background_recovery_enabled=? WHERE id=?",
+            (1 if enabled else 0, session_id),
         )
 
     def update_session_target(

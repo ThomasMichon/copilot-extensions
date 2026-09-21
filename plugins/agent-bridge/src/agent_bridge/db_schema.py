@@ -64,6 +64,16 @@ class _SchemaMixin:
             if col not in existing:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {col_type}")
                 added.append(col)
+        if "background_recovery_enabled" in added:
+            # The v20 migration's stopped-row backfill only runs when
+            # from_version < 20; a DB already stamped 20 but missing this
+            # column (reaching this safety net instead) would otherwise keep
+            # the blanket `DEFAULT 1`, silently re-enabling background
+            # recovery for existing dormant `stopped` rows.
+            conn.execute(
+                "UPDATE sessions SET background_recovery_enabled = "
+                "CASE WHEN status = 'stopped' THEN 0 ELSE 1 END"
+            )
         if added:
             conn.commit()
             log.warning(
@@ -465,3 +475,21 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (19,))
             conn.commit()
             log.info("Schema migrated to version 19: live_sessions.venue")
+
+        if from_version < 20:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
+            if "background_recovery_enabled" not in cols:
+                conn.execute(
+                    "ALTER TABLE sessions ADD COLUMN "
+                    "background_recovery_enabled INTEGER NOT NULL DEFAULT 1"
+                )
+            conn.execute(
+                "UPDATE sessions SET background_recovery_enabled = "
+                "CASE WHEN status = 'stopped' THEN 0 ELSE 1 END"
+            )
+            conn.execute("UPDATE schema_version SET version=?", (20,))
+            conn.commit()
+            log.info(
+                "Schema migrated to version 20: sessions.background_recovery_enabled "
+                "(legacy stopped rows default dormant)"
+            )

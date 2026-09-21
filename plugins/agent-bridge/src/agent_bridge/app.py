@@ -1041,20 +1041,20 @@ async def lifespan(app: FastAPI):
         log.warning("Graceful-cancel on shutdown failed", exc_info=True)
 
     # Shutdown: detach all active sessions (host + child + turn survive for
-    # reattach). `cancel_turn` mirrors the redeploy policy: detach-only by
-    # default, cancel only if `cancel_turns_on_redeploy` is set.
+    # reattach); `cancel_turn` mirrors `cancel_turns_on_redeploy`. Recovery
+    # stays on regardless -- a redeploy detach is never a stop (#3058).
     for session in mgr.list_sessions():
         if session.client and session.client.is_running:
             try:
                 log.info("Detaching session %s on shutdown", session.session_id)
                 await mgr.stop_session(
                     session.session_id,
-                    cancel_turn=mgr.cancel_turns_on_redeploy,
+                    cancel_turn=mgr.cancel_turns_on_redeploy, allow_background_recovery=True,
                 )
             except Exception:
                 log.warning(
-                    "Failed to stop session %s on shutdown",
-                    session.session_id, exc_info=True,
+                    "Failed to stop session %s on shutdown", session.session_id,
+                    exc_info=True,
                 )
 
     # Shutdown: disconnect SSH master connections (after sessions are stopped)

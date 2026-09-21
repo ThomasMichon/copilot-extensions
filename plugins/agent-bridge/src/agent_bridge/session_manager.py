@@ -39,6 +39,12 @@ from .models import (
     ServiceConfig,
     SessionStatus,
 )
+from .session_recovery_dormancy import (
+    _BACKGROUND_RECOVERY_IDLE_DORMANCY_AFTER,  # noqa: F401 -- re-exported for tests
+    _DISCONNECTED_REATTACH_ESCALATE_AFTER,  # noqa: F401 -- re-exported for tests
+    _RecoveryDormancyMixin,
+    _background_recovery_backoff_seconds,  # noqa: F401 -- re-exported for tests
+)
 from .transport import AgentProcess, SpawnTarget, _agent_worktrees_python, _agent_worktrees_root, spawn
 
 log = logging.getLogger("agent-bridge")
@@ -52,14 +58,6 @@ _REQUEST_OVERRIDES_KEY = "_agent_bridge_request_overrides"
 # after this many rounds all fail is the resume surfaced as a failure (the
 # caller's end+create is then the last resort).
 _MAX_RESUME_ROUNDS = 3
-
-# recover_disconnected_hosts() heartbeat-driven reattach (#2998): a remote
-# host is always "presumed alive" until ATTACH proves otherwise, so a
-# genuinely, silently dead far side was retried every 15s heartbeat forever.
-# Past this many CONSECUTIVE failures, force the authoritative liveness check
-# (_recover_remote_host_records) instead of retrying blindly again.
-_DISCONNECTED_REATTACH_ESCALATE_AFTER = 3
-
 
 class _AcpLaunchTiming:
     """Collect low-noise ACP launch sub-step timings for one session launch."""
@@ -702,6 +700,8 @@ class Session:
         # startup reattach path to decide whether a surviving Session Host needs
         # an explicit driver nudge.
         self.restart_status: str | None = None
+        # Gates startup/heartbeat auto-recovery; stop clears it, resume arms it.
+        self.background_recovery_enabled = True
         self.turn_count = 0
         self.context_size: int | None = None
         self.context_used: int | None = None
@@ -831,7 +831,7 @@ class Session:
         )
 
 
-class SessionManager:
+class SessionManager(_RecoveryDormancyMixin):
     """Manages all agent-bridge sessions with SQLite persistence."""
 
     MAX_SESSIONS = 100
@@ -910,6 +910,7 @@ class SessionManager:
         # Consecutive failed reattach attempts per session_id (#2998); see
         # _DISCONNECTED_REATTACH_ESCALATE_AFTER.
         self._disconnected_reattach_failures: dict[str, int] = {}
+        self._disconnected_reattach_retry_at: dict[str, float] = {}
         # Live remote-boundary forwards (session_id -> LocalForward). Held so a
         # CodeSpace/mesh Session Host's -L forward can be refreshed on reattach
         # and torn down on teardown. Empty for local hosts.
@@ -1527,6 +1528,7 @@ class SessionManager:
             session.updated_at = row["updated_at"]
             session.acp_session_id = row.get("acp_session_id")
             session.restart_status = status
+            session.background_recovery_enabled = bool(row.get("background_recovery_enabled", 1))
 
             # Restore the session's declared per-session MCP toolset. Without
             # this, a daemon restart silently drops it forever (it otherwise
@@ -2121,6 +2123,7 @@ class SessionManager:
             session.session_id
             for session in self._sessions.values()
             if session.status not in {SessionStatus.ENDED, SessionStatus.FAILED}
+            and session.background_recovery_enabled
         }
         recovery_budget = min(
             startup_budget / 2,
@@ -2149,6 +2152,9 @@ class SessionManager:
                     "Skipping startup reattach for terminal session %s (%s)",
                     rec.session_id, session.status.value,
                 )
+                continue
+            if session is not None and not session.background_recovery_enabled:
+                log.info("Skipping startup reattach for dormant session %s", rec.session_id)
                 continue
             if (
                 rec.session_id in self._remote_recovery_skipped
@@ -3523,31 +3529,6 @@ class SessionManager:
         self._remote_recovery_skipped.discard(rec.session_id)
         return True
 
-    async def _note_disconnected_reattach_failure(self, rec: Any) -> None:
-        """Count a failed heartbeat reattach; escalate past threshold (#2998).
-
-        A remote host is "presumed alive" until ATTACH proves otherwise, so a
-        silently-dead far side was retried forever. Past
-        ``_DISCONNECTED_REATTACH_ESCALATE_AFTER`` consecutive failures, force
-        the authoritative liveness check instead -- it prunes the record
-        outright if confirmed dead/absent, ending the loop.
-        """
-        failures = self._disconnected_reattach_failures.get(rec.session_id, 0) + 1
-        if failures < _DISCONNECTED_REATTACH_ESCALATE_AFTER:
-            self._disconnected_reattach_failures[rec.session_id] = failures
-            return
-        log.warning(
-            "Session %s failed reattach %d times; forcing an authoritative "
-            "liveness check", rec.session_id, failures,
-        )
-        with contextlib.suppress(Exception):
-            await self._recover_remote_host_records(
-                allow_wake=True, session_ids={rec.session_id},
-            )
-        # Throttle: if truly dead, the check above already pruned it; if
-        # inconclusive, give it a fresh run before escalating again.
-        self._disconnected_reattach_failures.pop(rec.session_id, None)
-
     async def recover_disconnected_hosts(self) -> int:
         """In-session liveness-driven reattach for host-backed sessions (P1).
 
@@ -3573,6 +3554,10 @@ class SessionManager:
             session = self._sessions.get(rec.session_id)
             if session is None or not session.acp_session_id:
                 continue
+            if session.status in {SessionStatus.FAILED, SessionStatus.ENDED}:
+                continue  # terminal sessions wait for explicit recovery (#2379)
+            if not session.background_recovery_enabled:
+                continue
             client = session.client
             if (
                 client is not None
@@ -3595,7 +3580,7 @@ class SessionManager:
                         "host_child_exited": True,
                         "exit_code": client.host_child_exit_code,
                     })
-                self._disconnected_reattach_failures.pop(rec.session_id, None)
+                self._clear_disconnected_reattach_retry_state(rec.session_id)
                 continue
             # A live, running client needs nothing; surface a stall and move on.
             if client is not None and client.is_running:
@@ -3604,7 +3589,7 @@ class SessionManager:
                         "Session %s stalled (channel up, no output) -- "
                         "surfaced, not reattached", rec.session_id,
                     )
-                self._disconnected_reattach_failures.pop(rec.session_id, None)
+                self._clear_disconnected_reattach_retry_state(rec.session_id)
                 continue
             # Transport is down. Only resume if the child is still there; a dead
             # child is a real end, left to normal teardown/GC.
@@ -3630,24 +3615,11 @@ class SessionManager:
             # already holds the lock.
             if session._lifecycle_lock.locked():
                 continue
-            async with session._lifecycle_lock:
-                if (
-                    getattr(rec, "boundary", "local") == "codespace"
-                    and not await self._codespace_host_available(
-                        rec, session, codespace_availability,
-                    )
-                ):
-                    continue
-                if await self._reattach_one(
-                    rec, session, new_status=keep,
-                    send_resume=getattr(rec, "resume_on_reattach", False),
-                ):
-                    self._remote_recovery_inconclusive.discard(rec.session_id)
-                    self._remote_recovery_skipped.discard(rec.session_id)
-                    self._disconnected_reattach_failures.pop(rec.session_id, None)
-                    recovered += 1
-                else:
-                    await self._note_disconnected_reattach_failure(rec)
+            if await self._reattach_or_note_failure(
+                rec, session, keep=keep,
+                codespace_availability=codespace_availability, now=now,
+            ):
+                recovered += 1
         if recovered:
             log.info("Recovered %d disconnected host-backed session(s)", recovered)
         return recovered
@@ -4994,6 +4966,8 @@ class SessionManager:
                 raise RuntimeError(
                     f"Session {session_id} has no ACP session ID -- cannot resume"
                 )
+            self._set_background_recovery_enabled(session, True)
+            self._clear_disconnected_reattach_retry_state(session_id)
 
             # Prefer reattaching to a surviving Session Host (adopt the running
             # child + its in-flight turn) over a fresh child + load_session, so a
@@ -5663,8 +5637,13 @@ class SessionManager:
         # If no turn is live to drain the queue on settle -- and we are not
         # mid-drain -- kick delivery now, resuming a recoverable STOPPED session
         # if needed. A live turn's settle tail (or the post-restart resume) will
-        # drain otherwise.
+        # drain otherwise. Arm recovery HERE, at admission -- not later inside
+        # the kick's resume_session() call -- so an explicit stop racing this
+        # admission cannot leave the session dormant despite a queued prompt
+        # already committed to running it (review of #3058).
         kick_session = session if not turn_live and not self._draining else None
+        if kick_session is not None and session.status == SessionStatus.STOPPED:
+            self._set_background_recovery_enabled(session, True)
         return (
             {
                 "queued": True,
@@ -6127,6 +6106,7 @@ class SessionManager:
     async def stop_session(
         self, session_id: str, *, force: bool = False, reap_host: bool = False,
         cancel_turn: bool = True,
+        allow_background_recovery: bool | None = None,
     ) -> None:
         """Stop a session -- shut down ACP client, preserve state for resume.
 
@@ -6151,6 +6131,9 @@ class SessionManager:
         ``False`` (dotfiles#1661) so the frontend detaches without cancelling --
         the host + child + turn survive for reattach. An explicit operator stop
         keeps the default (a stop IS an explicit host cancel).
+
+        ``allow_background_recovery`` (default: derived from ``cancel_turn``):
+        explicit stops go dormant; redeploy detaches stay auto-recoverable.
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
@@ -6160,18 +6143,28 @@ class SessionManager:
         if not force and session.has_active_background_tasks:
             raise SessionBusyError(session_id, session.active_background_tasks)
 
-        await self._quiesce_session(session, cancel_turn=cancel_turn)
+        if allow_background_recovery is None:
+            allow_background_recovery = not cancel_turn
 
-        # Idle-reaper only: free the Session Host child (a plain stop detaches
-        # to keep it reattachable). Safe here because the session is idle.
-        if reap_host and self._host_index is not None:
-            rec = self._host_index.get(session_id)
-            if rec is not None:
-                self._reap_host_record(rec, "idle reap (#1826)")
+        # Serialize with in-flight reattach/resume (same lock resume_session
+        # uses): otherwise a reattach begun before this stop could land a
+        # live client after stop already persisted dormancy (review of #3058).
+        async with session._lifecycle_lock:
+            await self._quiesce_session(session, cancel_turn=cancel_turn)
 
-        session.status = SessionStatus.STOPPED
-        now = time.time()
-        self._db.update_session_status(session_id, SessionStatus.STOPPED.value, now)
+            # Idle-reaper only: free the Session Host child (a plain stop
+            # detaches to keep it reattachable, safe since the session is idle).
+            if reap_host and self._host_index is not None:
+                rec = self._host_index.get(session_id)
+                if rec is not None:
+                    self._reap_host_record(rec, "idle reap (#1826)")
+
+            session.status = SessionStatus.STOPPED
+            now = time.time()
+            self._db.update_session_stopped(session_id, now, allow_background_recovery)
+            session.background_recovery_enabled = allow_background_recovery
+            if not allow_background_recovery:
+                self._clear_disconnected_reattach_retry_state(session_id)
         # Release the per-worktree ownership reservation (#2912): a stopped
         # owned session is no longer actively controlling the worktree, so free
         # it for a live CLI (or a later fresh owner) to claim.

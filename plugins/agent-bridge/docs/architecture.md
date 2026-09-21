@@ -35,6 +35,7 @@ Copilot CLI sessions (multiple)
 |--------|------|---------|
 | FastAPI app | `app.py` | HTTP server, routing, auth middleware |
 | Session manager | `session_manager.py` | Session lifecycle, turn tracking |
+| Recovery dormancy | `session_recovery_dormancy.py` | Explicit-stop dormancy, reconnect backoff, idle auto-dormancy (mixin) |
 | Transport | `transport.py` | Local + SSH subprocess spawning |
 | SSH carrier | `carrier.py` + vendored `ssh-manager` | One bounded, reconnecting framed stdio carrier per normalized SSH connection identity |
 | ACP agent | `acp_agent.py` | Upstream ACP agent interface (stdio mode) |
@@ -376,7 +377,9 @@ restart does not inherently close the child's pipes.
 - **Idle / stopped sessions survive transparently.** Session metadata, turns,
   events, and host connection data are persisted to SQLite/host state. On startup
   the daemon reattaches to compatible surviving Session Hosts; otherwise it can
-  lazily resume from persisted Copilot state.
+  lazily resume from persisted Copilot state. An explicit `stop` marks the
+  session dormant so startup/heartbeat recovery leaves it alone until an
+  explicit `resume`/`send` re-arms it.
 - **Background CodeSpace recovery does not wake unavailable venues.** Before
   reattaching a disconnected CodeSpace session, the heartbeat reads the exact
   target's state through the GitHub API, once per CodeSpace per pass. It honors
@@ -384,6 +387,10 @@ restart does not inherently close the child's pipes.
   under the other authenticated GitHub accounts. All lookup commands share a
   30-second budget. Unavailable or unverifiable venues remain untouched; a later
   Available result permits recovery. Healthy attached sessions need no check.
+- **Background reconnect is bounded.** Heartbeat-driven reconnect retries back
+  off exponentially up to five minutes. An idle, unwatched session that keeps
+  failing background recovery is parked dormant instead of hammering an
+  unreachable target forever; an explicit `resume` or later `send` wakes it.
 - **Active turns are preserved across frontend restarts when the Session Host
   survives.** A streaming `send`/`read`/`wait` reconnects through the routing
   table and resumes from the caller's acked delivery cursor. If a host is
