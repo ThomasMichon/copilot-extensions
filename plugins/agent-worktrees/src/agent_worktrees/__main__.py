@@ -20985,11 +20985,14 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         # Prints the login on stdout (exit 0); prints nothing + exit 1 when no
         # preference resolves (caller then uses ambient auth). The programmatic
         # primitive agent-codespaces (and other tools) shell out to. The slug is
-        # inferred from the active project when omitted.
+        # inferred from the active project when omitted -- GitHub-only
+        # inference (_infer_active_github_slug), since a provider-generic slug
+        # (e.g. an Azure DevOps "Project/repo") would otherwise be handed to a
+        # GitHub-only resolver and treat "Project" as a bogus owner.
         target = rest[0] if rest and not rest[0].startswith("-") else None
         json_out = "--json" in rest
         if not target:
-            target = _infer_active_repo_slug(cfg.load_config())
+            target = _infer_active_github_slug(cfg.load_config())
         if not target:
             output.err(
                 "Usage: repos account-for [owner|owner/name|registered-repo-name]  "
@@ -21057,7 +21060,11 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         # [--] <gh args>
         # The repo is inferred from the active project when the first token is
         # `--` (an explicit "no target" marker), so `repos gh -- issue list`
-        # works from inside the repo without naming it.
+        # works from inside the repo without naming it. Inference is
+        # GitHub-only (_infer_active_github_slug): a provider-generic slug
+        # (e.g. an Azure DevOps "Project/repo") would otherwise be handed to
+        # the GitHub-only account resolver and treat "Project" as a bogus
+        # owner.
         args = list(rest)
         target = None
         if args and args[0] == "--":
@@ -21073,7 +21080,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             # the rest as gh args.
             gh_args = args
         if target is None:
-            target = _infer_active_repo_slug(cfg.load_config())
+            target = _infer_active_github_slug(cfg.load_config())
         if not target or not gh_args:
             output.err(
                 "Usage: repos gh [owner|owner/name|registered-repo-name] "
@@ -27352,6 +27359,7 @@ def cmd_session_lock(args: argparse.Namespace) -> int:
 from . import handoff_diagnostics, pr_cli, session_tracking_cli
 
 _infer_active_repo_slug = pr_cli._infer_active_repo_slug
+_infer_active_github_slug = pr_cli._infer_active_github_slug
 _pr_watch_usage = pr_cli._pr_watch_usage
 _pr_parse_repo = pr_cli._pr_parse_repo
 _tracked_pr_head_evidence = pr_cli._tracked_pr_head_evidence
