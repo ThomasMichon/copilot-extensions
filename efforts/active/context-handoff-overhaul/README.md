@@ -1319,7 +1319,7 @@ gate land._
   already-open internal items.
 - Corrected mid-session by the operator: `agent-worktrees bind-session`
   must never be run from *within* a related child-repo checkout (this
-  copilot-extensions worktree, worked from an aperture-labs harness
+  copilot-extensions worktree, worked from a separate harness repo's
   session) -- only a harness worktree binds a session; a child worktree is
   *claimed* via its own repo-scoped CLI (`copilot-extensions create`/
   `push-changes`/`create-pr`) or `agent-worktrees related resolve <name>`.

@@ -646,17 +646,23 @@ const session = await joinSession({
         "handoffs with work still left to do, which should trigger immediately " +
         "without asking. The tool may either reuse the current " +
         "session's most recently saved handoff or store fresh markdown passed as " +
-        "`prompt_text` / `prompt`. It then: (1) drops the full handoff markdown " +
-        "in this session's session-state folder; (2) refreshes worktree-visible " +
-        "pending-handoff state when agent-worktrees is available; (3) reuses the " +
-        "existing agent-dispatch task path when available; (4) best-effort pings " +
-        "agent-bridge if present; (5) waits up to 30 seconds for the CUTOVER " +
-        "to start (a status-monitor `handoff_cutover_spawn` acknowledgement) " +
-        "-- not for the successor to fully finish cold-starting and consume " +
-        "the handoff, which legitimately takes longer and is not worth " +
-        "blocking on; (6) reports whether a cutover is already under way, " +
-        "already fully picked up, or neither; (7) prints manual fallback " +
-        "guidance only when truly nothing happened; and " +
+        "`prompt_text` / `prompt`. It always: (1) drops the full handoff " +
+        "markdown in this session's session-state folder; (2) durably stores " +
+        "it (agent-dispatch task or worktree-state file) and notes it in the " +
+        "worktree's own record. ONLY when `.context-handoff/config.yaml`'s " +
+        "`mode` is `auto` (the default is `manual-only`, which skips straight " +
+        "to the final seed) does it additionally: (3) refresh " +
+        "worktree-visible PENDING-HANDOFF state (the signal agent-worktrees' " +
+        "resident monitor watches for) when agent-worktrees is available; " +
+        "(4) best-effort ping agent-bridge if present; (5) wait up to 30 " +
+        "seconds for the CUTOVER to start (a status-monitor " +
+        "`handoff_cutover_spawn` acknowledgement) -- not for the successor to " +
+        "fully finish cold-starting and consume the handoff, which " +
+        "legitimately takes longer and is not worth blocking on; (6) report " +
+        "whether a cutover is already under way, already fully picked up, or " +
+        "neither. It (7) prints manual fallback guidance -- distinctly " +
+        "worded when automatic cutover is simply disabled by mode versus when " +
+        "it was attempted and nothing happened -- and " +
         "(8) ALWAYS ends with the final short handoff prompt/seed. " +
         "It NEVER checks panes or PIDs, spawns or retires sessions, or " +
         "performs any cutover itself.",
