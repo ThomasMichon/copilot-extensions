@@ -196,11 +196,20 @@ private paths).
       `changed` alone**: `sync` can report an empty `changed` list with a
       lock-only update, and `scan --from-settings` can emit findings with no
       file change at all -- treating either as a no-op silently drops lock
-      drift or reports success while hiding a real finding. A non-empty
-      `scan` finding that isn't a plain drift-to-fix routes the same way as
-      a blocking `sync` finding (see conflict routing below), never as a
-      silent pass. Only when there is truly nothing to report does the
-      worker skip opening a PR. **Managed-file
+      drift or reports success while hiding a real finding. **Deterministic
+      finding classification** (by `scan`'s own check name, not ad hoc
+      judgment): `projection-missing` (declared but not yet checked in) and
+      `projection-source-update` (checked-in projection differs from current
+      source) are plain drift -- `sync` resolves them and the worker
+      proceeds to open a PR. `projection-ownership` (untracked or
+      conflicting destination ownership -- the hand-edit/conflict case),
+      `projection-budget` (aggregate size over budget), and
+      `projection-orphan-lock` (a locked destination no plugin still
+      declares, which `scan` explicitly never deletes and marks for manual
+      review) are never auto-resolved or silently folded into a bypass-
+      eligible PR -- each routes to conflict-dispatch below for a human
+      decision. Only when there is truly nothing to report does the worker
+      skip opening a PR. **Managed-file
       conflict routing**: `sync` already returns blocking findings (not a
       git-merge conflict) when it detects a locally hand-edited managed
       projection or an ownership/lock validation failure, leaving `changed`
