@@ -94,7 +94,11 @@ def test_peer_reregisters_after_reap(directory, clock):
     assert [p["instance"] for p in directory.discover_peers()] == ["host-a"]
 
 
-def test_satellite_registers_with_role(directory):
+def test_satellite_registers_with_role(monkeypatch, directory):
+    # The outbound exposure gate defaults closed (satellite-agent-exposure
+    # effort's security steer) -- must be explicitly opened for a satellite to
+    # register at all.
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
     runner = FederationRunner(directory, "sat-1", role="satellite")
     runner.tick()
     sats = directory.discover_peers(role="satellite")

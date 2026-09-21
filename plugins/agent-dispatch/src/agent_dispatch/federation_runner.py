@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from . import config
 from .federation import CoordinatorRendezvous
 from .lease import CoordinatorLease
+from .satellites import ROLE_SATELLITE
 
 if TYPE_CHECKING:
     from .federation import Rendezvous
@@ -84,7 +85,14 @@ class FederationRunner:
       are the active coordinator or a standby (discovery, not election), so the
       *reported* role is the lease outcome, not the static config hint.
     * **presence-only** node (role ``peer`` / ``satellite``) -- register once, then
-      heartbeat; if our entry was TTL-reaped between beats, re-register.
+      heartbeat; if our entry was TTL-reaped between beats, re-register. A
+      ``satellite`` additionally pushes its own live embodiment status (worktrees
+      + per-worktree activity, sourced only from this machine's local bridge
+      sessions -- see :func:`agent_dispatch.tracking.satellite_status_snapshot`)
+      on every register/heartbeat, and is gated: while
+      :func:`agent_dispatch.config.satellite_gate_open` is ``False`` (the
+      default), it never registers at all, and withdraws immediately if the
+      gate closes mid-session (see the ``satellite-agent-exposure`` effort).
 
     :meth:`discover_coordinator` / :meth:`discover_peers` expose the directory reads
     peers use to route claims through the pinned coordinator.
@@ -143,12 +151,38 @@ class FederationRunner:
                 "epoch": state.epoch,
                 "is_active": state.is_active,
             }
+        if self._role == ROLE_SATELLITE and not config.satellite_gate_open():
+            # Outbound exposure gate closed (default): never register or
+            # heartbeat, and withdraw promptly if a registration exists --
+            # an operator closing it mid-session must take effect on the
+            # very next tick, not linger until the directory's own TTL reap
+            # (see the satellite-agent-exposure effort's security steer:
+            # exposure is opt-in, never ambient).
+            #
+            # Always ATTEMPT deregister here, never gate it on self._registered:
+            # this in-process flag only reflects what THIS runner instance did.
+            # A process restart (crash, redeploy, a fresh runner for the same
+            # stable instance id) starts with _registered=False even though a
+            # PRIOR process's registration can still be live in the directory --
+            # gating on the local flag would skip cleanup entirely in that case,
+            # leaving a stale entry exposed until TTL expiry. deregister() is
+            # idempotent (a no-op, returning False, when nothing is registered),
+            # so attempting it unconditionally is always safe.
+            self._rv.deregister(self._instance)
+            self._registered = False
+            return {
+                "instance": self._instance,
+                "role": self._role,
+                "epoch": 0,
+                "is_active": False,
+                "gate_state": "closed",
+            }
         # Presence-only: register once, then heartbeat (re-register if reaped).
         if not self._registered:
             self._register()
         else:
             try:
-                self._rv.heartbeat(self._instance, role=self._role)
+                self._heartbeat()
             except Exception:
                 # Entry expired between beats -> re-assert it.
                 self._register()
@@ -159,14 +193,30 @@ class FederationRunner:
             "is_active": False,
         }
 
+    def _satellite_kwargs(self) -> dict:
+        """Extra register/heartbeat kwargs for a satellite role -- its live
+        embodiment status, sourced only from this machine's own local bridge
+        sessions (see :func:`agent_dispatch.tracking.satellite_status_snapshot`).
+        Empty for every other role: peers/coordinator/standby push no status."""
+        if self._role != ROLE_SATELLITE:
+            return {}
+        from .tracking import satellite_status_snapshot
+
+        worktrees, status = satellite_status_snapshot()
+        return {"worktrees": worktrees, "status": status}
+
     def _register(self) -> None:
         self._rv.register(
             self._instance,
             role=self._role,
             machine=self._machine,
             capabilities=self._capabilities,
+            **self._satellite_kwargs(),
         )
         self._registered = True
+
+    def _heartbeat(self) -> None:
+        self._rv.heartbeat(self._instance, role=self._role, **self._satellite_kwargs())
 
     def discover_coordinator(self) -> dict | None:
         return self._rv.discover_coordinator()

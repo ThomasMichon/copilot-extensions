@@ -1511,6 +1511,25 @@ in seconds; `0` disables), `AGENT_DISPATCH_RUN_DIR` /
 shared coordinator), and `AGENT_DISPATCH_NO_AUTOSTART` (disable lazy local
 coordinator start).
 
+### Federation (`agent-dispatch federation run|status`)
+
+Opt-in cross-machine awareness/claim-plane participation (see the
+`agent-dispatch-federation` effort): `AGENT_DISPATCH_FEDERATION_ROLE`
+(`peer` / `coordinator` / `standby` / `satellite`; unset = federation
+disabled), `AGENT_DISPATCH_FEDERATION_INSTANCE` (directory id override;
+defaults to the resolved machine id), `AGENT_DISPATCH_FEDERATION_INTERVAL`
+(seconds between ticks; default 15), `AGENT_DISPATCH_FEDERATION_BACKEND`
+(`gateway` default / `devtunnels`), `AGENT_DISPATCH_FEDERATION_DEVTUNNEL_BIN`
+/ `AGENT_DISPATCH_FEDERATION_DEVTUNNEL_LABEL` (Dev Tunnels backend only).
+
+**`role=satellite`** additionally pushes this machine's own live worktree/
+embodiment status (never anything reached over SSH), gated by
+`AGENT_DISPATCH_SATELLITE_GATE` -- accepted open values: `open`, `1`, `true`,
+`yes`, `on` (case-insensitive); anything else, including unset, is **closed**.
+The gate defaults **closed**: a configured `role=satellite` node never
+registers, heartbeats, or pushes status until an operator explicitly opens
+it, and it withdraws on the very next tick if the gate closes mid-session.
+
 Bearer scheme matching is case-insensitive. Prefer environment or token-command
 configuration over token flags where process arguments may be observable.
 

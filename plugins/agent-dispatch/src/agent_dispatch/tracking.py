@@ -139,12 +139,12 @@ def _bridge_resolve_argv(worktree: str, *, machine: str | None) -> list[str] | N
 
 
 def _run_capture(
-    argv: list[str], *, timeout: float
+    argv: list[str], *, timeout: float, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a passive probe without allocating a headed Windows console."""
     if os.path.basename(argv[0]).casefold() in {"ssh", "ssh.exe"}:
         return run_ssh_capture(argv, timeout=timeout)
-    return run_background_capture(argv, timeout=timeout)
+    return run_background_capture(argv, timeout=timeout, env=env)
 
 
 def resolve_live_session(
@@ -195,12 +195,28 @@ def resolve_live_session(
     return data
 
 
-def list_local_body_sessions(*, timeout: float = 3.0) -> list[dict[str, Any]]:
-    """List local headless sessions; observation failures degrade to no rows."""
+def list_local_body_sessions(
+    *, timeout: float = 3.0, ensure_daemon: bool = True
+) -> list[dict[str, Any]]:
+    """List local headless sessions; observation failures degrade to no rows.
+
+    ``ensure_daemon`` (default ``True``, preserving prior behavior): the
+    underlying ``agent-bridge --json sessions`` CLI command boots the local
+    daemon on demand if it isn't already running (its own ``_get_client()``
+    default). Pass ``ensure_daemon=False`` for a genuinely passive,
+    unattended probe (e.g. a periodic background tick) that must never start
+    a daemon merely by checking whether anything is running -- this sets
+    ``AGENT_BRIDGE_NO_ENSURE=1`` for the subprocess only, degrading cleanly
+    to no rows when the daemon isn't already up rather than booting one.
+    """
     prefix = agent_bridge_launch_prefix()
     if prefix is None:
         return []
-    proc = _run_capture([*prefix, "--json", "sessions"], timeout=timeout)
+    env = None
+    if not ensure_daemon:
+        env = dict(os.environ)
+        env["AGENT_BRIDGE_NO_ENSURE"] = "1"
+    proc = _run_capture([*prefix, "--json", "sessions"], timeout=timeout, env=env)
     if proc is None:
         return []
     if proc.returncode != 0 or not proc.stdout.strip():
@@ -222,6 +238,72 @@ def embodiment_overlay(session: dict[str, Any] | None) -> dict[str, Any] | None:
     return overlay or None
 
 
+#: Session lifecycle states that still *occupy* a worktree (resumable) but are
+#: not currently doing live work -- a satellite must not advertise these as an
+#: active/embodied worktree (a stopped session is retired-but-resumable, not
+#: "the agent is here right now").
+_TERMINAL_SESSION_STATUSES = frozenset({"stopped", "ended", "failed"})
+
+
+def satellite_status_snapshot(
+    *, timeout: float = 3.0
+) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    """The (``worktrees``, ``status``) pair a ``role=satellite`` federation node
+    pushes on register/heartbeat (see the ``satellite-agent-exposure`` effort's
+    Phase 1 item C -- "pushing each live worktree's embodiment status").
+
+    Reads **only this machine's own** local headless sessions via
+    :func:`list_local_body_sessions` (the same local ``agent-bridge --json
+    sessions`` call the embodiment overlay already uses) -- no SSH, no new
+    outbound reach, and nothing opened for anyone to reach *in*.
+    ``ensure_daemon=False``: a periodic federation tick is a passive
+    background probe, not an interactive request for accurate status, so it
+    must never *boot* a local agent-bridge daemon merely to check whether
+    anything is running -- it degrades to ``([], {})`` when the daemon isn't
+    already up, exactly as if ``agent-bridge`` itself were absent.
+
+    Two things the raw session list requires filtering for before it's fit to
+    publish as "what's live right now": it can carry **resumable-but-stopped**
+    sessions (``status`` in :data:`_TERMINAL_SESSION_STATUSES`) alongside truly
+    active ones -- those are skipped, not advertised as active worktrees. And a
+    worktree can appear **more than once** after a session roll (a retired
+    predecessor plus its successor); since the bridge's list is newest-first,
+    only the *first* row seen per ``worktree_id`` is kept so an older row can
+    never silently overwrite the newer one's status. A session missing a
+    resolvable ``worktree_id`` or whose overlay is empty is also skipped; an
+    unreachable/absent ``agent-bridge`` degrades to ``([], {})`` exactly like
+    the rest of this module's best-effort tracking.
+    """
+    worktrees: list[str] = []
+    status: dict[str, dict[str, Any]] = {}
+    seen: set[str] = set()
+    for session in list_local_body_sessions(timeout=timeout, ensure_daemon=False):
+        worktree_id = session.get("worktree_id")
+        if not isinstance(worktree_id, str) or not worktree_id:
+            continue
+        if worktree_id in seen:
+            continue
+        # Mark seen BEFORE the terminal-status filter: the newest row for a
+        # worktree is authoritative regardless of whether it passes the
+        # live-status filter -- if the newest row is stopped/ended/failed, an
+        # OLDER (and possibly still "live"-looking) row for the same worktree
+        # must not be resurrected from further down the list.
+        seen.add(worktree_id)
+        session_status = str(session.get("status") or "").lower()
+        if session_status in _TERMINAL_SESSION_STATUSES:
+            continue
+        overlay = embodiment_overlay(session)
+        if overlay is None:
+            continue
+        entry = dict(overlay)
+        activity = session_activity(session)
+        if activity is not None:
+            entry["activity"] = activity
+        worktrees.append(worktree_id)
+        status[worktree_id] = entry
+    return worktrees, status
+
+
 def session_activity(session: dict[str, Any] | None) -> str | None:
     """Map an agent-bridge session snapshot to the task activity vocabulary."""
     if not session:
@@ -231,11 +313,22 @@ def session_activity(session: dict[str, Any] | None) -> str | None:
     turn_state = str(session.get("turn_state") or "").lower()
     if liveness == "stalled":
         return "STALLED"
-    if liveness == "active" or turn_state == "running":
+    # "disconnected" (agent-bridge __main__.py's own vocabulary: "DISCONNECTED
+    # - transport down") must never be reported ACTIVE, however stale/live-
+    # looking the rest of the snapshot's fields are -- a dead transport can
+    # still carry a lingering turn_state=="running" from before it dropped,
+    # particularly now that satellite_status_snapshot() can publish this
+    # fleet-wide. Guarded on every ACTIVE-producing branch below, not just
+    # the last one.
+    if liveness != "disconnected" and (liveness == "active" or turn_state == "running"):
         return "ACTIVE"
     if status == "idle" or liveness == "idle" or turn_state == "idle":
         return "IDLE"
-    if status in {"starting", "running"} and liveness not in {"idle", "stalled"}:
+    if status in {"starting", "running"} and liveness not in {
+        "idle",
+        "stalled",
+        "disconnected",
+    }:
         return "ACTIVE"
     return None
 
