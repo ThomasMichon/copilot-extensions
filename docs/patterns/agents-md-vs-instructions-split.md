@@ -70,6 +70,20 @@ For any paragraph of agent-facing guidance, ask:
    dynamic surface elsewhere -- e.g. odsp-web-harness's own
    never-pre-patch-another-contributor's-PR rule is a durable policy
    decision, not a derivable fact, and correctly lives in its `AGENTS.md`.
+4. **Is this a known failure symptom an agent can't phrase-match its way
+   into?** Skills are pull-only -- they trigger only once an agent has
+   already decided what it wants to *do*, so a category like "my outbound
+   claim is blocking finalize" or "a dispatched task is live but
+   structurally blocked" is undiscoverable if it exists only behind a skill
+   trigger. If yes, it needs an **ambient index row** in `AGENTS.md` or a
+   plugin's static `.github/instructions` projection -- naming the exact
+   symptom and the command/skill/doc that resolves it -- not just a skill
+   whose description happens to mention it. See
+   `efforts/active/ambient-guidance-navigability` (the audit that motivated
+   this question) and `customizing-copilot:reviewing-customizations`'
+   `troubleshooting-index.json` registry + coverage guard, which enforces
+   that every category a plugin claims to own is actually backed by such a
+   row.
 
 A misplacement in either direction is a defect:
 
@@ -124,3 +138,7 @@ leaving placement to each contributor's judgment call.
   worked PR-conduct precedent this pattern generalizes.
 - `ThomasMichon/copilot-extensions#2825` -- the tracking issue for the
   repo-wide audit this pattern's heuristic is meant to drive.
+- `efforts/active/ambient-guidance-navigability/README.md` -- the coverage
+  half of this question: a fail-closed registry + guard test proving every
+  claimed troubleshooting category actually has an ambient pointer row, not
+  just a skill trigger.

@@ -140,6 +140,41 @@ symlink/reparse indirection. It never deletes repository-owned files; orphaned
 projections and old managed regions are review findings for a human or ordinary
 repository change to remove.
 
+### Troubleshooting-category coverage registry
+
+A plugin may additionally ship a `troubleshooting-index.json` at its payload
+root, declaring the "what do I do when X happens" failure-mode categories it
+claims to own an ambient answer for (e.g. `agent-worktrees` claiming
+`claims-ledger`, `resource-obligations`):
+
+```json
+{
+  "schema": "copilot-extensions.troubleshooting-index",
+  "version": 1,
+  "categories": [
+    {
+      "id": "claims-ledger",
+      "summary": "Inspect or release an outbound claim on another worktree.",
+      "pointer": "`claims` command / `tracing-claimant-graphs` skill",
+      "markers": ["claims-ledger", "tracing-claimant-graphs"]
+    }
+  ]
+}
+```
+
+This registry is opt-in, independent of `instruction-projections.json`, and
+targets exactly the gap the
+`efforts/active/ambient-guidance-navigability` audit found: skills are
+pull-only, so a category with no ambient pointer is undiscoverable to an
+agent that doesn't already know the skill exists. The suite's guard test
+(`plugins/customizing-copilot/tests/test_troubleshooting_index.py`, backed by
+`scripts/troubleshooting_index.py`) fails closed the moment a plugin declares
+a category with no matching `markers` string present in any of that plugin's
+own static instruction-projection templates -- a category claimed but not
+actually indexed anywhere ambient. See
+[`docs/patterns/agents-md-vs-instructions-split.md`](../../../../docs/patterns/agents-md-vs-instructions-split.md)'s
+fourth audit question for when a category belongs in this registry.
+
 ### Session guidance conformance
 
 For a complete migration rather than a point-in-time scan, follow
