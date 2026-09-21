@@ -169,6 +169,13 @@ class WorktreeDiscoveryCache:
         self._archive_probe_inflight: dict[
             str, asyncio.Task[tuple[str, AgentConfig] | None]
         ] = {}
+        # Coalesce concurrent same-id live-existence probes (#6744) onto one
+        # in-flight task, same rationale as ``_archive_probe_inflight`` above
+        # but returning the full entry (needed for the worktree's on-disk
+        # path), and not restricted to archived records.
+        self._live_probe_inflight: dict[
+            str, asyncio.Task["tuple[str, _WorktreeEntry] | None"]
+        ] = {}
 
     def configure(self, *, interval: float) -> None:
         """Update the discovery interval (must be called before start)."""
@@ -202,11 +209,13 @@ class WorktreeDiscoveryCache:
             except asyncio.CancelledError:
                 pass
         # Same shutdown discipline for classify backfills
-        # (#discussion_r4004943069) and in-flight archived-owner probes:
-        # cancel/await so neither outlives the rest of application shutdown.
+        # (#discussion_r4004943069) and in-flight archived-owner / live
+        # probes: cancel/await so none outlives the rest of application
+        # shutdown.
         for pending in (
             [t for t in self._backfill_tasks if not t.done()],
             [t for t in self._archive_probe_inflight.values() if not t.done()],
+            [t for t in self._live_probe_inflight.values() if not t.done()],
         ):
             for task in pending:
                 task.cancel()
@@ -240,6 +249,29 @@ class WorktreeDiscoveryCache:
             task.add_done_callback(_evict)
         # Shield: a cancelled caller must never cancel the shared task out
         # from under other concurrent callers; eviction is done-callback-only.
+        return await asyncio.shield(task)
+
+    async def probe_live(
+        self, worktree_id: str, resolver: AgentResolver,
+    ) -> tuple[str, "_WorktreeEntry"] | None:
+        """Single-flight live-existence probe (#6744): coalesces concurrent
+        callers for the same ``worktree_id`` onto one in-flight task, same
+        rationale as :meth:`probe_archived` but returning the full entry
+        (needed for the worktree's on-disk path) and not restricted to
+        archived records -- covers a fresh, uncached, still-active worktree
+        too. Used as the fallback when the fleet-wide crawl cache doesn't
+        (yet) know about this worktree, so the cache never gates existence.
+        """
+        task = self._live_probe_inflight.get(worktree_id)
+        if task is None:
+            task = asyncio.create_task(_probe_live_worktree(worktree_id, resolver))
+            self._live_probe_inflight[worktree_id] = task
+
+            def _evict(t: asyncio.Task, wid: str = worktree_id) -> None:
+                if self._live_probe_inflight.get(wid) is t:
+                    del self._live_probe_inflight[wid]
+
+            task.add_done_callback(_evict)
         return await asyncio.shield(task)
 
     async def crawl_if_empty(self) -> None:
@@ -822,6 +854,16 @@ async def _start_fresh_worktree_session(
             entry, owner_agent = match, agent_name
             break
     if entry is None or owner_agent is None:
+        # Cache-blind / stale-cache case (#6744): the fleet-wide crawl cache
+        # is only ever a performance shortcut for "does this worktree
+        # exist" -- never the authority. A worktree the cache hasn't seen
+        # yet (fresh daemon start, or created after the last crawl) must
+        # still resolve via a targeted, live, single-worktree query before
+        # this falls through to a 404.
+        probed = await cache.probe_live(worktree_id, resolver)
+        if probed is not None:
+            owner_agent, entry = probed
+    if entry is None or owner_agent is None:
         return None
 
     lock = _fresh_start_locks.setdefault(worktree_id, asyncio.Lock())
@@ -1274,6 +1316,63 @@ def _worktree_id_in_payload(raw: str | None, worktree_id: str) -> bool:
     return isinstance(worktrees, list) and any(
         isinstance(wt, dict) and wt.get("id") == worktree_id for wt in worktrees
     )
+
+
+async def _probe_live_worktree(
+    worktree_id: str, resolver: AgentResolver,
+) -> tuple[str, _WorktreeEntry] | None:
+    """Fan a targeted, single-worktree ``list --worktree-id`` probe across
+    every eligible agent, returning the first match's owner + entry (#6744).
+
+    Mirrors :func:`_probe_archived_owner`'s fan-out (returning on first
+    match instead of waiting on a slow/unreachable agent), but is not
+    restricted to ``--tracking-status archived`` -- a fresh, genuinely-live
+    worktree the crawl cache simply hasn't seen yet (cache-blind or
+    stale-cache) must resolve here too, not only a tombstoned one. Returns
+    the full ``_WorktreeEntry`` (needed for the worktree's on-disk path),
+    not just the owning agent. Only ever called single-flight via
+    :meth:`WorktreeDiscoveryCache.probe_live`.
+    """
+    eligible = [
+        (name, cfg) for name, cfg in resolver.agents.items()
+        if cfg.project and cfg.worktree_discovery
+    ]
+    if not eligible:
+        return None
+    args = [
+        "list", "--json", "--mux-details", "--all",
+        "--tracking-status", "all", "--worktree-id", worktree_id,
+    ]
+    tasks = {
+        asyncio.create_task(_run_for_agent(name, cfg, resolver, args)): name
+        for name, cfg in eligible
+    }
+    pending = set(tasks)
+    match: tuple[str, _WorktreeEntry] | None = None
+    try:
+        while pending and match is None:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                if task.cancelled() or task.exception() is not None:
+                    continue
+                raw = task.result()
+                if raw is None:
+                    continue
+                agent_name = tasks[task]
+                found = next(
+                    (e for e in _parse_worktree_list(raw, agent_name)
+                     if e.id == worktree_id),
+                    None,
+                )
+                if found is not None:
+                    match = (agent_name, found)
+                    break
+        return match
+    finally:
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
 
 @router.get("/api/v1/worktrees/{worktree_id}/sessions")
