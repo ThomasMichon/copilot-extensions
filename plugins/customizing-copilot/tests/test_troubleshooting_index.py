@@ -20,6 +20,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.guard
+
 _SCRIPTS = (
     Path(__file__).resolve().parents[1]
     / "skills"

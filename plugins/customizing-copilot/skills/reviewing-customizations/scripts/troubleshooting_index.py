@@ -79,7 +79,8 @@ def load_declaration(path: Path) -> list[Category]:
         raise TroubleshootingIndexError(
             f"{path}: schema must be {DECLARATION_SCHEMA!r}"
         )
-    if raw.get("version") != DECLARATION_VERSION:
+    version = raw.get("version")
+    if not isinstance(version, int) or isinstance(version, bool) or version != DECLARATION_VERSION:
         raise TroubleshootingIndexError(
             f"{path}: version must be {DECLARATION_VERSION!r}"
         )
@@ -149,6 +150,7 @@ def _projection_template_bodies(plugin_root: Path) -> list[str]:
         return []
 
     bodies: list[str] = []
+    plugin_root_resolved = plugin_root.resolve()
     for projection in projections:
         if not isinstance(projection, dict):
             continue
@@ -156,10 +158,19 @@ def _projection_template_bodies(plugin_root: Path) -> list[str]:
         if not isinstance(template, str):
             continue
         template_path = plugin_root / template
-        if not template_path.is_file():
+        try:
+            resolved = template_path.resolve()
+        except OSError:
+            continue
+        if resolved != plugin_root_resolved and plugin_root_resolved not in resolved.parents:
+            # Refuse a declared template path that escapes the plugin root
+            # (e.g. "../../other-plugin/...") -- coverage must never be
+            # satisfied by a marker in a file the plugin doesn't itself ship.
+            continue
+        if not resolved.is_file():
             continue
         try:
-            bodies.append(template_path.read_text(encoding="utf-8"))
+            bodies.append(resolved.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError):
             continue
     return bodies

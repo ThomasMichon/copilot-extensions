@@ -167,7 +167,7 @@ repo's own effort.
       category has an ambient pointer row -- fails closed if a category is
       claimed but not indexed.
 - [x] Extend `docs/patterns/agents-md-vs-instructions-split.md`'s audit
-      heuristic with a third question: "Is this a known failure symptom an
+      heuristic with a fourth question: "Is this a known failure symptom an
       agent can't phrase-match its way into? If yes, it needs an ambient
       index row, not just a skill trigger."
 
