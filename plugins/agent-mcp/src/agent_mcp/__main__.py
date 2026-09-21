@@ -11,6 +11,10 @@ Subcommands:
                                 direct-bridge fallback (the #744 multiplexer child).
   validate <name|FILE>          Parse + schema-check a bridge config (no run).
   status                        Show prerequisites and available bridges.
+  clean-tool-cache               Detect/purge stale-schema entries in the
+                                persisted MCP tool-snapshot cache (the runtime
+                                only age-expires entries itself, never
+                                schema-mismatched ones).
   call <bridge> <tool> [args]   One-shot: invoke one upstream tool, print result.
   source-digest <bridge>        Print the keyed effective source fingerprint.
   materialize <bridge>          Project the upstream catalog into a CLI stub fleet.
@@ -159,6 +163,86 @@ def _cmd_installer_readiness(_args: argparse.Namespace) -> int:
             candidates.append((normalize_bridge_name(path.name), path))
     candidates.extend(discover_plugin_bridge_candidates())
     return emit(evaluate(candidates))
+
+
+# ---------------------------------------------------------------------------
+# clean-tool-cache -- purge stale-schema MCP tool-snapshot cache entries
+# ---------------------------------------------------------------------------
+
+def _cmd_clean_tool_cache(args: argparse.Namespace) -> int:
+    from . import tool_cache_maintenance as tcm
+
+    cache_dir = tcm.resolve_cache_dir(args.cache_dir)
+    if cache_dir is None or not cache_dir.is_dir():
+        result = {
+            "cache_dir": str(cache_dir) if cache_dir else None,
+            "found": False,
+            "total_entries": 0,
+            "stale_entries": 0,
+            "stale_bytes": 0,
+            "deleted": 0,
+            "applied": args.apply,
+        }
+        if args.json:
+            print(json.dumps(result))
+        else:
+            print(
+                f"No MCP tool-cache directory found"
+                f"{f' at {cache_dir}' if cache_dir else ''} -- nothing to do "
+                f"(expected on a fresh install, or a machine that has never "
+                f"run an MCP-equipped session)."
+            )
+        return 2
+
+    scanned = tcm.scan(cache_dir)
+    stale = scanned.stale_entries
+    deleted = 0
+    delete_errors: list[str] = []
+    if args.apply:
+        for e in stale:
+            try:
+                e.path.unlink()
+                deleted += 1
+            except OSError as error:
+                delete_errors.append(f"{e.path}: {error}")
+
+    if not args.quiet and not args.json:
+        print(f"MCP tool cache: {cache_dir}")
+        print(f"  {len(scanned.entries)} entr{'y' if len(scanned.entries) == 1 else 'ies'} total")
+        for version, count in sorted(scanned.version_counts.items(), key=lambda kv: -kv[1]):
+            marker = " (current)" if version == scanned.current_version else " (STALE)"
+            print(f"    schemaVersion {version}: {count}{marker}")
+        unparseable = [e for e in scanned.entries if e.parse_error]
+        if unparseable:
+            print(f"    unparseable/malformed: {len(unparseable)} (STALE)")
+        stale_bytes = sum(e.size for e in stale)
+        print(f"  {len(stale)} stale entr{'y' if len(stale) == 1 else 'ies'} ({stale_bytes:,} bytes)")
+        if args.apply:
+            print(f"  Deleted {deleted} of {len(stale)} stale entries")
+            for error in delete_errors:
+                print(f"  \u2717 Failed to delete {error}")
+        elif stale:
+            print("  Dry run -- pass --apply to actually delete these entries")
+
+    if args.json:
+        print(json.dumps({
+            "cache_dir": str(cache_dir),
+            "found": True,
+            "total_entries": len(scanned.entries),
+            "current_schema_version": scanned.current_version,
+            "schema_version_counts": dict(scanned.version_counts),
+            "stale_entries": len(stale),
+            "stale_bytes": sum(e.size for e in stale),
+            "deleted": deleted,
+            "delete_errors": delete_errors,
+            "applied": args.apply,
+        }))
+
+    if delete_errors:
+        return 1
+    if stale and not args.apply:
+        return 1
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -562,6 +646,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit the plugin-owned installer/readiness contract state as JSON",
     )
     p_readiness.set_defaults(func=_cmd_installer_readiness)
+
+    p_clean_cache = sub.add_parser(
+        "clean-tool-cache",
+        help="detect/purge stale-schema entries in the persisted MCP "
+             "tool-snapshot cache (the runtime itself only age-expires "
+             "entries, never schema-mismatched ones)",
+    )
+    p_clean_cache.add_argument("--apply", action="store_true",
+                               help="actually delete stale entries (default: report only)")
+    p_clean_cache.add_argument("--cache-dir",
+                               help="override the auto-detected mcp-tools cache directory")
+    p_clean_cache.add_argument("--json", action="store_true",
+                               help="emit a JSON summary instead of text")
+    p_clean_cache.add_argument("--quiet", action="store_true",
+                               help="suppress per-file detail (summary only)")
+    p_clean_cache.set_defaults(func=_cmd_clean_tool_cache)
 
     p_call = sub.add_parser(
         "call", help="one-shot: invoke a single upstream tool and print its result")

@@ -1099,6 +1099,40 @@ Re-running `materialize` rebuilds the tree in a temp dir and swaps it in
 atomically, so it doubles as a drift refresh (no partial-write window). The
 bridge's `tools:` allow/deny filter gates which tools are materialized.
 
+### `clean-tool-cache` — purge stale-schema MCP tool-snapshot cache entries
+
+```sh
+agent-mcp clean-tool-cache [--apply] [--cache-dir PATH] [--json] [--quiet]
+```
+
+Copilot CLI's own runtime persists each MCP server's `tools/list` result to
+disk (`mcp-tools/` under its cache home) so a session doesn't re-discover
+tools cold on every startup. The runtime's loader purges an entry once it
+ages out (14 days), but it never purges one whose `schemaVersion` no longer
+matches what the running CLI writes (e.g. after a CLI upgrade bumps the
+schema) — those entries are re-read, re-parsed, and re-rejected on *every*
+cache hydration attempt, forever, wasting disk I/O inside the runtime's own
+2-second hydration timeout budget.
+
+`clean-tool-cache` detects and (with `--apply`) purges those dead entries.
+The "current" schema version is never hardcoded — it's the *maximum* seen
+among cached entries, since the runtime only ever increments the schema
+version on a CLI upgrade, so the highest value present is always current
+regardless of how much stale garbage has accumulated (a machine long overdue
+for a cleanup can easily have more stale entries than current ones; treating
+the *most common* version as authoritative would silently pick the wrong one
+and delete good, current entries instead).
+
+```sh
+agent-mcp clean-tool-cache                 # report only, default (safe)
+agent-mcp clean-tool-cache --apply          # actually delete stale entries
+agent-mcp clean-tool-cache --json           # machine-readable summary
+```
+
+Exit codes: `0` nothing stale (or `--apply` cleaned everything found); `1`
+stale entries found and not fully cleaned (dry-run, or a delete failed); `2`
+the cache directory couldn't be resolved/read (expected on a fresh install).
+
 ### `serve` — the resident warmth tier
 
 ```sh
