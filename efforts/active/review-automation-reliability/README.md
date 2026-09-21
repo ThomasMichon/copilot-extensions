@@ -171,7 +171,14 @@ re-queuing (or re-superseding) the same blocked issue.
   one repository's private declaration) should refuse a close/merge mutation
   against a PR whose author differs from the acting identity, as a structural
   guard rather than relying on prose alone -- prose guidance was already
-  explicit here and was still violated.
+  explicit here and was still violated. **Assessed 2026-09-20** (from the
+  `declarative-dispatch-engine-generalization` effort, which owns this
+  question per the reviewer vision's See Also): feasible, but not with
+  today's worker-identity schema alone -- see that effort's dated journal
+  entry for the full assessment and its recommended follow-up shape. Left
+  unchecked here deliberately: an assessment is not the same as landing the
+  guard, and this repo's own house style requires a reviewed design slice
+  before implementation of a mechanism this consequential.
 - [ ] The label is currently maintainer-removed only (manual unblock). Add an
   automatic recheck: a lightweight periodic pass over
   `blocked-on-external-pr`-labeled issues that reads back the referenced PR
