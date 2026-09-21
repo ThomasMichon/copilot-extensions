@@ -68,3 +68,26 @@ reader can compare what changed and why.
 | 19 | routed | marketplace-scoped-installations | accepted into Phase 7 | corrected owner from initial "unclear" -- the audit scope squarely belongs to the install-cell/install-contract surface |
 
 *(Phase 2 revalidation, 2026-09-20: all 19 raw candidates re-checked against current source/target effort text. 8 were stale on second read (4 already delivered since the initial scan -> `closed-obsolete`; 1 mis-routed owner corrected to its own already-covering effort). 8 accepted `routed` candidates were placed into their target effort's own "Reconcile deferred backlog" phase (adding that phase where it did not yet exist: `agent-machines-declarative-control-plane` Phase 5, `account-aware-operations` Phase 5, `review-automation-reliability` Phase 11). 4 remain `residual` under `migration-intake` itself: no fitting canonical domain owner was found among the known domain plans. No public GitHub issues were created -- Phase 3's "create or update a public issue" step still requires domain-owner acceptance of each newly-added Plan item, which happens through that domain effort's own normal review, not this ledger.)*
+
+## Phase 2 correction (2026-09-20, post-merge)
+
+A post-merge self-audit found that candidates **#17** and **#19** were
+mis-routed: both were sent to `marketplace-scoped-installations`' Phase 7
+as new backlog items, but each already has its own pre-existing, more
+detailed **Draft** effort covering the identical scope --
+`tiered-payload-provisioning` (Windows `stamp` action, Plan line ~260) for
+#17, and `vendored-installer-engine` (Phase 0 — Audit the real shared
+surface) for #19. Routing them into `marketplace-scoped-installations` too
+would have created the exact two-owner situation the Intake Contract's
+single-primary-owner rule forbids.
+
+| # | Corrected disposition | Corrected owner | Outcome | What changed vs. Phase 2 revalidation |
+|---|--------------------------|--------------------|---------|-------------------------------|
+| 17 | superseded | tiered-payload-provisioning | already owned by its own Draft effort's Plan; no new item needed | corrected from `routed`/`marketplace-scoped-installations` -- removed the duplicate Phase 7 bullet added in the Phase 2 pass |
+| 19 | superseded | vendored-installer-engine | already owned by its own Draft effort's Phase 0; no new item needed | corrected from `routed`/`marketplace-scoped-installations` -- removed the duplicate Phase 7 bullet added in the Phase 2 pass |
+
+Lesson for future passes: before routing a candidate to a *large, active*
+domain effort's generic backlog phase, first check whether a smaller,
+dedicated (possibly still-Draft) effort already exists for that exact
+scope -- a Draft effort is still a real owner, not an absence of one.
+
