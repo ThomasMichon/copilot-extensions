@@ -222,6 +222,39 @@ def embodiment_overlay(session: dict[str, Any] | None) -> dict[str, Any] | None:
     return overlay or None
 
 
+def satellite_status_snapshot(
+    *, timeout: float = 3.0
+) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    """The (``worktrees``, ``status``) pair a ``role=satellite`` federation node
+    pushes on register/heartbeat (see the ``satellite-agent-exposure`` effort's
+    Phase 1 item C -- "pushing each live worktree's embodiment status").
+
+    Reads **only this machine's own** local headless sessions via
+    :func:`list_local_body_sessions` (the same local ``agent-bridge --json
+    sessions`` call the embodiment overlay already uses) -- no SSH, no new
+    outbound reach, and nothing opened for anyone to reach *in*. A session
+    missing a resolvable ``worktree_id`` or whose overlay is empty is skipped;
+    an unreachable/absent ``agent-bridge`` degrades to ``([], {})`` exactly
+    like the rest of this module's best-effort tracking.
+    """
+    worktrees: list[str] = []
+    status: dict[str, dict[str, Any]] = {}
+    for session in list_local_body_sessions(timeout=timeout):
+        worktree_id = session.get("worktree_id")
+        if not isinstance(worktree_id, str) or not worktree_id:
+            continue
+        overlay = embodiment_overlay(session)
+        if overlay is None:
+            continue
+        entry = dict(overlay)
+        activity = session_activity(session)
+        if activity is not None:
+            entry["activity"] = activity
+        worktrees.append(worktree_id)
+        status[worktree_id] = entry
+    return worktrees, status
+
+
 def session_activity(session: dict[str, Any] | None) -> str | None:
     """Map an agent-bridge session snapshot to the task activity vocabulary."""
     if not session:
