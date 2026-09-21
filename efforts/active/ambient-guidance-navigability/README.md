@@ -262,6 +262,22 @@ private paths).
       review-only until explicitly added to the allowlist) -- an
       untrustworthy source can be perfectly reproducible and still unsafe to
       auto-merge.
+
+      **2026-09-20: the orchestration half of this item is built and
+      tested** -- `scripts/projection_sync_worker.py`'s `run_sync_pass()`
+      composes `sync`/`scan`/`projection_reflect` into exactly one
+      deterministic pass per call (the correct actionable-change trigger,
+      fail-closed classification, and managed-file-conflict routing above
+      are all exercised by its test suite), returning a single `SyncOutcome`
+      a caller never needs a second invocation of this tool to complete --
+      closing the "onerous multi-round-trip PR" failure mode this item
+      warns against. **What remains open** is solely the deep byte-exact
+      recompute-against-a-pinned-artifact verification described above,
+      which depends on the still-missing marketplace-source commit resolver
+      (tracked in #3132) to actually populate `projection_reflect.py`'s
+      `pinned_commits` map for a real run -- `run_sync_pass()` already wires
+      that parameter through today, so wiring in a real resolver's output
+      requires no further orchestration change here.
 - [x] **Conflict-dispatch primitive**: a reusable helper (candidate home:
       `agent-dispatch`, since dispatch itself is a copilot-extensions
       plugin) generalizing `config-reflect`'s `conflict_dispatch.py` pattern
@@ -787,3 +803,48 @@ guessing.
   `pinned_commits` for a real sync worker. That remains its own follow-up
   slice -- this change only makes the eventual resolver's integration a
   parameter, not a schema migration.
+
+### 2026-09-20 (cont.) -- Landed the deterministic sync tool (one PR per run)
+
+Operator's explicit driving constraint for this slice: whatever landed next
+must not be so onerous it forces multiple round-trip PRs just to finish
+syncing a single upstream change -- it must be one-and-done per change.
+That constraint pointed directly at Phase 2's one remaining unchecked Plan
+item, the **deterministic sync tool** itself: `sync_repository`,
+`scan_repository`, and `projection_reflect`'s policy layer existed, but
+nothing composed them into a single callable a scheduler could invoke once
+per run and trust to be finished.
+
+- Added `scripts/projection_sync_worker.py`. `run_sync_pass()` runs `sync`
+  (the only mutation -- writes/locks whatever it can safely resolve) then
+  `scan` (validates the result, reports everything unresolved) **exactly
+  once**, reads back the changed lock entries, and calls
+  `projection_reflect.bypass_decision()` to produce a single `SyncOutcome`.
+  A caller reads `needs_pr` / `bypass_eligible` / `needs_conflict_dispatch`
+  directly off that one object -- there is no second call that could
+  surface more work from the same run, which is precisely what makes this
+  "one-and-done": a scheduler wired to it opens **at most one PR per
+  invocation**, never a follow-up PR to finish what the first call missed.
+- Deliberately still performs **no git/PR/dispatch operations** of its own
+  (matches `projection_reflect.py`'s existing boundary) and takes an
+  optional `refresh` callback for installed-payload refresh (host-specific,
+  run once before the pass, never retried mid-pass mid-way through) --
+  both are the calling scheduler's job, which remains per-adopting-repo
+  Phase 5 work, correctly out of this repo's own scope.
+- Wired `pinned_commits` straight through to `bypass_decision()`, so the
+  still-open marketplace-source commit resolver (#3132) only has to
+  produce a map -- no further change to this orchestration layer.
+- Added 7 new tests in `test_projection_sync_worker.py`: no-op idempotency
+  on a second run against an unchanged repo, first-sync bypass-eligibility,
+  untrusted-marketplace conflict-routing, hand-edit conflict-routing,
+  missing/valid pin behavior (reusing the pin conjunct landed in the prior
+  entry), and refresh-callback invocation. Documented the tool in
+  `reviewing-customizations/SKILL.md`. Full `customizing-copilot` suite:
+  200 passed, 8 skipped. `check-version-bump`/`check-version-consistency`/
+  `check-docs-consistency` all pass.
+- Marked this Plan item's orchestration half done in place (inline note,
+  not a bare checkbox flip) since the item's deeper byte-exact recompute-
+  against-a-pinned-artifact sub-requirement is still gated on the same
+  resolver as above -- see the inline annotation on the Plan item itself
+  for the precise split.
+

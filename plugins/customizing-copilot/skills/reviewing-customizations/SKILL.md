@@ -168,15 +168,56 @@ A worker composes these with `sync_repository`/`scan_repository`'s own
 `Result.findings` and the lock's changed entries to get a single
 `BypassDecision`; `eligible=False` names every violated conjunct (not just
 the first). See `projection_reflect.py`'s own module docstring for the
-tracked, not-yet-solved gap (immutable upstream-commit pinning, vs. today's
-version-string-only lock) and
-`efforts/active/ambient-guidance-navigability`'s Journal for status on the
-remaining pieces (a scheduler wrapper and the setup skill). A conflict a
-worker cannot bypass routes to `agent_dispatch.conflict_dispatch`'s
-generalized dispatch primitive, naming the
+immutable upstream-commit pinning conjunct (`pinned_commits`, additive and
+optional -- no caller has a resolver yet, but one may supply pins the
+moment it does) and `efforts/active/ambient-guidance-navigability`'s
+Journal for status on the remaining pieces (a scheduler wrapper and the
+setup skill). A conflict a worker cannot bypass routes to
+`agent_dispatch.conflict_dispatch`'s generalized dispatch primitive, naming
+the
 [`projection-reconciler` agent template](references/projection-reconciler-agent-template.md)
 -- report-only on a hand-edited managed projection, re-derive-fresh on an
 ordinary git-level conflict, never a self-merge.
+
+### `projection_sync_worker.py`: the one-shot deterministic sync tool
+
+Composing `sync`, `scan`, and `projection_reflect`'s policy by hand every
+run risks exactly the failure mode this effort exists to close: a worker
+that discovers more work on a second pass and needs a follow-up PR to
+finish resolving a single upstream change. `scripts/projection_sync_worker.py`
+wraps that whole recipe into **one function, one call, one outcome** per
+run:
+
+```bash
+python3 <skill-dir>/scripts/projection_sync_worker.py <repo-root> --json
+```
+
+`run_sync_pass()` runs `sync_repository` (the only mutation -- it
+writes/locks whatever it can safely resolve) then `scan_repository` (which
+validates the result and reports everything it could not resolve) exactly
+once, and returns a `SyncOutcome` whose `needs_pr` / `bypass_eligible` /
+`needs_conflict_dispatch` properties are already the complete decision --
+a caller branches on that outcome directly; it never needs to re-invoke this
+tool to discover more work from the same run, so a scheduler wired to it
+opens at most one PR per invocation. `needs_conflict_dispatch` is true only
+for a real conflict-classified finding (a hand-edit, a failed sync); an
+untrusted-marketplace source or a missing/malformed immutable pin refuses
+the bypass but opens a normal review-only PR instead, since there is
+nothing there for a reconciler to act on. It performs no git or PR/dispatch
+operations of its own (that remains the calling scheduler's job, per-adopting-
+repo and out of this repo's own scope -- see Phase 5); refreshing installed
+plugin payloads is similarly the caller's job, via an optional `refresh`
+callback run once before the pass (never retried mid-pass).
+
+The CLI (`main()`/`__main__`) is the actual consent-gated scheduled-worker
+surface: it calls `projection_reflect_consent.load_consent()` first and
+refuses to run at all -- no mutation, no trust decision made -- without this
+repo's own live, committed opt-in, deriving its trusted-source allowlist
+from that consent object rather than any command-line flag.
+`run_sync_pass()` itself stays a general-purpose library function that
+takes `trusted_marketplaces` explicitly from any caller (including a test
+or an already-consent-resolved scheduler); the consent gate lives at the
+CLI boundary, not inside the pure composition.
 
 ### Troubleshooting-category coverage registry
 
