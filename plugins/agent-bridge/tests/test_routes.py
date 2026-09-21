@@ -1043,6 +1043,29 @@ class TestAgentRoutes:
         assert detail.json()["description"] == "General-purpose worker."
         assert detail.json()["capabilities"] == ["builds", "tests"]
 
+    def test_get_agent_hides_unaddressable_profile_by_default(self, client, app) -> None:
+        app.state.resolver = AgentResolver(
+            {
+                "task-worker": AgentConfig(
+                    name="task-worker",
+                    project="aperture-labs",
+                    worktree_discovery=False,
+                    spawnable_as_target=False,
+                )
+            },
+            {},
+        )
+
+        hidden = client.get("/api/v1/agents/task-worker")
+        visible = client.get(
+            "/api/v1/agents/task-worker?include_unaddressable=true"
+        )
+
+        assert hidden.status_code == 404
+        assert visible.status_code == 200
+        assert visible.json()["spawnable_as_target"] is False
+        assert visible.json()["spawnable"] is False
+
     def test_machine_routes_include_metadata_defaults(self, client, app) -> None:
         machine = MachineConfig(key="host-a", display_name="Host A")
         app.state.resolver = AgentResolver({}, {"host-a": machine})

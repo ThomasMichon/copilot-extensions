@@ -658,6 +658,7 @@ def make_headless_spawn(
     spawn.requires_reusable_worktree = True
     spawn.allocation_driver = "agent-dispatch"
     spawn.allocation_interface = "acp"
+    spawn.allocation_agent = agent
     spawn.allocation_project_for = lambda _task: (
         bridge.registered_agent_project(agent, strict=True) or ""
     )

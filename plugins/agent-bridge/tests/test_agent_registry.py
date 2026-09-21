@@ -126,6 +126,7 @@ class TestParseAgentRegistry:
         assert registry["pool-body-agent"].worktree_discovery is False
         # a spawn body keeps its project (load-bearing for spawn-time worktree resolve)
         assert registry["pool-body-agent"].project == "my-project"
+        assert registry["pool-body-agent"].spawnable_as_target is False
 
     def test_local_agent_fields(self):
         registry = parse_agent_registry(SAMPLE_AGENTS)
@@ -133,6 +134,7 @@ class TestParseAgentRegistry:
         assert agent.host is None
         assert agent.cwd is None
         assert agent.managed is False
+        assert agent.spawnable_as_target is True
         assert agent.project == "my-project"
         assert agent.mcp_servers == [
             {"name": "gitea-mcp", "type": "stdio", "command": "agent-mcp",
@@ -369,10 +371,11 @@ class TestAgentResolver:
 
     def test_list_agents(self):
         agents = self.resolver.list_agents()
-        assert len(agents) == 6
+        assert len(agents) == 5
         names = {a["name"] for a in agents}
         assert "local-agent" in names
         assert "managed-agent" in names
+        assert "pool-body-agent" not in names
         # Managed agents should be marked non-spawnable
         managed = next(a for a in agents if a["name"] == "managed-agent")
         assert managed["spawnable"] is False
