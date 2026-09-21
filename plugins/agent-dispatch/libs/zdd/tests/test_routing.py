@@ -366,3 +366,80 @@ def test_reap_stale_active_noop_when_table_fully_empty(cfg_dir: Path):
     assert result["reaped"] is False
     assert result["promoted_port"] is None
     assert routing.read_table(cfg_dir) is None
+
+
+# -- reap_stale_active: dead-active promotion also requires a live pid ------
+
+
+def test_reap_stale_active_dead_active_promotes_only_a_live_pid_previous(
+    cfg_dir: Path,
+):
+    """The original dead-active reap path must apply the same pid guard.
+
+    A listener alone on ``previous.port`` is not proof the recorded previous
+    daemon is still the one behind it -- some other service could have
+    reused the port after that daemon exited. Both promotion paths in this
+    function must require a live recorded pid, not just this one.
+    """
+    dead_active_port = _free_port()
+    prev = _Listener()
+    try:
+        table = {
+            "active": {
+                "bind": "127.0.0.1", "port": dead_active_port, "pid": 999998,
+                "generation": 4,
+            },
+            "previous": {
+                "bind": "127.0.0.1", "port": prev.port, "pid": 999999,
+                "generation": 3,
+            },
+            "epoch": "x",
+        }
+        routing.routing_table_path(cfg_dir).write_text(json.dumps(table))
+
+        result = routing.reap_stale_active(
+            cfg_dir, service="agent-dispatch",
+            pid_alive=lambda pid: False,  # neither the active nor previous pid is alive
+        )
+
+        assert result["reaped"] is True
+        assert result["promoted_port"] is None  # previous's pid was dead too
+        data = routing.read_table(cfg_dir)
+        assert "active" not in data
+    finally:
+        prev.close()
+
+
+def test_reap_stale_active_dead_active_still_promotes_live_pid_previous(
+    cfg_dir: Path,
+):
+    dead_active_port = _free_port()
+    prev = _Listener()
+    try:
+        table = {
+            "active": {
+                "bind": "127.0.0.1", "port": dead_active_port, "pid": 999998,
+                "generation": 4,
+            },
+            "previous": {
+                "bind": "127.0.0.1", "port": prev.port, "pid": os.getpid(),
+                "generation": 3,
+            },
+            "epoch": "x",
+        }
+        routing.routing_table_path(cfg_dir).write_text(json.dumps(table))
+
+        # Only the recorded active pid is confirmed dead; the previous's pid
+        # (our own, real) is left to the default (real) liveness probe.
+        result = routing.reap_stale_active(
+            cfg_dir, service="agent-dispatch",
+            pid_alive=lambda pid: pid == os.getpid(),
+        )
+
+        assert result["reaped"] is True
+        assert result["promoted_port"] == prev.port
+        data = routing.read_table(cfg_dir)
+        assert data["active"]["port"] == prev.port
+        assert data["active"]["pid"] == os.getpid()
+    finally:
+        prev.close()

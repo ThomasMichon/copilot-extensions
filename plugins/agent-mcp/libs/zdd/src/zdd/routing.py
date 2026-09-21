@@ -566,7 +566,7 @@ def _reap_stale_active_unlocked(
         prev = Endpoint.from_dict(prev_raw) if isinstance(prev_raw, dict) else None
         promoted = False
         if prev is not None and prev.port != active.port and \
-                _listen(prev.client_host, prev.port):
+                _listen(prev.client_host, prev.port) and _alive(prev.pid):
             _publish_active_unlocked(
                 config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
                 version=prev.version, demote_existing=False,
