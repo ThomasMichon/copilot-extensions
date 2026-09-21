@@ -1,7 +1,7 @@
 {
   "captured_from": {
-    "commit": "053460fc978167fc53ecc967555b19217a44e837",
-    "plugin_version": "0.4.0-dev533",
+    "commit": "5484f2b27b6bc8ca65106394acfc7371c45ff9f8",
+    "plugin_version": "0.4.0-dev534",
     "protocol_generation": 16,
     "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
     "source_git_blob": "d77b3fb8a1bfb3f06b5f26df1fbb9301b4c545ee",
