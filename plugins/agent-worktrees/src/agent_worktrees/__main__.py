@@ -827,6 +827,12 @@ def _classify_daemon_compute(kind: str, payload: dict) -> dict:
     return _serialize_classify_map(state_map)
 
 
+from . import worktree_status_compute as _worktree_status_compute_mod
+
+_worktree_status_fact = _worktree_status_compute_mod._worktree_status_fact
+_worktree_status_compute = _worktree_status_compute_mod.compute
+
+
 def _classify_records_live(
     records: list[tracking.WorktreeRecord],
     session_ctx: sessions.SessionContext | None = None,
@@ -11094,6 +11100,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     from . import classify_daemon, monitor_roots, pane_reaper, registry_paths, session_catalog
     from . import locks as _locks
+    from . import worktree_status_daemon
     from .hook_ipc import HookIpcServer, HookUnavailable
 
     mux = "psmux" if shutil.which("psmux") else ("tmux" if shutil.which("tmux") else None)
@@ -11228,6 +11235,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     except Exception:
         classify_server = None
 
+    # agent-worktrees-external-status-accelerator effort: per-worktree status
+    # accelerator (see `worktree_status_daemon.InProcessRuntime`); a failure
+    # here is never fatal to the monitor.
+    worktree_status_runtime = worktree_status_daemon.InProcessRuntime()
+    worktree_status_runtime.start(
+        _aw_runtime_home() / "worktree-status-cache.sqlite3", _worktree_status_compute
+    )
+
     def _lock_extra() -> dict:
         extra = {"prefix": my_prefix, "mux": bool(mux_bin)}
         if isinstance(installation_context, dict):
@@ -11242,6 +11257,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             extra.update(hook_server.rendezvous())
         if classify_server is not None:
             extra.update(classify_daemon.rendezvous_fields(classify_server))
+        extra.update(worktree_status_runtime.lock_extra())
         return extra
 
     _locks.write_lock(lock, extra=_lock_extra())
@@ -11306,7 +11322,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             if served < 0:
                 time.sleep(interval)  # transient mux failure: hold, don't exit
                 continue
-            if served == 0 and not external_projects and not reconciler.has_live_worktree_mux:
+            if (
+                served == 0
+                and not external_projects
+                and not reconciler.has_live_worktree_mux
+                and not worktree_status_runtime.has_active_demand()
+            ):
                 empty_strikes += 1
                 if empty_strikes >= _MAX_EMPTY_STRIKES:
                     # Close the root-vs-idle race: a Picker/list caller can
@@ -11322,6 +11343,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         retry_wt
                         or monitor_roots.live_picker_projects()
                         or list_cache.recent_demand_projects()
+                        or worktree_status_runtime.has_active_demand()
                     ):
                         empty_strikes = 0
                     else:
@@ -11334,6 +11356,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             hook_server.close()
         if classify_server is not None:
             classify_server.close()
+        worktree_status_runtime.shutdown()
         # Release the lock only if it is still ours (never clobber a successor).
         d = _locks.read_lock(lock)
         if isinstance(d, dict) and d.get("pid") == os.getpid():
@@ -23396,6 +23419,7 @@ _relocate_active_project_for_worktree = session_tracking_cli._relocate_active_pr
 cmd_list_sessions = session_tracking_cli.cmd_list_sessions
 cmd_head_session = session_tracking_cli.cmd_head_session
 cmd_worktree_lineage = session_tracking_cli.cmd_worktree_lineage
+cmd_worktree_status_bundle = session_tracking_cli.cmd_worktree_status_bundle
 cmd_conclude_session = session_tracking_cli.cmd_conclude_session
 cmd_conclude_disposable = session_tracking_cli.cmd_conclude_disposable
 cmd_link_succession = session_tracking_cli.cmd_link_succession
@@ -23508,6 +23532,7 @@ COMMAND_MAP = {
     "list-sessions": cmd_list_sessions,
     "head-session": cmd_head_session,
     "worktree-lineage": cmd_worktree_lineage,
+    "worktree-status-bundle": cmd_worktree_status_bundle,
     "conclude-session": cmd_conclude_session,
     "conclude-disposable": cmd_conclude_disposable,
     "link-succession": cmd_link_succession,
@@ -23903,6 +23928,7 @@ _NO_PROJECT_COMMANDS = {
     "session-role",
     "head-session",
     "worktree-lineage",
+    "worktree-status-bundle",
     "conclude-session",
     "conclude-disposable",
     "link-succession",

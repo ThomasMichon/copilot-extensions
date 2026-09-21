@@ -1217,6 +1217,14 @@ class LiveVerdict:
     source: str = "none"
     """Where liveness came from: ``mux`` | ``lock`` | ``both`` | ``none``."""
 
+    probes_ok: bool = True
+    """False when either the mux or the reclaim/lock probe raised and was
+    swallowed to a default/partial result (see :func:`verify_worktree_active`'s
+    own best-effort contract). A caller that needs to distinguish "verified
+    live/inactive" from "we couldn't actually tell" (e.g. a status-bundle
+    consumer wrapping this verdict with its own ``confirmed`` marker) should
+    check this rather than assume every returned verdict is fully probed."""
+
 
 def verify_worktree_active(record) -> LiveVerdict:
     """Authoritatively verify whether ONE worktree has a live session right now.
@@ -1236,10 +1244,12 @@ def verify_worktree_active(record) -> LiveVerdict:
     from . import reclaim
 
     wt_id = record.worktree_id
+    probes_ok = True
     try:
         info = mux_status_many([wt_id]).get(wt_id) or MuxInfo()
     except Exception:
         info = MuxInfo()
+        probes_ok = False
     mux_live = bool(info.exists)
 
     live_ids: list[str] = []
@@ -1249,7 +1259,7 @@ def verify_worktree_active(record) -> LiveVerdict:
         live_ids = sorted({b["session_id"] for b in bound if b.get("session_id")})
         bare = any(b.get("homing") == "bare" for b in bound)
     except Exception:
-        pass
+        probes_ok = False
     lock_live = bool(live_ids)
 
     if mux_live and lock_live:
@@ -1268,6 +1278,7 @@ def verify_worktree_active(record) -> LiveVerdict:
         live_session_ids=live_ids,
         bare=bare,
         source=source,
+        probes_ok=probes_ok,
     )
 
 

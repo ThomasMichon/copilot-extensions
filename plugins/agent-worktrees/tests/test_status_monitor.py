@@ -2261,7 +2261,10 @@ def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
     assert "classify_generation" in servers_stamp
     # Never collides with the hook server's own namespace.
     assert "hook_endpoint" not in servers_stamp
-    assert closed["n"] == 1
+    assert "worktree_status_endpoint" in servers_stamp
+    assert "worktree_status_token" in servers_stamp
+    assert "worktree_status_generation" in servers_stamp
+    assert closed["n"] == 2  # classify_server + worktree_status_server
 
 
 def test_sweep_rechecks_before_publish_and_retains_registered_session_on_generation_change(
