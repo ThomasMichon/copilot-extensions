@@ -28,10 +28,17 @@ switch (scenario) {
     });
     break;
   case "wait-for-signal":
-    // The parent test sends the signal via child.kill(); this process just
-    // needs to stay alive long enough to receive it (the registered signal
-    // listener itself keeps the event loop alive, so no extra keep-alive is
-    // needed once installEmergencyDiagnostics() has run).
+    // The parent test sends the signal via child.kill(). A bare
+    // process.on(signal, ...) registration does NOT by itself keep the
+    // Node.js event loop alive (empirically confirmed: without this, the
+    // process exits(0) via natural event-loop drain almost immediately
+    // after printing READY, racing the parent's signal delivery and
+    // failing intermittently/always depending on scheduling -- the real
+    // extension.mjs never has this problem since its live joinSession() IPC
+    // connection is its own independent keep-alive handle). This interval
+    // is a harmless, real keep-alive for the test harness only; the signal
+    // handler's own process.exit() call is what actually ends the process.
+    setInterval(() => {}, 60_000);
     break;
   default:
     process.stderr.write(`unknown scenario: ${scenario}\n`);
