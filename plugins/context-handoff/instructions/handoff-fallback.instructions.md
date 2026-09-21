@@ -11,7 +11,10 @@ never registered this session. Everything below needs only a shell.
 
 Never end a turn with outstanding work and no handoff. Before triggering
 (context-pressure path) or once the user agrees (turn-end path), sync the
-worktree: `node "$CH" sync-worktree --json --cwd "$PWD"` (never a bare
+worktree. Resolve the CLI path first (same resolution as the "CLI
+fallback" section below):
+`CH_ROOT="${COPILOT_PLUGIN_ROOT:-$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff}"; CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"`.
+Then run `node "$CH" sync-worktree --json --cwd "$PWD"` (never a bare
 `git rebase`/`agent-worktrees git sync` -- this shares the same lock and
 rebase guard as the automatic force-tier path). A non-`synced` result is
 not a blocker -- note the reason in the brief and continue. Compose:
