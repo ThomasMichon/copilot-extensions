@@ -156,6 +156,32 @@ async def test_stop_session_explicit_default_cancels(tmp_path, monkeypatch) -> N
     client.cancel_prompt.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_redeploy_optin_cancel_stays_recoverable(tmp_path, monkeypatch) -> None:
+    """The legacy opt-in redeploy path (``cancel_turns_on_redeploy=True``)
+    passes ``cancel_turn=True`` to ``stop_session`` on shutdown -- but that
+    must NOT derive dormancy from ``cancel_turn`` the way an explicit
+    operator stop does (review of #3058): a system-initiated redeploy detach
+    stays auto-recoverable regardless of the legacy cancel-turn setting, so
+    ``app.py``'s shutdown loop passes ``allow_background_recovery=True``
+    explicitly. Without it, an opted-in cancel_turns_on_redeploy would wrongly
+    disable background recovery for every session on every redeploy."""
+    import agent_bridge.session_manager as sm
+    monkeypatch.setattr(sm, "_cleanup_worktree", AsyncMock())
+    mgr = _mgr(tmp_path, cancel_on_redeploy=True)
+    monkeypatch.setattr(mgr, "_detach_host", AsyncMock())
+    s = _running_session(mgr, "s1")
+    s._prompt_task = asyncio.create_task(_never())
+
+    # Mirrors app.py's shutdown call site exactly.
+    await mgr.stop_session(
+        "s1", cancel_turn=mgr.cancel_turns_on_redeploy, allow_background_recovery=True,
+    )
+
+    assert s.status == SessionStatus.STOPPED
+    assert s.background_recovery_enabled is True
+
+
 # -- drain: preserves live-host-backed turns (detach-only) ------------------
 
 @pytest.mark.asyncio
