@@ -825,10 +825,12 @@ def _classify_daemon_compute(kind: str, payload: dict) -> dict:
     return _serialize_classify_map(state_map)
 
 
-from . import worktree_status_compute as _worktree_status_compute_mod
+from . import worktree_status_audit  # noqa: E402 -- re-export position matches original definition site
+from . import worktree_status_compute as _worktree_status_compute_mod  # noqa: E402 -- same
 
 _worktree_status_fact = _worktree_status_compute_mod._worktree_status_fact
 _worktree_status_compute = _worktree_status_compute_mod.compute
+cmd_worktree_status_audit = worktree_status_audit.cmd_worktree_status_audit
 
 
 def _classify_records_live(
@@ -8028,6 +8030,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     session_tracking_cli.add_parsers(sub)
+    worktree_status_audit.add_parsers(sub)
 
     # anchor-check (anchor repo hygiene)
     sp = sub.add_parser(
@@ -9564,6 +9567,7 @@ COMMAND_MAP = {
     "head-session": cmd_head_session,
     "worktree-lineage": cmd_worktree_lineage,
     "worktree-status-bundle": cmd_worktree_status_bundle,
+    "worktree-status-audit": cmd_worktree_status_audit,
     "conclude-session": cmd_conclude_session,
     "conclude-disposable": cmd_conclude_disposable,
     "link-succession": cmd_link_succession,
@@ -9960,6 +9964,7 @@ _NO_PROJECT_COMMANDS = {
     "head-session",
     "worktree-lineage",
     "worktree-status-bundle",
+    "worktree-status-audit",
     "conclude-session",
     "conclude-disposable",
     "link-succession",

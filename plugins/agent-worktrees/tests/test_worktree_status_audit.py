@@ -1,0 +1,455 @@
+"""Tests for worktree_status_audit (agent-worktrees-external-status-
+accelerator effort, Phase 7 -- ongoing accuracy monitoring)."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import random
+import sqlite3
+import time
+import types
+
+from agent_worktrees import worktree_status_audit as wsa
+from agent_worktrees import worktree_status_daemon
+from agent_worktrees.worktree_status_cache import WorktreeStatusCache
+
+
+def _write_cache_row(db_path, project, worktree_id, bundle):
+    cache = WorktreeStatusCache(db_path)
+    cache.get_or_refresh(project, worktree_id, force=False, compute=lambda: bundle)
+    cache.close()
+
+
+def test_module_imports_without_work_coalescing_singleton_installed():
+    """Copilot review finding: this module (and `agent_worktrees.__main__`,
+    which imports it eagerly for its CLI alias) must stay importable in an
+    environment that never installed the vendored `work_coalescing_singleton`
+    package (e.g. the standalone `worktree-manager` package's own test
+    suite) -- the daemon-dependent pieces (`worktree_status_daemon`) must
+    only ever be imported lazily inside the functions that actually need
+    them, mirroring `__main__.py`'s own `cmd_status_monitor` and
+    `session_tracking_cli.cmd_worktree_status_bundle`."""
+    import subprocess
+    import sys
+
+    script = (
+        "import builtins\n"
+        "real_import = builtins.__import__\n"
+        "def fake_import(name, *a, **k):\n"
+        "    if name == 'work_coalescing_singleton' or name.startswith('work_coalescing_singleton.'):\n"
+        "        raise ModuleNotFoundError(name)\n"
+        "    return real_import(name, *a, **k)\n"
+        "builtins.__import__ = fake_import\n"
+        "import agent_worktrees.worktree_status_audit\n"
+        "import agent_worktrees.__main__\n"
+        "print('OK')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+
+
+def _bundle(project, worktree_id, *, git_state=None, active=None):
+    facts = {}
+    if git_state is not None:
+        facts["git_state"] = {"value": git_state, "confirmed": True, "observed_at": time.time()}
+    if active is not None:
+        facts["liveness"] = {"value": {"active": active}, "confirmed": True, "observed_at": time.time()}
+    return {"project": project, "worktree_id": worktree_id, "facts": facts}
+
+
+# -- read_cache_snapshot -----------------------------------------------------
+
+def test_read_cache_snapshot_empty_when_file_missing(tmp_path):
+    assert wsa.read_cache_snapshot(tmp_path / "nope.sqlite3") == []
+
+
+def test_read_cache_snapshot_reads_persisted_rows(tmp_path):
+    db_path = tmp_path / "cache.sqlite3"
+    bundle = _bundle("proj", "wt1", git_state={"state": "clean"})
+    _write_cache_row(db_path, "proj", "wt1", bundle)
+
+    rows = wsa.read_cache_snapshot(db_path)
+    assert len(rows) == 1
+    assert rows[0]["project"] == "proj"
+    assert rows[0]["worktree_id"] == "wt1"
+    assert rows[0]["bundle"] == bundle
+    assert isinstance(rows[0]["computed_at"], float)
+
+
+def test_read_cache_snapshot_skips_a_corrupt_bundle_row(tmp_path):
+    db_path = tmp_path / "cache.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "CREATE TABLE worktree_status_cache (project TEXT, worktree_id TEXT,"
+        " bundle_json TEXT, computed_at REAL, demanded_at REAL)"
+    )
+    conn.execute(
+        "INSERT INTO worktree_status_cache VALUES (?, ?, ?, ?, ?)",
+        ("proj", "wt1", "not-json{{{", time.time(), time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+    rows = wsa.read_cache_snapshot(db_path)
+    assert len(rows) == 1
+    assert rows[0]["bundle"] is None  # degraded, not raised/skipped entirely
+
+
+# -- select_sample ------------------------------------------------------------
+
+def test_select_sample_prefers_cache_rows_over_fallback(monkeypatch):
+    cache_rows = [{"project": "p", "worktree_id": "a", "computed_at": 1, "demanded_at": 1}]
+    monkeypatch.setattr(wsa, "_fallback_candidates", lambda: [("p", "should-not-be-used")])
+    sample = wsa.select_sample(cache_rows, sample_size=5, rng=random.Random(1))
+    assert sample == [("p", "a", cache_rows[0])]
+
+
+def test_select_sample_falls_back_when_cache_is_empty(monkeypatch):
+    monkeypatch.setattr(wsa, "_fallback_candidates", lambda: [("p", "a"), ("p", "b")])
+    sample = wsa.select_sample([], sample_size=5, rng=random.Random(1))
+    assert sorted(sample) == sorted([("p", "a", None), ("p", "b", None)])
+
+
+def test_select_sample_respects_sample_size(monkeypatch):
+    monkeypatch.setattr(
+        wsa, "_fallback_candidates",
+        lambda: [("p", str(i)) for i in range(20)],
+    )
+    sample = wsa.select_sample([], sample_size=3, rng=random.Random(1))
+    assert len(sample) == 3
+
+
+def test_select_sample_never_raises_on_a_non_positive_sample_size(monkeypatch):
+    """Copilot review finding: `random.sample` raises `ValueError` for a
+    negative count -- a misconfigured `--sample -1` (or `0`) must degrade
+    to an empty sample instead of crashing, per this module's own "never
+    raises" contract."""
+    monkeypatch.setattr(
+        wsa, "_fallback_candidates", lambda: [("p", str(i)) for i in range(5)],
+    )
+    assert wsa.select_sample([], sample_size=-1, rng=random.Random(1)) == []
+    assert wsa.select_sample([], sample_size=0, rng=random.Random(1)) == []
+
+
+# -- diffs ---------------------------------------------------------------
+
+def test_diff_git_state_flags_a_real_mismatch():
+    cached = _bundle("p", "wt1", git_state={"state": "clean", "ahead": 0})
+    live = _bundle("p", "wt1", git_state={"state": "dirty", "ahead": 0})
+    mismatches = wsa._diff_git_state(cached, live)
+    assert len(mismatches) == 1
+    assert mismatches[0].check == "git_state_accuracy"
+
+
+def test_diff_git_state_no_mismatch_when_equal():
+    cached = _bundle("p", "wt1", git_state={"state": "clean", "ahead": 0})
+    live = _bundle("p", "wt1", git_state={"state": "clean", "ahead": 0})
+    assert wsa._diff_git_state(cached, live) == []
+
+
+def test_diff_git_state_skips_comparison_when_either_side_unconfirmed():
+    cached = {"facts": {"git_state": {"value": {"state": "clean"}, "confirmed": False}}}
+    live = _bundle("p", "wt1", git_state={"state": "dirty"})
+    assert wsa._diff_git_state(cached, live) == []
+
+
+def test_diff_liveness_flags_a_real_mismatch():
+    cached = _bundle("p", "wt1", active=True)
+    live = _bundle("p", "wt1", active=False)
+    mismatches = wsa._diff_liveness(cached, live)
+    assert len(mismatches) == 1
+    assert mismatches[0].check == "liveness_accuracy"
+
+
+def test_diff_liveness_no_mismatch_when_equal():
+    cached = _bundle("p", "wt1", active=True)
+    live = _bundle("p", "wt1", active=True)
+    assert wsa._diff_liveness(cached, live) == []
+
+
+# -- identity / freshness -------------------------------------------------
+
+def test_check_identity_flags_a_mismatched_bundle():
+    bundle = {"project": "p", "worktree_id": "wt2"}
+    mismatches = wsa._check_identity("p", "wt1", bundle, source="cached")
+    assert len(mismatches) == 1
+    assert mismatches[0].check == "identity_consistency"
+
+
+def test_check_identity_ok_when_matching():
+    bundle = {"project": "p", "worktree_id": "wt1"}
+    assert wsa._check_identity("p", "wt1", bundle, source="cached") == []
+
+
+def test_check_identity_tolerates_a_missing_bundle():
+    assert wsa._check_identity("p", "wt1", None, source="cached") == []
+
+
+def test_check_freshness_flags_a_stale_entry():
+    now = time.time()
+    entry = {"computed_at": now - 10_000}
+    mismatches = wsa._check_freshness(entry, now=now)
+    assert len(mismatches) == 1
+    assert mismatches[0].check == "cache_freshness_bounds"
+
+
+def test_check_freshness_ok_for_a_recent_entry():
+    now = time.time()
+    entry = {"computed_at": now - 1}
+    assert wsa._check_freshness(entry, now=now) == []
+
+
+def test_check_freshness_tolerates_a_missing_entry():
+    assert wsa._check_freshness(None, now=time.time()) == []
+
+
+# -- audit_one -------------------------------------------------------------
+
+def test_audit_one_clean_when_cache_matches_live(monkeypatch):
+    bundle = _bundle("p", "wt1", git_state={"state": "clean"}, active=True)
+    monkeypatch.setattr(wsa.worktree_status_compute, "compute", lambda project, wt_id: bundle)
+    entry = {"project": "p", "worktree_id": "wt1", "bundle": bundle,
+              "computed_at": time.time(), "demanded_at": time.time()}
+    result = wsa.audit_one("p", "wt1", entry, now=time.time())
+    assert result.ok
+    assert result.had_cache_entry is True
+    assert result.error is None
+
+
+def test_audit_one_reports_a_git_state_mismatch(monkeypatch):
+    cached = _bundle("p", "wt1", git_state={"state": "clean"})
+    live = _bundle("p", "wt1", git_state={"state": "dirty"})
+    monkeypatch.setattr(wsa.worktree_status_compute, "compute", lambda project, wt_id: live)
+    entry = {"project": "p", "worktree_id": "wt1", "bundle": cached,
+              "computed_at": time.time(), "demanded_at": time.time()}
+    result = wsa.audit_one("p", "wt1", entry, now=time.time())
+    assert not result.ok
+    assert any(m.check == "git_state_accuracy" for m in result.mismatches)
+
+
+def test_audit_one_records_a_compute_exception_as_its_own_error(monkeypatch):
+    def _boom(project, wt_id):
+        raise ValueError("no such worktree")
+
+    monkeypatch.setattr(wsa.worktree_status_compute, "compute", _boom)
+    result = wsa.audit_one("p", "wt1", None, now=time.time())
+    assert not result.ok
+    assert result.error == "ValueError: no such worktree"
+    assert result.had_cache_entry is False
+
+
+def test_audit_one_never_diffs_against_a_cold_entry(monkeypatch):
+    """No cache entry at all (a fallback-sampled worktree) -- nothing to
+    diff against, only ground truth itself, so no mismatches possible from
+    the diff steps."""
+    live = _bundle("p", "wt1", git_state={"state": "dirty"}, active=False)
+    monkeypatch.setattr(wsa.worktree_status_compute, "compute", lambda project, wt_id: live)
+    result = wsa.audit_one("p", "wt1", None, now=time.time())
+    assert result.ok
+    assert result.cache_age_seconds is None
+    assert result.demand_age_seconds is None
+
+
+# -- check_daemon_liveness -------------------------------------------------
+
+def test_daemon_liveness_no_lock_file(tmp_path):
+    liveness = wsa.check_daemon_liveness(tmp_path / "status-monitor.lock")
+    assert liveness.lock_present is False
+    assert liveness.responsive is False
+
+
+def test_daemon_liveness_stale_lock_reports_not_live(tmp_path):
+    from agent_worktrees import locks
+
+    lock_path = tmp_path / "status-monitor.lock"
+    # An implausible pid that's essentially guaranteed dead/never existed.
+    locks.write_lock(lock_path, pid=2**30 - 1)
+    liveness = wsa.check_daemon_liveness(lock_path)
+    assert liveness.lock_present is True
+    assert liveness.rendezvous_present is False
+    assert liveness.responsive is False
+
+
+def test_daemon_liveness_no_probe_reports_unknown_responsiveness(tmp_path):
+    from agent_worktrees import locks
+
+    lock_path = tmp_path / "status-monitor.lock"
+    server = worktree_status_daemon.start_server(lambda kind, payload: {"ok": True})
+    server.start()
+    try:
+        locks.write_lock(lock_path, extra=worktree_status_daemon.rendezvous_fields(server))
+        liveness = wsa.check_daemon_liveness(lock_path, probe=None)
+        assert liveness.lock_present is True
+        assert liveness.rendezvous_present is True
+        assert liveness.responsive is None
+    finally:
+        server.close()
+
+
+def test_daemon_liveness_probe_succeeds_against_a_live_daemon(tmp_path):
+    from agent_worktrees import locks
+
+    lock_path = tmp_path / "status-monitor.lock"
+    server = worktree_status_daemon.start_server(
+        lambda kind, payload: {"worktree_id": payload["worktree_id"]}
+    )
+    server.start()
+    try:
+        locks.write_lock(lock_path, extra=worktree_status_daemon.rendezvous_fields(server))
+        liveness = wsa.check_daemon_liveness(lock_path, probe=("proj", "wt1"))
+        assert liveness.responsive is True
+    finally:
+        server.close()
+
+
+def test_daemon_liveness_probe_reports_unresponsive_when_daemon_is_down(tmp_path):
+    lock_path = tmp_path / "status-monitor.lock"
+    liveness = wsa.check_daemon_liveness(lock_path, probe=("proj", "wt1"))
+    assert liveness.lock_present is False
+    assert liveness.responsive is False
+
+
+# -- run_audit / report_to_dict / telemetry log --------------------------
+
+def test_run_audit_writes_a_telemetry_log_line(tmp_path, monkeypatch):
+    runtime_home = tmp_path
+    bundle = _bundle("p", "wt1", git_state={"state": "clean"})
+    _write_cache_row(wsa.cache_db_path(runtime_home), "p", "wt1", bundle)
+    monkeypatch.setattr(wsa.worktree_status_compute, "compute", lambda project, wt_id: bundle)
+
+    log_path = tmp_path / "audit.jsonl"
+    report = wsa.run_audit(
+        runtime_home=runtime_home, sample_size=5, log_path=log_path, rng=random.Random(1),
+    )
+    assert report.cache_row_count == 1
+    assert report.mismatch_count == 0
+    assert log_path.exists()
+    lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    logged = json.loads(lines[0])
+    assert logged["sampled_count"] == 1
+
+
+def test_run_audit_appends_one_line_per_call(tmp_path, monkeypatch):
+    runtime_home = tmp_path
+    monkeypatch.setattr(
+        wsa.worktree_status_compute, "compute",
+        lambda project, wt_id: _bundle(project, wt_id),
+    )
+    log_path = tmp_path / "audit.jsonl"
+    for _ in range(3):
+        wsa.run_audit(runtime_home=runtime_home, sample_size=1, log_path=log_path)
+    lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 3
+
+
+def test_run_audit_never_raises_when_log_write_fails(tmp_path, monkeypatch):
+    """Copilot review contract: telemetry-log write failure must never
+    surface past run_audit -- best-effort only."""
+    runtime_home = tmp_path
+    monkeypatch.setattr(
+        wsa.worktree_status_compute, "compute", lambda project, wt_id: _bundle(project, wt_id)
+    )
+    # A log path whose parent cannot be created (a file where a directory
+    # is expected) -- `mkdir` raises, `_append_log` must swallow it.
+    blocked = tmp_path / "not-a-dir"
+    blocked.write_text("x", encoding="utf-8")
+    log_path = blocked / "audit.jsonl"
+    report = wsa.run_audit(runtime_home=runtime_home, sample_size=1, log_path=log_path)
+    assert report is not None  # no exception propagated
+
+
+def test_report_to_dict_shape(tmp_path):
+    report = wsa.AuditReport(
+        timestamp=123.0,
+        sampled=[
+            wsa.WorktreeAudit(
+                project="p", worktree_id="wt1", had_cache_entry=True,
+                cache_age_seconds=1.0, demand_age_seconds=1.0,
+                mismatches=[wsa.FieldMismatch(check="git_state_accuracy", detail="x")],
+            )
+        ],
+        daemon=wsa.DaemonLiveness(lock_present=True, rendezvous_present=True, responsive=True),
+        cache_row_count=1,
+    )
+    payload = wsa.report_to_dict(report)
+    assert payload["version"] == 1
+    assert payload["mismatch_count"] == 1
+    assert payload["entries"][0]["ok"] is False
+    assert payload["entries"][0]["mismatches"][0]["check"] == "git_state_accuracy"
+
+
+# -- CLI --------------------------------------------------------------------
+
+def test_cmd_worktree_status_audit_exit_code_clean(tmp_path, monkeypatch):
+    fake_core = types.SimpleNamespace(
+        _aw_runtime_home=lambda: tmp_path,
+        _json_output=lambda payload: None,
+    )
+    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    bundle = _bundle("p", "wt1", git_state={"state": "clean"})
+    _write_cache_row(wsa.cache_db_path(tmp_path), "p", "wt1", bundle)
+    monkeypatch.setattr(wsa.worktree_status_compute, "compute", lambda project, wt_id: bundle)
+    monkeypatch.setattr(
+        wsa, "check_daemon_liveness",
+        lambda lock_path, probe=None: wsa.DaemonLiveness(
+            lock_present=True, rendezvous_present=True, responsive=True,
+        ),
+    )
+    rc = wsa.cmd_worktree_status_audit(
+        argparse.Namespace(sample=1, log_path=None, no_log=True, seed=1, json=True)
+    )
+    assert rc == 0
+
+
+def test_cmd_worktree_status_audit_exit_code_nonzero_on_mismatch(tmp_path, monkeypatch):
+    fake_core = types.SimpleNamespace(
+        _aw_runtime_home=lambda: tmp_path,
+        _json_output=lambda payload: None,
+    )
+    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    cached = _bundle("p", "wt1", git_state={"state": "clean"})
+    live = _bundle("p", "wt1", git_state={"state": "dirty"})
+    _write_cache_row(wsa.cache_db_path(tmp_path), "p", "wt1", cached)
+    monkeypatch.setattr(wsa.worktree_status_compute, "compute", lambda project, wt_id: live)
+    rc = wsa.cmd_worktree_status_audit(
+        argparse.Namespace(sample=5, log_path=None, no_log=True, seed=1, json=True)
+    )
+    assert rc == 1
+
+
+def test_cmd_worktree_status_audit_respects_no_log(tmp_path, monkeypatch):
+    fake_core = types.SimpleNamespace(
+        _aw_runtime_home=lambda: tmp_path,
+        _json_output=lambda payload: None,
+    )
+    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    monkeypatch.setattr(
+        wsa.worktree_status_compute, "compute", lambda project, wt_id: _bundle(project, wt_id)
+    )
+    wsa.cmd_worktree_status_audit(
+        argparse.Namespace(sample=1, log_path=None, no_log=True, seed=1, json=True)
+    )
+    assert not (tmp_path / wsa.DEFAULT_LOG_FILENAME).exists()
+
+
+def test_cmd_worktree_status_audit_uses_explicit_log_path(tmp_path, monkeypatch):
+    fake_core = types.SimpleNamespace(
+        _aw_runtime_home=lambda: tmp_path,
+        _json_output=lambda payload: None,
+    )
+    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    monkeypatch.setattr(
+        wsa.worktree_status_compute, "compute", lambda project, wt_id: _bundle(project, wt_id)
+    )
+    custom_log = tmp_path / "custom" / "audit.jsonl"
+    wsa.cmd_worktree_status_audit(
+        argparse.Namespace(
+            sample=1, log_path=str(custom_log), no_log=False, seed=1, json=True,
+        )
+    )
+    assert custom_log.exists()
