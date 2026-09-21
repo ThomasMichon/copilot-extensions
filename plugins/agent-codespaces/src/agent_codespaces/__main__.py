@@ -1188,8 +1188,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         relay_token = token_for(args.name)
 
     # Launch prelude: always scrub injected PATs (#160/#77); add the relay
-    # exports only when the relay is in use. Built here (after the token mint)
-    # so the PAT scrub can NEVER be clobbered by the relay exports.
+    # exports only when the relay is in use, after the token mint.
     relay_env = _build_relay_env(
         relay_port,
         relay_token,
@@ -2748,9 +2747,6 @@ def _render_codespaces_yaml(defaults: dict | None) -> str:
         "#\n"
         "# credentials:\n"
         "#   ado_host: <your-org>.visualstudio.com   # only for bare ADO get-access-token\n"
-        "#   # Export the host Azure-login identity string into launch env vars.\n"
-        "#   # For ordinary user principals this is the short alias (UPN local part).\n"
-        "#   # identity_env: [GITHUB_USER]\n"
     )
 
 
