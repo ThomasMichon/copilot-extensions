@@ -924,6 +924,35 @@ def test_task_action_arguments_uses_stable_binstub_path(monkeypatch):
     assert "-m agent_machines" not in args
 
 
+def test_task_definition_matches_its_own_generated_arguments(monkeypatch):
+    # Regression: the "/" -> "\\" path normalization applied to the whole
+    # arguments string for the binstub-path check also corrupted cmd.exe's
+    # own literal "/c" flag into "\c", making a freshly-registered task with
+    # the current (post-versioned-path-fix) `cmd.exe /c <binstub>` command
+    # shape never match its own expected definition -- perpetual, spurious
+    # drift on every real machine (dotfiles maintenance-worker report).
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+    home = Path(r"C:\Users\operator")
+    snapshot = self_update_tasks.ScheduledTaskSnapshot(
+        task_name=self_update_state.TIER_SPECS["sweep"].task_name,
+        present=True,
+        enabled=True,
+        state="Ready",
+        logon_type="Interactive",
+        description=self_update_tasks.task_description("sweep"),
+        execute="conhost.exe",
+        arguments=self_update_tasks.task_action_arguments(
+            "sweep", machine="box-1", home=home
+        ),
+        working_directory=self_update_tasks.task_working_directory(home),
+        trigger_kind="daily",
+        trigger_value=1,
+    )
+    assert self_update_tasks.task_definition_matches(
+        snapshot, "sweep", machine="box-1", home=home
+    )
+
+
 def test_reconcile_task_defers_to_elevated_install_when_registration_is_denied(
     monkeypatch, tmp_path
 ):
