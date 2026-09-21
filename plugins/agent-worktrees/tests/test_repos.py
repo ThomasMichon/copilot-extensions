@@ -579,6 +579,43 @@ def test_account_for_github_slug_preserves_matched_entrys_own_override(
     assert repos.account_for_github_slug("proj-b") == "account-b"
 
 
+def test_account_for_github_slug_unoverridden_entry_ignores_sibling_override(
+    home: Path,
+):
+    # The reported follow-up bug: an entry with NO account: of its own must
+    # not silently borrow a *different* registered sibling's explicit
+    # override just because they share a github owner -- it should fall
+    # through to the owner itself (no account_map entry configured here),
+    # exactly as `resolve_account` documents.
+    repos.add_repo(
+        "proj-a", "D:/Src/proj-a", repo_class="worktree",
+        remote="https://github.com/shared-owner/proj-a.git",
+        plat="windows",  # no explicit account
+    )
+    repos.add_repo(
+        "proj-b", "D:/Src/proj-b", repo_class="worktree",
+        remote="https://github.com/shared-owner/proj-b.git",
+        account="account-b", plat="windows",
+    )
+    assert repos.account_for_github_slug("proj-a") == "shared-owner"
+
+
+def test_account_for_github_slug_unoverridden_entry_still_honors_account_map(
+    home: Path,
+):
+    # An unoverridden entry still benefits from the decoupled account_map
+    # (org identity layer), just resolved through its own remote's owner --
+    # not through scanning sibling repos' explicit overrides.
+    repos.set_account_map("shared-owner", "mapped-login")
+    repos.add_repo(
+        "proj-a", "D:/Src/proj-a", repo_class="worktree",
+        remote="https://github.com/shared-owner/proj-a.git",
+        plat="windows",
+    )
+    assert repos.account_for_github_slug("proj-a") == "mapped-login"
+
+
+
 def test_is_unresolved_registered_target_false_for_github_registered_repo(
     home: Path,
 ):
