@@ -417,27 +417,9 @@ def test_discover_peers_backoff_doubles_then_recovers_after_elapsing():
     assert len(calls) == 4
 
 
-def test_reap_stale_also_goes_through_backoff():
-    clock = FakeClock()
-    calls = []
-
-    def failing_runner(args):
-        calls.append(args)
-        return subprocess.CompletedProcess(["devtunnel"], 1, "", "not logged in")
-
-    rv = DevTunnelRendezvous(runner=failing_runner, clock=clock)
-    with pytest.raises(DevTunnelError):
-        rv.reap_stale()
-    assert len(calls) == 1
-    # Still backed off -> reap_stale must not re-invoke list either.
-    assert rv.reap_stale() == 0
-    assert len(calls) == 1
-
-
-def test_discover_coordinator_bypasses_backoff_cache_and_raises(cli):
-    # Prime a real coordinator entry, and put discover_peers into an active
-    # backoff window (so a naive shared cache would answer discover_coordinator
-    # from a stale/empty snapshot instead of the real state).
+def test_discover_coordinator_raises_without_cli_call_while_backed_off(cli):
+    # Prime a real coordinator entry, then drive a SEPARATE (but same-backing)
+    # rendezvous into an active backoff window via a failing discover_peers.
     rv = DevTunnelRendezvous(runner=cli)
     rv.register("coord-1", role="coordinator", epoch=3)
 
@@ -453,15 +435,46 @@ def test_discover_coordinator_bypasses_backoff_cache_and_raises(cli):
     # Drive discover_peers into backoff first.
     with pytest.raises(DevTunnelError):
         flaky_rv.discover_peers()
+    assert len(calls) == 1
     calls.clear()
-    # discover_coordinator must NOT answer from that backoff state -- it must
-    # attempt its own live call (which also fails here) and raise, never
-    # silently returning None (which would look like "no coordinator" and
-    # license CoordinatorLease to take over).
+    # While backed off, discover_coordinator must raise WITHOUT even
+    # attempting the CLI -- it must never answer from stale/cached data, but
+    # it also must not hot-loop the CLI at the runner's tick rate.
     with pytest.raises(DevTunnelError):
         flaky_rv.discover_coordinator()
+    assert len(calls) == 0
+
+
+def test_discover_coordinator_retries_live_once_backoff_elapses(cli):
+    # A real coordinator entry, registered normally (real wall-clock last_seen,
+    # since _is_live checks against actual time regardless of the injected
+    # clock used for backoff-window arithmetic).
+    healthy_rv = DevTunnelRendezvous(runner=cli)
+    healthy_rv.register("coord-1", role="coordinator", epoch=1)
+
+    clock = FakeClock()
+    calls = []
+
+    def flaky_then_ok_runner(args):
+        calls.append(args)
+        if args[0] == "list" and len(calls) <= 1:
+            return subprocess.CompletedProcess(["devtunnel"], 1, "", "not logged in")
+        return cli(args)
+
+    rv = DevTunnelRendezvous(runner=flaky_then_ok_runner, clock=clock)
+    with pytest.raises(DevTunnelError):
+        rv.discover_coordinator()
     assert len(calls) == 1
-    assert calls[0][0] == "list"
+    # Still within the backoff window -> raises without another CLI call.
+    with pytest.raises(DevTunnelError):
+        rv.discover_coordinator()
+    assert len(calls) == 1
+    # Past the window -> retries live, this time succeeding.
+    clock.advance(10)
+    coord = rv.discover_coordinator()
+    assert coord is not None
+    assert coord["instance"] == "coord-1"
+    assert len(calls) == 2
 
 
 def test_lease_does_not_take_over_when_coordinator_discovery_is_unreachable(cli):
@@ -492,6 +505,29 @@ def test_lease_does_not_take_over_when_coordinator_discovery_is_unreachable(cli)
     # was ever registered.
     coordinators = healthy_rv.discover_peers(role="coordinator")
     assert [c["instance"] for c in coordinators] == ["coord-1"]
+
+
+def test_reap_stale_always_enumerates_fresh_ignoring_backoff():
+    clock = FakeClock()
+    calls = []
+
+    def flaky_then_ok_runner(args):
+        calls.append(args)
+        if args[0] != "list":
+            return subprocess.CompletedProcess(["devtunnel"], 0, json.dumps({}), "")
+        if len(calls) <= 1:
+            return subprocess.CompletedProcess(["devtunnel"], 1, "", "not logged in")
+        return subprocess.CompletedProcess(["devtunnel"], 0, json.dumps({"tunnels": []}), "")
+
+    rv = DevTunnelRendezvous(runner=flaky_then_ok_runner, clock=clock)
+    with pytest.raises(DevTunnelError):
+        rv.reap_stale()
+    assert len(calls) == 1
+    # reap_stale ignores the backoff timer entirely -- it retries immediately
+    # even though the window hasn't elapsed (unlike discover_peers).
+    assert rv.reap_stale() == 0
+    assert len(calls) == 2
+
 
 
 # -- factory / config wiring -----------------------------------------------------
