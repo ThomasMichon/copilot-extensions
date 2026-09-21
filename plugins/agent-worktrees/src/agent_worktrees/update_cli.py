@@ -247,7 +247,9 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
             output.warn(f"Plugin update returned non-zero:\n{detail}")
             payloads_ok = False
     except OSError as exc:
-        output.warn(f"{_describe_copilot_spawn_error(exc)} -- skipping plugin update")
+        output.warn(
+            f"{_describe_copilot_spawn_error(exc, cwd=update_context)} -- skipping plugin update"
+        )
         payloads_ok = False
     except subprocess.TimeoutExpired:
         output.warn("Plugin update timed out -- continuing with installed version")
@@ -430,7 +432,9 @@ def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> bool:
             return False
         return True
     except OSError as exc:
-        output.warn(f"{_describe_copilot_spawn_error(exc)} -- skipping marketplace refresh")
+        output.warn(
+            f"{_describe_copilot_spawn_error(exc, cwd=cwd)} -- skipping marketplace refresh"
+        )
         return False
     except subprocess.TimeoutExpired:
         output.warn("Marketplace refresh timed out -- continuing")
@@ -454,7 +458,9 @@ def _browse_marketplace_plugins(marketplace: str, *, cwd: Path | None = None) ->
             cwd=cwd,
         )
     except OSError as exc:
-        output.warn(f"{_describe_copilot_spawn_error(exc)} -- skipping retired plugin purge")
+        output.warn(
+            f"{_describe_copilot_spawn_error(exc, cwd=cwd)} -- skipping retired plugin purge"
+        )
         return None
     except subprocess.TimeoutExpired:
         output.warn("Marketplace inventory timed out -- skipping retired plugin purge")
@@ -492,7 +498,7 @@ def _uninstall_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | No
             cwd=cwd,
         )
     except OSError as exc:
-        return _describe_copilot_spawn_error(exc)
+        return _describe_copilot_spawn_error(exc, cwd=cwd)
     except subprocess.TimeoutExpired:
         return "uninstall timed out"
     if r.returncode == 0:
@@ -530,7 +536,7 @@ def _update_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | None 
     try:
         r = _run(verb)
     except OSError as exc:
-        message = _describe_copilot_spawn_error(exc)
+        message = _describe_copilot_spawn_error(exc, cwd=cwd)
         output.warn(f"{message} -- skipping plugin payload update")
         return message
     except PluginStateError as exc:

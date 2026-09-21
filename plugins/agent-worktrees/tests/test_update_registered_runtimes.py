@@ -38,8 +38,16 @@ def test_describe_copilot_spawn_error_self_lock_windows():
     """The reproduced bug: running an update from inside a live Copilot CLI
     session on Windows fails to re-spawn copilot.exe with winerror 1920
     ('The file cannot be accessed by the system'). This must NOT be reported
-    as 'not found' -- copilot is right there, running this very command."""
-    exc = OSError(22, "The file cannot be accessed by the system", None, 1920, None)
+    as 'not found' -- copilot is right there, running this very command.
+
+    ``winerror`` is only populated by the ``OSError`` constructor's fourth
+    positional argument on native Windows Python; setting it directly as an
+    attribute afterward simulates the same shape portably on any platform
+    (including this suite's Linux CI leg), since ``describe_copilot_spawn_error``
+    only ever reads ``exc.winerror`` via ``getattr``.
+    """
+    exc = OSError(22, "The file cannot be accessed by the system")
+    exc.winerror = 1920
     message = update_runtime.describe_copilot_spawn_error(exc)
     assert "not found" not in message
     assert "currently running as this very session" in message
@@ -51,6 +59,26 @@ def test_describe_copilot_spawn_error_generic_oserror_includes_detail():
     message = update_runtime.describe_copilot_spawn_error(exc)
     assert "not found or not executable" in message
     assert "Permission denied" in message
+
+
+def test_describe_copilot_spawn_error_distinguishes_missing_cwd():
+    """A ``FileNotFoundError`` whose ``filename`` matches the caller's own
+    ``cwd`` (a stale project/registered-plugin context) means the failure has
+    nothing to do with copilot -- must not be reported as copilot missing."""
+    stale_cwd = "/some/stale/project/path"
+    exc = FileNotFoundError(2, "No such file or directory", stale_cwd)
+    message = update_runtime.describe_copilot_spawn_error(exc, cwd=stale_cwd)
+    assert "not found on PATH" not in message
+    assert "working directory does not exist" in message
+    assert stale_cwd in message
+
+
+def test_describe_copilot_spawn_error_missing_executable_with_unrelated_cwd():
+    """A ``FileNotFoundError`` whose ``filename`` does NOT match ``cwd`` (or
+    is unset) still reports the executable as missing, cwd context or not."""
+    exc = FileNotFoundError(2, "No such file or directory")
+    message = update_runtime.describe_copilot_spawn_error(exc, cwd="/some/real/cwd")
+    assert "not found on PATH" in message
 
 
 @pytest.fixture(autouse=True)
