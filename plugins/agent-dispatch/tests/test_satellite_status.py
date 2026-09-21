@@ -258,7 +258,27 @@ def test_satellite_retries_deregister_after_a_transient_failure(monkeypatch, dir
     runner.tick()
     assert directory.discover_peers() == []
     assert runner._registered is False
-    assert len(calls) == 2
+
+
+def test_satellite_cleans_up_a_stale_entry_from_a_prior_process(monkeypatch, directory):
+    """Regression test: a fresh FederationRunner instance (simulating a
+    process restart -- _registered starts False by construction) must still
+    attempt deregister on a closed-gate tick even though ITS local flag
+    never saw a registration. A previous process for the same stable
+    instance id may have registered and then died/restarted with the gate
+    now closed; the directory entry must not be gated on this instance's
+    own in-memory belief."""
+    # Simulate the "previous process" leaving a live registration behind.
+    directory.register("book2", role="satellite")
+    assert len(directory.discover_peers()) == 1
+
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "closed")
+    fresh_runner = FederationRunner(directory, "book2", role="satellite")
+    assert fresh_runner._registered is False
+
+    state = fresh_runner.tick()
+    assert state["gate_state"] == "closed"
+    assert directory.discover_peers() == []
 
 
 def test_peer_role_unaffected_by_satellite_gate_and_pushes_no_status(monkeypatch, directory):

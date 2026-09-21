@@ -153,19 +153,23 @@ class FederationRunner:
             }
         if self._role == ROLE_SATELLITE and not config.satellite_gate_open():
             # Outbound exposure gate closed (default): never register or
-            # heartbeat, and withdraw promptly if we had been registered
-            # before the gate closed -- an operator closing it mid-session
-            # must take effect on the very next tick, not linger until the
-            # directory's own TTL reap (see the satellite-agent-exposure
-            # effort's security steer: exposure is opt-in, never ambient).
-            if self._registered:
-                # Clear the flag only on success: if deregister raises (a
-                # transient directory failure), we must still believe we're
-                # registered so the NEXT tick retries the withdrawal instead
-                # of silently giving up and leaving the entry stranded until
-                # TTL reap -- the opposite of "withdraw promptly".
-                self._rv.deregister(self._instance)
-                self._registered = False
+            # heartbeat, and withdraw promptly if a registration exists --
+            # an operator closing it mid-session must take effect on the
+            # very next tick, not linger until the directory's own TTL reap
+            # (see the satellite-agent-exposure effort's security steer:
+            # exposure is opt-in, never ambient).
+            #
+            # Always ATTEMPT deregister here, never gate it on self._registered:
+            # this in-process flag only reflects what THIS runner instance did.
+            # A process restart (crash, redeploy, a fresh runner for the same
+            # stable instance id) starts with _registered=False even though a
+            # PRIOR process's registration can still be live in the directory --
+            # gating on the local flag would skip cleanup entirely in that case,
+            # leaving a stale entry exposed until TTL expiry. deregister() is
+            # idempotent (a no-op, returning False, when nothing is registered),
+            # so attempting it unconditionally is always safe.
+            self._rv.deregister(self._instance)
+            self._registered = False
             return {
                 "instance": self._instance,
                 "role": self._role,

@@ -899,11 +899,11 @@ does **not** quietly undo it.
   reconciliation for the opt-in federation runtime (rendezvous discovery,
   fenced-epoch coordinator lease, pluggable Gateway/Dev-Tunnels backends) and
   the satellite exposure gate + embodiment-status push, both already shipped
-  in the aperture-labs `agent-dispatch-federation` effort's Phases 1-4 but
-  never previously cited here. Below-altitude for the shipped mechanism
-  itself (it already matches the intent stated); vision-extending for the
-  satellite's default-closed exposure gate and its stricter live-status
-  filtering, which had no prior vision coverage in this repo.
+  via the `agent-dispatch-federation` effort's Phases 1-4 but never
+  previously cited here. Below-altitude for the shipped mechanism itself (it
+  already matches the intent stated); vision-extending for the satellite's
+  default-closed exposure gate and its stricter live-status filtering, which
+  had no prior vision coverage in this repo.
 - **2026-09-19** — Added *durable-attachment-history*: a task's queryable
   history of every session/worktree that has ever attached to it, distinct
   from its mutable current-owner fields. Prompted by a stuck-review incident
