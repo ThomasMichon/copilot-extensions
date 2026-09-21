@@ -487,11 +487,66 @@ def account_for_github_owner(owner: str | None) -> str | None:
     return owner
 
 
+def resolve_slug_owner(target: str | None) -> str | None:
+    """Resolve the github ``owner`` a *target* (owner, ``owner/name`` slug, or
+    bare **registered repo name**) actually refers to.
+
+    A bare name is ambiguous with a bare owner: resolve it through the same
+    registry -> remote -> owner chain ``repos find`` uses, instead of treating
+    the literal string as the owner (silently minted under the wrong identity
+    -- see #3032). Falls back to the literal string only when it isn't a
+    registered repo name, so a bare personal/org owner keeps resolving as
+    before. None when a registered repo's remote has no derivable owner.
+    """
+    if not target:
+        return None
+    if "/" in target:
+        return target.split("/", 1)[0]
+    entry = find_repo(target)
+    if entry is not None:
+        return github_owner(entry.remote)
+    return target
+
+
+def is_unresolved_registered_target(target: str | None) -> bool:
+    """True when *target* names a **registered** repo that has no resolvable
+    account: no explicit per-repo ``account:`` override, and no derivable
+    github owner (e.g. a non-github/Azure DevOps remote) either.
+
+    This is the identity-known-but-unresolvable case #3032 flags as a hazard:
+    a caller explicitly named a repo this tool knows about, so silently
+    falling back to ambient ``gh`` auth would still risk acting under the
+    wrong account. Distinct from an unregistered/ambiguous bare name, where no
+    preference exists and ambient auth remains the documented, safe default.
+    """
+    if not target or "/" in target:
+        return False
+    entry = find_repo(target)
+    if entry is None:
+        return False
+    return resolve_account(entry) is None
+
+
 def account_for_github_slug(slug: str | None) -> str | None:
-    """Resolve the effective account for a github ``owner/name`` slug."""
+    """Resolve the effective account for a github ``owner/name`` slug, a bare
+    ``owner``, or a bare registered repo *name*.
+
+    A bare registered repo name resolves via its own matched entry's
+    :func:`resolve_account` (explicit ``account:`` -> ``account_map[owner]`` ->
+    the remote owner itself -> None) -- never by handing the owner alone to
+    the owner-*wide* resolver (:func:`account_for_github_owner`), which scans
+    every registered repo and can return a *different, sibling* repo's
+    explicit account for the same owner (see #3032 follow-up: with `proj-a`
+    unoverridden and `proj-b` -> `account-b` under the same owner,
+    `account-for proj-a` must not resolve to `account-b`).
+    """
     if not slug:
         return None
-    owner = slug.split("/", 1)[0] if "/" in slug else slug
+    if "/" not in slug:
+        entry = find_repo(slug)
+        if entry is not None:
+            return resolve_account(entry)
+    owner = resolve_slug_owner(slug)
     return account_for_github_owner(owner)
 
 

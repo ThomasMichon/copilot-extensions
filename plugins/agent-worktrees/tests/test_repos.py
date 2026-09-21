@@ -479,6 +479,167 @@ def test_account_for_github_slug_honors_override(home: Path):
     assert repos.account_for_github_slug("") is None
 
 
+# --- bare registered repo name resolution (#3032) ---------------------------
+
+
+def test_resolve_slug_owner_bare_owner_unregistered(home: Path):
+    # No registered repo by that name -> treated as a literal owner, exactly
+    # as before (personal/org owners keep resolving this way).
+    assert repos.resolve_slug_owner("ThomasMichon") == "ThomasMichon"
+
+
+def test_resolve_slug_owner_bare_registered_repo_name_derives_owner(home: Path):
+    # A bare registered repo *name* is not itself an owner: resolve through
+    # the registry -> remote -> owner chain, the same one `repos find` uses.
+    repos.add_repo(
+        "copilot-extensions", "D:/Src/copilot-extensions", repo_class="reference",
+        remote="https://github.com/ThomasMichon/copilot-extensions.git",
+        plat="windows",
+    )
+    assert repos.resolve_slug_owner("copilot-extensions") == "ThomasMichon"
+
+
+def test_account_for_github_slug_bare_registered_repo_name_resolves_owner(home: Path):
+    # The reported bug: `account_for_github_slug("copilot-extensions")` used to
+    # return the literal string "copilot-extensions" (an invalid login) instead
+    # of resolving the repo's actual owner.
+    repos.add_repo(
+        "copilot-extensions", "D:/Src/copilot-extensions", repo_class="reference",
+        remote="https://github.com/ThomasMichon/copilot-extensions.git",
+        plat="windows",
+    )
+    assert repos.account_for_github_slug("copilot-extensions") == "ThomasMichon"
+
+
+def test_resolve_slug_owner_registered_non_github_remote_is_none(home: Path):
+    # A registered repo whose remote isn't github.com has no github owner to
+    # resolve -- returning the bare name itself here would be just as wrong as
+    # the original bug, so this must be None (account_for_github_slug then
+    # also returns None -> "no account preference", never a bogus login).
+    repos.add_repo(
+        "azdo-proj", "D:/Src/azdo-proj", repo_class="reference",
+        remote="https://my-org.visualstudio.com/x/_git/azdo-proj",
+        plat="windows",
+    )
+    assert repos.resolve_slug_owner("azdo-proj") is None
+    assert repos.account_for_github_slug("azdo-proj") is None
+
+
+def test_resolve_slug_owner_empty_and_slash_forms():
+    assert repos.resolve_slug_owner("") is None
+    assert repos.resolve_slug_owner(None) is None
+    # An owner/name slug is unaffected -- the owner is taken verbatim, never
+    # looked up as a registered repo name.
+    assert repos.resolve_slug_owner("example-org/proj") == "example-org"
+
+
+def test_is_unresolved_registered_target_true_for_non_github_registered_repo(
+    home: Path,
+):
+    repos.add_repo(
+        "azdo-proj", "D:/Src/azdo-proj", repo_class="reference",
+        remote="https://my-org.visualstudio.com/x/_git/azdo-proj",
+        plat="windows",
+    )
+    assert repos.is_unresolved_registered_target("azdo-proj") is True
+
+
+def test_is_unresolved_registered_target_false_with_explicit_account_override(
+    home: Path,
+):
+    # An explicit per-repo `account:` is a real, resolvable identity even
+    # without a derivable github owner -- it must not be treated as unresolved.
+    repos.add_repo(
+        "azdo-proj", "D:/Src/azdo-proj", repo_class="reference",
+        remote="https://my-org.visualstudio.com/x/_git/azdo-proj",
+        account="explicit-login", plat="windows",
+    )
+    assert repos.is_unresolved_registered_target("azdo-proj") is False
+    assert repos.account_for_github_slug("azdo-proj") == "explicit-login"
+
+
+def test_account_for_github_slug_preserves_matched_entry_own_override(
+    home: Path,
+):
+    # Two registered repos share a github owner but have different explicit
+    # `account:` overrides -- resolving the second by its bare registered name
+    # must return *its own* account, not whichever entry the owner-wide
+    # resolver happens to iterate first (the #3032 follow-up finding).
+    repos.add_repo(
+        "proj-a", "D:/Src/proj-a", repo_class="worktree",
+        remote="https://github.com/shared-owner/proj-a.git",
+        account="account-a", plat="windows",
+    )
+    repos.add_repo(
+        "proj-b", "D:/Src/proj-b", repo_class="worktree",
+        remote="https://github.com/shared-owner/proj-b.git",
+        account="account-b", plat="windows",
+    )
+    assert repos.account_for_github_slug("proj-a") == "account-a"
+    assert repos.account_for_github_slug("proj-b") == "account-b"
+
+
+def test_account_for_github_slug_unoverridden_entry_ignores_sibling_override(
+    home: Path,
+):
+    # The reported follow-up bug: an entry with NO account: of its own must
+    # not silently borrow a *different* registered sibling's explicit
+    # override just because they share a github owner -- it should fall
+    # through to the owner itself (no account_map entry configured here),
+    # exactly as `resolve_account` documents.
+    repos.add_repo(
+        "proj-a", "D:/Src/proj-a", repo_class="worktree",
+        remote="https://github.com/shared-owner/proj-a.git",
+        plat="windows",  # no explicit account
+    )
+    repos.add_repo(
+        "proj-b", "D:/Src/proj-b", repo_class="worktree",
+        remote="https://github.com/shared-owner/proj-b.git",
+        account="account-b", plat="windows",
+    )
+    assert repos.account_for_github_slug("proj-a") == "shared-owner"
+
+
+def test_account_for_github_slug_unoverridden_entry_still_honors_account_map(
+    home: Path,
+):
+    # An unoverridden entry still benefits from the decoupled account_map
+    # (org identity layer), just resolved through its own remote's owner --
+    # not through scanning sibling repos' explicit overrides.
+    repos.set_account_map("shared-owner", "mapped-login")
+    repos.add_repo(
+        "proj-a", "D:/Src/proj-a", repo_class="worktree",
+        remote="https://github.com/shared-owner/proj-a.git",
+        plat="windows",
+    )
+    assert repos.account_for_github_slug("proj-a") == "mapped-login"
+
+
+
+def test_is_unresolved_registered_target_false_for_github_registered_repo(
+    home: Path,
+):
+    repos.add_repo(
+        "copilot-extensions", "D:/Src/copilot-extensions", repo_class="reference",
+        remote="https://github.com/ThomasMichon/copilot-extensions.git",
+        plat="windows",
+    )
+    assert repos.is_unresolved_registered_target("copilot-extensions") is False
+
+
+def test_is_unresolved_registered_target_false_for_unregistered_name(home: Path):
+    # No registered repo by this name -> not a "known but unresolvable"
+    # target; it is just an ordinary (possibly personal) bare owner, and
+    # ambient auth remains the safe, documented fallback.
+    assert repos.is_unresolved_registered_target("ThomasMichon") is False
+
+
+def test_is_unresolved_registered_target_false_for_slug_and_empty():
+    assert repos.is_unresolved_registered_target("owner/name") is False
+    assert repos.is_unresolved_registered_target("") is False
+    assert repos.is_unresolved_registered_target(None) is False
+
+
 def test_add_repo_persists_account(home: Path):
     repos.add_repo(
         "proj", "D:/Src/proj", repo_class="worktree",

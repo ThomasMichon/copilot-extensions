@@ -142,7 +142,7 @@ repos migrate [--default-class reference|singleton|worktree]
 repos status [--tag T] [--class C] [--json]
 repos sync [--tag T] [--class C]
 repos account [list|set <owner> <login>|unset <owner>]   # org->login map
-repos account-for <owner|owner/name>                     # print resolved login
+repos account-for <owner|owner/name|reponame>            # print resolved login
 repos allow-edits <repo> --reason <why> [--minutes N]    # break-glass grant
 repos allow-edits --list                                 # show active grants
 repos allow-edits <repo> --revoke                        # end a grant early
@@ -278,10 +278,15 @@ inline, so agents never hand-switch:
   none. None = today's ambient-`gh` behavior (additive, safe). The `account_map`
   step is what makes an **org-owned** repo (`github/…`, `example-org/…`)
   resolve to the correct login instead of the org name. GitHub-only in v1;
-  ADO/gitea remotes resolve no account.
-- **Query primitive**: `repos account-for <owner|owner/name>` prints the
-  resolved login (exit 1 if none). Other tools (e.g. **agent-codespaces**, to
-  pick the `gh` account for `gh codespace …`) shell out to it rather than
+  an ADO/Gitea remote resolves no account *unless* its own registered entry
+  has an explicit `account:` override, which still applies. A bare
+  *registered repo name* (as opposed to an owner or `owner/name` slug)
+  resolves through the registry to that entry's own `account:` first, else
+  its remote owner (`resolve_slug_owner`), so it is never mistaken for a
+  literal owner/account key.
+- **Query primitive**: `repos account-for <owner|owner/name|reponame>` prints
+  the resolved login (exit 1 if none). Other tools (e.g. **agent-codespaces**,
+  to pick the `gh` account for `gh codespace …`) shell out to it rather than
   importing agent-worktrees.
 - **gh/PR ops** (`create-pr`, `pr-merge`, `pr-ready`, `pr-status`, `pr-watch`,
   `pr-complete`, label/GraphQL): the resolved account mints a token

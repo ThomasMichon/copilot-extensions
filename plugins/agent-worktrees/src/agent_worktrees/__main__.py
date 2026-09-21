@@ -20544,8 +20544,9 @@ def _repos_usage() -> None:
     print("  doctor [--fix] [--json]             Reconcile projects.yaml <-> repos.yaml")
     print("  account [list|set <owner> <login>|unset <owner>]")
     print("                                      Decoupled owner->gh-login map (account_map)")
-    print("  account-for [owner|owner/name]      Print the resolved gh login (exit 1 if none)")
-    print("  gh [owner|owner/name] [--] <args>   Run gh under that repo's account (token-inject)")
+    print("  account-for [owner|owner/name|name] Print the resolved gh login (exit 1 if none)")
+    print("  gh [owner|owner/name|name] [--] <args>")
+    print("                                      Run gh under that repo's account (token-inject)")
     print(
         "  pin-credentials [name] [--all]      Backfill each repo's local git credential"
     )
@@ -20984,14 +20985,17 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         # Prints the login on stdout (exit 0); prints nothing + exit 1 when no
         # preference resolves (caller then uses ambient auth). The programmatic
         # primitive agent-codespaces (and other tools) shell out to. The slug is
-        # inferred from the active project when omitted.
+        # inferred from the active project when omitted -- GitHub-only
+        # inference (_infer_active_github_slug), since a provider-generic slug
+        # (e.g. an Azure DevOps "Project/repo") would otherwise be handed to a
+        # GitHub-only resolver and treat "Project" as a bogus owner.
         target = rest[0] if rest and not rest[0].startswith("-") else None
         json_out = "--json" in rest
         if not target:
-            target = _infer_active_repo_slug(cfg.load_config())
+            target = _infer_active_github_slug(cfg.load_config())
         if not target:
             output.err(
-                "Usage: repos account-for [owner|owner/name]  "
+                "Usage: repos account-for [owner|owner/name|registered-repo-name]  "
                 "(inferred from the active project when omitted)"
             )
             return 1
@@ -21052,10 +21056,15 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
     if sub == "gh":
         # Run `gh` against a repo under the account that owns it, via token
         # injection -- race-safe on a shared box where the active gh account is
-        # global per-machine. Usage: repos gh [owner/name] [--] <gh args>
+        # global per-machine. Usage: repos gh [owner/name|registered-repo-name]
+        # [--] <gh args>
         # The repo is inferred from the active project when the first token is
         # `--` (an explicit "no target" marker), so `repos gh -- issue list`
-        # works from inside the repo without naming it.
+        # works from inside the repo without naming it. Inference is
+        # GitHub-only (_infer_active_github_slug): a provider-generic slug
+        # (e.g. an Azure DevOps "Project/repo") would otherwise be handed to
+        # the GitHub-only account resolver and treat "Project" as a bogus
+        # owner.
         args = list(rest)
         target = None
         if args and args[0] == "--":
@@ -21071,15 +21080,24 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             # the rest as gh args.
             gh_args = args
         if target is None:
-            target = _infer_active_repo_slug(cfg.load_config())
+            target = _infer_active_github_slug(cfg.load_config())
         if not target or not gh_args:
             output.err(
-                "Usage: repos gh [owner|owner/name] [--] <gh args...>  "
+                "Usage: repos gh [owner|owner/name|registered-repo-name] "
+                "[--] <gh args...>  "
                 "(repo inferred from the active project when omitted)"
             )
             return 1
         if shutil.which("gh") is None:
             output.err("gh CLI not found on PATH")
+            return 1
+        if repos.is_unresolved_registered_target(target):
+            output.err(
+                f"'{target}' is a registered repo whose remote has no derivable "
+                "GitHub owner -- refusing to run gh under ambient auth for a "
+                "known-but-unresolvable identity. Pass an explicit owner/name, "
+                "or set an account: override for this repo."
+            )
             return 1
         env, login, injected = _gh_env_for_repo(target)
         if login and not injected:
@@ -27341,6 +27359,7 @@ def cmd_session_lock(args: argparse.Namespace) -> int:
 from . import handoff_diagnostics, pr_cli, session_tracking_cli
 
 _infer_active_repo_slug = pr_cli._infer_active_repo_slug
+_infer_active_github_slug = pr_cli._infer_active_github_slug
 _pr_watch_usage = pr_cli._pr_watch_usage
 _pr_parse_repo = pr_cli._pr_parse_repo
 _tracked_pr_head_evidence = pr_cli._tracked_pr_head_evidence
