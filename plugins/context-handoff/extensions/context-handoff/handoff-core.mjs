@@ -230,6 +230,39 @@ function describeSyncError(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+// Mirrors agent-worktrees' own `repository_identity_env()`
+// (plugins/agent-worktrees/src/agent_worktrees/git_ops.py) for the same
+// reason: these probes and the delegated sync always supply their checkout
+// explicitly via `cwd`, but an inherited GIT_DIR/GIT_WORK_TREE/
+// GIT_INDEX_FILE/etc. can silently override that selection and make the
+// safety check inspect (or the sync mutate) a different repository than the
+// one this function was asked to sync. GIT_TERMINAL_PROMPT=0 additionally
+// keeps an unattended sync from ever blocking on a credential prompt.
+const REPOSITORY_CONTEXT_ENV = new Set([
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CEILING_DIRECTORIES",
+  "GIT_COMMON_DIR", "GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
+  "GIT_DIR", "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_GRAFT_FILE",
+  "GIT_IMPLICIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_INTERNAL_SUPER_PREFIX",
+  "GIT_NAMESPACE", "GIT_NO_REPLACE_OBJECTS", "GIT_OBJECT_DIRECTORY",
+  "GIT_PREFIX", "GIT_QUARANTINE_PATH", "GIT_REPLACE_REF_BASE",
+  "GIT_SHALLOW_FILE", "GIT_WORK_TREE",
+]);
+export function sanitizedGitEnv(baseEnv = process.env) {
+  const env = { ...baseEnv };
+  for (const name of Object.keys(env)) {
+    const upper = name.toUpperCase();
+    if (
+      REPOSITORY_CONTEXT_ENV.has(upper)
+      || upper.startsWith("GIT_CONFIG_KEY_")
+      || upper.startsWith("GIT_CONFIG_VALUE_")
+    ) {
+      delete env[name];
+    }
+  }
+  env.GIT_TERMINAL_PROMPT = "0";
+  return env;
+}
+
 // `--git-path` resolves the correct per-worktree location for either rebase
 // strategy (merge-based `rebase -i` vs. the older apply-based path).
 // Returns { inProgress, error } rather than throwing so callers can
@@ -237,13 +270,14 @@ function describeSyncError(error) {
 // one shape. Deliberately cheap/side-effect-free so it is safe to call twice
 // (see attemptWorktreeSync's TOCTOU note on its two call sites).
 async function rebaseInProgress(cwd) {
+  const env = sanitizedGitEnv();
   try {
     const [mergeDir, applyDir] = await Promise.all([
       execFileAsync("git", ["rev-parse", "--git-path", "rebase-merge"], {
-        cwd, encoding: "utf-8", timeout: 5000,
+        cwd, encoding: "utf-8", timeout: 5000, env,
       }),
       execFileAsync("git", ["rev-parse", "--git-path", "rebase-apply"], {
-        cwd, encoding: "utf-8", timeout: 5000,
+        cwd, encoding: "utf-8", timeout: 5000, env,
       }),
     ]);
     return {
@@ -256,6 +290,52 @@ async function rebaseInProgress(cwd) {
     // the same as "not a git checkout" would have -- fail closed by
     // reporting in-progress rather than guessing.
     return { inProgress: true, error: true };
+  }
+}
+
+// Best-effort, same-process-family serialization for attemptWorktreeSync's
+// own check-then-sync window: a filesystem exclusive-create lock scoped to
+// this worktree's git dir. This closes the realistic TOCTOU risk (this
+// plugin's own force-tier and skill-guided sync paths racing each other
+// across concurrent tool calls/sessions on the SAME worktree) but is
+// deliberately honest about its limit -- it cannot and does not claim to
+// serialize against an operator (or unrelated tool) running `git rebase` by
+// hand at the exact wrong instant; no lock this plugin creates can compel an
+// external actor to honor it. That residual, unavoidable-without-owning-
+// agent-worktrees-itself gap is why rebaseInProgress() is still rechecked
+// immediately before the sync exec even while this lock is held.
+async function withWorktreeSyncLock(cwd, fn) {
+  let lockPath;
+  try {
+    const gitPath = await execFileAsync(
+      "git", ["rev-parse", "--git-path", "context-handoff-sync.lock"],
+      { cwd, encoding: "utf-8", timeout: 5000, env: sanitizedGitEnv() },
+    );
+    lockPath = resolve(cwd, gitPath.stdout.trim());
+  } catch {
+    // Can't even resolve the lock location -- fail closed the same way the
+    // rebase check does, rather than proceeding unserialized.
+    return {
+      attempted: false,
+      synced: false,
+      reason: "could not resolve a lock path for this worktree; automatic sync was skipped to be safe",
+    };
+  }
+  let lockFd;
+  try {
+    lockFd = openSync(lockPath, "wx");
+  } catch {
+    return {
+      attempted: false,
+      synced: false,
+      reason: "another sync attempt for this worktree is already in progress; automatic sync was skipped",
+    };
+  }
+  try {
+    return await fn();
+  } finally {
+    try { closeSync(lockFd); } catch { /* best-effort */ }
+    try { unlinkSync(lockPath); } catch { /* already gone */ }
   }
 }
 
@@ -311,14 +391,22 @@ async function resolveRuntimePythonAsyncNoProvision(resolved, env, cwd, timeout)
 export async function attemptWorktreeSync(cwd) {
   let status;
   try {
-    // --untracked-files=all matches this repo's own established dirty-check
-    // convention (service-utils.ps1): plain `--porcelain` collapses an
-    // untracked directory to one summary line and can also be suppressed
-    // entirely by a local `status.showUntrackedFiles=no` config, either of
-    // which would let real untracked content slip through as "clean".
+    // --ignored --untracked-files=all matches this repo's own established
+    // dirty-check safety pattern
+    // (customizing-copilot/skills/reviewing-customizations/scripts/
+    // scan_plugin_sources.py's _payload_is_clean): plain `--porcelain` omits
+    // ignored files entirely and collapses an untracked directory to one
+    // summary line, and can also be suppressed entirely for untracked files
+    // by a local `status.showUntrackedFiles=no` config -- any of which
+    // would let real content (including an ignored/untracked secret-adjacent
+    // file that could collide with what the sync brings in) slip through as
+    // "clean". This deliberately over-rejects (e.g. an ordinary ignored
+    // build/dependency directory also blocks a sync attempt) in favor of the
+    // same fail-closed philosophy this whole function already follows for
+    // any other uncommitted state.
     const result = await execFileAsync(
-      "git", ["status", "--porcelain", "--untracked-files=all"],
-      { cwd, encoding: "utf-8", timeout: 5000 },
+      "git", ["status", "--porcelain", "--ignored", "--untracked-files=all"],
+      { cwd, encoding: "utf-8", timeout: 5000, env: sanitizedGitEnv() },
     );
     status = result.stdout;
   } catch (error) {
@@ -332,9 +420,16 @@ export async function attemptWorktreeSync(cwd) {
     return {
       attempted: false,
       synced: false,
-      reason: "worktree has uncommitted changes; automatic sync never commits, so it was skipped",
+      reason: "worktree has uncommitted, untracked, or ignored content; automatic sync never commits, so it was skipped",
     };
   }
+  return withWorktreeSyncLock(cwd, () => attemptWorktreeSyncLocked(cwd));
+}
+
+// The locked portion of attemptWorktreeSync: rebase check through the actual
+// sync exec. Split out so the lock (withWorktreeSyncLock) wraps exactly this
+// window -- the dirty-tree check above needs no serialization on its own.
+async function attemptWorktreeSyncLocked(cwd) {
   // A rebase can be paused at a clean step (e.g. `edit`), which reports a
   // clean `git status --porcelain` even though a rebase is genuinely in
   // progress. Proceeding to sync in that state would let the sync helper's
@@ -342,12 +437,11 @@ export async function attemptWorktreeSync(cwd) {
   // never started -- never our call to make. `--git-path` resolves the
   // correct per-worktree location for either rebase strategy.
   //
-  // This check and the actual sync exec below are NOT atomic -- another
-  // process could start a rebase in the window between them, and we do not
-  // control (or want to invent) a cross-process worktree lock here. Rather
-  // than pretend a single check makes this airtight, `rebaseInProgress` is
-  // re-run again immediately before the sync exec call, right after the
-  // last other await, to shrink that window to the minimum unavoidable gap.
+  // The worktree sync lock serializes this plugin's OWN concurrent sync
+  // attempts (e.g. the force-tier and skill-guided paths racing on the same
+  // worktree), but it cannot compel an external actor (a human, or an
+  // unrelated tool) to honor it -- that residual gap is why
+  // `rebaseInProgress` is still rechecked immediately before the sync exec.
   const rebaseState = await rebaseInProgress(cwd);
   if (rebaseState.inProgress || rebaseState.error) {
     return {
@@ -371,8 +465,8 @@ export async function attemptWorktreeSync(cwd) {
   const timeout = 20000;
   try {
     if (resolved.pluginRoot) {
-      const env = runtimeEnvironment(
-        { ...process.env }, resolved.pluginRoot,
+      const env = sanitizedGitEnv(
+        runtimeEnvironment({ ...process.env }, resolved.pluginRoot),
       );
       // allowProvision: false, structurally -- this async resolver never
       // takes the (execFileSync-based, up-to-RUNTIME_PROVISION_TIMEOUT_MS)
@@ -410,7 +504,7 @@ export async function attemptWorktreeSync(cwd) {
         };
       }
       await execFileAsync(resolved.path, ["git", "sync"], {
-        cwd, timeout, encoding: "utf-8",
+        cwd, timeout, encoding: "utf-8", env: sanitizedGitEnv(),
       });
     }
     return { attempted: true, synced: true, reason: null };

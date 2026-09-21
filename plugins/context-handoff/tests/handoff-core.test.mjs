@@ -30,6 +30,7 @@ import {
   resolveSystemCli,
   runtimeEnvironment,
   safePathSegment,
+  sanitizedGitEnv,
   sessionBindingForSession,
   triggerHandoff,
   writeJsonAtomic,
@@ -1167,7 +1168,7 @@ test("attemptWorktreeSync skips (never commits) when the tree is dirty", async (
     const result = await attemptWorktreeSync(dir);
     assert.equal(result.attempted, false);
     assert.equal(result.synced, false);
-    assert.match(result.reason, /uncommitted changes/);
+    assert.match(result.reason, /uncommitted, untracked, or ignored content/);
     // Never auto-commits: the dirty change must still be present, uncommitted.
     const status = execFileSync("git", ["status", "--porcelain"], { cwd: dir, encoding: "utf-8" });
     assert.notEqual(status.trim(), "");
@@ -1276,7 +1277,61 @@ test("attemptWorktreeSync detects dirty state hidden by status.showUntrackedFile
     const result = await attemptWorktreeSync(dir);
     assert.equal(result.attempted, false);
     assert.equal(result.synced, false);
-    assert.match(result.reason, /uncommitted changes/);
+    assert.match(result.reason, /uncommitted, untracked, or ignored content/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attemptWorktreeSync skips when only an ignored file is present (plain --porcelain would miss it)", async () => {
+  // Real regression this guards: bare `git status --porcelain` omits ignored
+  // files entirely -- an ignored/secret-adjacent file could still collide
+  // with content the sync brings in. --ignored closes that gap; this
+  // deliberately over-rejects (an ordinary ignored build artifact also
+  // blocks a sync attempt), consistent with this function's documented
+  // fail-closed philosophy for any other uncommitted state.
+  const dir = initGitRepo();
+  try {
+    writeFileSync(join(dir, ".gitignore"), "ignored-secret.txt\n");
+    execFileSync("git", ["add", ".gitignore"], { cwd: dir });
+    execFileSync("git", ["commit", "-q", "-m", "add gitignore"], { cwd: dir });
+    writeFileSync(join(dir, "ignored-secret.txt"), "shh\n");
+    const bareStatus = execFileSync(
+      "git", ["status", "--porcelain"], { cwd: dir, encoding: "utf-8" },
+    );
+    assert.equal(bareStatus.trim(), "", "ignored file unexpectedly visible to bare porcelain");
+    const result = await attemptWorktreeSync(dir);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /uncommitted, untracked, or ignored content/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attemptWorktreeSync skips when another sync attempt already holds the worktree lock", async () => {
+  // Real regression this guards: the rebase-check-then-sync window is not
+  // atomic against a concurrent invocation of THIS SAME function (e.g. the
+  // force-tier and skill-guided paths racing on one worktree) -- the lock
+  // closes that specific, realistic race by serializing this plugin's own
+  // concurrent attempts, even though it cannot compel an unrelated external
+  // actor to honor it.
+  const dir = initGitRepo();
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, "");
+    try {
+      const result = await attemptWorktreeSync(dir);
+      assert.equal(result.attempted, false);
+      assert.equal(result.synced, false);
+      assert.match(result.reason, /already in progress/);
+    } finally {
+      unlinkSync(lockPath);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1389,4 +1444,37 @@ test("handoffDedupKey scopes different sessions to different keys even with iden
 test("handoffDedupKey embeds the session id verbatim for debuggability", () => {
   const key = handoffDedupKey("my-session-42", "content");
   assert.match(key, /^handoff-my-session-42-[0-9a-f]{12}$/);
+});
+
+// --- sanitizedGitEnv (round-10 review fix: inherited GIT_DIR/GIT_WORK_TREE/
+// etc. could override `cwd` and make a safety check inspect, or the
+// delegated sync mutate, a different repository than the one intended) ----
+
+test("sanitizedGitEnv strips repository-identity variables inherited from the ambient environment", () => {
+  const env = sanitizedGitEnv({
+    GIT_DIR: "/somewhere/else/.git",
+    GIT_WORK_TREE: "/somewhere/else",
+    GIT_INDEX_FILE: "/tmp/other-index",
+    GIT_COMMON_DIR: "/somewhere/else/.git-common",
+    GIT_CONFIG_KEY_0: "foo",
+    GIT_CONFIG_VALUE_0: "bar",
+    UNRELATED_VAR: "keep-me",
+  });
+  assert.equal(env.GIT_DIR, undefined);
+  assert.equal(env.GIT_WORK_TREE, undefined);
+  assert.equal(env.GIT_INDEX_FILE, undefined);
+  assert.equal(env.GIT_COMMON_DIR, undefined);
+  assert.equal(env.GIT_CONFIG_KEY_0, undefined);
+  assert.equal(env.GIT_CONFIG_VALUE_0, undefined);
+  assert.equal(env.UNRELATED_VAR, "keep-me");
+});
+
+test("sanitizedGitEnv disables the terminal credential prompt so an unattended sync never hangs on it", () => {
+  const env = sanitizedGitEnv({});
+  assert.equal(env.GIT_TERMINAL_PROMPT, "0");
+});
+
+test("sanitizedGitEnv is case-insensitive to a lowercase-spelled repository-identity variable", () => {
+  const env = sanitizedGitEnv({ git_dir: "/somewhere/else/.git" });
+  assert.equal(env.git_dir, undefined);
 });

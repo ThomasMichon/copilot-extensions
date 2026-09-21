@@ -519,10 +519,18 @@ const session = await joinSession({
             "2. Distinguish the trigger BEFORE saving:",
             "   - If context pressure is the reason for the handoff and work",
             "     remains: sync the worktree onto the latest default branch",
-            "     NOW, before saving (commit local WIP, then `agent-worktrees",
-            "     git sync` or equivalent -- see the context-handoff skill's",
-            "     'Sync before triggering' section; note any conflict in the",
-            "     brief rather than blocking on it). ALWAYS call",
+            "     NOW, before saving. First inspect the tree -- never",
+            "     blanket-commit (`git add -A`/`git commit -a`); stage and",
+            "     commit only paths you recognize as your own reviewed,",
+            "     intentional changes this session. If anything looks",
+            "     unfamiliar, untracked, or possibly sensitive, or you are",
+            "     unsure it is safe to commit, skip the sync entirely and",
+            "     note in the brief that the worktree may be behind the",
+            "     default branch. Otherwise commit local WIP, then run",
+            "     `agent-worktrees git sync` or equivalent -- see the",
+            "     context-handoff skill's 'Sync before triggering' section;",
+            "     note any conflict in the brief rather than blocking on it.",
+            "     ALWAYS call",
             "     generate_handoff_prompt again after the sync (even if it",
             "     looked like a no-op) so the Git Status you compose from is",
             "     current -- a WIP commit or a failed sync attempt both change",
@@ -639,10 +647,19 @@ const session = await joinSession({
           `Handoff stored (${stored.storage}: ${stored.id}). This preserves the ` +
           "baton without arming the pickup flow.\n\n" +
           "If this handoff exists because context pressure is rising and work " +
-          "still remains, call `trigger_handoff` directly now.\n\n" +
+          "still remains: you should already have synced the worktree onto the " +
+          "latest default branch before calling generate_handoff_prompt (see " +
+          "the context-handoff skill's 'Sync before triggering' section) -- " +
+          "call `trigger_handoff` directly now.\n\n" +
           "If this is a turn-end follow-up handoff, ask the user whether to " +
-          "continue via handoff and call `trigger_handoff` only after they say " +
-          "yes, unless autopilot or prior authorization already covers that path.\n\n" +
+          "continue via handoff. Only after they say yes: sync the worktree " +
+          "(inspect the tree first -- never blanket-commit; skip the sync " +
+          "entirely if anything looks unfamiliar or unsafe to commit), then " +
+          "ALWAYS re-run generate_handoff_prompt and save_handoff_prompt again " +
+          "-- even if the sync looked like a no-op -- so the stored baton " +
+          "reflects the post-sync state before calling trigger_handoff. Never " +
+          "sync or commit before the user has agreed, unless autopilot or " +
+          "prior authorization already covers that turn-end follow-up path.\n\n" +
           "If you later need manual continuation, open the successor session and " +
           "run `/consume-handoff`; if that command is unavailable, use the " +
           "payload-local context-handoff CLI with the recovery locator embedded " +
@@ -895,10 +912,17 @@ const session = await joinSession({
           prompt:
             "Perform a handoff now (the operator invoked /handoff-continue, " +
             "which is explicit authorization). Steps: (1) sync the worktree " +
-            "onto the latest default branch first (commit local WIP, then " +
-            "`agent-worktrees git sync` or equivalent -- see the " +
-            "context-handoff skill's 'Sync before triggering' section; note " +
-            "any conflict in the brief rather than blocking on it); (2) call " +
+            "onto the latest default branch first -- inspect the tree before " +
+            "committing anything (never blanket-commit via `git add -A`/" +
+            "`git commit -a`; stage and commit only paths you recognize as " +
+            "your own reviewed, intentional changes this session; if " +
+            "anything looks unfamiliar, untracked, or possibly sensitive, or " +
+            "you are unsure it is safe to commit, skip the sync entirely and " +
+            "note in the brief that the worktree may be behind the default " +
+            "branch), then run `agent-worktrees git sync` or equivalent -- " +
+            "see the context-handoff skill's 'Sync before triggering' " +
+            "section; note any conflict in the brief rather than blocking " +
+            "on it); (2) call " +
             "generate_handoff_prompt to collect session facts; (3) compose " +
             "continuation markdown per the context-handoff skill -- use its " +
             "compact effort-backed shape when a valid open active effort exists, " +

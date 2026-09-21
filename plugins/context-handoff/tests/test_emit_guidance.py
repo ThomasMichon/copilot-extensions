@@ -118,6 +118,7 @@ def test_bash_emits_owned_bounded_continuity_guidance() -> None:
     assert "When you own the active objective, it can span multiple agent sessions" in context
     assert "do not narrow investigation, planning, implementation" in context
     assert "compose and store the baton safely" in context
+    assert "sync the worktree first if pressure-driven, then compose and store" in context
     assert "trigger_handoff" in context
     assert "do not ask first" in context
     assert "ending the turn with proposed follow-ups" in context
