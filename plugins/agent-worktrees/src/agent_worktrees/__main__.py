@@ -1126,6 +1126,8 @@ def _worktree_to_dict(
     if not rec.checkout_managed:
         d["checkout_managed"] = False
     d["picker_hidden"] = rec.is_picker_hidden
+    if rec.bound_agent:
+        d["bound_agent"] = rec.bound_agent
     if rec.dispatch_attempt is not None:
         d["dispatch_attempt"] = rec.dispatch_attempt.to_dict()
     # worktree-status-core: the agent-asserted disposition overlay so the Picker
@@ -2287,6 +2289,7 @@ def _create_worktree_core(
     dispatch_attempt: dict[str, object] | None = None,
     launch_preflight: LaunchPreflight | None = None,
     recovery: bool = False,
+    bound_agent: str | None = None,
 ) -> dict:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
@@ -2524,6 +2527,7 @@ def _create_worktree_core(
                 # spun up as another worktree's outbound resource (stamped by `run` /
                 # an explicit --owner-ref). Absent = unclaimed.
                 owner_ref=owner_ref or None,
+                bound_agent=bound_agent or None,
             )
         finally:
             if owner_guard is not None:
@@ -10563,6 +10567,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                 owner_ref=owner_ref,
                 inherit_parent_session=not (is_system or no_owner),
                 dispatch_attempt=dispatch_attempt,
+                bound_agent=getattr(args, "bound_agent", None),
             )
         except CoordinationReadinessFailure as exc:
             return _emit_coordination_rejection(exc.readiness, json_out=args.json)
@@ -12669,9 +12674,17 @@ def build_parser() -> argparse.ArgumentParser:
         "parent session from COPILOT_AGENT_SESSION_ID, so no parent's "
         "finalize or terminal-cleanup gate is held on it (Ph6).",
     )
+    p.add_argument(
+        "--agent",
+        default=None,
+        dest="bound_agent",
+        help="Bind a charter (agent-bridge spawn profile name, e.g. "
+        "board-sweep-worker) to this worktree: agent-bridge reads the "
+        "binding when spawning/resuming any session here instead of "
+        "the venue's bare default. A charter is a spawn profile, never "
+        "its own first-class agent-bridge target.",
+    )
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
-
-    # run (execute an inner subcommand; journal the resource it produces as an
     # outbound claim on THIS worktree -- resource-claims)
     p = sub.add_parser(
         "run",

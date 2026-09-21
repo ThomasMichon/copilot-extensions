@@ -3067,6 +3067,53 @@ class TestSystemWorktreeKind:
         assert loaded.kind == "system"
         assert loaded.owner == "session-sync"
 
+    def test_create_new_record_bound_agent_round_trips(self, tmp_path: Path):
+        """agent-bridge-worktree-native-agents: a charter bound at create
+        time persists through save/load, and an unbound worktree's YAML
+        carries no bound_agent key at all (legacy-shape preserved)."""
+        rec = create_new_record(
+            "wt-bound", "worktree/wt-bound", "/tmp/wt-bound", "test-repo",
+            "test", "wsl", tmp_path, bound_agent="board-sweep-worker",
+        )
+        assert rec.bound_agent == "board-sweep-worker"
+        loaded = load_record(tmp_path / "wt-bound.yaml")
+        assert loaded.bound_agent == "board-sweep-worker"
+
+        unbound = create_new_record(
+            "wt-unbound", "worktree/wt-unbound", "/tmp/wt-unbound",
+            "test-repo", "test", "wsl", tmp_path,
+        )
+        assert unbound.bound_agent is None
+        raw = (tmp_path / "wt-unbound.yaml").read_text(encoding="utf-8")
+        assert "bound_agent" not in raw
+
+    def test_create_new_record_bound_agent_whitespace_normalizes_to_none(
+        self, tmp_path: Path,
+    ):
+        """A whitespace-only --agent value must not persist as a binding."""
+        rec = create_new_record(
+            "wt-blank", "worktree/wt-blank", "/tmp/wt-blank", "test-repo",
+            "test", "wsl", tmp_path, bound_agent="   ",
+        )
+        assert rec.bound_agent is None
+        raw = (tmp_path / "wt-blank.yaml").read_text(encoding="utf-8")
+        assert "bound_agent" not in raw
+
+    def test_load_record_strips_whitespace_only_bound_agent(self, tmp_path: Path):
+        """A hand-edited YAML with a whitespace-only bound_agent must load as
+        unbound, matching create_new_record()'s own normalization."""
+        path = tmp_path / "wt-handedit.yaml"
+        create_new_record(
+            "wt-handedit", "worktree/wt-handedit", "/tmp/wt-handedit",
+            "test-repo", "test", "wsl", tmp_path,
+        )
+        path.write_text(
+            path.read_text(encoding="utf-8") + 'bound_agent: "   "\n',
+            encoding="utf-8",
+        )
+        loaded = load_record(path)
+        assert loaded.bound_agent is None
+
 
 # ---------------------------------------------------------------------------
 # #2668 -- two-axis taxonomy (interface x origin) + Picker visibility

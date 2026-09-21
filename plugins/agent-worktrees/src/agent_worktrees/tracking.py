@@ -1004,6 +1004,14 @@ class WorktreeRecord:
     #     byte-identically.
     owner_ref: str | None = None
     resources: list[ResourceClaim] = field(default_factory=list)
+    # agent-bridge-worktree-native-agents: the charter (agent-bridge spawn
+    # profile name, e.g. "board-sweep-worker") bound to this worktree at
+    # create/embody time. A charter is never itself a first-class fabric
+    # target (see visions/agent-fabric `charter-is-a-profile-not-a-target`);
+    # this is the persisted selection agent-bridge reads when spawning or
+    # resuming a session here, instead of the venue's bare default. Absent =
+    # no charter bound (the common case; the venue's default agent drives).
+    bound_agent: str | None = None
     # worktree-status-core: the agent-asserted DISPOSITION overlay -- orthogonal
     # to git/session state (which cannot tell "done" from "finalized-with-
     # follow-ups"). Set via `agent-worktrees status`; absent (legacy) = the safe
@@ -2339,6 +2347,8 @@ def load_record(path: Path) -> WorktreeRecord:
         owner_ref=(str(data["owner_ref"])
                    if data.get("owner_ref") else None),
         resources=resources_list,
+        bound_agent=(str(data["bound_agent"]).strip() or None
+                     if data.get("bound_agent") else None),
         follow_up=bool(data.get("follow_up", False)),
         follow_ups=follow_ups_list,
         summary=str(data.get("summary", "") or ""),
@@ -3022,6 +3032,10 @@ def _save_record_unlocked(
     # set, so an unclaimed worktree's YAML stays byte-identical.
     if record.owner_ref:
         content += f"owner_ref: {_yaml_scalar(record.owner_ref)}\n"
+    # agent-bridge-worktree-native-agents: the bound charter. Emitted only
+    # when set, so an unbound worktree's YAML stays byte-identical.
+    if record.bound_agent:
+        content += f"bound_agent: {_yaml_scalar(record.bound_agent)}\n"
     # citadel paired -harness/-knowledge worktree lifecycle (#957): the pair
     # linkage. Emitted only when set, so an unpaired worktree's YAML stays
     # byte-identical (the common case is unpaired).
@@ -4385,12 +4399,14 @@ def create_new_record(
     pair_kind: str | None = None,
     codename: str | None = None,
     codename_source: str | None = None,
+    bound_agent: str | None = None,
 ) -> WorktreeRecord:
     """Create and save a new worktree tracking record."""
     now = _now_iso()
     normalized_parent_session = parent_session or None
     normalized_caller_worktree = caller_worktree or None
     normalized_owner_ref = owner_ref or None
+    normalized_bound_agent = (bound_agent or "").strip() or None
     try:
         controllers, controller_revision = _derive_initial_controller_relations(
             machine=machine,
@@ -4432,6 +4448,7 @@ def create_new_record(
         pair_kind=pair_kind or None,
         codename=codename or None,
         codename_source=codename_source or None,
+        bound_agent=normalized_bound_agent,
     )
     _mark_controller_projection_dirty(
         record,
