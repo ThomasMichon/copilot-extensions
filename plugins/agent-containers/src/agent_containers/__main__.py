@@ -141,6 +141,11 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true",
         help="Terminate a live SSH holder and take over this trusted container",
     )
+
+    # --- copilot (agent-bridge-cli-mode-sessions Phase 4: venue launch) ---
+    from .copilot_venue import add_copilot_subparser as _add_copilot_subparser
+    _add_copilot_subparser(sub)
+
     ssh_stdio_p = sub.add_parser(
         "ssh-stdio",
         help="Serve an SSH-compatible restricted provider target over stdio",
@@ -292,6 +297,16 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_lifecycle_clear(args)
         if args.command == "exec":
             return _cmd_exec(args)
+        if args.command == "copilot":
+            from .copilot_venue import cmd_copilot
+
+            return cmd_copilot(
+                args,
+                require_live_relay_port=_require_live_relay_port,
+                relay_healthy=_relay_healthy,
+                busy_exit=_BUSY_EXIT,
+                creation_flags=_creation_flags,
+            )
         if args.command == "ssh-stdio":
             from .provider_ssh import run_ssh_stdio
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-containers"
-version = "0.1.2-dev146"
+version = "0.1.2-dev147"
 description = "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver"
 readme = "README.md"
 license = "MIT"
@@ -18,6 +18,8 @@ dependencies = [
     "agent-credential-relay",
     "agent-config-migrate",
     "agent-procutil",
+    "agent-venue-copilot",
+    "agent-zdd",
 ]
 
 [tool.uv.sources]
@@ -31,6 +33,14 @@ agent-config-migrate = { path = "libs/config-migrate" }
 # Windows-headless process-spawn helpers (module ``agent_procutil``). Vendored
 # per plugin; byte-identical src across copies.
 agent-procutil = { path = "libs/agent-procutil" }
+# Provider-agnostic reserve/connect/release orchestration for the venue
+# `copilot` verb (module ``venue_copilot``). Shared with agent-codespaces.
+agent-venue-copilot = { path = "libs/venue-copilot" }
+# Routing-table reader (module ``zdd``) -- used read-only, without importing
+# agent_bridge, to resolve the host daemon's own live API port for the
+# `copilot` verb's daemon-port reverse forward. Shared with agent-bridge/
+# agent-codespaces.
+agent-zdd = { path = "libs/zdd" }
 
 [project.scripts]
 agent-containers = "agent_containers.__main__:main"
