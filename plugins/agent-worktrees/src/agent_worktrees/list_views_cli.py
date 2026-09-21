@@ -103,20 +103,26 @@ def _local_binstub(project: str) -> str:
 
 def _parse_list_payload(raw: str) -> list | None:
     """Extract the ``worktrees`` array from a ``list --json`` payload
-    (enveloped ``{"worktrees": [...]}`` or a flat list), or None on any
-    parse/shape failure.
+    (always an enveloped ``{"worktrees": [...]}`` object -- see
+    ``cmd_list``'s own ``_json_output({"worktrees": worktrees})``), or
+    None on any parse/shape failure.
 
     Tolerates surrounding shell/login-banner noise by scanning for the
-    JSON object/array boundaries first -- mirrors ``claimant.py``'s
-    ``_parse_alive`` / ``codename_reverse_lookup.py``'s ``_parse_lookup``,
-    which every other cross-machine SSH probe in this plugin already
-    relies on (review #3134): an SSH session's MOTD/profile output would
-    otherwise make a perfectly reachable host look unreachable.
+    JSON **object** boundaries first (``{`` .. last ``}``) -- exactly
+    ``claimant.py``'s ``_parse_alive`` / ``codename_reverse_lookup.py``'s
+    ``_parse_lookup`` pattern, which every other cross-machine SSH probe
+    in this plugin already relies on (review #3134): an SSH session's
+    MOTD/profile output would otherwise make a perfectly reachable host
+    look unreachable. Deliberately dict-only (not also scanning for a
+    top-level ``[``/``]``) -- a stray ``[``/``]`` in banner text (e.g. a
+    login timestamp's "[UTC]") would otherwise widen the scanned range
+    into the noise itself and break parsing, and the real payload is
+    never a bare top-level array.
     """
     if not raw:
         return None
-    start = min((i for i in (raw.find("{"), raw.find("[")) if i >= 0), default=-1)
-    end = max(raw.rfind("}"), raw.rfind("]"))
+    start = raw.find("{")
+    end = raw.rfind("}")
     if start < 0 or end <= start:
         return None
     try:

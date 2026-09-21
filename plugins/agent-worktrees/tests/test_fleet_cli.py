@@ -120,6 +120,18 @@ def test_ssh_login_banner_noise_does_not_break_parsing():
     assert result == [{"id": "a"}]
 
 
+def test_banner_noise_containing_brackets_does_not_break_parsing():
+    """A banner line containing a stray `[`/`]` (e.g. a bracketed timestamp)
+    must not widen the scanned range into the noise -- the dict-only
+    ({..}) boundary scan is deliberately immune to this (review #3134)."""
+    noisy = (
+        "Last login: Mon Jan  1 12:00:00 [UTC] 2026 from 10.0.0.5\n"
+        '{"worktrees": [{"id": "a"}]}\n'
+    )
+    result = fleet._parse_list_payload(noisy)
+    assert result == [{"id": "a"}]
+
+
 def test_local_environment_runs_locally_not_over_ssh(tmp_path):
     """The current machine's own environment is run directly via the local
     binstub (still a subprocess, not an ssh hop), matching the machine/
