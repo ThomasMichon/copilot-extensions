@@ -1546,3 +1546,75 @@ surfaced three new HIGH-severity findings, all fixed in this pass:
   (`check-marketplace-isolation`, `check-skills`, `check-docs-consistency`,
   `check-no-internal-identifiers`, `check-version-bump`) pass. Bumped
   `plugin.json`/`marketplace.json` to `0.1.1-dev36`.
+
+### 2026-09-21 (cont.) -- PR #3167 round 10: sanitized Git env, real lock,
+### review-safety wording carried into every trigger surface
+
+Round 10 review (against the round-9 commit) surfaced 2 new HIGH findings
+and reconfirmed 2 of round 9's fixes as still insufficient per the
+reviewer's bar; all fixed in this pass:
+
+- **Ignored files still not covered:** round 9 added
+  `--untracked-files=all` but not `--ignored` -- plain `--porcelain` omits
+  ignored files entirely regardless. Found the repo's own precedent using
+  BOTH flags together
+  (`customizing-copilot/skills/reviewing-customizations/scripts/
+  scan_plugin_sources.py`'s `_payload_is_clean`, scoped to a narrow
+  footprint and explicitly documented as "deliberately over-rejects").
+  Added `--ignored` to `attemptWorktreeSync`'s dirty-check, accepting the
+  same over-reject tradeoff (an ordinary ignored build artifact also blocks
+  a sync attempt) as consistent with this function's already-documented
+  fail-closed philosophy.
+- **Rebase-check/sync TOCTOU still open:** round 9's "recheck immediately
+  before exec" narrows but does not close the race the reviewer flagged.
+  Added a per-worktree advisory lock (`withWorktreeSyncLock`, filesystem
+  exclusive-create under `.git/context-handoff-sync.lock`) around the
+  entire rebase-check-through-sync-exec window, serializing this plugin's
+  own concurrent sync attempts (the realistic risk: the force-tier and
+  skill-guided paths racing on the same worktree). Documented honestly that
+  no lock this plugin creates can compel an external actor (a human running
+  `git rebase` by hand) to honor it -- the recheck-immediately-before-exec
+  mitigation stays in place for that residual gap.
+- **(New) Unsanitized Git environment variables:** the new Git probes and
+  the delegated sync inherit `process.env` unmodified, so an inherited
+  `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`/`GIT_COMMON_DIR`/etc. could
+  silently redirect the safety checks (or the sync itself) to a different
+  repository than the one `cwd` names. Ported `agent-worktrees`' own
+  `repository_identity_env()` (`git_ops.py`) as `sanitizedGitEnv()`
+  (new/exported), used for every git probe and the sync child process; also
+  sets `GIT_TERMINAL_PROMPT=0` so an unattended sync can never block on a
+  credential prompt.
+- **(New) WIP-commit safety condition not carried into tool-response
+  prompts:** `SKILL.md` requires inspecting the tree and committing only
+  reviewed paths before any sync-related commit, but the emitted
+  `generate_handoff_prompt`/`/handoff-continue` tool-response text just
+  said "commit local WIP" without that condition -- an agent following the
+  tool's own output literally could blanket-commit unrelated edits or
+  secrets. Made the inspect/only-reviewed/skip-if-unsafe rule explicit in
+  both prompt surfaces (both occurrences in `extension.mjs`).
+- Also fixed a genuine gap `save_handoff_prompt`'s own response text had:
+  it told the agent to ask-then-trigger for the turn-end path without
+  mentioning the sync+re-save step that must happen between "yes" and
+  `trigger_handoff` -- an agent following ONLY that tool's own text could
+  skip the sync entirely. Added the missing step.
+- Corrected the emitted kernel guidance's (`emit-guidance.sh`/`.ps1`)
+  ordering: it previously implied "compose and store the baton" happens
+  before syncing for the pressure-driven path, backwards from the
+  canonical flow. Rewrote (byte-neutral, -1 byte) so sync precedes
+  compose/store; hand-verified byte-identical wording between both
+  platform scripts, both still within budget (2014/2048 kernel,
+  672/700 aggregate). The aggregate string's ordering was already correct
+  from round 7 -- that specific re-flagged item was stale.
+- Updated the PR description to match the actual shipped diff (was still
+  describing an earlier, narrower version of the change and the wrong dev
+  number).
+- Re-verified round 9's dedup-key fix (`handoffDedupKey`) is NOT actually
+  stale-flagged content -- the review comment was pinned to unchanged
+  `SKILL.md` text and didn't reflect that the underlying `handoff-core.mjs`
+  fix had already landed; left as-is, expecting the next round to clear it.
+- 9 new tests (ignored-file detection, lock-serialization, 3
+  `sanitizedGitEnv` unit tests, 1 emit-guidance ordering assertion).
+  `node --test`: 133 tests, 131 pass (2 pre-existing skips), no
+  regressions. All guards pass. No version bump needed (still `0.1.1-dev36`
+  from round 9 -- these fixes are additional commits within the same
+  unreleased dev version).
