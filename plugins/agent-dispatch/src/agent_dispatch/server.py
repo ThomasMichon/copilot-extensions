@@ -308,7 +308,17 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
                 "another process is concurrently starting a coordinator on this "
                 "host; refusing to race it for the active route"
             )
-        if has_live_local_coordinator(token=cfg.token):
+        try:
+            live = has_live_local_coordinator(token=cfg.token)
+        except BaseException:
+            # An exception here (e.g. a malformed AGENT_DISPATCH_ENDPOINT
+            # override raised while parsing) must not strand the lock --
+            # otherwise a caller that catches this and retries in the same
+            # process deadlocks against its own held lock (review follow-up
+            # on ThomasMichon/copilot-extensions#3066).
+            start_lock.release()
+            raise
+        if live:
             start_lock.release()
             raise CoordinatorAlreadyLiveError(
                 "a coordinator is already live and answering on this host; "
@@ -368,9 +378,13 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
             # this instance's own ``/health`` actually answers, or as soon as
             # ``server.run()`` itself has returned/raised (``_server_exited``),
             # so a startup failure never leaves the lock held for no reason.
-            # Bounded to 10s as a last-resort safety net against a startup that
-            # neither succeeds nor fails within a reasonable time (review
-            # follow-up on ThomasMichon/copilot-extensions#3066).
+            # Deliberately *not* time-bounded beyond that: releasing on a timer
+            # while the route is published but still unready would let another
+            # starter observe it as dead and seize it -- exactly the race this
+            # gate exists to close. A startup that neither completes nor exits
+            # is the same "wedged coordinator" class this repo's watchdog/
+            # supervisor tooling already handles externally, not this lock's
+            # job (review follow-up on ThomasMichon/copilot-extensions#3066).
             from .config import _health_responsive as _self_health_responsive
 
             _server_exited = threading.Event()
@@ -378,8 +392,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
             _lock = start_lock  # closure-stable reference; start_lock is reset below
 
             def _release_start_lock_when_ready() -> None:
-                deadline = time.monotonic() + 10.0
-                while time.monotonic() < deadline and not _server_exited.is_set():
+                while not _server_exited.is_set():
                     if _self_health_responsive(self_url, timeout=0.5, token=cfg.token):
                         break
                     time.sleep(0.05)
@@ -393,8 +406,9 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
                 server.run(sockets=[sock])
             finally:
                 _server_exited.set()
-                poller.join(timeout=11.0)
-                # The poller above has now released it (or timed out doing so) --
+                poller.join(timeout=2.0)
+                # The poller above has now released it (or is finishing up
+                # doing so within a moment of `_server_exited` being set) --
                 # clear the reference so the outer finally doesn't double-release.
                 start_lock = None
         else:
@@ -453,12 +467,20 @@ def _loopback_probe_url(host: str, port: int) -> str:
     """Build an ``http://`` URL for a locally-bound ``host:port``.
 
     ``host`` is a bind address (e.g. from ``Config.host``), not always a valid
-    URL authority: an IPv6 literal such as ``::1`` needs bracketing
-    (``http://[::1]:port``), or ``urlopen`` misparses it as ``host=':'``/``port``
-    garbage and the readiness probe never succeeds -- reintroducing the very
-    route-seizure race this probe exists to close (review follow-up on
+    probe destination: a wildcard/unspecified bind (``0.0.0.0``/``::``,
+    explicitly permitted by ``check_bind_safety()`` when a token is
+    configured) isn't a reliable local dial target, so it's normalized to the
+    corresponding loopback address first. An IPv6 literal such as ``::1``
+    also needs bracketing (``http://[::1]:port``), or ``urlopen`` misparses
+    it as ``host=':'``/``port`` garbage -- either case would otherwise make
+    the readiness probe fail forever and reintroduce the route-seizure race
+    this probe exists to close (review follow-up on
     ThomasMichon/copilot-extensions#3066).
     """
+    if host in ("0.0.0.0", ""):
+        host = "127.0.0.1"
+    elif host in ("::", "[::]"):
+        host = "::1"
     if ":" in host and not host.startswith("["):
         return f"http://[{host}]:{port}"
     return f"http://{host}:{port}"

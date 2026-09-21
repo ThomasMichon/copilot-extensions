@@ -199,12 +199,50 @@ def test_serve_raises_when_coordinator_already_live(monkeypatch, tmp_path):
     assert rendezvous.read_endpoint(run) is None
 
 
+def test_serve_releases_start_lock_when_liveness_recheck_raises(monkeypatch, tmp_path):
+    """An exception from the liveness re-check itself (e.g. a malformed
+    AGENT_DISPATCH_ENDPOINT override) must not strand the start lock -- a
+    caller that catches it and retries in the same process would otherwise
+    deadlock against its own held lock (review follow-up on
+    ThomasMichon/copilot-extensions#3066)."""
+    import pytest
+    from agent_dispatch.single_instance import SingleInstance
+
+    run = tmp_path / "run"
+    routing = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing))
+
+    def _boom(**_kwargs):
+        raise ValueError("malformed AGENT_DISPATCH_ENDPOINT override")
+
+    monkeypatch.setattr(server, "has_live_local_coordinator", _boom)
+    cfg = Config(host="127.0.0.1", port=0, db_path=str(tmp_path / "tasks.db"))
+
+    with pytest.raises(ValueError):
+        server.serve(cfg)
+
+    # The lock must be free for a same-process retry.
+    lock_path = routing / "serve-start.lock"
+    probe = SingleInstance(lock_path)
+    assert probe.acquire(), "start lock was left held after the liveness re-check raised"
+    probe.release()
+
+
 def test_loopback_probe_url_brackets_ipv6_hosts():
     assert server._loopback_probe_url("127.0.0.1", 1234) == "http://127.0.0.1:1234"
     assert server._loopback_probe_url("::1", 1234) == "http://[::1]:1234"
-    assert server._loopback_probe_url("::", 1234) == "http://[::]:1234"
+    assert server._loopback_probe_url("::", 1234) == "http://[::1]:1234"
     # Already-bracketed input is passed through rather than double-wrapped.
     assert server._loopback_probe_url("[::1]", 1234) == "http://[::1]:1234"
+
+
+def test_loopback_probe_url_normalizes_wildcard_binds():
+    # check_bind_safety() explicitly permits a wildcard/unspecified bind when
+    # a token is configured, but it isn't a dialable loopback destination.
+    assert server._loopback_probe_url("0.0.0.0", 1234) == "http://127.0.0.1:1234"
+    assert server._loopback_probe_url("::", 1234) == "http://[::1]:1234"
+    assert server._loopback_probe_url("[::]", 1234) == "http://[::1]:1234"
 
 
 def test_serve_holds_start_lock_until_actually_responsive(monkeypatch, tmp_path):
