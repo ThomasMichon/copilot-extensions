@@ -62,12 +62,6 @@ fi
 
 # Status and dependency-light cell-slot actions do not enter the self-stage
 # block that creates and reaps legacy staging directories.
-case "$__legacy_action" in
-    start|ensure)
-        _skip 'Host service lifecycle is managed by an already-running agent-dispatch supervisor; this installer cannot launch it'
-        [[ "$__legacy_action" == ensure ]] && exit 0
-        exit 2 ;;
-esac
 __skip_self_stage=0
 if [[ "$__legacy_action" == cell-provision ||
       "$__legacy_action" == cell-recover ||
@@ -1701,18 +1695,21 @@ _service_cutover() {
 case "$ACTION" in
     install)
         _ensure_runtime
-        _skip 'Host service is dispatch-managed; independent embedding engine unchanged'
+        _service_cutover || _ensure_running
+        _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
         ;;
     update)                                                         # Thread B: installer-driven graceful zdd cutover (a version update must never kill in-flight work)
         _downgrade_guard
         _ensure_runtime
-        _skip 'Host service is dispatch-managed; independent embedding engine unchanged'
+        _service_cutover || _ensure_running
+        _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
         ;;
     ensure) _ensure_running ;;  # user-mode auto-run safety net (sessionStart hook) -- start if not already healthy
     stamp) do_stamp ;;
     provision)
         _ensure_runtime
-        _skip 'Only the lightweight client runtime was provisioned; host service is dispatch-managed'
+        _service_cutover || _ensure_running
+        _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
         ;;
     engine) _install_engine || true; _register_engine_daemon ;;     # explicit host-side provisioning (role-independent)
     engine-update)                                                  # rebuild durable engine venv + restart daemon (decoupled from service update)

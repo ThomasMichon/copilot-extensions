@@ -119,7 +119,9 @@ def _tracked_py_files() -> list[str]:
         check=True,
     )
     return [
-        line for line in out.stdout.splitlines() if line and not _is_test_file(line)
+        line
+        for line in out.stdout.splitlines()
+        if line and not _is_test_file(line) and (REPO / line).is_file()
     ]
 
 

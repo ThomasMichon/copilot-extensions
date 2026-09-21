@@ -341,27 +341,6 @@ def _fake_runtime(
     return interpreter
 
 
-@pytest.mark.parametrize("shell", ["bash", "powershell"])
-def test_dispatch_companion_mode_is_non_provisioning(
-    tmp_path: Path, shell: str
-) -> None:
-    script, environment = _fixture(tmp_path, shell)
-
-    result = _run(
-        shell,
-        script,
-        environment,
-        "__dispatch-companion-mode",
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {
-        "schema_version": 1,
-        "supported": True,
-        "mode": "legacy",
-    }
-
-
 def _real_setup_runtime(
     tmp_path: Path,
     runtime_root: Path,
@@ -547,12 +526,6 @@ def test_fresh_namespaced_setup_reaches_role_writing(
         "--json",
     )
 
-    if expected_role == "host":
-        assert result.returncode == 126
-        assert "dispatch-managed" in result.stderr
-        assert not provisioned_role.exists()
-        assert not capture.exists()
-        return
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["role"] == expected_role
@@ -1406,92 +1379,6 @@ def test_active_cell_rejects_validator_interpreter_outside_selected_slot(
 
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
-def test_namespaced_deploy_requires_live_cell_transaction(
-    tmp_path: Path,
-    shell: str,
-) -> None:
-    if shell == "bash" and shutil.which("bash") is None:
-        pytest.skip("bash is not installed")
-    script, env = _fixture(tmp_path, shell)
-    cell_root = tmp_path / "cell" / "plugins" / "agent-index"
-    context = cell_root / "install.json"
-    context.parent.mkdir(parents=True)
-    context.write_text("{}\n", encoding="utf-8")
-    env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
-    env["AGENT_INDEX_ROLE"] = "host"
-    env["TEST_CELL_ROOT"] = str(cell_root)
-    env["TEST_INSTALLATION_STATUS"] = json.dumps(
-        {
-            "status": "ready",
-            "reason": "namespaced-active",
-            "actualMode": "namespaced",
-            "desiredMode": "namespaced",
-            "context": str(context),
-            "marketplaceId": "example--1234",
-            "policy": {"state": "valid", "enabled": True},
-        }
-    )
-
-    result = _run(shell, script, env, "deploy", "--recover", "--json")
-
-    assert result.returncode == 126
-    assert "managed by an already-running agent-dispatch" in result.stderr
-
-
-@pytest.mark.parametrize("shell", ["bash", "pwsh"])
-@pytest.mark.parametrize("command", ["start", "serve"])
-def test_namespaced_public_start_is_blocked_by_runtime_gate(
-    tmp_path: Path,
-    shell: str,
-    command: str,
-) -> None:
-    if shell == "bash" and shutil.which("bash") is None:
-        pytest.skip("bash is not installed")
-    script, env = _fixture(tmp_path, shell)
-    cell_root = tmp_path / "cell" / "plugins" / "agent-index"
-    context = cell_root / "install.json"
-    context.parent.mkdir(parents=True)
-    context.write_text("{}\n", encoding="utf-8")
-    env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
-    env["AGENT_INDEX_ROLE"] = "host"
-    env["TEST_CELL_ROOT"] = str(cell_root)
-    env["TEST_INSTALLATION_STATUS"] = json.dumps(
-        {
-            "status": "ready",
-            "reason": "namespaced-active",
-            "actualMode": "namespaced",
-            "desiredMode": "namespaced",
-            "context": str(context),
-            "marketplaceId": "example--1234",
-            "policy": {"state": "valid", "enabled": True},
-        }
-    )
-
-    result = _run(shell, script, env, command)
-
-    assert result.returncode == 126
-    assert "managed by an already-running agent-dispatch" in result.stderr
-
-
-@pytest.mark.parametrize("shell", ["bash", "pwsh"])
-@pytest.mark.parametrize(
-    "command", ["start", "serve", "restart", "deploy", "__cell-start", "__managed-start"]
-)
-def test_host_lifecycle_never_enters_runtime_or_installer(
-    tmp_path: Path, shell: str, command: str
-) -> None:
-    script, env = _fixture(tmp_path, shell)
-    env["AGENT_INDEX_ROLE"] = "host"
-    env["AGENT_INDEX_MANAGED_PYTHON"] = env["TEST_PYTHON"]
-    env["TEST_PYTHON"] = ""
-    before = sorted(str(path) for path in tmp_path.rglob("*"))
-    result = _run(shell, script, env, command)
-    assert result.returncode == 126, result.stderr
-    assert "managed by an already-running agent-dispatch" in result.stderr
-    assert sorted(str(path) for path in tmp_path.rglob("*")) == before
-
-
-@pytest.mark.parametrize("shell", ["bash", "pwsh"])
 @pytest.mark.parametrize("command", ["__cell-bootstrap", "__cell-service-ensure"])
 def test_compatibility_hook_commands_never_provision(
     tmp_path: Path, shell: str, command: str
@@ -1562,6 +1449,7 @@ def test_legacy_host_setup_installs_only_base_from_current_payload(
     assert marker.read_text(encoding="utf-8").splitlines() == ["client"]
     result_data = json.loads(result.stdout)
     assert result_data["role"] == "host"
-    assert result_data["service"]["manager"] == "agent-dispatch"
+    assert result_data["service"]["manager"] == "agent-index"
+    assert result_data["service"]["state"] == "self-supervised"
     assert not result_data["service"]["started_by_setup"]
     assert not result_data["service"]["provisioned_by_setup"]

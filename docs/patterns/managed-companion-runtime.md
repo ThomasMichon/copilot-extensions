@@ -3,8 +3,9 @@
 **Serves:** *Vision plugin-services*
 §Features/`delegated-heavy-companion-runtime`; *Vision plugins/agent-dispatch*
 registered supervision.
-**Exemplar:** agent-index host service through agent-dispatch `plugin-companion`
-declarations.
+**Current in-tree consumer:** `agent-ssh`'s dtssh host companion. `agent-index`
+previously used this pattern for its host service, but now follows
+`service-lifecycle-supervision` directly.
 
 ## Problem
 
@@ -240,10 +241,8 @@ ownership repair rather than an automated destructive fallback.
 
 ## Increment boundary
 
-Unmanaged plugin companions retain their existing lifecycle. Agent Index is the
-first concrete managed host integration: its registrar candidate contributes a
-single `service` / `host` runtime at the payload version, containing its vendored
-zdd/process helpers and the `[store]` extra. No embedding/model extra is declared.
+Unmanaged plugin companions retain their existing lifecycle. The concrete
+managed-host example in-tree is now `agent-ssh`'s dtssh host companion.
 
 The provider resolves an explicitly enabled project's effective configuration
 and requires this machine's host designation. It inspects installation governance
@@ -255,19 +254,11 @@ contributor's identity.
 
 Lifecycle adapters launch the injected interpreter in isolated, no-bytecode
 mode and never invoke an installer, legacy current-version selector, or sibling
-runtime import. They remove inherited package-manager and Python overrides,
-force external engine mode, and disable index-worker engine lifecycle management.
-Indexing workers explicitly retain no-bytecode mode and remain in the managed
-process containment boundary rather than detaching beyond generation leases.
-Public host start/deploy commands refuse; explicit setup and client installers
-remain base-only. Session hooks publish only context and the inert candidate.
-The existing ownership-checked legacy stop path retires an older service before
-the first supervised start; unsupported contexts are never stopped by that path.
+runtime import. They remove inherited package-manager and Python overrides.
 
-Independent warm-engine provisioning/cutover, namespaced host migration, host
-placement, and multi-host failover remain outside this increment. The interpreter
-binding is invocation data supplied by the supervisor, not a cryptographic
-authorization token against another process running as the same filesystem owner.
+The interpreter binding is invocation data supplied by the supervisor, not a
+cryptographic authorization token against another process running as the same
+filesystem owner.
 
 ## See Also
 

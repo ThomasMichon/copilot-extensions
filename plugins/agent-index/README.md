@@ -27,18 +27,13 @@ to search from the sessionStart scope-binding hook's `additionalContext`.
 runs through a durable engine daemon at `127.0.0.1:8421` unless an operator opts
 into another engine mode.
 - **Safe activation**: session-start contributes the command catalog and scope
-binding only when one effective repository configuration is active. It also
-publishes an attributed, inert `agent-dispatch` companion candidate. The
-session hook never stamps a runtime, installs packages, or starts a service.
-- **Declarative host lifecycle**: when `agent-dispatch` is running, the
-companion provider activates only for an enabled project whose effective
-repository or required-state-root config designates this machine as an
-indexer. Dispatch alone materializes the declared `[store]` host dependency
-profile, selects an immutable generation, readiness-gates replacement, rolls
-back failures, and retains live generations. The plugin's lifecycle adapter
-uses the injected `AGENT_INDEX_MANAGED_PYTHON` without installation or fallback.
-Client, unconfigured, globally enabled without a project, malformed-config,
-and unsupported namespaced host scopes remain inactive.
+binding only when one effective repository configuration is active. The session
+hook never stamps a runtime, installs packages, or starts a service.
+- **Self-supervised host lifecycle**: the light host runtime is installed into
+its own versioned slot, and the plugin's installer/runtime commands supervise
+it directly. `install`/`update` rebuild only the light `[store]` service slot,
+then cut traffic over with zdd; the durable engine remains on its separate
+explicit lifecycle and is never rebuilt by a routine service update.
 
 ## Minimal setup
 
@@ -52,8 +47,8 @@ and unsupported namespaced host scopes remain inactive.
    `corpus.sources` entry. A malformed, unsafe, ambiguous, or empty config is
    inactive.
 3. Start a new Copilot session. The command catalog and scope guidance appear
-only for an active config. Session start publishes the companion candidate but
-performs no runtime provisioning or service startup itself.
+only for an active config. Session start remains non-mutating: it performs no
+runtime provisioning or service startup itself.
 4. Pick a role explicitly:
    - single-machine/local indexer: `agent-index setup --single`
    - remote indexer: run `agent-index setup --indexer <machine> --ssh <alias>`
@@ -61,22 +56,15 @@ performs no runtime provisioning or service startup itself.
    In automation, add `--yes`; omitting both `--single` and `--indexer` is an
    error rather than silently choosing a role.
 5. Setup may provision the lightweight base/client CLI and writes the selected
-role. It never installs host dependencies, starts the host, or provisions the
-independent embedding engine. Lightweight provisioning emits
-`::agent-provisioning::`.
+role. It never provisions the durable embedding engine. Lightweight
+provisioning emits `::agent-provisioning::`.
 
 A machine whose resolved role is `client` runs no local indexer daemon. A host
-runs its local service only through an already-running dispatch supervisor.
-Without dispatch the host is unavailable: commands do not start dispatch or
-substitute their own installer. The independent durable engine's existing
-explicit lifecycle remains separate and is never coupled to host cutover.
-
-`start`, `serve`, `restart`, and `deploy` report dispatch ownership and return
-nonzero rather than launching a host. `install`, `update`, `provision`, and
-`init` install only the base/client package, even with a configured host role.
-No public command creates or selects dispatch-managed cells. The internal
-`__managed-start` entry accepts only the already-selected interpreter and a
-host designation; it is a non-installing adapter seam, not a setup command.
+runs its local service through the plugin's own installer/runtime lifecycle.
+`install`, `update`, and `provision` manage the light host runtime directly and
+use zdd cutover when replacing a live service. The independent durable engine's
+explicit lifecycle remains separate and is never coupled to routine host
+cutover.
 
 The installer exposes explicit installation-context actions for disposable
 installation-cell validation:
@@ -96,13 +84,11 @@ scripts/install.sh cell-recover --context /path/to/install.json --expected-marke
 ```
 
 The slot actions remain non-activating ownership/validation primitives.
-`cell-provision` requires an already-active, validated installation cell and
-supports only client/unconfigured runtime profiles. Host provision, replacement,
-and recovery are unavailable in namespaced contexts; an existing host receipt
-does not grant new install or launch authority. Client marker CAS, strict
-completion/profile receipts, source provenance, and schema-4 manifest
-transactions remain enforced. These installation cells are distinct from the
-dispatch-owned managed host generations.
+`cell-provision` requires an already-active, validated installation cell.
+Client marker CAS, strict completion/profile receipts, source provenance, and
+schema-4 manifest transactions remain enforced. Namespaced installations use
+the same local slot/cutover primitives as legacy mode; the durable engine still
+stays outside those runtime cells.
 
 Missing, requested-only, foreign, malformed, maintained, orphaned, or stale
 contexts fail closed without legacy fallback. Deactivation-pending cells retain
@@ -122,9 +108,9 @@ the legacy client layout, not legacy host provisioning authority.
 | Find near-duplicate clusters | `agent-index clusters [--source S] [--exact-dupes-only]` |
 | Check coverage/health | `agent-index status` |
 | Refresh the index | `agent-index index [--source S] [--full]` or `POST /reindex` |
-| Inspect host/runtime | `agent-index status`; dispatch owns host provisioning, start, replacement, rollback, and retention |
+| Inspect host/runtime | `agent-index status`; installer/runtime verbs own provisioning, start, cutover, rollback, and retention |
 | Install a client | Explicit setup or installer `install`/`update`; namespaced client governance via `cell-provision`, `slot-cutover`, `cell-recover` |
-| Manage the engine daemon | `agent-index engine status|start|stop|run` |
+| Manage the engine daemon | `agent-index engine status|start|stop|run`; `install.ps1|sh engine-update` rebuilds the durable engine runtime |
 | Adopt host/client routing | `agent-index setup`, `role`, `capability --json` |
 
 The `agent-index` read subcommands (`search`, `similar`, `clusters`, `status`)
@@ -160,11 +146,11 @@ non-mutating `inactive` result; before setup in an active repository it returns
 `setup_required`.
 - `agent-index role` — whether this machine is acting as `host` or `client`.
 - `agent-index engine status` — durable engine health, PID, endpoint, and venv.
-- Host unavailable: inspect the already-running dispatch supervisor and its
-  attributed companion registration. Do not retry a plugin installer for host
-  dependencies or use `deploy --recover` to bypass dispatch.
-- Namespaced mode: `cell-recover` retains client installation-transaction
-  recovery; namespaced host lifecycle is unsupported and remains inert.
+- Host unavailable: run `agent-index status`, `agent-index deploy --recover`,
+  or the installer `start`/`update` path that owns the service cutover. Routine
+  service updates do not rebuild the durable engine.
+- Namespaced mode: `cell-recover` retains installation-transaction recovery, and
+  the local service/runtime still remain installation-owned.
 - Legacy mode: `~/.agent-index/deploy-manifest.json`, `active.json`, and
   `data/worker.log`.
 - Cell mode: the validated plugin root's `deploy-manifest.json`,

@@ -315,28 +315,12 @@ _find_management_python() {
     return 1
 }
 
-if [ "$COMMAND" = __dispatch-companion-mode ]; then
-    supported=false
-    if [ "$ACTUAL_MODE" = legacy ] && [ "$DESIRED_MODE" = legacy ]; then
-        supported=true
-    fi
-    printf '{"mode":"%s","schema_version":1,"supported":%s}\n' \
-        "$ACTUAL_MODE" "$supported"
-    exit 0
-fi
-
 if [ "$ACTUAL_MODE" = namespaced ] &&
    [ "$COMMAND" = engine ] &&
    { [ "${2:-status}" = start ] || [ "${2:-status}" = run ]; }; then
     printf '%s\n' '[agent-index] the installation-cell exemplar does not provision or start the heavy embedding engine.' >&2
     exit 2
 fi
-
-case "$COMMAND" in
-    start|serve|restart|deploy|__managed-start|__cell-start)
-        printf '%s\n' '[agent-index] host service lifecycle is managed by an already-running agent-dispatch supervisor; this command cannot provision or launch it.' >&2
-        exit 126 ;;
-esac
 
 _configured_role() {
     local role=""
@@ -574,11 +558,6 @@ _release_provision_lock() {
 
 _provision_runtime() {
     if [ "$ACTUAL_MODE" = namespaced ]; then
-        local provision_role="${SETUP_ROLE:-$(_configured_role 2>/dev/null || true)}"
-        if [ "$provision_role" = host ]; then
-            printf '%s\n' '[agent-index] host service is dispatch-managed; namespaced host provisioning is unavailable.' >&2
-            return 126
-        fi
         if [ "$RESOLUTION_STATUS" != ready ] ||
            [ "$RESOLUTION_REASON" != namespaced-active ]; then
             printf '%s\n' '[agent-index] deactivation-pending installation cannot provision a new runtime.' >&2

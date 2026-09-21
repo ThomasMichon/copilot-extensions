@@ -225,14 +225,10 @@ def _registrar_declaration_violations(plugin_versions: dict[str, str]) -> list[s
     checks in its target's version as a plain string -- there is no dynamic
     resolution at declaration-load time, so it silently drifts whenever the
     target plugin's own version bumps without this file being touched in the
-    same change. Caught twice via ``test_agent_index_managed.py``'s
-    assertion (#3018, #3028); this closes the gap with a fast, generic guard
-    instead of relying on running a sibling plugin's test suite.
+    same change. Keep this list in sync with any in-tree registrar declarations
+    that mirror another plugin's version.
     """
-    mirrors = {
-        REPO / "plugins" / "agent-index" / "references" / "agent-dispatch"
-        / "registrar" / "agent-index-service.json": "agent-index",
-    }
+    mirrors: dict[Path, str] = {}
     violations: list[str] = []
     for path, target_plugin in mirrors.items():
         data = _read_json(path)

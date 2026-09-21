@@ -11,7 +11,7 @@ The current plugin includes:
 - a Python package and `agent-index` CLI;
 - a loopback FastAPI service with zdd routing and legacy rendezvous discovery;
 - lightweight client runtime slots under `~/.agent-index/versions/<version>`;
-- immutable host `[store]` generations materialized and selected by dispatch;
+- versioned host `[store]` slots selected by the plugin's own installer/cutover;
 - durable service data under `~/.agent-index/data/`;
 - a durable embedding-engine venv/daemon under `~/.agent-index/engine`;
 - source connectors for local git, GitHub issues/PRs, and Azure DevOps work
@@ -51,7 +51,7 @@ stays on the host and is resolved there.
 | Runtime root | `~/.agent-index` | plugin installer |
 | Client slots | Legacy `~/.agent-index/versions/<payload-version>`; namespaced profile-qualified slots | client installer |
 | Client runtime marker | `~/.agent-index/current-version` | client installer selection only |
-| Host runtime generations | physical root chosen by dispatch policy | dispatch materialization, selection, rollback, retention |
+| Host runtime slots | `~/.agent-index/versions/<version>` or namespaced profile-qualified slots | plugin installer/cell reconciler selection, rollback, retention |
 | zdd routing table | `~/.agent-index/active.json` | active service endpoint |
 | Legacy rendezvous | `~/.agent-index/run/endpoint.json` | fallback diagnostics |
 | Durable index/task data | `~/.agent-index/data/` | shared across service versions |
@@ -59,11 +59,12 @@ stays on the host and is resolved there.
 | Machine config | `~/.agent-index/config.yaml` or `AGENT_INDEX_CONFIG` | role, device, client endpoints |
 | Repo config | `<repo>/.copilot-extensions/agent-index/config.yaml` (legacy fallback: `<repo>/.agent-index/config.yaml`) | indexer designation and corpus scopes |
 
-Host generations follow `../../../docs/patterns/managed-companion-runtime.md`.
-Plugin installers never install `[store]`, even with a host role override.
-Index data and queued work remain durable and outside managed runtime cells.
-The independent embedding engine is neither provisioned nor restarted during
-client updates or host replacement.
+Host service replacement follows
+`../../../docs/patterns/graceful-daemon-cutover.md`, while the durable engine
+split follows `../../../docs/patterns/durable-vs-versioned-runtime.md`.
+Index data and queued work remain durable and outside service runtime slots.
+The independent embedding engine is neither provisioned nor restarted during a
+routine service update or host replacement.
 
 ## Activation, lifecycle, and supervision
 
@@ -76,40 +77,35 @@ an external state root, it may select the valid config from the bound knowledge
 repo. A present invalid local config, an unsafe path, a conflicting
 singular/plural indexer declaration, a missing required binding, or an
 unavailable resolver leaves the plugin inactive.
-2. Session-start hooks only register the dispatch companion while that resolver
-reports active; they never emit aggregate context, stamp or provision a
-runtime, or start a service. Retrieval guidance belongs in the exact-session
-guidance file when a session-file writer is present.
+2. Session-start hooks only emit retrieval guidance while that resolver reports
+active; they never stamp or provision a runtime, or start a service. Retrieval
+guidance belongs in the exact-session guidance file when a session-file writer
+is present.
 3. Every payload CLI entry runs the same resolver before installation-context
 selection, runtime provisioning, or transport routing. `status` reports
 structured `inactive` outside an opted-in repository; other commands are
 refused.
-4. In an active repository, admitted explicit commands may provision only the
-base/client runtime. Setup writes the selected role without a second
-role-specific install or service reconcile. Noninteractive setup requires an
-explicit role flag. The gate never executes a historical `payload-dir` installer
-as a fallback, because that installer may retain obsolete host-install authority.
+4. In an active repository, admitted explicit commands may provision the light
+service runtime locally. Setup writes the selected role without a second
+role-specific engine provision. Noninteractive setup requires an explicit role
+flag. The gate never executes a historical `payload-dir` installer as a
+fallback, because that installer may retain obsolete host-install authority.
 5. The installer-readiness probe is deliberately configuration-empty at session
 start, including for opted-in repositories, so generic launch reconciliation
 does not download packages or start services. Existing explicit installer and
 runtime commands remain available.
-6. The attributed host companion declares its dependencies. Only the
-already-running dispatch service can build, select, readiness-gate, replace,
-roll back, or retain that runtime. Its adapter uses
-`AGENT_INDEX_MANAGED_PYTHON` and the non-installing `__managed-start` CLI seam.
-It forces external engine mode and disables worker-owned engine startup/stop;
-service readiness is not a claim that an embedding engine is available.
-Managed indexing workers stay in the supervisor's containment boundary and use
-explicit `-B` even with isolated `-I`, so they cannot write bytecode into a
-receipt-hashed generation or survive beyond its process lease.
-Public `start`, `serve`, `restart`, `deploy`, and the historical payload
-`__cell-start` entry point cannot launch a host, even if that variable is set.
-7. Namespaced client marker CAS, deploy-manifest publication, profile receipts,
-and transaction recovery retain existing installation governance. Namespaced
-host provisioning and lifecycle are unsupported and fail closed. Compatibility
-bootstrap/ensure hooks are inert in every mode. Previously completed host
-receipts remain diagnostic/ownership evidence, never permission to build or
-start a replacement.
+6. The plugin's own installer/runtime lifecycle now builds, selects,
+readiness-gates, replaces, rolls back, and retains the light host runtime. The
+public `start` / `serve` entry points run the local service directly in the
+selected interpreter, while installer `install` / `update` use `deploy` for
+automatic zdd cutover when a live service is already serving. The durable
+engine remains external to that runtime and is never rebuilt by an ordinary
+service update.
+7. Namespaced marker CAS, deploy-manifest publication, profile receipts, and
+transaction recovery retain existing installation governance. Namespaced hosts
+use the same local slot/cutover primitives as legacy mode. Compatibility
+bootstrap/ensure hooks remain inert. Previously completed receipts remain
+diagnostic/ownership evidence, never permission to bypass runtime validation.
 
 Client runtime selection requires the canonical exact four-field
 `.install-complete.json`, the strict role/extras profile receipt, a valid
@@ -118,10 +114,9 @@ slot. POSIX permits only the standard `bin/python` venv symlink after validating
 its owned parent slot and resolved executable; all other linked/reparse runtime
 artifacts remain rejected. A partial or corrupt slot is never dispatched.
 
-Host service scheduled tasks/systemd units are no longer installed or started
-by plugin commands. `register-tasks` refuses rather than establishing a second
-host lifecycle owner. Explicit independent engine commands retain their
-existing lifecycle, outside this integration.
+Windows scheduled tasks and POSIX systemd-user units are optional tier-2
+wrappers around the same stable launcher path. Explicit independent engine
+commands retain their existing lifecycle outside the light service runtime.
 
 ## Service HTTP surface
 
@@ -149,7 +144,7 @@ See `../../../docs/patterns/local-endpoint-discovery.md`.
 Public CLI verbs are implemented in `src/agent_index/__main__.py`:
 
 - `stop`, `status`, `version`
-- `start` / `serve`, `restart`, `deploy [--recover]` report dispatch ownership
+- `start` / `serve`, `restart`, `deploy [--recover]` manage the local service
 - `index [--source S] [--full]`
 - `search <query> [--source S] [--language L] [--repo R] [--limit N] [--json]`
 - `similar <chunk_id> [--limit N] [--source S]`
@@ -159,10 +154,8 @@ Public CLI verbs are implemented in `src/agent_index/__main__.py`:
 - `setup`, `role`, and `capability`
 
 `index-worker` is an internal subprocess entry point used by the task runner.
-`__managed-start` runs only an already-selected interpreter for a configured
-host and contains no package-manager or runtime-builder fallback. The
-interpreter binding is a dispatch adapter contract, not a security boundary
-against arbitrary Python code run by the same filesystem owner.
+`__cell-start` remains an installation-cell-owned launcher seam that validates
+ownership before serving from a namespaced runtime.
 
 ## Indexing pipeline
 

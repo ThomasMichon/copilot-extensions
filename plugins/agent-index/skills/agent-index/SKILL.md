@@ -24,12 +24,13 @@ commands are refused.
 does not start a service. After repository opt-in, an operator explicitly chooses
 `setup --single` or `setup --indexer <machine> --ssh <alias>`; that setup call
 may provision only the lightweight client/base CLI (`::agent-provisioning::`).
-The configured host's `[store]` dependencies and service are provisioned and
-supervised only by an already-running `agent-dispatch`; without it the host
-is unavailable. Setup never starts dispatch or the host. Automation must
-also pass `--yes` and an explicit role choice. If the command is missing, the
-session command catalog reports it as unavailable; surface that exact failure
-rather than searching `PATH` or improvising an install.
+The configured host's light `[store]` runtime is then provisioned and
+supervised by the plugin's own installer/runtime lifecycle (`install`, `start`,
+`update`, `deploy`); the durable engine remains on its own explicit `engine` /
+`engine-update` path. Setup never starts the host. Automation must also pass
+`--yes` and an explicit role choice. If the command is missing, the session
+command catalog reports it as unavailable; surface that exact failure rather
+than searching `PATH` or improvising an install.
 - `<catalog argv[0]> status` is the first health check in a configured
   repository. It reports service reachability,
 version, index availability, total chunks, per-source coverage, and indexing
@@ -66,9 +67,9 @@ Use the CLI directly when operating the runtime:
   --indexer <machine> --ssh <alias>`, `<catalog argv[0]> role`,
   `<catalog argv[0]> capability --json`.
 - Service: `<catalog argv[0]> status`. `start`, `serve`, `restart`, and
-  `deploy` report dispatch ownership and do not launch or provision a host.
-  Stop remains ownership-checked, but dispatch may restart an enabled companion;
-  change its owning configuration to withdraw supervision durably.
+  `deploy` manage the local host directly. `install` / `update` own the same
+  lifecycle and use zdd cutover for live replacement. Stop remains
+  ownership-checked.
 - Index refresh: `<catalog argv[0]> index [--source S] [--full]`. Incremental is the
 default; `--full` is explicit.
 - Engine daemon: `<catalog argv[0]> engine status|start|stop|run`.
@@ -87,16 +88,15 @@ clearly scoped, pass `source` or `repo` rather than doing an unscoped search.
 
 ## Troubleshooting
 
-- Service down on a host: run/check `<catalog argv[0]> status`, then inspect the
-already-running dispatch supervisor. Plugin installers install only the client
-base package, never the host service dependencies. Namespaced installation
-contexts do not yet support managed hosts. Session start never starts the daemon.
+- Service down on a host: run/check `<catalog argv[0]> status`, then use the
+installer/runtime lifecycle that owns the host (`install`, `start`, `update`,
+`deploy --recover`). Session start never starts the daemon.
 - Client cannot search: run inside a repo with `.agent-index/config.yaml`
 `indexer.ssh` or set `AGENT_INDEX_REPO`; the CLI read transport needs a project
 to choose the SSH target.
 - Engine issues: `<catalog argv[0]> engine status` shows durable engine health, PID,
 endpoint, and venv provisioning state.
-- Interrupted host cutover: inspect dispatch's managed-runtime readiness and
-rollback state; do not use a plugin command to select a generation.
+- Interrupted host cutover: inspect the local zdd routing/runtime state and use
+`deploy --recover`; do not hand-edit markers or manifests to pick a generation.
 
 Architecture details live in `plugins/agent-index/docs/architecture.md`.
