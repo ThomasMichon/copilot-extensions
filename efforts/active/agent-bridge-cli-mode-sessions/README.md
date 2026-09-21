@@ -257,7 +257,7 @@ mechanism CLI mode binds through.
 ### Phase 4 — Symmetric venue launch
 
 - [x] **Venue-prep checklist established, from a real venue, not a guess.**
-      Checked a live, currently-running CodeSpace (`odsp-web-codespaces`,
+      Checked a live, currently-running operator CodeSpace (an
       Ubuntu 24.04 devcontainer) directly rather than assuming: `copilot` is
       present (devcontainer convention — `nvm`-installed, v1.0.86), as are
       `git`/`node`/`python3`/`uv`. **`tmux` is NOT present**, though `apt`
@@ -938,7 +938,7 @@ rebased PR.
 
 Before writing any venue-specific launch code, checked what a **real** venue
 actually has, rather than assuming symmetry with a local dev box. SSH'd into
-a live, currently-running CodeSpace (`odsp-web-codespaces`, an existing venue
+a live, currently-running operator CodeSpace (an existing venue
 of this harness's own operator, Ubuntu 24.04 devcontainer) and checked
 directly: `copilot` present (`nvm`-installed, v1.0.86) alongside
 `git`/`node`/`python3`/`uv` — all devcontainer conventions. **`tmux` is
