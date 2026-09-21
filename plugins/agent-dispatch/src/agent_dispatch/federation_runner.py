@@ -174,6 +174,13 @@ class FederationRunner:
             # so attempting it unconditionally is always safe.
             self._rv.deregister(self._instance)
             self._registered = False
+            # The gate closing must retire any live work-intake client too --
+            # otherwise its transport stays open while gated off, and
+            # reopening the gate would resume the STALE cached instance
+            # instead of picking up any config changed while closed.
+            self._close_work_intake_client()
+            self._work_intake = None
+            self._work_intake_url = None
             return {
                 "instance": self._instance,
                 "role": self._role,
@@ -348,16 +355,30 @@ class FederationRunner:
         self._thread.start()
 
     def stop(self, *, resign: bool = True, timeout: float = 5.0) -> None:
-        """Stop the background loop and (by default) give up our directory entry."""
+        """Stop the background loop and (by default) give up our directory entry.
+
+        Closing this runner's work-intake `DispatchClient` must never race a
+        still-running tick using it: if the bounded `join()` below returns
+        while the loop thread is genuinely still alive (e.g. mid-`tick()`
+        blocked in a synchronous spawn attempt up to `spawn_timeout`), this
+        skips closing the client / clearing `_work_intake` and leaves
+        `_thread` set so a caller can `join()` again once it actually
+        exits -- never yanking a resource out from under a live in-flight
+        tick. Resigning presence (deregister/release lease) is unaffected:
+        it touches no work-intake resource."""
         self._stop.set()
+        thread_exited = True
         if self._thread is not None:
             self._thread.join(timeout=timeout)
-            self._thread = None
+            thread_exited = not self._thread.is_alive()
+            if thread_exited:
+                self._thread = None
         if resign:
             self.resign()
-        self._close_work_intake_client()
-        self._work_intake = None
-        self._work_intake_url = None
+        if thread_exited:
+            self._close_work_intake_client()
+            self._work_intake = None
+            self._work_intake_url = None
 
     def resign(self) -> None:
         """Give up this node's standing: release the lease (eligible) or deregister

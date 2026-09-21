@@ -579,3 +579,100 @@ def test_federation_interval_default_and_override(monkeypatch):
 def test_federation_instance_explicit_override(monkeypatch):
     monkeypatch.setenv("AGENT_DISPATCH_FEDERATION_INSTANCE", "mantis-counter/wt-x")
     assert config.federation_instance() == "mantis-counter/wt-x"
+
+
+# -- Phase 3 work-intake: gate-close cleanup + stop() race guard -------------
+
+
+def test_work_intake_client_closed_when_gate_closes(monkeypatch, directory):
+    from agent_dispatch import client as client_mod
+    from agent_dispatch import satellite_work_intake as swi_mod
+
+    gate_open = {"value": True}
+    monkeypatch.setattr(config, "satellite_gate_open", lambda: gate_open["value"])
+    monkeypatch.setattr(config, "shared_url", lambda: "https://gw.example/dispatch")
+
+    built_clients = []
+    monkeypatch.setattr(
+        client_mod,
+        "DispatchClient",
+        lambda url, **kw: built_clients.append(_FakeCloseableClient()) or built_clients[-1],
+    )
+
+    class FakeWorkIntake:
+        def __init__(self, client, **kwargs):
+            pass
+
+        def tick(self):
+            return {"spawned": []}
+
+    monkeypatch.setattr(swi_mod, "SatelliteWorkIntake", FakeWorkIntake)
+
+    runner = FederationRunner(directory, "sat-1", role="satellite")
+    runner.tick()
+    assert built_clients[0].closed is False
+
+    gate_open["value"] = False
+    runner.tick()
+    # Gate closing must retire the live work-intake client too, not just
+    # the presence registration -- otherwise its transport stays open while
+    # gated off, and reopening the gate would resume stale state.
+    assert built_clients[0].closed is True
+    assert runner._work_intake is None
+    assert runner._work_intake_url is None
+
+
+def test_stop_does_not_close_client_while_tick_thread_still_alive(monkeypatch, directory):
+    import threading
+
+    from agent_dispatch import client as client_mod
+    from agent_dispatch import satellite_work_intake as swi_mod
+
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
+    monkeypatch.setattr(config, "shared_url", lambda: "https://gw.example/dispatch")
+    monkeypatch.setattr(
+        client_mod,
+        "DispatchClient",
+        lambda url, **kw: _FakeCloseableClient(),
+    )
+
+    class FakeWorkIntake:
+        def __init__(self, client, **kwargs):
+            pass
+
+        def tick(self):
+            return {"spawned": []}
+
+    monkeypatch.setattr(swi_mod, "SatelliteWorkIntake", FakeWorkIntake)
+
+    runner = FederationRunner(directory, "sat-1", role="satellite")
+    runner.tick()
+    client = runner._work_intake_client
+    assert client is not None
+
+    # Simulate a still-alive loop thread (e.g. mid-spawn) that a short
+    # join() timeout doesn't wait out.
+    still_running = threading.Event()
+
+    def block_forever():
+        still_running.wait()
+
+    fake_thread = threading.Thread(target=block_forever, daemon=True)
+    fake_thread.start()
+    runner._thread = fake_thread
+    try:
+        runner.stop(resign=False, timeout=0.05)
+        # The thread is still alive -- must NOT have closed the client out
+        # from under it, and must still hold the thread handle so a caller
+        # can join() again later.
+        assert client.closed is False
+        assert runner._thread is fake_thread
+        assert runner._work_intake is not None
+    finally:
+        still_running.set()
+        fake_thread.join(timeout=5)
+
+    # Once the thread has genuinely exited, a later stop() completes cleanup.
+    runner.stop(resign=False, timeout=1.0)
+    assert client.closed is True
+    assert runner._work_intake is None

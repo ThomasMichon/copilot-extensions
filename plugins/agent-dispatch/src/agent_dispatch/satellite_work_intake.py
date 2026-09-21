@@ -28,6 +28,7 @@ the same task_id before that race window closes.
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Any, Callable, Protocol
 
@@ -66,11 +67,18 @@ DEFAULT_MAX_SPAWNS_PER_TICK = 1
 _ACTIVE_STATUSES = "claimed,started"
 
 #: Minimum page size for the queued-task discovery read, matching the
-#: `/tasks` endpoint's own default. See the fairness note at that call site:
-#: requesting only exactly `capacity` rows (newest-first, no server-side
-#: oldest-first option) risks starving an older queued task indefinitely
-#: under a steady stream of newer ones.
+#: `/tasks` endpoint's own default. See `_fetch_all_queued`'s fairness note:
+#: the endpoint orders newest-first with no oldest-first/cursor option, so a
+#: single page this small could still let a steady stream of newer tasks
+#: starve an older one indefinitely -- `_fetch_all_queued` pages past it
+#: rather than trusting one bounded read.
 _QUEUE_DISCOVERY_MIN_LIMIT = 200
+
+#: Hard ceiling on how large a single discovery page is allowed to grow
+#: while paging for the full backlog. Bounds worst-case work against a
+#: pathological/adversarial backlog; a real satellite's own affinitied
+#: queue realistically never approaches this.
+_QUEUE_DISCOVERY_MAX_LIMIT = 5000
 
 
 class SatelliteWorkIntake:
@@ -107,6 +115,13 @@ class SatelliteWorkIntake:
         self._max_concurrent = max(1, int(max_concurrent))
         self._max_spawns_per_tick = max(1, int(max_spawns_per_tick))
         self._trigger_ttl = float(trigger_ttl)
+        # Normalize here too, not just in config.satellite_spawn_timeout():
+        # a direct constructor caller (tests, a future non-FederationRunner
+        # embedder) passing `None`/non-positive/non-finite must not silently
+        # forward an unbounded timeout straight to subprocess.run -- every
+        # spawn attempt is documented as bounded, full stop.
+        if spawn_timeout is None or spawn_timeout <= 0 or not math.isfinite(spawn_timeout):
+            spawn_timeout = DEFAULT_SPAWN_TIMEOUT_S
         self._spawn_timeout = spawn_timeout
         self._spawn_fn = spawn_fn
         self._clock = clock
@@ -176,6 +191,36 @@ class SatelliteWorkIntake:
             timeout=self._spawn_timeout,
         )
 
+    def _fetch_all_queued(self, capacity: int) -> list[dict]:
+        """The full `queued` backlog affinitied to this machine -- not just
+        one bounded page.
+
+        The `/tasks` endpoint orders newest-first with **no** oldest-first
+        or cursor option. A single request sized to `capacity` (or even a
+        larger fixed page) only ever sees the newest rows -- under a steady
+        stream of newer targeted tasks, an older queued task could be pushed
+        past every page's edge and starve indefinitely, and re-sorting a
+        single truncated page oldest-first does not fix that (it only
+        reorders what already made it into the page). So this pages: keep
+        requesting a larger `limit` as long as the returned count equals the
+        requested one (a full page is itself evidence more rows may exist),
+        stopping once a page comes back short (the true end of the backlog)
+        or :data:`_QUEUE_DISCOVERY_MAX_LIMIT` is reached (a bound against a
+        pathological/adversarial backlog -- a real satellite's own
+        affinitied queue realistically never approaches it).
+        """
+        limit = max(_QUEUE_DISCOVERY_MIN_LIMIT, capacity + len(self._recent_triggers))
+        while True:
+            rows = self._client.list(
+                status="queued",
+                target_machine=self._machine,
+                repo=self._repo,
+                limit=limit,
+            )
+            if len(rows) < limit or limit >= _QUEUE_DISCOVERY_MAX_LIMIT:
+                return rows
+            limit = min(limit * 2, _QUEUE_DISCOVERY_MAX_LIMIT)
+
     def tick(self) -> dict:
         """Discover + trigger spawns for at most one concurrency slot's worth
         of this machine's own queued work. Never raises: a transient
@@ -207,26 +252,13 @@ class SatelliteWorkIntake:
         if capacity <= 0:
             return {"spawned": [], "skipped_at_capacity": True}
         try:
-            queued = self._client.list(
-                status="queued",
-                target_machine=self._machine,
-                repo=self._repo,
-                # The `/tasks` endpoint orders newest-first with no
-                # oldest-first/cursor option, so requesting exactly
-                # `capacity` (+ padding for in-flight rows, see above) would
-                # only ever see the newest page -- under a steady stream of
-                # newer targeted tasks, an older queued task could starve
-                # indefinitely, never once appearing in a page this small.
-                # Request a page at least as large as the endpoint's own
-                # default (200) and sort it oldest-first below so fairness
-                # doesn't depend on the server ever adding an ordering knob.
-                limit=max(_QUEUE_DISCOVERY_MIN_LIMIT, capacity + len(self._recent_triggers)),
-            )
+            queued = self._fetch_all_queued(capacity)
         except Exception:
             return {"spawned": [], "skipped_at_capacity": False, "error": "list_failed"}
-        # Oldest-first within the fetched page: `_bulk_task_dict` (server)
-        # carries `created_at`; fall back to `0.0` (sorts first) for a
-        # malformed/legacy row missing it rather than raising on `sorted()`.
+        # Oldest-first across the WHOLE fetched backlog (not just one page):
+        # `_bulk_task_dict` (server) carries `created_at`; fall back to
+        # `0.0` (sorts first) for a malformed/legacy row missing it rather
+        # than raising on `sorted()`.
         queued = sorted(queued, key=lambda t: t.get("created_at") or 0.0)
         spawned: list[str] = []
         attempts = 0

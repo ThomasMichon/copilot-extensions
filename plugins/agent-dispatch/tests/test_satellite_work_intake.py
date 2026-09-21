@@ -6,7 +6,10 @@ from __future__ import annotations
 
 import pytest
 
-from agent_dispatch.satellite_work_intake import SatelliteWorkIntake
+from agent_dispatch.satellite_work_intake import (
+    DEFAULT_SPAWN_TIMEOUT_S,
+    SatelliteWorkIntake,
+)
 
 
 class FakeClock:
@@ -263,6 +266,65 @@ def test_queued_list_limit_never_below_the_endpoint_default():
     assert client.calls[1]["limit"] == 200
 
 
+def test_queued_discovery_pages_past_a_full_first_page():
+    # A response exactly as large as the requested limit is itself evidence
+    # more rows may exist (the /tasks endpoint has no cursor/oldest-first
+    # option) -- must keep paging with a larger limit rather than trusting
+    # a single page, or an older task past that page could starve forever.
+    class PagingClient:
+        def __init__(self):
+            self.calls = []
+            # 250 rows total: oldest (lowest created_at) first in id order,
+            # newest-first is what the real endpoint would return, but this
+            # fake only needs to prove the LIMIT keeps growing -- return
+            # exactly `limit` rows until the true backlog (250) is covered.
+            self._all_queued = [
+                {"id": f"t{i}", "created_at": float(i)} for i in range(250)
+            ]
+
+        def list(self, **params):
+            self.calls.append(params)
+            if params.get("status") == "claimed,started":
+                return []
+            limit = params["limit"]
+            return self._all_queued[:limit]
+
+    client = PagingClient()
+    loop, spawned = _loop(client, max_concurrent=1)
+    loop.tick()
+    queued_calls = [c for c in client.calls if c.get("status") == "queued"]
+    # First page (200, the endpoint default) came back exactly as large as
+    # requested -- must have paged again with a larger limit.
+    assert [c["limit"] for c in queued_calls] == [200, 400]
+    # The oldest task (t0, created_at=0.0) is the one actually spawned.
+    assert spawned == ["t0"]
+
+
+def test_queued_discovery_pages_bounded_by_a_hard_ceiling():
+    from agent_dispatch.satellite_work_intake import _QUEUE_DISCOVERY_MAX_LIMIT
+
+    class AlwaysFullClient:
+        def __init__(self):
+            self.calls = []
+
+        def list(self, **params):
+            self.calls.append(params)
+            if params.get("status") == "claimed,started":
+                return []
+            limit = params["limit"]
+            # Pathological/adversarial: always return exactly `limit` rows,
+            # never signalling "end of backlog".
+            return [{"id": f"t{i}", "created_at": float(i)} for i in range(limit)]
+
+    client = AlwaysFullClient()
+    loop, _ = _loop(client, max_concurrent=1)
+    loop.tick()
+    queued_calls = [c for c in client.calls if c.get("status") == "queued"]
+    assert queued_calls[-1]["limit"] == _QUEUE_DISCOVERY_MAX_LIMIT
+    # Must have actually stopped, not looped forever.
+    assert len(queued_calls) < 20
+
+
 def test_queued_tasks_considered_oldest_first_within_the_page():
     # The `/tasks` endpoint orders newest-first with no oldest-first option
     # -- this loop must re-sort the page itself so an older queued task
@@ -299,6 +361,31 @@ def test_queued_list_limit_padded_past_recently_triggered_count():
 
 
 # -- spawn timeout -------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_value", [None, 0, -5, float("inf"), float("nan")])
+def test_spawn_timeout_normalized_to_default_on_bad_direct_construction(bad_value):
+    # A direct constructor caller (not just FederationRunner, which already
+    # goes through config.satellite_spawn_timeout()'s own validation) must
+    # never be able to forward an unbounded/invalid timeout straight to
+    # subprocess.run -- every spawn attempt is documented as bounded.
+    captured = []
+
+    def fake_spawn(task_id, **kw):
+        captured.append(kw.get("timeout"))
+        return FakeProc(0)
+
+    client = FakeClient(queued=[{"id": "t1"}])
+    loop = SatelliteWorkIntake(
+        client,
+        machine="book2",
+        project="test-project",
+        spawn_timeout=bad_value,
+        spawn_fn=fake_spawn,
+        clock=FakeClock(),
+    )
+    loop.tick()
+    assert captured == [DEFAULT_SPAWN_TIMEOUT_S]
 
 
 def test_spawn_timeout_passed_through_to_spawn_fn():
