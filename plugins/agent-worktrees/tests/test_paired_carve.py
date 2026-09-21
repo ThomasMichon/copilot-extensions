@@ -353,6 +353,117 @@ class TestCarvePairedKnowledgeAttributionPolicy:
         assert called["carve"] is False
 
 
+class TestPairedKnowledgeAllocationEarlyPreflight:
+    """Round-6 review finding: `_paired_knowledge_allocation_preflight`
+    lets `_create_worktree_core` catch a paired-knowledge policy
+    violation BEFORE it creates the harness's own worktree/branch/record
+    -- `_carve_paired_knowledge`'s own preflight only runs AFTER those
+    harness side effects already exist."""
+
+    def _knowledge_config_with_custom_wordlist(
+        self, tmp_path, *, source_attribution_configured: bool,
+    ):
+        from agent_worktrees.codename_config import CodenameConfig
+        wordlist_file = tmp_path / "custom-words.yaml"
+        wordlist_file.write_text("- alpha\n- bravo\n- charlie\n")
+        return types.SimpleNamespace(
+            default_repo=types.SimpleNamespace(
+                codename=CodenameConfig(
+                    wordlist_path=str(wordlist_file), wordlist_path_configured=True,
+                ),
+                pr=types.SimpleNamespace(
+                    enabled=True,
+                    source_attribution_configured=source_attribution_configured,
+                ),
+            )
+        )
+
+    def _setup(self, monkeypatch, tmp_path, *, source_attribution_configured):
+        k_anchor = tmp_path / "knowledge"
+        k_anchor.mkdir()
+        monkeypatch.setattr(
+            m.state_root_mod, "resolve_state_root",
+            lambda c: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
+        )
+        entry = repos_mod.RepoEntry(
+            name="citadel-knowledge", repo_class="worktree",
+            remote="https://example.com/citadel-knowledge.git",
+            default_branch="main",
+        )
+        monkeypatch.setattr(repos_mod, "find_repo", lambda n: entry)
+        knowledge_config = self._knowledge_config_with_custom_wordlist(
+            tmp_path, source_attribution_configured=source_attribution_configured,
+        )
+        monkeypatch.setattr(m.cfg, "load_config", lambda project=None: knowledge_config)
+
+    def test_blocks_before_harness_can_be_examined(self, monkeypatch, tmp_path):
+        self._setup(monkeypatch, tmp_path, source_attribution_configured=False)
+        from agent_worktrees import codename_tracking
+
+        try:
+            m._paired_knowledge_allocation_preflight(_config(machine="test"))
+        except codename_tracking.CodenameAttributionPolicyError:
+            pass
+        else:
+            raise AssertionError("expected CodenameAttributionPolicyError")
+
+    def test_allows_explicit_opt_in(self, monkeypatch, tmp_path):
+        self._setup(monkeypatch, tmp_path, source_attribution_configured=True)
+        # Must not raise.
+        m._paired_knowledge_allocation_preflight(_config(machine="test"))
+
+    def test_unbound_harness_is_a_no_op(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            m.state_root_mod, "resolve_state_root",
+            lambda c: _state_root(path=None, repo="", requires_external=False,
+                                   bound=False),
+        )
+        # Must not raise -- no pairing applies.
+        m._paired_knowledge_allocation_preflight(_config(machine="test"))
+
+    def test_create_worktree_core_refuses_before_harness_side_effects(
+        self, monkeypatch, tmp_path,
+    ):
+        # Full integration: the harness's OWN policy is fine (built-in
+        # wordlist, PR disabled), but the paired-knowledge repo's is not
+        # -- `_create_worktree_core` must refuse before creating the
+        # harness worktree/branch/record, not only inside
+        # `_carve_paired_knowledge` (which runs after those exist).
+        self._setup(monkeypatch, tmp_path, source_attribution_configured=False)
+        from agent_worktrees import config as cfg_mod
+
+        harness_anchor = tmp_path / "harness-anchor"
+        harness_anchor.mkdir()
+        harness_config = cfg_mod.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="linux",
+            repo_name="citadel-harness",
+            repos={
+                "citadel-harness": cfg_mod.RepoConfig(
+                    anchor=str(harness_anchor),
+                    worktree_root=str(tmp_path / "harness-worktrees"),
+                )
+            },
+        )
+        create_worktree_calls: list[object] = []
+        monkeypatch.setattr(
+            m.git_ops, "create_worktree",
+            lambda *a, **k: create_worktree_calls.append((a, k)),
+        )
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+
+        from agent_worktrees import codename_tracking
+        try:
+            m._create_worktree_core(harness_config)
+        except codename_tracking.CodenameAttributionPolicyError:
+            pass
+        else:
+            raise AssertionError("expected CodenameAttributionPolicyError")
+        assert not create_worktree_calls
+        assert not (tmp_path / "harness-worktrees").exists()
+
+
 class TestCreatePairPluginComposition:
     def test_stamps_pair_before_composing_plugins(self, monkeypatch, tmp_path):
         record = tk.WorktreeRecord(

@@ -1838,6 +1838,52 @@ def _unsupported_hosted_launch(
     return ""
 
 
+def _paired_knowledge_allocation_preflight(config: cfg.Config) -> None:
+    """Preflight the paired-knowledge codename-allocation policy with NO
+    side effect (round-6 review finding).
+
+    Mirrors the same is-this-a-bound-worktree-class-stateless-harness
+    resolution `_carve_paired_knowledge` performs, purely to decide
+    whether that function's eventual allocation would be policy-blocked
+    -- so `_create_worktree_core` can call this BEFORE it creates the
+    harness's own worktree/branch/record, closing the gap where a
+    paired-knowledge policy violation only surfaced after those harness
+    side effects already existed (with no rollback).
+
+    Raises :class:`codename_tracking.CodenameAttributionPolicyError` on a
+    genuine policy violation. Any OTHER failure (state-root resolution,
+    config load, an unregistered knowledge repo) is swallowed -- this is
+    advisory-only pre-validation; `_carve_paired_knowledge`'s own
+    preflight and second (lock-held) revalidation remain the actual
+    fail-closed gate for the allocation itself.
+    """
+    if os.environ.get("AGENT_WORKTREES_NO_PAIR"):
+        return
+    try:
+        res = state_root_mod.resolve_state_root(config)
+    except Exception:
+        return
+    if not (res.requires_external and res.bound and res.path):
+        return
+
+    from . import repos as repos_mod
+
+    entry = repos_mod.find_repo(res.repo)
+    is_worktree_class = bool(entry) and repos_mod.normalize_class(entry.repo_class) in (
+        "worktree", "knowledge",
+    )
+    if not is_worktree_class:
+        return
+    try:
+        knowledge_config = cfg.load_config(project=res.repo)
+        knowledge_policy_kwargs = codename_tracking.allocation_policy_kwargs_for_repo(
+            knowledge_config
+        )
+    except Exception:
+        return
+    codename_tracking.check_allocation_policy(**knowledge_policy_kwargs)
+
+
 def _carve_paired_knowledge(
     config: cfg.Config,
     *,
@@ -2301,6 +2347,19 @@ def _create_worktree_core(
         )
         if launch_preflight.error:
             raise LaunchPreflightError(launch_preflight.error)
+
+    # Round-6 review finding: preflight the PAIRED-KNOWLEDGE allocation
+    # policy here, BEFORE any side effect below (owner claim, harness git
+    # worktree/branch, tracking record) -- the ONLY preflight this policy
+    # previously had lived inside `_carve_paired_knowledge`, which
+    # `_create_worktree_core` calls AFTER the harness worktree/branch/
+    # record already exist, so a violation there still left those harness
+    # side effects behind (and without the orphan-path context the later
+    # revalidation adds). This mirrors the harness's own preflight-then-
+    # revalidate-under-lock shape immediately below; `_carve_paired_
+    # knowledge`'s own preflight/revalidation stay in place as defense in
+    # depth for the narrower TOCTOU window between here and its own carve.
+    _paired_knowledge_allocation_preflight(config)
 
     # Ensure root exists
     Path(repo.worktree_root).mkdir(parents=True, exist_ok=True)
@@ -4676,7 +4735,15 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         if use_new:
             config = cfg.load_config()
             profile = _resolve_profile(config, args)
-            return _resolve_new(config, args, profile=profile)
+            try:
+                return _resolve_new(config, args, profile=profile)
+            except codename_tracking.CodenameAttributionPolicyError as exc:
+                # Round-6 review finding: the plain (non-JSON) `resolve
+                # --new` route calls `_create_worktree_core` (via
+                # `_resolve_new`) without catching this policy error --
+                # report it as a normal CLI error, not a traceback.
+                output.err(str(exc))
+                return 1
 
         # --machine <remote> flag: skip picker entirely, emit SSH handoff
         requested_machine = getattr(args, "machine", None)
@@ -29003,7 +29070,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         try:
             return handler(args)
-        except (FileNotFoundError, ValueError, inst.BinstubOwnershipError) as e:
+        except (
+            FileNotFoundError, ValueError, inst.BinstubOwnershipError,
+            codename_tracking.CodenameAttributionPolicyError,
+        ) as e:
             output.err(str(e))
             return 1
         except KeyboardInterrupt:

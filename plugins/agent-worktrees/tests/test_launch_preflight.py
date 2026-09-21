@@ -284,6 +284,41 @@ def test_resolve_json_new_codename_policy_error_is_a_clean_json_error(
     assert "custom codename wordlist" in json.loads(captured.out)["error"]
 
 
+def test_resolve_plain_new_codename_policy_error_is_a_clean_cli_error(
+    tmp_path,
+    monkeypatch,
+    capfd,
+):
+    """Round-6 review finding: the non-JSON `resolve --new` route calls
+    `_resolve_new` (-> `_create_worktree_core`) without catching
+    `CodenameAttributionPolicyError`, and `main()`'s own top-level dispatch
+    only normalized `FileNotFoundError`/`ValueError`/
+    `BinstubOwnershipError` -- a real policy rejection from a plain,
+    interactive invocation could terminate with a raw traceback instead of
+    a clean CLI error.
+    """
+    config = _config(tmp_path)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(
+        m,
+        "_resolve_new",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            m.codename_tracking.CodenameAttributionPolicyError(
+                "PR-active repo 'demo' has a custom codename wordlist "
+                "configured but pr.source_attribution is not explicit"
+            )
+        ),
+    )
+    args = m.build_parser().parse_args(["resolve", "--new", "--no-mux"])
+
+    rc = m.cmd_resolve(args)
+
+    captured = capfd.readouterr()
+    assert rc == 1
+    assert "Traceback" not in captured.out + captured.err
+    assert "custom codename wordlist" in captured.err
+
+
 def test_resolve_json_resume_preflight_failure_precedes_tracking_mutation(
     tmp_path,
     monkeypatch,

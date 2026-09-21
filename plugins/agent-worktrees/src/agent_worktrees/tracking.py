@@ -2469,16 +2469,22 @@ def _merge_pr_attribution_state(
     1. Backfill a fresh ``pr_id`` if it doesn't have one yet.
     2. Find the matching ``record.prs`` (in-memory) entry via
        :func:`_pr_identity_match`.
-    3. If matched and ``current``'s ``pr_revision`` is STRICTLY HIGHER than
-       the matched entry's, overwrite that entry's frozen fields
+    3. If matched and ``current``'s ``pr_revision`` is greater than OR
+       EQUAL TO the matched entry's, overwrite that entry's frozen fields
        (``attribution_mode``/``attribution_explicit``/``pr_id``/
-       ``pr_revision``) from ``current``'s copy -- never the reverse (a
-       lower-or-equal ``current`` revision never overwrites an in-memory
-       entry that is already at least as fresh). If the match came via the
-       legacy branch/number fallback (record's entry had no ``pr_id``),
-       write the resolved ``pr_id`` back onto it regardless of the
-       revision comparison, so the in-memory object is no longer legacy on
-       a later save from the same caller.
+       ``pr_revision``) from ``current``'s copy -- never the reverse. An
+       EQUAL on-disk revision is also authoritative, not only a strictly
+       greater one (a PR #3037 review finding): two concurrent first-touch
+       freezes of the same legacy PR can each independently bump their own
+       copy from 0 to 1, so a strict ``>`` would let whichever stale
+       in-memory snapshot happens to save SECOND silently overwrite the
+       already-persisted first decision merely because the revisions tie;
+       the value already durably on disk wins that tie. Only a STRICTLY
+       LOWER ``current`` revision leaves the in-memory entry unchanged. If
+       the match came via the legacy branch/number fallback (record's
+       entry had no ``pr_id``), write the resolved ``pr_id`` back onto it
+       regardless of the revision comparison, so the in-memory object is
+       no longer legacy on a later save from the same caller.
     4. If UNMATCHED (a concurrent writer created this PR after the stale
        snapshot was taken), append ``current``'s entry into
        ``record.prs`` unchanged.
