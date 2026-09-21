@@ -28,7 +28,7 @@ import shlex
 import shutil
 import subprocess
 
-from . import bridge_remote
+from . import bridge_remote, worktree_attribution
 from .embody_prompts import autopilot_worker_prompt, fleet_autopilot_worker_prompt
 from .procutil import (
     agent_worktrees_environment,
@@ -38,6 +38,10 @@ from .procutil import (
 )
 
 DEFAULT_DRIVER = "agent-dispatch"
+
+#: Tracking statuses meaning a worktree is done and cannot be reused.
+_TERMINAL_WORKTREE_STATUSES = frozenset(
+    {"finalizing", "finalized", "complete", "completed", "orphaned", "terminal"})
 
 
 class EmbodyUnavailable(RuntimeError):
@@ -177,9 +181,11 @@ def create_worktree(
 
 
 def resolve_worktree(
-    worktree_id: str, *, project: str | None = None, timeout: float | None = None
+    worktree_id: str, *, project: str | None = None,
+    timeout: float | None = None, task_id: str | None = None,
 ) -> dict[str, str | None]:
-    """Resolve a tracked worktree id to its current path."""
+    """Resolve a tracked worktree id to its current path. ``task_id``
+    additionally rejects a reassigned worktree (see :mod:`agent_dispatch.worktree_attribution`)."""
     exe_prefix = _agent_worktrees_launch_prefix()
     if exe_prefix is None:
         raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
@@ -210,15 +216,10 @@ def resolve_worktree(
         if not isinstance(row, dict):
             continue
         if row.get("id") == worktree_id:
-            if row.get("status") in {
-                "finalizing",
-                "finalized",
-                "complete",
-                "completed",
-                "orphaned",
-                "terminal",
-            }:
+            if row.get("status") in _TERMINAL_WORKTREE_STATUSES:
                 raise WorktreeNotFound(f"worktree is terminal and cannot be reused: {worktree_id}")
+            if task_id and (owner := worktree_attribution.foreign_task_id(row, task_id)):
+                raise WorktreeNotFound(f"worktree now owned by {owner!r}, not {task_id!r}")
             return {"worktree": worktree_id, "path": row.get("path")}
     raise WorktreeNotFound(f"worktree not found: {worktree_id}")
 
@@ -234,12 +235,10 @@ def prepare_reusable_worktree(
     timeout: float | None = None,
 ) -> dict[str, object]:
     """Resolve or create the worktree carried by an exclusive reservation.
-
     A successful lookup reuses the existing checkout. A positively missing
-    carried id falls back to a fresh worktree. Any indeterminate failure
-    propagates without creating a replacement, so a possibly live binding is
-    never overwritten.
-    """
+    or reassigned-to-another-task carried id (see :func:`resolve_worktree`)
+    falls back to a fresh worktree. Any indeterminate failure propagates
+    without creating a replacement, so a possibly live binding is never overwritten."""
     project = project or project_for_task(task)
     carried = reservation.get("worktree")
     if isinstance(carried, str) and carried:
@@ -248,6 +247,7 @@ def prepare_reusable_worktree(
                 carried,
                 project=project,
                 timeout=timeout,
+                task_id=str(task["id"]),
             )
         except WorktreeNotFound as exc:
             created = create_worktree(

@@ -299,8 +299,20 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
     # System worktrees are daemon-owned (never auto-removed here). Archived
     # records have nothing left to reap -- exclude both from cleanup.
+    # A dispatch-created worktree that hasn't yet been concluded (its `kind`
+    # is still an ordinary one, not yet flipped to a MANAGED_KINDS value by
+    # `terminal_conclusion.conclude_disposable_worktree`) is excluded too:
+    # only that explicit conclusion step -- driven by the owning
+    # agent-dispatch task reaching a terminal state -- may hand it to the
+    # managed sweep. Without this, a dispatch-created worktree sitting idle
+    # between retry attempts (clean, no commits yet, no active session --
+    # indistinguishable from an ordinary "unused" worktree) is a routine
+    # auto-clean candidate for THIS sweep despite a still-pending task
+    # depending on it (observed live: a dispatch task's spawn kept retrying a
+    # worktree that had been swept out from under it between retry attempts).
     records = [r for r in records if r.kind not in tracking.MANAGED_KINDS
-               and r.status != "archived"]
+               and r.status != "archived"
+               and r.dispatch_attempt is None]
     if not records:
         print("No tracked sessions.")
         return 0

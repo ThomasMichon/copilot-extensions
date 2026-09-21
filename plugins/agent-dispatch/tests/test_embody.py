@@ -575,6 +575,109 @@ def test_resolve_worktree_rejects_terminal_checkout(monkeypatch, status):
         embody.resolve_worktree("wt-finalized", project="widgets")
 
 
+def test_resolve_worktree_accepts_own_dispatch_attempt(monkeypatch):
+    monkeypatch.setattr(
+        embody,
+        "_agent_worktrees_launch_prefix",
+        lambda: ["/usr/bin/agent-worktrees"],
+    )
+    monkeypatch.setattr(
+        embody.subprocess,
+        "run",
+        lambda *_args, **_kwargs: types.SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "worktrees": [
+                        {
+                            "id": "wt-mine",
+                            "path": "/tmp/wt-mine",
+                            "dispatch_attempt": {"task_id": "task-1"},
+                        }
+                    ]
+                }
+            ),
+            stderr="",
+        ),
+    )
+
+    resolved = embody.resolve_worktree("wt-mine", project="widgets", task_id="task-1")
+
+    assert resolved == {"worktree": "wt-mine", "path": "/tmp/wt-mine"}
+
+
+def test_resolve_worktree_rejects_worktree_owned_by_different_task(monkeypatch):
+    monkeypatch.setattr(
+        embody,
+        "_agent_worktrees_launch_prefix",
+        lambda: ["/usr/bin/agent-worktrees"],
+    )
+    monkeypatch.setattr(
+        embody.subprocess,
+        "run",
+        lambda *_args, **_kwargs: types.SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "worktrees": [
+                        {
+                            "id": "wt-shared",
+                            "path": "/tmp/wt-shared",
+                            "dispatch_attempt": {"task_id": "task-other"},
+                        }
+                    ]
+                }
+            ),
+            stderr="",
+        ),
+    )
+
+    with pytest.raises(embody.WorktreeNotFound, match="now owned by"):
+        embody.resolve_worktree("wt-shared", project="widgets", task_id="task-1")
+
+
+def test_prepare_reusable_worktree_replaces_worktree_owned_by_different_task(
+    monkeypatch,
+):
+    """Live incident: an exclusive lane's carried worktree/session had, in the
+    meantime, become a *different* task's own worktree (its tracking record's
+    ``dispatch_attempt.task_id`` no longer matched) -- every spawn attempt kept
+    retrying that foreign, unresolvable session identically instead of ever
+    recovering. This must be treated exactly like a positively-missing
+    worktree: fall back to creating a fresh one."""
+    monkeypatch.setattr(
+        embody,
+        "resolve_worktree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            embody.WorktreeNotFound(
+                "worktree 'wt-shared' is now attributed to a different task"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        embody,
+        "create_worktree",
+        lambda **_kwargs: {"worktree": "wt-fresh", "path": "/tmp/wt-fresh"},
+    )
+
+    prepared = embody.prepare_reusable_worktree(
+        {"id": "task-1", "repo": "example.com/acme/widgets"},
+        {
+            "key": "dispatch-task:task-1:2",
+            "attempt": 2,
+            "worktree": "wt-shared",
+            "session_handle": "local-body:session-belongs-to-other-task",
+        },
+        interface="acp",
+        driver="agent-dispatch",
+        supervisor="supervisor-1",
+    )
+
+    assert prepared["worktree"] == "wt-fresh"
+    assert prepared["replaced"] is True
+    assert prepared["ownership"] == "created"
+
+
 def test_prepare_reusable_worktree_replaces_finalized_checkout(monkeypatch):
     monkeypatch.setattr(
         embody,
