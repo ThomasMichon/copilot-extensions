@@ -258,7 +258,15 @@ private paths).
       identity + stamp label + path-scope + diff-shape + recompute-match +
       trusted-source allowlist, not identity alone (identity alone was
       already proven insufficient by `config-reflect`'s own hard-won
-      lessons).
+      lessons). **Onboarding a repo with no existing reflect-style
+      identity**: the setup skill must not silently mint one. It either
+      declines outright (report-only mode: it can still tell an adopter what
+      drift exists, just never open an auto-mergeable PR for it) until a
+      trusted deterministic identity has been provisioned and registered
+      through that repo's own normal, reviewed account/credential process,
+      or it walks the operator through that one-time registration step
+      explicitly -- never as an automatic side effect of "set up the
+      instruction sync worker."
 
 ### Phase 3 -- Populate the concrete content gaps found by the audit
 - [ ] `agent-worktrees`: claims-ledger index row (-> `claims` command /
