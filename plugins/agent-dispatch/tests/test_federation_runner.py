@@ -158,11 +158,85 @@ def test_satellite_attempts_work_intake_when_shared_url_configured(
     assert tick_calls[0]["max_concurrent"] == 3
 
     # Reuses the same work-intake instance on the next tick rather than
-    # rebuilding it (one DispatchClient/SatelliteWorkIntake per runner
-    # lifetime, not one per tick).
+    # rebuilding it, as long as the configured shared URL is unchanged (one
+    # DispatchClient/SatelliteWorkIntake per stable URL, not one per tick).
     runner.tick()
     assert len(built_clients) == 1
     assert len(tick_calls) == 2
+
+
+def test_satellite_work_intake_torn_down_when_shared_url_later_unset(
+    monkeypatch, directory
+):
+    # An operator unsetting AGENT_DISPATCH_SHARED_URL at runtime must disable
+    # work-intake on the very next tick -- a cached client must never keep
+    # silently polling a coordinator the config no longer names.
+    from agent_dispatch import client as client_mod
+    from agent_dispatch import satellite_work_intake as swi_mod
+
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
+    url_box = {"url": "https://gw.example/dispatch"}
+    monkeypatch.setattr(config, "shared_url", lambda: url_box["url"])
+    monkeypatch.setattr(client_mod, "DispatchClient", lambda url, **kw: object())
+
+    tick_calls = []
+
+    class FakeWorkIntake:
+        def __init__(self, client, **kwargs):
+            pass
+
+        def tick(self):
+            tick_calls.append(1)
+            return {"spawned": []}
+
+    monkeypatch.setattr(swi_mod, "SatelliteWorkIntake", FakeWorkIntake)
+
+    runner = FederationRunner(directory, "sat-1", role="satellite")
+    runner.tick()
+    assert runner._work_intake is not None
+    assert len(tick_calls) == 1
+
+    url_box["url"] = None
+    runner.tick()
+    assert runner._work_intake is None
+    assert len(tick_calls) == 1  # not ticked again once torn down
+
+
+def test_satellite_work_intake_rebuilt_when_shared_url_changes(monkeypatch, directory):
+    from agent_dispatch import client as client_mod
+    from agent_dispatch import satellite_work_intake as swi_mod
+
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
+    url_box = {"url": "https://gw-a.example/dispatch"}
+    monkeypatch.setattr(config, "shared_url", lambda: url_box["url"])
+
+    built_urls = []
+    monkeypatch.setattr(
+        client_mod,
+        "DispatchClient",
+        lambda url, **kw: built_urls.append(url) or object(),
+    )
+
+    class FakeWorkIntake:
+        def __init__(self, client, **kwargs):
+            pass
+
+        def tick(self):
+            return {"spawned": []}
+
+    monkeypatch.setattr(swi_mod, "SatelliteWorkIntake", FakeWorkIntake)
+
+    runner = FederationRunner(directory, "sat-1", role="satellite")
+    runner.tick()
+    runner.tick()  # same URL -- must not rebuild
+    assert built_urls == ["https://gw-a.example/dispatch"]
+
+    url_box["url"] = "https://gw-b.example/dispatch"
+    runner.tick()
+    assert built_urls == [
+        "https://gw-a.example/dispatch",
+        "https://gw-b.example/dispatch",
+    ]
 
 
 def test_satellite_work_intake_failure_does_not_disrupt_presence(monkeypatch, directory):

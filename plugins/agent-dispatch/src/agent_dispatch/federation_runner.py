@@ -125,6 +125,7 @@ class FederationRunner:
         self._thread: threading.Thread | None = None
         self._lease: CoordinatorLease | None = None
         self._work_intake: SatelliteWorkIntake | None = None
+        self._work_intake_url: str | None = None
         if role in config.FEDERATION_LEASE_ROLES:
             lease_kwargs = {} if lease_ttl is None else {"lease_ttl": lease_ttl}
             self._lease = CoordinatorLease(
@@ -223,6 +224,14 @@ class FederationRunner:
         runner's rendezvous already talks to (and which may itself be a
         *different* backend, e.g. Dev Tunnels).
 
+        The shared URL is re-read on **every** tick, not just once: an
+        operator unsetting/changing ``AGENT_DISPATCH_SHARED_URL`` at runtime
+        must disable (or repoint) work-intake on its very next tick, not
+        leave a cached client silently polling a stale/removed coordinator
+        indefinitely -- the cached :class:`SatelliteWorkIntake` is rebuilt
+        whenever the configured URL no longer matches the one it was built
+        from (including "now unset", which tears it down entirely).
+
         Everything past the shared-URL check -- building the client, building
         the work-intake object, and ticking it -- is one guarded block: a
         transient coordinator/spawn error must never disrupt this tick's
@@ -231,10 +240,12 @@ class FederationRunner:
         has to cover *construction* failures (e.g. a malformed shared
         endpoint) exactly as much as a failure inside `tick()` itself."""
         try:
-            if self._work_intake is None:
-                url = config.shared_url()
-                if not url:
-                    return
+            url = config.shared_url()
+            if not url:
+                self._work_intake = None
+                self._work_intake_url = None
+                return
+            if self._work_intake is None or url != self._work_intake_url:
                 from .client import DispatchClient
                 from .satellite_work_intake import SatelliteWorkIntake
 
@@ -247,6 +258,7 @@ class FederationRunner:
                     spawn_timeout=config.satellite_spawn_timeout(),
                     clock=self._clock,
                 )
+                self._work_intake_url = url
             self._work_intake.tick()
         except Exception:
             pass
