@@ -137,6 +137,21 @@ fleet, topology, or operating environment.
   recovery without hiding failed resources.
 - [ ] Validate representative resource modules on Windows and POSIX hosts.
 
+### Phase 5 - Reconcile deferred backlog
+
+- [ ] Accept declarative-control-plane candidates only through
+  [`migration-intake`](../migration-intake/README.md)'s deduplication and
+  ownership gate.
+- [ ] Revalidate accepted technical scope against the current resource-model
+  and reconciliation contract; return obsolete or unsafe candidates for
+  explicit disposition.
+- [ ] Place each accepted public tracker item in exactly one existing phase,
+  extending this plan before implementation when necessary.
+- [ ] Non-Windows (systemd/launchd) scheduler parity for the self-update
+  resource: define and apply an equivalent unattended self-update scheduling
+  mechanism on POSIX hosts, matching the Windows Scheduled Task tier model.
+- [ ] Keep examples synthetic and repository-neutral.
+
 ## Validation Plan
 
 - [ ] Invalid schemas, dependency cycles, duplicate ownership, and unknown

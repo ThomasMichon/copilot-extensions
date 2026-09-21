@@ -84,6 +84,22 @@ degradation without global identity mutation.
   failures, and target/account mismatches.
 - [ ] Document migration from ambient selection and a reversible rollback path.
 
+### Phase 5 - Reconcile deferred backlog
+
+- [ ] Accept account-scoping candidates only through
+  [`migration-intake`](../migration-intake/README.md)'s deduplication and
+  ownership gate.
+- [ ] Revalidate accepted technical scope against the current identity/scoped-
+  execution contract; return obsolete or unsafe candidates for explicit
+  disposition.
+- [ ] Place each accepted public tracker item in exactly one existing phase,
+  extending this plan before implementation when necessary.
+- [ ] PR-guidance overlays and relationship metadata: support review-guidance
+  overlays and cross-PR relationship metadata once live caller-identity and
+  network resolution (Phase 1-2 of this plan) exist to attribute them
+  correctly.
+- [ ] Keep examples synthetic and repository-neutral.
+
 ## Validation Plan
 
 - [ ] Parallel child processes targeting repositories with different bindings
