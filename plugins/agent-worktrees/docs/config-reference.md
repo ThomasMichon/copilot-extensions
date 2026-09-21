@@ -220,6 +220,7 @@ agent-worktrees ≥ 1.5.3-dev113.)
 | `validate_paths` | list[str] | `[]` | Repo-relative paths the `validate` command checks for. |
 | `validate_hook` | map(platform→list) | `{}` | Custom validation command per platform. |
 | `service_paths` | list[str] (globs) | `[]` | Globs for service discovery (`services` subcommands). |
+| `bootstrap_services` | list[str] | `[]` | Opt-in additional service names (discovered via `service_paths`) that the normalized launcher must confirm are current **before** starting Copilot, alongside agent-worktrees itself. The launcher declares no facility- or repo-specific service names by default -- a repo names its own here rather than the launcher assuming one exists. |
 | `post_install_hook` | map(platform→list) | `{}` | Command run after install, per platform. |
 | `pr` | map | *(disabled)* | PR-workflow policy — see below. **Can also live in-repo.** |
 | `base_repo` | bool | `false` | Drive the anchor directly with **no worktrees** (for repos that can't use worktrees, e.g. enlistment-based monorepos). Pair with `env_script` (Windows enlistment env) or a custom `launch`. |

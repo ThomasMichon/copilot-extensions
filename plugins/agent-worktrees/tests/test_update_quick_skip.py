@@ -15,6 +15,7 @@ import json
 import subprocess
 import types
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -378,6 +379,92 @@ def test_prelaunch_legacy_default_uses_conventional_runtime(
     assert update["unset_environment"] == list(reconcile._RUNTIME_ENV_UNSET)
     expected_flag = "-InstallDir" if m.platform.system() == "Windows" else "--install-dir"
     assert update["argv"][-2:] == [expected_flag, str(legacy_root)]
+
+
+def _fake_service(tmp_path: Path, name: str) -> Any:
+    """A minimal ServiceInfo-shaped stand-in with a real installer on disk
+    (so ``_append_update_if_stale`` doesn't bail on a missing installer)."""
+    installer = tmp_path / "repo" / "services" / name / "install.ps1"
+    installer.parent.mkdir(parents=True, exist_ok=True)
+    installer.write_text("# installer\n", encoding="utf-8")
+    return types.SimpleNamespace(
+        name=name,
+        installer_path=f"services/{name}/install.ps1",
+    )
+
+
+@pytest.mark.parametrize(
+    "bootstrap_services, expect_vault_update",
+    [(None, False), ([], False), (["vault"], True)],
+)
+def test_prelaunch_repo_service_only_bootstrapped_when_opted_in(
+    tmp_path,
+    monkeypatch,
+    plugin_dir,
+    bootstrap_services,
+    expect_vault_update,
+):
+    """#regression: agent-worktrees must not hardcode a facility-specific
+    service name (formerly a bare "vault" literal in ``_BOOTSTRAP_SERVICES``)
+    as a launch-blocking bootstrap check for every repo it drives. A
+    same-named repo service is only force-updated at launch when the repo's
+    own config explicitly opts it in via ``bootstrap_services``."""
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    legacy_root = tmp_path / "legacy"
+    legacy_root.mkdir()
+    (legacy_root / "deploy-manifest.json").write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(m, "_find_repo_dir", lambda: repo)
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda: types.SimpleNamespace(
+            default_repo=types.SimpleNamespace(
+                service_paths=None, bootstrap_services=bootstrap_services
+            )
+        ),
+    )
+    monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
+    vault_service = _fake_service(tmp_path, "vault")
+    monkeypatch.setattr(
+        m.svc, "discover_services", lambda *args, **kwargs: [vault_service]
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "core_installed_payload_dir",
+        lambda name: plugin_dir,
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "resolve_runtime_installation",
+        lambda name, selected_plugin_dir, **kwargs: (
+            reconcile.RuntimeInstallationResolution(
+                runtime_root=legacy_root,
+                context=None,
+                actual_mode="legacy",
+                desired_mode="legacy",
+                status="ready",
+                reason="policy-default-false",
+            )
+        ),
+    )
+    # agent-worktrees itself is current -- only the repo service's staleness
+    # (if bootstrapped at all) can produce an update.
+    monkeypatch.setattr(m.svc, "check_staleness", lambda *args: "current")
+    monkeypatch.setattr(
+        m.svc,
+        "get_service_status",
+        lambda service, repo_dir: types.SimpleNamespace(staleness="behind"),
+    )
+
+    plan = m.plan_pre_launch()
+
+    if expect_vault_update:
+        assert plan["action"] == "self-update"
+        assert [u["service"] for u in plan["updates"]] == ["vault"]
+    else:
+        assert plan["action"] == "continue"
 
 
 def test_prelaunch_invalid_other_context_fails_closed(

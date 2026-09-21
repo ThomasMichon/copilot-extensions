@@ -358,6 +358,45 @@ def test_invalid_nested_pr_types_do_not_change_behavior(tmp_path, monkeypatch):
     assert "enabled must be a boolean" in report.findings[0].detail
 
 
+def test_malformed_bootstrap_services_is_rejected_not_silently_emptied(
+    tmp_path, monkeypatch
+):
+    """A typo such as ``bootstrap_services: vault`` (a bare string, not a
+    list) must be rejected as invalid configuration -- like the sibling
+    ``service_paths`` field -- rather than silently coerced to an empty list
+    by the repo-config parser, which would unexpectedly disable launch
+    blocking for a service the operator meant to opt in."""
+    from agent_worktrees import config as cfg
+
+    anchor = tmp_path / "repo"
+    anchor.mkdir()
+    machine = tmp_path / "config.yaml"
+    machine.write_text(
+        "repo_name: sample\n"
+        "repos:\n"
+        "  sample:\n"
+        f"    anchor: {anchor}\n",
+        encoding="utf-8",
+    )
+    directory = tmp_path / "config.d"
+    directory.mkdir()
+    (directory / "bad.yaml").write_text(
+        "repos:\n  sample:\n    bootstrap_services: vault\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        cfg, "global_config_path", lambda: tmp_path / "missing-global.yaml"
+    )
+
+    report = dropins.scan_config_dropin_registry(
+        directory, project_name="sample"
+    )
+
+    assert report.active_entries == {}
+    assert report.findings[0].reason == "invalid-entry"
+    assert "bootstrap_services" in report.findings[0].detail
+
+
 def test_disabled_or_uninstalled_managed_plugin_withdraws_prior(tmp_path):
     source = "sample@example-marketplace"
     root = tmp_path / "plugin"
