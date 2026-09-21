@@ -1044,6 +1044,28 @@ def test_tasks_for_session_reverse_lookup(q):
     assert q.tasks_for_session("session-never-seen") == []
 
 
+def test_tasks_for_session_reports_worktree_for_unpinned_task(q):
+    """Regression: an UNPINNED task (no target_worktree/target_machine --
+    the common case, an untargeted claim from the general pool) must still
+    report the actual claimant's worktree/machine in the reverse lookup.
+    Real CLI callers pass worker_id as the machine/worktree composite
+    (`worker_id_for`/`_owner_from_identity`); a prior version of this code
+    read only the target pin, which is always null for an unpinned task."""
+    task = q.create("headless")  # no target_worktree/target_machine
+    q.claim_one("anomalous-potato/wt-real", task_id=task.id)
+    q.start(task.id, "anomalous-potato/wt-real")
+    q.bind_owner_session(task.id, "anomalous-potato/wt-real", "session-unpinned", now=1000.0)
+
+    found = q.tasks_for_session("session-unpinned")
+    assert len(found) == 1
+    assert found[0].machine == "anomalous-potato"
+    assert found[0].worktree_id == "wt-real"
+
+    history = q.attachment_history(task.id)
+    assert history[0].machine == "anomalous-potato"
+    assert history[0].worktree_id == "wt-real"
+
+
 def test_set_activity_cannot_restore_activity_on_suspended_task(q):
     t = q.create("dormant")
     reservation, _ = q.reserve_spawn(t.id)

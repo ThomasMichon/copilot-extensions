@@ -1087,6 +1087,25 @@ def test_client_tasks_for_session_round_trip(client):
     assert client.tasks_for_session("session-never-seen") == []
 
 
+def test_client_tasks_for_session_url_encodes_reserved_characters(client):
+    """Regression: a session id containing a URL-reserved character (``?``,
+    ``#``) must round-trip correctly, not be mis-parsed as query/fragment
+    syntax when interpolated into the request URL. (A literal ``/`` in a
+    path segment is a separate, ASGI-level limitation -- routers decode
+    ``%2F`` back to ``/`` before matching -- out of scope here.)"""
+    t = client.create("via client")
+    client.claim("w1", repo=TEST_REPO)
+    client.start(t["id"], "w1")
+    reserved_session_id = "sess-with#reserved?chars"
+    client.bind_owner_session(t["id"], "w1", reserved_session_id)
+
+    found = client.tasks_for_session(reserved_session_id)
+    assert len(found) == 1
+    assert found[0]["task_id"] == t["id"]
+    # A DIFFERENT session id must not incidentally match the encoded one.
+    assert client.tasks_for_session("sess-with") == []
+
+
 def test_client_error_maps_to_dispatch_error(client):
     with pytest.raises(DispatchError) as exc:
         client.get("missing")

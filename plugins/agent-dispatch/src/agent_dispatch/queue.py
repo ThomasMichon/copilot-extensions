@@ -124,6 +124,25 @@ def worker_id_for(machine: str, worktree: str) -> str:
     return f"{machine}/{worktree}"
 
 
+def _claimant_worktree_machine(task: Task) -> tuple[str | None, str | None]:
+    """The task's actual claimant identity (``machine``, ``worktree``), for
+    recording a durable attachment row.
+
+    Prefers ``task.owner`` (the real claimant, stamped by ``claim_one`` as
+    ``worker_id_for(machine, worktree)`` -- correct for the common **unpinned**
+    claim, where ``target_worktree``/``target_machine`` are never set) over
+    the target pin, falling back to the pin only when there is no owner yet
+    (e.g. a not-yet-claimed pinned task). A worktree id cannot itself contain
+    ``/``, so splitting on the first one is exact, unlike ``__main__._split_owner``
+    which defensively tolerates one for a value of uncertain origin.
+    """
+    if task.owner:
+        machine, _, worktree = task.owner.partition("/")
+        if worktree:
+            return machine, worktree
+    return task.target_machine, task.target_worktree
+
+
 def machine_matches(target: str | None, machine: str | None) -> bool:
     """True when a task's stored ``target_machine`` matches the ``machine`` a
     caller is scoping to -- **case-insensitively**.
@@ -3282,14 +3301,15 @@ class TaskQueue(
                 "UPDATE tasks SET owner_session_id=?, updated_at=? WHERE id=?",
                 (owner_session_id, ts, task_id),
             )
+            attach_machine, attach_worktree = _claimant_worktree_machine(task)
             self._record_attachment(
                 conn,
                 task_id,
                 ts=ts,
                 old_session_id=task.owner_session_id,
                 new_session_id=owner_session_id,
-                worktree_id=task.target_worktree,
-                machine=task.target_machine,
+                worktree_id=attach_worktree,
+                machine=attach_machine,
                 detach_reason="rebound",
             )
             self._audit(
@@ -4216,14 +4236,15 @@ class TaskQueue(
             # Column names are internal constants; values are bound parameters.
             conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params)  # noqa: S608
             if "owner_session_id" in (extra or {}):
+                attach_machine, attach_worktree = _claimant_worktree_machine(task)
                 self._record_attachment(
                     conn,
                     task_id,
                     ts=ts,
                     old_session_id=task.owner_session_id,
                     new_session_id=extra["owner_session_id"],  # type: ignore[index]
-                    worktree_id=task.target_worktree,
-                    machine=task.target_machine,
+                    worktree_id=attach_worktree,
+                    machine=attach_machine,
                     detach_reason=note or to,
                 )
             if release_spawn:

@@ -125,8 +125,20 @@ class DispatchClient(RegistrationClientMixin):
     def tasks_for_session(self, session_id: str) -> list[dict]:
         """The reverse lookup: every task ``session_id`` has ever attached to
         on this host's coordinator, newest first. Empty, not an error, when
-        the session id never attached to a task here."""
-        return self._unwrap(self._http.get(f"/sessions/{session_id}/tasks"))
+        the session id never attached to a task here.
+
+        Unlike a task id (always an internally-generated hex string),
+        ``session_id`` is an externally-sourced value (an agent-bridge escrow
+        id or a durable ACP UUID) -- URL-encode it before interpolating into
+        the path so a value containing a reserved character (``?``, ``#``)
+        can't be mis-parsed as query/fragment syntax. A literal ``/`` in the
+        id is a separate, ASGI-level limitation (the server decodes ``%2F``
+        back to ``/`` before route matching) that percent-encoding here
+        cannot fix -- expected to never occur for a real session id.
+        """
+        from urllib.parse import quote
+
+        return self._unwrap(self._http.get(f"/sessions/{quote(session_id, safe='')}/tasks"))
 
     def payload(self, task_id: str) -> dict:
         return self._unwrap(self._http.get(f"/tasks/{task_id}/payload"))
