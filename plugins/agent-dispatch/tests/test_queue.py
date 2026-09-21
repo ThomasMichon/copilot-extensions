@@ -1016,6 +1016,56 @@ def test_attachment_history_records_bind_release_and_handoff(q):
     assert history[1].detached_at == 1070.0
 
 
+def test_tasks_for_session_reverse_lookup(q):
+    """tasks_for_session is the reverse of attachment_history: given a session
+    id, find every task it has ever attached to. Backs the reverse-lookup CLI
+    (an arbitrary session id -> its worktree + task-assignment history)."""
+    t1 = q.create("headless", target_worktree="wt-1", target_machine="m1")
+    q.claim_one("w1", task_id=t1.id, machine="m1", worktree="wt-1")
+    q.start(t1.id, "w1")
+    q.bind_owner_session(t1.id, "w1", "session-shared", now=1000.0)
+
+    # The same session id later attaches to a second, unrelated task.
+    t2 = q.create("headless", target_worktree="wt-2", target_machine="m2")
+    q.claim_one("w2", task_id=t2.id, machine="m2", worktree="wt-2")
+    q.start(t2.id, "w2")
+    q.bind_owner_session(t2.id, "w2", "session-shared", now=2000.0)
+
+    found = q.tasks_for_session("session-shared")
+    assert [entry.task_id for entry in found] == [t2.id, t1.id]
+    assert found[0].worktree_id == "wt-2"
+    assert found[0].machine == "m2"
+    assert found[0].detached_at is None
+    assert found[1].worktree_id == "wt-1"
+    assert found[1].machine == "m1"
+
+    # A session id that never attached to anything is an empty list, not an
+    # error.
+    assert q.tasks_for_session("session-never-seen") == []
+
+
+def test_tasks_for_session_reports_worktree_for_unpinned_task(q):
+    """Regression: an UNPINNED task (no target_worktree/target_machine --
+    the common case, an untargeted claim from the general pool) must still
+    report the actual claimant's worktree/machine in the reverse lookup.
+    Real CLI callers pass worker_id as the machine/worktree composite
+    (`worker_id_for`/`_owner_from_identity`); a prior version of this code
+    read only the target pin, which is always null for an unpinned task."""
+    task = q.create("headless")  # no target_worktree/target_machine
+    q.claim_one("anomalous-potato/wt-real", task_id=task.id)
+    q.start(task.id, "anomalous-potato/wt-real")
+    q.bind_owner_session(task.id, "anomalous-potato/wt-real", "session-unpinned", now=1000.0)
+
+    found = q.tasks_for_session("session-unpinned")
+    assert len(found) == 1
+    assert found[0].machine == "anomalous-potato"
+    assert found[0].worktree_id == "wt-real"
+
+    history = q.attachment_history(task.id)
+    assert history[0].machine == "anomalous-potato"
+    assert history[0].worktree_id == "wt-real"
+
+
 def test_set_activity_cannot_restore_activity_on_suspended_task(q):
     t = q.create("dormant")
     reservation, _ = q.reserve_spawn(t.id)
