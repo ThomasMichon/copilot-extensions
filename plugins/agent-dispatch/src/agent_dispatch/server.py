@@ -100,7 +100,7 @@ def _owns_active_route() -> bool:
 
         table = routing.read_table(routing_dir())
         raw = table.get("active") if isinstance(table, dict) else None
-        if not isinstance(raw, dict) or raw.get("pid") is None:
+        if not isinstance(raw, dict):
             now = time.monotonic()
             if now - _last_missing_active_heal_attempt >= _MISSING_ACTIVE_HEAL_INTERVAL_S:
                 _last_missing_active_heal_attempt = now
@@ -123,6 +123,11 @@ def _owns_active_route() -> bool:
                         _wake_route_owned = raw.get("pid") == os.getpid()
                         return _wake_route_owned
             return _wake_route_owned
+        # An active dict with no recorded pid is not a "missing claim" --
+        # reap_stale_active has nothing to repair there, and it must not be
+        # treated as owned just because a previous check happened to return
+        # True: fall through to the plain pid comparison below, which
+        # correctly evaluates to False (``None != os.getpid()``).
         _wake_route_owned = raw.get("pid") == os.getpid()
         return _wake_route_owned
     except Exception:

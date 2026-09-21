@@ -504,6 +504,19 @@ def _reap_stale_active_unlocked(
     """
     _listen = listening or _listening
     _alive = pid_alive or _pid_alive
+
+    def _confirmed_live(pid: int | None) -> bool:
+        """A promotion candidate needs a **positive, recorded** live pid.
+
+        ``_alive`` alone is not enough here: it returns ``True`` for
+        ``None``/non-positive pids too (its own conservative default for "we
+        cannot disprove liveness"), which is the right call when deciding
+        whether to *reap* a pid we already have reason to distrust, but wrong
+        when deciding whether to *trust* a listener as proof of identity --
+        that must require an actual recorded pid to check against.
+        """
+        return bool(pid) and pid > 0 and _alive(pid)
+
     result: dict = {"reaped": False, "reason": "", "dead_port": None,
                     "promoted_port": None}
     try:
@@ -520,7 +533,7 @@ def _reap_stale_active_unlocked(
                 Endpoint.from_dict(prev_raw) if isinstance(prev_raw, dict) else None
             )
             if prev is not None and _listen(prev.client_host, prev.port) \
-                    and _alive(prev.pid):
+                    and _confirmed_live(prev.pid):
                 _publish_active_unlocked(
                     config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
                     version=prev.version, demote_existing=False,
@@ -566,7 +579,7 @@ def _reap_stale_active_unlocked(
         prev = Endpoint.from_dict(prev_raw) if isinstance(prev_raw, dict) else None
         promoted = False
         if prev is not None and prev.port != active.port and \
-                _listen(prev.client_host, prev.port) and _alive(prev.pid):
+                _listen(prev.client_host, prev.port) and _confirmed_live(prev.pid):
             _publish_active_unlocked(
                 config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
                 version=prev.version, demote_existing=False,

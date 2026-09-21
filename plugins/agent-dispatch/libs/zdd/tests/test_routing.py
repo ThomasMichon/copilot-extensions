@@ -312,6 +312,33 @@ def test_reap_stale_active_promotes_live_previous_when_active_missing(
         prev.close()
 
 
+def test_reap_stale_active_does_not_promote_when_previous_has_no_recorded_pid(
+    cfg_dir: Path,
+):
+    """A listener alone must never stand in for a positive recorded pid.
+
+    ``_pid_alive`` treats an absent/non-positive pid as unfalsifiable-alive
+    (its own conservative default, correct for *not reaping* an endpoint we
+    lack positive evidence against) -- but that default must not also be
+    read as *proof* an unverified listener is the real previous daemon.
+    """
+    prev = _Listener()
+    try:
+        table = {
+            "previous": {"bind": "127.0.0.1", "port": prev.port, "generation": 5},
+            "epoch": "x",
+        }
+        routing.routing_table_path(cfg_dir).write_text(json.dumps(table))
+
+        result = routing.reap_stale_active(cfg_dir, service="agent-dispatch")
+
+        assert result["promoted_port"] is None
+        data = routing.read_table(cfg_dir)
+        assert "active" not in data
+    finally:
+        prev.close()
+
+
 def test_reap_stale_active_does_not_promote_when_previous_pid_confirmed_dead(
     cfg_dir: Path,
 ):

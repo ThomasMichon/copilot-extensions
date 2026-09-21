@@ -84,6 +84,33 @@ def test_wake_drain_does_not_promote_passive_on_routing_read_failure(
     assert server._owns_active_route() is False
 
 
+def test_wake_drain_never_treats_a_null_pid_active_as_owned_or_repairable(
+    tmp_path: Path, monkeypatch
+):
+    """An ``active`` dict with ``pid: None`` is neither "missing" nor "ours".
+
+    Only a genuinely absent/non-dict ``active`` is the shape
+    ``reap_stale_active`` can repair (a clean shutdown leaving only
+    ``previous``). An *active dict* whose recorded pid is ``None`` is a
+    different, unrepairable state -- self-healing it would be a no-op, and
+    treating it as eligible for the same branch risked falling through to the
+    stale cached ownership value instead of correctly deciding "not ours".
+    """
+    _reset(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        routing, "read_table",
+        lambda _path: {"active": {"bind": "127.0.0.1", "port": 9999, "pid": None}},
+    )
+    reap_calls = []
+    monkeypatch.setattr(
+        routing, "reap_stale_active",
+        lambda *a, **k: reap_calls.append(1) or {"reaped": False, "promoted_port": None},
+    )
+
+    assert server._owns_active_route() is False
+    assert reap_calls == []  # not the missing-active shape -- no self-heal attempt
+
+
 def test_wake_drain_self_heals_missing_active_by_promoting_live_previous(
     tmp_path: Path, monkeypatch
 ):
