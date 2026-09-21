@@ -479,6 +479,60 @@ def test_account_for_github_slug_honors_override(home: Path):
     assert repos.account_for_github_slug("") is None
 
 
+# --- bare registered repo name resolution (#3032) ---------------------------
+
+
+def test_resolve_slug_owner_bare_owner_unregistered():
+    # No registered repo by that name -> treated as a literal owner, exactly
+    # as before (personal/org owners keep resolving this way).
+    assert repos.resolve_slug_owner("ThomasMichon") == "ThomasMichon"
+
+
+def test_resolve_slug_owner_bare_registered_repo_name_derives_owner(home: Path):
+    # A bare registered repo *name* is not itself an owner: resolve through
+    # the registry -> remote -> owner chain, the same one `repos find` uses.
+    repos.add_repo(
+        "copilot-extensions", "D:/Src/copilot-extensions", repo_class="reference",
+        remote="https://github.com/ThomasMichon/copilot-extensions.git",
+        plat="windows",
+    )
+    assert repos.resolve_slug_owner("copilot-extensions") == "ThomasMichon"
+
+
+def test_account_for_github_slug_bare_registered_repo_name_resolves_owner(home: Path):
+    # The reported bug: `account_for_github_slug("copilot-extensions")` used to
+    # return the literal string "copilot-extensions" (an invalid login) instead
+    # of resolving the repo's actual owner.
+    repos.add_repo(
+        "copilot-extensions", "D:/Src/copilot-extensions", repo_class="reference",
+        remote="https://github.com/ThomasMichon/copilot-extensions.git",
+        plat="windows",
+    )
+    assert repos.account_for_github_slug("copilot-extensions") == "ThomasMichon"
+
+
+def test_resolve_slug_owner_registered_non_github_remote_is_none(home: Path):
+    # A registered repo whose remote isn't github.com has no github owner to
+    # resolve -- returning the bare name itself here would be just as wrong as
+    # the original bug, so this must be None (account_for_github_slug then
+    # also returns None -> "no account preference", never a bogus login).
+    repos.add_repo(
+        "azdo-proj", "D:/Src/azdo-proj", repo_class="reference",
+        remote="https://my-org.visualstudio.com/x/_git/azdo-proj",
+        plat="windows",
+    )
+    assert repos.resolve_slug_owner("azdo-proj") is None
+    assert repos.account_for_github_slug("azdo-proj") is None
+
+
+def test_resolve_slug_owner_empty_and_slash_forms():
+    assert repos.resolve_slug_owner("") is None
+    assert repos.resolve_slug_owner(None) is None
+    # An owner/name slug is unaffected -- the owner is taken verbatim, never
+    # looked up as a registered repo name.
+    assert repos.resolve_slug_owner("example-org/proj") == "example-org"
+
+
 def test_add_repo_persists_account(home: Path):
     repos.add_repo(
         "proj", "D:/Src/proj", repo_class="worktree",

@@ -487,11 +487,34 @@ def account_for_github_owner(owner: str | None) -> str | None:
     return owner
 
 
+def resolve_slug_owner(target: str | None) -> str | None:
+    """Resolve the github ``owner`` a *target* (owner, ``owner/name`` slug, or
+    bare **registered repo name**) actually refers to.
+
+    A bare name is ambiguous with a bare owner: resolve it through the same
+    registry -> remote -> owner chain ``repos find`` uses, instead of treating
+    the literal string as the owner (silently minted under the wrong identity
+    -- see #3032). Falls back to the literal string only when it isn't a
+    registered repo name, so a bare personal/org owner keeps resolving as
+    before. None when a registered repo's remote has no derivable owner.
+    """
+    if not target:
+        return None
+    if "/" in target:
+        return target.split("/", 1)[0]
+    entry = find_repo(target)
+    if entry is not None:
+        return github_owner(entry.remote)
+    return target
+
+
 def account_for_github_slug(slug: str | None) -> str | None:
-    """Resolve the effective account for a github ``owner/name`` slug."""
+    """Resolve the effective account for a github ``owner/name`` slug, a bare
+    ``owner``, or a bare registered repo *name* (see :func:`resolve_slug_owner`).
+    """
     if not slug:
         return None
-    owner = slug.split("/", 1)[0] if "/" in slug else slug
+    owner = resolve_slug_owner(slug)
     return account_for_github_owner(owner)
 
 
