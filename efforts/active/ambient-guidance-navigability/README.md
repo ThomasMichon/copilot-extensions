@@ -37,8 +37,8 @@ never requiring the agent to already know the skill exists.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Driving agent (this repo) | Designs and lands the registry/guard mechanism (Phase 1) and per-plugin content (Phase 2) here | independent per-phase worktree, this repo's own PR flow |
-| Driving agent (downstream consumer) | Runs the one-time sync-drift fix and adds a repo-owned terse AGENTS.md category index (Phase 0 / Phase 3) in its own private repo | that repo's own worktree/PR flow; not part of this repo's history |
+| Driving agent (this repo) | Designs and lands the registry/guard mechanism (Phase 1), the `projection-reflect` generic recipe (Phase 2), and per-plugin content (Phase 3) here | independent per-phase worktree, this repo's own PR flow |
+| Driving agent (downstream consumer) | Runs the one-time sync-drift fix, adds a repo-owned terse AGENTS.md category index, and instantiates `projection-reflect` (Phase 0 / Phase 4 / Phase 5) in its own private repo | that repo's own worktree/PR flow; not part of this repo's history |
 
 ## Coordination
 
@@ -46,7 +46,7 @@ never requiring the agent to already know the skill exists.
   is its own worktree and its own PR, following that repo's own merge policy.
 - **Host (owns PRs):** the driving agent in each repo, for that repo's own
   phases.
-- **Delegates:** none beyond the split above; the downstream repo's Phase 0/3
+- **Delegates:** none beyond the split above; the downstream repo's Phase 0/4/5
   work is out of scope for this repo's own history and is tracked in that
   repo's own private effort/issue instead.
 - **Handoff:** each phase closes with its own repo's validation green and its
@@ -149,7 +149,8 @@ payloads, not every installed/marketplace plugin), so this deliberately does
 not check in pointers for disabled capabilities (picks up `head-claim-fallback`
 and the `cross-repo-debug-tracking` fix immediately; reconciles stale
 plugin-version metadata for every enabled plugin). Recorded here only as
-context for Phase 1's sync-freshness guard; not a checklist item of this
+context for Phase 2's `projection-reflect` design; not a checklist item of
+this
 repo's own effort.
 
 ### Phase 1 -- Registry + coverage guard (`customizing-copilot:reviewing-customizations`)
@@ -180,7 +181,7 @@ reconciler -- see a downstream private effort's architecture summary for the
 exact reusable-primitives mapping; not reproduced here since it cites
 private paths).
 
-- [ ] **Immediate/proactive trigger** (landed, `#3053`): a force-synced
+- [x] **Immediate/proactive trigger** (landed, `#3053`): a force-synced
       ambient rule -- after merging an upstream PR here, immediately
       force-update installed plugins and re-run the projection sync in the
       current harness/consumer repo, before ending the turn. This is the
