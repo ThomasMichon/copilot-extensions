@@ -21,6 +21,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from agent_procutil import no_window_flags
+
 # Static PATs a CodeSpace injects that must be neutralized so a dispatched agent
 # never relies on a stale/expired token instead of the credential relay.
 SCRUB_ENV_VARS: tuple[str, ...] = (
@@ -46,7 +48,7 @@ RELAY_PORTMAP_DIR = "$HOME/.agent-bridge/relay-ports"
 # ``build_azure_auth_helper_compat_shim``) -- never persisted to a dotfile, so
 # it never survives past this one launch's shell.
 AZURE_AUTH_HELPER_COMPAT_DIR = "$HOME/.cache/agent-codespaces/compat-path"
-_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+_SUBPROCESS_FLAGS = no_window_flags()
 
 
 def _az_argv(rest: list[str]) -> list[str] | None:
