@@ -31,6 +31,14 @@ than ``ttl_seconds`` -- the same TTL-reap vocabulary
 backend. A stale tunnel is not deleted here (that would race a
 still-registering peer); ``reap_stale`` is an explicit opt-in for a caller
 that wants to garbage-collect old entries.
+
+**Enumeration backs off on repeated failure:** ``discover_peers`` /
+``discover_coordinator`` / ``reap_stale`` all read through
+:meth:`DevTunnelRendezvous._list_tunnels`, which doubles a backoff delay on
+each consecutive ``devtunnel list`` failure (a lapsed ``dtssh login`` being
+the common case) up to a cap, serving the last successfully enumerated
+snapshot while backed off rather than re-invoking the CLI every federation
+tick.
 """
 
 from __future__ import annotations
@@ -62,6 +70,14 @@ DEFAULT_EXPIRATION = "30d"
 #: a network round trip; generous but bounded so a hung call doesn't wedge a
 #: federation tick.
 DEFAULT_TIMEOUT = 20.0
+
+#: Enumeration backoff (``devtunnel list``, the awareness-plane read every
+#: tick makes). A repeated enumeration failure -- most commonly a lapsed
+#: ``dtssh login`` -- must not hot-loop the CLI at the runner's tick interval;
+#: the delay doubles on each consecutive failure up to the cap, and resets on
+#: the next success.
+DEFAULT_ENUM_BACKOFF_SECONDS = 5.0
+MAX_ENUM_BACKOFF_SECONDS = 300.0
 
 CommandRunner = Callable[[list[str]], "subprocess.CompletedProcess[str] | None"]
 
@@ -133,6 +149,7 @@ class DevTunnelRendezvous:
         ttl_seconds: float = DEFAULT_TTL_SECONDS,
         timeout: float = DEFAULT_TIMEOUT,
         runner: CommandRunner | None = None,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         self._binary = binary or _default_binary()
         self._label = label
@@ -140,6 +157,11 @@ class DevTunnelRendezvous:
         self._ttl = float(ttl_seconds)
         self._timeout = timeout
         self._runner = runner or self._spawn
+        self._clock = clock
+        # Enumeration backoff state (see DEFAULT_ENUM_BACKOFF_SECONDS).
+        self._enum_backoff_seconds = 0.0
+        self._enum_backoff_until = 0.0
+        self._enum_cache: list[dict] = []
 
     # -- transport --------------------------------------------------------
 
@@ -410,8 +432,7 @@ class DevTunnelRendezvous:
         return True
 
     def discover_peers(self, *, role: str | None = None) -> list[dict]:
-        result = self._call(["list", "--all-labels", self._label])
-        tunnels = (result or {}).get("tunnels") or []
+        tunnels = self._list_tunnels()
         entries = []
         for tunnel in tunnels:
             entry = self._decode(tunnel)
@@ -427,6 +448,41 @@ class DevTunnelRendezvous:
             return None
         return max(coordinators, key=lambda e: (e["epoch"], e["instance"]))
 
+    # -- enumeration backoff -------------------------------------------------
+
+    def _list_tunnels(self) -> list[dict]:
+        """``devtunnel list --all-labels <label>``, backed off on repeated
+        failure.
+
+        A federation tick calls this every interval; a persistent enumeration
+        failure (most commonly a lapsed ``dtssh login``) must not re-invoke
+        the CLI at that same rate indefinitely. While backed off, this serves
+        the last successfully enumerated snapshot (degrading to an already-
+        known, possibly-stale awareness picture) instead of hammering the
+        management API; the backoff clears -- and a fresh enumeration is
+        attempted -- as soon as it elapses. The *first* failure still
+        propagates (via :class:`DevTunnelError`) so a caller sees the failure
+        at least once rather than the backoff silently swallowing it forever.
+        """
+        now = self._clock()
+        if now < self._enum_backoff_until:
+            return self._enum_cache
+        try:
+            result = self._call(["list", "--all-labels", self._label])
+        except DevTunnelError:
+            self._enum_backoff_seconds = min(
+                self._enum_backoff_seconds * 2 if self._enum_backoff_seconds else (
+                    DEFAULT_ENUM_BACKOFF_SECONDS
+                ),
+                MAX_ENUM_BACKOFF_SECONDS,
+            )
+            self._enum_backoff_until = now + self._enum_backoff_seconds
+            raise
+        self._enum_backoff_seconds = 0.0
+        self._enum_backoff_until = 0.0
+        self._enum_cache = (result or {}).get("tunnels") or []
+        return self._enum_cache
+
     # -- maintenance (explicit opt-in, not called by the Protocol) ----------
 
     def reap_stale(self) -> int:
@@ -436,8 +492,7 @@ class DevTunnelRendezvous:
         Protocol -- an operator/cron convenience so a permanently-dead
         instance's tunnel doesn't linger for its full ``--expiration``.
         """
-        result = self._call(["list", "--all-labels", self._label])
-        tunnels = (result or {}).get("tunnels") or []
+        tunnels = self._list_tunnels()
         removed = 0
         for tunnel in tunnels:
             entry = self._decode(tunnel)

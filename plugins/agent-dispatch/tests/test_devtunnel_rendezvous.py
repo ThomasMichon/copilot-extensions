@@ -27,6 +27,17 @@ from agent_dispatch.federation import Rendezvous
 from agent_dispatch.satellites import UnknownInstance
 
 
+class FakeClock:
+    def __init__(self, start: float = 1000.0) -> None:
+        self.t = float(start)
+
+    def __call__(self) -> float:
+        return self.t
+
+    def advance(self, seconds: float) -> None:
+        self.t += float(seconds)
+
+
 class FakeDevTunnelCLI:
     """An in-memory stand-in for the ``devtunnel`` CLI's JSON-mode subcommands.
 
@@ -352,6 +363,75 @@ def test_call_returns_none_on_timeout_marker():
     rv = DevTunnelRendezvous(runner=timeout_runner)
     with pytest.raises(DevTunnelError):
         rv.register("host-a")
+
+
+# -- enumeration backoff -----------------------------------------------------
+
+
+def test_discover_peers_first_failure_raises_and_backs_off():
+    clock = FakeClock()
+    calls = []
+
+    def flaky_runner(args):
+        calls.append(args)
+        return subprocess.CompletedProcess(["devtunnel"], 1, "", "not logged in")
+
+    rv = DevTunnelRendezvous(runner=flaky_runner, clock=clock)
+    with pytest.raises(DevTunnelError):
+        rv.discover_peers()
+    assert len(calls) == 1
+    # Within the backoff window, a repeated call must NOT re-invoke the CLI.
+    assert rv.discover_peers() == []
+    assert len(calls) == 1
+
+
+def test_discover_peers_backoff_doubles_then_recovers_after_elapsing():
+    clock = FakeClock()
+    calls = []
+
+    def flaky_then_ok_runner(args):
+        calls.append(args)
+        if len(calls) <= 2:
+            return subprocess.CompletedProcess(["devtunnel"], 1, "", "not logged in")
+        return subprocess.CompletedProcess(["devtunnel"], 0, json.dumps({"tunnels": []}), "")
+
+    rv = DevTunnelRendezvous(runner=flaky_then_ok_runner, clock=clock)
+    with pytest.raises(DevTunnelError):
+        rv.discover_peers()
+    assert len(calls) == 1
+    # First backoff window (5s default) hasn't elapsed -> still cached, no call.
+    clock.advance(1)
+    rv.discover_peers()
+    assert len(calls) == 1
+    # Past the first backoff window -> retries, fails again, backoff doubles.
+    clock.advance(10)
+    with pytest.raises(DevTunnelError):
+        rv.discover_peers()
+    assert len(calls) == 2
+    # Past the doubled window -> retries, succeeds, backoff resets.
+    clock.advance(20)
+    assert rv.discover_peers() == []
+    assert len(calls) == 3
+    # Backoff cleared -> the very next call retries immediately (no wait).
+    rv.discover_peers()
+    assert len(calls) == 4
+
+
+def test_reap_stale_also_goes_through_backoff():
+    clock = FakeClock()
+    calls = []
+
+    def failing_runner(args):
+        calls.append(args)
+        return subprocess.CompletedProcess(["devtunnel"], 1, "", "not logged in")
+
+    rv = DevTunnelRendezvous(runner=failing_runner, clock=clock)
+    with pytest.raises(DevTunnelError):
+        rv.reap_stale()
+    assert len(calls) == 1
+    # Still backed off -> reap_stale must not re-invoke list either.
+    assert rv.reap_stale() == 0
+    assert len(calls) == 1
 
 
 # -- factory / config wiring -----------------------------------------------------
