@@ -416,6 +416,15 @@ def main(argv: list[str] | None = None) -> int:
     abort_p.add_argument("--owner", required=True)
     abort_p.add_argument("--execution-id", required=True)
     abort_p.add_argument("--generation", required=True)
+    force_retire_p = sub.add_parser(
+        "native-force-retire",
+        help="Force-release a native claim for an unreachable/gone venue (records a forced receipt)",
+    )
+    force_retire_p.add_argument("name")
+    force_retire_p.add_argument("--owner", required=True)
+    force_retire_p.add_argument("--execution-id", required=True)
+    force_retire_p.add_argument("--generation", required=True)
+    force_retire_p.add_argument("--reason", default="venue unreachable; bounded stop could not confirm retirement")
     retirement_p = sub.add_parser("native-retirement", help="Read an identity-bound native retirement receipt")
     retirement_p.add_argument("name")
     retirement_p.add_argument("--owner", required=True)
@@ -971,6 +980,14 @@ def main(argv: list[str] | None = None) -> int:
 
             released = abort_unlaunched(args.name, args.owner, (args.execution_id, args.generation))
             print(json.dumps({"released": released}))
+            return 0
+        if args.command == "native-force-retire":
+            from .execution_claims import force_release
+
+            receipt = force_release(
+                args.name, args.owner, (args.execution_id, args.generation), reason=args.reason,
+            )
+            print(json.dumps({"receipt": receipt}))
             return 0
         if args.command == "native-retirement":
             from .execution_claims import retirement

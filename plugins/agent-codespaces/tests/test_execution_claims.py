@@ -35,6 +35,32 @@ def test_native_blocks_all_unqualified_claims_before_distributed_mutation(state,
     assert modes._path().read_bytes() == before
 
 
+def test_force_release_retires_a_launched_claim_with_a_truthful_receipt(state):
+    native()
+    modes.mark("example-space", "owner", ("native-one", "generation-one"), launchRequested=True)
+    # A normal release refuses without a verified retirement proof.
+    with pytest.raises(lease.CoordinationRejected):
+        modes.release("example-space", "owner", ("native-one", "generation-one"))
+    # force_release clears the claim and records a forced, truthful receipt.
+    receipt = modes.force_release(
+        "example-space", "owner", ("native-one", "generation-one"), reason="venue unreachable",
+    )
+    assert receipt["retired"] is True and receipt["forced"] is True
+    assert receipt["recovery"] == {"ok": False, "detail": "venue unreachable"}
+    assert modes.get("example-space") is None  # claim released -> venue free
+    # The receipt is persisted and identity-matched for later reads.
+    persisted = modes.retirement("example-space", "owner", ("native-one", "generation-one"))
+    assert persisted["forced"] is True
+
+
+def test_force_release_is_idempotent_when_claim_already_gone(state):
+    native()
+    modes.force_release("example-space", "owner", ("native-one", "generation-one"), reason="gone")
+    # Second call: claim already released; returns the persisted forced receipt.
+    again = modes.force_release("example-space", "owner", ("native-one", "generation-one"), reason="gone")
+    assert again["retired"] is True and again["forced"] is True
+
+
 @pytest.mark.parametrize("disabled", [False, True])
 def test_claim_cli_cannot_fall_back_to_acp_for_same_owner(state, monkeypatch, disabled):
     native()

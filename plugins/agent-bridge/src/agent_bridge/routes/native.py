@@ -70,7 +70,9 @@ async def status(execution_id: str, request: Request, generation: str | None = N
 async def stop(execution_id: str, request: Request, body: dict = Body(...)):
     if not body.get("generation"):
         raise HTTPException(400, detail={"code": "generation_required"})
-    return await invoke(manager(request).stop(execution_id, body["generation"]))
+    return await invoke(
+        manager(request).stop(execution_id, body["generation"], force=bool(body.get("force"))),
+    )
 
 
 @router.post("/{execution_id}/messages")

@@ -29,10 +29,13 @@ class NativeClient:
         return self._request("GET", path) or {}
 
 
-    def native_stop(self, execution_id: str, generation: str) -> dict[str, Any]:
+    def native_stop(self, execution_id: str, generation: str, *, force: bool = False) -> dict[str, Any]:
+        body: dict[str, Any] = {"generation": generation}
+        if force:
+            body["force"] = True
         return self._request(
             "POST", "/api/v1/native-executions/" + urllib.parse.quote(execution_id, safe="") + "/stop",
-            {"generation": generation}, request_timeout=210,
+            body, request_timeout=210,
         ) or {}
 
 

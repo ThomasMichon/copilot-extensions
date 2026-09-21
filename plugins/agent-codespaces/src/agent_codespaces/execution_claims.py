@@ -224,6 +224,44 @@ def abort_unlaunched(name: str, owner: str, identity: tuple[str, str]) -> bool:
         lock.release()
 
 
+def force_release(name: str, owner: str, identity: tuple[str, str], *, reason: str) -> dict:
+    """Force-release a native claim for an unreachable/gone venue.
+
+    A normal ``release`` requires a verified remote retirement proof. When the
+    venue is unreachable or has been deleted, that proof can never be obtained
+    and the claim would otherwise be held forever (a stuck ``stopping``). This
+    releases the claim after a bounded stop could not confirm retirement, and
+    records a TRUTHFUL forced receipt (``forced: True`` + an unsuccessful
+    ``recovery``) so the uncertainty is never misrepresented as a clean shutdown.
+    The remote native host, if any survives, is reaped by its leader-exit
+    process-group retirement. Idempotent: if the claim is already gone, returns
+    the persisted receipt or a synthesized forced one.
+    """
+    from ssh_manager import TargetLock
+    from .lease import _lease_lock
+
+    forced = {
+        "codespace": name, "owner": owner, "executionId": identity[0],
+        "generation": identity[1], "retired": True, "forced": True,
+        "recovery": {"ok": False, "detail": reason},
+    }
+    lock = TargetLock(name, op="native-force-retire")
+    lock.acquire()
+    try:
+        with _lease_lock():
+            rows = _read()
+            existing = _receipts().get(_retirement_key(name, identity))
+            if name not in rows:
+                return existing or forced
+            assert_access(name, identity, owner)
+            del rows[name]
+            _write(rows, retire=(name, identity),
+                   receipt_update=(_retirement_key(name, identity), forced))
+            return forced
+    finally:
+        lock.release()
+
+
 def retirement(name: str, owner: str, identity: tuple[str, str]) -> dict | None:
     from .lease import _lease_lock, CoordinationRejected
 

@@ -34,7 +34,23 @@ async def test_native_http_auth_and_generation_are_not_optional():
             "/api/v1/native-executions/one/stop", json={"generation": "generation"}, headers=headers,
         )
         assert result.status_code == 200
-        app.state.native_manager.stop.assert_awaited_once_with("one", "generation")
+        app.state.native_manager.stop.assert_awaited_once_with("one", "generation", force=False)
+
+
+@pytest.mark.asyncio
+async def test_native_stop_forwards_force_flag():
+    app = FastAPI()
+    app.add_middleware(BearerAuthMiddleware, token="fixture-token")
+    app.state.native_manager = SimpleNamespace(stop=AsyncMock(return_value={"state": "stopped"}))
+    app.include_router(native.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://fixture") as client:
+        result = await client.post(
+            "/api/v1/native-executions/one/stop",
+            json={"generation": "generation", "force": True},
+            headers={"Authorization": "Bearer fixture-token"},
+        )
+        assert result.status_code == 200
+        app.state.native_manager.stop.assert_awaited_once_with("one", "generation", force=True)
 
 
 def test_unauthenticated_terminal_does_not_touch_execution():

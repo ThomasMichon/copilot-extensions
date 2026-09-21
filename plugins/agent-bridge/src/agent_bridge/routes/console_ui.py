@@ -339,7 +339,7 @@ $("#stopexec").onclick = async () => {
   if (!confirm("Retire this native execution?")) return;
   try { await api(`/api/v1/native-executions/${encodeURIComponent(sel.exec.executionId)}/stop`,
     { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ generation: sel.exec.generation }) });
+      body: JSON.stringify({ generation: sel.exec.generation, force: true }) });
     setStatus("stop requested"); refresh();
   } catch (e) { setStatus(e.message, true); }
 };

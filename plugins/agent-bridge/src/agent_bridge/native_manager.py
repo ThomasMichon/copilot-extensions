@@ -6,6 +6,7 @@ These are execution-host records, never phantom ACP SessionManager sessions.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -19,6 +20,12 @@ from .native_venue import key as venue_key, venue, record_venue
 
 CAPABILITY = "codespace-native-control-v1"
 _LIVE = ("starting", "ready", "unrepresented", "unreachable")
+
+# Bound how long a stop will wait to (re)establish a retirement transport before
+# it stops hanging. A dead/deleted venue used to block up to 30 min re-connecting
+# for a retirement receipt it could never obtain; a force stop past this bound
+# fast-paths to a truthful forced retirement instead.
+_RETIREMENT_ESTABLISH_TIMEOUT = 60
 _PROGRESS_PHASES = frozenset({
     "local-config", "owner-admission", "ssh-to-target", "target-auth-env",
     "target-binstub", "worktree", "native-host",
@@ -584,11 +591,35 @@ class NativeManager:
         await self._prove_endpoint(endpoint)
         return endpoint
 
-    async def stop(self, execution_id: str, generation: str) -> dict:
+    async def stop(self, execution_id: str, generation: str, *, force: bool = False) -> dict:
         async with self.stop_locks.setdefault(execution_id, asyncio.Lock()):
-            return await self._stop(execution_id, generation)
+            return await self._stop(execution_id, generation, force=force)
 
-    async def _stop(self, execution_id: str, generation: str) -> dict:
+    async def _forced_retirement(self, row: dict, reason: str) -> dict:
+        """Bounded forced retirement for an unreachable/gone venue.
+
+        Releases the claim through the provider's ``native-force-retire`` (which
+        records a TRUTHFUL forced receipt -- ``forced: True`` + an unsuccessful
+        recovery), forcibly closes any owned transport, and marks the execution
+        stopped, instead of hanging on a retirement receipt that a dead/deleted
+        venue can never produce.
+        """
+        execution, generation = row["id"], row["generation"]
+        store = self.store()
+        transport = self.transports.pop(execution, None)
+        if transport is not None:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(transport.close(), timeout=10)
+        if store is not None:
+            store.update(execution, generation, transportCleanupPending=False)
+        payload = json.loads(await self._provider_control(row, "native-force-retire"))
+        proof = payload.get("receipt")
+        if not isinstance(proof, dict):
+            raise NativeError("retirement_unconfirmed", "Forced retirement receipt is unavailable", 503)
+        self._remember_retirement(row, proof)
+        return await self._finish_retirement(execution, generation)
+
+    async def _stop(self, execution_id: str, generation: str, *, force: bool = False) -> dict:
         if not self.serving():
             raise NativeError("not_ready", "Native controller is rebinding", 503)
         store = self.store()
@@ -633,17 +664,32 @@ class NativeManager:
             if cached:
                 self._remember_retirement(row, cached)
                 return await self._finish_retirement(execution_id, generation)
-            await self._prepare(execution_id, generation, retirement_only=True)
+            try:
+                await asyncio.wait_for(
+                    self._prepare(execution_id, generation, retirement_only=True),
+                    timeout=_RETIREMENT_ESTABLISH_TIMEOUT,
+                )
+            except (asyncio.TimeoutError, TimeoutError):
+                if force:
+                    return await self._forced_retirement(
+                        row, "retirement transport did not become available (venue unreachable)")
+                raise NativeError(
+                    "retirement_unconfirmed",
+                    "Native infrastructure did not become available; ownership retained (pass force to release)", 503,
+                )
         transport = self.transports.get(execution_id)
         if transport is None:
+            if force:
+                return await self._forced_retirement(row, "retirement transport unavailable (venue unreachable)")
             raise NativeError("retirement_unconfirmed", "Native infrastructure is unavailable; ownership retained", 503)
         try:
-            result = await transport.request("stop")
+            result = await asyncio.wait_for(transport.request("stop"), timeout=_RETIREMENT_ESTABLISH_TIMEOUT)
         except (OSError, TimeoutError, asyncio.TimeoutError, NativeError) as exc:
             if isinstance(exc, NativeError) and exc.code not in {
                 "provider_unavailable", "provider_operation_failed", "reply_transport_timeout",
             }:
                 raise
+            proof = None
             try:
                 proof = await self._retirement_receipt(row)
                 if proof is not None:
@@ -651,6 +697,9 @@ class NativeManager:
             finally:
                 await self._close_transport(execution_id, generation, transport)
             if proof is None:
+                if force:
+                    return await self._forced_retirement(
+                        row, "native transport failed and no retirement proof is available (venue unreachable)")
                 raise NativeError(
                     "retirement_unconfirmed", "Native transport failed and no retirement proof is available; ownership retained", 503,
                 ) from exc

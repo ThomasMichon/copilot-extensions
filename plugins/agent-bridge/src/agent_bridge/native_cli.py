@@ -64,7 +64,9 @@ def command(args) -> None:
                 request["hostResources"] = validate_definitions(read_json_file(args.host_resources_file))
             value = _get_client(ensure=True).native_start(request)
         elif action == "stop":
-            value = client.native_stop(args.execution_id, args.expected_generation)
+            value = client.native_stop(
+                args.execution_id, args.expected_generation, force=getattr(args, "force", False),
+            )
         elif action == "status":
             value = client.native_status(args.execution_id, generation=args.expected_generation)
         elif action == "list":
@@ -111,6 +113,11 @@ def add_arguments(sub) -> None:
         p = actions.add_parser(action)
         p.add_argument("execution_id")
         p.add_argument("--expected-generation", required=action != "status")
+        if action == "stop":
+            p.add_argument(
+                "--force", action="store_true",
+                help="Force-release the claim if the venue is unreachable/gone (bounded, records a forced receipt)",
+            )
         if action in {"attach", "resume"}:
             role = p.add_mutually_exclusive_group()
             role.add_argument("--observer", action="store_true")
