@@ -376,6 +376,12 @@ class ConnectionManager:
         args.extend([
             "-o", "ConnectTimeout=15",
             "-o", "ServerAliveInterval=30",
+            # Tolerate a transient stall (e.g. a brief Windows loopback-proxy
+            # hiccup under heavy interactive output) before declaring the
+            # connection dead: 30s x 6 = 180s, up from OpenSSH's default of 3
+            # (90s). Long-lived native sessions were dropping on short blips.
+            "-o", "ServerAliveCountMax=6",
+            "-o", "TCPKeepAlive=yes",
             "-o", "BatchMode=yes",
             "-T",  # no PTY
         ])

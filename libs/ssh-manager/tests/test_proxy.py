@@ -48,6 +48,58 @@ def test_loopback_routing_preserves_explicit_host_key_alias():
     ]
 
 
+def test_pump_treats_windows_reset_as_clean_eof():
+    """A peer RST (WinError 64 ConnectionResetError, the way the Windows
+    proactor surfaces it on read) ends the pump gracefully instead of raising,
+    so a normal loopback close is not a hard transport failure."""
+
+    class _ResetReader:
+        def __init__(self):
+            self.calls = 0
+
+        async def read(self, _n):
+            self.calls += 1
+            if self.calls == 1:
+                return b"hello"
+            raise ConnectionResetError(64, "The specified network name is no longer available")
+
+    writes = []
+
+    class _Writer:
+        def write(self, data):
+            writes.append(data)
+
+        async def drain(self):
+            return None
+
+    # Must NOT raise; the reset is swallowed as end-of-stream.
+    asyncio.run(proxy._pump(_ResetReader(), _Writer()))
+    assert writes == [b"hello"]
+
+
+def test_pump_treats_broken_pipe_on_drain_as_eof():
+    """A BrokenPipeError while draining to a closed peer also ends gracefully."""
+
+    class _OneShotReader:
+        def __init__(self):
+            self.done = False
+
+        async def read(self, _n):
+            if self.done:
+                return b""
+            self.done = True
+            return b"data"
+
+    class _BrokenWriter:
+        def write(self, data):
+            return None
+
+        async def drain(self):
+            raise BrokenPipeError("SSH proxy output closed")
+
+    asyncio.run(proxy._pump(_OneShotReader(), _BrokenWriter()))
+
+
 def test_proxy_tokens_use_remote_not_loopback_identity():
     config = SSHConfig(
         host_alias="alias", hostname="remote.example", user="tester", port=2222,

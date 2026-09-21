@@ -125,9 +125,20 @@ def _broker_args(args: Sequence[str], client_command: str) -> list[str]:
 
 
 async def _pump(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    while data := await reader.read(65536):
-        writer.write(data)
-        await writer.drain()
+    try:
+        while data := await reader.read(65536):
+            writer.write(data)
+            await writer.drain()
+    except (ConnectionResetError, BrokenPipeError):
+        # Windows' proactor event loop surfaces a peer RST as
+        # ConnectionResetError (WinError 64, "The specified network name is no
+        # longer available") on read()/drain() instead of returning a clean
+        # EOF. For a loopback relay, a peer closing its half is a normal
+        # end-of-stream, so end THIS direction gracefully rather than raising --
+        # which the broker would otherwise treat as a hard transport failure
+        # (tearing down an otherwise-recoverable SSH connection and logging a
+        # scary "SSH proxy connection failed" traceback on every normal close).
+        return
 
 
 class _ProxyBroker:
