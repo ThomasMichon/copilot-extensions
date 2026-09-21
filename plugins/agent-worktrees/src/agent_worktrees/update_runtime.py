@@ -108,16 +108,16 @@ def _update_registered_plugins(
         return True
 
     refreshed_contexts: set[Path | None] = set()
+    browse_contexts: list[Path | None] = []
     refresh_marketplace = _core_helper("_refresh_marketplace", _refresh_marketplace)
     for target in targets.values():
         context = target.context
         if context in refreshed_contexts:
             continue
         refreshed_contexts.add(context)
-        if context is not None:
-            refresh_marketplace(reconcile.MARKETPLACE, cwd=context)
+        if refresh_marketplace(reconcile.MARKETPLACE, cwd=context):
+            browse_contexts.append(context)
 
-    browse_contexts = [context for context in refreshed_contexts if context is not None]
     if not browse_contexts:
         try:
             fallback_context = _core_helper(
@@ -125,9 +125,22 @@ def _update_registered_plugins(
             )()
         except Exception:
             fallback_context = None
-        if fallback_context is not None:
-            refresh_marketplace(reconcile.MARKETPLACE, cwd=fallback_context)
-            browse_contexts.append(fallback_context)
+        if fallback_context is not None and fallback_context not in refreshed_contexts:
+            refreshed_contexts.add(fallback_context)
+            if refresh_marketplace(reconcile.MARKETPLACE, cwd=fallback_context):
+                browse_contexts.append(fallback_context)
+
+    if not browse_contexts:
+        browse_contexts = []
+    else:
+        deduped: list[Path | None] = []
+        seen_browse: set[Path | None] = set()
+        for context in browse_contexts:
+            if context in seen_browse:
+                continue
+            seen_browse.add(context)
+            deduped.append(context)
+        browse_contexts = deduped
 
     browse_marketplace_plugins = _core_helper(
         "_browse_marketplace_plugins", _browse_marketplace_plugins
@@ -751,4 +764,3 @@ def _find_installed_plugin_dir() -> Path | None:
                 continue
 
     return None
-
