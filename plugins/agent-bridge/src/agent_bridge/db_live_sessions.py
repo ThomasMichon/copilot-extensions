@@ -30,6 +30,7 @@ class _LiveSessionsMixin:
         role: str | None,
         now: float,
         driven_by: str | None = None,
+        venue: str | None = None,
     ) -> str:
         """Insert or refresh a live interactive-session registration (upsert).
 
@@ -47,6 +48,13 @@ class _LiveSessionsMixin:
           resurrect itself via a late heartbeat). Lease-lapsed ``expired`` rows
           still revive normally.
 
+        ``venue`` is an opaque, caller-supplied JSON string describing where a
+        remote-venue CLI-mode session actually lives and how to reattach to it
+        (``{"kind","target","mux_session_name"}``) -- ``None`` for the ordinary
+        local case. Never interpreted here; carried through for
+        reattach/observation guidance to read later
+        (agent-bridge-cli-mode-sessions Phase 4).
+
         Returns the resulting registration status: ``'live'`` on a successful
         insert/refresh, or a rejection reason -- ``'reserved'`` (an owned ACP
         reservation holds the worktree) or ``'taken-over'`` (this id was taken
@@ -54,9 +62,9 @@ class _LiveSessionsMixin:
         """
         cur = self.execute_write(
             "INSERT INTO live_sessions (session_id, machine, cwd, worktree_id, "
-            "repo, branch, pid, role, driven_by, status, registered_at, "
+            "repo, branch, pid, role, driven_by, venue, status, registered_at, "
             "updated_at) "
-            "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ? "
+            "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ? "
             "WHERE NOT EXISTS ("
             "  SELECT 1 FROM worktree_ownership wo "
             "  JOIN sessions s ON s.id = wo.session_id "
@@ -67,11 +75,11 @@ class _LiveSessionsMixin:
             "machine=excluded.machine, cwd=excluded.cwd, "
             "worktree_id=excluded.worktree_id, repo=excluded.repo, "
             "branch=excluded.branch, pid=excluded.pid, role=excluded.role, "
-            "driven_by=excluded.driven_by, "
+            "driven_by=excluded.driven_by, venue=excluded.venue, "
             "status='live', updated_at=excluded.updated_at "
             "WHERE live_sessions.status != 'taken-over'",
             (session_id, machine, cwd, worktree_id, repo, branch, pid, role,
-             driven_by, now, now, worktree_id, worktree_id),
+             driven_by, venue, now, now, worktree_id, worktree_id),
         )
         if cur.rowcount == 1:
             # Best-effort, additive: a worktree with a pending, unclaimed
