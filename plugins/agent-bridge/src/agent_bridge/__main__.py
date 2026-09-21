@@ -2170,6 +2170,75 @@ def _live_session_summary_line(s: dict[str, Any]) -> str:
     return f"{s.get('session_id', '?')} [{status}]{turn}{driven}{age}{prog}"
 
 
+def _launch_cli_mode_session(
+    client: Any,
+    worktree_id: str,
+    *,
+    ttl_seconds: float = 300.0,
+    driver: str | None = "cli-mode",
+    seed: str | None = None,
+    verify_timeout: float = 30.0,
+    embody_bin: str = "agent-worktrees",
+    run: Any = None,
+) -> dict[str, Any]:
+    """Reserve ``worktree_id``'s next CLI-mode session, then hand off to
+    ``agent-worktrees embody`` -- the existing DETACHED, mux-wrapped
+    (tmux/psmux), resume-aware, cross-platform interactive-``copilot``
+    launch path -- rather than a bare foreground subprocess (Phase 3, the
+    opt-in local launch surface).
+
+    ``embody`` never attaches the invoking terminal itself: it spawns (or
+    resumes) a durable ``wt-<id>`` mux session and returns once it exists
+    (``--verify-timeout``), so this call returns promptly and the launched
+    session survives this process exiting -- genuine reattach, not a
+    foreground-spawn dead end. An operator (or Neuron Forge/Picker) attaches
+    with the platform mux binary directly (``tmux``/``psmux``
+    ``attach-session -t wt-<worktree_id>``); no bridge-side attach surface is
+    needed. This deliberately reuses the SAME launch path a human already
+    gets from the worktree/mux flow rather than inventing a second one --
+    only the CLI-mode reservation (so the daemon's Phase 2 server-side claim
+    binds the resulting session) is new here. The CLI extension's ambient
+    self-registration is unchanged. Raises ``BridgeClientError`` (status 409)
+    if ``worktree_id`` already holds an active reservation, exactly like
+    ``cli-mode reserve``.
+    """
+    reservation = client.create_cli_mode_reservation(
+        worktree_id, ttl_seconds=ttl_seconds,
+    )
+    argv = [
+        embody_bin, "embody", "--worktree-id", worktree_id, "--json",
+        "--verify-timeout", str(verify_timeout),
+        # Explicit opt-in only: agent-worktrees never installs tmux/psmux for
+        # a bare `embody` call (an operator running a BYO terminal/session
+        # manager, e.g. Herdr, on their own machine must never have tmux
+        # installed underneath them). A `cli-mode launch` IS the deliberate,
+        # per-request case that vision calls out as fine to default -- there
+        # is nothing else already managing sessions on a freshly-prepared
+        # venue (CodeSpace/container) or a bare local box.
+        "--ensure-mux",
+    ]
+    if driver:
+        argv += ["--driver", driver]
+    if seed:
+        argv += ["--seed", seed]
+    runner = run or subprocess.run
+    result = runner(argv, capture_output=True, text=True)
+    embody_out: dict[str, Any] = {}
+    stdout = getattr(result, "stdout", None)
+    if stdout:
+        try:
+            embody_out = json.loads(stdout)
+        except (json.JSONDecodeError, TypeError):
+            embody_out = {}
+    final = client.get_cli_mode_reservation(worktree_id) or reservation
+    return {
+        "reservation": final,
+        "embody": embody_out,
+        "session": embody_out.get("session"),
+        "exit_code": getattr(result, "returncode", None),
+    }
+
+
 def _cmd_live_sessions(args: argparse.Namespace) -> None:
     """List or resolve registered live interactive CLI sessions.
 
@@ -2218,6 +2287,97 @@ def _cmd_live_sessions(args: argparse.Namespace) -> None:
         lp = (session or {}).get("latest_progress") or {}
         print(f"progress recorded: {lp.get('phase', '')} {lp.get('summary', '')}".strip())
         return
+
+    if action == "cli-mode":
+        cli_mode_action = getattr(args, "cli_mode_action", None)
+        worktree_id = getattr(args, "worktree_id", None)
+        if cli_mode_action == "reserve":
+            try:
+                reservation = client.create_cli_mode_reservation(
+                    worktree_id, ttl_seconds=getattr(args, "ttl_seconds", 300.0),
+                )
+            except BridgeClientError as exc:
+                if exc.status == 409:
+                    print(
+                        f"(worktree {worktree_id!r} already has an active "
+                        "CLI-mode reservation)",
+                        file=sys.stderr,
+                    )
+                    if args.json:
+                        _json_out({"error": "reservation_active"})
+                    sys.exit(1)
+                raise
+            if args.json:
+                _json_out(reservation)
+                return
+            print(
+                f"reserved {worktree_id}: reservation_id="
+                f"{reservation.get('reservation_id')} "
+                f"expires_at={reservation.get('expires_at')}"
+            )
+            return
+        if cli_mode_action == "status":
+            reservation = client.get_cli_mode_reservation(worktree_id)
+            if args.json:
+                _json_out(reservation)
+                return
+            if not reservation:
+                print(f"(no CLI-mode reservation for worktree {worktree_id!r})")
+                return
+            claimed = reservation.get("claimed_by_session_id")
+            state = f"claimed by {claimed}" if claimed else "pending, unclaimed"
+            print(
+                f"{worktree_id}: reservation_id="
+                f"{reservation.get('reservation_id')} ({state}), "
+                f"expires_at={reservation.get('expires_at')}"
+            )
+            return
+        if cli_mode_action == "release":
+            removed = client.release_cli_mode_reservation(worktree_id)
+            if args.json:
+                _json_out({"removed": removed})
+                return
+            print(f"released {removed} reservation(s) for {worktree_id}")
+            return
+        if cli_mode_action == "launch":
+            try:
+                outcome = _launch_cli_mode_session(
+                    client, worktree_id,
+                    ttl_seconds=getattr(args, "ttl_seconds", 300.0),
+                    driver=getattr(args, "driver", None) or "cli-mode",
+                    seed=getattr(args, "seed", None),
+                    verify_timeout=getattr(args, "verify_timeout", 30.0),
+                )
+            except BridgeClientError as exc:
+                if exc.status == 409:
+                    print(
+                        f"(worktree {worktree_id!r} already has an active "
+                        "CLI-mode reservation)",
+                        file=sys.stderr,
+                    )
+                    if args.json:
+                        _json_out({"error": "reservation_active"})
+                    sys.exit(1)
+                raise
+            if args.json:
+                _json_out(outcome)
+                return
+            reservation = outcome.get("reservation") or {}
+            claimed = reservation.get("claimed_by_session_id")
+            state = f"claimed by {claimed}" if claimed else "pending, unclaimed"
+            session_name = outcome.get("session") or "?"
+            print(
+                f"CLI-mode session for {worktree_id}: mux session "
+                f"{session_name!r} (reservation {state}). Attach with "
+                f"tmux/psmux attach-session -t {session_name}."
+            )
+            return
+        print(
+            "usage: agent-bridge live-sessions cli-mode "
+            "{reserve,status,release,launch}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     # default: list
     try:
@@ -6032,6 +6192,59 @@ def build_parser() -> argparse.ArgumentParser:
     live_progress_p.add_argument("--blocker", help="a real blocker, if any")
     live_progress_p.add_argument("--pr", help="the PR/ref this beat corresponds to")
     live_progress_p.set_defaults(func=_cmd_live_sessions)
+    live_cli_mode_p = live_sub.add_parser(
+        "cli-mode",
+        help="Allocate/inspect/release a worktree's CLI-mode Session Host "
+             "reservation (explicit, per-request; never ambient)",
+    )
+    live_cli_mode_sub = live_cli_mode_p.add_subparsers(dest="cli_mode_action")
+    live_cli_mode_reserve_p = live_cli_mode_sub.add_parser(
+        "reserve",
+        help="Reserve a worktree's next CLI-mode session before its muxed "
+             "CLI process starts",
+    )
+    live_cli_mode_reserve_p.add_argument("--worktree-id", required=True)
+    live_cli_mode_reserve_p.add_argument(
+        "--ttl-seconds", type=float, default=300.0,
+        help="Reservation lifetime before it's reclaimable (default 300)",
+    )
+    live_cli_mode_reserve_p.set_defaults(func=_cmd_live_sessions)
+    live_cli_mode_status_p = live_cli_mode_sub.add_parser(
+        "status", help="Show a worktree's current CLI-mode reservation, if any",
+    )
+    live_cli_mode_status_p.add_argument("--worktree-id", required=True)
+    live_cli_mode_status_p.set_defaults(func=_cmd_live_sessions)
+    live_cli_mode_release_p = live_cli_mode_sub.add_parser(
+        "release", help="Release a worktree's CLI-mode reservation",
+    )
+    live_cli_mode_release_p.add_argument("--worktree-id", required=True)
+    live_cli_mode_release_p.set_defaults(func=_cmd_live_sessions)
+    live_cli_mode_launch_p = live_cli_mode_sub.add_parser(
+        "launch",
+        help="Reserve, then hand off to `agent-worktrees embody` -- a "
+             "DETACHED, mux-wrapped (tmux/psmux), reattachable interactive "
+             "`copilot` bound to this worktree -- proving the CLI-mode "
+             "mechanism end-to-end with genuine reattach (Phase 3)",
+    )
+    live_cli_mode_launch_p.add_argument("--worktree-id", required=True)
+    live_cli_mode_launch_p.add_argument(
+        "--ttl-seconds", type=float, default=300.0,
+        help="Reservation lifetime before it's reclaimable (default 300)",
+    )
+    live_cli_mode_launch_p.add_argument(
+        "--driver", default="cli-mode",
+        help="Forwarded to `embody --driver` (stamps the 'driven by' "
+             "banner; default 'cli-mode')",
+    )
+    live_cli_mode_launch_p.add_argument(
+        "--seed", help="Forwarded to `embody --seed` (first interactive turn)",
+    )
+    live_cli_mode_launch_p.add_argument(
+        "--verify-timeout", type=float, default=30.0,
+        help="Forwarded to `embody --verify-timeout` (default 30)",
+    )
+    live_cli_mode_launch_p.set_defaults(func=_cmd_live_sessions)
+    live_cli_mode_p.set_defaults(func=_cmd_live_sessions)
     live_p.set_defaults(func=_cmd_live_sessions)
 
     sessions_p = sub.add_parser("sessions", help="List sessions")

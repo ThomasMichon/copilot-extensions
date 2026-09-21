@@ -565,12 +565,47 @@ class LiveSessionInfo(BaseModel):
     #: Operator-driven session's latest progress beat (parsed object) or None
     #: (Phase 7 Slice 7c). The live-session analogue of a task's latest_progress.
     latest_progress: dict[str, Any] | None = None
+    #: True when this registration claimed a pending CLI-mode Session Host
+    #: reservation for its worktree (agent-bridge-cli-mode-sessions Phase 2) --
+    #: a durable, honest marker distinguishing an explicitly-allocated,
+    #: human-attended CLI-mode session from an ordinary ambient live-session
+    #: registration. Never set by the caller; the bridge derives it at
+    #: registration time from ``cli_mode_reservations``.
+    cli_mode: bool = False
     registered_at: float
     updated_at: float
 
 
 class LiveSessionListResponse(BaseModel):
     live_sessions: list[LiveSessionInfo]
+
+
+# -- CLI-mode Session Host reservations (agent-bridge-cli-mode-sessions) -----
+
+
+class CreateCliModeReservationRequest(BaseModel):
+    """Request to reserve a worktree for an upcoming CLI-mode session.
+
+    Created by the operator (or a control surface acting on their explicit
+    request) *before* the muxed, interactive CLI process starts -- never
+    ambiently. See ``visions/remote-interactive-sessions``
+    §opt-in-not-ambient-default.
+    """
+
+    worktree_id: str
+    ttl_seconds: float = 300.0
+
+
+class CliModeReservationInfo(BaseModel):
+    """Public view of a CLI-mode Session Host reservation."""
+
+    worktree_id: str
+    reservation_id: str
+    created_at: float
+    expires_at: float
+    #: The live session that claimed this reservation, once one has -- None
+    #: while still awaiting its CLI process (§allocate-before-launch).
+    claimed_by_session_id: str | None = None
 
 
 class SdkEventIn(BaseModel):

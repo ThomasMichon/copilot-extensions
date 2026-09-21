@@ -4030,6 +4030,21 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 }
             )
             return 0
+        # A freshly-provisioned remote venue (CodeSpace/container) virtually
+        # never has tmux preinstalled (confirmed against a real CodeSpace
+        # devcontainer, agent-bridge-cli-mode-sessions Phase 4 prep) --
+        # self-heal it here, once, right before the one call that actually
+        # needs it, rather than failing with a raw "not found" or silently
+        # downgrading to a non-reattachable headless launch. Explicit opt-in
+        # only (--ensure-mux): an operator who deliberately runs a BYO
+        # terminal/session manager (e.g. Herdr) instead of tmux on their OWN
+        # machine must never have tmux silently installed underneath them by
+        # an ordinary `embody` call -- opt-in-not-ambient-default applies
+        # here just as it does to CLI mode itself. Only a caller that KNOWS
+        # it is preparing a venue with nothing else already managing
+        # sessions (agent-bridge's `cli-mode launch`) sets this.
+        if getattr(args, "ensure_mux", False):
+            sessions.ensure_mux_available()
         result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
     finally:
         lifecycle_lock.release()
@@ -23566,6 +23581,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--recovery", action="store_true", help="Use the repo's recovery launch command"
+    )
+    p.add_argument(
+        "--ensure-mux", dest="ensure_mux", action="store_true",
+        help="Best-effort self-heal a missing tmux/psmux before creating the "
+        "session (apt-get/dnf/yum/apk, POSIX only). Explicit opt-in only: an "
+        "operator running a BYO terminal/session manager instead of tmux "
+        "must never have tmux installed underneath them by an ordinary "
+        "embody call. Set this only when preparing a venue that has nothing "
+        "else already managing sessions (e.g. a CLI-mode launch).",
     )
     p.add_argument(
         "--dry-run", action="store_true", help="Print the resolved plan without spawning anything"
