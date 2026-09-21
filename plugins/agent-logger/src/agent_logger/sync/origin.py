@@ -25,6 +25,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from agent_logger import _peer_launch
+from agent_logger.config import home_dir
+
 try:
     import yaml
 except ImportError:  # pragma: no cover - pyyaml is a hard dependency
@@ -207,6 +210,39 @@ def _declared_opt_in(repo_path: Path) -> bool | None:
     return value if status == "declared" else None
 
 
+def _bound_knowledge_repo_same_cell(
+    repo_path: Path, raw_context: str,
+) -> subprocess.CompletedProcess[str] | None:
+    """Same-cell ``state-root --json`` probe, scoped to the validated peer.
+
+    Returns ``None`` on any owner-validation, governance, or peer-resolution
+    failure -- callers here fold every such case into the same best-effort
+    ``None`` this whole lookup already returns on ambiguity (see
+    :func:`_bound_knowledge_repo`), unlike compact.py's tracked-worktree
+    lookup, which distinguishes "confirmed absent" from "unresolved" for its
+    protective-set callers.
+    """
+    try:
+        own = _peer_launch.validate_owner("agent-logger", home_dir(), raw_context)
+        peer_root = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+        if not peer_root.exists() and not peer_root.is_symlink():
+            return None
+        prefix = _peer_launch.launch_prefix(
+            "agent-logger", Path(own["pluginRoot"]), raw_context, "agent-worktrees",
+        )
+        return subprocess.run(
+            [*prefix, "state-root", "--json"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=_OPT_IN_SUBPROCESS_TIMEOUT,
+            check=False,
+            **_peer_launch.no_window_kwargs(),
+        )
+    except (OSError, ValueError, ImportError, subprocess.SubprocessError):
+        return None
+
+
 @functools.lru_cache(maxsize=256)
 def _bound_knowledge_repo_cached(repo_path_str: str) -> str | None:
     """Cached body of :func:`_bound_knowledge_repo`, keyed by the resolved
@@ -215,20 +251,26 @@ def _bound_knowledge_repo_cached(repo_path_str: str) -> str | None:
     a sync/compaction pass over a large session store no longer pays a
     process-startup cost per session for the same handful of repos."""
     repo_path = Path(repo_path_str)
-    command = shutil.which("agent-worktrees")
-    if not command:
-        return None
-    try:
-        result = subprocess.run(
-            [command, "state-root", "--json"],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            timeout=_OPT_IN_SUBPROCESS_TIMEOUT,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    explicit_context = os.environ.get(_peer_launch.CONTEXT_ENV, "")
+    if explicit_context:
+        result = _bound_knowledge_repo_same_cell(repo_path, explicit_context)
+        if result is None:
+            return None
+    else:
+        command = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
+        if not command:
+            return None
+        try:
+            result = subprocess.run(
+                [command, "state-root", "--json"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=_OPT_IN_SUBPROCESS_TIMEOUT,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
     if result.returncode != 0:
         return None
     try:
