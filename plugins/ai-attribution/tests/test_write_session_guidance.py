@@ -270,3 +270,123 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
     assert content.startswith("# AI attribution session guidance\n\n")
     assert "[owner: ai-attribution@" in content
     assert len(content.encode("utf-8")) <= writer._GUIDANCE_MAX_BYTES
+
+
+def test_powershell_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
+    """Proves the wrapper's cache fast path actually skips python on a hit,
+    by stripping every python interpreter from PATH before invoking it: if
+    the fast path did not serve this from cache and instead fell through to
+    the python fallback, there would be no python to run it, and the session
+    file would show the "unavailable" fallback text instead of the cached
+    guidance asserted below."""
+    shell = shutil.which("pwsh") or shutil.which("powershell.exe")
+    if not shell:
+        pytest.skip("PowerShell is unavailable")
+    git_exe = shutil.which("git")
+    if not git_exe:
+        pytest.skip("git is unavailable")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    key = writer._repo_cache_key(str(repo))
+    cache_dir = writer._cache_dir(home)
+    cache_dir.mkdir(parents=True)
+    (cache_dir / f"{key}.json").write_text(
+        json.dumps(
+            {
+                "version": writer._CACHE_FORMAT_VERSION,
+                "computed_at": time_module.time(),
+                "guidance": "[owner: ai-attribution@1.0.0]\ncached policy only",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = json.dumps(
+        {"sessionId": "session-1", "cwd": str(repo), "source": "copilot-cli"}
+    )
+    # Start from the real environment (pwsh itself needs plenty of it --
+    # SystemRoot, TEMP, PSModulePath, etc.) and strip out only the
+    # directories that would let it find a python interpreter.
+    python_dirs = {
+        str(Path(p).resolve().parent)
+        for name in ("python3", "python", "py")
+        for p in [shutil.which(name)]
+        if p
+    }
+    filtered_path = os.pathsep.join(
+        part
+        for part in os.environ.get("PATH", "").split(os.pathsep)
+        if part and str(Path(part).resolve()) not in python_dirs
+    )
+    env = {
+        **os.environ,
+        "PATH": filtered_path,
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(_PLUGIN),
+    }
+    result = subprocess.run(
+        [
+            shell,
+            "-NoProfile",
+            "-File",
+            str(_PLUGIN / "scripts" / "write-session-guidance.ps1"),
+        ],
+        cwd=repo,
+        env=env,
+        input=payload,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout == "{}"
+    content = _target(home).read_text(encoding="utf-8")
+    assert "cached policy only" in content
+    assert "unavailable" not in content
+
+
+def test_powershell_wrapper_falls_back_on_cold_cache(tmp_path):
+    """No cache entry yet -> the wrapper must fall through to the unchanged
+    python path rather than silently producing no guidance."""
+    shell = shutil.which("pwsh") or shutil.which("powershell.exe")
+    if not shell:
+        pytest.skip("PowerShell is unavailable")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    payload = json.dumps(
+        {"sessionId": "session-1", "cwd": str(repo), "source": "copilot-cli"}
+    )
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(_PLUGIN),
+    }
+    for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
+        env.pop(name, None)
+    result = subprocess.run(
+        [
+            shell,
+            "-NoProfile",
+            "-File",
+            str(_PLUGIN / "scripts" / "write-session-guidance.ps1"),
+        ],
+        cwd=repo,
+        env=env,
+        input=payload,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout == "{}"
+    content = _target(home).read_text(encoding="utf-8")
+    assert "[owner: ai-attribution@" in content
+    # Recomputing via python must also have warmed the cache for next time.
+    assert (writer._cache_dir(home) / f"{writer._repo_cache_key(str(repo))}.json").is_file()
