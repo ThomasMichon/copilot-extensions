@@ -161,6 +161,11 @@ def test_wake_drain_missing_active_self_heal_is_throttled(
     tmp_path: Path, monkeypatch
 ):
     _reset(monkeypatch, tmp_path)
+    # A readable table with no `active` claim -- self-heal is only attempted
+    # (throttled) for this confirmed shape, not for a wholly absent/unreadable
+    # table (see test_wake_drain_retains_cache_only_for_unreadable_table).
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9999, pid=os.getpid())
+    routing.clear_if_owner(tmp_path, pid=os.getpid())
     calls = []
     monkeypatch.setattr(
         routing, "reap_stale_active",
@@ -169,6 +174,25 @@ def test_wake_drain_missing_active_self_heal_is_throttled(
     assert server._owns_active_route() is False
     assert server._owns_active_route() is False
     assert len(calls) == 1  # second call within the throttle window is skipped
+
+
+def test_wake_drain_preserves_cache_only_for_unreadable_table(
+    tmp_path: Path, monkeypatch
+):
+    """A wholly absent/unreadable table is ambiguous, unlike a confirmed-empty one.
+
+    ``read_table`` returns ``None`` both for a file that never existed and for
+    a genuine I/O failure -- there is no way to tell "nothing has ever been
+    published" from "a transient read blip", so this must not reset the
+    cached ownership (unlike a *readable* table that positively confirms no
+    ``active`` claim).
+    """
+    _reset(monkeypatch, tmp_path)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9999, pid=os.getpid())
+    assert server._owns_active_route() is True
+    monkeypatch.setattr(routing, "read_table", lambda _path: None)
+
+    assert server._owns_active_route() is True
 
 
 def test_stop_emitted_even_after_demotion(tmp_path: Path, monkeypatch):

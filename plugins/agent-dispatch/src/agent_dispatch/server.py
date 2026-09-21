@@ -99,8 +99,19 @@ def _owns_active_route() -> bool:
         from zdd import routing
 
         table = routing.read_table(routing_dir())
-        raw = table.get("active") if isinstance(table, dict) else None
+        if table is None:
+            # Unreadable/absent table: ambiguous (could be a transient I/O
+            # blip), not positive evidence no one owns the route -- preserve
+            # the last known-good value rather than guessing.
+            return _wake_route_owned
+        raw = table.get("active")
         if not isinstance(raw, dict):
+            # Confirmed: this table has no active claim at all. Attempt the
+            # self-heal, but if it cannot restore one (dead/missing
+            # `previous`, throttled, or a failed probe), this is positive
+            # evidence no process currently owns the route -- unlike the
+            # unreadable-table case above, there is nothing ambiguous here,
+            # so the stale cached value must not be trusted either.
             now = time.monotonic()
             if now - _last_missing_active_heal_attempt >= _MISSING_ACTIVE_HEAL_INTERVAL_S:
                 _last_missing_active_heal_attempt = now
@@ -122,6 +133,7 @@ def _owns_active_route() -> bool:
                     if isinstance(raw, dict) and raw.get("pid") is not None:
                         _wake_route_owned = raw.get("pid") == os.getpid()
                         return _wake_route_owned
+            _wake_route_owned = False
             return _wake_route_owned
         # An active dict with no recorded pid is not a "missing claim" --
         # reap_stale_active has nothing to repair there, and it must not be
