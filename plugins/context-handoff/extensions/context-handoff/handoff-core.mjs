@@ -19,7 +19,7 @@ import {
   writeFileSync, readFileSync, existsSync, mkdirSync, renameSync, unlinkSync,
   openSync, closeSync, statSync, readdirSync,
 } from "node:fs";
-import { join, basename, dirname } from "node:path";
+import { join, basename, dirname, resolve } from "node:path";
 import { execFileSync, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -297,6 +297,41 @@ export async function attemptWorktreeSync(cwd) {
       attempted: false,
       synced: false,
       reason: "worktree has uncommitted changes; automatic sync never commits, so it was skipped",
+    };
+  }
+  // A rebase can be paused at a clean step (e.g. `edit`), which reports a
+  // clean `git status --porcelain` even though a rebase is genuinely in
+  // progress. Proceeding to sync in that state would let the sync helper's
+  // own failure-path `git rebase --abort` cancel a rebase this session
+  // never started -- never our call to make. `--git-path` resolves the
+  // correct per-worktree location for either rebase strategy.
+  try {
+    const [mergeDir, applyDir] = await Promise.all([
+      execFileAsync("git", ["rev-parse", "--git-path", "rebase-merge"], {
+        cwd, encoding: "utf-8", timeout: 5000,
+      }),
+      execFileAsync("git", ["rev-parse", "--git-path", "rebase-apply"], {
+        cwd, encoding: "utf-8", timeout: 5000,
+      }),
+    ]);
+    if (
+      existsSync(resolve(cwd, mergeDir.stdout.trim()))
+      || existsSync(resolve(cwd, applyDir.stdout.trim()))
+    ) {
+      return {
+        attempted: false,
+        synced: false,
+        reason: "a rebase is already in progress in this worktree; automatic sync never touches an in-progress rebase, so it was skipped",
+      };
+    }
+  } catch {
+    // If we can't even ask git where its rebase state would live, treat that
+    // the same as "not a git checkout" below would have -- fail closed by
+    // skipping the sync rather than guessing.
+    return {
+      attempted: false,
+      synced: false,
+      reason: "could not determine rebase state; automatic sync was skipped to be safe",
     };
   }
   let resolved;
