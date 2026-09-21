@@ -190,7 +190,25 @@ def _format_human(summaries: list[WindowSummary]) -> str:
         lines.append(f"[{summary.label}] {summary.total} launches, ready-timeout rate {rate_text}")
         for outcome, count in sorted(summary.outcomes.items(), key=lambda kv: -kv[1]):
             lines.append(f"  {outcome}: {count}")
+        if summary.cli_versions:
+            lines.append("  cli_versions:")
+            for version, count in sorted(summary.cli_versions.items(), key=lambda kv: -kv[1]):
+                lines.append(f"    {version}: {count}")
     return "\n".join(lines)
+
+
+def _parse_split_at(value: str) -> datetime:
+    """Parse --split-at, treating a naive (offset-less) ISO-8601 value as UTC.
+
+    Parsed log launch times are always timezone-aware (see
+    _parse_launch_time); comparing them against a naive datetime raises
+    TypeError. A bare `--split-at 2026-09-21T05:00:00` is valid ISO-8601 and
+    a reasonable thing to pass, so normalize instead of rejecting it.
+    """
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -203,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     log_dir = Path(args.log_dir) if args.log_dir else default_log_dir()
-    split_at = datetime.fromisoformat(args.split_at) if args.split_at else None
+    split_at = _parse_split_at(args.split_at) if args.split_at else None
     summaries = report(log_dir, args.plugin, days=args.days, split_at=split_at)
 
     if args.json:

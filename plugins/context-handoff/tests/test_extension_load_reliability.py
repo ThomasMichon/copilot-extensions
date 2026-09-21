@@ -180,3 +180,42 @@ def test_main_missing_log_dir_reports_zero_not_error(tmp_path, capsys):
 
     payload = json.loads(capsys.readouterr().out)
     assert payload[0]["total"] == 0
+
+
+def test_parse_split_at_treats_naive_timestamp_as_utc():
+    # Log launch times are always timezone-aware; a naive --split-at value
+    # (no offset, e.g. "2026-09-21T05:00:00") must not raise TypeError when
+    # compared against them.
+    parsed = reliability._parse_split_at("2026-09-21T05:00:00")
+    assert parsed.tzinfo is not None
+    assert parsed == datetime(2026, 9, 21, 5, 0, 0, tzinfo=timezone.utc)
+
+
+def test_parse_split_at_preserves_explicit_offset():
+    parsed = reliability._parse_split_at("2026-09-21T05:00:00+00:00")
+    assert parsed == datetime(2026, 9, 21, 5, 0, 0, tzinfo=timezone.utc)
+
+
+def test_main_accepts_naive_split_at_without_raising(tmp_path, capsys):
+    now = datetime.now(timezone.utc)
+    now_ms = int(now.timestamp() * 1000)
+    _write_log(tmp_path, "p", launch_ms=now_ms, pid=1, terminal_marker="ready")
+    naive = now.replace(tzinfo=None).isoformat()
+    exit_code = reliability.main(
+        ["--plugin", "p", "--log-dir", str(tmp_path), "--split-at", naive, "--json"]
+    )
+    assert exit_code == 0
+    import json
+
+    payload = json.loads(capsys.readouterr().out)
+    assert [s["label"] for s in payload] == ["before", "after"]
+
+
+def test_human_report_includes_cli_version_breakdown(tmp_path, capsys):
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    _write_log(tmp_path, "p", launch_ms=now_ms, pid=1, terminal_marker="ready", cli_version="1.0.87-0")
+    exit_code = reliability.main(["--plugin", "p", "--log-dir", str(tmp_path)])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "cli_versions:" in out
+    assert "1.0.87-0: 1" in out
