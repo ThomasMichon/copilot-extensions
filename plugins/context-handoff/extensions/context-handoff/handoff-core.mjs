@@ -304,6 +304,39 @@ async function rebaseInProgress(cwd) {
 // external actor to honor it. That residual, unavoidable-without-owning-
 // agent-worktrees-itself gap is why rebaseInProgress() is still rechecked
 // immediately before the sync exec even while this lock is held.
+//
+// STALE_LOCK_MS: a process killed between `openSync(..., "wx")` succeeding
+// and the `finally` block running (e.g. the extension host or the whole
+// process is terminated mid-fetch) would otherwise leave the lock file
+// forever, silently skipping every future sync for this worktree until a
+// human manually deletes it. Any lock older than this is treated as
+// abandoned and reclaimed -- generous relative to attemptWorktreeSync's own
+// ~30s worst-case duration, but still self-heals within a bounded time
+// rather than requiring manual intervention.
+const STALE_LOCK_MS = 5 * 60 * 1000;
+
+function acquireLock(lockPath) {
+  try {
+    return openSync(lockPath, "wx");
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+    let ageMs = Infinity;
+    try {
+      ageMs = Date.now() - statSync(lockPath).mtimeMs;
+    } catch {
+      // Lock vanished between the failed open and this stat (another
+      // process's own cleanup racing us) -- treat as reclaimable below.
+      ageMs = Infinity;
+    }
+    if (ageMs <= STALE_LOCK_MS) throw error;
+    // Stale -- reclaim it. A second, harmless race is possible here (another
+    // process reclaiming the same stale lock at the same instant); only one
+    // `wx` create can win, and the loser correctly reports "in progress".
+    try { unlinkSync(lockPath); } catch { /* already gone */ }
+    return openSync(lockPath, "wx");
+  }
+}
+
 async function withWorktreeSyncLock(cwd, fn) {
   let lockPath;
   try {
@@ -323,7 +356,7 @@ async function withWorktreeSyncLock(cwd, fn) {
   }
   let lockFd;
   try {
-    lockFd = openSync(lockPath, "wx");
+    lockFd = acquireLock(lockPath);
   } catch {
     return {
       attempted: false,
@@ -427,6 +460,81 @@ export async function attemptWorktreeSync(cwd) {
 }
 
 // The locked portion of attemptWorktreeSync: rebase check through the actual
+// Fallback for a payload-only context-handoff installation with no sibling
+// agent-worktrees payload available (or an unresolvable one): a plain
+// sanitized-env fetch + rebase onto the remote's default branch, aborting
+// cleanly on conflict. Mirrors the same conflict-safety contract
+// agent-worktrees' own `git sync` provides (never leaves a conflicted
+// rebase-merge state behind), just without agent-worktrees' own richer
+// diagnostics. Exported for direct testability: resolveSystemCliDescriptor
+// resolves against the real on-disk sibling `agent-worktrees` plugin, which
+// always exists in this monorepo checkout, so this path can't be reached
+// end-to-end from attemptWorktreeSync in-repo without genuinely uninstalling
+// that sibling -- test this function directly instead.
+export async function plainGitSync(cwd) {
+  const env = sanitizedGitEnv();
+  const timeout = 20000;
+  let defaultBranch;
+  try {
+    // `origin/HEAD` is the standard local pointer to the remote's default
+    // branch, set by `git clone`/`git remote set-head`. Resolved via
+    // `rev-parse --abbrev-ref` rather than `symbolic-ref` so a missing
+    // local origin/HEAD symref still has one more (network) chance below.
+    const { stdout } = await execFileAsync(
+      "git", ["rev-parse", "--abbrev-ref", "origin/HEAD"],
+      { cwd, encoding: "utf-8", timeout: 5000, env },
+    );
+    defaultBranch = stdout.trim().replace(/^origin\//, "");
+  } catch {
+    defaultBranch = null;
+  }
+  if (!defaultBranch) {
+    try {
+      // `origin/HEAD` may never have been set locally (e.g. a shallow or
+      // hand-built checkout) -- `git remote show origin` asks the remote
+      // directly for its HEAD branch as a last resort before giving up.
+      const { stdout } = await execFileAsync(
+        "git", ["remote", "show", "origin"],
+        { cwd, encoding: "utf-8", timeout, env },
+      );
+      const match = stdout.match(/HEAD branch:\s*(\S+)/);
+      defaultBranch = match && match[1] !== "(unknown)" ? match[1] : null;
+    } catch {
+      defaultBranch = null;
+    }
+  }
+  if (!defaultBranch) {
+    return {
+      attempted: true,
+      synced: false,
+      reason: "could not determine the remote's default branch for a plain-git sync",
+    };
+  }
+  try {
+    await execFileAsync(
+      "git", ["fetch", "origin", defaultBranch],
+      { cwd, encoding: "utf-8", timeout, env },
+    );
+    await execFileAsync(
+      "git", ["rebase", `origin/${defaultBranch}`],
+      { cwd, encoding: "utf-8", timeout, env },
+    );
+    return { attempted: true, synced: true, reason: null };
+  } catch (error) {
+    // Never leave a conflicted rebase-merge state for the successor to
+    // inherit -- same conflict-safety contract as agent-worktrees' own
+    // sync helper.
+    try {
+      await execFileAsync("git", ["rebase", "--abort"], { cwd, encoding: "utf-8", timeout: 5000, env });
+    } catch { /* nothing to abort, or abort itself failed -- best-effort */ }
+    return {
+      attempted: true,
+      synced: false,
+      reason: `plain-git sync failed: ${describeSyncError(error)}`,
+    };
+  }
+}
+
 // sync exec. Split out so the lock (withWorktreeSyncLock) wraps exactly this
 // window -- the dirty-tree check above needs no serialization on its own.
 async function attemptWorktreeSyncLocked(cwd) {
@@ -455,12 +563,11 @@ async function attemptWorktreeSyncLocked(cwd) {
   let resolved;
   try {
     resolved = resolveSystemCliDescriptor("agent-worktrees");
-  } catch (error) {
-    return {
-      attempted: true,
-      synced: false,
-      reason: `sync failed or agent-worktrees unavailable: ${describeSyncError(error)}`,
-    };
+  } catch {
+    // No sibling agent-worktrees payload resolves (e.g. a payload-only
+    // context-handoff installation) -- fall back to a plain sanitized-env
+    // git fetch/rebase rather than reporting the sync unavailable outright.
+    return plainGitSync(cwd);
   }
   const timeout = 20000;
   try {
@@ -2180,6 +2287,17 @@ export async function triggerHandoff(
     requestBridge = requestAgentBridgeHandoff,
     readPickupSignals = pickupSignals,
     sleepFn = sleep,
+    // Awaited AFTER the baton is safely stored (`store()` above) but BEFORE
+    // any live-pickup signal is armed (`noteHandoff`/activity log/bridge
+    // request below) -- lets a caller defer live pickup until a best-effort
+    // worktree sync settles (or times out), without ever delaying the
+    // store itself. Defaults to a no-op so every other caller is
+    // unaffected. Added for the force-tier path (round-12 review finding:
+    // starting the sync merely CONCURRENTLY with the live trigger was not
+    // enough -- a fast monitor could still launch a successor before the
+    // sync had even begun; this closes that by construction rather than
+    // narrowing it).
+    beforeArmPickup = async () => {},
   },
 ) {
   const normalizedPrompt = String(promptText || "").trim();
@@ -2241,6 +2359,12 @@ export async function triggerHandoff(
   }
 
   const autoEnabled = automaticHandoffEnabled(mode);
+  // Runs after the baton above is durably stored, but strictly before any
+  // live-pickup signal below is armed -- see beforeArmPickup's own comment.
+  // Only worth awaiting when a live signal can actually fire (manual-only
+  // mode, the default, never arms pickup at all, so there is nothing to
+  // gate and no reason to add the sync's latency to this call).
+  if (autoEnabled) await beforeArmPickup();
   // `noteHandoff` (agent-worktrees `note-handoff`) calls `open_handoff()`,
   // which creates a `pending_handoffs` entry agent-worktrees' resident
   // monitor scans independently of the `handoff_requested` activity event

@@ -1663,3 +1663,63 @@ addressed in this pass:
   the new skill wording was fixed with the established
   `<!-- marketplace-isolation: allow ... -->` marker, back to the 702
   baseline). No version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 12: crash-safe lock, plain-git fallback, real trigger gating
+
+Round 12 confirmed round 11's rebase-check fix resolved and surfaced 5 new
+HIGH findings plus 1 "previously missed" finding, all addressed:
+
+- **Crash leaves the sync lock permanently stale (previously missed):** the
+  lock was removed only by a `finally` block -- a process killed between
+  acquiring it and that block running (e.g. mid-fetch) would leave the lock
+  file forever, silently skipping every future sync for that worktree.
+  Added a staleness check (`STALE_LOCK_MS` = 5 minutes, generous relative
+  to the sync's own ~30s worst case): an `EEXIST` on acquire now stats the
+  existing lock's mtime and reclaims (unlink + retry the exclusive create)
+  anything older than that, rather than honoring an abandoned lock forever.
+- **Skill-guided tool-response prompts still said bare `agent-worktrees git
+  sync`:** round 11 added the shared `sync-worktree` CLI command but the
+  `generate_handoff_prompt` tool response and the `/handoff-continue`
+  slash-command prompt (both in `extension.mjs`) still told the agent to
+  run the bare command directly, bypassing the lock/rebase-guard/sanitized
+  env entirely if followed literally. Repointed both at the exact
+  `handoff-cli.mjs sync-worktree` invocation.
+- **`sync-worktree` exited 0 on a real sync failure:** the JSON branch
+  returned before any exit handling, and the non-JSON branch only exited
+  nonzero for a *skipped* sync, not an *attempted-and-failed* one. A caller
+  using this as a gate could proceed past a real failure. Fixed: exits
+  nonzero for every non-`synced` outcome, in both output modes (documented
+  in SKILL.md as expected/non-blocking, not itself a stop condition).
+- **No plain-Git fallback when the sibling agent-worktrees payload is
+  absent:** a payload-only context-handoff installation had no working sync
+  at all -- `attemptWorktreeSync` just reported "unavailable" outright, even
+  though the PR description already promised a plain-Git fallback path.
+  Added `plainGitSync()` (new, exported for direct testability since
+  `resolveSystemCliDescriptor` always resolves the real on-disk sibling
+  plugin in this monorepo checkout, making the fallback otherwise
+  unreachable in-repo): determines the remote's default branch
+  (`origin/HEAD`, falling back to `git remote show origin`), fetches and
+  rebases under the same sanitized environment, and aborts cleanly on
+  conflict -- same conflict-safety contract as agent-worktrees' own helper.
+- **Force-tier: concurrent-start sync still wasn't enough:** round 11's fix
+  (start the sync concurrently with `triggerHandoff` rather than after it)
+  was judged insufficient -- a fast live-pickup monitor could still launch
+  a successor before the sync had even begun. Added a `beforeArmPickup`
+  hook to `triggerHandoff` (default no-op, so every other caller is
+  unaffected), awaited strictly between the baton being durably stored and
+  the live-pickup signal being armed -- and ONLY when a live signal can
+  actually fire (manual-only mode, the default, never calls it, so those
+  handoffs pay no extra latency). `autoForceHandoff` now passes the SAME
+  sync promise it already started (not a second sync attempt) as this
+  hook, so auto-mode handoffs genuinely gate the live signal on the sync
+  settling, while manual-only handoffs keep the original fire-and-forget
+  behavior.
+- Updated the README fallback command blocks (bash + PowerShell) and the
+  durable `instructions/handoff-fallback.instructions.md` to include
+  `sync-worktree`, closing the last surface that still omitted it.
+- 6 new/changed tests (stale-lock reclaim, `plainGitSync` success against a
+  real local "remote" and honest failure with no origin, updated
+  assertions for the now-real agent-worktrees invocation in this
+  checkout). `node --test`: 137 tests, 135 pass (2 pre-existing skips), no
+  regressions. All guards pass. No version bump needed (still
+  `0.1.1-dev36`).
