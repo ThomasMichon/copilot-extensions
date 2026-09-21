@@ -199,6 +199,14 @@ def test_serve_raises_when_coordinator_already_live(monkeypatch, tmp_path):
     assert rendezvous.read_endpoint(run) is None
 
 
+def test_loopback_probe_url_brackets_ipv6_hosts():
+    assert server._loopback_probe_url("127.0.0.1", 1234) == "http://127.0.0.1:1234"
+    assert server._loopback_probe_url("::1", 1234) == "http://[::1]:1234"
+    assert server._loopback_probe_url("::", 1234) == "http://[::]:1234"
+    # Already-bracketed input is passed through rather than double-wrapped.
+    assert server._loopback_probe_url("[::1]", 1234) == "http://[::1]:1234"
+
+
 def test_serve_holds_start_lock_until_actually_responsive(monkeypatch, tmp_path):
     """The start lock must stay held past the route publish, through
     uvicorn's own startup, until this instance is verifiably answering its

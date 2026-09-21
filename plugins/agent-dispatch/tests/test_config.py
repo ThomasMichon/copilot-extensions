@@ -442,6 +442,21 @@ def test_health_responsive_omits_auth_header_when_no_token(monkeypatch):
     assert captured["auth_header"] is None
 
 
+def test_health_responsive_treats_http_error_as_live(monkeypatch):
+    # A 401/403 from an *authenticated* endpoint proves a real process
+    # answered -- it must count as live, never as dead, or a healthy
+    # incumbent started with a different token than the candidate's would be
+    # misclassified as dead and its route seized (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
+    def _raise_unauthorized(request, timeout=None):
+        raise config_mod.urllib.error.HTTPError(
+            "http://127.0.0.1:59999/health", 401, "Unauthorized", hdrs=None, fp=None
+        )
+
+    monkeypatch.setattr(config_mod.urllib.request, "urlopen", _raise_unauthorized)
+    assert config_mod._health_responsive("http://127.0.0.1:59999") is True
+
+
 def test_health_responsive_explicit_token_overrides_ambient(monkeypatch):
     # A caller with its own known effective token (e.g. serve()'s cfg.token)
     # must be able to probe accurately even when it differs from the ambient

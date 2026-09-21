@@ -360,28 +360,43 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
             # able to answer requests on it: uvicorn's startup (ASGI lifespan +
             # accepting connections) still has to run, and a concurrent starter
             # racing in during that gap would see this brand-new, not-yet-serving
-            # route as "not live" and seize it right back out from under us. Run
-            # uvicorn in a background thread (uvicorn's own signal-handler
-            # install is a documented no-op off the main thread, so this is
-            # safe) and hold the start lock until *this* instance's own
-            # ``/health`` actually answers, bounded so a genuinely broken
-            # startup doesn't wedge the lock forever (review follow-up on
-            # ThomasMichon/copilot-extensions#3066).
-            server_thread = threading.Thread(
-                target=server.run, kwargs={"sockets": [sock]}, daemon=True
-            )
-            server_thread.start()
+            # route as "not live" and seize it right back out from under us.
+            #
+            # ``server.run()`` itself stays on the main thread (unchanged signal
+            # handling/exception propagation -- a background *poller* thread
+            # watches for readiness instead and releases the lock either once
+            # this instance's own ``/health`` actually answers, or as soon as
+            # ``server.run()`` itself has returned/raised (``_server_exited``),
+            # so a startup failure never leaves the lock held for no reason.
+            # Bounded to 10s as a last-resort safety net against a startup that
+            # neither succeeds nor fails within a reasonable time (review
+            # follow-up on ThomasMichon/copilot-extensions#3066).
             from .config import _health_responsive as _self_health_responsive
 
-            deadline = time.monotonic() + 10.0
-            self_url = f"http://{cfg.host}:{bound_port}"
-            while time.monotonic() < deadline and server_thread.is_alive():
-                if _self_health_responsive(self_url, timeout=0.5, token=cfg.token):
-                    break
-                time.sleep(0.05)
-            start_lock.release()
-            start_lock = None
-            server_thread.join()
+            _server_exited = threading.Event()
+            self_url = _loopback_probe_url(cfg.host, bound_port)
+            _lock = start_lock  # closure-stable reference; start_lock is reset below
+
+            def _release_start_lock_when_ready() -> None:
+                deadline = time.monotonic() + 10.0
+                while time.monotonic() < deadline and not _server_exited.is_set():
+                    if _self_health_responsive(self_url, timeout=0.5, token=cfg.token):
+                        break
+                    time.sleep(0.05)
+                _lock.release()
+
+            poller = threading.Thread(
+                target=_release_start_lock_when_ready, daemon=True
+            )
+            poller.start()
+            try:
+                server.run(sockets=[sock])
+            finally:
+                _server_exited.set()
+                poller.join(timeout=11.0)
+                # The poller above has now released it (or timed out doing so) --
+                # clear the reference so the outer finally doesn't double-release.
+                start_lock = None
         else:
             server.run(sockets=[sock])
     finally:
@@ -432,6 +447,21 @@ def _maybe_start_federation():
     except Exception as exc:
         log.warning("federation runner not started (serving without it): %s", exc)
         return None
+
+
+def _loopback_probe_url(host: str, port: int) -> str:
+    """Build an ``http://`` URL for a locally-bound ``host:port``.
+
+    ``host`` is a bind address (e.g. from ``Config.host``), not always a valid
+    URL authority: an IPv6 literal such as ``::1`` needs bracketing
+    (``http://[::1]:port``), or ``urlopen`` misparses it as ``host=':'``/``port``
+    garbage and the readiness probe never succeeds -- reintroducing the very
+    route-seizure race this probe exists to close (review follow-up on
+    ThomasMichon/copilot-extensions#3066).
+    """
+    if ":" in host and not host.startswith("["):
+        return f"http://[{host}]:{port}"
+    return f"http://{host}:{port}"
 
 
 def _server_bind_port() -> int:
