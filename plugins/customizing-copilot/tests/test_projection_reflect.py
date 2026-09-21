@@ -188,6 +188,62 @@ def test_bypass_decision_empty_trusted_set_rejects_everything() -> None:
     assert not decision.eligible
 
 
+def test_is_valid_commit_pin_requires_full_hex_sha() -> None:
+    assert reflect.is_valid_commit_pin("a" * 40)
+    assert not reflect.is_valid_commit_pin("a" * 39)
+    assert not reflect.is_valid_commit_pin("A" * 40)
+    assert not reflect.is_valid_commit_pin("")
+    assert not reflect.is_valid_commit_pin(None)
+
+
+def test_bypass_decision_ignores_pins_when_none_provided() -> None:
+    # Default/back-compat behavior: no caller has a resolver yet, so omitting
+    # pinned_commits must behave exactly as before this parameter existed.
+    decision = reflect.bypass_decision(
+        findings=[],
+        changed_lock_entries=[{"plugin": "agent-worktrees@copilot-extensions"}],
+        trusted_marketplaces=["copilot-extensions"],
+    )
+
+    assert decision.eligible
+
+
+def test_bypass_decision_requires_pin_for_changed_source_when_pins_supplied() -> None:
+    decision = reflect.bypass_decision(
+        findings=[],
+        changed_lock_entries=[{"plugin": "agent-worktrees@copilot-extensions"}],
+        trusted_marketplaces=["copilot-extensions"],
+        pinned_commits={},
+    )
+
+    assert not decision.eligible
+    assert any("immutable commit pin" in reason for reason in decision.reasons)
+
+
+def test_bypass_decision_rejects_malformed_pin() -> None:
+    decision = reflect.bypass_decision(
+        findings=[],
+        changed_lock_entries=[{"plugin": "agent-worktrees@copilot-extensions"}],
+        trusted_marketplaces=["copilot-extensions"],
+        pinned_commits={"agent-worktrees@copilot-extensions": "not-a-sha"},
+    )
+
+    assert not decision.eligible
+    assert any("immutable commit pin" in reason for reason in decision.reasons)
+
+
+def test_bypass_decision_eligible_with_valid_pin_supplied() -> None:
+    decision = reflect.bypass_decision(
+        findings=[],
+        changed_lock_entries=[{"plugin": "agent-worktrees@copilot-extensions"}],
+        trusted_marketplaces=["copilot-extensions"],
+        pinned_commits={"agent-worktrees@copilot-extensions": "a" * 40},
+    )
+
+    assert decision.eligible
+    assert decision.reasons == ()
+
+
 # ---- integration against the real sync/scan engine ---------------------------
 
 
