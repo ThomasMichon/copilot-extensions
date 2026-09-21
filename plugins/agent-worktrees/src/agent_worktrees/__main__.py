@@ -2547,7 +2547,22 @@ def _create_worktree_core(
     # pair together with this worktree and cross-stamp the linkage. Only for
     # plain session worktrees (never system/bridge), and fully fail-safe -- a
     # pairing failure never breaks the harness carve.
-    if kind == "session":
+    #
+    # Excludes ``origin == "delegate"`` (confirmed leak, copilot-extensions
+    # follow-up to #3198): pairing exists to give a human operator a personal
+    # knowledge-repo sibling alongside their own interactive work. A
+    # delegate-origin worktree (a headless dispatch attempt, or any other
+    # automated/Picker-hidden creation -- never a human sitting at a
+    # terminal) has no such operator to benefit from one, yet `kind` for a
+    # dispatch attempt still defaults to the ordinary "session" (its own
+    # CLI invocation never overrides ``--kind``), so this carve fired for
+    # every single dispatch attempt: a full extra knowledge-repo worktree
+    # per attempt, permanently unreleasable once created (`is_paired`
+    # unconditionally blocks `conclude_disposable_worktree`'s disposal gate,
+    # and nothing -- unlike a `session`-kind resource claim -- ever unpairs
+    # it). 103 orphaned "-k" knowledge worktrees, most with `session_count:
+    # 0`, were found accumulated from this on one operator's machine alone.
+    if kind == "session" and origin != "delegate":
         try:
             pair_stamp = _carve_paired_knowledge(
                 config,
