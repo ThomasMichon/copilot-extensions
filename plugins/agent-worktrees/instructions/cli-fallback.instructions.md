@@ -8,8 +8,7 @@ This file is reflected directly into the consuming repo's own source tree, so
 it loads on every session regardless of whether `agent-worktrees` registered
 correctly this session.
 
-## If a `gh`-family command (or `repos gh`, `create-pr`, `pr-merge`, label
-## operations) fails with a GraphQL error
+## If a `gh`-family command (or `repos gh`, `create-pr`, `pr-merge`, label operations) fails with a GraphQL error
 
 Read the literal error text before retrying -- these are distinct failure
 classes, not one generic "GraphQL broke":
@@ -31,8 +30,7 @@ classes, not one generic "GraphQL broke":
   `agent-worktrees` itself (a GitHub schema change), not a local
   misconfiguration -- file an issue rather than working around it locally.
 
-## If a plugin's own CLI command is not found ("command not found" / "not
-## recognized as an internal or external command")
+## If a plugin's own CLI command is not found ("command not found" / "not recognized as an internal or external command")
 
 This means the binstub is not (yet, or no longer) on `PATH` for **this**
 process -- it does not mean the plugin failed to install. Before assuming a
