@@ -72,7 +72,8 @@ decided they want it (private/closed-circuit repos, not open ones).
 `agent_worktrees.config._parse_pr`/`_source_attribution` and consumed by
 `pr_ops.py`/`providers/attribution.py`:
 
-- `false` (current default) — no marker at all.
+- `false` (the default before this effort's Phase 1 landed; `"codename"` is
+  the default now) — no marker at all.
 - `true` — the full raw marker (worktree id, machine, session, head SHA);
   closed-circuit repos only.
 - `"codename"` — a public-safe marker carrying **only** the worktree's
@@ -801,7 +802,7 @@ these decisions directly and assumes this design is understood.
   commit as the code change, not a follow-up.
 
 ### Phase 2 — Correct downstream messaging that assumed the old default
-- [ ] Update `attribution-audit`/`audit_source_attribution_risk`'s finding
+- [x] Update `attribution-audit`/`audit_source_attribution_risk`'s finding
   text: `"absent (defaults to false)"` is now wrong; correct it to
   `"absent (defaults to codename)"` (still worth flagging when combined
   with a risky `head_pattern` — codename mode is public-safe for the
@@ -818,7 +819,7 @@ these decisions directly and assumes this design is understood.
   true` (if this repo accepts full exposure) or removing the risky token
   from `head_pattern` — drop the now-inapplicable "or codename" clause
   from the `None` branch entirely.
-- [ ] **Preserve existing no-finding behavior for a safe `head_pattern`
+- [x] **Preserve existing no-finding behavior for a safe `head_pattern`
   (round-20 finding)** — this is not an open design question:
   `audit_source_attribution_risk` already returns `[]` immediately
   whenever `head_pattern_leak_risk(head_pattern)` is empty, regardless of
@@ -828,13 +829,13 @@ these decisions directly and assumes this design is understood.
   effort's label/remedy-text changes above. Add a regression test proving
   this: an absent-key repo with a safe (non-leaking) `head_pattern`
   produces zero findings both before and after this effort's changes.
-- [ ] Update `docs/config-reference.md`, `docs/cli-reference.md`,
+- [x] Update `docs/config-reference.md`, `docs/cli-reference.md`,
   `skills/worktree/references/pr-workflow.md`, and
   `providers/attribution.py`'s module docstring: all describe `false` as
   "the (safe) default" today; correct every instance to describe
   `"codename"` as the default and `false`/`true` as the two opt-out
   directions (fully anonymous / fully raw).
-- [ ] Update the SOURCE-level comments/docstrings that make the same now-
+- [x] Update the SOURCE-level comments/docstrings that make the same now-
   wrong claim, not just the standalone docs: `PRConfig`'s inline field
   comments in `config.py` describing `source_attribution`,
   `pr_ops.audit_attribution_risk`'s docstring,
@@ -844,7 +845,7 @@ these decisions directly and assumes this design is understood.
   `false` is the default -- an implementation that updates only the
   standalone docs would leave these behaviorally-adjacent comments
   actively misleading.
-- [ ] Update this REPO'S OWN contributor/reviewer policy text, which
+- [x] Update this REPO'S OWN contributor/reviewer policy text, which
   currently instructs the OLD posture and would otherwise tell future
   contributors and automated reviewers to reject the very behavior this
   effort introduces: `AGENTS.md`'s "PR metadata is public too" bullet
@@ -856,7 +857,7 @@ these decisions directly and assumes this design is understood.
   distinguish the public-safe `codename` default (expected, not a
   violation) from the raw `true` mode (still correctly flagged for a
   public repo).
-- [ ] **Versioning gate (required for this phase's PR):** this phase
+- [x] **Versioning gate (required for this phase's PR):** this phase
   changes `agent-worktrees` runtime source (`providers/attribution.py`,
   `pr_ops.py`) even though most of the diff is documentation -- the same
   bump requirement as Phase 1 applies (`plugin.json`, `pyproject.toml`,
@@ -1403,3 +1404,38 @@ yet been opened/pushed as of this entry.
   `f2b538c47` for fifteen rounds straight — not re-edited again).
 
 
+
+### 2026-09-20/21 — PR #3037 (Phase 1) merged after 8 review rounds; Phase 2 implemented
+
+PR #3037 (Phase 1 implementation) went through 8 rounds of automated
+code review. Rounds 4-7 each surfaced genuine findings, all fixed with
+regression tests (full suite green throughout): a fail-closed
+config-reload fallback (never reuse a stale pre-lock policy snapshot on
+reload failure), `CodenameAttributionPolicyError` subclassing
+`RuntimeError` plus explicit catches at every CLI boundary that can
+raise it (`create-pr --json`, `resolve --json --new`, plain `resolve
+--new` via `main()`'s top-level dispatch, `status --write`), a
+`tracking.ensure_pr_id` helper closing a duplicate-append hazard when
+`set-pr` corrects a legacy entry's branch, one-to-one legacy PR
+identity matching (two same-branch legacy PRs could otherwise collapse
+onto the same in-memory entry), an early paired-knowledge allocation
+preflight before the harness's own worktree/branch/record exist, and a
+codename-provenance merge fix so a stale writer can never clobber an
+on-disk reclassification. Round 8 confirmed no new findings (the 4
+still-open threads were stale carryovers of already-fixed/tested
+items) — merged per this repo's advisory-review policy (`AGENTS.md`),
+matching the PR #2978 precedent.
+
+Phase 2 (correct downstream messaging that assumed the old `false`
+default) was then implemented in a fresh worktree: the audit
+message/remedy text and its regression test were already fixed as a
+side effect of the Phase 1 review cycle (rounds 5-7); this pass added
+the remaining safe-`head_pattern` regression test, corrected
+`docs/config-reference.md`/`skills/worktree/references/pr-workflow.md`/
+`providers/attribution.py`'s module docstring/`pr_ops.create_pr`'s
+docstring (all still described `false` as the safe default), and
+corrected this repo's own contributor/reviewer policy text
+(`AGENTS.md`, `.github/copilot-instructions.md`, `REVIEW.md`) to
+distinguish the public-safe `codename` default from the still-flagged
+raw `true` mode, without asserting Phase 3's not-yet-landed config
+change.

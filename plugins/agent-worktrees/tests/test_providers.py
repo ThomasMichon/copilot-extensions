@@ -554,6 +554,17 @@ class TestAuditSourceAttributionRisk:
         assert "codename" in findings[0]
         assert "migrate to source_attribution: true or codename" not in findings[0]
 
+    def test_absent_key_with_safe_head_pattern_has_no_findings(self):
+        # Phase 2 (round-20 finding): the audit already short-circuits to
+        # zero findings whenever `head_pattern_leak_risk` itself is empty,
+        # regardless of `source_attribution`'s value -- an absent-key repo
+        # with a SAFE (non-leaking) head_pattern must continue producing
+        # no findings after the default-flip's label/remedy-text changes.
+        # Locks in this pre-existing behavior with an explicit regression.
+        assert attribution.audit_source_attribution_risk(
+            source_attribution=None, head_pattern="pr/{slug}-{suffix}",
+        ) == []
+
     def test_worktree_id_token_is_never_flagged(self):
         # {worktree_id} is not part of pr_head_name's actual rendering
         # contract (only prefix/slug/suffix/username/machine are) -- a

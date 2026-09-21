@@ -81,9 +81,13 @@ These repo-specific rules must be followed by any change:
 - **Public repo — stay identifier-neutral.** This repository is public. Do not
   introduce internal organization/account/project names, private hostnames, or
   personal aliases in code, docs, comments, examples, or PR metadata. Hidden
-  HTML comments are still public. This repo must keep
-  `pr.source_attribution: false`; closed-circuit repos may opt in through their
-  own config. Use neutral placeholders.
+  HTML comments are still public. This repo's `pr.source_attribution` must
+  stay in `codename` mode (the default; only the worktree's assigned
+  codename, decodes to nothing on its own — safe for a public repo, and not
+  a violation) or `false` (fully anonymous); the full raw
+  `pr.source_attribution: true` marker must stay off here. Closed-circuit
+  repos may opt into `true` through their own config. Use neutral
+  placeholders.
 
 - **Terminal status bars must not compute on the render path.** Nothing in a
   tmux/psmux `status-left` / `status-right` may spawn a process per render (no

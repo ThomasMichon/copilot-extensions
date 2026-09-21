@@ -41,8 +41,10 @@ specifically when reviewing a pull request, not a replacement for them.
 - **Identifier neutrality.** Flag any newly introduced internal
   organization/account/project names, private hostnames, or personal
   aliases — this repository is public. PR titles, bodies, labels, commit
-  messages, and hidden comments count; flag any attempt to enable
-  `pr.source_attribution` here.
+  messages, and hidden comments count; the default `codename` marker (only
+  the worktree's assigned codename, decodes to nothing on its own) is
+  expected and not a violation, but flag any attempt to enable the full raw
+  `pr.source_attribution: true` here.
 - **Contribution boundary.** Flag a change whose value or implementation
   depends on a particular person's private state or a particular
   organization's internal systems, identity, process, or data — that

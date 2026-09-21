@@ -1,18 +1,21 @@
 """Optional source-worktree attribution markers for PR bodies/comments.
 
-When a closed-circuit repo opts in with ``pr.source_attribution: true``, a PR
-opened by agent-worktrees carries an initial hidden HTML-comment marker naming
-the **source worktree** (+ machine / session / head SHA). Later pushed heads are
-published as dedicated marker comments so mutable metadata never replaces the
-authored PR description. Consumers use the newest marker across both surfaces.
-The feature is off by default because hidden PR metadata is still public and raw
-machine, worktree, and session identifiers are inappropriate for public repos.
+By default (codename-attribution-by-default), a PR opened by agent-worktrees
+carries a public-safe marker naming **only** the worktree's assigned codename
+(see the third mode below) -- no machine, worktree-id, session, or head SHA.
+When a closed-circuit repo instead opts in with ``pr.source_attribution:
+true``, the marker carries the raw **source worktree** (+ machine / session /
+head SHA) -- this must stay off for a public repo, since hidden PR metadata
+is still public and raw machine/worktree/session identifiers are
+inappropriate there. Later pushed heads are published as dedicated marker
+comments so mutable metadata never replaces the authored PR description.
+Consumers use the newest marker across both surfaces.
 
 The marker is a single HTML comment, invisible in rendered Markdown:
 
     <!-- agent-worktrees:source worktree=<id> machine=<m> session=<sid> head=<sha> -->
 
-A third mode, ``pr.source_attribution: codename`` (effort
+The default third mode, ``pr.source_attribution: codename`` (effort
 ``pr-attribution-codenames`` Phase 4), is for a public repo that still wants
 author-side traceability: it emits :func:`build_codename_marker` instead --
 **only** the worktree's assigned codename, no machine/worktree-id/session/
@@ -61,8 +64,12 @@ def build_codename_marker(codename: str) -> str:
     """Build the codename-only source-attribution comment (``codename``
     mode). Carries **no** machine, worktree id, session id, or timestamp --
     only the assigned codename, which decodes to nothing without local
-    access to the authoring machine's own tracking store (or a manual SSH
-    session onto it -- there is no automated cross-machine lookup yet).
+    access to the authoring machine's own tracking store, or -- via
+    ``resolve --codename``/``embody --codename``'s automated cross-machine
+    SSH scan (effort ``pr-attribution-codenames`` Phase 3,
+    :mod:`agent_worktrees.codename_reverse_lookup`) -- an author explicitly
+    asking every other known, ssh-ready machine whether its own tracking
+    store has that codename.
     """
     return f"<!-- agent-worktrees:source codename={codename} -->"
 

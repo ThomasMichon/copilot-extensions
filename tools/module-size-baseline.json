@@ -91,7 +91,7 @@
   "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": 1703,
   "plugins/agent-worktrees/src/agent_worktrees/installer.py": 1745,
   "plugins/agent-worktrees/src/agent_worktrees/pr_contract.py": 1470,
-  "plugins/agent-worktrees/src/agent_worktrees/pr_ops.py": 2305,
+  "plugins/agent-worktrees/src/agent_worktrees/pr_ops.py": 2307,
   "plugins/agent-worktrees/src/agent_worktrees/reconcile.py": 2195,
   "plugins/agent-worktrees/src/agent_worktrees/related.py": 1717,
   "plugins/agent-worktrees/src/agent_worktrees/repos.py": 1220,
