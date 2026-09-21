@@ -205,22 +205,16 @@ mechanism CLI mode binds through.
       session type, lifecycle, or protocol was introduced. All existing
       reattach/observation/messaging routes are unchanged and apply
       identically regardless of `cli_mode`.
-- [ ] **Course correction (2026-09-20), reopens this phase's discovery
-      design:** promote a claimed CLI-mode reservation into a real
-      `host_index` registration instead of only flipping
-      `live_sessions.cli_mode`. See the vision's 2026-09-20 Provenance entry
-      and this effort's matching journal entry for the reasoning: a Session
-      Host's *survival* and *ACP transport* duties are already covered, for a
-      CLI-mode session, by the multiplexer and the already-loaded CLI
-      extension — no host process needs spawning — but its *discoverability*
-      duty (durable, restart-surviving `host_index` lookup, not a bespoke
-      side-table) was never actually unified, and that's the one piece worth
-      fixing before Phase 4 builds a second venue on top of the un-unified
-      version. Concretely: extend `HostRecord`/`host_index.py`
-      (`plugins/agent-bridge/src/agent_bridge/session_host/host_index.py`)
-      with a CLI-mode record shape (`mode: "cli"`, a mux-reattach descriptor
-      instead of a dialable `port`) and a mux-liveness check (no `host_pid`
-      to poll), then have the reservation-claim path register through it.
+- [x] ~~Course correction (2026-09-20), reopens this phase's discovery
+      design~~ — **superseded same-day, see below.** Proposed promoting a
+      claimed reservation into `host_index`; a closer look at
+      `host_index.py` found it's specifically the daemon's map of processes
+      *it spawned* (dialable port, `host_pid`/`child_pid` liveness) — not a
+      fit for a self-registered session. `live_sessions` (which CLI mode
+      already correctly uses) is the right existing mechanism; see the
+      corrected finding under Phase 4 and the vision's newest Provenance
+      entry for what's actually still missing (cross-venue network
+      reachability + reattach metadata, not a second registry to unify with).
 
 ### Phase 3 — Opt-in local launch surface
 
@@ -288,39 +282,78 @@ mechanism CLI mode binds through.
 - [x] Confirm/document the remaining venue-prep prerequisites this surfaces
       before any venue-specific launch verb is added.
       **Done** — see the 2026-09-20 "Phase 4 prep: prerequisites confirmed,
-      container-spawner gap found" journal entry: (1) `copilot` presence is a
-      CodeSpace devcontainer convention (verified live), but is **not**
-      guaranteed for `agent-containers`' operator-supplied images —
-      `installer_readiness.inspect_toolchain` only validates host-side fleet
-      tooling (docker/devcontainer/ssh), never in-container `copilot`/`tmux`;
-      this must be an explicit precondition check, not an assumption, for any
-      container-venue launch verb. (2) `agent-worktrees` full `install`
-      remains a manual/first-touch step for a venue that's never had a human
-      session — unchanged, not automated here. (3) Confirmed the CLI-mode
-      reservation is correctly host-side even for a venue launch: agent-bridge
-      runs exactly one daemon (on the host) regardless of spawn target: a
-      dispatched Session Host — whether via `LocalSpawner` or
-      `CodeSpaceSpawner` (`session_manager.py`) — always registers back to
-      that same host daemon, so Phase 2's server-side reservation correlation
-      needs no change for the CodeSpace case.
-- [ ] Extend `agent-codespaces` to offer the same CLI-mode launch shape —
-      prepare the venue (the checklist above), allocate the CLI-mode
-      reservation, start a standard muxed CLI process (`embody`, run
-      remotely) bound to it — over the existing venue-parity SSH transport
-      and auth-relay back-channel. No new venue-specific transport. This is
-      tractable now: agent-bridge already has a working `CodeSpaceSpawner`
-      seam (ACP mode) to extend.
-- [ ] ~~Extend `agent-containers` to offer the same CLI-mode launch shape~~ —
-      **scope note, not yet started:** unlike `agent-codespaces`,
-      agent-bridge has **no existing headless/ACP Session Host spawner for
-      containers at all** today (`session_manager.py` defines only
-      `LocalSpawner` and `CodeSpaceSpawner`; no `ContainerSpawner`). Adding
-      CLI-mode launch there is not "extend an existing venue seam" like the
-      CodeSpace case — it first needs that base dispatch primitive, which is
-      a materially bigger, separate prerequisite. Do the `agent-codespaces`
-      case first; revisit `agent-containers` scope (possibly its own
-      follow-on effort) once that base primitive exists or is confirmed
-      genuinely in-scope here.
+      container-spawner gap found" journal entry (**correction below**: that
+      entry's claim of no container dispatch primitive was wrong): (1)
+      `copilot` presence is a CodeSpace devcontainer convention (verified
+      live), but is **not** guaranteed for `agent-containers`' operator-supplied
+      images — `installer_readiness.inspect_toolchain` only validates
+      host-side fleet tooling (docker/devcontainer/ssh), never in-container
+      `copilot`/`tmux`; this must be an explicit precondition check, not an
+      assumption, for any container-venue launch verb. (2)
+      `agent-worktrees` full `install` remains a manual/first-touch step for
+      a venue that's never had a human session — unchanged, not automated
+      here. (3) Confirmed the CLI-mode reservation is correctly host-side
+      even for a venue launch: agent-bridge runs exactly one daemon (on the
+      host) regardless of spawn target: a dispatched Session Host — whether
+      via `LocalSpawner` or `CodeSpaceSpawner` (`session_manager.py`) —
+      always registers back to that same host daemon, so Phase 2's
+      server-side reservation correlation needs no change for the CodeSpace
+      case.
+- [x] **Correction (2026-09-20): retract the "no ContainerSpawner" claim.**
+      A closer read of `session_host/container_transport.py` found
+      `ContainerTransport` (an OpenSSH `RemoteTransport` for a trusted
+      container, `boundary = "container"`) and `build_container_spawner()`,
+      which wires it into the *same* `CodeSpaceSpawner` class used for
+      CodeSpaces (genuinely boundary-agnostic, per its own docstring: "named
+      for its first consumer (CodeSpaces)... The mesh `SshSpawner` is the
+      same class with an ssh-manager-backed transport"). `agent-containers`
+      **already has** a headless/ACP Session Host dispatch primitive; my
+      earlier claim it didn't was a shallow-grep error (only checked
+      `session_manager.py` for a `class.*Spawner` match, missing
+      `session_host/*.py` entirely). Both remaining Phase 4 items below
+      apply to `agent-codespaces` **and** `agent-containers` equally — no
+      venue is uniquely blocked.
+- [ ] **New finding (2026-09-20), the real remaining Phase 4 prerequisite:
+      cross-venue self-registration has no network path back to the host
+      daemon yet.** Traced how a live CLI-mode session actually becomes
+      discoverable: it self-registers into `live_sessions` (via the bundled
+      extension's ordinary registration POST) — **not** `host_index`, which
+      is specifically the daemon's own map of processes *it spawned*
+      (dialable local port, `host_pid`/`child_pid` liveness). `live_sessions`
+      is already the correct, existing "any self-registered live session"
+      discovery mechanism, and CLI mode already uses it correctly for the
+      local case — Phase 2 got the *mechanism* choice right; my 2026-09-20
+      vision correction narrowing this to "promote into `host_index`" was
+      itself wrong and has been corrected again (see the vision's newest
+      Provenance entry). What's actually missing for a *remote* venue:
+      `extension.mjs`'s `resolveBaseUrl()` always dials `http://127.0.0.1:<port>`
+      — a registering session assumes its daemon is reachable on its own
+      loopback. Checked what's reverse-forwarded into a CodeSpace/container
+      today (`session_host/codespace_transport.py`,
+      `session_host/container_transport.py`, `relay_launch.py`): only the
+      **credential-relay** port is carried on a `-R` forward; the daemon's
+      own API port is not. A CLI-mode process launched inside a venue
+      therefore has no path back to the host daemon to register at all yet.
+      Fixing this needs a `-R` forward for the daemon's own port alongside
+      the existing relay forward (reusing the same reverse-forward
+      machinery, not inventing a second one) as part of venue-side CLI-mode
+      launch prep.
+- [ ] **New finding (2026-09-20): `live_sessions` needs a reattach-shaped
+      field for remote CLI-mode sessions.** Today's schema (`machine`,
+      `cwd`, `worktree_id`, `pid`, ...) has no venue identity or mux-session
+      descriptor, so nothing durably records "which CodeSpace/container this
+      is, and what to attach to" for an operator or the daemon to use later.
+      Needs an additive field (e.g. a `venue`/reattach descriptor: boundary +
+      target + mux session name) alongside the existing columns — additive
+      only, no schema break for the ordinary local case.
+- [ ] Extend `agent-codespaces` **and** `agent-containers` to offer the same
+      CLI-mode launch shape — prepare the venue (the checklist above),
+      allocate the CLI-mode reservation, start a standard muxed CLI process
+      (`embody`, run remotely) bound to it, with the daemon-port reverse
+      forward and reattach metadata above — over the existing venue-parity
+      SSH transport and auth-relay back-channel. No new venue-specific
+      transport; both venues use the same `CodeSpaceSpawner`-shaped seam
+      already, so neither is ahead of the other here.
 
 ### Phase 5 — Docs and vision closure
 
@@ -388,6 +421,60 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-09-20 — Second-pass correction: `host_index` was the wrong unification target; the real gaps are cross-venue reachability + reattach metadata, and the "no ContainerSpawner" claim was wrong
+
+Starting the implementation follow-up from the entry below (extend
+`host_index`/`HostRecord` for CLI mode) surfaced that its target was itself
+wrong, before any code changed. Checked `host_index.py` directly: it is
+explicitly the daemon's map of processes **it spawned** -- `HostRecord`
+carries a dialable `port` and polls `host_pid`/`child_pid` for liveness. A
+CLI-mode session is never spawned by the daemon; it self-registers. Checked
+where that self-registration actually lands (`routes/live_sessions.py`'s
+`register_live_session` -> `db.register_live_session`): `live_sessions`, a
+different, already-existing table every attended (non-daemon-spawned)
+session already uses to be observable/messageable. CLI mode already writes
+there correctly -- Phase 2 got the *mechanism* choice right; there was no
+discovery mechanism left to unify, and the previous journal entry's
+"promote into `host_index`" plan is retracted (checkbox above marked
+superseded).
+
+What's real, found by tracing two things end to end instead of assuming:
+
+1. **No network path back for a remote CLI-mode registration.**
+   `extensions/agent-bridge/extension.mjs`'s `resolveBaseUrl()` always
+   builds `http://127.0.0.1:<port>` -- it assumes its daemon is reachable on
+   its own loopback. Checked what's actually reverse-forwarded into a
+   CodeSpace or container today (`session_host/codespace_transport.py`,
+   `session_host/container_transport.py`, `relay_launch.py`): only the
+   credential-relay port rides a `-R` forward. The daemon's own API port
+   does not. A muxed `copilot` process launched inside a venue therefore has
+   nothing to register against yet -- this, not a data-model gap, is the
+   real remaining Phase 4 prerequisite for cross-venue discovery.
+2. **`live_sessions` carries no reattach/venue descriptor.** `machine`,
+   `cwd`, `pid`, etc. don't say which CodeSpace/container a session lives in
+   or what mux session name to attach to. An additive field is needed
+   before an operator or the daemon can act on a remote CLI-mode
+   registration.
+
+Also retracted a **separate**, unrelated error from last session while
+re-reading the surrounding code: the "agent-bridge has no ContainerSpawner
+at all" finding was wrong -- `session_host/container_transport.py` defines
+`ContainerTransport` (`boundary = "container"`) and `build_container_spawner()`,
+wiring it into the *same* `CodeSpaceSpawner` class CodeSpaces use (it is
+already boundary-agnostic, named for its first consumer per its own
+docstring). That claim came from grepping only `session_manager.py` for
+`class.*Spawner` and missing `session_host/*.py` entirely. Both venues
+already have the same ACP dispatch primitive; neither is ahead of the other
+for Phase 4's remaining work now.
+
+Updated the vision's Concepts/Features/Behaviors/Non-Goals back off
+`host_index` language and onto `live_sessions`, added a same-day Provenance
+entry superseding (not deleting) the wrong one, and rewrote this effort's
+Phase 4 checklist with the two real findings above plus the ContainerSpawner
+retraction. Not yet implemented: the reverse-forward addition and the
+`live_sessions` schema field are the next concrete work, followed by the
+actual `agent-codespaces`/`agent-containers` launch verb.
 
 ### 2026-09-20 — Course correction: no Session Host process for CLI mode, but unify discovery through `host_index`
 
