@@ -1469,3 +1469,20 @@ implicit `"codename"` default, and updated the adjacent comment to
 explain both the raw-marker risk and why removal (not an explicit
 `codename` key) is this repo's own migration choice -- confirmed via
 `attribution-audit` (no new finding) and the full test suite.
+
+### 2026-09-21 — PR #3092 (Phase 3) merged after 5 review rounds
+
+PR #3092 (Phase 3, repo config rollout) went through 5 review rounds.
+Genuine findings: an inaccurate config.yaml comment overstating
+`may_publish_codename`'s round-32-narrowed rule (fixed), and two stale
+"current state" claims in the effort README's own "Guiding Intent"/
+"The gap this effort closes" sections that no longer matched reality
+once Phase 3 landed (both reworded to past tense). One review comment
+(bundling an unrelated `engine.py` module-size baseline widen into
+this PR, needed only to unblock a stale pre-push guard from an
+unrelated concurrent merge) was split out into its own PR #3097 and
+merged separately, per the reviewer's own suggestion -- the cleanest
+resolution rather than arguing the point. The remaining carried-forward
+mention of that same widen in later rounds was confirmed stale (the
+final diff no longer touches that file at all, verified via `git diff
+origin/main --stat`) before merging.
