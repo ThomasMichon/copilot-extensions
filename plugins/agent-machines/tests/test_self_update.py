@@ -374,7 +374,9 @@ def test_refresh_dtssh_mesh_uses_same_cell_agent_ssh_prefix(monkeypatch, tmp_pat
 
     def runner(argv, *, cwd=None, timeout=0):
         calls.append(list(argv))
-        payload = json.dumps({"ok": True, "machines_yaml": None, "detail": "no mesh", "aliases": []})
+        payload = json.dumps(
+            {"ok": True, "machines_yaml": None, "detail": "no mesh", "aliases": []}
+        )
         return self_update.CommandResult(list(argv), 0, payload, "")
 
     step = self_update.refresh_dtssh_mesh(runner=runner)
@@ -888,6 +890,8 @@ def test_register_scheduled_task_hourly_uses_native_repetition_parameters():
     assert "-RepetitionDuration (New-TimeSpan -Days 3650)" in script
     assert "$trigger.Repetition.Interval" not in script
     assert "$trigger.Repetition.Duration" not in script
+    assert str(Path("/home/operator/.local/bin/agent-machines")) in script
+    assert "-m agent_machines" not in script
 
 
 def test_register_scheduled_task_daily_has_no_repetition_parameters():
@@ -906,6 +910,18 @@ def test_register_scheduled_task_daily_has_no_repetition_parameters():
     script = captured["argv"][-1]
     assert "-Daily -At '3:00AM' -DaysInterval 1" in script
     assert "-RepetitionInterval" not in script
+
+
+def test_task_action_arguments_uses_stable_binstub_path(monkeypatch):
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+    args = self_update_tasks.task_action_arguments(
+        "watchdog", machine="box-1", home=Path(r"C:\Users\operator")
+    )
+    assert args.startswith("--headless cmd.exe /c ")
+    assert r"C:\Users\operator\.local\bin\agent-machines.cmd" in args
+    assert "self-update run --tier watchdog --machine box-1" in args
+    assert r"C:\\Users\\operator" not in args
+    assert "-m agent_machines" not in args
 
 
 def test_reconcile_task_defers_to_elevated_install_when_registration_is_denied(
@@ -967,7 +983,11 @@ def test_default_command_runner_resolves_pathext_shim(monkeypatch):
     captured: dict[str, list[str]] = {}
 
     def fake_which(name):
-        return f"C:\\Users\\operator\\.local\\bin\\{name}.cmd" if name == "agent-worktrees" else None
+        return (
+            f"C:\\Users\\operator\\.local\\bin\\{name}.cmd"
+            if name == "agent-worktrees"
+            else None
+        )
 
     def fake_run(argv, **kwargs):
         captured["argv"] = argv
@@ -1095,7 +1115,12 @@ def test_render_linux_service_unit_includes_machine_and_workdir(tmp_path):
         "sweep", machine="box-1", home=tmp_path
     )
     assert "Type=oneshot" in unit
-    assert "-m agent_machines self-update run --tier sweep --machine box-1" in unit
+    expected = (
+        f"ExecStart={tmp_path}/.local/bin/agent-machines "
+        "self-update run --tier sweep --machine box-1"
+    )
+    assert expected in unit
+    assert "-m agent_machines" not in unit
     assert f"WorkingDirectory={self_update_tasks.task_working_directory(tmp_path)}" in unit
 
 
@@ -1202,6 +1227,8 @@ def test_query_systemd_timer_matches_after_register(tmp_path):
     assert snapshot.enabled is True
     assert snapshot.state == "active"
     assert snapshot.matching is True
+    assert snapshot.execute == str(tmp_path / ".local" / "bin" / "agent-machines")
+    assert snapshot.arguments == "self-update run --tier watchdog --machine box-1"
 
 
 def test_query_systemd_timer_not_matching_when_unit_content_drifted(tmp_path):

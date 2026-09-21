@@ -232,8 +232,12 @@ with independent authority and locking.
 `watchdog` is the narrow hourly dtssh-launcher liveness tier; `sweep` is the
 broader daily pull + plugin-reconcile + **maintenance-safe** restore tier.
 Declaring the resource controls both `agent-machines self-update run` and the
-Windows Scheduled Task presence reconciled by `agent-machines self-update
-install` and `agent-machines restore --apply`:
+machine-local scheduler presence reconciled by `agent-machines self-update
+install` and `agent-machines restore --apply` (Windows Scheduled Tasks; Linux /
+WSL `systemd --user` timers). The registered command always targets the stable
+`agent-machines` management binstub (`~/.local/bin/agent-machines` on POSIX,
+`agent-machines.cmd` on Windows), so runtime slot updates do not leave the
+scheduler pinned to an old version:
 
 - `run` resolves the selected tier first and is a clean no-op when it is
   opted out.
