@@ -173,3 +173,78 @@ def test_serve_honors_pinned_port(monkeypatch, tmp_path):
     assert seen["bound_port"] == pinned
     assert seen["during"].tcp_host_port == ("127.0.0.1", pinned)
     assert rendezvous.read_endpoint(run) is None
+
+
+# -- non-passive serve() refuses to seize an already-live route (#3066) -----
+
+
+def test_serve_raises_when_coordinator_already_live(monkeypatch, tmp_path):
+    import pytest
+
+    run = tmp_path / "run"
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+    monkeypatch.setattr(server, "has_live_local_coordinator", lambda: True)
+    cfg = Config(host="127.0.0.1", port=0, db_path=str(tmp_path / "tasks.db"))
+
+    with pytest.raises(server.CoordinatorAlreadyLiveError):
+        server.serve(cfg)
+
+    # Refused before ever binding/advertising/publishing anything.
+    assert rendezvous.read_endpoint(run) is None
+
+
+def test_serve_raises_when_start_lock_already_held(monkeypatch, tmp_path):
+    """A second, concurrent non-passive serve() must not slip past the
+    friendly caller-side pre-check and seize the route -- the lock itself is
+    the atomic guard (ThomasMichon/copilot-extensions#3066 follow-up)."""
+    import pytest
+
+    from agent_dispatch.single_instance import SingleInstance
+
+    run = tmp_path / "run"
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+    monkeypatch.setattr(server, "has_live_local_coordinator", lambda: False)
+    # Simulate a concurrent starter already holding the lock.
+    holder = SingleInstance(run / "serve-start.lock")
+    assert holder.acquire()
+    try:
+        cfg = Config(host="127.0.0.1", port=0, db_path=str(tmp_path / "tasks.db"))
+        with pytest.raises(server.CoordinatorAlreadyLiveError):
+            server.serve(cfg)
+        assert rendezvous.read_endpoint(run) is None
+    finally:
+        holder.release()
+
+
+def test_serve_force_bypasses_live_coordinator_guard(monkeypatch, tmp_path):
+    run = tmp_path / "run"
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+    monkeypatch.setattr(server, "has_live_local_coordinator", lambda: True)
+
+    def _fake_run(self, sockets=None):
+        pass
+
+    monkeypatch.setattr(uvicorn.Server, "run", _fake_run)
+    cfg = Config(host="127.0.0.1", port=0, db_path=str(tmp_path / "tasks.db"))
+
+    # Must not raise despite a live coordinator, and must actually publish.
+    server.serve(cfg, force=True)
+    assert rendezvous.read_endpoint(run) is None  # cleared on shutdown, as usual
+
+
+def test_serve_passive_never_checks_live_coordinator(monkeypatch, tmp_path):
+    run = tmp_path / "run"
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+
+    def _boom():
+        raise AssertionError("passive serve() must never consult liveness")
+
+    monkeypatch.setattr(server, "has_live_local_coordinator", _boom)
+
+    def _fake_run(self, sockets=None):
+        pass
+
+    monkeypatch.setattr(uvicorn.Server, "run", _fake_run)
+    cfg = Config(host="127.0.0.1", port=0, db_path=str(tmp_path / "tasks.db"))
+
+    server.serve(cfg, passive=True)

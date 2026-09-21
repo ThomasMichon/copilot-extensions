@@ -11,10 +11,18 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import __version__, telemetry
-from .config import Config, load_config, requires_token_bind, routing_dir, run_dir
+from .config import (
+    Config,
+    has_live_local_coordinator,
+    load_config,
+    requires_token_bind,
+    routing_dir,
+    run_dir,
+)
 from .coordinator import create_app
 from .queue import TaskQueue
 from .rendezvous import clear_endpoint, write_endpoint
+from .single_instance import SingleInstance
 
 log = logging.getLogger("agent-dispatch.server")
 
@@ -36,6 +44,19 @@ _last_missing_active_heal_attempt = 0.0
 
 class UnsafeBindError(RuntimeError):
     """Raised when the coordinator would bind the LAN without a bearer token."""
+
+
+class CoordinatorAlreadyLiveError(RuntimeError):
+    """Raised when a non-passive, non-forced ``serve()`` would seize the active
+    route from an already-live coordinator (ThomasMichon/copilot-extensions#3066).
+
+    A caller-side pre-check (e.g. the CLI's ``_cmd_serve``) is a cheap, friendly
+    fast path, but is not atomic against a second, concurrent non-passive
+    ``serve()`` racing the same decision -- both could observe "not live" before
+    either publishes. This is raised from *inside* ``serve()``, guarded by a
+    ``SingleInstance`` lock held across the re-check and the routing-table
+    publish, so only one non-passive starter can ever win that race.
+    """
 
 
 def check_bind_safety(cfg: Config) -> None:
@@ -239,7 +260,7 @@ def _clear_routing() -> None:
         log.debug("zdd routing clear-on-shutdown skipped", exc_info=True)
 
 
-def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
+def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = False) -> None:
     """Bind and serve the coordinator (blocking).
 
     Stage C: the coordinator binds an **OS-assigned** ephemeral port
@@ -254,6 +275,14 @@ def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     fresh port but does **not** publish the zdd routing table -- the cutover
     orchestrator flips the route to it only after it health-gates, so it never
     seizes the active route from the live coordinator (invariant #5).
+
+    A non-passive, non-``force`` start raises :class:`CoordinatorAlreadyLiveError`
+    rather than seize the active route when a coordinator is already live
+    (ThomasMichon/copilot-extensions#3066). The check is made *atomic* against a
+    second, concurrent non-passive ``serve()`` by holding a ``SingleInstance``
+    lock across the re-check and the routing-table publish below -- a caller-side
+    pre-check (e.g. the CLI) is a cheap, friendly fast path but cannot alone rule
+    out two starters racing the same decision.
     """
     import uvicorn
 
@@ -265,32 +294,53 @@ def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     procutil.relocate_off_payload()
 
     cfg = cfg or load_config()
+    start_lock: SingleInstance | None = None
+    if not passive and not force:
+        start_lock = SingleInstance(run_dir() / "serve-start.lock")
+        if not start_lock.acquire():
+            raise CoordinatorAlreadyLiveError(
+                "another process is concurrently starting a coordinator on this "
+                "host; refusing to race it for the active route"
+            )
+        if has_live_local_coordinator():
+            start_lock.release()
+            raise CoordinatorAlreadyLiveError(
+                "a coordinator is already live and answering on this host; "
+                "refusing to seize its active route non-passively"
+            )
     try:
-        check_bind_safety(cfg)
-    except UnsafeBindError as exc:
-        print(f"agent-dispatch: {exc}", file=sys.stderr)
-        raise SystemExit(2) from exc
-    if requires_token_bind(cfg.host):
-        log.warning(
-            "binding %s exposes the coordinator on all interfaces; a token is set, "
-            "but ensure the port is firewalled off the LAN (allow loopback + the "
-            "Docker bridge subnets only)",
-            cfg.host,
-        )
-    # Stage C: pre-bind the listening socket ourselves so we can capture the
-    # OS-assigned port and advertise the *actual* endpoint before serving. Passing
-    # the already-bound socket to uvicorn avoids a fixed-port reservation entirely.
-    sock = _bind_listen_socket(cfg.host, _server_bind_port())
-    bound_port = sock.getsockname()[1]
-    global _wake_route_owned
-    _wake_route_owned = not passive
-    # Advertise the bound endpoint for discovery (see the endpoint-rendezvous lib
-    # and docs/patterns/local-endpoint-discovery.md). Additive: discovery-capable
-    # clients resolve this dynamic port from the rendezvous file.
-    advertise_endpoint(replace(cfg, port=bound_port))
-    # Publish the zdd routing table (skipped while passive) so clients follow this
-    # generation across a graceful cutover (docs/patterns/graceful-daemon-cutover.md).
-    _publish_routing(cfg, bound_port, passive=passive)
+        try:
+            check_bind_safety(cfg)
+        except UnsafeBindError as exc:
+            print(f"agent-dispatch: {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+        if requires_token_bind(cfg.host):
+            log.warning(
+                "binding %s exposes the coordinator on all interfaces; a token is set, "
+                "but ensure the port is firewalled off the LAN (allow loopback + the "
+                "Docker bridge subnets only)",
+                cfg.host,
+            )
+        # Stage C: pre-bind the listening socket ourselves so we can capture the
+        # OS-assigned port and advertise the *actual* endpoint before serving. Passing
+        # the already-bound socket to uvicorn avoids a fixed-port reservation entirely.
+        sock = _bind_listen_socket(cfg.host, _server_bind_port())
+        bound_port = sock.getsockname()[1]
+        global _wake_route_owned
+        _wake_route_owned = not passive
+        # Advertise the bound endpoint for discovery (see the endpoint-rendezvous lib
+        # and docs/patterns/local-endpoint-discovery.md). Additive: discovery-capable
+        # clients resolve this dynamic port from the rendezvous file.
+        advertise_endpoint(replace(cfg, port=bound_port))
+        # Publish the zdd routing table (skipped while passive) so clients follow this
+        # generation across a graceful cutover (docs/patterns/graceful-daemon-cutover.md).
+        _publish_routing(cfg, bound_port, passive=passive)
+    finally:
+        # Release right after the routing-table publish (the actual seizure
+        # moment) -- never hold this lock across the long-blocking serve loop
+        # below, and always release it even on an early raise/SystemExit above.
+        if start_lock is not None:
+            start_lock.release()
     # Record the *actually-running* version so the launch-path reconciler can tell
     # a lagging live coordinator from an up-to-date on-disk manifest (dotfiles
     # #533). Best-effort; a dead-pid/missing file is treated as absent by readers.

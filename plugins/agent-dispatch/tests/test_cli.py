@@ -1492,7 +1492,7 @@ def test_cmd_serve_reroots_cwd_to_runtime_dir(monkeypatch, tmp_path):
 
     seen = {}
 
-    def fake_serve(cfg, *, passive=False):
+    def fake_serve(cfg, *, passive=False, force=False):
         seen["cwd"] = Path.cwd()
         seen["cfg"] = cfg
         seen["passive"] = passive
@@ -1529,7 +1529,7 @@ def test_cmd_serve_runtime_dir_resolution_failure_is_nonfatal(
 
     seen = {}
 
-    def fake_serve(cfg, *, passive=False):
+    def fake_serve(cfg, *, passive=False, force=False):
         seen["cwd"] = Path.cwd()
 
     monkeypatch.setattr(server, "serve", fake_serve)

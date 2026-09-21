@@ -519,10 +519,15 @@ def _parse_affinity(pairs: list[str] | None) -> dict[str, str]:
 
 def _cmd_serve(args: argparse.Namespace) -> int:
     from .config import load_config
-    from .server import serve
+    from .server import CoordinatorAlreadyLiveError, serve
 
     passive = bool(getattr(args, "passive", False))
     force = bool(getattr(args, "force", False))
+    # A cheap, friendly fast path: most refusals are caught here without even
+    # binding a socket. This is NOT atomic against a second, concurrent
+    # non-passive `serve()` -- `serve()` itself holds a lock across its own
+    # re-check and the routing-table publish, so a race that slips past this
+    # pre-check is still caught there (see CoordinatorAlreadyLiveError below).
     if not passive and not force and has_live_local_coordinator():
         print(
             "agent-dispatch: a coordinator is already live and answering on this "
@@ -543,7 +548,17 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         token=args.token or base.token,
         control_token=getattr(args, "control_token", None) or base.control_token,
     )
-    serve(cfg, passive=passive)
+    try:
+        serve(cfg, passive=passive, force=force)
+    except CoordinatorAlreadyLiveError as exc:
+        print(
+            f"agent-dispatch: {exc} (ThomasMichon/copilot-extensions#3066). Use "
+            "`agent-dispatch deploy` for a graceful, zero-downtime cutover onto "
+            "new code, or pass --force if you intend a deliberate, unmanaged "
+            "manual restart.",
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 
