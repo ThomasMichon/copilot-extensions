@@ -2495,6 +2495,234 @@ async def test_idle_unwatched_session_goes_dormant_after_repeated_recovery_failu
 
 
 @pytest.mark.asyncio
+async def test_stop_serializes_with_inflight_reattach(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    """An explicit stop overlapping an in-flight background reattach must not
+    let the reattach's later success revive the session after stop already
+    persisted dormancy (review finding on #3058): stop must serialize with
+    the same lifecycle lock a reattach holds across its await, not race it.
+    """
+    from agent_bridge.session_host.protocol import PROTOCOL_VERSION
+
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.IDLE
+    session.acp_session_id = "acp-1"
+    session.client = None
+    manager._sessions[session.session_id] = session
+    now = time.time()
+    tmp_db.create_session(
+        session_id=session.session_id,
+        name=session.name,
+        agent_name=session.agent_name,
+        caller_id=session.caller_id,
+        target_dir=session.target.cwd,
+        target_type=session.target.type,
+        status=SessionStatus.IDLE.value,
+        now=now,
+        target_json=session.target.to_json(),
+    )
+    tmp_db.update_session_acp_id(session.session_id, session.acp_session_id)
+    rec = SimpleNamespace(
+        session_id=session.session_id,
+        protocol_version=PROTOCOL_VERSION,
+        host_version="test",
+        host_pid=123,
+        child_pid=456,
+        created_at=now,
+        resume_on_reattach=False,
+        boundary="local",
+    )
+
+    reattach_started = asyncio.Event()
+    release_reattach = asyncio.Event()
+
+    async def slow_reattach_one(rec_arg, session_arg, **kwargs):
+        reattach_started.set()
+        await release_reattach.wait()
+        # A successful reattach establishes a live client and lands IDLE --
+        # exactly what must not survive a stop that raced it.
+        session_arg.client = object()
+        session_arg.status = SessionStatus.IDLE
+        return True
+
+    monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(manager, "_reattach_one", slow_reattach_one)
+
+    reattach_task = asyncio.create_task(manager.recover_disconnected_hosts())
+    await reattach_started.wait()
+
+    stop_task = asyncio.create_task(manager.stop_session(session.session_id))
+    await asyncio.sleep(0)  # let stop_session start waiting on the lock
+    assert not stop_task.done()
+
+    release_reattach.set()
+    await reattach_task
+    await stop_task
+
+    # Stop must win: the session ends dormant, not silently revived by the
+    # reattach that raced it.
+    assert session.status is SessionStatus.STOPPED
+    assert session.client is None
+    assert session.background_recovery_enabled is False
+    assert tmp_db.get_session(session.session_id)["background_recovery_enabled"] == 0
+
+
+@pytest.mark.asyncio
+async def test_recover_disconnected_hosts_skips_failed_session(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    """A FAILED session with a surviving HostRecord (partial/inconclusive
+    cleanup) must wait for explicit recovery (#2379), the same terminal-state
+    guard the startup reattach path already applies."""
+    from agent_bridge.session_host.protocol import PROTOCOL_VERSION
+
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.FAILED
+    session.acp_session_id = "acp-1"
+    session.client = None
+    manager._sessions[session.session_id] = session
+    rec = SimpleNamespace(
+        session_id=session.session_id,
+        protocol_version=PROTOCOL_VERSION,
+        host_version="test",
+        host_pid=123,
+        child_pid=456,
+        created_at=time.time(),
+        resume_on_reattach=False,
+        boundary="local",
+    )
+    attach = AsyncMock(return_value=True)
+    monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(manager, "_reattach_one", attach)
+
+    assert await manager.recover_disconnected_hosts() == 0
+    attach.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recover_disconnected_hosts_feeds_codespace_unavailable_into_backoff(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    """An unavailable CodeSpace venue must feed the same backoff/dormancy
+    bookkeeping as a failed reattach (#2378/#2379), not bypass it via a bare
+    ``continue`` -- otherwise a persistently unavailable target is probed on
+    every heartbeat and never reaches idle dormancy."""
+    import agent_bridge.session_manager as sm
+    from agent_bridge.session_manager import _BACKGROUND_RECOVERY_IDLE_DORMANCY_AFTER
+
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.IDLE
+    session.acp_session_id = "acp-1"
+    session.client = None
+    manager._sessions[session.session_id] = session
+    rec = SimpleNamespace(
+        session_id=session.session_id,
+        protocol_version=1,
+        host_version="test",
+        host_pid=123,
+        child_pid=456,
+        created_at=1000.0,
+        resume_on_reattach=False,
+        boundary="codespace",
+    )
+    manager._host_index.register(
+        HostRecord(
+            session_id=session.session_id,
+            port=49555,
+            host_pid=123,
+            child_pid=456,
+        )
+    )
+    now = 1000.0
+    monkeypatch.setattr(sm.time, "time", lambda: now)
+    monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(manager, "_recover_remote_host_records", AsyncMock(return_value=0))
+    reattach = AsyncMock(return_value=True)
+    monkeypatch.setattr(manager, "_reattach_one", reattach)
+    monkeypatch.setattr(
+        manager, "_codespace_host_available", AsyncMock(return_value=False),
+    )
+
+    for _ in range(_BACKGROUND_RECOVERY_IDLE_DORMANCY_AFTER):
+        assert await manager.recover_disconnected_hosts() == 0
+        now = manager._disconnected_reattach_retry_at.get(session.session_id, now)
+
+    # An unavailable venue never even attempts a reattach...
+    reattach.assert_not_awaited()
+    # ...but still accrues failures and reaches idle dormancy exactly like a
+    # failed reattach would.
+    assert session.status is SessionStatus.STOPPED
+    assert session.background_recovery_enabled is False
+
+
+def test_ensure_columns_backfills_background_recovery_for_stopped_rows(
+    tmp_path,
+) -> None:
+    """A sessions table stamped at the current schema_version but missing
+    ``background_recovery_enabled`` (the #815 elevated-DB shape) must not
+    just add the column with its blanket ``DEFAULT 1`` -- existing ``stopped``
+    rows must land dormant (0), same as the v19 migration's own backfill,
+    or the safety net would silently re-enable background recovery for
+    already-dormant sessions."""
+    import sqlite3
+
+    from agent_bridge.db import SCHEMA_VERSION, Database
+
+    path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(str(path))
+    conn.executescript(
+        f"""
+        CREATE TABLE schema_version (version INTEGER NOT NULL);
+        INSERT INTO schema_version (version) VALUES ({SCHEMA_VERSION});
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            agent_name TEXT,
+            caller_id TEXT,
+            target_dir TEXT,
+            target_type TEXT NOT NULL DEFAULT 'local',
+            target_json TEXT,
+            status TEXT NOT NULL DEFAULT 'created',
+            pid INTEGER,
+            acp_session_id TEXT,
+            config_json TEXT,
+            predecessor_id TEXT,
+            successor_id TEXT,
+            handoff_at REAL,
+            created_at REAL NOT NULL DEFAULT 0,
+            updated_at REAL NOT NULL DEFAULT 0
+        );
+        INSERT INTO sessions (id, name, status, created_at, updated_at)
+        VALUES ('stopped-1', 'agent', 'stopped', 0, 0);
+        INSERT INTO sessions (id, name, status, created_at, updated_at)
+        VALUES ('idle-1', 'agent', 'idle', 0, 0);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    # Opening the Database runs _init_schema -> _ensure_columns.
+    Database(str(path))
+
+    check = sqlite3.connect(str(path))
+    rows = {
+        r[0]: r[1]
+        for r in check.execute(
+            "SELECT id, background_recovery_enabled FROM sessions"
+        )
+    }
+    check.close()
+    assert rows == {"stopped-1": 0, "idle-1": 1}
+
+
+@pytest.mark.asyncio
 async def test_stopped_container_resume_reattaches_without_refresh(
     tmp_db, tmp_path, monkeypatch,
 ) -> None:
