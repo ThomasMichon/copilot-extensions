@@ -32,3 +32,32 @@ class TestParseCodename:
         for bad in (None, False, True, 7, 3.5, [], {}):
             cfg = parse_codename({"wordlist_path": bad})
             assert cfg.wordlist_path == ""
+
+    def test_wordlist_path_configured_false_when_key_absent(self) -> None:
+        cfg = parse_codename({})
+        assert cfg.wordlist_path == ""
+        assert cfg.wordlist_path_configured is False
+
+    def test_wordlist_path_configured_true_when_key_present_and_valid(
+        self,
+    ) -> None:
+        cfg = parse_codename({"wordlist_path": "config/codenames.yaml"})
+        assert cfg.wordlist_path_configured is True
+
+    def test_wordlist_path_configured_true_for_malformed_value(self) -> None:
+        # codename-attribution-by-default (round-13 finding): a malformed
+        # value normalizes wordlist_path to the same empty string as a
+        # genuinely absent key -- wordlist_path_configured must still be
+        # True, so classification callers can tell "no custom wordlist"
+        # apart from "a custom wordlist was configured but is malformed"
+        # (the latter must still classify as custom/unsafe, never
+        # built-in).
+        for bad in (None, False, True, 7, 3.5, [], {}):
+            cfg = parse_codename({"wordlist_path": bad})
+            assert cfg.wordlist_path == ""
+            assert cfg.wordlist_path_configured is True
+
+    def test_wordlist_path_configured_false_for_non_mapping_raw(self) -> None:
+        assert parse_codename(None).wordlist_path_configured is False
+        assert parse_codename("not-a-mapping").wordlist_path_configured is False
+

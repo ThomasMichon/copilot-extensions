@@ -1494,6 +1494,11 @@ def test_new_worktree_survives_optional_assignment_state_failure(
     )
     monkeypatch.setattr(m.activity, "log_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(m, "_repo_session_env", lambda *_args, **_kwargs: {})
+    # codename-attribution-by-default (PR #3037 review finding): the
+    # allocation-policy second revalidation reloads config fresh -- this
+    # test's config is a bare, in-memory `cfg.Config`, never registered as
+    # a real project on disk, so resolve the reload back to it directly.
+    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
 
     result = m._create_worktree_core(
         config,

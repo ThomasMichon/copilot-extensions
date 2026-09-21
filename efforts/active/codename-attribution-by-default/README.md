@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** `pr/<slug>` per phase
 - **Created:** 2026-09-20
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** vision-extending — `visions/plugins/agent-worktrees/pull-requests`
   now explicitly covers the PR-marker/codename mechanism (revised
   2026-09-20, round-23 finding: it previously described only the
@@ -171,24 +171,24 @@ these decisions directly and assumes this design is understood.
 ## Plan
 
 ### Phase 1 — Flip the default, reconcile both code paths
-- [ ] Change `_parse_pr`'s fallback: `raw.get("source_attribution", False)` →
+- [x] Change `_parse_pr`'s fallback: `raw.get("source_attribution", False)` →
   `raw.get("source_attribution", "codename")`.
-- [ ] Change `PRConfig.source_attribution`'s dataclass default from `False`
+- [x] Change `PRConfig.source_attribution`'s dataclass default from `False`
   to `"codename"` (the missing-`pr`-block early return in `_parse_pr` and
   any bare `PRConfig()` construction must match the parsed-default path —
   see Context's "design decision" above; do not change only one of the two
   places).
-- [ ] Audit and update every test that constructs a bare `PRConfig()` (or
+- [x] Audit and update every test that constructs a bare `PRConfig()` (or
   relies on the parsed absent-key default) and currently asserts
   `.source_attribution is False` — there are multiple across
   `test_config.py`/`test_pr_ops.py`/`test_providers.py`. Update each to the
   new default explicitly, with a comment noting WHY (this effort), so a
   future reader doesn't mistake it for an unrelated regression.
-- [ ] Verify `source_attribution_configured` behavior is unaffected (still
+- [x] Verify `source_attribution_configured` behavior is unaffected (still
   `False` by dataclass default, `True` only when the raw key is literally
   present) — no code change expected here, but add a regression test
   proving the two fields don't drift together.
-- [ ] **Widen `attribution` parameter typing across `pr_ops.py` to match
+- [x] **Widen `attribution` parameter typing across `pr_ops.py` to match
   `SourceAttribution` (round-18 finding)** — `create_pr`,
   `_finish_auto_open`, and `_push_existing_feature` all annotate their
   `attribution` override parameter `bool | None`, but `create_pr` already
@@ -214,7 +214,7 @@ these decisions directly and assumes this design is understood.
   produces a published codename marker — proving the annotation change
   didn't accompany a silent runtime behavior change, since ruff's F/E9
   selection does not itself catch a parameter-type mismatch.
-- [ ] **Implement the custom-wordlist exclusion decision** from Context —
+- [x] **Implement the custom-wordlist exclusion decision** from Context —
   this is an **allocation-time** gate only, distinct from the **publish-
   time** `codename_source` gate below (round-15 finding: the two must be
   implemented as separate checks, not one shared condition, or an
@@ -257,7 +257,7 @@ these decisions directly and assumes this design is understood.
   regress ordinary local-only Picker usage — three tests, not two, so an
   overbroad implementation (blocking (c)) or an underbroad one (missing
   (a)) both fail.
-- [ ] **Apply the identical, identically-scoped allocation-time preflight
+- [x] **Apply the identical, identically-scoped allocation-time preflight
   to the NORMAL `create` path, not just the paired-knowledge path
   (round-21 finding)** — the bullets above and below only specify this
   policy for `_carve_paired_knowledge` (the knowledge-repo carve);
@@ -287,7 +287,7 @@ these decisions directly and assumes this design is understood.
   with a custom wordlist and omitted `source_attribution` fails outright,
   before any worktree/branch/record exists — the direct normal-path
   analog of the paired-knowledge preflight test below.
-- [ ] **Centralize the allocation-time gate INSIDE `ensure_codename`
+- [x] **Centralize the allocation-time gate INSIDE `ensure_codename`
   itself, not just at `create`/paired-knowledge call sites (round-26
   finding)** — `ensure_codename` is the SHARED lazy-backfill function three
   more callers invoke directly to allocate a missing codename, none of
@@ -317,7 +317,7 @@ these decisions directly and assumes this design is understood.
   a custom wordlist and omitted `source_attribution`, on a record with no
   codename yet, fail with the policy error rather than silently
   allocating one.
-- [ ] **Persist `codename_source` through serialization** (round-9
+- [x] **Persist `codename_source` through serialization** (round-9
   finding): `WorktreeRecord` is manually round-tripped through YAML, not
   via a generic dataclass (de)serializer — `tracking.load_record` parses
   known keys explicitly (`tracking.py`'s `codename=(str(data["codename"])
@@ -329,7 +329,7 @@ these decisions directly and assumes this design is understood.
   following the exact same only-emit-when-set pattern the `codename` field
   itself uses (so a legacy YAML file with no `codename_source` line
   parses to `None`, not a crash or a silently-wrong default).
-- [ ] **Set `codename_source` at every codename-assignment call site**, not
+- [x] **Set `codename_source` at every codename-assignment call site**, not
   just one: (a) the normal `create` path (`__main__.py`'s
   `codename_tracking.assign_new_codename` call feeding
   `create_new_record`'s `codename=` kwarg, ~line 2268); (b) the paired
@@ -361,7 +361,7 @@ these decisions directly and assumes this design is understood.
   failure modes are closed by the single flag defined next; a value's
   *validity* or a file's *loadability* are irrelevant to classification,
   only the raw key's *presence* matters.
-- [ ] **Add a `wordlist_path_configured` flag to distinguish "absent" from
+- [x] **Add a `wordlist_path_configured` flag to distinguish "absent" from
   "present but malformed" (round-13 finding)** — extend `CodenameConfig`
   with a `wordlist_path_configured: bool` field, set by `parse_codename` to
   `True` whenever the raw `codename:` block's `wordlist_path` key is
@@ -374,7 +374,7 @@ these decisions directly and assumes this design is understood.
   proving: `wordlist_path: []` (or any other non-string value) still
   classifies `"custom"`, not `"built-in"`, and a valid string path naming a
   missing/malformed file also classifies `"custom"`.
-- [ ] **Fix `ensure_codename`'s signature and provenance-copy gap
+- [x] **Fix `ensure_codename`'s signature and provenance-copy gap
   (round-12 finding):** the lazy-backfill function currently accepts only
   a resolved `wordlist: Wordlist | None` parameter (never the raw path,
   so it cannot classify `codename_source` itself per the rule above), AND
@@ -392,7 +392,7 @@ these decisions directly and assumes this design is understood.
   concurrent `ensure_codename` calls on the same record, where one wins
   the race — the LOSING caller's returned record still carries the
   correct `codename_source`, not `None`/a default.
-- [ ] **Fix the paired-knowledge path's error-swallowing at BOTH layers
+- [x] **Fix the paired-knowledge path's error-swallowing at BOTH layers
   (round-10 + round-11 findings):** `_carve_paired_knowledge` currently
   wraps `cfg.load_config(project=knowledge_name)` +
   `codename_tracking.wordlist_for_repo(...)` in a bare
@@ -463,7 +463,7 @@ these decisions directly and assumes this design is understood.
   simulating the race (policy becomes violated only after the second
   preflight check) asserting the failure message names the orphaned
   worktree path/branch and that no automatic rollback is attempted.
-- [ ] **Propagate the policy exception at the `create-pr` boundary too
+- [x] **Propagate the policy exception at the `create-pr` boundary too
   (round-16 finding)** — the paired-knowledge fix above covers the
   `create` command's harness-carve path, but `ensure_codename`'s OTHER
   call site (`pr_ops.py`'s `_open_via_provider`, the `codename`-marker
@@ -513,7 +513,7 @@ these decisions directly and assumes this design is understood.
   only after the preflight passes) still fails via the re-raise path, with
   the branch/record left in place and no automatic rollback attempted —
   the direct `create-pr` analog of the other preflights' race tests.
-- [ ] **Merge `codename`/`codename_source` under the record lock during
+- [x] **Merge `codename`/`codename_source` under the record lock during
   concurrent saves (round-11 finding):** `_save_record_unlocked` already
   merges several fields (handoff reservations, lifecycle/session-backend/
   execution-leg state) from the current on-disk record into a stale
@@ -529,12 +529,12 @@ these decisions directly and assumes this design is understood.
   regression test: a save from a stale in-memory record (predating a
   concurrent codename assignment) does not erase the codename or its
   provenance that a concurrent writer set under the lock.
-- [ ] **Round-trip test**: assign a codename (setting `codename_source`),
+- [x] **Round-trip test**: assign a codename (setting `codename_source`),
   `save_record`, `load_record` the same file back, assert
   `codename_source` survives unchanged — proving the serialization wiring
   above actually persists the field rather than just existing on the
   in-memory dataclass.
-- [ ] **Implement per-record codename provenance** (the legacy-record gap
+- [x] **Implement per-record codename provenance** (the legacy-record gap
   from Context): add a `codename_source` field (`"built-in"` or
   `"custom"`) to `WorktreeRecord`, populated once at codename-assignment
   time from whether the repo has `codename.wordlist_path` configured at
@@ -642,7 +642,7 @@ these decisions directly and assumes this design is understood.
   by itself is never sufficient to publish a `"custom"`-sourced record —
   proving the helper reads `source_attribution_configured`, not just
   `attribution`'s value, to decide (a) vs. (b).
-- [ ] **Backfill migration for existing `WorktreeRecord`s created before
+- [x] **Backfill migration for existing `WorktreeRecord`s created before
   this field existed (round-10 finding: keep this fail-closed, never
   infer from current config):** a record with no `codename_source`
   recorded is permanently treated as `"custom"` (fail closed under the
@@ -660,7 +660,7 @@ these decisions directly and assumes this design is understood.
   record fails closed by default regardless of the owning repo's current
   config, and that no code path auto-promotes it without an explicit,
   individually-targeted operator edit.
-- [ ] **Freeze each PR's attribution decision (mode AND explicitness) at
+- [x] **Freeze each PR's attribution decision (mode AND explicitness) at
   PRRecord-creation time, at EVERY creation site; strictly validate the
   persisted pair; protect it under concurrent-save merge (rounds
   26-32)** — full rationale, gap enumeration, and regression-test
@@ -792,7 +792,7 @@ these decisions directly and assumes this design is understood.
     strict-parsing edge cases, explicit-opt-in provenance narrowing,
     `pr_revision` round-trip, per-entry stale-writer merge across
     parallel PRs, legacy-PR lazy-freeze-at-first-touch).
-- [ ] **Versioning gate (required for this phase's PR):** this phase
+- [x] **Versioning gate (required for this phase's PR):** this phase
   changes `agent-worktrees` runtime source (`config.py`). Per
   `AGENTS.md`'s Version Bump section, bump `plugins/agent-worktrees/plugin.json`,
   `plugins/agent-worktrees/pyproject.toml`, the `agent-worktrees` entry in
@@ -1310,14 +1310,68 @@ _Pending._
 ## Journal
 
 > Dated, append-only running log of the effort. Full round-6 through
-> round-37 history lives in **[journal.md](journal.md)** to keep this
+> round-38 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.
 
 
 
-### 2026-09-20 — Plan-review round 38 fixes
+### 2026-09-20 — Phase 1 implementation (13 slices, all tested)
 
-- Confirmed: both round-37 findings (inline `pr_id` backfill, freeze-
+PR #2978 (the plan-review PR) merged after 39 rounds. This session
+implemented Phase 1 of the merged plan in a fresh worktree, as 13
+atomic, individually-tested commits (full `agent-worktrees` suite
+green at every commit, 4637 tests passing at the end):
+
+1. Flipped `source_attribution`'s implicit default to `"codename"` in
+   both code paths (`_parse_pr`'s fallback and `PRConfig`'s dataclass
+   default); widened the `attribution` override parameter across
+   `pr_ops.py` to `SourceAttribution | None` (round-18).
+2. Added `wordlist_path_configured` to `CodenameConfig`.
+3. Added `WorktreeRecord.codename_source` + serialization wiring.
+4. Added `CodenameAttributionPolicyError` + centralized the
+   allocation-time gate inside `ensure_codename`'s actual-allocation
+   branch, wired at all 3 call sites (`_open_via_provider`,
+   `resume`/`status --write` backfill).
+5. Added allocation-time preflights (+ second revalidation) to the
+   normal `create` path and the paired-knowledge carve, restructuring
+   the latter so the policy check sits outside the config-load
+   try/except that previously could have swallowed it.
+6. Merged `codename`/`codename_source` under the record lock in
+   `_save_record_unlocked`.
+7. Added the shared `may_publish_codename` publish-time gating helper,
+   wired into both `_open_via_provider` and `refresh_source_attribution`.
+8. Added `PRRecord.attribution_mode`/`attribution_explicit`/`pr_id`/
+   `pr_revision` with strict YAML load/save wiring.
+9. Stamped the frozen attribution pair + `pr_id` at all 3
+   fresh-construction sites via `tracking.stamp_frozen_attribution`.
+10. Restructured `refresh_source_attribution` so the legacy-freeze
+    runs BEFORE any live-config-dependent early return; dropped
+    `_finish_auto_open`'s live-config caller gate.
+11. Implemented the per-entry PR merge in `_save_record_unlocked`
+    (`_pr_identity_match`/`_merge_pr_attribution_state`): `pr_id` as
+    canonical identity, the round-35 branch/number rule as a one-time
+    legacy-reconciliation bridge, inline backfill (no separate
+    migration mechanism), `pr_revision`-gated overwrite.
+12. Version bump (`plugin.json`/`pyproject.toml`/marketplace entry +
+    catalog `metadata.version`).
+13. Checked off this Phase's checklist above; ~50 new regression tests
+    added across the 12 code slices, covering the allocation/publish
+    gating matrix, the freeze/merge mechanism's edge cases, and the
+    provenance fail-closed rules the 39-round review process
+    specified.
+
+One real bug caught by the new merge logic itself, mid-session: a test
+scenario that reused the same branch name across independent
+"scenarios" got its frozen state correctly carried forward by the
+merge (exactly the intended behavior) rather than reset, requiring the
+TEST to be fixed (distinct branches per scenario), not the
+implementation -- a good sign the merge logic works as designed.
+
+Not yet done: Phases 2-4 (downstream messaging fixes, repo config
+rollout, live validation) remain future work. This Phase 1 PR has not
+yet been opened/pushed as of this entry.
+
+
   before-guard ordering) verified correct — this round's review lists
   them under "Resolved since last review."
 - Two new genuine findings, plus two "previously missed" findings in

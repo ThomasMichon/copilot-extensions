@@ -39,6 +39,26 @@ def _common_patches(monkeypatch, tmp_path):
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda a, b: False)
     monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda p: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
+    # codename-attribution-by-default (PR #3037 review finding): the
+    # allocation-policy second revalidation reloads config fresh -- tests
+    # in this module don't register a real project on disk, so give the
+    # reload a benign default (no custom wordlist, PR inactive) rather
+    # than letting it fail into the conservative-deny fallback for every
+    # test that doesn't explicitly opt into the policy scenario.
+    # TestCarvePairedKnowledgeAttributionPolicy's own `_setup` overrides
+    # this with a scenario-specific config afterward.
+    from agent_worktrees.codename_config import CodenameConfig
+    monkeypatch.setattr(
+        m.cfg, "load_config",
+        lambda project=None: types.SimpleNamespace(
+            default_repo=types.SimpleNamespace(
+                codename=CodenameConfig(),
+                pr=types.SimpleNamespace(
+                    enabled=False, source_attribution_configured=False,
+                ),
+            )
+        ),
+    )
 
 
 class TestCarvePairedKnowledge:
@@ -142,6 +162,12 @@ class TestCarvePairedKnowledge:
         # worktree is a real, independently-lookup-able record and must get
         # its own codename, scoped to its own project's tracking directory.
         assert krec.codename
+        # codename-attribution-by-default: a config-load failure (no real
+        # project config for this knowledge repo in the test env) degrades
+        # only the wordlist resolution, never authorizes an allocation the
+        # policy would otherwise block -- classifies to the safe
+        # "built-in" default.
+        assert krec.codename_source == "built-in"
         assert krec.pair_id == "20260806-ab"
         assert krec.pair_ref == "test/citadel-harness/test-win-20260806-ab"
         assert not (tmp_path / "test-win-20260806-ab-k.yaml").exists()
@@ -192,6 +218,250 @@ class TestCarvePairedKnowledge:
         assert refreshed["called"] is True
         # No knowledge tracking record either.
         assert list(tmp_path.glob("*.yaml")) == []
+
+
+class TestCarvePairedKnowledgeAttributionPolicy:
+    """codename-attribution-by-default (round-10/11/12/13/14 findings):
+    the paired-knowledge carve must preflight the SAME allocation-time
+    policy the harness's own create path enforces, for the KNOWLEDGE
+    project's own config -- and never silently swallow a policy violation
+    into a built-in-wordlist fallback."""
+
+    def _knowledge_config_with_custom_wordlist(
+        self, tmp_path, *, source_attribution_configured: bool,
+    ):
+        from agent_worktrees.codename_config import CodenameConfig
+        wordlist_file = tmp_path / "custom-words.yaml"
+        wordlist_file.write_text("- alpha\n- bravo\n- charlie\n")
+        return types.SimpleNamespace(
+            default_repo=types.SimpleNamespace(
+                codename=CodenameConfig(
+                    wordlist_path=str(wordlist_file), wordlist_path_configured=True,
+                ),
+                pr=types.SimpleNamespace(
+                    enabled=True,
+                    source_attribution_configured=source_attribution_configured,
+                ),
+                worktree_root=str(tmp_path / "worktrees"),
+            )
+        )
+
+    def _setup(self, monkeypatch, tmp_path, *, source_attribution_configured):
+        _common_patches(monkeypatch, tmp_path)
+        k_anchor = tmp_path / "knowledge"
+        k_anchor.mkdir()
+        monkeypatch.setattr(
+            m.state_root_mod, "resolve_state_root",
+            lambda c: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
+        )
+        entry = repos_mod.RepoEntry(
+            name="citadel-knowledge", repo_class="worktree",
+            remote="https://example.com/citadel-knowledge.git",
+            default_branch="main",
+        )
+        monkeypatch.setattr(repos_mod, "find_repo", lambda n: entry)
+        monkeypatch.setattr(
+            m.git_ops, "resolve_remote_name", lambda value, *, cwd: "origin",
+        )
+        knowledge_config = self._knowledge_config_with_custom_wordlist(
+            tmp_path, source_attribution_configured=source_attribution_configured,
+        )
+        monkeypatch.setattr(m.cfg, "load_config", lambda project=None: knowledge_config)
+        called = {"carve": False}
+        monkeypatch.setattr(
+            m.git_ops, "create_worktree",
+            lambda *a, **k: called.__setitem__("carve", True),
+        )
+        monkeypatch.setattr(
+            m.git_ops, "prepare_worktree_base",
+            lambda *a, **k: types.SimpleNamespace(
+                start_point="origin/main", fetched=True, fetch_error=None,
+                anchor=types.SimpleNamespace(updated=True, reason="updated", behind=0),
+            ),
+        )
+        return called
+
+    def test_custom_wordlist_unconfigured_blocks_before_any_side_effect(
+        self, monkeypatch, tmp_path,
+    ):
+        called = self._setup(
+            monkeypatch, tmp_path, source_attribution_configured=False,
+        )
+        from agent_worktrees import codename_tracking
+        try:
+            m._carve_paired_knowledge(
+                _config(machine="test"), harness_id="test-win-20260806-ab",
+                timestamp="20260806", suffix="ab", plat="windows",
+                plat_short="win",
+            )
+        except codename_tracking.CodenameAttributionPolicyError:
+            pass
+        else:
+            raise AssertionError("expected CodenameAttributionPolicyError")
+        assert called["carve"] is False
+        assert not (tmp_path / ".citadel-knowledge").exists()
+
+    def test_explicit_opt_in_allows_carve(self, monkeypatch, tmp_path):
+        called = self._setup(
+            monkeypatch, tmp_path, source_attribution_configured=True,
+        )
+        stamp = m._carve_paired_knowledge(
+            _config(machine="test"), harness_id="test-win-20260806-ab",
+            timestamp="20260806", suffix="ab", plat="windows", plat_short="win",
+        )
+        assert stamp is not None
+        assert called["carve"] is True
+        krec = tk.load_record_by_id(
+            "test-win-20260806-ab-k",
+            tracking_path=tmp_path / ".citadel-knowledge" / "worktrees",
+        )
+        assert krec is not None
+        assert krec.codename_source == "custom"
+
+    def test_second_revalidation_recomputes_from_fresh_config(
+        self, monkeypatch, tmp_path,
+    ):
+        # PR #3037 review finding: the second revalidation (immediately
+        # before the first side effect, under the allocation lock) must
+        # RECOMPUTE the policy from a freshly-loaded config, not reuse the
+        # pre-lock snapshot -- otherwise it can never observe a config
+        # change landing between the preflight and this point, making the
+        # claimed TOCTOU-window shrink hollow. Simulate exactly that: the
+        # preflight sees an EXPLICIT opt-in (passes), but by the time the
+        # lock is held, cfg.load_config resolves an UNCONFIGURED policy --
+        # the second check must catch it.
+        called = self._setup(
+            monkeypatch, tmp_path, source_attribution_configured=True,
+        )
+        unconfigured_config = self._knowledge_config_with_custom_wordlist(
+            tmp_path, source_attribution_configured=False,
+        )
+        monkeypatch.setattr(
+            m.cfg, "load_config", lambda project=None: unconfigured_config,
+        )
+        from agent_worktrees import codename_tracking
+        try:
+            m._carve_paired_knowledge(
+                _config(machine="test"), harness_id="test-win-20260806-ab",
+                timestamp="20260806", suffix="ab", plat="windows",
+                plat_short="win",
+            )
+        except codename_tracking.CodenameAttributionPolicyError:
+            pass
+        else:
+            raise AssertionError("expected CodenameAttributionPolicyError")
+        assert called["carve"] is False
+
+
+class TestPairedKnowledgeAllocationEarlyPreflight:
+    """Round-6 review finding: `_paired_knowledge_allocation_preflight`
+    lets `_create_worktree_core` catch a paired-knowledge policy
+    violation BEFORE it creates the harness's own worktree/branch/record
+    -- `_carve_paired_knowledge`'s own preflight only runs AFTER those
+    harness side effects already exist."""
+
+    def _knowledge_config_with_custom_wordlist(
+        self, tmp_path, *, source_attribution_configured: bool,
+    ):
+        from agent_worktrees.codename_config import CodenameConfig
+        wordlist_file = tmp_path / "custom-words.yaml"
+        wordlist_file.write_text("- alpha\n- bravo\n- charlie\n")
+        return types.SimpleNamespace(
+            default_repo=types.SimpleNamespace(
+                codename=CodenameConfig(
+                    wordlist_path=str(wordlist_file), wordlist_path_configured=True,
+                ),
+                pr=types.SimpleNamespace(
+                    enabled=True,
+                    source_attribution_configured=source_attribution_configured,
+                ),
+            )
+        )
+
+    def _setup(self, monkeypatch, tmp_path, *, source_attribution_configured):
+        k_anchor = tmp_path / "knowledge"
+        k_anchor.mkdir()
+        monkeypatch.setattr(
+            m.state_root_mod, "resolve_state_root",
+            lambda c: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
+        )
+        entry = repos_mod.RepoEntry(
+            name="citadel-knowledge", repo_class="worktree",
+            remote="https://example.com/citadel-knowledge.git",
+            default_branch="main",
+        )
+        monkeypatch.setattr(repos_mod, "find_repo", lambda n: entry)
+        knowledge_config = self._knowledge_config_with_custom_wordlist(
+            tmp_path, source_attribution_configured=source_attribution_configured,
+        )
+        monkeypatch.setattr(m.cfg, "load_config", lambda project=None: knowledge_config)
+
+    def test_blocks_before_harness_can_be_examined(self, monkeypatch, tmp_path):
+        self._setup(monkeypatch, tmp_path, source_attribution_configured=False)
+        from agent_worktrees import codename_tracking
+
+        try:
+            m._paired_knowledge_allocation_preflight(_config(machine="test"))
+        except codename_tracking.CodenameAttributionPolicyError:
+            pass
+        else:
+            raise AssertionError("expected CodenameAttributionPolicyError")
+
+    def test_allows_explicit_opt_in(self, monkeypatch, tmp_path):
+        self._setup(monkeypatch, tmp_path, source_attribution_configured=True)
+        # Must not raise.
+        m._paired_knowledge_allocation_preflight(_config(machine="test"))
+
+    def test_unbound_harness_is_a_no_op(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            m.state_root_mod, "resolve_state_root",
+            lambda c: _state_root(path=None, repo="", requires_external=False,
+                                   bound=False),
+        )
+        # Must not raise -- no pairing applies.
+        m._paired_knowledge_allocation_preflight(_config(machine="test"))
+
+    def test_create_worktree_core_refuses_before_harness_side_effects(
+        self, monkeypatch, tmp_path,
+    ):
+        # Full integration: the harness's OWN policy is fine (built-in
+        # wordlist, PR disabled), but the paired-knowledge repo's is not
+        # -- `_create_worktree_core` must refuse before creating the
+        # harness worktree/branch/record, not only inside
+        # `_carve_paired_knowledge` (which runs after those exist).
+        self._setup(monkeypatch, tmp_path, source_attribution_configured=False)
+        from agent_worktrees import config as cfg_mod
+
+        harness_anchor = tmp_path / "harness-anchor"
+        harness_anchor.mkdir()
+        harness_config = cfg_mod.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="linux",
+            repo_name="citadel-harness",
+            repos={
+                "citadel-harness": cfg_mod.RepoConfig(
+                    anchor=str(harness_anchor),
+                    worktree_root=str(tmp_path / "harness-worktrees"),
+                )
+            },
+        )
+        create_worktree_calls: list[object] = []
+        monkeypatch.setattr(
+            m.git_ops, "create_worktree",
+            lambda *a, **k: create_worktree_calls.append((a, k)),
+        )
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+
+        from agent_worktrees import codename_tracking
+        try:
+            m._create_worktree_core(harness_config)
+        except codename_tracking.CodenameAttributionPolicyError:
+            pass
+        else:
+            raise AssertionError("expected CodenameAttributionPolicyError")
+        assert not create_worktree_calls
+        assert not (tmp_path / "harness-worktrees").exists()
 
 
 class TestCreatePairPluginComposition:

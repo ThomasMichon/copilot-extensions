@@ -9,6 +9,8 @@ import argparse
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg
 from agent_worktrees import tracking
@@ -32,7 +34,9 @@ def _create_config(tmp_path: Path) -> cfg.Config:
     )
 
 
-def _stub_create_worktree_core_internals(monkeypatch, tmp_path: Path) -> None:
+def _stub_create_worktree_core_internals(
+    monkeypatch, tmp_path: Path, config: cfg.Config | None = None,
+) -> None:
     """Neutralize every side-effecting internal except the tracking-store
     write path, so the real ``create_new_record``/codename assignment runs.
     """
@@ -61,6 +65,18 @@ def _stub_create_worktree_core_internals(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(m, "_repo_session_env", lambda *_a, **_k: {})
     monkeypatch.setattr(m, "_build_env", lambda *_a, **_k: {})
     monkeypatch.setattr(m, "_apply_assignment_env", lambda env, _selection: env)
+    # codename-attribution-by-default (PR #3037 review finding): the
+    # allocation-policy second revalidation reloads config fresh (never
+    # reusing the pre-lock snapshot) -- this test's config is a bare,
+    # in-memory `cfg.Config`, never registered as a real project on disk,
+    # so `cfg.load_config(project=...)` would otherwise fail here (a
+    # legitimate difference from real usage, not the race the fresh-reload
+    # fix targets) and trip the new fail-closed fallback. Resolve it back
+    # to the SAME config object the caller already constructed (never
+    # reconstruct one -- `_create_config` creates the anchor directory,
+    # which would raise on a second call).
+    if config is not None:
+        monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
 
 
 class TestCreateAssignsCodename:
@@ -70,7 +86,7 @@ class TestCreateAssignsCodename:
         config = _create_config(tmp_path)
         tracking_path = tmp_path / "tracking"
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_path)
-        _stub_create_worktree_core_internals(monkeypatch, tmp_path)
+        _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
 
         result = m._create_worktree_core(config)
 
@@ -85,12 +101,85 @@ class TestCreateAssignsCodename:
         config = _create_config(tmp_path)
         tracking_path = tmp_path / "tracking"
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_path)
-        _stub_create_worktree_core_internals(monkeypatch, tmp_path)
+        _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
 
         first = m._create_worktree_core(config)
         second = m._create_worktree_core(config)
 
         assert first["worktree"]["codename"] != second["worktree"]["codename"]
+
+
+class TestCreatePolicyPreflightIntegration:
+    """PR #3037 review finding: dedicated integration coverage for the
+    normal `create` path's allocation-time policy preflight -- a PR-active
+    repo with a custom wordlist configured but `pr.source_attribution`
+    omitted must refuse to allocate a codename, and must do so before ANY
+    `create` side effect (no git worktree/branch, no tracking record, no
+    owner claim). Earlier coverage only exercised
+    `codename_tracking.check_allocation_policy` directly; this exercises
+    the real `_create_worktree_core` call site end to end.
+    """
+
+    def test_create_worktree_core_refuses_before_any_side_effect(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        anchor = tmp_path / "anchor"
+        anchor.mkdir()
+        config = cfg.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="windows",
+            repo_name="demo-repo",
+            repos={
+                "demo-repo": cfg.RepoConfig(
+                    anchor=str(anchor),
+                    worktree_root=str(tmp_path / "worktrees"),
+                    pr=cfg.PRConfig(enabled=True, source_attribution_configured=False),
+                    codename=cfg.CodenameConfig(
+                        wordlist_path=str(tmp_path / "custom-wordlist.json"),
+                        wordlist_path_configured=True,
+                    ),
+                )
+            },
+        )
+        tracking_path = tmp_path / "tracking"
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_path)
+        _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+        create_worktree_calls: list[object] = []
+        monkeypatch.setattr(
+            m.git_ops,
+            "create_worktree",
+            lambda *a, **k: create_worktree_calls.append((a, k)),
+        )
+
+        with pytest.raises(m.codename_tracking.CodenameAttributionPolicyError):
+            m._create_worktree_core(config)
+
+        assert not create_worktree_calls
+        assert not tracking_path.exists() or not list(tracking_path.glob("*.yaml"))
+
+    def test_create_worktree_core_fails_closed_on_reload_failure(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """PR #3037 review finding: if the fresh config reload inside the
+        allocation lock fails, the second revalidation must degrade to a
+        conservative, ALWAYS-non-authorizing state -- never silently reuse
+        the pre-lock snapshot (which, for this benign pre-lock config,
+        would have passed). A transient reload failure must fail the
+        allocation closed, not open.
+        """
+        config = _create_config(tmp_path)  # benign: no PR, no custom wordlist
+        tracking_path = tmp_path / "tracking"
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_path)
+        _stub_create_worktree_core_internals(monkeypatch, tmp_path, config=None)
+
+        def _raise_on_reload(*_a, **_k):
+            raise RuntimeError("simulated transient config-reload failure")
+
+        monkeypatch.setattr(m.cfg, "load_config", _raise_on_reload)
+
+        with pytest.raises(m.codename_tracking.CodenameAttributionPolicyError):
+            m._create_worktree_core(config)
 
 
 class TestCodenameSelectorWiring:

@@ -26,6 +26,21 @@ class CodenameConfig:
     """
 
     wordlist_path: str = ""
+    # Whether ``codename.wordlist_path`` was an explicit key in the raw
+    # ``codename:`` block, versus omitted entirely -- distinct from
+    # ``wordlist_path``'s own truthiness. Two failure modes make the
+    # truthiness check alone unsafe for classification purposes (effort
+    # codename-attribution-by-default): (1) a present-but-malformed
+    # non-string value normalizes to the same empty string as a genuinely
+    # absent key (see below), and (2) a present-but-unloadable/missing
+    # wordlist *file* still resolves to the built-in `Wordlist` object
+    # downstream (`load_wordlist_or_default`'s own fail-soft), which is
+    # indistinguishable from "no custom path configured" if you only look
+    # at the resolved `Wordlist`. This flag lets a caller ask "did this
+    # repo configure a custom wordlist at all?" using only the raw key's
+    # *presence*, independent of whether its value is valid or its file
+    # loads.
+    wordlist_path_configured: bool = False
 
 
 def parse_codename(raw: Any) -> CodenameConfig:
@@ -41,6 +56,10 @@ def parse_codename(raw: Any) -> CodenameConfig:
     if not isinstance(raw, dict):
         return CodenameConfig()
     wordlist_path = raw.get("wordlist_path", "")
+    wordlist_path_configured = "wordlist_path" in raw
     if not isinstance(wordlist_path, str):
         wordlist_path = ""
-    return CodenameConfig(wordlist_path=wordlist_path.strip())
+    return CodenameConfig(
+        wordlist_path=wordlist_path.strip(),
+        wordlist_path_configured=wordlist_path_configured,
+    )

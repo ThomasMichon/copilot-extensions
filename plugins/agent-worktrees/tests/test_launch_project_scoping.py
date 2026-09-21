@@ -75,7 +75,7 @@ def _config(tmp_path):
     )
 
 
-def _stub_create_worktree_core_internals(monkeypatch, m, tmp_path):
+def _stub_create_worktree_core_internals(monkeypatch, m, tmp_path, config=None):
     """Neutralize every side-effecting internal `_create_worktree_core` calls,
     while running the real function body -- so its assembled `launch` dict is
     genuinely exercised, not hand-constructed by the test."""
@@ -121,6 +121,13 @@ def _stub_create_worktree_core_internals(monkeypatch, m, tmp_path):
     monkeypatch.setattr(m, "_repo_session_env", lambda *_a, **_k: {})
     monkeypatch.setattr(m, "_build_env", lambda *_a, **_k: {})
     monkeypatch.setattr(m, "_apply_assignment_env", lambda env, _selection: env)
+    # codename-attribution-by-default (PR #3037 review finding): the
+    # allocation-policy second revalidation reloads config fresh -- this
+    # test's config is a bare, in-memory `cfg.Config`, never registered as
+    # a real project on disk, so resolve the reload back to the SAME
+    # config object the test already constructed.
+    if config is not None:
+        monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
 
 
 def test_create_worktree_core_plan_project_matches_repo_name_not_ambient_global(
@@ -133,7 +140,7 @@ def test_create_worktree_core_plan_project_matches_repo_name_not_ambient_global(
     from agent_worktrees import __main__ as m
 
     config = _config(tmp_path)
-    _stub_create_worktree_core_internals(monkeypatch, m, tmp_path)
+    _stub_create_worktree_core_internals(monkeypatch, m, tmp_path, config)
     # Simulate the daemon/ambient global sitting on a stale, unrelated project
     # while this specific call is scoped (via `config`) to "demo-repo".
     monkeypatch.setattr(m.cfg, "active_project", lambda: "some-other-stale-project")

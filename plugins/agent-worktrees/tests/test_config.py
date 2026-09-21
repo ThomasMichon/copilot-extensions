@@ -162,7 +162,9 @@ class TestDataModels:
         pr = cfg.PRConfig()
         assert pr.enabled is False
         assert pr.provider == "gitea"
-        assert pr.source_attribution is False
+        # codename-attribution-by-default: implicit default is now
+        # "codename" (public-safe marker), not False.
+        assert pr.source_attribution == "codename"
         # Auto-complete completion defaults.
         assert pr.approval_required is True
         assert pr.allow_stale_approval is False
@@ -287,14 +289,16 @@ class TestPRConfigParsing:
         self, tmp_path: Path,
     ):
         # The migration audit (Phase 5) needs to tell this apart from an
-        # explicit `false` -- both parse `source_attribution` to `False`
-        # identically, but only the genuinely-absent case sets this to
+        # explicit `false` -- an absent key parses to the implicit
+        # "codename" default (codename-attribution-by-default), while
+        # only an EXPLICIT `false` produces the raw boolean `False`; only
+        # the genuinely-absent case leaves `source_attribution_configured`
         # `False`.
         cfgfile = tmp_path / "config.yaml"
         self._write(cfgfile, "    pr:\n      enabled: true\n")
         conf = cfg.load_config(cfgfile)
         pr = conf.repos["ext"].pr
-        assert pr.source_attribution is False
+        assert pr.source_attribution == "codename"
         assert pr.source_attribution_configured is False
 
     def test_pr_source_attribution_configured_false_when_pr_block_absent(
@@ -303,12 +307,58 @@ class TestPRConfigParsing:
         # Review round 4: `_parse_pr` early-returns `PRConfig()` when the
         # whole `pr:` block is missing entirely -- must not fall back to a
         # `True` default for `source_attribution_configured` there either.
+        # (codename-attribution-by-default: the bare `PRConfig()` default
+        # for `source_attribution` itself is now "codename", not False --
+        # see the design-decision note in Context re: both code paths
+        # moving together.)
         cfgfile = tmp_path / "config.yaml"
         self._write(cfgfile)
         conf = cfg.load_config(cfgfile)
         pr = conf.repos["ext"].pr
-        assert pr.source_attribution is False
+        assert pr.source_attribution == "codename"
         assert pr.source_attribution_configured is False
+
+    def test_pr_source_attribution_default_and_configured_do_not_drift(
+        self, tmp_path: Path,
+    ):
+        # codename-attribution-by-default: the implicit-default value
+        # (now "codename") and source_attribution_configured (whether the
+        # raw key was literally present) are independent axes -- flipping
+        # the former must never move the latter. Cover all four
+        # combinations: omitted key / explicit "codename" / explicit
+        # `false` / explicit `true`.
+        omitted = tmp_path / "omitted.yaml"
+        self._write(omitted, "    pr:\n      enabled: true\n")
+        pr = cfg.load_config(omitted).repos["ext"].pr
+        assert pr.source_attribution == "codename"
+        assert pr.source_attribution_configured is False
+
+        explicit_codename = tmp_path / "explicit_codename.yaml"
+        self._write(
+            explicit_codename,
+            "    pr:\n      enabled: true\n      source_attribution: codename\n",
+        )
+        pr = cfg.load_config(explicit_codename).repos["ext"].pr
+        assert pr.source_attribution == "codename"
+        assert pr.source_attribution_configured is True
+
+        explicit_false = tmp_path / "explicit_false.yaml"
+        self._write(
+            explicit_false,
+            "    pr:\n      enabled: true\n      source_attribution: false\n",
+        )
+        pr = cfg.load_config(explicit_false).repos["ext"].pr
+        assert pr.source_attribution is False
+        assert pr.source_attribution_configured is True
+
+        explicit_true = tmp_path / "explicit_true.yaml"
+        self._write(
+            explicit_true,
+            "    pr:\n      enabled: true\n      source_attribution: true\n",
+        )
+        pr = cfg.load_config(explicit_true).repos["ext"].pr
+        assert pr.source_attribution is True
+        assert pr.source_attribution_configured is True
 
     def test_pr_source_attribution_codename_mode_parsed(self, tmp_path: Path):
         cfgfile = tmp_path / "config.yaml"
