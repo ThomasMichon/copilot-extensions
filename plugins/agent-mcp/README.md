@@ -1133,6 +1133,48 @@ Exit codes: `0` nothing stale (or `--apply` cleaned everything found); `1`
 stale entries found and not fully cleaned (dry-run, or a delete failed); `2`
 the cache directory couldn't be resolved/read (expected on a fresh install).
 
+### `mcp-health` — sweep the CLI's own logs for MCP-lifecycle warning signals
+
+```sh
+agent-mcp mcp-health [--since-hours N] [--log-dir PATH] [--cache-dir PATH] [--json] [--quiet]
+```
+
+Read-only diagnostic: sweeps Copilot CLI's own process log
+(`$COPILOT_HOME/logs`, default `~/.copilot/logs/`) for a known set of
+MCP-lifecycle signals, and reports the tool-snapshot cache's current
+staleness ratio alongside it (the same scan `clean-tool-cache` uses, without
+touching anything). Meant to be run periodically -- by hand, or on a
+schedule -- so an operator can tell whether a maintenance action like
+`clean-tool-cache` is actually improving MCP session reliability over time,
+instead of guessing from anecdote.
+
+Signals tracked:
+
+- `stale_schema_cache_entry` -- a persisted tool-cache entry rejected for a
+  schema-version mismatch (the exact class `clean-tool-cache` purges; a
+  regularly-cleaned cache should trend this toward zero).
+- `cache_hydration_timeout` -- the persisted tool cache's own load timed out
+  (a tight, hardcoded runtime budget).
+- `pending_snapshot` -- a reload/reconcile snapshot showing zero connected
+  servers and at least one still `pending`. A single hit is normal (every
+  connect briefly passes through `pending`); treat this as a rate/persistence
+  signal, not proof of a stuck server on its own -- `--json` reports
+  first/last-seen timestamps so a caller can judge how long an elevated
+  window lasted.
+- `explicit_failed_retry` -- a server with a nonzero failed-retry count on a
+  reload snapshot: an explicit, not merely suspected, failure.
+
+```sh
+agent-mcp mcp-health                    # last 24h (default), text report
+agent-mcp mcp-health --since-hours 168  # last week
+agent-mcp mcp-health --since-hours 0    # all available log history
+agent-mcp mcp-health --json             # machine-readable, for trend tracking across runs
+```
+
+`--json` output is designed to be safely re-run on a cadence (e.g. daily) and
+diffed/archived externally to build a trend -- this subcommand itself keeps
+no history of its own.
+
 ### `serve` — the resident warmth tier
 
 ```sh
