@@ -13,12 +13,13 @@ interactive git/GCM prompts. This is the **public seam** agent-bridge calls
 from __future__ import annotations
 
 import os
+import json
 import shlex
+import shutil
 import socket
+import subprocess
 import sys
 from pathlib import Path
-
-from credential_relay.sources.az_login import current_identity
 
 # Static PATs a CodeSpace injects that must be neutralized so a dispatched agent
 # never relies on a stale/expired token instead of the credential relay.
@@ -45,6 +46,51 @@ RELAY_PORTMAP_DIR = "$HOME/.agent-bridge/relay-ports"
 # ``build_azure_auth_helper_compat_shim``) -- never persisted to a dotfile, so
 # it never survives past this one launch's shell.
 AZURE_AUTH_HELPER_COMPAT_DIR = "$HOME/.cache/agent-codespaces/compat-path"
+_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+
+def _az_argv(rest: list[str]) -> list[str] | None:
+    """Build an argv that can launch the Azure CLI cross-platform."""
+    az = shutil.which("az")
+    if not az:
+        return None
+    if sys.platform == "win32" and az.lower().endswith((".cmd", ".bat")):
+        return ["cmd", "/c", az, *rest]
+    return [az, *rest]
+
+
+def current_identity(*, timeout: float = 10.0) -> str | None:
+    """Return the current host Azure-login identity string, or ``None``."""
+    args = _az_argv(["account", "show", "--output", "json"])
+    if args is None:
+        return None
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            creationflags=_SUBPROCESS_FLAGS,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    user = data.get("user") if isinstance(data, dict) else None
+    if not isinstance(user, dict):
+        return None
+    raw = str(user.get("name") or "").strip()
+    if not raw:
+        return None
+    if str(user.get("type") or "").strip().casefold() == "user" and "@" in raw:
+        alias = raw.split("@", 1)[0].strip()
+        if alias:
+            return alias
+    return raw
 
 
 def build_azure_auth_helper_compat_shim() -> str:

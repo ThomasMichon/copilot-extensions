@@ -180,27 +180,27 @@ def test_build_relay_env_no_relay_omits_feed_token():
 
 
 def test_current_identity_prefers_short_user_alias(monkeypatch):
-    import credential_relay.sources.az_login as az_login
+    import agent_codespaces.relay_launch as rl
 
     class Result:
         returncode = 0
         stdout = '{"user":{"name":"someone@example.com","type":"user"}}'
 
-    monkeypatch.setattr(az_login, "_az_argv", lambda args: ["az", *args])
-    monkeypatch.setattr(az_login.subprocess, "run", lambda *a, **k: Result())
-    assert az_login.current_identity() == "someone"
+    monkeypatch.setattr(rl, "_az_argv", lambda args: ["az", *args])
+    monkeypatch.setattr(rl.subprocess, "run", lambda *a, **k: Result())
+    assert rl.current_identity() == "someone"
 
 
 def test_current_identity_keeps_non_user_principal_name(monkeypatch):
-    import credential_relay.sources.az_login as az_login
+    import agent_codespaces.relay_launch as rl
 
     class Result:
         returncode = 0
         stdout = '{"user":{"name":"app://principal@example.com","type":"servicePrincipal"}}'
 
-    monkeypatch.setattr(az_login, "_az_argv", lambda args: ["az", *args])
-    monkeypatch.setattr(az_login.subprocess, "run", lambda *a, **k: Result())
-    assert az_login.current_identity() == "app://principal@example.com"
+    monkeypatch.setattr(rl, "_az_argv", lambda args: ["az", *args])
+    monkeypatch.setattr(rl.subprocess, "run", lambda *a, **k: Result())
+    assert rl.current_identity() == "app://principal@example.com"
 
 
 def test_build_relay_launch_env(monkeypatch, tmp_path):
