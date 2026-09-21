@@ -434,6 +434,22 @@ any-boundary resumption, stale-revision blocking, etc.) checkable against
   live-behavior tests both pass, so no wiring slice can silently diverge
   from the machine it claims to implement.
 
+### Phase 11 - Reconcile deferred backlog
+
+- [ ] Accept review-automation candidates only through
+  [`migration-intake`](../migration-intake/README.md)'s deduplication and
+  ownership gate.
+- [ ] Revalidate accepted technical scope against the current dispatch/review
+  state-model contract; return obsolete or unsafe candidates for explicit
+  disposition.
+- [ ] Place each accepted public tracker item in exactly one existing phase,
+  extending this plan before implementation when necessary.
+- [ ] Remote-aware stale-branch/stale-PR reconciliation: make the role-aware
+  fork-mode PR flow's stale-branch and stale-PR pruning aware of which
+  remote (origin vs. fork) a branch/PR actually targets, closing the
+  wrong-remote reconciliation gap surfaced by that flow's own review.
+- [ ] Keep examples synthetic and repository-neutral.
+
 ## Validation Plan
 
 - [ ] Concurrent claim attempts yield exactly one review owner.

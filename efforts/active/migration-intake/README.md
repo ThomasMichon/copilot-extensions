@@ -160,6 +160,44 @@ retain only genuinely unclassified general-purpose work here.
 
 ## Journal
 
+### 2026-09-20 — Phase 2 revalidation: 8 candidates routed, 4 stale, 4 stay residual
+
+- Revalidated all 19 raw candidates from the initial ledger pass against
+  their current source-effort text and, for each proposed owner, that
+  target's current Plan. Findings:
+  - **4 already delivered** since the initial scan (agent-index-engine-daemon's
+    accelerator selection, handoff-cutover-reload-robustness' bare-resume
+    spawn, pr-attribution-codenames' attribution phase, uniform-runtime-
+    resolution's link retirement) -> reclassified `closed-obsolete`, no
+    tracker entry.
+  - **1 mis-routed on the initial pass**: native-construct-convergence's own
+    deferred delegation (candidate #12) is already tracked in that effort's
+    own Phase C (#988) -- corrected from the initial "route to
+    worktree-manager-control-plane" guess to "already covered by its own
+    effort," no action.
+  - **8 accepted `routed`**, each placed into its target's own "Reconcile
+    deferred backlog" phase (the standard acceptance gate every domain plan
+    in this pattern carries): `worktree-manager-control-plane` Phase 8 (1
+    item), `worktree-finality-and-obligations` Phase 7 (2 items),
+    `marketplace-scoped-installations` Phase 7 (2 items),
+    `agent-machines-declarative-control-plane` (1 item -- added a new Phase 5
+    for this, since the effort had no reconcile-backlog phase yet),
+    `account-aware-operations` (1 item -- new Phase 5), and
+    `review-automation-reliability` (1 item -- new Phase 11).
+  - **4 stay `residual`** under this effort: no fitting canonical domain owner
+    was found for daemon self-retirement semantics, dispatch worker-identity
+    policy binding, pre-lifecycle history backfill, or the next
+    module-componentization candidate.
+  - 1 `rejected` (custom-context-aggregator-retirement's remaining work) was
+    confirmed on re-read as genuinely blocked on facility-specific transport
+    proof, not a portable gap.
+- **No public GitHub issues created.** Phase 3's "obtain acceptance from the
+  chosen domain plan" happens through each target effort's own normal PR
+  review of the Plan addition just made here -- issue publication is the
+  next step only after that acceptance, and only for items that still need
+  a public tracker entry distinct from the domain plan's own Plan checkbox.
+- Updated `ledger.md` with final Phase 2 dispositions and outcomes.
+
 ### 2026-09-20 — Phase 1 frozen; initial Phase 2 candidate ledger
 
 - Froze the intake contract (Phase 1, all three items) as an explicit,
