@@ -62,19 +62,20 @@ def _local_host_child_alive(mgr: object, session_id: str) -> bool | None:
     return mgr._rec_host_alive(rec) and mgr._rec_child_alive(rec)
 
 
-def resolve_already_live(
+async def resolve_already_live(
     mgr: object | None, worktree_id: str, session: object,
 ) -> bool:
     """True if ``session`` should be returned as-is (still live).
 
     RUNNING/IDLE is never trusted blindly (Phase 2, #6744): when a live
     local-host pid check confirms the Session Host child is actually dead,
-    settle the session (stale client cleared, host record reaped, STOPPED
-    persisted -- via ``mgr.settle_dead_local_session``, which owns that
-    mutation since it touches SessionManager-internal state) and return
-    False so the caller falls through to the normal resume path. Any other
-    status, or an inconclusive/confirmed-alive live check, returns
-    True/False matching the plain "was it live" question.
+    settle the session (in-flight prompt task cancelled, stale client
+    cleared, host record reaped, STOPPED persisted -- via
+    ``mgr.settle_dead_local_session``, which owns that mutation since it
+    touches SessionManager-internal state) and return False so the caller
+    falls through to the normal resume path. Any other status, or an
+    inconclusive/confirmed-alive live check, returns True/False matching
+    the plain "was it live" question.
     """
     if session.status not in (SessionStatus.RUNNING, SessionStatus.IDLE):
         return False
@@ -85,7 +86,7 @@ def resolve_already_live(
         "dead; reclassifying to stopped",
         worktree_id, session.session_id, session.status.value,
     )
-    mgr.settle_dead_local_session(session)
+    await mgr.settle_dead_local_session(session)
     return False
 
 

@@ -46,11 +46,22 @@ class _HostLivenessMixin:
             return pid_alive(rec.child_pid)
         return True
 
-    def settle_dead_local_session(self, session: "Session") -> None:
+    async def settle_dead_local_session(self, session: "Session") -> None:
         """Phase 2 (#6744): settle a session whose local host child is
-        confirmed dead -- mirrors the reattach path's own dead-child settle
-        (``mark_host_child_exited`` avoids hanging on a dead transport),
-        reaps the stale host record, and persists STOPPED."""
+        confirmed dead -- cancels any in-flight prompt task FIRST (its own
+        exception handler would otherwise unconditionally write IDLE back
+        over our STOPPED, review #3142 -- the dead child means there is no
+        one to signal, so this skips the ACP cancel and just cancels the
+        local task, mirroring ``_quiesce_session``'s ``cancel_turn=False``
+        path), then clears the client (``mark_host_child_exited`` avoids
+        hanging on a dead transport, mirrors the reattach path's own
+        dead-child settle), reaps the stale host record, and persists
+        STOPPED."""
+        task = session._prompt_task
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(BaseException):
+                await task
         if session.client is not None:
             session.client.mark_host_child_exited(-1)
             session.client = None

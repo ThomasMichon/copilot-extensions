@@ -1,6 +1,6 @@
 """Unit tests for `worktree_probe.resolve_already_live` / its
 `_local_host_child_alive` helper, and `SessionManager.settle_dead_local_session`
-(agent-bridge-cold-resume Phase 2, aperture-labs #6744): never trust a stale
+(agent-bridge-cold-resume Phase 2, #6744): never trust a stale
 RUNNING/IDLE status blindly -- verify against the actual Session Host child
 pid, and persist the reclassification, not just mutate the in-memory object.
 """
@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 import time
+
+import pytest
 
 from agent_bridge.db import Database
 from agent_bridge.models import SessionStatus
@@ -74,15 +76,17 @@ def test_remote_record_is_inconclusive_not_falsely_confirmed(tmp_path) -> None:
     assert worktree_probe._local_host_child_alive(mgr, "s1") is None
 
 
-def test_resolve_already_live_non_running_idle_is_false(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_resolve_already_live_non_running_idle_is_false(tmp_path) -> None:
     """A STOPPED/FAILED/etc. session is never "already live" -- the live
     check is only meaningful for RUNNING/IDLE."""
     mgr = _mgr(tmp_path)
     session = _seeded_session(mgr, "s1", SessionStatus.STOPPED)
-    assert worktree_probe.resolve_already_live(mgr, "wt-1", session) is False
+    assert await worktree_probe.resolve_already_live(mgr, "wt-1", session) is False
 
 
-def test_resolve_already_live_reclassifies_and_persists_confirmed_dead_session(
+@pytest.mark.asyncio
+async def test_resolve_already_live_reclassifies_and_persists_confirmed_dead_session(
     tmp_path,
 ) -> None:
     mgr = _mgr(tmp_path)
@@ -91,7 +95,7 @@ def test_resolve_already_live_reclassifies_and_persists_confirmed_dead_session(
         session_id="s1", port=1, host_pid=0, child_pid=0, boundary="local",
     ))
 
-    assert worktree_probe.resolve_already_live(mgr, "wt-1", session) is False
+    assert await worktree_probe.resolve_already_live(mgr, "wt-1", session) is False
     assert session.status == SessionStatus.STOPPED
     # The persisted row, not just the in-memory object, must reflect it --
     # otherwise a regression dropping the DB write would still pass (#3142).
@@ -99,3 +103,29 @@ def test_resolve_already_live_reclassifies_and_persists_confirmed_dead_session(
     assert row[0]["status"] == SessionStatus.STOPPED.value
     # The stale host record is reaped, not left to linger.
     assert mgr._host_index.get("s1") is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_already_live_cancels_stale_prompt_task(tmp_path) -> None:
+    """(review #3142) A RUNNING session's in-flight prompt task must be
+    cancelled as part of settling -- otherwise its own exception handler
+    would race and write IDLE back over our STOPPED once mark_host_child_
+    exited wakes it, silently reviving a session we just declared dead."""
+    import asyncio
+
+    mgr = _mgr(tmp_path)
+    session = _seeded_session(mgr, "s1", SessionStatus.RUNNING)
+    mgr._host_index.register(HostRecord(
+        session_id="s1", port=1, host_pid=0, child_pid=0, boundary="local",
+    ))
+
+    async def _never_finishes():
+        await asyncio.sleep(3600)
+
+    task = asyncio.ensure_future(_never_finishes())
+    session._prompt_task = task
+
+    assert await worktree_probe.resolve_already_live(mgr, "wt-1", session) is False
+    assert task.cancelled()
+    assert session.status == SessionStatus.STOPPED
+
