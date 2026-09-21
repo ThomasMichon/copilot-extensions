@@ -200,3 +200,75 @@ def test_refresh_callback_runs_before_the_pass(tmp_path: Path) -> None:
     )
 
     assert calls == ["refreshed"]
+
+
+# ---- regression coverage for the review findings on PR #3139 ----------------
+
+
+def test_policy_relevant_destinations_includes_lock_only_changes() -> None:
+    # A lock-only update (some lock-entry field moved without a matching
+    # content-diff destination in `changed`) must still be evaluated by the
+    # trust/pin conjuncts -- never silently exempted.
+    before = {"a": {"pluginVersion": "1.0.0"}}
+    after = {"a": {"pluginVersion": "1.0.1"}}
+
+    relevant = worker._policy_relevant_destinations(
+        changed=[], entries_before=before, entries_after=after
+    )
+
+    assert relevant == {"a"}
+
+
+def test_policy_relevant_destinations_excludes_untouched_entries() -> None:
+    before = {"a": {"pluginVersion": "1.0.0"}, "b": {"pluginVersion": "2.0.0"}}
+    after = {"a": {"pluginVersion": "1.0.0"}, "b": {"pluginVersion": "2.0.0"}}
+
+    relevant = worker._policy_relevant_destinations(
+        changed=[], entries_before=before, entries_after=after
+    )
+
+    assert relevant == set()
+
+
+def test_policy_relevant_destinations_still_includes_content_changes() -> None:
+    relevant = worker._policy_relevant_destinations(
+        changed=["a"], entries_before={}, entries_after={}
+    )
+
+    assert relevant == {"a"}
+
+
+def test_sync_findings_are_not_dropped_when_scan_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A sync-side failure (e.g. a failed-to-acquire sync lock) must never
+    # look like a clean no-op just because a subsequent scan finds nothing
+    # new of its own to report.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    sync_finding = projections.Finding(
+        severity=projections.BLOCKING,
+        check="projection-sync-lock",
+        path=str(repo),
+        message="cannot acquire repository synchronization lock",
+    )
+    fake_sync_result = SimpleNamespace(
+        changed=[], unchanged=[], lock_updated=False, findings=[sync_finding]
+    )
+    fake_scan_result = SimpleNamespace(findings=[])
+    monkeypatch.setattr(
+        worker.projections, "sync_repository", lambda *a, **kw: fake_sync_result
+    )
+    monkeypatch.setattr(
+        worker.projections, "scan_repository", lambda *a, **kw: fake_scan_result
+    )
+
+    outcome = worker.run_sync_pass(
+        repo, [], trusted_marketplaces=["copilot-extensions"]
+    )
+
+    assert outcome.needs_pr
+    assert sync_finding in outcome.findings
+    assert not outcome.bypass.eligible
+    assert any("conflict-dispatch" in reason for reason in outcome.bypass.reasons)

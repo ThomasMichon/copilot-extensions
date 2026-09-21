@@ -19,6 +19,16 @@ PR -- to fully resolve one round of upstream change:
   whether there is nothing to report, a bypass-eligible diff, or a diff that
   needs conflict-dispatch. A caller branches on that outcome's properties;
   it never has to re-run this tool to "finish" a run that already ran.
+  Both ``sync``'s and ``scan``'s own findings feed that one decision --
+  a sync-side failure (a rejected ownership conflict, a failed lock
+  acquisition, a budget overrun) must never look like a clean, do-nothing
+  run just because a subsequent scan has nothing new of its own to report.
+  Likewise, a **lock-only update** (e.g. a plugin version bump that renders
+  identical content, so no destination appears in ``sync``'s own `changed`
+  list) still moves that source's locked identity -- this module diffs the
+  lock's entries before and after the pass so the trusted-source and
+  immutable-pin conjuncts are evaluated against it too, never silently
+  skipped because no file byte happened to change.
 * This module still performs **no git or PR/dispatch operations** of its
   own (consistent with ``projection_reflect.py``'s own boundary) -- those
   are the calling scheduler's job (Phase 5, per-adopting-repo, out of this
@@ -50,12 +60,12 @@ import projection_reflect as reflect
 def _load_lock_entries(repo_root: Path) -> list[dict[str, object]]:
     """Best-effort read of the current lock's projection entries.
 
-    Called only right after a ``sync_repository`` call in the same process,
-    against a lock ``sync``/``scan`` just validated -- a missing or
-    unparsable lock at this point simply yields no entries (the caller's
-    ``changed``/finding lists remain the source of truth for whether
-    anything happened; this is only used to look up per-destination lock
-    fields ``bypass_decision`` needs).
+    Called once before and once after a ``sync_repository`` call in the
+    same process, against a lock ``sync``/``scan`` just validated -- a
+    missing or unparsable lock at either point simply yields no entries
+    (the caller's ``changed``/finding lists remain the source of truth for
+    whether anything happened; this is only used to look up per-destination
+    lock fields ``bypass_decision`` needs).
     """
     lock_path = repo_root.joinpath(*projections.LOCK_RELATIVE.parts)
     try:
@@ -69,6 +79,30 @@ def _load_lock_entries(repo_root: Path) -> list[dict[str, object]]:
     if not isinstance(entries, list):
         return []
     return [entry for entry in entries if isinstance(entry, dict)]
+
+
+def _policy_relevant_destinations(
+    *,
+    changed: Iterable[str],
+    entries_before: Mapping[str, dict[str, object]],
+    entries_after: Mapping[str, dict[str, object]],
+) -> set[str]:
+    """Every destination whose lock entry moved, not just content-changed ones.
+
+    ``sync``'s own ``changed`` list only names destinations whose *rendered
+    file bytes* differ -- but a lock-only update (any lock-entry field
+    change not reflected in the rendered content) moves that source's
+    locked identity too, and must not be silently exempted from the
+    trusted-source/immutable-pin conjuncts just because no file byte
+    happened to change. Comparing the lock's own entries before and after
+    the pass catches that case precisely, without guessing at *why* an
+    entry moved.
+    """
+    relevant = set(changed)
+    for destination, after_entry in entries_after.items():
+        if entries_before.get(destination) != after_entry:
+            relevant.add(destination)
+    return relevant
 
 
 @dataclass(frozen=True)
@@ -148,20 +182,43 @@ def run_sync_pass(
         refresh()
 
     sources = list(sources)
+    entries_before = {
+        str(entry.get("destination")): entry
+        for entry in _load_lock_entries(repo_root)
+    }
     sync_result = projections.sync_repository(repo_root, sources)
     scan_result = projections.scan_repository(repo_root, sources)
+    entries_after = {
+        str(entry.get("destination")): entry
+        for entry in _load_lock_entries(repo_root)
+    }
 
-    changed_lock_entries: list[dict[str, object]] = []
-    if sync_result.changed:
-        changed_destinations = frozenset(sync_result.changed)
-        changed_lock_entries = [
-            entry
-            for entry in _load_lock_entries(repo_root)
-            if entry.get("destination") in changed_destinations
-        ]
+    # Policy-relevant destinations are `sync`'s own changed-content list
+    # *plus* any destination whose lock entry differs before vs. after --
+    # a lock-only update (e.g. a plugin version bump with identical
+    # rendered content) leaves `changed` empty but still moves that
+    # source's identity, and must not silently skip the trust/pin
+    # conjuncts below just because no file byte changed.
+    policy_relevant = _policy_relevant_destinations(
+        changed=sync_result.changed,
+        entries_before=entries_before,
+        entries_after=entries_after,
+    )
+    changed_lock_entries = [
+        entries_after[destination]
+        for destination in sorted(policy_relevant)
+        if destination in entries_after
+    ]
+
+    # `sync`'s own findings (e.g. a failed-to-acquire sync lock, a rejected
+    # ownership conflict, or a budget overrun) must feed the same decision
+    # as `scan`'s: a sync failure followed by an otherwise-clean scan must
+    # never look like a successful no-op just because scan itself found
+    # nothing new to report.
+    all_findings = tuple(sync_result.findings) + tuple(scan_result.findings)
 
     decision = reflect.bypass_decision(
-        findings=scan_result.findings,
+        findings=all_findings,
         changed_lock_entries=changed_lock_entries,
         trusted_marketplaces=trusted_marketplaces,
         pinned_commits=pinned_commits,
@@ -170,7 +227,7 @@ def run_sync_pass(
     return SyncOutcome(
         changed=tuple(sync_result.changed),
         lock_updated=sync_result.lock_updated,
-        findings=tuple(scan_result.findings),
+        findings=all_findings,
         bypass=decision,
     )
 
