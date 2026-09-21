@@ -32,6 +32,49 @@ def _resolve_copilot(*args, **kwargs):
     return _core()._resolve_copilot(*args, **kwargs)
 
 
+def describe_copilot_spawn_error(exc: OSError, *, cwd: str | Path | None = None) -> str:
+    """Turn a failed ``copilot`` executable spawn into an accurate message.
+
+    A bare ``FileNotFoundError`` really does mean "not found" (no ``copilot``
+    on PATH, ENOENT) -- *unless* it was actually raised because the caller's
+    own ``cwd`` doesn't exist (a stale project/registered-plugin context):
+    CPython's ``subprocess`` machinery sets the exception's ``filename`` to
+    whichever path it was operating on when the OS call failed, so a
+    ``filename`` matching the passed-in ``cwd`` means the failure has nothing
+    to do with copilot at all. Pass ``cwd`` (the same value given to
+    ``subprocess.run``) so that case reports its real cause instead.
+
+    Other ``OSError`` shapes mean copilot *was* resolved and is otherwise a
+    valid executable, yet the OS still refused to spawn it -- most commonly
+    Windows ``ERROR_CANT_ACCESS_FILE`` (winerror 1920, "The file cannot be
+    accessed by the system"), which fires when the resolved executable is
+    the *same* binary currently running THIS process: e.g. driving
+    ``<project> update`` from inside a live Copilot CLI session on Windows,
+    where the WindowsApps App Execution Alias reparse point for
+    ``copilot.exe`` refuses to re-launch itself while it's already running.
+    Reporting that case as "not found" is actively misleading -- copilot is
+    right there, running this very command. Always include the raw OSError
+    text too, so a genuinely novel failure mode is still diagnosable.
+    """
+    if isinstance(exc, FileNotFoundError):
+        filename = getattr(exc, "filename", None)
+        if cwd is not None and filename is not None and str(filename) == str(cwd):
+            return (
+                "'copilot' plugin command failed because its working "
+                f"directory does not exist ({exc.strerror or exc}: {filename}) "
+                "-- not a missing copilot executable"
+            )
+        return f"'copilot' CLI not found on PATH ({exc.strerror or exc})"
+    if getattr(exc, "winerror", None) == 1920:
+        return (
+            "'copilot' CLI could not be launched because it is currently "
+            "running as this very session -- the OS refuses to re-spawn its "
+            "own executable. Re-run this update from outside an active "
+            f"Copilot CLI session ({exc.strerror or exc})"
+        )
+    return f"'copilot' CLI not found or not executable ({exc.strerror or exc})"
+
+
 def _refresh_marketplace(*args, **kwargs):
     return _core()._refresh_marketplace(*args, **kwargs)
 
@@ -622,8 +665,10 @@ def _update_modules(
                         f"Plugin update for {name} returned non-zero "
                         f"(continuing with installed version)"
                     )
-            except OSError:
-                output.warn("'copilot' CLI not found or not executable -- skipping plugin refresh")
+            except OSError as exc:
+                output.warn(
+                    f"{describe_copilot_spawn_error(exc)} -- skipping plugin refresh"
+                )
             except subprocess.TimeoutExpired:
                 output.warn(
                     f"Plugin update for {name} timed out -- continuing with installed version"
