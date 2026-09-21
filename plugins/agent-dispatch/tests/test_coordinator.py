@@ -8,6 +8,7 @@ import time
 
 import httpx
 import pytest
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from agent_dispatch.client import (
@@ -230,6 +231,23 @@ def test_health(api):
     r = api.get("/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+
+
+def test_create_app_registers_representative_extracted_route_groups(app):
+    route_paths = {
+        route.path for route in app.routes if isinstance(route, APIRoute)
+    }
+    assert {
+        "/health",
+        "/events",
+        "/directory",
+        "/satellites",
+        "/tasks",
+        "/claim",
+        "/spawn-reservations",
+        "/routing-assignments",
+        "/schedules",
+    } <= route_paths
 
 
 def test_health_loops_empty_when_sweep_disabled(api):
