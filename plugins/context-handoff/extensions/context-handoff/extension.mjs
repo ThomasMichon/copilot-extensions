@@ -648,11 +648,13 @@ const session = await joinSession({
         "session's most recently saved handoff or store fresh markdown passed as " +
         "`prompt_text` / `prompt`. It always: (1) drops the full handoff " +
         "markdown in this session's session-state folder; (2) durably stores " +
-        "it (agent-dispatch task or worktree-state file) and notes it in the " +
-        "worktree's own record. ONLY when `.context-handoff/config.yaml`'s " +
-        "`mode` is `auto` (the default is `manual-only`) does it additionally: " +
-        "(3) refresh worktree-visible PENDING-HANDOFF state (the signal " +
-        "agent-worktrees' resident monitor watches for) when agent-worktrees " +
+        "it (agent-dispatch task or worktree-state file). ONLY when " +
+        "`.context-handoff/config.yaml`'s `mode` is `auto` (the default is " +
+        "`manual-only`) does it additionally: (3) note it in the worktree's " +
+        "own record (creates a pending-handoff entry agent-worktrees' " +
+        "resident monitor can discover and claim on its own -- gated " +
+        "identically to the two triggers below, not merely advisory), and " +
+        "refresh worktree-visible PENDING-HANDOFF state when agent-worktrees " +
         "is available; (4) best-effort ping agent-bridge if present; (5) wait " +
         "up to 30 seconds for the CUTOVER to start (a status-monitor " +
         "`handoff_cutover_spawn` acknowledgement) -- not for the successor to " +
@@ -753,13 +755,12 @@ const session = await joinSession({
         if (result.automaticCutoverDisabled) {
           return (
             `Handoff stored (automatic cutover disabled) for ${result.stored.storage} ` +
-            `baton ${result.stored.id}. Neither the \`handoff_requested\` ` +
+            `baton ${result.stored.id}. None of the live-cutover triggers ran ` +
+            "-- not the worktree-record note, not the `handoff_requested` " +
             "activity event agent-worktrees' resident monitor watches for, " +
-            "nor an agent-bridge ping, was sent, because " +
-            "`.context-handoff/config.yaml`'s `mode` is not `auto` -- no " +
-            "successor pane will be spawned automatically. (A lightweight " +
-            "worktree-record note may still have been made; that is " +
-            "advisory history, not a live-cutover trigger.)\n\n" +
+            "and not an agent-bridge ping -- because `.context-handoff/" +
+            "config.yaml`'s `mode` is not `auto`. No successor pane will be " +
+            "spawned automatically.\n\n" +
             `${result.manualInstructions
               || "A manually-launched successor already appears to have " +
                 "picked this up. Keep the same seed available in case a " +

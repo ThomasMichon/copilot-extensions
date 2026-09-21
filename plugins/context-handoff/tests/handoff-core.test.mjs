@@ -947,7 +947,9 @@ test("triggerHandoff under the default (manual-only) mode never wires up automat
       metadata: { worktree: "wt-example", title: "Parser follow-up" },
     }),
     writeSessionState: ({ seed }) => ({ ok: true, path: "C:\\state\\handoff-request.json", seed }),
-    noteHandoff: () => {},
+    noteHandoff: (...args) => {
+      calls.push(["note-handoff", ...args]);
+    },
     logActivity: (...args) => {
       calls.push(["activity", ...args]);
       return { logged: true };
@@ -973,10 +975,18 @@ test("triggerHandoff under the default (manual-only) mode never wires up automat
     waitMs: 120000,
   });
   assert.equal(result.ok, true);
-  // Neither live-cutover trigger point (the activity event agent-worktrees'
-  // resident monitor watches for, nor the agent-bridge ping) was ever
-  // invoked -- only a single pickup-status check, no polling loop, no sleep.
+  // Neither live-cutover trigger point was ever invoked -- not the activity
+  // event agent-worktrees' resident monitor primarily watches for, not the
+  // agent-bridge ping, and -- critically -- not `noteHandoff` either: it
+  // shells to `agent-worktrees note-handoff`, which calls `open_handoff()`
+  // and creates a `pending_handoffs` entry the monitor can independently
+  // discover and claim via its OWN session-state-file fallback path, with
+  // no activity event required at all (the High-severity gap a Copilot
+  // review caught on PR #3041 -- gating only the activity event/bridge
+  // ping left this second path wide open). Only a single pickup-status
+  // check, no polling loop, no sleep.
   assert.deepEqual(calls.map(([name]) => name), ["signals"]);
+  assert.equal(result.worktreeSignal.noted, false);
   assert.equal(result.worktreeSignal.activity.logged, false);
   assert.equal(result.bridge.attempted, false);
   assert.match(

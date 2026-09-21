@@ -1914,10 +1914,19 @@ export async function triggerHandoff(
     };
   }
 
-  if (!justStored) {
+  const autoEnabled = automaticHandoffEnabled(mode);
+  // `noteHandoff` (agent-worktrees `note-handoff`) calls `open_handoff()`,
+  // which creates a `pending_handoffs` entry agent-worktrees' resident
+  // monitor scans independently of the `handoff_requested` activity event
+  // below (a session-state-file fallback path lets it discover and claim a
+  // pending handoff with NO activity event at all) -- so this call is a
+  // live-cutover trigger point too, not merely advisory, and must be gated
+  // the same way (Copilot review finding on PR #3041: a "manual-only"
+  // handoff could otherwise still get auto-launched by the monitor through
+  // this exact path, defeating the entire opt-in gate).
+  if (!justStored && autoEnabled) {
     noteHandoff(cwd, sid, stored.id, stored.metadata?.title || title);
   }
-  const autoEnabled = automaticHandoffEnabled(mode);
   // Only "auto" mode emits the `handoff_requested` activity event
   // agent-worktrees' resident status-monitor watches for, or pings
   // agent-bridge -- both are how an automatic successor pane gets spawned.
@@ -1968,7 +1977,7 @@ export async function triggerHandoff(
     // "signaled" when neither live-cutover trigger point ever ran).
     automaticCutoverDisabled: !autoEnabled,
     worktreeSignal: {
-      noted: true,
+      noted: !justStored && autoEnabled,
       activity,
     },
     bridge,

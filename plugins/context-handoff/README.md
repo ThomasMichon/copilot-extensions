@@ -149,12 +149,16 @@ It always:
 1. drops the composed handoff markdown in the current session's session-state
    folder,
 2. durably stores it (`agent-dispatch` task-backed storage when available,
-   otherwise a worktree-state file) and notes it in the worktree's own record.
+   otherwise a worktree-state file).
 
 **Only when `.context-handoff/config.yaml`'s `mode` is `auto`** (the default
 is `manual-only`) does it additionally:
 
-3. refresh worktree-visible PENDING-HANDOFF state -- the signal
+3. note it in the worktree's own record via `agent-worktrees note-handoff`
+   (this creates a `pending_handoffs` entry agent-worktrees' resident
+   monitor can discover and claim on its own -- a live-cutover trigger
+   point, not merely advisory, so it is gated identically to the two
+   below), refresh worktree-visible PENDING-HANDOFF state -- the signal
    agent-worktrees' resident status-monitor watches for -- when
    `agent-worktrees` is available,
 4. best-effort ping `agent-bridge` if present,

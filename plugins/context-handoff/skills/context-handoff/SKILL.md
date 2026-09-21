@@ -171,14 +171,15 @@ Its contract is:
 
 1. drop the full markdown in the current session's session-state folder,
 2. **always:** durably store it (reusing the existing agent-dispatch task
-   path when available, otherwise a worktree-state file) and note it in
-   the worktree's own record (an advisory pointer, not a live-cutover
-   trigger),
+   path when available, otherwise a worktree-state file),
 3. **only when `.context-handoff/config.yaml`'s `mode` is `auto`** (the
-   default is `manual-only` -- see "Mode gate" below): refresh
-   worktree-visible PENDING-HANDOFF state (the signal agent-worktrees'
-   resident monitor watches for) when `agent-worktrees` is available, and
-   best-effort ping `agent-bridge` if present,
+   default is `manual-only` -- see "Mode gate" below): note it in the
+   worktree's own record via `agent-worktrees note-handoff` (this creates a
+   `pending_handoffs` entry agent-worktrees' resident monitor can discover
+   and claim independently -- a live-cutover trigger point, not merely
+   advisory, so it is gated the same as the two below), refresh
+   worktree-visible PENDING-HANDOFF state when `agent-worktrees` is
+   available, and best-effort ping `agent-bridge` if present,
 4. wait up to 30 seconds for the cutover itself to start -- not for the
    successor to fully finish cold-starting and consume the handoff (a real
    Copilot cold-start routinely takes 40-90+ seconds, and isn't worth
@@ -195,10 +196,11 @@ Its contract is:
 
 `.context-handoff/config.yaml`'s `mode` defaults to `manual-only`: the
 automatic pressure nudges, the force-tier auto-trigger, and step 3 above
-(the two live-cutover triggers -- worktree-visible pending-handoff state
-and the agent-bridge ping) are all opt-in, requiring `mode: auto` in
-that file (repo-level) or `~/.context-handoff/config.yaml` (user-level).
-Under the default, `trigger_handoff` still fully composes, stores, and
+(the three live-cutover triggers -- the worktree-record note, worktree-
+visible pending-handoff state, and the agent-bridge ping) are all opt-in,
+requiring `mode: auto` in that file (repo-level) or
+`~/.context-handoff/config.yaml` (user-level). Under the default,
+`trigger_handoff` still fully composes, stores, and
 seeds the handoff -- it just never wires up automatic pickup, so the
 operator/agent must consume it manually. Do not assume live cutover
 happens unless you have confirmed `mode: auto` is set.
