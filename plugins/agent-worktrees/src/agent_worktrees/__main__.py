@@ -4313,6 +4313,65 @@ def _restore_before_resume(record: tracking.WorktreeRecord) -> bool:
     return False
 
 
+def cmd_copilot(args: argparse.Namespace) -> int:
+    """Deliver a TTY Copilot session to the user in THIS terminal.
+
+    The canonical "___ copilot" verb: ensure a durable, mux-wrapped Copilot
+    session exists for the target worktree (identical create-or-resume
+    semantics to `embody`), then hand this process's own controlling
+    terminal over to it -- this process becomes the mux client, replacing
+    itself via exec so there is no wrapper left holding the TTY. Unlike
+    `embody` (always detached, JSON out, for a programmatic caller), this is
+    the human/TTY-facing counterpart and refuses without one.
+
+    `agent-codespaces`/`agent-containers` implement the same verb
+    (`copilot <name>`) for a remote venue by SSH `-t`'ing in and running
+    this exact command there -- one name, one meaning, everywhere: deliver a
+    TTY Copilot session in the current terminal. The amount of setup needed
+    before that's possible (none locally; venue prep + reverse-forwards
+    remotely) is the only thing that differs.
+    """
+    if not sys.stdin.isatty():
+        output.err(
+            "`copilot` needs a controlling terminal to attach to -- for a "
+            "programmatic/detached launch use `embody` instead."
+        )
+        return 2
+
+    # Reuse embody's full target-resolution/preflight/create-or-resume logic
+    # in-process rather than duplicating it -- only its JSON result is wanted
+    # here, not its stdout (which is about to become the mux client's TTY).
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = cmd_embody(args)
+    if rc != 0:
+        # embody already wrote its JSON error to buf; surface it for a human
+        # on stderr and exit the same way embody would have.
+        sys.stderr.write(buf.getvalue())
+        return rc
+    try:
+        result = json.loads(buf.getvalue())
+    except (ValueError, TypeError):
+        output.err("copilot: could not parse the embodiment result")
+        return 1
+
+    session_name = result.get("session")
+    if not session_name:
+        output.err("copilot: embodiment result had no session name")
+        return 1
+
+    mux_bin = sessions._mux_bin(getattr(args, "mux", None))
+    argv = [mux_bin, "attach-session", "-t", session_name]
+    try:
+        os.execvp(mux_bin, argv)  # never returns on success
+    except OSError as exc:
+        output.err(f"copilot: could not attach to {session_name!r}: {exc}")
+        return 1
+    return 0  # pragma: no cover -- unreachable after a successful execvp
+
+
 def cmd_resolve(args: argparse.Namespace) -> int:
     """Resolve a launch plan and emit it as JSON.
 
@@ -23890,6 +23949,56 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="JSON output mode (stdout is JSON only; always on)"
     )
 
+    # copilot (the human/TTY-facing counterpart of embody -- deliver a TTY
+    # Copilot session in THIS terminal, the canonical "___ copilot" verb also
+    # implemented by agent-codespaces/agent-containers for a remote venue)
+    p = sub.add_parser(
+        "copilot",
+        help="Deliver a TTY Copilot session to the user in this terminal "
+        "(create-or-resume like embody, then attach this terminal to it; "
+        "refuses without a controlling terminal)",
+    )
+    g = p.add_mutually_exclusive_group()
+    g.add_argument(
+        "--worktree-id", dest="worktree_id", default=None,
+        help="Deliver a Copilot session for this existing worktree",
+    )
+    g.add_argument(
+        "--new", action="store_true", help="Create a fresh worktree first, then deliver Copilot in it"
+    )
+    g.add_argument(
+        "--codename", default=None,
+        help="Same codename resolution as `embody --codename` (local first, "
+        "then a cross-machine SSH scan; fails closed on a different machine).",
+    )
+    p.add_argument(
+        "--seed", default=None,
+        help="Seed prompt injected as the session's first interactive turn once Copilot is ready",
+    )
+    p.add_argument(
+        "--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0,
+        metavar="SECONDS",
+        help="How long to wait for Copilot's input prompt before typing --seed (default 180)",
+    )
+    p.add_argument(
+        "--driver", default=None,
+        help="Label of the agent steering this session; stamps the "
+        "'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY)",
+    )
+    p.add_argument(
+        "--recovery", action="store_true", help="Use the repo's recovery launch command"
+    )
+    p.add_argument(
+        "--ensure-mux", dest="ensure_mux", action="store_true",
+        help="Best-effort self-heal a missing tmux/psmux before creating the "
+        "session (same explicit opt-in as `embody --ensure-mux`).",
+    )
+    p.add_argument(
+        "--mux", default=None,
+        help="Override the mux binary used to attach (default: auto-detect "
+        "tmux/psmux, same resolution as the rest of agent-worktrees)",
+    )
+
     p = sub.add_parser("list", help="List worktrees from tracking records")
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
     p.add_argument(
@@ -27467,6 +27576,7 @@ COMMAND_MAP = {
     "handoff-trace": cmd_handoff_trace,
     "handoffs-check": cmd_handoffs_check,
     "embody": cmd_embody,
+    "copilot": cmd_copilot,
     "list": cmd_list,
     "claims": cmd_claims,
     "follow-ups": cmd_follow_ups,
