@@ -928,6 +928,16 @@ the Phase 0 runbook, picked up as capacity allows.
   `check-install-contract.py`, and `check-version-consistency.py` all clean.
   Version bump: `agent-worktrees` `1.5.5-dev217`, marketplace
   `metadata.version` `1.7.7-dev186`.
+- **Follow-up on the follow-up:** this PR's own review round (this time
+  landing well before merge, since the process note above was already
+  heeded) asked for regression coverage of the fix itself, not just of
+  `_relocate_active_project_for_worktree` in isolation. Added
+  `test_noninteractive_resume_reloads_config_after_relocation` to
+  `test_resolve_cross_project.py`, which drives
+  `_resolve_noninteractive_worktree` end-to-end with a pre-cached stale
+  config and asserts every downstream call (profile validation, preflight,
+  profile resolution, resume) receives the freshly-reloaded post-relocation
+  config, never the stale one. Full targeted suite: 243 passed, 18 skipped.
 - **Process note:** this is the second time a genuine, late-arriving Copilot
   review finding has landed within seconds of an auto-merge and needed a
   separate recovery PR. Worth treating as a pattern: after pushing a final
