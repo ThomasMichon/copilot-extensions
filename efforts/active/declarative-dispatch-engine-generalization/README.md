@@ -69,11 +69,10 @@ and the parent agent-dispatch vision:
 - [x] Prove one live Azure DevOps-backed declaration end-to-end (discovery,
   batching, reservation, settlement) alongside the existing GitHub declaration
   it must not regress. Proved 2026-09-20 against a real sandbox project
-  (reserve/claim/release cycle on real work items); full discovery
-  (`list_open_issues`) is proven for the per-item REST paths it shares with
-  reserve/claim/release but is separately gated on the scale finding below.
-  See the dated journal entry for the six real bugs this live pass found and
-  fixed -- only mocked-`az` unit tests had exercised this adapter before.
+  (reserve/claim/release cycle on real work items, and full discovery once
+  the TeamProject-scoping bug below was found and fixed). See the two dated
+  journal entries for the seven real bugs this live pass found and fixed --
+  only mocked-`az` unit tests had exercised this adapter before.
 
 ### Phase 2 - Declarative worker identity
 
@@ -748,6 +747,46 @@ state instead.
   written cannot be proven end-to-end against a project of meaningful age
   without one. This is the next slice for Phase 1's Validation Plan item,
   not closed by this leg.
+
+### 2026-09-20 (cont.) - Found the actual root cause of the discovery cap; fixed it, and added optional narrowing
+
+- Investigated the flagged discovery-scale follow-up above. The real root
+  cause is more fundamental than "any large project can exceed the cap":
+  `az boards query --project <name>` does **not** scope the WIQL query to
+  that project by itself. Confirmed live: an otherwise-identical query
+  without an explicit `[System.TeamProject] = '<project>'` clause runs
+  **organization-wide** and hits the 20000-item cap even though the target
+  project alone holds far fewer items (confirmed: the same query narrowed
+  only by `[System.TeamProject]`, no date/type/area filter at all, returned
+  exactly 1000 work items -- an API page-size ceiling, not the error cap --
+  against a project whose org has clearly accumulated 20000+ items
+  elsewhere). `--project` only sets API routing context; it is silently
+  **not** a WIQL predicate. This means every declaration using this adapter
+  before this fix was one `az boards query` release/behavior change away
+  from silently scanning its entire organization on every discovery tick,
+  not just large projects -- fixed by always including
+  `[System.TeamProject] = '<project>'` explicitly in the base WIQL,
+  unconditionally (not only under an opt-in scope).
+  Live-proved via a WIQL row-count check (bypassing full `list_open_issues`
+  per-item hydration, which is far slower against hundreds of real items):
+  a query with the pre-fix shape (no `TeamProject` clause) fails with the
+  same `VS402337` cap error; the same query with the fix succeeds.
+- Also added the originally-planned `forge.discovery_scope` (azure-devops
+  only; `work_item_types`, `area_path`, `max_age_days` -- at least one
+  required) so a declaration can narrow discovery further beyond the
+  TeamProject fix, for a project whose own single-project item count still
+  approaches the cap. Live-proved: `max_age_days: 30` against the same real
+  project narrowed 1000 -> 22 work items.
+  Validation and WIQL-rendering logic extracted into a new
+  `agent_dispatch.ado_discovery_scope` module (kept `repository_issue_loops.py`
+  under its shrink-only 1811-line module-size cap: it was already near the
+  ceiling before this slice). Own test file `test_ado_discovery_scope.py`;
+  6 new/updated tests in `test_repository_issue_loops.py` cover declaration
+  validation, provider threading, and WIQL row assembly. 74 tests total pass.
+  **Phase 1's Validation Plan item is now fully closed**: discovery,
+  batching, reservation, and settlement are all live-proved against a real
+  Azure DevOps project, and the TeamProject-scoping bug that would have
+  undermined every future declaration is fixed.
 
 
 
