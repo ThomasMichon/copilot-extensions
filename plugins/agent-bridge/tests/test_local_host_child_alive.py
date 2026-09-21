@@ -13,6 +13,7 @@ import time
 import pytest
 
 from agent_bridge.db import Database
+from agent_bridge.events import EventLog
 from agent_bridge.models import SessionStatus
 from agent_bridge.routes import worktree_probe
 from agent_bridge.session_host.host_index import HostRecord
@@ -33,6 +34,7 @@ def _seeded_session(mgr: SessionManager, sid: str, status: SessionStatus) -> Ses
     never inserts a row can't distinguish a real UPDATE from a silent no-op)."""
     s = Session(sid, sid, SpawnTarget(type="local", cwd="/tmp/x"))
     s.status = status
+    s.event_log = EventLog(session_id=sid)
     mgr._sessions[sid] = s
     mgr._db.create_session(
         sid, sid, None, "/tmp/x", "local", status.value, time.time(),
@@ -103,6 +105,9 @@ async def test_resolve_already_live_reclassifies_and_persists_confirmed_dead_ses
     assert row[0]["status"] == SessionStatus.STOPPED.value
     # The stale host record is reaped, not left to linger.
     assert mgr._host_index.get("s1") is None
+    # Subscribers must see the transition too, not just DB/memory (#3142).
+    events = [e for e in session.event_log._events if e.event == "session_state_changed"]
+    assert events and events[-1].data["status"] == SessionStatus.STOPPED.value
 
 
 @pytest.mark.asyncio

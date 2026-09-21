@@ -48,30 +48,40 @@ class _HostLivenessMixin:
 
     async def settle_dead_local_session(self, session: "Session") -> None:
         """Phase 2 (#6744): settle a session whose local host child is
-        confirmed dead -- cancels any in-flight prompt task FIRST (its own
-        exception handler would otherwise unconditionally write IDLE back
-        over our STOPPED, review #3142 -- the dead child means there is no
-        one to signal, so this skips the ACP cancel and just cancels the
-        local task, mirroring ``_quiesce_session``'s ``cancel_turn=False``
-        path), then clears the client (``mark_host_child_exited`` avoids
-        hanging on a dead transport, mirrors the reattach path's own
-        dead-child settle), reaps the stale host record, and persists
-        STOPPED."""
-        task = session._prompt_task
-        if task is not None and not task.done():
-            task.cancel()
-            with contextlib.suppress(BaseException):
-                await task
-        if session.client is not None:
-            session.client.mark_host_child_exited(-1)
-            session.client = None
-        rec = self._host_index.get(session.session_id) if self._host_index else None
-        if rec is not None:
-            self._reap_host_record(rec, "resume_worktree: local host child dead")
-        session.status = SessionStatus.STOPPED
-        self._db.update_session_status(
-            session.session_id, SessionStatus.STOPPED.value, time.time()
-        )
+        confirmed dead -- guarded by the session's own lifecycle lock (a
+        concurrent resume/prompt must never observe the stale status mid-
+        settle, or race the client/DB/host-record mutation, review #3142),
+        cancels any in-flight prompt task FIRST (its own exception handler
+        would otherwise unconditionally write IDLE back over our STOPPED --
+        the dead child means there is no one to signal, so this skips the
+        ACP cancel and just cancels the local task, mirroring
+        ``_quiesce_session``'s ``cancel_turn=False`` path), then clears the
+        client (``mark_host_child_exited`` avoids hanging on a dead
+        transport, mirrors ``_settle_dead_child``'s reattach-path settle),
+        reaps the stale host record, persists STOPPED, and appends a
+        ``session_state_changed`` event so subscribers stop seeing a stale
+        RUNNING/IDLE (matching ``_settle_dead_child``'s own event emission)."""
+        async with session._lifecycle_lock:
+            task = session._prompt_task
+            if task is not None and not task.done():
+                task.cancel()
+                with contextlib.suppress(BaseException):
+                    await task
+            if session.client is not None:
+                session.client.mark_host_child_exited(-1)
+                session.client = None
+            rec = self._host_index.get(session.session_id) if self._host_index else None
+            if rec is not None:
+                self._reap_host_record(rec, "resume_worktree: local host child dead")
+            session.status = SessionStatus.STOPPED
+            self._db.update_session_status(
+                session.session_id, SessionStatus.STOPPED.value, time.time()
+            )
+            if session.event_log:
+                session.event_log.append("session_state_changed", {
+                    "status": SessionStatus.STOPPED.value,
+                    "local_host_child_dead": True,
+                })
 
     def _live_host_records(self) -> list[Any]:
         """Records whose host is (boundary-appropriately) alive."""
