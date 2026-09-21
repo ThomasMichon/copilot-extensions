@@ -329,8 +329,17 @@ def conclude_disposable_worktree(
             if policy == DISPATCH_ATTEMPT_POLICY and _dispatch_ownership_confirmed(
                 record, reservation_key=reservation_key, owner=owner
             ):
-                if _release_dispatch_session_claims(record, session_id=session_id):
-                    tracking.save_record(record, record_path)
+                # In-memory only here -- deliberately NOT persisted. This
+                # first phase is a preliminary gate that decides whether the
+                # (potentially slow) unlocked git inspection below is even
+                # worth running; if it or the second locked phase's
+                # revalidation later finds a different reason to skip
+                # (dirty work, branch drift, a lifecycle change underneath),
+                # persisting the release here would leave an irreversible
+                # side effect on a call that ultimately never primed the
+                # worktree. The second phase re-derives and persists this
+                # same release only once the conclusion has fully succeeded.
+                _release_dispatch_session_claims(record, session_id=session_id)
 
             if reason := _preservation_reason(record, policy=policy):
                 result.update(action="skipped", reason=reason)

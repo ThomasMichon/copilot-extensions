@@ -337,6 +337,58 @@ def test_dispatch_attempt_policy_releases_only_the_concluding_session_claim(
     )
     record.resources = [
         tracking.ResourceClaim(kind="session", ref=own_ref, state="active"),
+        # Already released (e.g. that session's own clean sessionEnd already
+        # ran) -- not live, so it must not block the conclusion, and this
+        # test also proves the selective release does not touch it.
+        tracking.ResourceClaim(kind="session", ref=other_ref, state="released"),
+    ]
+    tracking.save_record(record, record_path)
+
+    result = _conclude(
+        record_path,
+        repo,
+        policy=tc.DISPATCH_ATTEMPT_POLICY,
+        reservation_key="dispatch-task:task-1:1",
+    )
+
+    assert result["action"] == "primed"
+    record = tracking.load_record(record_path)
+    own_claim = next(c for c in record.resources if c.ref == own_ref)
+    other_claim = next(c for c in record.resources if c.ref == other_ref)
+    assert own_claim.state == "released"
+    assert other_claim.state == "released"
+
+
+def test_dispatch_attempt_policy_unrelated_live_claim_blocks_without_persisting(
+    tmp_path, monkeypatch
+):
+    """An unrelated still-LIVE session claim must keep blocking disposal
+    (outstanding obligations) -- and, per Copilot review on PR #3198, the
+    concluding session's own claim must NOT be persisted as released
+    either: the first phase's release is provisional/in-memory only (just
+    enough to evaluate that phase's own preservation gate), so a call that
+    ultimately reports `skipped` never leaves an irreversible partial
+    mutation behind."""
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    record = tracking.load_record(record_path)
+    record.interface = "acp"
+    record.origin = "delegate"
+    record.dispatch_attempt = tracking.DispatchAttempt(
+        task_id="task-1",
+        reservation_key="dispatch-task:task-1:1",
+        attempt=1,
+        driver="dispatcher",
+        supervisor="supervisor-1",
+        creator_machine=record.machine,
+    )
+    own_ref = tracking.format_claim_ref(
+        record.machine, "demo", record.worktree_id, session="session-exact",
+    )
+    other_ref = tracking.format_claim_ref(
+        record.machine, "demo", record.worktree_id, session="session-other",
+    )
+    record.resources = [
+        tracking.ResourceClaim(kind="session", ref=own_ref, state="active"),
         tracking.ResourceClaim(kind="session", ref=other_ref, state="active"),
     ]
     tracking.save_record(record, record_path)
@@ -348,14 +400,56 @@ def test_dispatch_attempt_policy_releases_only_the_concluding_session_claim(
         reservation_key="dispatch-task:task-1:1",
     )
 
-    # The unrelated session's claim is still live -> still blocked overall.
     assert result["action"] == "skipped"
     assert result["reason"] == "outstanding-obligations"
     record = tracking.load_record(record_path)
     own_claim = next(c for c in record.resources if c.ref == own_ref)
     other_claim = next(c for c in record.resources if c.ref == other_ref)
-    assert own_claim.state == "released"
+    assert own_claim.state == "active"  # never persisted -- conclusion did not succeed
     assert other_claim.state == "active"
+
+
+def test_dispatch_attempt_policy_does_not_persist_release_when_dirty_work_blocks(
+    tmp_path, monkeypatch
+):
+    """The first phase's provisional release must not survive a later
+    skip discovered only during the unlocked git inspection (dirty
+    uncommitted work) -- the claim must remain exactly as it was on disk."""
+    repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+    (worktree / "valuable.txt").write_text("keep\n", encoding="utf-8")
+    record = tracking.load_record(record_path)
+    record.interface = "acp"
+    record.origin = "delegate"
+    record.dispatch_attempt = tracking.DispatchAttempt(
+        task_id="task-1",
+        reservation_key="dispatch-task:task-1:1",
+        attempt=1,
+        driver="dispatcher",
+        supervisor="supervisor-1",
+        creator_machine=record.machine,
+    )
+    own_ref = tracking.format_claim_ref(
+        record.machine, "demo", record.worktree_id, session="session-exact",
+    )
+    record.resources = [
+        tracking.ResourceClaim(kind="session", ref=own_ref, state="active"),
+    ]
+    tracking.save_record(record, record_path)
+
+    result = _conclude(
+        record_path,
+        repo,
+        policy=tc.DISPATCH_ATTEMPT_POLICY,
+        reservation_key="dispatch-task:task-1:1",
+    )
+
+    assert result["action"] == "skipped"
+    assert result["reason"] == "dirty-work"
+    record = tracking.load_record(record_path)
+    own_claim = next(c for c in record.resources if c.ref == own_ref)
+    assert own_claim.state == "active"
+    assert (worktree / "valuable.txt").read_text(encoding="utf-8") == "keep\n"
+
 
 
 def test_dispatch_attempt_policy_does_not_release_claim_on_reservation_mismatch(
