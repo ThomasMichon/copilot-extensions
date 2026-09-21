@@ -418,7 +418,7 @@ Verbatim from the operator:
   status-monitor watches for, and the agent-bridge ping) all require
   explicit `mode: auto` opt-in now. Manual handoffs (compose/save/consume)
   keep working unconditionally under the new default -- only `mode: off`
-  blocks them. **PR #3041.**
+  blocks them. **PR #3041 (merged `9cdf4f3a0`).**
 - [ ] Investigate why the `context-handoff` plugin frequently fails to load
   in Copilot CLI sessions at all -- needs controlled experimentation with
   the plugin's manifest/extension shape to isolate the rejection cause.
@@ -1328,10 +1328,10 @@ gate land._
   subsequent git operations in this session routed through
   `agent-worktrees git sync` / `copilot-extensions create-pr` rather than
   raw `git worktree add`/manual push.
-- **Shipped the opt-in gate (PR #3041, this phase's first item):**
-  `.context-handoff/config.yaml`'s `mode` default flipped from `auto` to
-  `manual-only`. Found and closed a real gap the existing mode config
-  didn't cover on its own: `triggerHandoff()` always emitted the
+- **Shipped the opt-in gate (PR #3041, this phase's first item, merged
+  `9cdf4f3a0`):** `.context-handoff/config.yaml`'s `mode` default flipped
+  from `auto` to `manual-only`. Found and closed a real gap the existing
+  mode config didn't cover on its own: `triggerHandoff()` always emitted the
   `handoff_requested` activity event (agent-worktrees' automatic-spawn
   trigger) and pinged agent-bridge regardless of mode -- now both are
   gated on a new `mode` parameter threaded through from all three call
@@ -1339,10 +1339,23 @@ gate land._
   compose/save/consume keeps working unconditionally under the new
   default; corrected `HANDOFF_MECHANISM_AWARENESS`'s now-inaccurate
   unconditional "the extension nudges...and forces one" claim in the same
-  pass, since the default flip made it false for the common case. Full
-  `node --test` suite: 110 tests, 108 passed (2 pre-existing skips),
-  including a new dedicated test proving manual-only never invokes either
-  live-cutover trigger point.
+  pass, since the default flip made it false for the common case.
+  **Nine rounds of automated review** on this PR caught two genuinely
+  serious follow-on gaps beyond the initial fix, both closed before merge:
+  (1) `storeHandoff()` itself -- shared by BOTH `save_handoff_prompt` and
+  `trigger_handoff` -- unconditionally called `noteHandoffInRecord()`,
+  creating a `pending_handoffs` entry agent-worktrees' resident monitor
+  could discover and claim independently via its own session-state-file
+  fallback, with no activity event required at all; this meant even
+  `save_handoff_prompt` alone (documented as never arming pickup) could
+  still get auto-launched, completely bypassing the gate. Fixed by
+  removing the call from `storeHandoff()` entirely -- only
+  `triggerHandoff()` now records it, gated. (2) The static bash/PowerShell
+  session-start fallback guidance (`emit-guidance.sh`/`.ps1`) still
+  unconditionally claimed live signaling always happens; updated within
+  their existing byte budgets. Final `node --test` suite: 112 tests, 110
+  passed (2 pre-existing skips), including new structural/behavioral
+  regression tests for both fixes.
 - Remaining Phase 7 items (plugin-load investigation, Worktree Manager
   pickup reliability, successor fallback hardening, dual-source head
   reconciliation + resume conflict UX, durable event logging + cut-me-over/
