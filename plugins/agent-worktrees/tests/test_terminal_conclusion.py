@@ -309,6 +309,55 @@ def test_dispatch_attempt_policy_releases_own_stale_session_claim(
     assert released.state == "released"
 
 
+def test_dispatch_attempt_policy_releases_only_the_concluding_session_claim(
+    tmp_path, monkeypatch
+):
+    """A record can hold more than one `session`-kind claim (e.g. an
+    earlier, separately-tracked session on the same worktree). Concluding
+    THIS attempt's session must release only its own claim -- an unrelated
+    still-live session claim must keep blocking disposal (outstanding
+    obligations), never be swept up by a blanket release."""
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    record = tracking.load_record(record_path)
+    record.interface = "acp"
+    record.origin = "delegate"
+    record.dispatch_attempt = tracking.DispatchAttempt(
+        task_id="task-1",
+        reservation_key="dispatch-task:task-1:1",
+        attempt=1,
+        driver="dispatcher",
+        supervisor="supervisor-1",
+        creator_machine=record.machine,
+    )
+    own_ref = tracking.format_claim_ref(
+        record.machine, "demo", record.worktree_id, session="session-exact",
+    )
+    other_ref = tracking.format_claim_ref(
+        record.machine, "demo", record.worktree_id, session="session-other",
+    )
+    record.resources = [
+        tracking.ResourceClaim(kind="session", ref=own_ref, state="active"),
+        tracking.ResourceClaim(kind="session", ref=other_ref, state="active"),
+    ]
+    tracking.save_record(record, record_path)
+
+    result = _conclude(
+        record_path,
+        repo,
+        policy=tc.DISPATCH_ATTEMPT_POLICY,
+        reservation_key="dispatch-task:task-1:1",
+    )
+
+    # The unrelated session's claim is still live -> still blocked overall.
+    assert result["action"] == "skipped"
+    assert result["reason"] == "outstanding-obligations"
+    record = tracking.load_record(record_path)
+    own_claim = next(c for c in record.resources if c.ref == own_ref)
+    other_claim = next(c for c in record.resources if c.ref == other_ref)
+    assert own_claim.state == "released"
+    assert other_claim.state == "active"
+
+
 def test_dispatch_attempt_policy_does_not_release_claim_on_reservation_mismatch(
     tmp_path, monkeypatch
 ):

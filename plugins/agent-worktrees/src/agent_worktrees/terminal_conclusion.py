@@ -113,8 +113,14 @@ def _dispatch_ownership_confirmed(
 
 def _release_dispatch_session_claims(
     record: tracking.WorktreeRecord,
+    *,
+    session_id: str | None,
 ) -> list[tracking.ResourceClaim]:
-    """Release every live ``session``-kind resource claim on ``record``.
+    """Release the live ``session``-kind resource claim(s) for
+    ``session_id`` specifically -- never every live session claim on the
+    record, which could over-release an unrelated still-relevant claim
+    (e.g. a distinct, separately-tracked session this same worktree also
+    holds).
 
     Only called once the caller has confirmed (a) this is a
     ``dispatch-attempt`` conclusion whose reservation/attribution exactly
@@ -126,7 +132,7 @@ def _release_dispatch_session_claims(
     concluding this attempt (complete, abandoned, or a spawn attempt that
     definitively failed) IS the same kind of authoritative "we are done
     with this session" signal an operator's explicit ``finalize`` or
-    handoff carries -- so its own outward ``session`` claim(s) may be
+    handoff carries -- so its own outward ``session`` claim may be
     released rather than left wedged forever. A clean-exit ``sessionEnd``
     hook is the *only other* release path for a ``session`` claim
     (:func:`tracking.release_resource_claim`'s own docstring; the reclaim
@@ -138,11 +144,17 @@ def _release_dispatch_session_claims(
 
     Mutates ``record`` in place (does not itself persist -- the caller
     saves alongside its own conclusion write) and returns the claims
-    released, for observability.
+    released, for observability. A missing ``session_id`` releases
+    nothing (there is no specific session to attribute the release to).
     """
+    if not session_id:
+        return []
     released = [
         claim for claim in record.resources
-        if claim.is_live and claim.kind == "session"
+        if claim.is_live
+        and claim.kind == "session"
+        and (parsed := tracking.parse_claim_ref(claim.ref)) is not None
+        and parsed.session == session_id
     ]
     for claim in released:
         tracking.release_resource_claim(record, claim.ref, save=False)
@@ -312,7 +324,7 @@ def conclude_disposable_worktree(
             if policy == DISPATCH_ATTEMPT_POLICY and _dispatch_ownership_confirmed(
                 record, reservation_key=reservation_key, owner=owner
             ):
-                if _release_dispatch_session_claims(record):
+                if _release_dispatch_session_claims(record, session_id=session_id):
                     tracking.save_record(record, record_path)
 
             if reason := _preservation_reason(record, policy=policy):
@@ -451,7 +463,7 @@ def conclude_disposable_worktree(
             if policy == DISPATCH_ATTEMPT_POLICY and _dispatch_ownership_confirmed(
                 record, reservation_key=reservation_key, owner=owner
             ):
-                _release_dispatch_session_claims(record)
+                _release_dispatch_session_claims(record, session_id=session_id)
             if reason := _preservation_reason(record, policy=policy):
                 result.update(action="skipped", reason=reason)
                 return result
