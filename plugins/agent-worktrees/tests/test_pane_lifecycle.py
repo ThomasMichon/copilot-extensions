@@ -160,6 +160,61 @@ def test_pane_create_retires_failed_successor_when_receipt_never_arrives(
     assert cleaned == {"pane": "%9", "tree": {101, 202}}
 
 
+def test_pane_create_retires_successor_when_foreground_fails(
+    monkeypatch, tmp_path: Path,
+):
+    # The launch was confirmed (prompt_received=True), but mux_focus_pane
+    # could not make it the operator's current pane -- the same "invisible
+    # orphan" failure mode as a receipt never arriving, previously left
+    # uncleaned.
+    receipt = tmp_path / "receipt"
+    cleaned: dict[str, object] = {}
+
+    monkeypatch.setattr(sessions, "has_mux_session", lambda worktree_id: True)
+    monkeypatch.setattr(
+        sessions,
+        "build_mux_new_window_argv",
+        lambda *args, **kwargs: ["tmux", "new-window"],
+    )
+    monkeypatch.setattr(
+        sessions,
+        "_initial_prompt_receipt_path",
+        lambda token: receipt,
+    )
+    monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "tmux")
+    monkeypatch.setattr(
+        sessions, "_mux_pane_alive", lambda pane, mux_bin, session_name=None: True
+    )
+    monkeypatch.setattr(sessions, "mux_focus_pane", lambda *args, **kwargs: False)
+    monkeypatch.setattr(sessions, "_mux_pane_process_tree", lambda *args, **kwargs: {303, 404})
+    monkeypatch.setattr(
+        sessions,
+        "_retire_failed_successor",
+        lambda pane_id, tree, **kwargs: cleaned.update(pane=pane_id, tree=tree) or {"ok": True},
+    )
+    monkeypatch.setattr(pane_lifecycle.activity, "log_event", lambda *args, **kwargs: None)
+
+    def _run(argv, **kwargs):
+        receipt.write_text("launching", encoding="utf-8")
+        return _RunResult(stdout="%13\n")
+
+    monkeypatch.setattr(pane_lifecycle.subprocess, "run", _run)
+
+    result = pane_lifecycle.pane_create(
+        "jkl",
+        "/w/jkl",
+        ["copilot"],
+        mux="tmux",
+        prompt_receipt_timeout=1.0,
+        prompt_startup_grace=0.0,
+    )
+
+    assert result["ok"] is False
+    assert result["foregrounded"] is False
+    assert result["cleanup"] == {"ok": True}
+    assert cleaned == {"pane": "%13", "tree": {303, 404}}
+
+
 def test_pane_terminate_graceful_via_liveness_only(monkeypatch):
     state = {"send_count": 0}
 
