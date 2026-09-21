@@ -320,13 +320,19 @@ function acquireLock(lockPath) {
     return openSync(lockPath, "wx");
   } catch (error) {
     if (error?.code !== "EEXIST") throw error;
-    let ageMs = Infinity;
+    let ageMs;
     try {
       ageMs = Date.now() - statSync(lockPath).mtimeMs;
     } catch {
-      // Lock vanished between the failed open and this stat (another
-      // process's own cleanup racing us) -- treat as reclaimable below.
-      ageMs = Infinity;
+      // Could not stat the lock we just failed to create exclusively --
+      // NOT necessarily gone (a permission error, a transient FS issue, or
+      // it vanishing between the failed open and this stat all look the
+      // same here). Treating that ambiguity as reclaimable would risk
+      // unlinking a lock another process re-created a moment ago, letting
+      // both processes run concurrently. Fail closed as contention instead
+      // -- a lock that is genuinely gone will simply succeed to acquire on
+      // the NEXT attempt.
+      throw error;
     }
     if (ageMs <= STALE_LOCK_MS) throw error;
     // Stale -- reclaim it. A second, harmless race is possible here (another
@@ -515,6 +521,20 @@ export async function plainGitSync(cwd) {
       "git", ["fetch", "origin", defaultBranch],
       { cwd, encoding: "utf-8", timeout, env },
     );
+    // Recheck immediately before the rebase exec -- this fallback is
+    // reached only after attemptWorktreeSync's own earlier rebase check,
+    // and the remote-discovery + fetch awaits above are exactly the kind of
+    // gap another process could start a rebase in. Skipping here (rather
+    // than proceeding into the catch's unconditional `git rebase --abort`)
+    // avoids cancelling a rebase this call did not start.
+    const recheck = await rebaseInProgress(cwd);
+    if (recheck.inProgress || recheck.error) {
+      return {
+        attempted: false,
+        synced: false,
+        reason: "a rebase started in this worktree just before the plain-git sync; it was skipped rather than touching an in-progress rebase",
+      };
+    }
     await execFileAsync(
       "git", ["rebase", `origin/${defaultBranch}`],
       { cwd, encoding: "utf-8", timeout, env },
@@ -523,7 +543,10 @@ export async function plainGitSync(cwd) {
   } catch (error) {
     // Never leave a conflicted rebase-merge state for the successor to
     // inherit -- same conflict-safety contract as agent-worktrees' own
-    // sync helper.
+    // sync helper. Only reachable once the recheck above has already
+    // confirmed no pre-existing rebase, so any abort here can only ever be
+    // cancelling the rebase this same call just started (a real conflict),
+    // never one it did not start.
     try {
       await execFileAsync("git", ["rebase", "--abort"], { cwd, encoding: "utf-8", timeout: 5000, env });
     } catch { /* nothing to abort, or abort itself failed -- best-effort */ }
@@ -2287,6 +2310,15 @@ export async function triggerHandoff(
     requestBridge = requestAgentBridgeHandoff,
     readPickupSignals = pickupSignals,
     sleepFn = sleep,
+    // Called ONCE the baton is durably stored (right after store()/
+    // writeSessionState() both succeed) -- the right place for a caller to
+    // KICK OFF a best-effort side task (e.g. a worktree sync) that must
+    // never run before storage is confirmed. Defaults to a no-op. Paired
+    // with beforeArmPickup below (round-13 review finding: starting that
+    // side task before the store was even attempted meant a store failure
+    // could still leave it running, contradicting the "post-capture only"
+    // contract).
+    afterStore = () => {},
     // Awaited AFTER the baton is safely stored (`store()` above) but BEFORE
     // any live-pickup signal is armed (`noteHandoff`/activity log/bridge
     // request below) -- lets a caller defer live pickup until a best-effort
@@ -2357,6 +2389,10 @@ export async function triggerHandoff(
       error: sessionState.error,
     };
   }
+  // The baton is now durably stored -- the earliest point a caller may
+  // start a best-effort side task without risking it running ahead of (or
+  // despite) a store failure above.
+  afterStore();
 
   const autoEnabled = automaticHandoffEnabled(mode);
   // Runs after the baton above is durably stored, but strictly before any

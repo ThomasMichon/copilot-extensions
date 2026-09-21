@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { join, dirname } from "node:path";
 import {
   mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, unlinkSync,
-  utimesSync,
+  utimesSync, existsSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -815,6 +815,75 @@ test("triggerHandoff stores, signals, waits, and skips manual fallback when pick
   assert.match(result.seed, /task:task-42$/);
 });
 
+test("triggerHandoff calls afterStore once the baton is durably stored, and beforeArmPickup only in auto mode before arming pickup", async () => {
+  // Real regression this guards: a caller's side task (e.g. a worktree
+  // sync) must never start before the store is confirmed, and must only
+  // gate the live-pickup signal in auto mode (manual-only never arms
+  // pickup, so there is nothing to gate and no reason to pay that latency).
+  const calls = [];
+  const stored = {
+    storage: "agent-dispatch",
+    id: "task-77",
+    taskId: "task-77",
+    metadata: { worktree: "wt-example", title: "t" },
+  };
+  await triggerHandoff({
+    promptText: "markdown",
+    sid: "sess-1",
+    cwd: "C:\\repo",
+    title: "t",
+    mode: "auto",
+    store: () => { calls.push("store"); return stored; },
+    writeSessionState: () => { calls.push("session-state"); return { ok: true, path: "p" }; },
+    logActivity: () => { calls.push("activity"); return { logged: true }; },
+    requestBridge: () => { calls.push("bridge"); return { attempted: false, accepted: false }; },
+    readPickupSignals: () => ({ pickedUp: true, via: ["x"], sessionState: {}, worktree: {}, dispatch: {} }),
+    sleepFn: async () => {},
+    afterStore: () => { calls.push("afterStore"); },
+    beforeArmPickup: async () => { calls.push("beforeArmPickup"); },
+  });
+  const order = ["store", "session-state", "afterStore", "beforeArmPickup", "activity"];
+  assert.deepEqual(calls.slice(0, order.length), order);
+});
+
+test("triggerHandoff never calls afterStore/beforeArmPickup when the store itself fails", async () => {
+  const calls = [];
+  const result = await triggerHandoff({
+    promptText: "markdown",
+    sid: "sess-1",
+    cwd: "C:\\repo",
+    title: "t",
+    mode: "auto",
+    store: () => ({ storage: null, error: "no safe store" }),
+    afterStore: () => { calls.push("afterStore"); },
+    beforeArmPickup: async () => { calls.push("beforeArmPickup"); },
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(calls, []);
+});
+
+test("triggerHandoff calls afterStore but never beforeArmPickup under manual-only mode", async () => {
+  const calls = [];
+  const stored = {
+    storage: "agent-dispatch",
+    id: "task-78",
+    taskId: "task-78",
+    metadata: { worktree: "wt-example", title: "t" },
+  };
+  await triggerHandoff({
+    promptText: "markdown",
+    sid: "sess-1",
+    cwd: "C:\\repo",
+    title: "t",
+    mode: "manual-only",
+    store: () => stored,
+    writeSessionState: () => ({ ok: true, path: "p" }),
+    afterStore: () => { calls.push("afterStore"); },
+    beforeArmPickup: async () => { calls.push("beforeArmPickup"); },
+  });
+  assert.deepEqual(calls, ["afterStore"]);
+});
+
 test("triggerHandoff logs the predecessor pid in the handoff_requested activity", async () => {
   const execCalls = [];
   await triggerHandoff({
@@ -1276,6 +1345,34 @@ test("plainGitSync fails honestly when no origin remote exists to determine a de
   }
 });
 
+test("plainGitSync rechecks for an in-progress rebase immediately before its own rebase exec, and never aborts it", async () => {
+  // Real regression this guards: the remote-discovery + fetch awaits before
+  // the rebase exec are exactly the kind of gap another process could start
+  // a rebase in; without a recheck immediately before the rebase, this
+  // fallback's catch-all `git rebase --abort` could cancel a rebase it did
+  // not start.
+  const origin = initGitRepo();
+  const clone = mkdtempSync(join(tmpdir(), "context-handoff-sync-clone-"));
+  try {
+    execFileSync("git", ["clone", "-q", origin, clone]);
+    const gitDirRaw = execFileSync("git", ["rev-parse", "--git-dir"], {
+      cwd: clone, encoding: "utf-8",
+    }).trim();
+    const rebaseMergeDir = join(clone, gitDirRaw, "rebase-merge");
+    mkdirSync(rebaseMergeDir, { recursive: true });
+    const result = await plainGitSync(clone);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /rebase started|in-progress rebase/);
+    // The pre-existing rebase state must still be there, untouched --
+    // proves the fallback never reached (or aborted via) `git rebase`.
+    assert.equal(existsSync(rebaseMergeDir), true);
+  } finally {
+    rmSync(origin, { recursive: true, force: true });
+    rmSync(clone, { recursive: true, force: true });
+  }
+});
+
 test("attemptWorktreeSync never blocks the event loop before its first await", async () => {
   // Real regression this guards: attemptWorktreeSync is invoked synchronously
   // at the top of autoForceHandoff, before that function's first await, from
@@ -1413,6 +1510,33 @@ test("attemptWorktreeSync reclaims a stale worktree lock left by a crashed proce
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("acquireLock treats a failed stat on lock contention as contention, not as reclaimable", () => {
+  // Real regression this guards: if statSync throws for a reason OTHER
+  // than "the lock is genuinely gone" (a permission error, a transient FS
+  // hiccup, or another process recreating it in the exact instant between
+  // the failed open and this stat), treating that ambiguity as reclaimable
+  // would let this process unlink an ACTIVE replacement lock another
+  // process just created, letting both run concurrently. Structural check
+  // (no DI seam for the internal fs calls): the stat's catch block must
+  // rethrow/fail closed, never fall through to an unconditional reclaim.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const body = source.slice(
+    source.indexOf("function acquireLock("),
+    source.indexOf("async function withWorktreeSyncLock("),
+  );
+  assert.ok(body.length > 0, "could not locate acquireLock's body");
+  const statCatchBody = body.slice(
+    body.indexOf("} catch {", body.indexOf("statSync(lockPath)")),
+  );
+  assert.match(statCatchBody.slice(0, statCatchBody.indexOf("}", 10) + 1), /throw error/);
 });
 
 test("attemptWorktreeSync rechecks for an in-progress rebase immediately before the sync exec (TOCTOU narrowing)", () => {

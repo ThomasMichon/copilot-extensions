@@ -188,6 +188,11 @@ test("sync-worktree shares the same lock/rebase-safe helper the force-tier path 
     assert.equal(parsed.attempted, true);
     assert.equal(parsed.synced, false);
     assert.match(parsed.reason, /sync failed|unavailable/);
+    // A real sync failure must exit nonzero -- a caller using this command
+    // as a gate must see a failure exit status, not a silent 0. Also
+    // confirms the JSON write was NOT truncated by an immediate
+    // process.exit(): stdout parsed above as complete, valid JSON.
+    assert.equal(result.status, 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

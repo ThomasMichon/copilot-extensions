@@ -352,50 +352,52 @@ async function autoForceHandoff(sid, cwd) {
   }
   let result;
   try {
-    // Started here (still fire-and-forget, still un-awaited by the capture
-    // path above) so the sync happens regardless of mode -- a worktree
-    // sync benefits a manual-only handoff too (a human resuming it later
-    // still wants the latest code), not just an auto-mode live pickup.
-    // triggerHandoff's beforeArmPickup hook below awaits this SAME promise
-    // (not a second sync attempt) strictly between the baton being durably
-    // stored and the live pickup signal being armed -- but ONLY in auto
-    // mode, since that is the only mode where a live monitor could launch a
-    // successor before this settles (a round-11 fix merely started the sync
-    // concurrently with the trigger, which a round-12 review finding showed
-    // was insufficient: a fast monitor could still launch a successor
-    // before the sync had even begun). In manual-only mode, triggerHandoff
-    // never calls beforeArmPickup, so this promise simply keeps running in
-    // the background and logs its own outcome, exactly as before. Its
-    // outcome is only ever logged, never folded back into the
-    // already-stored baton (there is no update path for a handoff that has
-    // already been triggered).
-    const syncPromise = attemptWorktreeSync(cwd)
-      .then((syncResult) => {
-        if (syncResult.synced) {
-          session.log(
-            "[Context Handoff] Force-tier: worktree synced onto the latest " +
-            "default branch.",
-            { level: "info" },
-          );
-        } else {
-          session.log(
-            `[Context Handoff] Force-tier: worktree sync ` +
-            `${syncResult.attempted ? "failed" : "was skipped"} ` +
-            `(${syncResult.reason}). The successor should sync onto the ` +
-            "latest default branch itself.",
-            { level: "warning" },
-          );
-        }
-        return syncResult;
-      })
-      .catch(() => {});
+    // syncPromise is assigned inside afterStore -- started ONLY once
+    // triggerHandoff has confirmed the baton is durably stored (a round-13
+    // review finding: starting the sync before the store was even
+    // attempted meant a store failure could still leave a sync running,
+    // contradicting the "post-capture only" contract). It runs regardless
+    // of mode -- a worktree sync benefits a manual-only handoff too (a
+    // human resuming it later still wants the latest code), not just an
+    // auto-mode live pickup. triggerHandoff's beforeArmPickup hook below
+    // awaits this SAME promise (not a second sync attempt) strictly before
+    // the live pickup signal is armed -- but ONLY in auto mode, since that
+    // is the only mode where a live monitor could launch a successor
+    // before this settles. In manual-only mode, triggerHandoff never calls
+    // beforeArmPickup, so this promise simply keeps running in the
+    // background and logs its own outcome. Its outcome is only ever
+    // logged, never folded back into the already-stored baton (there is
+    // no update path for a handoff that has already been triggered).
+    let syncPromise = null;
     result = await triggerHandoff({
       promptText: markdown,
       sid,
       cwd,
       title: "Force-threshold auto-handoff",
       mode: handoffConfig.mode,
-      beforeArmPickup: () => syncPromise,
+      afterStore: () => {
+        syncPromise = attemptWorktreeSync(cwd)
+          .then((syncResult) => {
+            if (syncResult.synced) {
+              session.log(
+                "[Context Handoff] Force-tier: worktree synced onto the " +
+                "latest default branch.",
+                { level: "info" },
+              );
+            } else {
+              session.log(
+                `[Context Handoff] Force-tier: worktree sync ` +
+                `${syncResult.attempted ? "failed" : "was skipped"} ` +
+                `(${syncResult.reason}). The successor should sync onto ` +
+                "the latest default branch itself.",
+                { level: "warning" },
+              );
+            }
+            return syncResult;
+          })
+          .catch(() => {});
+      },
+      beforeArmPickup: () => syncPromise || Promise.resolve(),
     });
   } catch (error) {
     session.log(
