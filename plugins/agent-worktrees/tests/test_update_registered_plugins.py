@@ -472,6 +472,67 @@ def test_missing_payload_install_uses_activation_preserving_wrapper(monkeypatch)
     ]
 
 
+def test_update_failure_on_existing_payload_retries_with_install(monkeypatch):
+    """Regression (aperture-labs#7286): a plugin whose payload directory
+    already exists but was bootstrap-installed (never registered through
+    `copilot plugin install`) fails `update` with Copilot's own "not
+    installed" ledger error. Must retry with `install` -- which backfills
+    that ledger entry -- rather than giving up on the first failure."""
+    monkeypatch.setattr(
+        reconcile, "core_installed_payload_dir", lambda name: Path("/inst/agent-machines")
+    )
+
+    update_calls: list[list[str]] = []
+
+    def fake_run(argv, **kw):
+        update_calls.append(list(argv))
+        return _fail()
+
+    install_calls: list[tuple[list[str], str]] = []
+
+    def preserving(argv, identity, **kwargs):
+        install_calls.append((list(argv), identity))
+        return _ok()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        activation_preservation, "run_install_preserving_activation", preserving
+    )
+
+    result = m._update_one_plugin_payload("agent-machines", "copilot-extensions")
+
+    assert update_calls == [
+        ["copilot", "plugin", "update", "agent-machines@copilot-extensions"]
+    ]
+    assert install_calls == [
+        (
+            ["copilot", "plugin", "install", "agent-machines@copilot-extensions"],
+            "agent-machines@copilot-extensions",
+        )
+    ]
+    assert result == "OK (installed)"
+
+
+def test_update_and_install_retry_both_fail_reports_original_update_error(monkeypatch):
+    """When the install retry ALSO fails, report the original `update`
+    failure (the payload genuinely exists; `update` is the verb a caller
+    should see reflected in the status string), not a misleading "install
+    exited" for a plugin that was never actually missing."""
+    monkeypatch.setattr(
+        reconcile, "core_installed_payload_dir", lambda name: Path("/inst/agent-machines")
+    )
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: _fail(code=3))
+    monkeypatch.setattr(
+        activation_preservation,
+        "run_install_preserving_activation",
+        lambda argv, identity, **kw: _fail(code=4),
+    )
+
+    result = m._update_one_plugin_payload("agent-machines", "copilot-extensions")
+
+    assert result == "update exited 3"
+
+
 def test_malformed_activation_state_is_reported_without_raising(monkeypatch):
     monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: None)
 
@@ -576,7 +637,14 @@ def test_missing_plugin_uses_install_path(monkeypatch):
 
 
 def test_single_failure_warns_and_continues(monkeypatch):
-    """One plugin failing does not abort the rest of the loop."""
+    """One plugin failing does not abort the rest of the loop.
+
+    ``bbb``'s first attempt (``update``, since it's already "installed") fails
+    and is retried once with ``install`` (the not-installed-ledger fallback --
+    see ``_update_one_plugin_payload``'s docstring); that retry also fails
+    here, so ``bbb`` genuinely fails while ``aaa``/``ccc`` succeed on their
+    first attempt.
+    """
     _install_config(monkeypatch, "/repo/anchor")
     monkeypatch.setattr(
         reconcile, "read_enabled_plugins",
@@ -595,7 +663,7 @@ def test_single_failure_warns_and_continues(monkeypatch):
         name = argv[3].split("@")[0]
         updated.append(name)
         if name == "bbb":
-            return _fail()  # middle plugin fails
+            return _fail()  # middle plugin fails, on both update and retry
         return _ok()
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -603,8 +671,9 @@ def test_single_failure_warns_and_continues(monkeypatch):
     # Must not raise despite bbb failing.
     assert m._update_registered_plugins() is False
 
-    # All three were attempted (loop continued past the failure).
-    assert updated == ["aaa", "bbb", "ccc"]
+    # All three were attempted (loop continued past the failure); bbb is
+    # attempted twice (update, then the install retry).
+    assert updated == ["aaa", "bbb", "bbb", "ccc"]
 
 
 def test_timeout_on_one_plugin_does_not_abort(monkeypatch):
