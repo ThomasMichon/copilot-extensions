@@ -533,6 +533,41 @@ def test_resolve_slug_owner_empty_and_slash_forms():
     assert repos.resolve_slug_owner("example-org/proj") == "example-org"
 
 
+def test_is_unresolved_registered_target_true_for_non_github_registered_repo(
+    home: Path,
+):
+    repos.add_repo(
+        "azdo-proj", "D:/Src/azdo-proj", repo_class="reference",
+        remote="https://my-org.visualstudio.com/x/_git/azdo-proj",
+        plat="windows",
+    )
+    assert repos.is_unresolved_registered_target("azdo-proj") is True
+
+
+def test_is_unresolved_registered_target_false_for_github_registered_repo(
+    home: Path,
+):
+    repos.add_repo(
+        "copilot-extensions", "D:/Src/copilot-extensions", repo_class="reference",
+        remote="https://github.com/ThomasMichon/copilot-extensions.git",
+        plat="windows",
+    )
+    assert repos.is_unresolved_registered_target("copilot-extensions") is False
+
+
+def test_is_unresolved_registered_target_false_for_unregistered_name():
+    # No registered repo by this name -> not a "known but unresolvable"
+    # target; it is just an ordinary (possibly personal) bare owner, and
+    # ambient auth remains the safe, documented fallback.
+    assert repos.is_unresolved_registered_target("ThomasMichon") is False
+
+
+def test_is_unresolved_registered_target_false_for_slug_and_empty():
+    assert repos.is_unresolved_registered_target("owner/name") is False
+    assert repos.is_unresolved_registered_target("") is False
+    assert repos.is_unresolved_registered_target(None) is False
+
+
 def test_add_repo_persists_account(home: Path):
     repos.add_repo(
         "proj", "D:/Src/proj", repo_class="worktree",

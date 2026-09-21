@@ -38,14 +38,14 @@ def test_conduct_fragment_present_and_shaped():
     assert "issue/PR/release/settings mutations" in text
     assert "target\n`owner/repo` (`owner` for org calls)" in text
     assert "never infer its account from cwd or active\n`gh`" in text
-    assert "repos account-for <owner|owner/repo>" in text
+    assert "repos account-for <owner|owner/repo|reponame>" in text
     assert "repos gh" in text
     assert "Active account is global/shared/racy" in text
     assert "never switch ordinarily" in text
     assert "Account-scoped\ntransports (e.g. CodeSpaces) and auth repair are exceptions" in text
     assert "follow their skill" in text
     assert "restore the prior account" in text
-    assert "scopes identity per\nprocess" in text
+    assert "scopes\nidentity per process" in text
     assert "Verify any ambient fallback" in text
     assert "agent-worktrees:agent-worktrees-repos" in text
     assert "GH_TOKEN" not in text

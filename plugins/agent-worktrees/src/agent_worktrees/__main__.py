@@ -20544,8 +20544,9 @@ def _repos_usage() -> None:
     print("  doctor [--fix] [--json]             Reconcile projects.yaml <-> repos.yaml")
     print("  account [list|set <owner> <login>|unset <owner>]")
     print("                                      Decoupled owner->gh-login map (account_map)")
-    print("  account-for [owner|owner/name]      Print the resolved gh login (exit 1 if none)")
-    print("  gh [owner|owner/name] [--] <args>   Run gh under that repo's account (token-inject)")
+    print("  account-for [owner|owner/name|name] Print the resolved gh login (exit 1 if none)")
+    print("  gh [owner|owner/name|name] [--] <args>")
+    print("                                      Run gh under that repo's account (token-inject)")
     print(
         "  pin-credentials [name] [--all]      Backfill each repo's local git credential"
     )
@@ -20991,7 +20992,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             target = _infer_active_repo_slug(cfg.load_config())
         if not target:
             output.err(
-                "Usage: repos account-for [owner|owner/name]  "
+                "Usage: repos account-for [owner|owner/name|registered-repo-name]  "
                 "(inferred from the active project when omitted)"
             )
             return 1
@@ -21052,7 +21053,8 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
     if sub == "gh":
         # Run `gh` against a repo under the account that owns it, via token
         # injection -- race-safe on a shared box where the active gh account is
-        # global per-machine. Usage: repos gh [owner/name] [--] <gh args>
+        # global per-machine. Usage: repos gh [owner/name|registered-repo-name]
+        # [--] <gh args>
         # The repo is inferred from the active project when the first token is
         # `--` (an explicit "no target" marker), so `repos gh -- issue list`
         # works from inside the repo without naming it.
@@ -21074,12 +21076,21 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             target = _infer_active_repo_slug(cfg.load_config())
         if not target or not gh_args:
             output.err(
-                "Usage: repos gh [owner|owner/name] [--] <gh args...>  "
+                "Usage: repos gh [owner|owner/name|registered-repo-name] "
+                "[--] <gh args...>  "
                 "(repo inferred from the active project when omitted)"
             )
             return 1
         if shutil.which("gh") is None:
             output.err("gh CLI not found on PATH")
+            return 1
+        if repos.is_unresolved_registered_target(target):
+            output.err(
+                f"'{target}' is a registered repo whose remote has no derivable "
+                "GitHub owner -- refusing to run gh under ambient auth for a "
+                "known-but-unresolvable identity. Pass an explicit owner/name, "
+                "or set an account: override for this repo."
+            )
             return 1
         env, login, injected = _gh_env_for_repo(target)
         if login and not injected:

@@ -68,3 +68,49 @@ def test_never_switches_active_account(monkeypatch):
     # env-builder does no subprocess of its own (token mint is monkeypatched);
     # crucially it issues no `gh auth switch`.
     assert not any("switch" in c for c in calls)
+
+
+def test_repos_gh_rejects_unresolved_registered_target(monkeypatch, capfd):
+    """`repos gh <registered-non-github-repo>` must hard-fail rather than run
+    under ambient auth (#3032's fail-fast requirement) -- a registered repo
+    with no derivable github owner is a known-but-unresolvable identity, not
+    an ordinary "no preference" bare owner.
+    """
+    import subprocess
+
+    monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(repos, "is_unresolved_registered_target", lambda t: True)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: calls.append(list(a[0]) if a else []),
+    )
+
+    rc = m.cmd_repos_dispatch(["gh", "azdo-proj", "--", "issue", "list"])
+
+    assert rc == 1
+    assert not calls, "gh must never be invoked for an unresolved registered target"
+    assert "azdo-proj" in capfd.readouterr().out
+
+
+def test_repos_gh_allows_unregistered_bare_owner(monkeypatch):
+    """An ordinary unregistered bare owner (no registry entry at all) keeps
+    the existing ambient-auth fallback -- only a *registered* target with an
+    unresolvable identity is rejected.
+    """
+    import subprocess
+
+    monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(repos, "is_unresolved_registered_target", lambda t: False)
+    monkeypatch.setattr(repos, "account_for_github_slug", lambda t: None)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **k: calls.append(list(a[0]) if a else []) or type(
+            "R", (), {"returncode": 0},
+        )(),
+    )
+
+    rc = m.cmd_repos_dispatch(["gh", "ThomasMichon", "--", "issue", "list"])
+
+    assert rc == 0
+    assert calls == [["gh", "issue", "list"]]

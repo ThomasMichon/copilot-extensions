@@ -191,13 +191,15 @@ contribution policy than the one you're already using. Never reuse your home
 repo's account or assume ambient `gh auth` applies:
 
 - **Account -- GitHub targets only.** `<agent-worktrees catalog argv[0]> repos
-  account-for <owner|owner/name>` prints the resolved `gh` login for a GitHub
-  repo (explicit `account:` -> `account_map` -> the remote owner itself ->
-  none/ambient); route every `gh`/API call for it through
-  `<agent-worktrees catalog argv[0]> repos gh <owner|owner/name> -- <args>`,
-  never a bare `gh <cmd>` or a machine-global `gh auth switch`. A non-GitHub
-  remote (Gitea, Azure DevOps) resolves **no** account through this path --
-  `related resolve` still surfaces the resolved account (`explicit` vs
+  account-for <owner|owner/name|reponame>` prints the resolved `gh` login for
+  a GitHub repo (explicit `account:` -> `account_map` -> the remote owner
+  itself -> none/ambient); route every `gh`/API call for it through
+  `<agent-worktrees catalog argv[0]> repos gh <owner|owner/name|reponame> --
+  <args>`, never a bare `gh <cmd>` or a machine-global `gh auth switch`. A
+  bare *registered repo name* resolves through the registry to that repo's
+  actual remote owner first, rather than being treated as a literal owner. A
+  non-GitHub remote (Gitea, Azure DevOps) resolves **no** account through this
+  path -- `related resolve` still surfaces the resolved account (`explicit` vs
   `derived`) when one applies, alongside the class/locus facts above.
 - **Source/host** -- check the registry entry's actual `remote` (via
   `<agent-worktrees catalog argv[0]> repos list` / the repo's `repos.yaml`

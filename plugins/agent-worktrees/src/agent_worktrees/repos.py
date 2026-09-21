@@ -508,6 +508,24 @@ def resolve_slug_owner(target: str | None) -> str | None:
     return target
 
 
+def is_unresolved_registered_target(target: str | None) -> bool:
+    """True when *target* names a **registered** repo whose remote has no
+    derivable github owner (e.g. a non-github/Azure DevOps remote).
+
+    This is the identity-known-but-unresolvable case #3032 flags as a hazard:
+    a caller explicitly named a repo this tool knows about, so silently
+    falling back to ambient ``gh`` auth would still risk acting under the
+    wrong account. Distinct from an unregistered/ambiguous bare name, where no
+    preference exists and ambient auth remains the documented, safe default.
+    """
+    if not target or "/" in target:
+        return False
+    entry = find_repo(target)
+    if entry is None:
+        return False
+    return github_owner(entry.remote) is None
+
+
 def account_for_github_slug(slug: str | None) -> str | None:
     """Resolve the effective account for a github ``owner/name`` slug, a bare
     ``owner``, or a bare registered repo *name* (see :func:`resolve_slug_owner`).
