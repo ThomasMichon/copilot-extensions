@@ -17,7 +17,7 @@
 
 import {
   writeFileSync, readFileSync, existsSync, mkdirSync, renameSync, unlinkSync,
-  openSync, closeSync, statSync, readdirSync,
+  openSync, closeSync, statSync, readdirSync, linkSync,
 } from "node:fs";
 import { join, basename, dirname, resolve } from "node:path";
 import { execFileSync, execFile } from "node:child_process";
@@ -263,6 +263,32 @@ export function sanitizedGitEnv(baseEnv = process.env) {
   return env;
 }
 
+// Ephemeral git config overrides via the GIT_CONFIG_* env protocol
+// (equivalent to `-c key=value` on every git invocation in this
+// environment, including ones a delegated CLI spawns internally):
+// - `rebase.autoStash=false`: for the AGENT-WORKTREES-delegated sync path,
+//   which (unlike plainGitSync's own rebase, which ALSO passes
+//   `--no-autostash` directly as a redundant belt-and-braces measure) has
+//   no CLI flag of its own to ask for this.
+// - `core.hooksPath=/dev/null`: mirrors agent-worktrees' own established
+//   convention (`git_ops.py`'s `no_hooks` option) for trusted, mechanical
+//   plumbing -- a repo's client-side guard hooks (`pre-rebase` etc.) must
+//   not be able to block or mutate this unattended sync. Git for Windows'
+//   POSIX layer resolves this path the same way agent-worktrees already
+//   relies on cross-platform.
+// Call AFTER sanitizedGitEnv(), which strips any inherited
+// GIT_CONFIG_KEY_*/VALUE_* first, so these are the only overrides present.
+function withUnattendedSyncGitConfig(env) {
+  return {
+    ...env,
+    GIT_CONFIG_COUNT: "2",
+    GIT_CONFIG_KEY_0: "rebase.autoStash",
+    GIT_CONFIG_VALUE_0: "false",
+    GIT_CONFIG_KEY_1: "core.hooksPath",
+    GIT_CONFIG_VALUE_1: "/dev/null",
+  };
+}
+
 // `--git-path` resolves the correct per-worktree location for either rebase
 // strategy (merge-based `rebase -i` vs. the older apply-based path).
 // Returns { inProgress, error } rather than throwing so callers can
@@ -417,10 +443,8 @@ async function withWorktreeSyncLock(cwd, fn) {
 // it runs.
 function releaseLock(lockPath, token) {
   const claimedPath = `${lockPath}.release-${process.pid}-${Date.now()}`;
-  let claimed;
   try {
     renameSync(lockPath, claimedPath);
-    claimed = true;
   } catch {
     // Nothing at that path to claim -- already released, or reclaimed and
     // released again by someone else. Either way, not this invocation's to
@@ -434,17 +458,21 @@ function releaseLock(lockPath, token) {
     }
     // Claimed content that is NOT this invocation's own token -- this
     // invocation ran long enough that another one reclaimed the path as
-    // stale and is (or was) actively using it. Put it back rather than
-    // destroying an active lock; a brief window where the path is empty is
-    // the same residual, unavoidable gap acquireLock's own reclaim step
-    // already accepts.
-    renameSync(claimedPath, lockPath);
-  } catch {
-    // Best-effort: if the restore-rename itself fails (e.g. lockPath was
-    // recreated by yet another acquire in the interim), fall through to
-    // cleaning up the orphaned claimedPath below rather than leaving stray
-    // files behind.
-    if (claimed) { try { unlinkSync(claimedPath); } catch { /* already gone */ } }
+    // stale and is (or was) actively using it. Restore it via `linkSync`
+    // (NOT `renameSync`): rename silently overwrites an existing
+    // destination on POSIX, which would clobber a fresh lock a THIRD
+    // invocation created at `lockPath` in the interim since our claim --
+    // exactly the un-serialized-concurrency outcome this whole lock exists
+    // to prevent. `linkSync` fails with EEXIST if the destination already
+    // exists, so it only ever restores into a genuinely empty slot.
+    try {
+      linkSync(claimedPath, lockPath);
+    } catch {
+      // Destination already occupied by a newer lock -- leave it alone;
+      // our claimed copy is cleaned up below either way.
+    }
+  } finally {
+    try { unlinkSync(claimedPath); } catch { /* already gone */ }
   }
 }
 
@@ -539,7 +567,7 @@ export async function attemptWorktreeSync(cwd) {
 // end-to-end from attemptWorktreeSync in-repo without genuinely uninstalling
 // that sibling -- test this function directly instead.
 export async function plainGitSync(cwd) {
-  const env = sanitizedGitEnv();
+  const env = withUnattendedSyncGitConfig(sanitizedGitEnv());
   const timeout = 20000;
   // `agent-worktrees`' own managed sync explicitly skips a detached
   // worktree; this fallback must match that, not just mirror its conflict
@@ -714,9 +742,9 @@ async function attemptWorktreeSyncLocked(cwd) {
   const timeout = 20000;
   try {
     if (resolved.pluginRoot) {
-      const env = sanitizedGitEnv(
+      const env = withUnattendedSyncGitConfig(sanitizedGitEnv(
         runtimeEnvironment({ ...process.env }, resolved.pluginRoot),
-      );
+      ));
       // allowProvision: false, structurally -- this async resolver never
       // takes the (execFileSync-based, up-to-RUNTIME_PROVISION_TIMEOUT_MS)
       // provisioning path at all; an unprovisioned runtime throws
@@ -730,12 +758,27 @@ async function attemptWorktreeSyncLocked(cwd) {
       // Recheck immediately before the actual sync subprocess launch --
       // narrows (never fully closes) the TOCTOU window noted above, since
       // this is the last point before the exec that could abort a rebase.
+      // Also recheck dirtiness here: the delegated `agent-worktrees git
+      // sync`'s own clean-tree check uses bare `git status --porcelain`
+      // (not this file's stricter --ignored/--untracked-files=all check),
+      // and its rebase does not disable rebase.autoStash on its own --
+      // content created in the runtime-resolution gap above could
+      // otherwise be silently stashed/rebased by the delegated call,
+      // bypassing this path's own fail-closed safety. GIT_CONFIG_* above
+      // covers the autostash half; this recheck covers the dirty half.
       const recheck = await rebaseInProgress(cwd);
       if (recheck.inProgress || recheck.error) {
         return {
           attempted: false,
           synced: false,
           reason: "a rebase started in this worktree just before sync; automatic sync never touches an in-progress rebase, so it was skipped",
+        };
+      }
+      if (await worktreeIsDirty(cwd)) {
+        return {
+          attempted: false,
+          synced: false,
+          reason: "the worktree became dirty just before sync; it was skipped rather than letting the delegated sync touch it",
         };
       }
       await execFileAsync(
@@ -752,8 +795,15 @@ async function attemptWorktreeSyncLocked(cwd) {
           reason: "a rebase started in this worktree just before sync; automatic sync never touches an in-progress rebase, so it was skipped",
         };
       }
+      if (await worktreeIsDirty(cwd)) {
+        return {
+          attempted: false,
+          synced: false,
+          reason: "the worktree became dirty just before sync; it was skipped rather than letting the delegated sync touch it",
+        };
+      }
       await execFileAsync(resolved.path, ["git", "sync"], {
-        cwd, timeout, encoding: "utf-8", env: sanitizedGitEnv(),
+        cwd, timeout, encoding: "utf-8", env: withUnattendedSyncGitConfig(sanitizedGitEnv()),
       });
     }
     return { attempted: true, synced: true, reason: null };
