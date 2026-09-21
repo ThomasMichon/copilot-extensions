@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -67,12 +68,17 @@ def _remote_list_cmd(shell: str, project: str, extra_args: list[str]) -> str:
     Mirrors ``claimant.py``'s ``_remote_probe_cmd`` (pwsh EncodedCommand on
     Windows, ``bash -lc`` elsewhere) for the same reason: robust against a
     cmd.exe default sshd shell.
+
+    Builds the inner command as a properly quoted argv (``shlex.join``)
+    rather than naive string concatenation -- ``extra_args`` (e.g. a
+    ``--tracking-status`` value) is caller-influenced and must never be
+    interpolated into a shell string unescaped (review #3134).
     """
-    inner = " ".join([project, "list", "--json", *extra_args])
+    inner = shlex.join([project, "list", "--json", *extra_args])
     if shell == "pwsh":
         enc = base64.b64encode(inner.encode("utf-16-le")).decode("ascii")
         return f"pwsh -NoProfile -WindowStyle Hidden -EncodedCommand {enc}"
-    return f"bash -lc '{inner}'"
+    return f"bash -lc {shlex.quote(inner)}"
 
 
 def _local_binstub(project: str) -> str:
@@ -146,6 +152,7 @@ def run_fleet(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--tracking-status", default=None,
+        choices=["active", "complete", "finalized", "orphaned", "archived", "all"],
         help="Passed through to each host's own `list --json --tracking-status ...`",
     )
     parser.add_argument(
