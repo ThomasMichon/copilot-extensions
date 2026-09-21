@@ -6748,6 +6748,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     resume_p.set_defaults(func=_cmd_resume)
 
+    from . import restart_worktree_cli
+    restart_worktree_cli.add_parser(sub)
+
     handoff_p = sub.add_parser(
         "handoff",
         help="Retire a session/worktree and continue in a fresh successor "

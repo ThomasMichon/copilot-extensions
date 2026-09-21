@@ -1,8 +1,8 @@
 """Tests for agent_dispatch.bridge_reclaim -- the reclaim path's replacement
 for the removed ``create --reclaim`` (agent-bridge-cold-resume Phase 3,
 #6744): resume, and if a live interactive CLI holds the worktree, actually
-stop it (via agent-worktrees), revalidate it's gone, and only then force
-the take-over."""
+stop it (via ``agent-bridge restart-worktree``), revalidate it's gone, and
+only then force the take-over."""
 
 from __future__ import annotations
 
@@ -18,13 +18,6 @@ def _proc(cmd, returncode=0, stdout="", stderr=""):
 
 def _resume(monkeypatch, fake_run, **overrides):
     monkeypatch.setattr(bridge_reclaim.subprocess, "run", fake_run)
-    monkeypatch.setattr(
-        bridge_reclaim, "agent_worktrees_launch_prefix",
-        lambda: ["/usr/bin/agent-worktrees"],
-    )
-    monkeypatch.setattr(
-        bridge_reclaim, "agent_worktrees_environment", lambda: {"SCRUBBED": "1"},
-    )
     kwargs = dict(
         exe=["/usr/bin/agent-bridge"], agent="task-worker",
         caller="agent-dispatch:w1", wait=True, json_output=False, timeout=None,
@@ -44,6 +37,14 @@ def _live_cli_refusal(cmd, holder="live-7"):
     )
 
 
+def _is_restart(cmd):
+    return cmd[:2] == ["/usr/bin/agent-bridge", "restart-worktree"]
+
+
+def _is_resume(cmd):
+    return cmd[1:3] == ["--json", "resume"]
+
+
 def test_resume_then_send_happy_path_no_holder(monkeypatch):
     """The common case: no live interactive CLI holds the worktree at all --
     a plain (non-forcing) resume succeeds outright, no stop is attempted."""
@@ -51,7 +52,7 @@ def test_resume_then_send_happy_path_no_holder(monkeypatch):
 
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
-        if cmd[1:3] == ["--json", "resume"]:
+        if _is_resume(cmd):
             return _proc(cmd, 0, json.dumps({"session_id": "resumed-9"}))
         return _proc(cmd, 0, "ok")
 
@@ -80,18 +81,18 @@ def test_resume_failure_short_circuits(monkeypatch):
 
 def test_live_cli_holder_is_stopped_revalidated_then_force_resumed(monkeypatch):
     """The actual 'reclaim' verb: kill the interactive CLI holding the
-    worktree (agent-worktrees restart), REVALIDATE it's actually gone (the
-    revalidation resume still names the SAME holder -- a lingering stale
-    registration, not a fresh claimant), THEN force-take-over."""
+    worktree (agent-bridge restart-worktree), REVALIDATE it's actually gone
+    (the revalidation resume still names the SAME holder -- a lingering
+    stale registration, not a fresh claimant), THEN force-take-over."""
     calls = []
 
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
-        if cmd[:2] == ["/usr/bin/agent-worktrees", "restart"]:
+        if _is_restart(cmd):
             return _proc(cmd, 0, json.dumps(
                 {"ok": True, "had_session": True, "method": "graceful"}
             ))
-        if cmd[1:3] == ["--json", "resume"]:
+        if _is_resume(cmd):
             if "--force" in cmd:
                 return _proc(cmd, 0, json.dumps({"session_id": "reclaimed-1"}))
             # 1st (pre-stop) and 2nd (revalidation) both still see 'live-7'.
@@ -102,28 +103,28 @@ def test_live_cli_holder_is_stopped_revalidated_then_force_resumed(monkeypatch):
     assert result.returncode == 0
     kinds = [(c[0], c[1] if len(c) > 1 else None) for c in calls]
     assert kinds == [
-        ("/usr/bin/agent-bridge", "--json"),      # 1st resume, no --force -> 409
-        ("/usr/bin/agent-worktrees", "restart"),  # stop the interactive CLI
-        ("/usr/bin/agent-bridge", "--json"),      # revalidation resume -> still 409
-        ("/usr/bin/agent-bridge", "--json"),      # force resume -> ok
+        ("/usr/bin/agent-bridge", "--json"),          # 1st resume, no --force -> 409
+        ("/usr/bin/agent-bridge", "restart-worktree"),  # stop the interactive CLI
+        ("/usr/bin/agent-bridge", "--json"),          # revalidation resume -> still 409
+        ("/usr/bin/agent-bridge", "--json"),          # force resume -> ok
         ("/usr/bin/agent-bridge", "send"),
     ]
-    assert calls[1] == ["/usr/bin/agent-worktrees", "restart", "wt-1", "--json"]
+    assert calls[1] == ["/usr/bin/agent-bridge", "restart-worktree", "wt-1", "--json"]
     assert "--force" not in calls[2]
     assert "--force" in calls[3]
     assert "reclaimed-1" in calls[4]
 
 
 def test_revalidation_succeeding_needs_no_force_at_all(monkeypatch):
-    """If the revalidation resume (right after 'restart') succeeds outright,
+    """If the revalidation resume (right after the stop) succeeds outright,
     the stale registration already cleared on its own -- no --force needed."""
     calls = []
 
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
-        if cmd[:2] == ["/usr/bin/agent-worktrees", "restart"]:
+        if _is_restart(cmd):
             return _proc(cmd, 0, json.dumps({"ok": True}))
-        if cmd[1:3] == ["--json", "resume"]:
+        if _is_resume(cmd):
             if calls.count(list(cmd)) == 1:
                 return _live_cli_refusal(cmd)
             return _proc(cmd, 0, json.dumps({"session_id": "cleared-1"}))
@@ -137,16 +138,16 @@ def test_revalidation_succeeding_needs_no_force_at_all(monkeypatch):
 
 def test_different_holder_after_stop_refuses_to_force(monkeypatch):
     """A DIFFERENT live interactive CLI claimed the worktree in the race
-    window between 'restart' returning and the revalidation check -- this
+    window between the stop returning and the revalidation check -- this
     must refuse to force through it, since it never confirmed THAT process
     dead."""
     calls = []
 
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
-        if cmd[:2] == ["/usr/bin/agent-worktrees", "restart"]:
+        if _is_restart(cmd):
             return _proc(cmd, 0, json.dumps({"ok": True}))
-        if cmd[1:3] == ["--json", "resume"]:
+        if _is_resume(cmd):
             if calls.count(list(cmd)) == 1:
                 return _live_cli_refusal(cmd, holder="live-7")
             return _live_cli_refusal(cmd, holder="new-claimant-2")
@@ -160,16 +161,16 @@ def test_different_holder_after_stop_refuses_to_force(monkeypatch):
 
 
 def test_stop_failure_is_reported_without_forcing_through(monkeypatch):
-    """If agent-worktrees can't confirm the interactive CLI actually stopped,
-    this must NOT fall through to '--force' anyway -- that would risk the
-    exact duplicate-controller race the guard exists to prevent."""
+    """If the stop can't confirm the interactive CLI actually stopped, this
+    must NOT fall through to '--force' anyway -- that would risk the exact
+    duplicate-controller race the guard exists to prevent."""
     calls = []
 
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
-        if cmd[:2] == ["/usr/bin/agent-worktrees", "restart"]:
+        if _is_restart(cmd):
             return _proc(cmd, 0, json.dumps({"ok": False, "error": "quit hung"}))
-        if cmd[1:3] == ["--json", "resume"]:
+        if _is_resume(cmd):
             return _live_cli_refusal(cmd)
         return _proc(cmd, 0, "ok")
 
@@ -178,21 +179,6 @@ def test_stop_failure_is_reported_without_forcing_through(monkeypatch):
     assert "could not stop the interactive CLI" in result.stderr
     assert len(calls) == 2  # one resume attempt, one stop attempt -- never a 2nd resume
     assert not any("--force" in c for c in calls)
-
-
-def test_stop_uses_scrubbed_environment(monkeypatch):
-    seen_env = {}
-
-    def fake_run(cmd, **kwargs):
-        if cmd[:2] == ["/usr/bin/agent-worktrees", "restart"]:
-            seen_env.update(kwargs.get("env") or {})
-            return _proc(cmd, 0, json.dumps({"ok": True}))
-        if cmd[1:3] == ["--json", "resume"]:
-            return _live_cli_refusal(cmd)
-        return _proc(cmd, 0, "ok")
-
-    _resume(monkeypatch, fake_run)
-    assert seen_env == {"SCRUBBED": "1"}
 
 
 def test_missing_session_id_reports_failure_not_a_legacy_fallback(monkeypatch):
@@ -224,7 +210,7 @@ def test_busy_reused_session_is_ended_then_resumed_again_for_its_replacement(
 
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
-        if cmd[1:3] == ["--json", "resume"]:
+        if _is_resume(cmd):
             sid = "reused-1" if calls.count(list(cmd)) == 1 else "fresh-2"
             return _proc(cmd, 0, json.dumps({"session_id": sid}))
         if cmd[1] == "send" and "reused-1" in cmd:
@@ -244,7 +230,7 @@ def test_busy_reused_session_is_ended_then_resumed_again_for_its_replacement(
 
 def test_json_output_reshapes_send_result(monkeypatch):
     def fake_run(cmd, **kwargs):
-        if cmd[1:3] == ["--json", "resume"]:
+        if _is_resume(cmd):
             return _proc(cmd, 0, json.dumps({"session_id": "resumed-9"}))
         return _proc(cmd, 0, "raw send output")
 

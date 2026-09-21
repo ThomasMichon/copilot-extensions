@@ -3,7 +3,6 @@
 Used by CLI commands to talk to a running agent-bridge service.
 Uses only stdlib (urllib) to avoid adding runtime dependencies.
 """
-
 from __future__ import annotations
 
 import json
@@ -16,9 +15,10 @@ from typing import TYPE_CHECKING, Any, Iterator
 
 import yaml
 
+from .client_worktree_restart import WorktreeRestartMixin
+
 if TYPE_CHECKING:
     from collections.abc import Callable
-
 
 DEFAULT_RESTART_GRACE = 30.0
 DEFAULT_SESSION_SETTLE_GRACE = 5.0
@@ -144,7 +144,7 @@ class SseStream(Iterator[dict[str, Any]]):
             response.close()
 
 
-class BridgeClient:
+class BridgeClient(WorktreeRestartMixin):
     """Sync HTTP client for the agent-bridge REST API."""
 
     def __init__(

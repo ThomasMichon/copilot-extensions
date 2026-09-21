@@ -70,6 +70,26 @@ def test_end_stop_thread_force_query_param(cfg_dir: Path, monkeypatch):
     ]
 
 
+def test_restart_worktree_force_query_param(cfg_dir: Path, monkeypatch):
+    """`restart_worktree` maps `force` to POST .../restart?force=true (#6744
+    Phase 3 -- the reclaim sequence's stop half)."""
+    client = BridgeClient.from_config()
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        client, "_request",
+        lambda method, path, **kw: calls.append((method, path, kw)) or None,
+    )
+    client.restart_worktree("wt-1")
+    client.restart_worktree("wt-2", force=True)
+    assert calls == [
+        ("POST", "/api/v1/worktrees/wt-1/restart", {"params": None, "request_timeout": None}),
+        (
+            "POST", "/api/v1/worktrees/wt-2/restart",
+            {"params": {"force": "true"}, "request_timeout": None},
+        ),
+    ]
+
+
 def test_explicit_base_url_env_wins(cfg_dir: Path, monkeypatch):
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
     routing.publish_active(cfg_dir, bind="127.0.0.1", port=9290, version="v")

@@ -1466,7 +1466,7 @@ gate land._
 - This effort's Phase 3-slice-2 entry above (2026-09-15/16) documented
   `agent-bridge create --reclaim` as the implemented mechanism behind
   `agent_dispatch.bridge.spawn_worker(reclaim=...)`. That CLI flag no
-  longer exists: `agent-bridge-cold-resume` Phase 3 (aperture-labs #6744,
+  longer exists: `agent-bridge-cold-resume` Phase 3 (#6744,
   copilot-extensions PR #3161) removed `create`'s own session-lifecycle
   head-guard bypass entirely -- `create` into an occupied worktree has no
   break-glass of its own now.

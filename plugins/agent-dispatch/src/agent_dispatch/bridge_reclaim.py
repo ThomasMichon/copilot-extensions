@@ -17,11 +17,15 @@ meant to be the *second* half of that two-step sequence, never a
 substitute for the first. An earlier revision of this module only ever
 performed the second half (bypassing the guard without actually stopping
 anything, or later, never bypassing it at all) -- both wrong. This module
-performs the whole sequence: ``agent-worktrees restart <worktree_id>``
-(the exact primitive behind the Picker "Stop" action and Neuron Forge's own
-"Take over" -- graceful double-Ctrl-C quit, then a hard mux kill-session)
-confirms the interactive CLI is actually gone, and only then does
-``agent-bridge resume <worktree_id> --force`` take the worktree over.
+performs the whole sequence: ``agent-bridge restart-worktree <worktree_id>``
+(the reclaim sequence's stop half -- shells to ``agent-worktrees restart``,
+the exact primitive behind the Picker "Stop" action and Neuron Forge's own
+"Take over": graceful double-Ctrl-C quit, then a hard mux kill-session --
+and *additionally* expires the worktree's live-session registration
+server-side on success, #2906; calling ``agent-worktrees restart`` directly
+would skip that invalidation) confirms the interactive CLI is actually
+gone, and only then does ``agent-bridge resume <worktree_id> --force`` take
+the worktree over.
 
 **Race between the stop and the forced resume.** ``restart`` and the
 following ``resume --force`` are two separate calls; a *different* live
@@ -78,7 +82,7 @@ import json
 import subprocess
 from collections.abc import Sequence
 
-from .procutil import agent_worktrees_environment, agent_worktrees_launch_prefix, no_window_kwargs
+from .procutil import no_window_kwargs
 
 _SEND_BUSY_EXIT = 75
 _LIVE_CLI_HOLDS_WORKTREE = "live_cli_holds_worktree"
@@ -123,22 +127,26 @@ def _resume_refusal(resumed: subprocess.CompletedProcess) -> tuple[str | None, s
     return detail.get("reason"), detail.get("session_id")
 
 
-def _stop_worktree_copilot(worktree_id: str, *, timeout: float | None) -> dict:
+def _stop_worktree_copilot(
+    worktree_id: str, *, exe: Sequence[str], timeout: float | None,
+) -> dict:
     """Kill the interactive Copilot CLI holding ``worktree_id`` via
+    ``agent-bridge restart-worktree`` -- the reclaim sequence's stop half
+    (agent-bridge-cold-resume Phase 3, #6744). That verb shells to
     ``agent-worktrees restart`` (graceful double-Ctrl-C, then a hard mux
-    kill-session) -- the exact primitive behind the Picker's "Stop" action
-    and Neuron Forge's "Take over". Returns its JSON payload
-    (``{"ok": bool, "had_session": bool, "method": ...}``), or ``{"ok":
-    False, "error": ...}`` if agent-worktrees isn't available or the call
-    itself failed.
+    kill-session -- the same primitive behind the Picker's "Stop" action
+    and Neuron Forge's "Take over") *and* expires the worktree's
+    live-session registration server-side on success (#2906) -- calling
+    ``agent-worktrees restart`` directly skips that invalidation entirely,
+    which is exactly what the caller's revalidation-before-forcing step
+    below exists to detect and refuse rather than silently miss. Returns
+    the JSON payload (``{"ok": bool, "had_session": bool, "method": ...}``),
+    or ``{"ok": False, "error": ...}`` on any failure to parse/run it.
     """
-    exe = agent_worktrees_launch_prefix()
-    if exe is None:
-        return {"ok": False, "error": "agent-worktrees CLI not found on PATH"}
-    cmd = [*exe, "restart", worktree_id, "--json"]
+    cmd = [*exe, "restart-worktree", worktree_id, "--json"]
     proc = subprocess.run(  # noqa: S603
         cmd, check=False, capture_output=True, text=True, timeout=timeout,
-        env=agent_worktrees_environment(), **no_window_kwargs(),
+        **no_window_kwargs(),
     )
     try:
         payload = json.loads(proc.stdout or "{}")
@@ -148,7 +156,7 @@ def _stop_worktree_copilot(worktree_id: str, *, timeout: float | None) -> dict:
         return {
             "ok": False,
             "error": (proc.stderr or proc.stdout or "").strip()
-            or f"agent-worktrees restart exited {proc.returncode}",
+            or f"agent-bridge restart-worktree exited {proc.returncode}",
         }
     return payload
 
@@ -187,7 +195,7 @@ def _take_over_live_holder(
     actually gone, and only then force-resume. Returns ``(failure_or_None,
     session_id_or_None)`` -- exactly one is non-``None``.
     """
-    stopped = _stop_worktree_copilot(worktree_id, timeout=timeout)
+    stopped = _stop_worktree_copilot(worktree_id, exe=exe, timeout=timeout)
     if not stopped.get("ok"):
         return subprocess.CompletedProcess(
             args=[], returncode=1, stdout="",
