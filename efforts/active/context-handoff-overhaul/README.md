@@ -2200,3 +2200,70 @@ deferred again:
   skills, docs-consistency, runbook-references) all pass -- no new
   findings beyond the pre-existing report-only marketplace-isolation
   baseline and skill-length warnings on unrelated plugins.
+
+### 2026-09-21 (cont.) -- PR #3167 round 26: unreadable-lock fail-closed, restore-fallback never leaves the canonical path empty, decouple pickup arm from sync completion
+
+Round 26 surfaced 3 new findings (2 HIGH, 1 MEDIUM), all fixed, plus a LOW
+PR-metadata finding (fixed) and 6 re-flagged carryovers -- all 6 confirmed
+already resolved in earlier rounds (verified against current file state,
+not re-fixed):
+
+- **(HIGH) Unreadable locks were reclaimed by age like unparseable ones:**
+  acquireLock treated "could not read the existing lock at all" the same
+  as "read it fine but found no parseable pid" -- both fell through to
+  the age-only heuristic. An unreadable-but-genuinely-live lock (a
+  permission error, transient I/O, an unsupported filesystem) has no
+  evidence its holder is gone, so folding it into the age fallback could
+  reclaim a live holder purely because the lock happened to be old. Now
+  tracks a distinct readFailed flag: an unreadable lock fails closed
+  immediately (never reclaimed by age); only a readable-but-unparseable
+  one still reaches the age-only fallback.
+- **(HIGH) restoreClaimedLock's fail-closed branch left the canonical
+  path empty:** when linkSync failed for any reason OTHER than EEXIST,
+  the prior code preserved only the orphaned claimedPath, leaving
+  lockPath (the canonical path) missing entirely -- a third invocation's
+  exclusive acquireLock could then succeed there and run concurrently
+  with the holder whose content survived only at the orphan. Since
+  EEXIST is the ONLY "already occupied" signal linkSync gives, any OTHER
+  failure means lockPath is presumably empty, so restoreClaimedLock now
+  falls back to a direct renameSync there (no clobber risk reasoned from
+  that same exclusion), only truly failing closed (preserving the
+  orphan) if that fallback ALSO fails.
+- **(MEDIUM) Arming live pickup awaited the full worktree sync, not just
+  its start:** the force-tier path's beforeArmPickup hook awaited the
+  ENTIRE sync promise (network/CLI work with multiple 20s timeouts)
+  before arming pickup, in auto mode. A slow or unreachable remote could
+  hold the last-chance/fire-and-forget trigger long enough for
+  compaction to happen -- defeating the very guarantee this path exists
+  for. The round-12 finding this hook was built for only needed the sync
+  to have STARTED before a live monitor could race ahead of it -- which
+  calling attemptWorktreeSync already guarantees synchronously, before
+  its first await (proven by an existing elapsed-time regression test).
+  Removed the beforeArmPickup gating from the force-tier caller entirely;
+  triggerHandoff's hook itself remains a generic DI seam other callers
+  could still use.
+- **(LOW, PR metadata) PR description reported the version as dev36/dev35
+  after later rounds bumped it further:** updated the PR body's version
+  bullet and validation test counts (127 fast + 37 exhaustive = 164
+  total) to match current dev37 (later dev38 once this round's own fixes
+  needed a bump too), and added Changes-section bullets summarizing the
+  restoreClaimedLock/readFailed/pickup-decoupling fixes and the CI
+  test-lane split so the PR description stays a faithful summary of the
+  shipped diff.
+- **Carryovers re-verified as already resolved, not re-fixed:** dedup-key
+  content-hash (round 9) already prevents a stale post-sync baton from
+  surviving a re-save; emitted `generate_handoff_prompt`/`save_handoff_prompt`
+  tool-response text and the `/handoff-continue` prompt already reference
+  the sync step (round 10-12); `scripts/emit-guidance.sh`/`.ps1` already
+  sequence sync before compose/store; `README.md`'s fallback command block
+  and `instructions/handoff-fallback.instructions.md` already include
+  `sync-worktree`; and the PR description already carries a
+  "Documentation impact" section. All confirmed against current file
+  content, not assumed from memory.
+- 4 new/changed exhaustive-suite tests (readFailed-vs-unparseable
+  structural check; renameSync-fallback structural check replacing the
+  now-outdated "never renameSync" assertion). `node --test`: fast suite
+  127 tests/125 pass (2 pre-existing skips, unchanged), exhaustive suite
+  37/37 pass (164 total, no regressions). Bumped plugin.json/marketplace.json
+  to `0.1.1-dev38` (content changed again after dev37's own bump). All
+  guards pass.
