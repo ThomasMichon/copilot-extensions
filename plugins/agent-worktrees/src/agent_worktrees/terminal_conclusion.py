@@ -84,6 +84,88 @@ def _save_session_conclusion(
     }, not already
 
 
+def _dispatch_ownership_confirmed(
+    record: tracking.WorktreeRecord,
+    *,
+    reservation_key: str | None,
+    owner: str,
+) -> bool:
+    """Whether ``record``'s own ``dispatch_attempt`` provenance exactly
+    matches the caller's claimed reservation/owner identity -- the same
+    match the ``dispatch-attempt`` policy gate already requires before
+    priming. Reused right before releasing this worktree's own ``session``
+    claim(s) (see :func:`_release_dispatch_session_claims`) so that release
+    is never granted on provenance the two-phase lock's unlocked
+    git-inspection window could have let drift underneath -- defense in
+    depth; the policy gate's own earlier check already enforces this for
+    the ordinary path, this just avoids trusting a now-stale in-memory
+    ``record`` a second time.
+    """
+    allocation = record.dispatch_attempt
+    return (
+        allocation is not None
+        and reservation_key is not None
+        and allocation.reservation_key == reservation_key
+        and allocation.creator_machine.casefold() == record.machine.casefold()
+        and allocation.driver == owner
+    )
+
+
+def _release_dispatch_session_claims(
+    record: tracking.WorktreeRecord,
+    *,
+    session_id: str | None,
+) -> list[tracking.ResourceClaim]:
+    """Release the live ``session``-kind resource claim(s) for
+    ``session_id`` specifically -- never every live session claim on the
+    record, which could over-release an unrelated still-relevant claim
+    (e.g. a distinct, separately-tracked session this same worktree also
+    holds).
+
+    Only called once the caller has confirmed (a) this is a
+    ``dispatch-attempt`` conclusion whose reservation/attribution exactly
+    matches the record's own ``dispatch_attempt``
+    (:func:`_dispatch_ownership_confirmed`), and (b) the backstop liveness
+    probe (:func:`_session_is_live`, itself built on the pid-lock/mux
+    check -- never a query to agent-bridge) already found no live process
+    for this worktree. Under those two conditions, agent-dispatch
+    concluding this attempt (complete, abandoned, or a spawn attempt that
+    definitively failed) IS the same kind of authoritative "we are done
+    with this session" signal an operator's explicit ``finalize`` or
+    handoff carries -- so its own outward ``session`` claim may be
+    released rather than left wedged forever. A clean-exit ``sessionEnd``
+    hook is the *only other* release path for a ``session`` claim
+    (:func:`tracking.release_resource_claim`'s own docstring; the reclaim
+    sweep in :mod:`sweep` deliberately has no gone-verdict resolver for
+    ``session`` claims, by design -- an abnormal agent-bridge death alone
+    must never look like a reason to reap a worktree we never declared
+    done with, copilot-extensions#3179 follow-up), and that hook never
+    fires for a session that crashed or was reaped before it could run.
+
+    Mutates ``record`` in place (does not itself persist -- the caller
+    saves alongside its own conclusion write) and returns the claims
+    released, for observability. A missing ``session_id`` releases
+    nothing (there is no specific session to attribute the release to).
+    """
+    if not session_id:
+        return []
+    # Mirrors `deregister_session`'s own `self_session_ref` construction
+    # exactly (tracking.py) -- an exact-string match on the fully qualified
+    # ref, not merely the parsed session fragment, so a claim is only ever
+    # released when its machine, project, AND worktree id all match this
+    # record too, not just an incidental session-id substring collision.
+    expected_ref = tracking.format_claim_ref(
+        record.machine, record.repo, record.worktree_id, session=session_id,
+    )
+    released = [
+        claim for claim in record.resources
+        if claim.is_live and claim.kind == "session" and claim.ref == expected_ref
+    ]
+    for claim in released:
+        tracking.release_resource_claim(record, claim.ref, save=False)
+    return released
+
+
 def _preservation_reason(
     record: tracking.WorktreeRecord, *, policy: str
 ) -> str | None:
@@ -244,6 +326,21 @@ def conclude_disposable_worktree(
                 }
                 return result
 
+            if policy == DISPATCH_ATTEMPT_POLICY and _dispatch_ownership_confirmed(
+                record, reservation_key=reservation_key, owner=owner
+            ):
+                # In-memory only here -- deliberately NOT persisted. This
+                # first phase is a preliminary gate that decides whether the
+                # (potentially slow) unlocked git inspection below is even
+                # worth running; if it or the second locked phase's
+                # revalidation later finds a different reason to skip
+                # (dirty work, branch drift, a lifecycle change underneath),
+                # persisting the release here would leave an irreversible
+                # side effect on a call that ultimately never primed the
+                # worktree. The second phase re-derives and persists this
+                # same release only once the conclusion has fully succeeded.
+                _release_dispatch_session_claims(record, session_id=session_id)
+
             if reason := _preservation_reason(record, policy=policy):
                 result.update(action="skipped", reason=reason)
                 return result
@@ -377,6 +474,10 @@ def conclude_disposable_worktree(
             ):
                 result.update(action="skipped", reason="lifecycle-changed")
                 return result
+            if policy == DISPATCH_ATTEMPT_POLICY and _dispatch_ownership_confirmed(
+                record, reservation_key=reservation_key, owner=owner
+            ):
+                _release_dispatch_session_claims(record, session_id=session_id)
             if reason := _preservation_reason(record, policy=policy):
                 result.update(action="skipped", reason=reason)
                 return result
