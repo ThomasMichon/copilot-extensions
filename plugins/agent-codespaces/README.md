@@ -78,10 +78,17 @@ repos:
 
 credentials:
   ado_host: my-org.visualstudio.com   # only for bare ADO get-access-token
+  identity_env: [GITHUB_USER]         # optional launch-time host identity alias
 ```
 
 > The service reads config live from the repo -- no generated intermediate
 > config. All org/account/URL values live in **your** repo, never in the plugin.
+
+For launch-time credential extras, `credentials.feed_token_env` exports fresh
+relay-minted Azure bearer tokens into named env vars, and
+`credentials.identity_env` exports the host Azure-login identity string those
+tokens represent. Ordinary user principals export the short alias (UPN local
+part); other principal types keep the reported identity string.
 
 ### Repo provenance & the active-plugin config seam
 

@@ -281,6 +281,8 @@ extras below.
 |-----|------|---------|-------------|
 | `relay_port` | int | `0` (dynamic) | TCP port for the relay. `0` binds an OS-assigned ephemeral port (recommended). A positive value pins a fixed port. |
 | `ado_host` | string | -- | Default Azure DevOps host (e.g. `<your-org>.visualstudio.com`) for bare `get-access-token` requests that carry no host (npm/nuget via ado-auth-helper). Unset = such requests are rejected. Also settable via the `CODESPACES_ADO_HOST` env var on the relay host. |
+| `feed_token_env` | list[string] | `[]` | Env-var names to populate at launch with a fresh relay-minted Azure bearer for tooling that reads feed/cache auth from a static env token. |
+| `identity_env` | list[string] | `[]` | Env-var names to populate at launch with the host Azure-login identity string behind relay-minted Azure tokens. Ordinary user principals export the short alias (UPN local part); other principal types keep the reported identity string. |
 | `sources` | dict | -- | Optional per-source overrides (see below). |
 
 ### Credential Sources

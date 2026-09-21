@@ -1188,14 +1188,14 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         relay_token = token_for(args.name)
 
     # Launch prelude: always scrub injected PATs (#160/#77); add the relay
-    # exports only when the relay is in use. Built here (after the token mint)
-    # so the PAT scrub can NEVER be clobbered by the relay exports.
+    # exports only when the relay is in use, after the token mint.
     relay_env = _build_relay_env(
         relay_port,
         relay_token,
         use_relay=not args.no_relay,
         ado_host=getattr(config.credentials, "ado_host", None),
         feed_token_env=getattr(config.credentials, "feed_token_env", None),
+        identity_env=getattr(config.credentials, "identity_env", None),
     )
 
     manager = ConnectionManager()

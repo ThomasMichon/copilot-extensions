@@ -30,6 +30,9 @@
 #   # Default Azure DevOps host for bare `get-access-token` requests that carry
 #   # no host (npm/nuget via ado-auth-helper). Unset = such requests are rejected.
 #   ado_host: <your-org>.visualstudio.com
+#   # Export the host Azure-login identity string into launch env vars. Ordinary
+#   # user principals export the short alias (UPN local part).
+#   # identity_env: [GITHUB_USER]
 #   sources:
 #     az-login:                 # Optional EXTRA Azure token resources.
 #       enabled: true           # ADO REST + Storage are allowed by default.

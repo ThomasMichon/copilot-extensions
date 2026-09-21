@@ -487,17 +487,14 @@ def _validate_dropin_config(raw: object) -> str | None:
     for index, plugin in enumerate(raw.get("codespace_plugins", [])):
         if not isinstance(plugin, dict):
             return f"codespace_plugins[{index}] must be a mapping"
-
     credentials = raw.get("credentials", {})
-    if "feed_token_env" in credentials and not isinstance(
-        credentials["feed_token_env"], list
-    ):
-        return "credentials.feed_token_env must be a list"
-    if "feed_token_env" in credentials:
-        error = _validate_dropin_string_list(
-            credentials["feed_token_env"],
-            location="credentials.feed_token_env",
-        )
+    for key in ("feed_token_env", "identity_env"):
+        value = credentials.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            return f"credentials.{key} must be a list"
+        error = _validate_dropin_string_list(value, location=f"credentials.{key}")
         if error is not None:
             return error
     sources = credentials.get("sources", {})
@@ -1524,7 +1521,9 @@ class CredentialsConfig:
     # Left empty (default), nothing is exported and behavior is unchanged.
     # dotfiles#1221.
     feed_token_env: list[str] = field(default_factory=list)
-
+    # Env var names to populate at launch with the host Azure-login identity
+    # behind relay-minted Azure tokens (user principals export the short alias).
+    identity_env: list[str] = field(default_factory=list)
 
 @dataclass
 class ConnectionOwnerConfig:
@@ -2488,10 +2487,11 @@ def load_merged_config(
                 "enforce_ado_rest_login",
                 merged.credentials.enforce_ado_rest_login,
             ))
-            # Union feed-token env var names across adopted repos (dotfiles#1221).
-            for _var in creds_raw.get("feed_token_env", []) or []:
-                if _var and _var not in merged.credentials.feed_token_env:
-                    merged.credentials.feed_token_env.append(_var)
+            for attr in ("feed_token_env", "identity_env"):
+                target = getattr(merged.credentials, attr)
+                for _var in creds_raw.get(attr, []) or []:
+                    if _var and _var not in target:
+                        target.append(_var)
             for source_name, source_raw in creds_raw.get("sources", {}).items():
                 if source_name not in merged.credentials.sources:
                     merged.credentials.sources[source_name] = _parse_credential_source(

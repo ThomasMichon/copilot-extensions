@@ -656,6 +656,12 @@ def test_structurally_invalid_target_is_inactive_while_valid_peer_loads(
             "credentials.feed_token_env entries must be non-empty strings",
         ),
         (
+            "identity_env:\n"
+            "  - GITHUB_USER\n"
+            "  - 42\n",
+            "credentials.identity_env entries must be non-empty strings",
+        ),
+        (
             "sources:\n"
             "  shared:\n"
             "    allowed_hosts:\n"
@@ -687,6 +693,8 @@ def test_invalid_credential_member_is_inactive_while_valid_peer_merges(
         "credentials:\n"
         "  feed_token_env:\n"
         "    - VALID_TOKEN\n"
+        "  identity_env:\n"
+        "    - GITHUB_USER\n"
         "  sources:\n"
         "    shared:\n"
         "      allowed_hosts:\n"
@@ -712,6 +720,7 @@ def test_invalid_credential_member_is_inactive_while_valid_peer_merges(
     monkeypatch.setattr(cfg, "load_adopted_repos", lambda: [])
     merged = cfg.load_merged_config(include_cwd=False)
     assert merged.credentials.feed_token_env == ["VALID_TOKEN"]
+    assert merged.credentials.identity_env == ["GITHUB_USER"]
     assert merged.credentials.sources["shared"].allowed_hosts == ["valid.example"]
     assert merged.credentials.sources["shared"].allowed_resources == [
         "https://valid.example/resource"
