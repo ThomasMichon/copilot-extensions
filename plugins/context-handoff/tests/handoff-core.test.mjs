@@ -1216,10 +1216,15 @@ test("resolveRuntimePython with allowProvision:false fails fast instead of riski
     mkdirSync(scriptsDir, { recursive: true });
     // Deliberately resolves nothing (simulates an unprovisioned runtime)
     // without erroring, so resolve() returns an empty string rather than
-    // throwing for an unrelated reason.
+    // throwing for an unrelated reason. Both platform scripts are written so
+    // this test is meaningful on POSIX CI runners too, not just Windows.
     writeFileSync(
       join(scriptsDir, "resolve-runtime.ps1"),
       "$AgentRtPy = $null\n",
+    );
+    writeFileSync(
+      join(scriptsDir, "resolve-runtime.sh"),
+      "AGENT_RT_PY=\n",
     );
     const resolved = {
       path: join(fakePluginRoot, "fake-cli.ps1"),
