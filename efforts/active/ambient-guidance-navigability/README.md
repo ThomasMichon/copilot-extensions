@@ -910,7 +910,7 @@ green at that point. That round's findings were genuinely still open:
   verdict: "Approval recommended -- no unresolved blocking issues remain."
   Merged; `customizing-copilot` at `0.1.0-dev86`.
 - **Phase 2's "Deterministic sync tool" Plan item is now checked** -- the
-  orchestration half is complete, tested (28 tests across
+  orchestration half is complete, tested (35 tests across
   `test_projection_reflect.py` + `test_projection_sync_worker.py`), and
   merged. Only the deep byte-exact recompute-against-a-pinned-artifact
   verification remains open, gated on the still-missing marketplace-source
