@@ -587,6 +587,7 @@ def _restart_status_monitor() -> dict:
     return result
 
 
+
 def cmd_status_monitor_restart(args: argparse.Namespace) -> int:
     """``status-monitor-restart`` -- reap+respawn the resident monitor.
 
