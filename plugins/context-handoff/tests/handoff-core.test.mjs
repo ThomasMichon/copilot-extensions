@@ -24,6 +24,7 @@ import {
   logHandoffPromptReceived,
   manualFallbackInstructions,
   normalizeHandoffTitle,
+  resolveRuntimePython,
   retryStoredHandoffCutover,
   resolveSystemCli,
   runtimeEnvironment,
@@ -1199,5 +1200,48 @@ test("attemptWorktreeSync attempts a sync on a clean tree and reports failure ho
     assert.match(result.reason, /sync failed|unavailable/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("resolveRuntimePython with allowProvision:false fails fast instead of risking the 180s provisioning wait", () => {
+  // Real regression this guards: attemptWorktreeSync's runCli call is
+  // fire-and-forget from session.usage_info, before any await -- if an
+  // agent-worktrees runtime were not yet provisioned, resolveRuntimePython's
+  // provisioning branch could block the event loop for up to
+  // RUNTIME_PROVISION_TIMEOUT_MS (180s). allowProvision:false must skip that
+  // branch entirely and fail immediately instead.
+  const fakePluginRoot = mkdtempSync(join(tmpdir(), "context-handoff-fakert-"));
+  try {
+    const scriptsDir = join(fakePluginRoot, "scripts");
+    mkdirSync(scriptsDir, { recursive: true });
+    // Deliberately resolves nothing (simulates an unprovisioned runtime)
+    // without erroring, so resolve() returns an empty string rather than
+    // throwing for an unrelated reason.
+    writeFileSync(
+      join(scriptsDir, "resolve-runtime.ps1"),
+      "$AgentRtPy = $null\n",
+    );
+    const resolved = {
+      path: join(fakePluginRoot, "fake-cli.ps1"),
+      pluginRoot: fakePluginRoot,
+      module: "fake_module",
+      runtimeRoot: ".fake-runtime-root-that-does-not-exist",
+      payloadRootEnv: null,
+    };
+    const env = {
+      ...process.env,
+      COPILOT_PLUGIN_ROOT: fakePluginRoot,
+    };
+    const start = Date.now();
+    assert.throws(
+      () => resolveRuntimePython(resolved, env, fakePluginRoot, 5000, false),
+      /provisioning skipped/,
+    );
+    const elapsedMs = Date.now() - start;
+    // Generous upper bound: real provisioning waits up to 180_000ms: this
+    // must be nowhere close to that if allowProvision:false is honored.
+    assert.ok(elapsedMs < 10_000, `expected a fast failure, took ${elapsedMs}ms`);
+  } finally {
+    rmSync(fakePluginRoot, { recursive: true, force: true });
   }
 });
