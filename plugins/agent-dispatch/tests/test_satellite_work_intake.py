@@ -218,7 +218,7 @@ def test_list_calls_scoped_to_this_machine_and_capped_active_limit():
         "status": "queued",
         "target_machine": "book2",
         "repo": None,
-        "limit": 3,
+        "limit": 200,
     }
 
 
@@ -236,6 +236,31 @@ def test_queued_list_limit_matches_remaining_capacity_above_endpoint_default():
     assert client.calls[1]["limit"] == 250
 
 
+def test_queued_list_limit_never_below_the_endpoint_default():
+    # Even a small capacity must request at least the endpoint's own
+    # default page size -- see the oldest-first fairness note.
+    client = FakeClient(queued=[])
+    loop, _ = _loop(client, max_concurrent=2)
+    loop.tick()
+    assert client.calls[1]["limit"] == 200
+
+
+def test_queued_tasks_considered_oldest_first_within_the_page():
+    # The `/tasks` endpoint orders newest-first with no oldest-first option
+    # -- this loop must re-sort the page itself so an older queued task
+    # isn't starved behind a stream of newer ones inside the same response.
+    client = FakeClient(
+        queued=[
+            {"id": "new", "created_at": 300.0},
+            {"id": "old", "created_at": 100.0},
+            {"id": "mid", "created_at": 200.0},
+        ]
+    )
+    loop, spawned = _loop(client, max_concurrent=1)
+    loop.tick()
+    assert spawned == ["old"]
+
+
 def test_queued_list_limit_padded_past_recently_triggered_count():
     # If the first `capacity` rows the coordinator would otherwise return
     # are all already in `_recent_triggers` (still awaiting confirmation),
@@ -243,17 +268,16 @@ def test_queued_list_limit_padded_past_recently_triggered_count():
     # client-side-suppressed and leave a slot idle even though a newer
     # eligible task exists further down the queue -- the request must be
     # padded past the in-flight count so those newer rows are still in
-    # the returned page.
-    client = FakeClient(queued=[{"id": "t1"}])
-    loop, _ = _loop(client, max_concurrent=3)
-    loop.tick()  # triggers t1; recent_triggers now has 1 entry
-
-    client._active = []
-    client._queued = [{"id": "t1"}, {"id": "t2"}]
+    # the returned page (and past the endpoint's own 200 floor, once
+    # capacity + in-flight exceeds it).
+    client = FakeClient(queued=[])
+    loop, _ = _loop(client, max_concurrent=250)
+    # White-box: seed 100 still-pending triggers directly, as if 100 spawns
+    # were triggered on a prior tick and not yet coordinator-confirmed.
+    loop._recent_triggers = {f"pending-{i}": 1000.0 for i in range(100)}
     loop.tick()
-    # capacity = 3 - active(0) - recent_triggers(1, t1 still pending) = 2
-    # limit must be padded past the 1 in-flight entry so t2 is reachable.
-    assert client.calls[-1]["limit"] == 2 + 1
+    # capacity = 250 - active(0) - recent_triggers(100) = 150
+    assert client.calls[-1]["limit"] == 150 + 100
 
 
 # -- spawn timeout -------------------------------------------------------

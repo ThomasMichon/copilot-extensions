@@ -55,6 +55,13 @@ DEFAULT_SPAWN_TIMEOUT_S = 30.0
 #: the live, coordinator-authoritative half of the concurrency cap.
 _ACTIVE_STATUSES = "claimed,started"
 
+#: Minimum page size for the queued-task discovery read, matching the
+#: `/tasks` endpoint's own default. See the fairness note at that call site:
+#: requesting only exactly `capacity` rows (newest-first, no server-side
+#: oldest-first option) risks starving an older queued task indefinitely
+#: under a steady stream of newer ones.
+_QUEUE_DISCOVERY_MIN_LIMIT = 200
+
 
 class SatelliteWorkIntake:
     """Discovers this machine's own affinitied `queued` work on the shared
@@ -185,16 +192,23 @@ class SatelliteWorkIntake:
                 status="queued",
                 target_machine=self._machine,
                 repo=self._repo,
-                # Pad the request past `capacity`: any row already in
-                # `_recent_triggers` is filtered out client-side below, so a
-                # request sized to EXACTLY `capacity` could come back
-                # entirely suppressed (every returned row already
-                # in-flight) and leave open slots idle even though other,
-                # newer eligible tasks exist further down the queue.
-                limit=capacity + len(self._recent_triggers),
+                # The `/tasks` endpoint orders newest-first with no
+                # oldest-first/cursor option, so requesting exactly
+                # `capacity` (+ padding for in-flight rows, see above) would
+                # only ever see the newest page -- under a steady stream of
+                # newer targeted tasks, an older queued task could starve
+                # indefinitely, never once appearing in a page this small.
+                # Request a page at least as large as the endpoint's own
+                # default (200) and sort it oldest-first below so fairness
+                # doesn't depend on the server ever adding an ordering knob.
+                limit=max(_QUEUE_DISCOVERY_MIN_LIMIT, capacity + len(self._recent_triggers)),
             )
         except Exception:
             return {"spawned": [], "skipped_at_capacity": False, "error": "list_failed"}
+        # Oldest-first within the fetched page: `_bulk_task_dict` (server)
+        # carries `created_at`; fall back to `0.0` (sorts first) for a
+        # malformed/legacy row missing it rather than raising on `sorted()`.
+        queued = sorted(queued, key=lambda t: t.get("created_at") or 0.0)
         spawned: list[str] = []
         for task in queued:
             if capacity <= 0:
