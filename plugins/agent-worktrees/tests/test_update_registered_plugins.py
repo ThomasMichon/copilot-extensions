@@ -473,11 +473,11 @@ def test_missing_payload_install_uses_activation_preserving_wrapper(monkeypatch)
 
 
 def test_update_failure_on_existing_payload_retries_with_install(monkeypatch):
-    """Regression (aperture-labs#7286): a plugin whose payload directory
-    already exists but was bootstrap-installed (never registered through
-    `copilot plugin install`) fails `update` with Copilot's own "not
-    installed" ledger error. Must retry with `install` -- which backfills
-    that ledger entry -- rather than giving up on the first failure."""
+    """Regression: a plugin whose payload directory already exists but was
+    bootstrap-installed (never registered through `copilot plugin install`)
+    fails `update` with Copilot's own "not installed" ledger error. Must
+    retry with `install` -- which backfills that ledger entry -- rather than
+    giving up on the first failure."""
     monkeypatch.setattr(
         reconcile, "core_installed_payload_dir", lambda name: Path("/inst/agent-machines")
     )

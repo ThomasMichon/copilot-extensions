@@ -18698,15 +18698,17 @@ def _update_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | None 
     """Update (or install) a single copilot-extensions plugin payload.
 
     Idempotent and network-facing. Chooses ``update`` when the payload
-    directory is already present, else ``install``. If that attempt fails,
-    ALWAYS retries with ``install`` -- a plugin whose payload directory exists
-    (bootstrap-installed, never through an interactive ``copilot plugin
-    install``) has no ledger entry in Copilot's own plugin manager, so
-    ``update`` fails "not installed" even though the payload is genuinely
-    present; ``install`` is the only verb that backfills that ledger entry,
-    and re-running it against an already-current payload is a proven no-op
-    (aperture-labs#7286). Never raises: a single plugin's failure is reported
-    as a short status string so the caller can continue with the rest.
+    directory is already present, else ``install``. If that attempt exits
+    non-zero (an exception -- ``copilot`` missing, a preservation error, a
+    timeout -- returns immediately without retrying), retries with
+    ``install`` -- a plugin whose payload directory exists (bootstrap-
+    installed, never through an interactive ``copilot plugin install``) has
+    no ledger entry in Copilot's own plugin manager, so ``update`` fails "not
+    installed" even though the payload is genuinely present; ``install`` is
+    the only verb that backfills that ledger entry, and re-running it
+    against an already-current payload is a proven no-op. Never raises: a
+    single plugin's failure is reported as a short status string so the
+    caller can continue with the rest.
 
     Returns one of ``"OK"``, ``"OK (installed)"``, or an error description.
     """
@@ -18755,12 +18757,12 @@ def _update_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | None 
     # whose payload was bootstrap-installed (a direct file copy into
     # installed-plugins/, never through an interactive `copilot plugin
     # install`) has no such ledger entry, so `update` fails with "not
-    # installed" even though the payload is right there (aperture-labs#7286).
-    # Retry with `install` in BOTH cases (``installed`` or not) -- it is
-    # idempotent and safe to re-run against an already-correct payload
-    # (verified: no content drift, no activation-state change), and it is the
-    # only verb that backfills the missing ledger entry. Only report failure
-    # once the install retry ALSO fails.
+    # installed" even though the payload is right there. Retry with
+    # `install` in BOTH cases (``installed`` or not) -- it is idempotent and
+    # safe to re-run against an already-correct payload (verified: no
+    # content drift, no activation-state change), and it is the only verb
+    # that backfills the missing ledger entry. Only report failure once the
+    # install retry ALSO fails.
     if installed:
         output.info(f"Plugin update for {name} returned non-zero -- retrying with install")
     else:
