@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import {
   mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, unlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 import {
   HANDOFF_META_PREFIX,
@@ -993,6 +994,32 @@ test("triggerHandoff under the default (manual-only) mode never wires up automat
     result.manualInstructions,
     /Automatic cutover is disabled.*mode.*is not `auto`/s,
   );
+});
+
+test("storeHandoff never notes the worktree record itself (save_handoff_prompt must never arm pickup)", () => {
+  // Root-cause fix for the same High-severity gap: `storeHandoff()` backs
+  // BOTH `save_handoff_prompt` (documented as never arming pickup) and
+  // `trigger_handoff`. It used to call `noteHandoffInRecord()` internally
+  // regardless of caller or mode, so even `save_handoff_prompt` alone --
+  // with no trigger_handoff call at all -- created a `pending_handoffs`
+  // entry agent-worktrees' resident monitor could discover and claim.
+  // Structural check (storeHandoff has no dependency-injection seam for
+  // its internal helpers): its source must never reference
+  // `noteHandoffInRecord` -- only `triggerHandoff()` may call it, and only
+  // when `mode: auto` is configured.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const storeHandoffBody = source.slice(
+    source.indexOf("export function storeHandoff("),
+    source.indexOf("export function buildSeedForStored("),
+  );
+  assert.ok(storeHandoffBody.length > 0, "could not locate storeHandoff's body");
+  assert.doesNotMatch(storeHandoffBody, /noteHandoffInRecord/);
 });
 
 test("triggerHandoff reports when an explicit stored baton cannot be recovered", async () => {

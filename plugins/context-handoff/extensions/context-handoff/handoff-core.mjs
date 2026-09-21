@@ -1724,10 +1724,20 @@ function pickupSignals(cwd, sid, stored, sessionStatePath, execute = runCli) {
 //   { storage: "agent-dispatch"|"file", id, taskId?, path?, metadata }
 // On failure returns a storage:null result with the resolver/write diagnostic.
 export function storeHandoff({ promptText, sid, cwd, title, preferTask = true }) {
+  // Deliberately does NOT touch the worktree's own record: `storeHandoff`
+  // backs BOTH `save_handoff_prompt` (documented as the "safe,
+  // non-committal" step that must never arm pickup) and `trigger_handoff`
+  // (the "arm pickup" step). Recording a handoff there creates a
+  // `pending_handoffs` entry agent-worktrees' resident monitor can
+  // discover and claim on its own -- a live-cutover trigger, not merely
+  // advisory history (Copilot review finding on PR #3041: this used to
+  // run unconditionally here, so even `save_handoff_prompt` -- and a
+  // manual-only-mode `trigger_handoff` -- could still get auto-launched by
+  // the monitor through this exact path). Only `triggerHandoff()` records
+  // it now, and only when `mode: auto` is configured.
   if (preferTask && agentDispatchAvailable()) {
     const task = dispatchHandoff(promptText, sid, cwd, title);
     if (task) {
-      noteHandoffInRecord(cwd, sid, task.id, title);
       return {
         storage: "agent-dispatch",
         id: task.id,
@@ -1745,7 +1755,6 @@ export function storeHandoff({ promptText, sid, cwd, title, preferTask = true })
       error: file?.error || "unknown file-store failure",
     };
   }
-  noteHandoffInRecord(cwd, sid, file.id, title);
   return { storage: "file", id: file.id, path: file.path, metadata: file.metadata };
 }
 
@@ -1923,8 +1932,12 @@ export async function triggerHandoff(
   // live-cutover trigger point too, not merely advisory, and must be gated
   // the same way (Copilot review finding on PR #3041: a "manual-only"
   // handoff could otherwise still get auto-launched by the monitor through
-  // this exact path, defeating the entire opt-in gate).
-  if (!justStored && autoEnabled) {
+  // this exact path, defeating the entire opt-in gate). Now runs
+  // regardless of `justStored` -- `storeHandoff()` itself never notes it
+  // (see its own docstring), so this is the ONE place that ever does,
+  // whether the handoff was just stored fresh or recovered from a prior
+  // save.
+  if (autoEnabled) {
     noteHandoff(cwd, sid, stored.id, stored.metadata?.title || title);
   }
   // Only "auto" mode emits the `handoff_requested` activity event
@@ -1977,7 +1990,7 @@ export async function triggerHandoff(
     // "signaled" when neither live-cutover trigger point ever ran).
     automaticCutoverDisabled: !autoEnabled,
     worktreeSignal: {
-      noted: !justStored && autoEnabled,
+      noted: autoEnabled,
       activity,
     },
     bridge,
