@@ -995,6 +995,12 @@ the Phase 0 runbook, picked up as capacity allows.
   those commands. Fixed by routing both handlers back through the re-exported
   `__main__` helper surface (`_core()._resolve_worktree_for_read(...)`), which
   restores the exact monkeypatch seam the slice promised to preserve.
+- The fresh post-fix review round then caught one smaller previously-missed
+  compatibility contract: the extracted `cmd_effort_focus()` had changed the
+  fallback invalid-action exit code from the pre-extraction `1` to `2`. Even
+  though argparse normally prevents that path, the handler is still
+  re-exported for direct callers/tests, so restored the original `return 1`
+  behavior before merge.
 - Followed through on the remaining contract checks after the code stabilized:
   `python tools/check-module-size.py` passed, `python tools/check-module-size.py
   --refresh-baseline` lowered `tools/module-size-baseline.json`'s ceiling for

@@ -590,7 +590,7 @@ def cmd_effort_focus(args) -> int:
     if args.json:
         return _json_error(message)
     output.err(message)
-    return 2
+    return 1
 
 
 def cmd_claimant_liveness(args) -> int:
