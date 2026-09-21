@@ -20,7 +20,8 @@ import {
   openSync, closeSync, statSync, readdirSync,
 } from "node:fs";
 import { join, basename, dirname } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import {
@@ -44,6 +45,7 @@ const INSTALLATION_ROOT = dirname(PLUGIN_ROOT);
 const CANONICAL_REPOSITORY =
   "https://github.com/ThomasMichon/copilot-extensions";
 const RUNTIME_PROVISION_TIMEOUT_MS = 180000;
+const execFileAsync = promisify(execFile);
 
 // --- cross-platform system-CLI invocation ---------------------------------
 // Resolve sibling payload/runtime ownership before invoking exact isolated
@@ -227,6 +229,40 @@ function describeSyncError(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+// Async-only twin of resolveRuntimePython's `resolve()` step, for a caller
+// that must never block the event loop (see attemptWorktreeSync below).
+// Always behaves as allowProvision:false -- an unprovisioned runtime is
+// reported as not-found, never waited on with a blocking provision step.
+async function resolveRuntimePythonAsyncNoProvision(resolved, env, cwd, timeout) {
+  let python;
+  if (process.platform === "win32") {
+    const script = [
+      "$ErrorActionPreference='Stop'",
+      `$env:AGENT_RT_ROOT=Join-Path $env:USERPROFILE '${resolved.runtimeRoot}'`,
+      ". (Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts\\resolve-runtime.ps1')",
+      "if ($AgentRtPy) {[Console]::Out.Write($AgentRtPy)}",
+    ].join("; ");
+    const { stdout } = await execFileAsync(
+      windowsPowerShell(),
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+      { cwd, timeout, env, encoding: "utf-8" },
+    );
+    python = stdout.trim();
+  } else {
+    const { stdout } = await execFileAsync("sh", ["-c", [
+      `AGENT_RT_ROOT="$HOME/${resolved.runtimeRoot}"`,
+      "export AGENT_RT_ROOT",
+      '. "$COPILOT_PLUGIN_ROOT/scripts/resolve-runtime.sh"',
+      'printf %s "${AGENT_RT_PY:-}"',
+    ].join("; ")], { cwd, timeout, env, encoding: "utf-8" });
+    python = stdout.trim();
+  }
+  if (!python || !existsSync(python)) {
+    throw new Error("payload runtime is not yet provisioned (provisioning skipped)");
+  }
+  return python;
+}
+
 // Best-effort worktree sync for the fully-automated force-tier path (Phase 7:
 // a successor inherits the SAME on-disk worktree, so an un-synced predecessor
 // hands the same already-fixed-upstream bugs to its own successor). This path
@@ -236,12 +272,19 @@ function describeSyncError(error) {
 // commit of unrelated edits or untracked secrets (the same risk an agent-guided
 // blanket commit could hit, but here there is no agent to scope it). Only a
 // worktree that is already clean gets synced.
-export function attemptWorktreeSync(cwd) {
+//
+// Fully async (execFile, not execFileSync/runCli) end to end: this is invoked
+// synchronously at the top of a fire-and-forget async function
+// (autoForceHandoff) before its first await, so any blocking child-process
+// call here would freeze the SDK event loop for the length of that call
+// regardless of the caller's own fire-and-forget intent.
+export async function attemptWorktreeSync(cwd) {
   let status;
   try {
-    status = execFileSync("git", ["status", "--porcelain"], {
+    const result = await execFileAsync("git", ["status", "--porcelain"], {
       cwd, encoding: "utf-8", timeout: 5000,
     });
+    status = result.stdout;
   } catch (error) {
     return {
       attempted: false,
@@ -256,15 +299,42 @@ export function attemptWorktreeSync(cwd) {
       reason: "worktree has uncommitted changes; automatic sync never commits, so it was skipped",
     };
   }
+  let resolved;
   try {
-    // allowProvision: false -- this fire-and-forget path (called from
-    // session.usage_info, before any await) must never risk
-    // RUNTIME_PROVISION_TIMEOUT_MS (180s) of blocking self-provisioning. An
-    // agent-worktrees runtime that is not already provisioned is reported as
-    // unavailable, not waited on.
-    runCli("agent-worktrees", ["git", "sync"], {
-      cwd, timeout: 20000, allowProvision: false,
-    });
+    resolved = resolveSystemCliDescriptor("agent-worktrees");
+  } catch (error) {
+    return {
+      attempted: true,
+      synced: false,
+      reason: `sync failed or agent-worktrees unavailable: ${describeSyncError(error)}`,
+    };
+  }
+  const timeout = 20000;
+  try {
+    if (resolved.pluginRoot) {
+      const env = runtimeEnvironment(
+        { ...process.env }, resolved.pluginRoot,
+      );
+      // allowProvision: false, structurally -- this async resolver never
+      // takes the (execFileSync-based, up-to-RUNTIME_PROVISION_TIMEOUT_MS)
+      // provisioning path at all; an unprovisioned runtime throws
+      // immediately instead.
+      const python = await resolveRuntimePythonAsyncNoProvision(
+        resolved, env, cwd, timeout,
+      );
+      if (resolved.payloadRootEnv) {
+        env[resolved.payloadRootEnv] = resolved.pluginRoot;
+      }
+      await execFileAsync(
+        python,
+        isolatedPythonArgs(resolved.module, ["git", "sync"]),
+        { cwd, timeout, env, encoding: "utf-8" },
+      );
+    } else {
+      await execFileAsync(resolved.path, ["git", "sync"], {
+        cwd, timeout, encoding: "utf-8",
+      });
+    }
     return { attempted: true, synced: true, reason: null };
   } catch (error) {
     return {

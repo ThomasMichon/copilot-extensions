@@ -138,9 +138,13 @@ listing a set of follow-up ideas or questions:
 4. **Replace the usual follow-up list** with one short, low-friction offer to
    continue via handoff.
 5. **Only once the user says yes:** sync the worktree (see "Sync before
-   triggering" below), then **call `trigger_handoff`.** Do not sync or
-   mutate local history before this point -- a decline must leave the
-   worktree untouched.
+   triggering" below). If the sync changed anything relevant (branch moved,
+   or a rebase conflicted and was left unresolved), **re-run
+   `generate_handoff_prompt` and `save_handoff_prompt`** so the stored baton
+   reflects the post-sync state -- otherwise `trigger_handoff` reuses the
+   pre-sync brief and silently omits the sync/conflict outcome. Then **call
+   `trigger_handoff`.** Do not sync or mutate local history before the user
+   has agreed -- a decline must leave the worktree untouched.
 
 Only this turn-end follow-up path is skippable via **autopilot** or prior
 explicit pre-authorization.
