@@ -1029,13 +1029,17 @@ async def _start_fresh_worktree_session(
                 ),
             )
         # Claim the per-worktree ownership reservation for the fresh owned
-        # session (#2912) so a later live-CLI registration respects it. Under
-        # the per-worktree lock + post-crawl live-holder recheck above, so it
-        # cannot race a live holder here.
+        # session (#2912) so a later live-CLI registration respects it. The
+        # pre-spawn live-holder recheck above does NOT cover the spawn
+        # itself (mgr.start_session is the actual slow, awaited step) -- a
+        # genuinely different claimant can still register in that window,
+        # so the reservation's own result must be checked, not assumed.
         db = getattr(request.app.state, "db", None)
-        if db is not None:
-            db.reserve_worktree_ownership(
-                worktree_id, fresh.session_id, now=time.time(), reclaim=reclaim
+        if db is not None and not db.reserve_worktree_ownership(
+            worktree_id, fresh.session_id, now=time.time(), reclaim=reclaim
+        ):
+            raise HTTPException(
+                status_code=409, detail=_reservation_conflict_detail(db, worktree_id)
             )
         return fresh
 

@@ -2446,6 +2446,46 @@ class TestWorktreeRoutes:
         assert spawned_target.cwd == f"/wt/{wt_id}"
         assert mgr.start_session.call_args.kwargs["caller_id"] == wt_id
 
+    def test_resume_worktree_fresh_session_reports_conflict_when_reservation_fails(
+        self, client, app,
+    ) -> None:
+        """The pre-spawn live-holder recheck does not cover the spawn itself
+        (mgr.start_session is the slow, awaited step) -- a genuinely
+        different claimant can register during it. The post-spawn
+        reservation attempt's result must be checked: a False result must
+        surface as a 409, never silently return the fresh session as if it
+        were safely owned (that would recreate the duplicate-controller
+        race)."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from agent_bridge.transport import SpawnTarget
+
+        wt_id = "anomalous-potato-wsl-20250101-193510-freshraced"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+        app.state.resolver.resolve = MagicMock(
+            return_value=SpawnTarget(type="local")
+        )
+
+        mgr = app.state.session_manager
+        target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id)
+        fresh = Session("fresh-sess-raced", "amber-loop", target, "test-agent")
+        fresh.status = SessionStatus.IDLE
+        mgr.start_session = AsyncMock(return_value=fresh)
+
+        db = app.state.db
+        db.reserve_worktree_ownership = lambda *a, **k: False
+        db.register_live_session(
+            "cli-raced-in", machine="test-agent", cwd=None, worktree_id=wt_id,
+            repo=None, branch=None, pid=None, role=None, now=time.time(),
+        )
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["reason"] == "live_cli_holds_worktree"
+        assert detail["session_id"] == "cli-raced-in"
+
     def test_resume_worktree_unknown_still_404s(self, client, app) -> None:
         """A worktree that is not discoverable at all (no session, not on disk)
         still 404s -- the fresh-start only rescues a *known* worktree (#1683)."""
