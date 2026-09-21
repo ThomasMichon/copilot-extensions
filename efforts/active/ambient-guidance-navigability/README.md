@@ -193,14 +193,25 @@ private paths).
       consumer repo, does: refresh installed plugin payloads for every
       enabled plugin, `sync`, `scan --from-settings` for drift, and -- only
       if the result changed anything -- produces a branch + PR carrying a
-      dedicated stamp label (e.g. `projection-reflect`) and a **recompute
-      manifest**: enough information (plugin name + version + template hash
-      per changed file) for a reviewer to independently recompute the exact
-      expected bytes and confirm a byte-exact match against the diff. This
-      is strictly stronger verification than `config-reflect` can offer
-      (there is no live, unrepeatable device state here -- the source is
-      already-reviewed, already-merged upstream content, so the render is
-      100% reproducible).
+      dedicated stamp label (e.g. `projection-reflect`). **Managed-file
+      conflict routing**: `sync` already returns blocking findings (not a
+      git-merge conflict) when it detects a locally hand-edited managed
+      projection or an ownership/lock validation failure, leaving `changed`
+      empty -- the worker must treat *that* outcome as a conflict too and
+      route it to the conflict-dispatch primitive below (a hand-edited
+      managed file is exactly the "flag it, don't silently overwrite" case
+      the reconciler exists for), not silently stop or silently skip it.
+      **Verification target**: reuse the existing
+      `.github/copilot/context-projections.json` lock schema as the
+      recompute-verification target (it already carries `template`,
+      `pluginVersion`, `templateBytes`/`templateSha256`, and
+      `renderedBytes`/`renderedSha256` per destination) -- no new manifest
+      format is needed; a reviewer independently re-runs `sync` against the
+      same installed-plugin state and requires a byte-exact match against
+      the PR's own lock-entry diff. This is strictly stronger verification
+      than `config-reflect` can offer (there is no live, unrepeatable device
+      state here -- the source is already-reviewed, already-merged upstream
+      content, so the render is 100% reproducible).
 - [ ] **Conflict-dispatch primitive**: a reusable helper (candidate home:
       `agent-dispatch`, since dispatch itself is a copilot-extensions
       plugin) generalizing `config-reflect`'s `conflict_dispatch.py` pattern
@@ -284,8 +295,15 @@ whatever dispatches on Phase 2's conflict-dispatch label there.
 - [ ] Phase 1's guard test fails on a synthetic plugin with a declared-but-
       unindexed category, and passes once indexed (a real negative-proof
       test, not just a passing positive one).
-- [ ] Phase 2's recompute-manifest verification rejects a PR whose diff does
-      not byte-match the recomputed render (a real negative-proof test).
+- [ ] Phase 2's recompute verification rejects a PR whose diff does not
+      byte-match the recomputed lock entries (a real negative-proof test).
+- [ ] Phase 2's bypass safety boundary is proven with negative tests for
+      *each* conjunct, not just recompute mismatch: a no-change run opens no
+      PR; a disabled plugin's projection is never touched even if its
+      installed payload changed; a PR missing the stamp label, touching a
+      path outside the managed globs, or containing a non-regular-file diff
+      shape is rejected by the bypass; and a routed conflict is proven to
+      update the existing PR without ever self-merging.
 - [ ] Phase 6's re-audit shows a materially higher navigable/false-positive
       ratio than the baseline table above, with the specific false-positive
       corrected.
