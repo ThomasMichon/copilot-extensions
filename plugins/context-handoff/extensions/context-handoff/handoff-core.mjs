@@ -118,7 +118,7 @@ function windowsPowerShell() {
   );
 }
 
-function resolveRuntimePython(resolved, env, cwd, timeout) {
+export function resolveRuntimePython(resolved, env, cwd, timeout, allowProvision = true) {
   const resolve = process.platform === "win32"
     ? () => {
       const script = [
@@ -143,6 +143,14 @@ function resolveRuntimePython(resolved, env, cwd, timeout) {
     }).trim();
   let python = resolve();
   if (!python) {
+    if (!allowProvision) {
+      // Best-effort/fire-and-forget callers (e.g. the force-tier auto-sync
+      // path, which has no agent judgment in the loop and must never risk
+      // blocking the event loop for the up-to-RUNTIME_PROVISION_TIMEOUT_MS
+      // self-provisioning step below) opt out of provisioning entirely: an
+      // unprovisioned runtime is reported as unavailable, not waited on.
+      throw new Error("payload runtime is not yet provisioned (provisioning skipped)");
+    }
     const provisionBin = process.platform === "win32"
       ? windowsPowerShell()
       : resolved.path;
@@ -185,7 +193,7 @@ export function runtimeEnvironment(baseEnv, pluginRoot) {
 }
 
 export function runCli(bin, args, opts = {}) {
-  const { cwd, timeout = 15000, ...extra } = opts;
+  const { cwd, timeout = 15000, allowProvision = true, ...extra } = opts;
   const resolved = resolveSystemCliDescriptor(bin);
   const resolvedBin = resolved.path;
   const env = resolved.pluginRoot
@@ -197,7 +205,7 @@ export function runCli(bin, args, opts = {}) {
   const childOptions = { ...extra, env };
   if (resolved.pluginRoot) {
     const python = resolveRuntimePython(
-      resolved, env, cwd, timeout,
+      resolved, env, cwd, timeout, allowProvision,
     );
     if (resolved.payloadRootEnv) {
       env[resolved.payloadRootEnv] = resolved.pluginRoot;
@@ -249,7 +257,14 @@ export function attemptWorktreeSync(cwd) {
     };
   }
   try {
-    runCli("agent-worktrees", ["git", "sync"], { cwd, timeout: 20000 });
+    // allowProvision: false -- this fire-and-forget path (called from
+    // session.usage_info, before any await) must never risk
+    // RUNTIME_PROVISION_TIMEOUT_MS (180s) of blocking self-provisioning. An
+    // agent-worktrees runtime that is not already provisioned is reported as
+    // unavailable, not waited on.
+    runCli("agent-worktrees", ["git", "sync"], {
+      cwd, timeout: 20000, allowProvision: false,
+    });
     return { attempted: true, synced: true, reason: null };
   } catch (error) {
     return {

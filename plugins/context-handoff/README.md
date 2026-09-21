@@ -109,8 +109,11 @@ external system create a successor.
 ### 2. Context-pressure-driven handoff: trigger directly
 
 If the reason for the handoff is **context pressure** and the objective still
-has more work left to do, the agent should call `trigger_handoff` directly
-after saving the baton. This path does **not** ask for confirmation first.
+has more work left to do, the agent should sync the worktree onto the latest
+default branch first (see "Sync before triggering" in the `context-handoff`
+skill -- never blanket-commits, and skips cleanly rather than blocking if
+anything looks unsafe), then call `trigger_handoff`. This path does **not**
+ask for confirmation first.
 
 ### 3. Turn-end follow-ups ask before triggering
 
@@ -119,7 +122,8 @@ listing follow-up ideas or questions, the flow is different:
 
 - **compose + save** the baton,
 - **ask the user** whether to continue via handoff,
-- only after a brief yes (for example, "sure") call `trigger_handoff`.
+- only after a brief yes (for example, "sure"), **sync the worktree** (same
+  rule as above), then call `trigger_handoff`.
 
 Only this turn-end follow-up path is skipped by autopilot mode or prior user
 pre-authorization.
