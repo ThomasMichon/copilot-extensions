@@ -72,10 +72,14 @@ async def resolve_already_live(
     settle the session (in-flight prompt task cancelled, stale client
     cleared, host record reaped, STOPPED persisted -- via
     ``mgr.settle_dead_local_session``, which owns that mutation since it
-    touches SessionManager-internal state) and return False so the caller
-    falls through to the normal resume path. Any other status, or an
+    touches SessionManager-internal state, and rechecks liveness under its
+    own lock before actually settling) and return False so the caller falls
+    through to the normal resume path. Any other status, or an
     inconclusive/confirmed-alive live check, returns True/False matching
-    the plain "was it live" question.
+    the plain "was it live" question. If a concurrent resume already
+    reattached/replaced the session by the time the settle's own lock is
+    acquired, ``settle_dead_local_session`` is a safe no-op and this trusts
+    whatever ``session.status`` ends up being instead of forcing False.
     """
     if session.status not in (SessionStatus.RUNNING, SessionStatus.IDLE):
         return False
@@ -87,7 +91,20 @@ async def resolve_already_live(
         worktree_id, session.session_id, session.status.value,
     )
     await mgr.settle_dead_local_session(session)
-    return False
+    return session.status in (SessionStatus.RUNNING, SessionStatus.IDLE)
+
+
+def reassign_worktree_ownership(
+    db: object | None, worktree_id: str, session_id: str,
+) -> None:
+    """Force-reassign the worktree-ownership reservation to ``session_id``
+    (review #3142): the reservation taken before resuming still names the
+    OLD session after a resume/reclassify falls back to a fresh one, so a
+    live-CLI registration would otherwise be checked against a stale
+    reference instead of the replacement that actually now owns it."""
+    import time
+    if db is not None:
+        db.reserve_worktree_ownership(worktree_id, session_id, now=time.time(), reclaim=True)
 
 
 async def owning_agent(

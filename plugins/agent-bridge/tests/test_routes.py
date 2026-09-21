@@ -1488,6 +1488,11 @@ class TestWorktreeRoutes:
         assert row[0]["status"] == SessionStatus.STOPPED.value
         # The stale host record is reaped, not left to linger.
         assert mgr._host_index.get(stale.session_id) is None
+        # The worktree-ownership reservation must follow the replacement
+        # session, not still name the reclassified-stale one (review #3142).
+        owner = mgr._db.get_worktree_ownership(wt_id)
+        assert owner is not None
+        assert owner["session_id"] == "fresh-sess-deadhost"
 
     def test_resume_worktree_falls_back_to_fresh_session(
         self, client, app,

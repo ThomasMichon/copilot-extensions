@@ -134,3 +134,26 @@ async def test_resolve_already_live_cancels_stale_prompt_task(tmp_path) -> None:
     assert task.cancelled()
     assert session.status == SessionStatus.STOPPED
 
+
+@pytest.mark.asyncio
+async def test_settle_rechecks_liveness_under_lock_before_reaping(tmp_path) -> None:
+    """(review #3142) If a concurrent resume already reattached/replaced the
+    host between the caller's initial check and this settle acquiring the
+    lock, settle_dead_local_session must recheck rather than blindly reap
+    whatever record now exists -- otherwise it would kill a freshly-live
+    host and revert the session it just resumed back to stopped."""
+    mgr = _mgr(tmp_path)
+    session = _seeded_session(mgr, "s1", SessionStatus.IDLE)
+    # By the time settle actually runs, the record is already live again
+    # (simulates a concurrent resume winning the race).
+    mgr._host_index.register(HostRecord(
+        session_id="s1", port=1, host_pid=os.getpid(), child_pid=os.getpid(),
+        boundary="local",
+    ))
+
+    settled = await mgr.settle_dead_local_session(session)
+
+    assert settled is False
+    assert session.status == SessionStatus.IDLE  # untouched
+    assert mgr._host_index.get("s1") is not None  # not reaped
+

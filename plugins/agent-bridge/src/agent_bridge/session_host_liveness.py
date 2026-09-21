@@ -46,22 +46,37 @@ class _HostLivenessMixin:
             return pid_alive(rec.child_pid)
         return True
 
-    async def settle_dead_local_session(self, session: "Session") -> None:
+    async def settle_dead_local_session(self, session: "Session") -> bool:
         """Phase 2 (#6744): settle a session whose local host child is
         confirmed dead -- guarded by the session's own lifecycle lock (a
         concurrent resume/prompt must never observe the stale status mid-
-        settle, or race the client/DB/host-record mutation, review #3142),
-        cancels any in-flight prompt task FIRST (its own exception handler
-        would otherwise unconditionally write IDLE back over our STOPPED --
-        the dead child means there is no one to signal, so this skips the
-        ACP cancel and just cancels the local task, mirroring
-        ``_quiesce_session``'s ``cancel_turn=False`` path), then clears the
-        client (``mark_host_child_exited`` avoids hanging on a dead
-        transport, mirrors ``_settle_dead_child``'s reattach-path settle),
-        reaps the stale host record, persists STOPPED, and appends a
-        ``session_state_changed`` event so subscribers stop seeing a stale
-        RUNNING/IDLE (matching ``_settle_dead_child``'s own event emission)."""
+        settle, or race the client/DB/host-record mutation, review #3142).
+
+        Re-verifies liveness AFTER acquiring the lock, not just before: a
+        concurrent resume racing to acquire the same lock first could
+        already have reattached/replaced the host, so blindly reaping
+        whatever record now exists would kill a freshly-live one instead of
+        the stale one this caller observed (review #3142). Returns True if
+        it actually settled the session (still confirmed dead under the
+        lock); False if a concurrent caller already made it live again, in
+        which case nothing here is touched.
+
+        On confirmed-dead: cancels any in-flight prompt task FIRST (its own
+        exception handler would otherwise unconditionally write IDLE back
+        over our STOPPED -- the dead child means there is no one to signal,
+        so this skips the ACP cancel and just cancels the local task,
+        mirroring ``_quiesce_session``'s ``cancel_turn=False`` path), then
+        clears the client (``mark_host_child_exited`` avoids hanging on a
+        dead transport, mirrors ``_settle_dead_child``'s reattach-path
+        settle), reaps the stale host record, persists STOPPED, and appends
+        a ``session_state_changed`` event so subscribers stop seeing a
+        stale RUNNING/IDLE (matching ``_settle_dead_child``'s own event)."""
         async with session._lifecycle_lock:
+            rec = self._host_index.get(session.session_id) if self._host_index else None
+            if rec is None or getattr(rec, "boundary", "local") != "local":
+                return False  # no longer a stale local record to settle
+            if self._rec_host_alive(rec) and self._rec_child_alive(rec):
+                return False  # a concurrent resume already made it live again
             task = session._prompt_task
             if task is not None and not task.done():
                 task.cancel()
@@ -70,9 +85,7 @@ class _HostLivenessMixin:
             if session.client is not None:
                 session.client.mark_host_child_exited(-1)
                 session.client = None
-            rec = self._host_index.get(session.session_id) if self._host_index else None
-            if rec is not None:
-                self._reap_host_record(rec, "resume_worktree: local host child dead")
+            self._reap_host_record(rec, "resume_worktree: local host child dead")
             session.status = SessionStatus.STOPPED
             self._db.update_session_status(
                 session.session_id, SessionStatus.STOPPED.value, time.time()
@@ -82,6 +95,7 @@ class _HostLivenessMixin:
                     "status": SessionStatus.STOPPED.value,
                     "local_host_child_dead": True,
                 })
+            return True
 
     def _live_host_records(self) -> list[Any]:
         """Records whose host is (boundary-appropriately) alive."""
