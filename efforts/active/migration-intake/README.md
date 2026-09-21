@@ -97,9 +97,12 @@ published.
    force-routed or force-published to clear a queue.
 
 The **candidate ledger** (`ledger.md` in this directory) is the append-only
-record: one row per candidate with its source, disposition, owner, and
-tracker outcome. A candidate leaves `residual` only when a later pass can
-resolve disposition 1-3 above.
+record: one dated section per pass, each with one row per candidate
+recording its source, disposition, owner, and tracker outcome. A later pass
+never edits a prior pass's rows in place -- it appends its own section so
+the full history from initial scan to final outcome stays comparable and
+auditable. A candidate leaves `residual` only when a later pass can resolve
+disposition 1-3 above.
 
 ## Plan
 
@@ -196,7 +199,9 @@ retain only genuinely unclassified general-purpose work here.
   review of the Plan addition just made here -- issue publication is the
   next step only after that acceptance, and only for items that still need
   a public tracker entry distinct from the domain plan's own Plan checkbox.
-- Updated `ledger.md` with final Phase 2 dispositions and outcomes.
+- Appended a dated "Phase 2 revalidation" section to `ledger.md` with final
+  dispositions and outcomes, alongside (not overwriting) the Initial scan
+  section from the prior pass, keeping the ledger genuinely append-only.
 
 ### 2026-09-20 — Phase 1 frozen; initial Phase 2 candidate ledger
 
