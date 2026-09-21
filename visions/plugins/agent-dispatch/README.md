@@ -534,6 +534,38 @@ discovered there with a throwaway identity that never reconciles with the next
 one, so declared registrations accumulate without bound instead of converging —
 the exact failure #2417 diagnosed and fixed.
 
+### cross-machine-federation
+A coordinator is **opt-in federatable**: a node declares a role
+(`peer`/`coordinator`/`standby`/`satellite`) and a background runner keeps it
+present in a **directory** other instances discover through, funneling the
+claim plane through a **single, fenced-epoch coordinator** rather than a full
+peer mesh or a leader election — single-user federation has no Byzantine
+actors, so crash/partition tolerance plus dedup suffice. The directory is
+reached over a pluggable **rendezvous** (a hosted coordinator's own directory,
+or a single-user relay such as Dev Tunnels), so the same federation logic
+runs identically over either substrate. A `satellite` is the most-constrained
+role: it registers itself outbound, is never selected as coordinator/standby,
+and is reachable only through work queued for it to pull — never a general
+inbound control surface. Federation is never required for a lone install to
+work: with no role configured, a coordinator behaves exactly as it always
+has, consistent with this fabric's à la carte install principle.
+
+### satellite-status-is-pushed-not-polled-and-gated-closed
+A satellite additionally publishes its **own live embodiment status**
+(worktrees + activity) on every heartbeat, sourced only from that machine's
+own local session list — never an inbound reach, never anything read *from*
+another machine. Two properties keep this trustworthy and inert by default.
+First, the pushed status must reflect **what's actually live right now**: a
+resumable-but-stopped session, a session whose transport has disconnected, or
+a stale duplicate row for an already-seen worktree must never be reported as
+an active embodiment — a satellite's fleet-wide status is a stronger claim
+than a purely local, best-effort display overlay, so it earns stricter
+filtering. Second, exposure is **default-closed**: a configured `satellite`
+role never registers, heartbeats, or reads local sessions until an operator
+explicitly opens its gate, and it withdraws on the very next tick if the gate
+closes mid-session — a satellite offers nothing back to the fleet merely
+because the capability exists, only when the operator has said so.
+
 ## Behaviors
 
 ### focus-is-an-early-signal-not-a-heartbeat
@@ -862,6 +894,16 @@ does **not** quietly undo it.
 
 ## Provenance
 
+- **2026-09-21** — Added *cross-machine-federation* and
+  *satellite-status-is-pushed-not-polled-and-gated-closed*: retroactive
+  reconciliation for the opt-in federation runtime (rendezvous discovery,
+  fenced-epoch coordinator lease, pluggable Gateway/Dev-Tunnels backends) and
+  the satellite exposure gate + embodiment-status push, both already shipped
+  in the aperture-labs `agent-dispatch-federation` effort's Phases 1-4 but
+  never previously cited here. Below-altitude for the shipped mechanism
+  itself (it already matches the intent stated); vision-extending for the
+  satellite's default-closed exposure gate and its stricter live-status
+  filtering, which had no prior vision coverage in this repo.
 - **2026-09-19** — Added *durable-attachment-history*: a task's queryable
   history of every session/worktree that has ever attached to it, distinct
   from its mutable current-owner fields. Prompted by a stuck-review incident
