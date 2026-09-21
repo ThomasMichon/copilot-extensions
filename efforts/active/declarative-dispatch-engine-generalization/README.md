@@ -103,10 +103,16 @@ and the parent agent-dispatch vision:
   > **2026-09-17 correction:** the packaged path this bullet describes no
   > longer exists -- see the dated journal entry below. The live declaration
   > now resolves the same identity from a repo-local override instead.
-- [ ] Assess whether a named identity's structural boundaries (permitted
+- [x] Assess whether a named identity's structural boundaries (permitted
   tools/mutations) can enforce the reviewer vision's never-supersede rule
   more robustly than prose alone -- closing the Phase-6 open question in
-  `review-automation-reliability`.
+  `review-automation-reliability`. **Assessed 2026-09-20**: feasible via
+  `agent-mcp`'s existing `gate` decorator (preflight-conditional access),
+  but not with today's worker-identity schema alone -- see the dated
+  journal entry for the full assessment and its recommended follow-up
+  shape. Closing this bullet means the assessment is done, not that the
+  guard is landed; implementing it is out of scope for this bullet and
+  is named as a candidate follow-up, not silently dropped.
 
 ### Phase 3 - Concise event-then-charter-pull prompts
 
@@ -825,6 +831,74 @@ state instead.
   real-colleague validation this session cannot self-assert; it needs an
   actual colleague (or a clean-room-style dry run by someone who did not
   write the engine) trying the doc as written.
+
+### 2026-09-20 (cont. 3) - Phase 2: assessed the never-supersede structural-guard question
+
+- Picked up the effort's last remaining Phase 2 bullet: whether a named
+  worker identity's structural boundaries can enforce the reviewer vision's
+  never-supersede rule (never close/replace another author's open PR) more
+  robustly than prose, closing `review-automation-reliability`'s Phase 6
+  open question.
+- **Grounded the assessment in what actually exists today, not
+  speculation.** `agent_dispatch.worker_identities.WorkerIdentity` has
+  exactly four fields (`name`, `description`, `rules`, `source_path`) --
+  `rules` is markdown prose rendered into a prompt; there is no
+  tool-permission or mutation-boundary field of any kind. Separately,
+  neither forge adapter in `repository_issue_loops.py`
+  (`GitHubProvider`/`AzureDevOpsProvider`) exposes a close/merge/supersede
+  mutation at all -- both are narrowly list/reserve/claim/release. The
+  live incident Phase 6 describes (a worker closing and replacing another
+  author's PR) therefore happened entirely through the **embodied worker's
+  own generic `gh`/`git` tool access** during its session, a surface
+  agent-dispatch's own forge-provider boundary never touches and today's
+  identity schema has no hook into.
+- **The feasible mechanism is `agent-mcp`'s existing `gate` decorator, not
+  a new primitive.** `gate` (`plugins/agent-mcp/src/agent_mcp/decorators/gate.py`)
+  already does exactly the shape this needs: on a matched tool call, it
+  issues a **preflight** upstream lookup keyed off the call's own
+  arguments (e.g. fetch the target PR's author by PR number), evaluates an
+  `allow_when` predicate over that lookup result, and denies the call
+  (`on_deny: error`/`stub`/`drop`) if it fails -- fail-closed by default on
+  preflight error. Contrast with the narrower `input_gate`, which only sees
+  a call's own arguments with no external lookup and therefore *cannot*
+  express "PR author differs from the acting identity" (a `gh pr close
+  <number>` call's own arguments don't carry the PR's author; only a
+  preflight fetch does). This means the generic reviewer/backlog recipe
+  *can* be given a real structural guard -- "deny closing PR #N unless its
+  author equals the declared `forge.producer_login`" is a one-`gate`-rule
+  policy, enforced at the tool-call layer regardless of what the LLM
+  decides, which is exactly the class of failure prose already tried and
+  failed to prevent here.
+- **Why this isn't landable as a small identity-schema addition today**:
+  `gate` only intercepts calls that already flow through an agent-mcp
+  bridge. The incident's actual close/replace mutation went through the
+  embodied session's own direct `gh`/`git` CLI tool access, not through any
+  MCP bridge -- there is nothing to gate yet. Landing the guard for real
+  needs, at minimum: (1) the reviewer/backlog worker's mutating PR
+  operations routed through an agent-mcp bridge instead of raw CLI (the
+  `agent-worktrees` "pull-requests" vision's provider-neutral PR capability,
+  which the reviewer loop "composes (or should)" per its own See Also, is
+  the natural authoritative-operation surface to gate in front of); and
+  (2) a new field on the declaration/identity schema (e.g. a
+  `structural_guards` or `gate` reference) naming which gate policy a
+  worker identity requires, since nothing in today's schema lets a
+  declaration or identity express "and also refuse this class of mutation
+  structurally." Both are real, scoped pieces of design work, not a
+  same-slice implementation detail -- and this repo's own house style
+  (established repeatedly in `review-automation-reliability`'s own Phase 9
+  entries) requires a reviewed design slice before implementing a
+  mechanism this consequential, which this journal entry deliberately does
+  not attempt to pre-empt.
+- **Conclusion, recorded in both efforts**: yes, structurally more robust
+  than prose is achievable, and the concrete mechanism (`agent-mcp`'s
+  `gate` decorator) already exists and needs no new invention -- but two
+  prerequisites (PR-mutation traffic actually flowing through a gateable
+  bridge, and a schema hook for a worker identity to require a gate policy)
+  are not yet in place. Recorded as a candidate follow-up in
+  `review-automation-reliability`'s own Phase 6 checklist (cross-referenced
+  there) rather than treated as this bullet's job to implement. This
+  effort's own Phase 2 bullet is closed by the assessment itself, per its
+  own wording ("assess whether...").
 
 
 
