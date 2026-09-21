@@ -1070,6 +1070,23 @@ def test_client_round_trip(client):
     assert trail == [Status.QUEUED, Status.CLAIMED, Status.STARTED, Status.COMPLETED]
 
 
+def test_client_tasks_for_session_round_trip(client):
+    """DispatchClient.tasks_for_session against the real HTTP route (not just
+    the fake client the CLI test exercises, and not just the raw route the
+    coordinator test exercises) -- the actual production path the CLI uses."""
+    t = client.create("via client")
+    client.claim("w1", repo=TEST_REPO)
+    client.start(t["id"], "w1")
+    client.bind_owner_session(t["id"], "w1", "session-via-client")
+
+    found = client.tasks_for_session("session-via-client")
+    assert len(found) == 1
+    assert found[0]["task_id"] == t["id"]
+    assert found[0]["detached_at"] is None
+
+    assert client.tasks_for_session("session-never-seen") == []
+
+
 def test_client_error_maps_to_dispatch_error(client):
     with pytest.raises(DispatchError) as exc:
         client.get("missing")
