@@ -27,6 +27,27 @@ agent-worktrees bind-session --worktree-dir "$PWD"
 the worktree directly, without depending on any handoff plumbing having run
 first.
 
+## If your outbound claim is blocking finalize, or you need to release one
+
+`finalize`'s obligation gate blocks on **unsettled outbound resource
+obligations** -- a claim this worktree holds on a child worktree, CodeSpace,
+container, bridge session, or an out-of-band `pr`/`workdir` you journaled by
+hand. Never force-release one; resolve it:
+
+```bash
+agent-worktrees claims show
+agent-worktrees claims sweep          # dry-run: provably-gone-and-safe reclaims
+agent-worktrees claims sweep --apply  # only after reviewing the dry-run
+```
+
+The full itemized procedure per obligation kind (cross-repo worktree,
+borrowed CodeSpace, bridge session, crashed holder, the affirmative-handoff
+path when you genuinely cannot close a child yourself) lives in the
+`worktree` skill's own `references/obligations.md` -- read it before
+choosing `--handoff-to` or a selective `claims cleanup`. Tracing *whose*
+claim something is (walking back to a root owner, or checking whether that
+owner is still live) is the separate **`tracing-claimant-graphs`** skill.
+
 ## If a handoff/cutover trigger appears to have failed
 
 A stuck cutover (a successor spawned but never confirmed, or a predecessor
@@ -53,3 +74,6 @@ guess.
   with `handoffs-check`/`doctor` first.
 - A session that cannot confirm it is head should not act as though it is;
   `bind-session` is the explicit, safe way to resolve that ambiguity.
+- Never force-release or force-settle an outbound claim; resolve it via
+  `claims show`/`sweep` and `references/obligations.md`, or the affirmative
+  `--handoff-to` path -- never bypass the obligation gate.

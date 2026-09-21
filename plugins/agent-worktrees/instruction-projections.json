@@ -25,6 +25,22 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "cli-fallback",
+      "template": "instructions/cli-fallback.instructions.md",
+      "destination": ".github/instructions/agent-worktrees/cli-fallback.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    },
+    {
+      "id": "ownership-boundary-fallback",
+      "template": "instructions/ownership-boundary-fallback.instructions.md",
+      "destination": ".github/instructions/agent-worktrees/ownership-boundary-fallback.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }

@@ -1,0 +1,36 @@
+{
+  "schema": "copilot-extensions.troubleshooting-index",
+  "version": 1,
+  "categories": [
+    {
+      "id": "claims-ledger",
+      "summary": "Inspect or release an outbound claim this worktree holds on another worktree/CodeSpace/container/PR, or trace whose claim something is.",
+      "pointer": "`claims` command / `tracing-claimant-graphs` skill",
+      "markers": ["claims show", "tracing-claimant-graphs"]
+    },
+    {
+      "id": "resource-obligations",
+      "summary": "finalize's obligation gate is blocking on an unsettled outbound resource obligation.",
+      "pointer": "`worktree` skill's `references/obligations.md`",
+      "markers": ["obligations.md", "obligation gate"]
+    },
+    {
+      "id": "graphql-error-triage",
+      "summary": "A gh-family/GraphQL-backed command (repos gh, create-pr, pr-merge, labels) failed.",
+      "pointer": "`cli-fallback.instructions.md` -- account/scope, rate-limit, permission, or schema-drift triage",
+      "markers": ["GraphQL error", "repos account-for"]
+    },
+    {
+      "id": "command-not-found-triage",
+      "summary": "A plugin's own CLI command is not found / not recognized in this process.",
+      "pointer": "`cli-fallback.instructions.md` -- PATH inheritance and first-run bootstrap triage",
+      "markers": ["not recognized as an internal or external command", "hook stamps the binstub"]
+    },
+    {
+      "id": "ownership-boundary-disambiguation",
+      "summary": "Deciding whether a local tool index/script actually belongs to this repo, or to an installed plugin/related repo.",
+      "pointer": "`ownership-boundary-fallback.instructions.md` / `working-cross-repo` skill's `related resolve`",
+      "markers": ["ownership-boundary disambiguation", "related resolve <name>"]
+    }
+  ]
+}

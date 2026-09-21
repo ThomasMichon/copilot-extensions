@@ -1,0 +1,12 @@
+{
+  "schema": "copilot-extensions.troubleshooting-index",
+  "version": 1,
+  "categories": [
+    {
+      "id": "commented-verdict-handling",
+      "summary": "A PR review verdict came back as a plain comment with no approval/change-request, and it's unclear whether that blocks landing.",
+      "pointer": "`commented-review-verdict.instructions.md` -- read as advisory, land the change",
+      "markers": ["Commented-verdict review fallback", "never gates a merge"]
+    }
+  ]
+}

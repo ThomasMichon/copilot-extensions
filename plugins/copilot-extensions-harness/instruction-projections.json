@@ -17,6 +17,14 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "commented-review-verdict",
+      "template": "instructions/commented-review-verdict.instructions.md",
+      "destination": ".github/instructions/copilot-extensions-harness/commented-review-verdict.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }
