@@ -1352,6 +1352,16 @@ _resolve() {
     if [ -f "$_resolver" ]; then
         AGENT_RT_ROOT="$_root"
         . "$_resolver"
+        # resolve-runtime.sh's calling convention exports AGENT_RT_ROOT so the
+        # shared resolver can read it -- but that export then survives into
+        # whatever this binstub execs next (the versioned agent_machines
+        # python, and everything IT subsequently spawns). A sibling binstub
+        # that this process later shells out to (e.g. `agent-worktrees`) reads
+        # that SAME variable per the identical shared-resolver contract, so an
+        # un-unset AGENT_RT_ROOT here silently redirects it to resolve THIS
+        # plugin's runtime instead of its own. Unset immediately after use so
+        # only this one resolution call ever observes it.
+        unset AGENT_RT_ROOT
     fi
 }
 _resolve
