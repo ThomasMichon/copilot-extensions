@@ -8,7 +8,7 @@ import io
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 
-from agent_worktrees import __main__ as m
+from agent_worktrees import list_views_cli
 from agent_worktrees import tracking
 
 
@@ -42,7 +42,7 @@ def _rec(wt_id, *, title=None, summary="", note_min=None, follow_up=False,
 def _glance(records) -> str:
     buf = io.StringIO()
     with redirect_stdout(buf):
-        rc = m._cmd_list_glance(records)
+        rc = list_views_cli.cmd_list_glance(records)
     assert rc == 0
     return buf.getvalue()
 
