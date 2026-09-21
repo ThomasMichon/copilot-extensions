@@ -8279,12 +8279,36 @@ def cmd_status(args: argparse.Namespace) -> int:
         wt_ids = [rec.worktree_id for rec in records]
         mux_map = sessions.mux_status_many(wt_ids)
 
+    # worktree-status-core / #3070: this fleet-wide read used to fetch once PER
+    # WORKTREE via `classify_worktree(..., fetch=True, ...)` -- N real, sequential
+    # `git fetch` subprocesses (each individually bounded, but with no shared
+    # budget) for what is, per repo, the *same* remote-tracking refs. Those refs
+    # live in the `.git` common dir a repo's worktrees all share, so one fetch
+    # against the **anchor** (mirrors `cmd_sync`'s own "one fetch refreshes the
+    # shared upstream ref for every worktree of this repo" pattern) is sufficient
+    # -- and only when the repo's own freshness ledger
+    # (`tracking.is_repo_fetch_fresh` / `record_repo_fetch_confirmed`, the same
+    # ledger the resident status-monitor already relies on for this dedup in
+    # `session_catalog.py::_maybe_refresh_repo_freshness`) says it's actually
+    # stale, so this command, `cmd_sync`, and the monitor never redundantly
+    # re-fetch a repo any of the others just refreshed.
+    _distinct_repos = {r.repo for r in records if r.repo}
+    if any(not tracking.is_repo_fetch_fresh(r) for r in _distinct_repos):
+        if git_ops.has_remote(repo.remote, cwd=repo.anchor):
+            try:
+                git_ops.fetch(repo.remote, cwd=repo.anchor)
+            except Exception:
+                pass
+            else:
+                for _r in _distinct_repos:
+                    tracking.record_repo_fetch_confirmed(_r)
+
     results: list[dict] = []
     for rec in records:
         info = git_ops.classify_worktree(
             rec.worktree_path,
             rec.branch,
-            fetch=True,
+            fetch=False,
             remote=repo.remote,
             default_branch=repo.default_branch,
             active_paths=active_paths,

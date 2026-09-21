@@ -1,7 +1,8 @@
 """Tests wiring `tracking.record_repo_fetch_confirmed` into operations that
 already perform a real git fetch (worktree-finality-and-obligations Phase 9,
 slice 4): `finalize.push_changes`/`validate_and_finalize`,
-`pr_ops.create_pr`/`_pull_forward_recommendation`, and `cmd_sync`.
+`pr_ops.create_pr`/`_pull_forward_recommendation`, `cmd_sync`, and
+`cmd_status` (#3070).
 
 Each op's own fetch is expected to record the ledger entry immediately,
 instead of only benefiting from whichever surface happens to read
@@ -208,6 +209,106 @@ class TestSyncRecordsLedger:
 
         # Two records, same repo -> exactly one ledger write for that repo.
         assert recorded == ["owner/repo"]
+
+
+class TestStatusRecordsLedger:
+    """`cmd_status` (#3070): the fleet-wide read used to `classify_worktree`
+    with ``fetch=True`` for EVERY tracked worktree record -- N real, sequential
+    fetches for what is, per repo, the same remote-tracking refs. It must
+    instead fetch at most once per distinct repo, against the anchor (mirroring
+    `cmd_sync`'s own pattern), and skip the fetch entirely when the repo's
+    freshness ledger already says it's current."""
+
+    def _setup(self, tmp_path, monkeypatch, *, fetch_impl=None):
+        from agent_worktrees import __main__ as cli
+
+        anchor = _make_repo(tmp_path)
+        wt_a = tmp_path / "a"
+        wt_b = tmp_path / "b"
+        wt_a.mkdir()
+        wt_b.mkdir()
+        rec_a = tracking.WorktreeRecord(
+            worktree_id="a", branch="worktree/a", worktree_path=str(wt_a),
+            repo="owner/repo", machine="m", platform=cfg.detect_platform(),
+            started_at="2026-06-01T10:00:00", last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+        )
+        rec_b = tracking.WorktreeRecord(
+            worktree_id="b", branch="worktree/b", worktree_path=str(wt_b),
+            repo="owner/repo", machine="m", platform=cfg.detect_platform(),
+            started_at="2026-06-01T10:00:00", last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+        )
+        repo_cfg = cfg.RepoConfig(
+            anchor=str(anchor), worktree_root=str(tmp_path),
+            remote="origin", default_branch="base",
+        )
+        config = cfg.Config(
+            srcroot=str(tmp_path), machine="test", platform=cfg.detect_platform(),
+            repo_name="repo", repos={"repo": repo_cfg},
+        )
+
+        recorded: list[str] = []
+        fetch_calls: list[tuple[str, str]] = []
+
+        def _default_fetch_impl(remote, *, cwd, **_k):
+            fetch_calls.append((remote, str(cwd)))
+
+        monkeypatch.setattr(cli.profile_assignment, "maintain", lambda: None)
+        monkeypatch.setattr(cli.cfg, "load_config", lambda: config)
+        monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+        monkeypatch.setattr(cli.tracking, "list_records", lambda *a, **k: [rec_a, rec_b])
+        monkeypatch.setattr(
+            cli.tracking, "record_repo_fetch_confirmed",
+            lambda repo: recorded.append(repo))
+        monkeypatch.setattr(cli.git_ops, "has_remote", lambda *a, **k: True)
+        monkeypatch.setattr(cli.git_ops, "fetch", fetch_impl or _default_fetch_impl)
+
+        return cli, anchor, fetch_calls, recorded
+
+    def test_status_fetches_once_against_anchor_not_once_per_worktree(
+        self, tmp_path, monkeypatch,
+    ):
+        cli, anchor, fetch_calls, recorded = self._setup(tmp_path, monkeypatch)
+        monkeypatch.setattr(cli.tracking, "is_repo_fetch_fresh", lambda repo: False)
+
+        args = cli.build_parser().parse_args(["status", "--json"])
+        rc = cli.cmd_status(args)
+
+        assert rc == 0
+        # Exactly one fetch total (not one per worktree record), against the
+        # ANCHOR path -- neither worktree's own path.
+        assert fetch_calls == [("origin", str(anchor))]
+        assert recorded == ["owner/repo"]
+
+    def test_status_skips_fetch_entirely_when_repo_already_fresh(
+        self, tmp_path, monkeypatch,
+    ):
+        cli, _anchor, fetch_calls, recorded = self._setup(tmp_path, monkeypatch)
+        monkeypatch.setattr(cli.tracking, "is_repo_fetch_fresh", lambda repo: True)
+
+        args = cli.build_parser().parse_args(["status", "--json"])
+        rc = cli.cmd_status(args)
+
+        assert rc == 0
+        assert fetch_calls == []
+        assert recorded == []
+
+    def test_status_does_not_record_ledger_on_fetch_failure(
+        self, tmp_path, monkeypatch,
+    ):
+        def _boom(*a, **k):
+            raise RuntimeError("network down")
+
+        cli, _anchor, _fetch_calls, recorded = self._setup(
+            tmp_path, monkeypatch, fetch_impl=_boom)
+        monkeypatch.setattr(cli.tracking, "is_repo_fetch_fresh", lambda repo: False)
+
+        args = cli.build_parser().parse_args(["status", "--json"])
+        rc = cli.cmd_status(args)
+
+        assert rc == 0
+        assert recorded == []
 
 
 class TestPrOpsRecordsLedger:
