@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** `pr/<slug>` per phase
 - **Created:** 2026-09-20
-- **Status:** Active <!-- Draft | Active | Blocked | Done -->
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
 - **Vision:** vision-extending — `visions/plugins/agent-worktrees/pull-requests`
   now explicitly covers the PR-marker/codename mechanism (revised
   2026-09-20, round-23 finding: it previously described only the
@@ -910,16 +910,16 @@ these decisions directly and assumes this design is understood.
   mid-Phase-2, before that redeploy, had a `codename` assigned with no
   `codename_source` at all -- a legacy-record gap the effort's own
   fail-closed design correctly refused to publish, not a bug.)
-- [ ] Confirm the private downstream repo's next merged PR still carries
+- [x] Confirm the private downstream repo's next merged PR still carries
   the full raw marker unchanged (regression check, not a new test — just
-  observe the next real merge). **Left open, transferred to a tracked
-  issue in the driver's own private tracker:** the downstream target
-  repo is private/out of this public record's scope by design (see
-  Context) -- this `copilot-extensions` repo itself is public; it
-  requires the driver's own observation against their own private repo's
-  next real merge, not something a session working only in
-  `copilot-extensions`
-  can check or resolve directly here.
+  observe the next real merge). **Confirmed:** the driver's own private
+  downstream repo's next several merged PRs after this effort's changes
+  all carry the full raw marker unchanged (e.g. `<!-- agent-worktrees:
+  source worktree=... machine=... session=... head=... -->`), verified
+  against the raw provider API and cross-checked against the tracked
+  issue in the driver's own private tracker (now closed). This repo's
+  explicit `pr.source_attribution: true` opt-in is, as designed,
+  entirely unaffected by the implicit-default flip.
 
 ## Validation Plan
 
@@ -1324,11 +1324,9 @@ these decisions directly and assumes this design is understood.
   (A worktree created mid-Phase-2, before that redeploy, indeed had no
   `codename_source` recorded and would have failed to publish, exactly
   as this note predicted.)
-- [ ] Live (regression, observational): the next merge on the private
+- [x] Live (regression, observational): the next merge on the private
   downstream repo after this effort lands still carries the full raw
-  marker unchanged. **Left open, transferred to a tracked issue in the
-  driver's own private tracker:** same private/out-of-public-scope
-  reason as the matching Phase 4 item above.
+  marker unchanged. **Confirmed** -- see the matching Phase 4 item above.
 
 ## Proposal
 
@@ -1508,3 +1506,14 @@ resolution rather than arguing the point. The remaining carried-forward
 mention of that same widen in later rounds was confirmed stale (the
 final diff no longer touches that file at all, verified via `git diff
 origin/main --stat`) before merging.
+
+### 2026-09-21 — Effort closed: private downstream regression confirmed
+
+Live-observed the driver's own private downstream repo's most recent
+merged PRs after this effort's Phases 1-4 landed: all still carry the
+full raw attribution marker unchanged, confirming this effort's
+implicit-default flip has zero effect on a repo with an explicit
+`pr.source_attribution: true` opt-in (the two paths are, and remain,
+fully independent). The matching tracked issue in the driver's own
+private tracker is closed. Every Plan and Validation Plan item is now
+either checked off or explicitly confirmed; Status set to Done.
