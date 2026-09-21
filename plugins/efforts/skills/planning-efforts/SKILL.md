@@ -236,7 +236,42 @@ The README is the shared contract — keep it **ahead of the conversation**. But
   commit is itself opening is a catch-22; record a PR only once it has merged.
   Remark open issues the effort spawned or still blocks on.
 
-### Cross-repo efforts — where the effort folder lives
+## Drive to completion, relentlessly
+
+A durably-journaled effort is what makes relentless driving safe: because the
+README and its Journal — not the conversation or a single session's memory —
+already carry the plan, the decisions, and what happened, the head session can
+keep selecting and executing the next Plan item across phases, PRs, and
+session boundaries **without waiting to be re-prompted for each step**. This
+is the `continue-until-closed` behavior the `efforts` vision commits to: the
+rightful head keeps driving until the effort's own completion gate is
+satisfied, not until one relay leg, PR, or checklist item happens to finish.
+
+In particular, **opening or pushing a reviewable change is not a stopping
+point** — it's mid-flight. Once a PR (or equivalent reviewable gate) exists,
+stay on it: watch for the verdict, and act on it immediately — grant merge
+consent on approval, address requested changes and re-push, or resolve a
+conflict — through to merge, then continue with the effort's next Plan item.
+Journal the outcome as you go so the next slice starts from a durable record,
+not from memory of what "should" happen next.
+
+**Stop short of driving further only for a genuine blocker:**
+
+- an **error** that needs diagnosis before it's safe to continue;
+- a **design crossroads** — a decision only the operator can make;
+- a **safety rail** — a destructive action, or anything else, that requires
+  explicit confirmation before proceeding;
+- a **handoff boundary** where automatic cutover to a successor session isn't
+  available (see the `context-handoff` skill, when present) — hand off
+  explicitly, naming the blocker and the next actionable step, rather than
+  stopping silently.
+
+None of these are satisfied by "this is a suitable stopping point," "the
+session has run long," or a completed phase/PR/handoff/session in isolation —
+those are exactly the false stops the effort's own completion gate exists to
+catch.
+
+## Cross-repo efforts — where the effort folder lives
 
 When an effort touches **another** repo, placement follows validated target
 capability, not directory presence, repository names, or private assumptions.
@@ -362,3 +397,6 @@ change that realizes it.
 - ❌ Letting the README balloon with every phase's full detail inline — extract
   large phases/slices to linked sibling sub-docs (`<effort-folder>/<phase>.md`) and keep the
   Plan a map, so a resuming agent loads only the phase it is working.
+- ❌ Stopping after opening or pushing a reviewable change and waiting to be
+  re-prompted — stay on it through review, consent, and merge before moving on
+  or ending the turn.
