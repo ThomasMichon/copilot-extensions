@@ -125,3 +125,37 @@ def test_non_dict_json_is_not_consent(tmp_path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(["not", "an", "object"]), encoding="utf-8")
     assert consent.load_consent(tmp_path) is None
+
+
+def test_symlinked_consent_file_is_not_consent(tmp_path: Path) -> None:
+    # A symlinked consent file could source an opt-in from outside the repo
+    # the committed file appears to live in -- reject it outright.
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps(_valid_payload()), encoding="utf-8")
+    path = tmp_path.joinpath(*consent.CONSENT_PATH_PARTS)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    assert consent.load_consent(tmp_path) is None
+
+
+def test_symlinked_parent_directory_is_not_consent(tmp_path: Path) -> None:
+    # A symlinked *parent* directory is exactly as much of an escape as a
+    # symlinked file -- also reject it.
+    outside = tmp_path / "outside-copilot"
+    outside.mkdir()
+    (outside / "projection-reflect.json").write_text(
+        json.dumps(_valid_payload()), encoding="utf-8"
+    )
+    github_dir = tmp_path / ".github"
+    github_dir.mkdir()
+    linked = github_dir / "copilot"
+    try:
+        linked.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    assert consent.load_consent(tmp_path) is None

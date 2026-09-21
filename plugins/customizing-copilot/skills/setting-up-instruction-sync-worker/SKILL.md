@@ -49,7 +49,8 @@ asked for it in this session" or "the repo is PR-gated" are **not**
 ownership signals (a repo you only contribute to is often PR-gated too).
 
 The ownership signal is a committed `.github/copilot/projection-reflect.json`
-matching this schema (validated by
+matching this schema (validated by the sibling
+`reviewing-customizations` skill's
 `scripts/projection_reflect_consent.py`'s `load_consent`):
 
 ```json
@@ -97,10 +98,14 @@ matching this schema (validated by
    it returns `None`; refresh enabled plugin payloads; run `sync` then
    `scan --from-settings`; compute `has_actionable_change` and
    `bypass_decision` (both from `projection_reflect.py`); when eligible, open
-   or update the stamp-labeled PR; when not (a conflict-classified finding,
-   or an untrusted source), dispatch the conflict-resolution task via
+   or update the stamp-labeled PR. When not eligible, distinguish *why*:
+   only a genuine conflict-classified finding
+   (`classify_findings(...).conflict`) is dispatched to the reconciler via
    `agent_dispatch.conflict_dispatch.build_dispatch`, naming the consent
-   file's own `reconcilerAgent`/`dispatchLabel`.
+   file's own `reconcilerAgent`/`dispatchLabel` -- an otherwise-clean change
+   from an untrusted source alone stays review-only and is never dispatched
+   to an agent (the reconciler is only authorized to resolve real
+   conflicts).
 
 3. **A bypass-config profile**, adapted from
    [`references/templates/bypass-profile.md`](references/templates/bypass-profile.md)

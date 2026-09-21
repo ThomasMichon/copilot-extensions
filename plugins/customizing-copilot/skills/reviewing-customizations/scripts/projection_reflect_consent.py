@@ -21,6 +21,8 @@ and let the next scheduled run/PR observe it.
 from __future__ import annotations
 
 import json
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +34,39 @@ CONSENT_VERSION = 1
 CONSENT_PATH_PARTS = (".github", "copilot", "projection-reflect.json")
 
 MAX_TRUSTED_MARKETPLACES = 16
+
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+
+def _is_reparse(info: os.stat_result) -> bool:
+    return bool(
+        getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
+        or getattr(info, "st_reparse_tag", 0)
+    )
+
+
+def _is_indirection(path: Path) -> bool:
+    try:
+        info = path.lstat()
+    except OSError:
+        return False
+    return stat.S_ISLNK(info.st_mode) or _is_reparse(info)
+
+
+def _has_indirected_component(repo_root: Path, path: Path) -> bool:
+    """Reject a consent path reached through a symlink/reparse point at any
+    level -- the file itself, or any parent directory up to ``repo_root``
+    (a symlinked parent is exactly as much of an escape as a symlinked
+    file). This gate controls repo-write and auto-merge consent, so it must
+    never resolve indirection that could source an opt-in from outside the
+    repo the committed file appears to live in.
+    """
+    current = path
+    while current != repo_root and current.parent != current:
+        if _is_indirection(current):
+            return True
+        current = current.parent
+    return False
 
 
 @dataclass(frozen=True)
@@ -58,6 +93,18 @@ def load_consent(repo_root: Path) -> Consent | None:
     instruction) when this returns ``None``.
     """
     path = repo_root.joinpath(*CONSENT_PATH_PARTS)
+    if _has_indirected_component(repo_root, path):
+        return None
+    try:
+        info = path.lstat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        # Refuse anything but a genuine regular file (a symlink, junction,
+        # or other reparse point is rejected by `_has_indirected_component`
+        # above; this also rejects the rare case of a non-regular file --
+        # e.g. a FIFO or device node -- at the exact consent path).
+        return None
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
