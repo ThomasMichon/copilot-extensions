@@ -2436,7 +2436,6 @@ def test_context_budget_splits_hooks_without_executing(
     source = scan.PluginSource(
         skills_root=plugin / "skills", origin="market/plugin",
     )
-
     budget = scan.build_context_budget(repo, [source], home=home)
     hooks = budget["hook_registrations"]
     context_hooks = hooks["additional_context_capable"]
@@ -2800,3 +2799,73 @@ def test_json_without_context_budget_preserves_default_shape(
     payload = json.loads(capsys.readouterr().out)
 
     assert "context_budget" not in payload
+
+
+# ---------------------------------------------------------------------------
+# _plugin_commit / resolve_pinned_commits (immutable-pin resolver, effort
+# ambient-guidance-navigability, issue #3132)
+# ---------------------------------------------------------------------------
+
+
+def _run_git(cwd: Path, *args: str) -> None:
+    import subprocess
+
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def _git_available() -> bool:
+    import shutil
+
+    return shutil.which("git") is not None
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_plugin_commit_resolves_head_inside_a_git_checkout(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _run_git(repo, "init", "-q")
+    _run_git(repo, "config", "user.email", "test@example.com")
+    _run_git(repo, "config", "user.name", "Test")
+    (repo / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.0"}), encoding="utf-8"
+    )
+    _run_git(repo, "add", "-A")
+    _run_git(repo, "commit", "-q", "-m", "initial")
+
+    sha = scan._plugin_commit(repo)
+
+    assert len(sha) == 40
+    assert all(ch in "0123456789abcdef" for ch in sha)
+
+
+def test_plugin_commit_empty_outside_a_git_checkout(tmp_path: Path):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.0"}), encoding="utf-8"
+    )
+
+    assert scan._plugin_commit(plain) == ""
+
+
+def test_plugin_commit_empty_when_git_unavailable(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(scan.shutil, "which", lambda _name: None)
+
+    assert scan._plugin_commit(tmp_path) == ""
+
+
+def test_resolve_pinned_commits_includes_only_resolved_sources():
+    pinned = scan.PluginSource(
+        skills_root=Path("/x/skills"),
+        origin="copilot-extensions/agent-worktrees",
+        commit="a" * 40,
+    )
+    unpinned = scan.PluginSource(
+        skills_root=Path("/y/skills"),
+        origin="third-party-marketplace/some-plugin",
+        commit="",
+    )
+
+    result = scan.resolve_pinned_commits([pinned, unpinned])
+
+    assert result == {"agent-worktrees@copilot-extensions": "a" * 40}

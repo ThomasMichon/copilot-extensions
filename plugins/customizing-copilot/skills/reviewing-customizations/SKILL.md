@@ -169,12 +169,17 @@ A worker composes these with `sync_repository`/`scan_repository`'s own
 `BypassDecision`; `eligible=False` names every violated conjunct (not just
 the first). See `projection_reflect.py`'s own module docstring for the
 immutable upstream-commit pinning conjunct (`pinned_commits`, additive and
-optional -- no caller has a resolver yet, but one may supply pins the
-moment it does) and `efforts/active/ambient-guidance-navigability`'s
-Journal for status on the remaining pieces (a scheduler wrapper and the
-setup skill). A conflict a worker cannot bypass routes to
-`agent_dispatch.conflict_dispatch`'s generalized dispatch primitive, naming
-the
+optional). `scan_plugin_sources.resolve_pinned_commits()` is a real,
+honestly-partial resolver for it: it can only pin a self-hosted/directory-
+marketplace source (via `git rev-parse HEAD` inside that source's own
+payload root) -- a plain installed-plugins payload copy (the common case
+for an externally-installed marketplace plugin) has no local git history to
+read, and is simply absent from the resulting map rather than guessed at
+(see its own docstring, and issue #3132 for that remaining half). See
+`efforts/active/ambient-guidance-navigability`'s Journal for status on the
+remaining pieces (a scheduler wrapper and the setup skill). A conflict a
+worker cannot bypass routes to `agent_dispatch.conflict_dispatch`'s
+generalized dispatch primitive, naming the
 [`projection-reconciler` agent template](references/projection-reconciler-agent-template.md)
 -- report-only on a hand-edited managed projection, re-derive-fresh on an
 ordinary git-level conflict, never a self-merge.
@@ -230,6 +235,14 @@ general-purpose library function that takes `trusted_marketplaces`
 explicitly from any caller (including a test or an already-consent-resolved
 scheduler); the consent gate lives at the CLI boundary, not inside the pure
 composition.
+
+The committed consent file's `requireImmutablePin` (default `false` when
+absent) gates whether the CLI enforces the pin conjunct at all: most
+adopters sync externally-installed marketplace plugins, which
+`resolve_pinned_commits()` cannot pin -- enforcing it unconditionally would
+silently disable the bypass path entirely for that common case. A repo
+opts in explicitly only once it understands today's tradeoff (only
+self-hosted/directory-marketplace sources can ever be pinned).
 
 ### Troubleshooting-category coverage registry
 

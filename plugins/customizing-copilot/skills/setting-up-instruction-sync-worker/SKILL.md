@@ -60,9 +60,20 @@ matching this schema (validated by the sibling
   "enabled": true,
   "reconcilerAgent": "projection-reconciler",
   "dispatchLabel": "projection-conflict",
-  "trustedMarketplaces": ["copilot-extensions"]
+  "trustedMarketplaces": ["copilot-extensions"],
+  "requireImmutablePin": false
 }
 ```
+
+`requireImmutablePin` is optional (defaults to `false` when absent). Most
+adopters sync externally-installed marketplace plugins, which
+`scan_plugin_sources.resolve_pinned_commits()` cannot pin at all today (only
+a self-hosted/directory-marketplace source resolves a commit, via `git
+rev-parse HEAD` inside its own payload root) -- setting this `true`
+unconditionally would silently disable the bypass path entirely for that
+common case. Only set it `true` once you understand that tradeoff (see
+issue #3132 for the still-open externally-installed-source half of this
+gap).
 
 - **No file present, or `enabled` is not literally `true`:** decline to
   scaffold anything. You may still report what drift exists (`scan
@@ -95,12 +106,14 @@ matching this schema (validated by the sibling
    to whichever mechanism the repo already uses for scheduled automation
    (a systemd timer, a scheduled Action, cron). It must: call
    `load_consent` first and exit immediately (no PR, no scheduler action) if
-   it returns `None`; refresh enabled plugin payloads; run `sync` then
-   `scan --from-settings`; compute `has_actionable_change` and
-   `bypass_decision` (both from `projection_reflect.py`); when eligible, open
-   or update the stamp-labeled PR. When not eligible, distinguish *why*:
-   only a genuine conflict-classified finding
-   (`classify_findings(...).conflict`) is dispatched to the reconciler via
+   it returns `None`; refresh enabled plugin payloads; then call
+   `projection_sync_worker.run_sync_pass()` -- never hand-roll the
+   sync/scan/decide sequence separately, which risks dropping a lock-only
+   change, a sync-side failure, or a race between two workers, exactly the
+   failure modes `run_sync_pass` exists to close. When `outcome.
+   bypass_eligible`, open or update the stamp-labeled PR. When not eligible,
+   distinguish *why*: only `outcome.needs_conflict_dispatch` (a real
+   conflict-classified finding) is dispatched to the reconciler via
    `agent_dispatch.conflict_dispatch.build_dispatch`, naming the consent
    file's own `reconcilerAgent`/`dispatchLabel` -- an otherwise-clean change
    from an untrusted source alone stays review-only and is never dispatched

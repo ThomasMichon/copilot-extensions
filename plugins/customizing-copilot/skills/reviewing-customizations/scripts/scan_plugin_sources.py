@@ -21,6 +21,12 @@ class PluginSource:
     the plugin is **external** (installed from another marketplace) -- its skills
     are reference-only for collision detection, while agent safety findings are
     advisory and carry an upstream remediation pointer.
+
+    ``commit`` is the immutable git commit SHA the payload was checked out
+    at, when (and only when) it lives inside a real git working tree (this
+    repo's own directory-marketplace plugins, or an ``agent-worktrees-repo``
+    checkout) -- empty when unresolvable (e.g. a plain installed-plugins
+    payload copy with no local git history). See :func:`resolve_pinned_commits`.
     """
 
     skills_root: Path
@@ -28,6 +34,7 @@ class PluginSource:
     controlled: bool = False
     source: str = ""
     version: str = ""
+    commit: str = ""
 
     @property
     def payload_root(self) -> Path:
@@ -177,6 +184,63 @@ def _plugin_version(footprint: Path) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+_GIT_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _plugin_commit(footprint: Path) -> str:
+    """Return the immutable git commit SHA a payload was checked out at.
+
+    Only resolvable when ``footprint`` lives inside a real git working tree
+    -- this repo's own directory-marketplace plugins, or an
+    ``agent-worktrees-repo`` checkout, are the two cases that qualify today.
+    Returns ``""`` -- never raises -- for every other case: git is
+    unavailable, the footprint is not inside a git working tree, or the
+    command fails for any reason. Deliberately never attempts to resolve a
+    commit for a plain installed-plugins payload copy (no local git history
+    to read there) -- that remains a genuinely unsolved case (see
+    ``efforts/active/ambient-guidance-navigability``'s Journal), not
+    something to guess at.
+    """
+    git = shutil.which("git")
+    if git is None:
+        return ""
+    try:
+        result = subprocess.run(
+            [git, "-C", str(footprint), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    sha = result.stdout.strip()
+    return sha if _GIT_COMMIT_SHA.fullmatch(sha) else ""
+
+
+def resolve_pinned_commits(sources: list[PluginSource]) -> dict[str, str]:
+    """Build a ``"<plugin>@<marketplace>" -> commit SHA`` map from ``sources``.
+
+    Only sources with a resolved :attr:`PluginSource.commit` are included --
+    a source this resolver could not pin (today: any plain installed-plugins
+    payload copy) is simply absent from the map, so
+    ``projection_reflect.bypass_decision``'s ``pinned_commits`` conjunct
+    correctly treats it as unpinned (fail-closed, review-only) rather than
+    silently vacuously trusted. This is an honestly **partial** resolver: it
+    closes the immutable-pin gap for self-hosted/directory-marketplace
+    sources today, and does not invent an answer for externally-installed
+    ones (see ``efforts/active/ambient-guidance-navigability``'s tracked
+    follow-up, issue #3132, for that remaining half).
+    """
+    return {
+        f"{source.plugin_name}@{source.marketplace}": source.commit
+        for source in sources
+        if source.commit
+    }
 
 
 def _plugin_manifest_path(footprint: Path) -> Path:
@@ -441,6 +505,7 @@ def assemble_enabled_plugins(
                 controlled=controlled,
                 source=source_url,
                 version=_plugin_version(footprint),
+                commit=_plugin_commit(footprint),
             )
         )
     return out
@@ -460,6 +525,7 @@ def _sources_from_raw_dir(root: Path) -> list[PluginSource]:
                 controlled=False,
                 source=_plugin_repo_url(plugin_dir),
                 version=_plugin_version(plugin_dir),
+                commit=_plugin_commit(plugin_dir),
             )
         )
     return out

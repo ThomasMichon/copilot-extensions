@@ -22,9 +22,15 @@ if str(_SCRIPTS) not in sys.path:
 import instruction_projections as projections  # noqa: E402
 import projection_reflect_consent  # noqa: E402
 import projection_sync_worker as worker  # noqa: E402
+import scan_plugin_sources  # noqa: E402
 
 
-def _write_consent(repo: Path, *, trusted_marketplaces: list[str]) -> None:
+def _write_consent(
+    repo: Path,
+    *,
+    trusted_marketplaces: list[str],
+    require_immutable_pin: bool = False,
+) -> None:
     consent_path = repo.joinpath(*projection_reflect_consent.CONSENT_PATH_PARTS)
     consent_path.parent.mkdir(parents=True, exist_ok=True)
     consent_path.write_text(
@@ -36,6 +42,7 @@ def _write_consent(repo: Path, *, trusted_marketplaces: list[str]) -> None:
                 "reconcilerAgent": "projection-reconciler",
                 "dispatchLabel": "projection-reflect-conflict",
                 "trustedMarketplaces": trusted_marketplaces,
+                "requireImmutablePin": require_immutable_pin,
             }
         ),
         encoding="utf-8",
@@ -352,6 +359,87 @@ def test_cli_happy_path_with_consent(
     assert payload["needsPr"] is True
     assert payload["bypassEligible"] is True
     assert payload["needsConflictDispatch"] is False
+
+
+def _real_source(plugin: Path, marketplace: str, name: str, *, commit: str = "") -> object:
+    return scan_plugin_sources.PluginSource(
+        skills_root=plugin / "skills",
+        origin=f"{marketplace}/{name}",
+        controlled=False,
+        source="",
+        version="",
+        commit=commit,
+    )
+
+
+def test_cli_ignores_pin_requirement_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    # requireImmutablePin absent (default False): an unpinned source must
+    # still be bypass-eligible -- unaffected by the resolver's existence.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_consent(repo, trusted_marketplaces=["copilot-extensions"])
+    plugin, source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+    unpinned = _real_source(plugin, "copilot-extensions", "policy", commit="")
+    monkeypatch.setattr(
+        worker.projections, "discover_enabled_sources", lambda *a, **kw: [unpinned]
+    )
+
+    exit_code = worker.main([str(repo), "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["bypassEligible"] is True
+
+
+def test_cli_require_immutable_pin_blocks_unpinned_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    # requireImmutablePin=true: an unpinned source must NOT be bypass-
+    # eligible, even though it's from a trusted marketplace.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_consent(
+        repo,
+        trusted_marketplaces=["copilot-extensions"],
+        require_immutable_pin=True,
+    )
+    plugin, _source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+    unpinned = _real_source(plugin, "copilot-extensions", "policy", commit="")
+    monkeypatch.setattr(
+        worker.projections, "discover_enabled_sources", lambda *a, **kw: [unpinned]
+    )
+
+    exit_code = worker.main([str(repo), "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["bypassEligible"] is False
+    assert any("immutable commit pin" in reason for reason in payload["bypassReasons"])
+
+
+def test_cli_require_immutable_pin_permits_pinned_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_consent(
+        repo,
+        trusted_marketplaces=["copilot-extensions"],
+        require_immutable_pin=True,
+    )
+    plugin, _source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+    pinned = _real_source(plugin, "copilot-extensions", "policy", commit="a" * 40)
+    monkeypatch.setattr(
+        worker.projections, "discover_enabled_sources", lambda *a, **kw: [pinned]
+    )
+
+    exit_code = worker.main([str(repo), "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["bypassEligible"] is True
 
 
 def test_cli_json_error_for_invalid_root(tmp_path: Path, capsys) -> None:

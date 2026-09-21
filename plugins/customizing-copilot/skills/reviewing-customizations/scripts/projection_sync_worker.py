@@ -66,6 +66,7 @@ from typing import Callable, Iterable, Mapping
 import instruction_projections as projections
 import projection_reflect as reflect
 import projection_reflect_consent
+import scan_plugin_sources
 
 
 def _policy_relevant_destinations(
@@ -333,8 +334,25 @@ def main(argv: list[str] | None = None) -> int:
         _emit_error(str(exc), as_json=args.json)
         return 2
 
+    # Only compute/enforce pins when this repo's consent explicitly opts
+    # in (require_immutable_pin, default False): most adopters sync
+    # externally-installed marketplace plugins, which today's resolver
+    # cannot pin at all -- enforcing it unconditionally would silently
+    # disable the bypass path entirely for that common case. A source the
+    # resolver can't pin is simply absent from the map, so
+    # bypass_decision's pin conjunct correctly treats it as unpinned
+    # (fail-closed, review-only) rather than silently exempting it.
+    pinned_commits = (
+        scan_plugin_sources.resolve_pinned_commits(sources)
+        if consent.require_immutable_pin
+        else None
+    )
+
     outcome = run_sync_pass(
-        root, sources, trusted_marketplaces=consent.trusted_marketplaces
+        root,
+        sources,
+        trusted_marketplaces=consent.trusted_marketplaces,
+        pinned_commits=pinned_commits,
     )
     if args.json:
         print(json.dumps(outcome.to_dict(), indent=2, sort_keys=True))
