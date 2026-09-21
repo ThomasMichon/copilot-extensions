@@ -58,7 +58,7 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-20, post-`agent-worktrees __main__.py` namespace split)
+### Current pecking order (snapshot, 2026-09-20, post-`agent-worktrees __main__.py` PR/finalize slice)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
 — re-run before starting a phase, this list moves; it already has once per
@@ -67,7 +67,7 @@ table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 26,303 | +25,303 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | First dedicated slice landed: context/services/repos/related dispatch extracted into sibling `*_cli.py` modules; still the worst offender, with the live session/status/PR/install/reap surfaces left for later dedicated slices |
+| 25,306 | +24,306 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Second dedicated slice landed: `finalize_cli.py` and `pr_state_cli.py` now hold the PR/finalize handlers, leaving the status/session/handoff/reap/install surfaces as the next obvious seams |
 | 9,267 | +8,267 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression); it drifted again while this slice was in flight, so the baseline was manually widened (9191 → 9267) to restore a green full-tree guard pending its own future split |
 | 9,169 | +8,169 | `libs/installation-context/installation_context.py` (+17 vendored copies) | Split the **canonical** copy only; `sync-installation-context.py` propagates to every vendored copy |
 | 6,873 | +5,873 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
@@ -90,10 +90,10 @@ table):
 
 **Suggested next pick (Phase 2, next slice):** continue the dedicated
 `plugins/agent-worktrees/src/agent_worktrees/__main__.py` campaign while the
-cohesive seams are fresh: the remaining live lifecycle/status/session/handoff
-surfaces still dominate the table and should keep landing as isolated, fully
-validated slices. If that blast radius is too high for the moment, fall back to
-the clean-room fixtures
+cohesive seams are fresh: the **status family** still looks like the largest
+cleanly-separable remaining chunk, followed by the session/handoff/reap
+lifecycle and then the install/update/register surface. If that blast radius is
+too high for the moment, fall back to the clean-room fixtures
 (`tools/clean-room/scenarios/agent-index-installation-cells/scenario.py` /
 `.../progressive-context-disclosure-baseline/fixture.py`) or the still-large
 production module `plugins/agent-worktrees/src/agent_worktrees/pr_ops.py`.
@@ -504,3 +504,34 @@ the Phase 0 runbook, picked up as capacity allows.
   landed elsewhere, so this slice took the next patch `-devN` bump instead:
   `agent-worktrees` `1.5.5-dev201` and `.github/plugin/marketplace.json`
   `metadata.version` `1.7.7-dev173`.
+
+### 2026-09-20 — Phase 2 continued: `agent-worktrees/__main__.py` PR/finalize slice
+- Kept the second bite deliberately cohesive: rather than mixing the status and
+  session-lifecycle surface into the same PR, peeled off the PR/finalize family
+  into two sibling modules while leaving `__main__.py` as the composition root.
+  Extracted `finalize_cli.py` (`post-exit`, `finalize`, `push-changes`,
+  `create-pr`, `attribution-audit`, `mark-complete`) and `pr_state_cli.py`
+  (`set-pr`, `pr-ready`, `pr-status`, `pr-complete`). `build_parser()` now
+  delegates those parser stubs to the new modules, and `agent_worktrees.__main__`
+  re-exports the moved handler/helper names so existing monkeypatch seams and
+  direct imports keep working.
+- Net result: `plugins/agent-worktrees/src/agent_worktrees/__main__.py`
+  dropped from 26,303 lines to 25,306. That is still wildly over the cap, but
+  it takes another real chunk out of the CLI engine without mixing in behavior
+  changes. The remaining `__main__.py` backlog is now more sharply defined:
+  the status family, then the session/handoff/reap lifecycle, then the
+  install/update/register surface.
+- Validation stayed at the stricter componentization bar. Ruff (`--select
+  F,E9`) passed on `__main__.py`, `finalize_cli.py`, and `pr_state_cli.py`.
+  The full `python tools/run-plugin-tests.py agent-worktrees` pass again hit
+  the same pre-existing `tests/test_doctor.py` failures in sub-suite 2
+  (**550 passed, 10 failed, 1 skipped**) rather than anything in the moved
+  surface, so followed the runbook and ran a targeted sweep over the extracted
+  area instead: **201 passed, 1 skipped, 4785 deselected**. `python
+  tools/check-module-size.py --refresh-baseline` lowered
+  `tools/module-size-baseline.json`'s ceiling for `agent_worktrees/__main__.py`
+  from 26,303 to 25,306. The required install/version guards still pass after
+  the slice. Follow-up review fixes advanced the same PR's version once more to
+  stay ahead of newer `main`, so the final bump for this pass is
+  `agent-worktrees` `1.5.5-dev203` and marketplace `metadata.version`
+  `1.7.7-dev175`.
