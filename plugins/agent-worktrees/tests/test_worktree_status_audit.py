@@ -489,6 +489,62 @@ def test_cmd_worktree_status_audit_exit_code_clean(tmp_path, monkeypatch):
     assert rc == 0
 
 
+def test_cmd_worktree_status_audit_passes_ensure_monitor_when_enabled(tmp_path, monkeypatch):
+    """Copilot review round 3 on PR #3206: the `ensure_monitor` opt-out
+    wiring itself (resolved from `core._status_monitor_enabled()`/
+    `core._ensure_status_monitor`) had no CLI-level regression coverage --
+    a regression that always boots, or never does regardless of the
+    opt-out, would still pass every other CLI test here since none of
+    them inspect what `run_audit` actually received."""
+    sentinel_ensure_monitor = lambda: True  # noqa: E731 -- identity marker
+    fake_core = types.SimpleNamespace(
+        _aw_runtime_home=lambda: tmp_path,
+        _json_output=lambda payload: None,
+        _status_monitor_enabled=lambda: True,
+        _ensure_status_monitor=sentinel_ensure_monitor,
+    )
+    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    captured = {}
+    real_run_audit = wsa.run_audit
+
+    def _spy_run_audit(**kwargs):
+        captured["ensure_monitor"] = kwargs.get("ensure_monitor")
+        return real_run_audit(**kwargs)
+
+    monkeypatch.setattr(wsa, "run_audit", _spy_run_audit)
+    wsa.cmd_worktree_status_audit(
+        argparse.Namespace(sample=1, log_path=None, no_log=True, seed=1, json=True)
+    )
+    assert captured["ensure_monitor"] is sentinel_ensure_monitor
+
+
+def test_cmd_worktree_status_audit_omits_ensure_monitor_when_disabled(tmp_path, monkeypatch):
+    """The opt-out's other half: when the resident monitor is disabled
+    (``AGENT_WORKTREES_STATUS_MONITOR=0``, surfaced here as
+    ``_status_monitor_enabled() -> False``), `run_audit` must receive
+    ``ensure_monitor=None`` -- never the real boot callable -- so the
+    audit can't spawn a monitor an operator deliberately turned off."""
+    fake_core = types.SimpleNamespace(
+        _aw_runtime_home=lambda: tmp_path,
+        _json_output=lambda payload: None,
+        _status_monitor_enabled=lambda: False,
+        _ensure_status_monitor=lambda: True,
+    )
+    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    captured = {}
+    real_run_audit = wsa.run_audit
+
+    def _spy_run_audit(**kwargs):
+        captured["ensure_monitor"] = kwargs.get("ensure_monitor")
+        return real_run_audit(**kwargs)
+
+    monkeypatch.setattr(wsa, "run_audit", _spy_run_audit)
+    wsa.cmd_worktree_status_audit(
+        argparse.Namespace(sample=1, log_path=None, no_log=True, seed=1, json=True)
+    )
+    assert captured["ensure_monitor"] is None
+
+
 def test_cmd_worktree_status_audit_exit_code_nonzero_on_mismatch(tmp_path, monkeypatch):
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
