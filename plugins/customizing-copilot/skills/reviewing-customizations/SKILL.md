@@ -140,6 +140,40 @@ symlink/reparse indirection. It never deletes repository-owned files; orphaned
 projections and old managed regions are review findings for a human or ordinary
 repository change to remove.
 
+### `projection-reflect`: automating the sync (deterministic worker policy)
+
+`sync`/`scan` above are the mechanism; a scheduled, non-agentic worker that
+runs them unattended for a consumer repo needs an additional **policy** layer
+before it may fold a run's diff into an auto-mergeable PR --
+`scripts/projection_reflect.py` provides exactly that layer (pure functions,
+no rendering/writing/pushing of its own):
+
+- **The "did anything happen" trigger is `changed or lock_updated`, never
+  `changed` alone** (`has_actionable_change`) -- `sync` can report an empty
+  `changed` list with a lock-only update, and a no-op sync can still pair
+  with a `scan` that finds something.
+- **Deterministic, fail-closed finding classification** (`classify_findings`):
+  only `projection-missing` and `projection-source-update` are plain drift
+  `sync` already resolved. Every other check name -- including one not yet
+  invented -- is conflict-routed by default; a newly added
+  `instruction_projections.py` check must be reviewed and explicitly
+  allowlisted here before a worker may silently fold it into a bypass.
+- **Trusted-source allowlist** (`marketplace_of` + `bypass_decision`), keyed
+  off a lock entry's own `plugin@marketplace` identity -- `sync`'s
+  `discover_enabled_sources` resolves every repository-enabled marketplace,
+  including third-party ones this repo did not author, so byte-exact
+  reproducibility alone is never sufficient to bypass review.
+
+A worker composes these with `sync_repository`/`scan_repository`'s own
+`Result.findings` and the lock's changed entries to get a single
+`BypassDecision`; `eligible=False` names every violated conjunct (not just
+the first). See `projection_reflect.py`'s own module docstring for the
+tracked, not-yet-solved gap (immutable upstream-commit pinning, vs. today's
+version-string-only lock) and
+`efforts/active/ambient-guidance-navigability`'s Journal for status on the
+remaining pieces (a scheduler wrapper, the conflict-dispatch primitive, and
+the `projection-reconciler` agent template this decision routes to).
+
 ### Troubleshooting-category coverage registry
 
 A plugin may additionally ship a `troubleshooting-index.json` at its payload
