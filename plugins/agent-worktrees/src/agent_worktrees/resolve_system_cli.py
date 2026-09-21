@@ -379,11 +379,11 @@ def _system_status(config: cfg.Config) -> int | None:
 
 
 def _system_pause(msg: str) -> None:
-    """Display a short status message in a picker-style pause dialog."""
+    """Show a brief message via a single-item picker (press Enter to dismiss)."""
     pick(
-        [MenuItem(label="OK", kind=ItemKind.ACTION, value="ok")],
-        title=msg,
-        subtitle="Press Enter or Esc to continue",
+        [MenuItem(label=f"↩ {msg}", kind=ItemKind.ACTION, value="ok")],
+        title="",
+        subtitle="Enter to return",
         default=0,
     )
 
