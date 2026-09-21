@@ -8,7 +8,7 @@ checked-in defaults are placeholders for source checkouts.
 
 from __future__ import annotations
 
-__version__ = "0.1.2-dev26"
+__version__ = "0.1.2-dev27"
 
 COMMIT = "unknown"
 BUILT_AT = "unknown"
