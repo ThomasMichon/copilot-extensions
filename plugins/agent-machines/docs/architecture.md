@@ -143,7 +143,8 @@ The accepted dispositions are:
    including package authority.
 3. Apply Copilot surfaces first.
 4. Apply declarative resources second (packages/files/registry/features/power
-   settings/self-update opt-ins and Scheduled Task reconciliation; see below).
+   settings/self-update/fleet-update opt-ins and Scheduled Task reconciliation;
+   see below).
 5. Run repo-local modules third.
 
 `plan`, `validate`, and `restore` default to the adopted project containing CWD

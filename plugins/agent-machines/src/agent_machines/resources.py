@@ -160,6 +160,8 @@ class ResolvedResource:
             )
         if self.type == "self-update":
             return "enabled" if self.desired.get("state", "present") == "present" else "disabled"
+        if self.type == "fleet-update":
+            return "enabled" if self.desired.get("state", "present") == "present" else "disabled"
         return self.desired.get("state", "present")
 
 
@@ -1806,6 +1808,7 @@ MANAGERS: dict[str, dict[str, Any]] = {
 
 
 def _build_handlers() -> dict[str, ResourceHandler]:
+    from .resource_fleet_update import FleetUpdateResourceHandler
     from .resource_power import PowerSettingResourceHandler
     from .resource_self_update import SelfUpdateResourceHandler
 
@@ -1816,6 +1819,7 @@ def _build_handlers() -> dict[str, ResourceHandler]:
         "feature": FeatureResourceHandler(),
         "power-setting": PowerSettingResourceHandler(),
         "self-update": SelfUpdateResourceHandler(),
+        "fleet-update": FleetUpdateResourceHandler(),
     }
 
 
