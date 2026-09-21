@@ -354,7 +354,11 @@ async function cmdSyncWorktree(args) {
   const result = await attemptWorktreeSync(cwd);
   if (args.json) {
     emit(result, args);
-    if (!result.synced) process.exit(1);
+    // process.exitCode (not process.exit()) -- Node lets stdout drain to a
+    // pipe naturally before exiting on this code, whereas an immediate
+    // process.exit() call right after a write can terminate the process
+    // before that write flushes, truncating the documented --json output.
+    if (!result.synced) process.exitCode = 1;
     return;
   }
   if (result.synced) {
@@ -368,7 +372,7 @@ async function cmdSyncWorktree(args) {
   // skipped), not just the "attempted" case -- a caller using this command
   // as a gate (e.g. "only proceed once synced") must see a real failure
   // exit status regardless of why the sync did not happen.
-  process.exit(1);
+  process.exitCode = 1;
 }
 
 async function main() {

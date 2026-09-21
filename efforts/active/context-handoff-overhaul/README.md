@@ -1723,3 +1723,50 @@ HIGH findings plus 1 "previously missed" finding, all addressed:
   checkout). `node --test`: 137 tests, 135 pass (2 pre-existing skips), no
   regressions. All guards pass. No version bump needed (still
   `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 13: lock-stat safety, fallback rebase recheck, honest sync ordering, exit-code truncation
+
+Round 13 confirmed 5 of round 12's fixes resolved and surfaced 4 new HIGH
+findings, all fixed:
+
+- **Failed lock stat could remove an active replacement lock:** `acquireLock`
+  treated ANY `statSync` failure on an `EEXIST` as "the lock is gone,
+  reclaim it" -- but a failed stat doesn't prove that; it could be a
+  permission error, a transient FS hiccup, or another process re-creating
+  the lock in the exact instant between the failed open and this stat.
+  Reclaiming in that ambiguous case could unlink an active replacement lock
+  another process just created, letting both run concurrently. Fixed: a
+  failed stat now rethrows the original contention error (fails closed)
+  instead of falling through to reclaim.
+- **Plain-git fallback could abort a rebase it did not start:**
+  `plainGitSync` is reached after `attemptWorktreeSyncLocked`'s own earlier
+  rebase check, but the remote-discovery + fetch awaits inside it are
+  exactly the kind of gap another process could start a rebase in -- and
+  the catch block's unconditional `git rebase --abort` could then cancel
+  that unrelated rebase. Added the same immediate-before-exec
+  `rebaseInProgress` recheck this file's other sync path already used,
+  skipping (never touching, never aborting) rather than proceeding.
+- **Sync could start before a successful store, and delayed live triggering
+  unconditionally:** round 12's fix started the sync promise BEFORE calling
+  `triggerHandoff` at all, so a store failure inside `triggerHandoff` still
+  left an orphaned sync running -- contradicting the "post-capture only"
+  contract. Added a new `afterStore` hook to `triggerHandoff` (default
+  no-op), called exactly once the baton is durably stored (right after
+  `store()`/`writeSessionState()` both succeed) -- the correct place to
+  KICK OFF the side task. `autoForceHandoff` now assigns its sync promise
+  inside `afterStore`, and `beforeArmPickup` awaits that SAME (already
+  running) promise only in auto mode. This also incidentally documents the
+  actual contract precisely: sync starts after store, gates live pickup
+  only when live pickup can fire, never delays or depends on anything else.
+- **`sync-worktree --json` could truncate its own output:** `process.exit(1)`
+  called immediately after a stdout JSON write can terminate the process
+  before that write drains to a pipe on some platforms. Switched to
+  `process.exitCode = 1` (matching every other JSON-emitting command path
+  in this CLI, which never call `process.exit()` directly) so Node lets
+  the write flush naturally before exiting with that code.
+- 8 new/changed tests (lock stat-failure fail-closed via a structural
+  check, `plainGitSync`'s pre-rebase-exec recheck with a real pre-existing
+  `rebase-merge` dir left untouched, 3 `triggerHandoff` ordering tests for
+  `afterStore`/`beforeArmPickup`, a CLI exit-code assertion). `node --test`:
+  142 tests, 140 pass (2 pre-existing skips), no regressions. All guards
+  pass. No version bump needed (still `0.1.1-dev36`).
