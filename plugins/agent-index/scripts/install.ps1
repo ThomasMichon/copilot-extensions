@@ -314,6 +314,14 @@ $PkgSrcDir = Join-Path $PluginDir 'src\agent_index'
 if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE '.agent-index' }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 $VenvDir  = Join-Path $InstallDir '.venv'
+# The historical (pre-versioned-runtime) real venv/junction path -- distinct
+# from $VenvDir/$LinkDir below, which the versioned-runtime block repoints at
+# the freshly-built versions/<v> slot (always a real, non-link directory).
+# Guarding a legacy-migration stop MUST use this real path, never the
+# build-target one, or the guard fires on every routine update and force-stops
+# the daemon each time (service-lifecycle-supervision.md's "Guard a
+# legacy-migration stop on the real link path, not the built slot" gotcha).
+$LegacyVenvDir = $VenvDir
 $LocalBin = Join-Path $env:USERPROFILE '.local\bin'
 $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
@@ -563,7 +571,7 @@ function Invoke-VersionedActivate {
             return $true
         }
     }
-    if ((Test-Path $LinkDir) -and -not (Test-VenvIsLink $LinkDir)) {
+    if ((Test-Path $LegacyVenvDir) -and -not (Test-VenvIsLink $LegacyVenvDir)) {
         try { Invoke-Stop | Out-Null } catch {}
     }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'

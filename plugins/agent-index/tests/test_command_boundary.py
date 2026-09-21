@@ -101,6 +101,29 @@ def test_installers_preserve_two_step_cuda_engine_swap():
     assert 'engine-update)                                                  # rebuild durable engine venv + restart daemon (decoupled from service update)' in sh
 
 
+def test_versioned_activate_legacy_stop_guard_never_fires_on_the_build_target():
+    """`Invoke-VersionedActivate`'s one-time legacy-migration guard must gate on
+    the REAL historical `.venv` path, never on the variable the versioned-
+    runtime block repoints at the freshly-built `versions/<v>` slot -- that
+    slot is always a real, non-link directory, so gating on it fires on
+    EVERY routine update and force-stops the service *and* the durable engine
+    each time (the "kill the detached child" / "guard on the real link path,
+    not the built slot" gotchas in service-lifecycle-supervision.md; this
+    exact class of bug previously regressed agent-dispatch). Caught live on
+    tmichon-cloud1: a routine `install.ps1 update` stopped the already-warm,
+    healthy durable engine daemon even though nothing about the engine or its
+    torch/model stack had changed.
+    """
+    ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    assert "$LegacyVenvDir = $VenvDir" in ps
+    activate_fn = ps.split("function Invoke-VersionedActivate {", 1)[1].split(
+        "\nfunction ", 1
+    )[0]
+    assert "Test-Path $LegacyVenvDir" in activate_fn
+    assert "Test-VenvIsLink $LegacyVenvDir" in activate_fn
+    assert "$LinkDir" not in activate_fn
+
+
 def test_stop_and_uninstall_also_stop_the_durable_engine_daemon():
     """The durable engine daemon (daemon.py) is a separate detached process
     from the light service -- stopping only the service, or only the engine's
