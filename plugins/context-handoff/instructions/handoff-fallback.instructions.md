@@ -38,14 +38,16 @@ node "$CH" trigger --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_A
 node "$CH" consume --locator "task:<id>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 ```
 
-PowerShell: same verbs, `$env:COPILOT_PLUGIN_ROOT`, `node $ch <verb> ...`.
+PowerShell: same verbs; use `COPILOT_PLUGIN_ROOT` as a PS env var, then
+`node $ch <verb> ...`.
 
 ## If the plugin failed to load: find it yourself, no tools required
 
 1. Read `instructions/context-handoff/session-guidance.instructions.md` in
    your session folder, if present -- it may already name a handoff.
-2. Glob `~/.copilot/session-state/*/files/handoff-*.md` for the newest file
-   (a predecessor's last-resort write); read and resume it if found.
+2. List each session's disclosed session-state folder for a
+   `files/handoff-*.md` entry (a predecessor's last-resort write); pick the
+   newest by mtime, read it, and resume it if found.
 3. `agent-worktrees head-session --worktree "<id>" --json` and
    `agent-worktrees handoffs-check --worktree-id "<id>" --json` (a
    separate, independent plugin) report any pending handoff + seed.
@@ -59,9 +61,9 @@ symptom persists? Escalate to a human or `agent-worktrees doctor --fix`.
 
 ## Last resort: write the file yourself
 
-No reachable store, no `node`? Write the brief to
-`~/.copilot/session-state/<your-session-id>/files/handoff-<slug>.md`
-(create `files/` first), state the absolute path, and give the user:
+No reachable store, no `node`? Write the brief to a `handoff-<slug>.md`
+file under your disclosed session-state folder's `files/` directory
+(create it first), state the absolute path, and give the user:
 `/clear` then "Read <path> and resume the objective it describes." No
 auto-pickup, no claim tracking -- last resort only.
 
