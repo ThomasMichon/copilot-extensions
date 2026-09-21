@@ -102,3 +102,84 @@ def test_relocate_is_noop_when_ambiguous_across_projects(tmp_path, monkeypatch):
 
     assert m._relocate_active_project_for_worktree("wt-1") is False
     assert switched == []
+
+
+def test_noninteractive_resume_reloads_config_after_relocation(tmp_path, monkeypatch):
+    """Regression guard for the PR #3178 review follow-up:
+    ``_resolve_noninteractive_worktree`` must not keep using a config cached
+    from an earlier (ambient-project) probe once relocation switches the
+    active project -- every downstream call (profile validation, preflight,
+    profile resolution, resume) must see the *new* project's config."""
+    from agent_worktrees import resolve_cli
+
+    other_dir = tmp_path / "other" / "worktrees"
+    _write_record(other_dir, "wt-1")
+
+    ambient_config = object()
+    other_config = object()
+
+    state = resolve_cli.ResolveCommandState(
+        args=object(),
+        use_json=False,
+        use_base=False,
+        use_new=False,
+        requested_machine=None,
+        worktree_id="wt-1",
+        config=ambient_config,
+    )
+
+    load_calls = {"n": 0}
+
+    def fake_load_config():
+        load_calls["n"] += 1
+        return other_config
+
+    seen_configs = []
+
+    monkeypatch.setattr(resolve_cli, "_resolve_worktree_id", lambda wt_id: wt_id)
+    monkeypatch.setattr(
+        resolve_cli, "_relocate_active_project_for_worktree", lambda wt_id: True
+    )
+    monkeypatch.setattr(resolve_cli.cfg, "load_config", fake_load_config)
+    monkeypatch.setattr(resolve_cli.cfg, "tracking_dir", lambda: other_dir)
+    monkeypatch.setattr(
+        resolve_cli.tracking, "load_record", lambda path: type("Record", (), {"worktree_path": "/tmp/wt-1"})()
+    )
+    monkeypatch.setattr(
+        resolve_cli,
+        "_validate_profile_assignment_config",
+        lambda config: seen_configs.append(("validate", config)),
+    )
+
+    def fake_preflight(config, args, work_dir):
+        seen_configs.append(("preflight", config))
+        return type("Preflight", (), {"error": None})()
+
+    monkeypatch.setattr(resolve_cli, "_preflight_launch", fake_preflight)
+
+    def fake_resolve_profile(config, args):
+        seen_configs.append(("profile", config))
+        return object()
+
+    monkeypatch.setattr(resolve_cli, "_resolve_profile", fake_resolve_profile)
+
+    def fake_resolve_resume(record, config, args, *, profile, launch_preflight):
+        seen_configs.append(("resume", config))
+        return 0
+
+    monkeypatch.setattr(resolve_cli, "_resolve_resume", fake_resolve_resume)
+
+    result = resolve_cli._resolve_noninteractive_worktree(state)
+
+    assert result == 0
+    # Cache was cleared and reloaded exactly once, and every downstream call
+    # saw the fresh (relocated-project) config -- never the stale ambient one.
+    assert load_calls["n"] == 1
+    assert state.config is other_config
+    assert seen_configs == [
+        ("validate", other_config),
+        ("preflight", other_config),
+        ("profile", other_config),
+        ("resume", other_config),
+    ]
+
