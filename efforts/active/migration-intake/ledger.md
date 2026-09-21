@@ -99,16 +99,19 @@ Phase 3 acceptance gate the Intake Contract requires before publication.
 `account-aware-operations` (#14) and `review-automation-reliability` (#15)
 are still `Draft` effort status with no umbrella issue, so no public issue
 was created for either; both stay `routed` with publication pending until
-their owning effort activates.
+their owning effort is both `Active` *and* has an umbrella issue -- effort
+activation alone is not sufficient, since an activated effort could still
+lack an umbrella to attach a sub-issue to.
 
 | # | Disposition | Owner | Tracker outcome | What changed vs. prior pass |
 |---|-------------|-------|------------------|-------------------------------|
 | 5 | routed | agent-machines-declarative-control-plane | published [#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115) | Phase 3 publication completed |
 | 9 | routed | worktree-finality-and-obligations | published [#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113) | Phase 3 publication completed |
-| 14 | routed | account-aware-operations | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per Intake Contract §3 until the effort activates |
-| 15 | routed | review-automation-reliability | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per Intake Contract §3 until the effort activates |
+| 14 | routed | account-aware-operations | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per Intake Contract §3 until the effort is both `Active` and has an umbrella issue |
+| 15 | routed | review-automation-reliability | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per Intake Contract §3 until the effort is both `Active` and has an umbrella issue |
 | 16 | routed | worktree-finality-and-obligations | published [#3114](https://github.com/ThomasMichon/copilot-extensions/issues/3114) | Phase 3 publication completed |
 | 3 | routed | worktree-manager-control-plane | in flight under existing PR [#3102](https://github.com/ThomasMichon/copilot-extensions/pull/3102) (not yet merged) | stays `routed`, not `superseded`, until #3102 actually merges; no separate public issue needed unless it does not land, since it already covers this exact scope |
+
 
 *(Phase 3 publication, 2026-09-20: of the 6 routed candidates not already
 resolved by an earlier ledger pass, 3 were published as new public issues
