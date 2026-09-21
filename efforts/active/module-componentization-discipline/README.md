@@ -206,7 +206,7 @@ Verbatim from the operator:
             full `run-plugin-tests.py agent-dispatch` green across all 5
             sub-suites, targeted `-k` coverage green, ruff green, baseline
             refreshed to remove `coordinator.py`, and `agent-dispatch` bumped
-            to `0.1.2-dev148`.
+            to `0.1.2-dev151`.
       - [ ] The `tools/clean-room/scenarios/*` fixtures (2,429 / 2,369) —
             lower urgency (not production code), but validating a split
             means actually running the Docker-based clean-room scenario
@@ -449,4 +449,4 @@ the Phase 0 runbook, picked up as capacity allows.
   full-tree `check-module-size.py` run additionally surfaced a separate live
   drift in `worktree-manager/.../picker_tui/engine.py`; applied a manual,
   reviewed widen there (9191 → 9267) so the guard is green again while that
-  file stays in the backlog. Bumped `agent-dispatch` to `0.1.2-dev148`.
+  file stays in the backlog. Bumped `agent-dispatch` to `0.1.2-dev151`.
