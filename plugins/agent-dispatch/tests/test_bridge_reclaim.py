@@ -1,6 +1,7 @@
-"""Tests for agent_dispatch.bridge_reclaim (the reclaim path's two-call
-equivalent of the removed ``create --reclaim``, agent-bridge-cold-resume
-Phase 3, #6744)."""
+"""Tests for agent_dispatch.bridge_reclaim -- the reclaim path's replacement
+for the removed ``create --reclaim`` (agent-bridge-cold-resume Phase 3,
+#6744): resume, and if a live interactive CLI holds the worktree, actually
+stop it (via agent-worktrees) before forcing the take-over."""
 
 from __future__ import annotations
 
@@ -16,6 +17,10 @@ def _proc(cmd, returncode=0, stdout="", stderr=""):
 
 def _resume(monkeypatch, fake_run, **overrides):
     monkeypatch.setattr(bridge_reclaim.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        bridge_reclaim, "agent_worktrees_launch_prefix",
+        lambda: ["/usr/bin/agent-worktrees"],
+    )
     kwargs = dict(
         exe=["/usr/bin/agent-bridge"], agent="task-worker",
         caller="agent-dispatch:w1", wait=True, json_output=False, timeout=None,
@@ -24,7 +29,9 @@ def _resume(monkeypatch, fake_run, **overrides):
     return bridge_reclaim.resume_worktree_and_send("wt-1", "the seed", **kwargs)
 
 
-def test_resume_then_send_happy_path(monkeypatch):
+def test_resume_then_send_happy_path_no_holder(monkeypatch):
+    """The common case: no live interactive CLI holds the worktree at all --
+    a plain (non-forcing) resume succeeds outright, no stop is attempted."""
     calls = []
 
     def fake_run(cmd, **kwargs):
@@ -37,6 +44,7 @@ def test_resume_then_send_happy_path(monkeypatch):
     assert result.returncode == 0
     assert len(calls) == 2
     assert calls[0] == ["/usr/bin/agent-bridge", "--json", "resume", "wt-1"]
+    assert "--force" not in calls[0]
     assert calls[1] == [
         "/usr/bin/agent-bridge", "send", "resumed-9", "--prompt-file", "-",
         "--caller", "agent-dispatch:w1", "--no-wait",
@@ -52,41 +60,79 @@ def test_resume_failure_short_circuits(monkeypatch):
 
     result = _resume(monkeypatch, fake_run)
     assert result.returncode == 1
-    assert len(calls) == 1  # send is never attempted
+    assert len(calls) == 1  # send is never attempted, no stop attempted either
 
 
-def test_never_forces_past_a_live_cli_holder(monkeypatch):
-    """Single-controller invariant: 'resume' is called without '--force', so
-    a genuine live interactive CLI holder's 409 refusal is surfaced as-is --
-    agent-dispatch judged the *task* stale, never that a human's own attached
-    session should be torn out from under them."""
+def test_live_cli_holder_is_stopped_then_force_resumed(monkeypatch):
+    """The actual 'reclaim' verb: kill the interactive CLI holding the
+    worktree (agent-worktrees restart), THEN force-take-over via resume
+    --force -- never bypass the guard without confirming the holder is
+    actually gone first."""
     calls = []
 
     def fake_run(cmd, **kwargs):
-        calls.append(cmd)
-        return _proc(
-            cmd, 1,
-            '{"error": "a live interactive CLI (live-7) still holds worktree '
-            'wt-1", "reason": "live_cli_holds_worktree", "session_id": "live-7"}',
-            "",
-        )
+        calls.append(list(cmd))
+        if cmd[:2] == ["/usr/bin/agent-worktrees", "restart"]:
+            return _proc(cmd, 0, json.dumps(
+                {"ok": True, "had_session": True, "method": "graceful"}
+            ))
+        if cmd[1:3] == ["--json", "resume"]:
+            if "--force" not in cmd:
+                return _proc(
+                    cmd, 1,
+                    '{"error": "a live interactive CLI (live-7) still holds '
+                    'worktree wt-1", "reason": "live_cli_holds_worktree", '
+                    '"session_id": "live-7"}',
+                    "",
+                )
+            return _proc(cmd, 0, json.dumps({"session_id": "reclaimed-1"}))
+        return _proc(cmd, 0, "ok")
+
+    result = _resume(monkeypatch, fake_run)
+    assert result.returncode == 0
+    kinds = [(c[0], c[1] if len(c) > 1 else None) for c in calls]
+    assert kinds == [
+        ("/usr/bin/agent-bridge", "--json"),   # 1st resume, no --force -> 409
+        ("/usr/bin/agent-worktrees", "restart"),  # stop the interactive CLI
+        ("/usr/bin/agent-bridge", "--json"),   # 2nd resume, --force -> ok
+        ("/usr/bin/agent-bridge", "send"),
+    ]
+    assert calls[1] == ["/usr/bin/agent-worktrees", "restart", "wt-1", "--json"]
+    assert "--force" in calls[2]
+    assert "reclaimed-1" in calls[3]
+
+
+def test_stop_failure_is_reported_without_forcing_through(monkeypatch):
+    """If agent-worktrees can't confirm the interactive CLI actually stopped,
+    this must NOT fall through to '--force' anyway -- that would risk the
+    exact duplicate-controller race the guard exists to prevent."""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if cmd[:2] == ["/usr/bin/agent-worktrees", "restart"]:
+            return _proc(cmd, 0, json.dumps({"ok": False, "error": "quit hung"}))
+        if cmd[1:3] == ["--json", "resume"]:
+            return _proc(
+                cmd, 1,
+                '{"reason": "live_cli_holds_worktree", "session_id": "live-7"}',
+                "",
+            )
+        return _proc(cmd, 0, "ok")
 
     result = _resume(monkeypatch, fake_run)
     assert result.returncode == 1
-    assert "live_cli_holds_worktree" in result.stdout
-    assert len(calls) == 1  # send is never attempted
-    assert "--force" not in calls[0]
+    assert "could not stop the interactive CLI" in result.stderr
+    assert len(calls) == 2  # one resume attempt, one stop attempt -- never a 2nd resume
+    assert not any("--force" in c for c in calls)
 
 
 def test_missing_session_id_reports_failure_not_a_legacy_fallback(monkeypatch):
     """A successful (returncode 0) resume whose stdout carries no session_id
-    means a not-yet-upgraded daemon already reused-or-created the worktree's
-    session via its old human '[OK] ...' text -- NOT a genuine new failure.
-    But this must never fall back to 'create --reclaim': that daemon already
-    has a live session on this worktree, and create --reclaim force-news a
-    *second* one, leaving two controllers. Report the failure instead (the
-    caller degrades by leaving the task queued) -- resolved once agent-bridge
-    is upgraded too."""
+    means a not-yet-upgraded daemon already resumed/created a session via
+    its old human '[OK] ...' text -- NOT a genuine new failure, but there is
+    no safe way to recover that session's id, so this reports failure rather
+    than guessing (the caller degrades by leaving the task queued)."""
     calls = []
 
     def fake_run(cmd, **kwargs):
@@ -97,7 +143,6 @@ def test_missing_session_id_reports_failure_not_a_legacy_fallback(monkeypatch):
     assert result.returncode == 1
     assert "no session_id" in result.stderr
     assert len(calls) == 1  # never falls back to 'create'
-    assert not any("create" in c for c in calls[0])
 
 
 def test_busy_reused_session_is_ended_then_resumed_again_for_its_replacement(
@@ -112,8 +157,6 @@ def test_busy_reused_session_is_ended_then_resumed_again_for_its_replacement(
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
         if cmd[1:3] == ["--json", "resume"]:
-            # First resume reuses 'reused-1'; the post-end resume creates
-            # a fresh replacement, 'fresh-2'.
             sid = "reused-1" if calls.count(list(cmd)) == 1 else "fresh-2"
             return _proc(cmd, 0, json.dumps({"session_id": sid}))
         if cmd[1] == "send" and "reused-1" in cmd:
@@ -128,6 +171,7 @@ def test_busy_reused_session_is_ended_then_resumed_again_for_its_replacement(
     assert kinds == ["--json", "send", "end", "--json", "send"]
     assert calls[2] == ["/usr/bin/agent-bridge", "end", "reused-1", "--force"]
     assert "fresh-2" in calls[4]
+    assert not any("--force" in c for c in calls if c[1] == "--json")
 
 
 def test_json_output_reshapes_send_result(monkeypatch):

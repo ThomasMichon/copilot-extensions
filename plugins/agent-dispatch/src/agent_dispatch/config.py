@@ -35,7 +35,9 @@ lone dev box or against a designated coordinator host on a shared network:
   coordinator's handoff-fallback reconciliation (an unclaimed
   ``handoff``-labeled ``proposed``/``queued`` task past
   ``AGENT_DISPATCH_HANDOFF_FALLBACK_GRACE`` triggers exactly one
-  ``agent-bridge resume <worktree>`` (then ``send``) launch attempt; see
+  ``agent-bridge resume <worktree>`` (then ``send``; if a live interactive
+  CLI still holds it, stopping it via ``agent-worktrees restart`` first) launch
+  attempt; see
   ``efforts/active/context-handoff-overhaul``). Off by default because this is
   the coordinator autonomously spawning a real Copilot process on a time
   heuristic -- a genuinely safety-relevant action.
