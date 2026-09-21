@@ -128,18 +128,31 @@ def sweep(
                 for line in handle:
                     lines_scanned += 1
                     timestamp = _parse_timestamp(line)
-                    if since is not None and timestamp is not None and timestamp < since:
+                    # A genuine runtime log line always starts with a bare
+                    # leading timestamp. A line without one is never a live
+                    # emission -- it is, in practice, this CLI's own session
+                    # state (events.jsonl-style capture) recording an earlier
+                    # tool call's output, which can itself quote/escape a
+                    # copy of a genuine warning line (e.g. an agent session
+                    # discussing or grepping these exact log patterns, as
+                    # this very investigation's own session did). Skip it
+                    # entirely rather than only skipping it from the
+                    # --since-hours window -- confirmed live: without this
+                    # check, this session's own conversation history about
+                    # this tool inflated its own counts.
+                    if timestamp is None:
+                        continue
+                    if since is not None and timestamp < since:
                         continue
                     for name, pattern in _SIGNALS.items():
                         if pattern.search(line):
                             signal_counts[name] += 1
                             if len(signal_samples[name]) < max_samples:
                                 signal_samples[name].append(line.rstrip("\n")[:300])
-                            if timestamp is not None:
-                                if name not in first_seen or timestamp < first_seen[name]:
-                                    first_seen[name] = timestamp
-                                if name not in last_seen or timestamp > last_seen[name]:
-                                    last_seen[name] = timestamp
+                            if name not in first_seen or timestamp < first_seen[name]:
+                                first_seen[name] = timestamp
+                            if name not in last_seen or timestamp > last_seen[name]:
+                                last_seen[name] = timestamp
         except OSError:
             continue
 
