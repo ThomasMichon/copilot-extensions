@@ -211,32 +211,54 @@ private paths).
       the PR's own lock-entry diff. This is strictly stronger verification
       than `config-reflect` can offer (there is no live, unrepeatable device
       state here -- the source is already-reviewed, already-merged upstream
-      content, so the render is 100% reproducible).
+      content, so the render is 100% reproducible). **Byte-exact match
+      proves reproducibility, not trust**: `discover_enabled_sources`
+      resolves every repository-enabled marketplace, including third-party
+      ones this repo did not author. The bypass must additionally restrict
+      itself to an explicit **trusted-source allowlist** (defaulting to this
+      repo's own marketplace only; any other marketplace/plugin source is
+      review-only until explicitly added to the allowlist) -- an
+      untrustworthy source can be perfectly reproducible and still unsafe to
+      auto-merge.
 - [ ] **Conflict-dispatch primitive**: a reusable helper (candidate home:
       `agent-dispatch`, since dispatch itself is a copilot-extensions
       plugin) generalizing `config-reflect`'s `conflict_dispatch.py` pattern
       -- domain-scoped dedup key, compact descriptor, async `agent-dispatch
       create` call -- parameterized so it isn't config-reflect-specific.
 - [ ] **`projection-reconciler` agent template**: modeled on
-      `config-reconciler`, but simpler -- there is no legitimate "local
-      reality" to weigh against a canonical render, so the reconciler always
-      **prefers the freshly-recomputed canonical content** on a real
-      conflict, and treats a hand-edited projected file (a violation of the
-      "never hand-edit a managed projection" rule) as a finding to surface,
-      not a side to blend. Never self-merges; updates the same PR and
-      returns.
+      `config-reconciler`, but narrower -- the sync manager already refuses
+      to overwrite a locally hand-edited managed projection outright (a
+      deliberate existing safety property), so the reconciler must not try
+      to force that overwrite by looping `sync` or silently discarding the
+      local edit either. On a genuine hand-edit conflict it stays
+      **report-only**: it records/preserves the local preimage, comments on
+      (or files) a tracked finding describing exactly what blocked the sync
+      and why, and stops -- it does not attempt an automatic repair of that
+      case. It only resolves ordinary git-level conflicts (e.g. concurrent
+      updates to the same lock-file region across unrelated plugins) by
+      re-deriving the canonical render fresh; it never blends two candidate
+      "truths" for a managed file. Never self-merges; updates the same PR
+      and returns.
 - [ ] **`setting-up-instruction-sync-worker` skill** (or a section within
       `authoring-harness-plugins`): scaffolds, for any harness repo that
       asks for it, the scheduler config template, a bypass-config-profile
       template (label / path-globs / diff-shape rule / recompute-verify
-      callback -- adaptable to whatever review gate that repo uses), and the
-      reconciler agent file.
+      callback / trusted-source allowlist -- adaptable to whatever review
+      gate that repo uses), and the reconciler agent file. Per
+      `docs/patterns/install-vs-adopt-boundary.md`: granting a scheduler
+      repo-write authority and a review-bypass profile is repo mutation, not
+      a machine-local install/update concern -- the skill must require an
+      explicit, committed, in-repo opt-in (the repo's own config declaring
+      it wants this) as its ownership signal before scaffolding anything,
+      never merely "the operator asked for it in this session" or "the repo
+      is PR-gated" (a repo you only contribute to is often PR-gated too).
 - [ ] Reuse the **same** deterministic producer identity a repo already
       trusts for its own reflect-style automation (do not mint a new
       identity per feature) -- the safety boundary is the conjunction of
-      identity + stamp label + path-scope + diff-shape + recompute-match,
-      not identity alone (identity alone was already proven insufficient by
-      `config-reflect`'s own hard-won lessons).
+      identity + stamp label + path-scope + diff-shape + recompute-match +
+      trusted-source allowlist, not identity alone (identity alone was
+      already proven insufficient by `config-reflect`'s own hard-won
+      lessons).
 
 ### Phase 3 -- Populate the concrete content gaps found by the audit
 - [ ] `agent-worktrees`: claims-ledger index row (-> `claims` command /
@@ -273,10 +295,13 @@ hardcoded profile into a small list of named profiles (so its existing
 trusted deterministic identity can serve a second, distinctly-scoped reflect
 kind without proliferating identities); add the `projection-reflect` profile
 (that repo's own instructions-file paths + the lock file, diff-shape rule,
-recompute-verify callback); stand up the scheduled worker (a thin
-timer-triggered wrapper around Phase 2's sync tool, no device polling
-needed); add that repo's own `projection-reconciler` agent file, wired to
-whatever dispatches on Phase 2's conflict-dispatch label there.
+recompute-verify callback, and an explicit trusted-source allowlist scoped to
+this repo's own marketplace); record that repo's explicit, committed opt-in
+before enabling anything (the ownership signal Phase 2's setup skill
+requires); stand up the scheduled worker (a thin timer-triggered wrapper
+around Phase 2's sync tool, no device polling needed); add that repo's own
+`projection-reconciler` agent file, wired to whatever dispatches on Phase 2's
+conflict-dispatch label there.
 
 ### Phase 6 -- Validate
 - [ ] Re-run the same 12-question navigability audit (fresh frozen snapshot,
@@ -300,10 +325,15 @@ whatever dispatches on Phase 2's conflict-dispatch label there.
 - [ ] Phase 2's bypass safety boundary is proven with negative tests for
       *each* conjunct, not just recompute mismatch: a no-change run opens no
       PR; a disabled plugin's projection is never touched even if its
-      installed payload changed; a PR missing the stamp label, touching a
-      path outside the managed globs, or containing a non-regular-file diff
-      shape is rejected by the bypass; and a routed conflict is proven to
-      update the existing PR without ever self-merging.
+      installed payload changed; a source outside the trusted-source
+      allowlist is never auto-merged even with a byte-exact recompute match;
+      a PR missing the stamp label, touching a path outside the managed
+      globs, or containing a non-regular-file diff shape is rejected by the
+      bypass; and a routed conflict is proven to update the existing PR
+      without ever self-merging.
+- [ ] The setup skill refuses to scaffold the scheduler/bypass without the
+      repo's explicit, committed opt-in signal present (a negative-proof
+      test: no opt-in file present -> setup declines).
 - [ ] Phase 6's re-audit shows a materially higher navigable/false-positive
       ratio than the baseline table above, with the specific false-positive
       corrected.
