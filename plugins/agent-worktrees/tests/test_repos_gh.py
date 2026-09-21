@@ -8,8 +8,21 @@ the env-builder seam (the exec itself is a thin ``subprocess.run`` passthrough).
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import pytest
+
 from agent_worktrees import __main__ as m
 from agent_worktrees import git_ops, repos
+
+
+@pytest.fixture
+def home(tmp_path: Path, monkeypatch) -> Path:
+    """Redirect ~ so the registry reads/writes under a tmp dir."""
+    monkeypatch.setattr(repos.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    return tmp_path
 
 
 def test_injects_token_when_account_and_token_resolve(monkeypatch):
@@ -114,3 +127,73 @@ def test_repos_gh_allows_unregistered_bare_owner(monkeypatch):
 
     assert rc == 0
     assert calls == [["gh", "issue", "list"]]
+
+
+# --- `repos account-for` dispatcher (command-level, #3032 follow-up) -------
+#
+# The original bug was specifically an incorrect *successful* `account-for`
+# result (echoing an unresolved bare name back with exit 0), so exercising
+# only `account_for_github_slug()` in isolation is not enough -- the
+# dispatcher's own parsing/output/exit-status wiring needs its own coverage.
+
+
+def test_repos_account_for_bare_registered_repo_prints_owner(
+    home: Path, capfd,
+):
+    repos.add_repo(
+        "copilot-extensions", str(home / "src" / "copilot-extensions"),
+        repo_class="reference",
+        remote="https://github.com/ThomasMichon/copilot-extensions.git",
+        plat="windows",
+    )
+    capfd.readouterr()  # drain add_repo's own registration confirmation
+
+    rc = m.cmd_repos_dispatch(["account-for", "copilot-extensions"])
+
+    assert rc == 0
+    assert capfd.readouterr().out.strip() == "ThomasMichon"
+
+
+def test_repos_account_for_bare_registered_repo_json(home: Path, capfd):
+    repos.add_repo(
+        "copilot-extensions", str(home / "src" / "copilot-extensions"),
+        repo_class="reference",
+        remote="https://github.com/ThomasMichon/copilot-extensions.git",
+        plat="windows",
+    )
+    capfd.readouterr()  # drain add_repo's own registration confirmation
+
+    rc = m.cmd_repos_dispatch(["account-for", "copilot-extensions", "--json"])
+
+    assert rc == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["target"] == "copilot-extensions"
+    assert payload["account"] == "ThomasMichon"
+
+
+def test_repos_account_for_unresolved_registered_repo_fails(home: Path, capfd):
+    # A registered non-GitHub repo with no explicit account: override has no
+    # resolvable identity -- must print nothing and exit 1, never echo the
+    # bare name back as if it were a valid login (the original #3032 bug).
+    repos.add_repo(
+        "azdo-proj", str(home / "src" / "azdo-proj"), repo_class="reference",
+        remote="https://my-org.visualstudio.com/x/_git/azdo-proj",
+        plat="windows",
+    )
+    capfd.readouterr()  # drain add_repo's own registration confirmation
+
+    rc = m.cmd_repos_dispatch(["account-for", "azdo-proj"])
+
+    assert rc == 1
+    assert capfd.readouterr().out == ""
+
+
+def test_repos_account_for_unregistered_bare_owner_prints_itself(
+    home: Path, capfd,
+):
+    # An ordinary unregistered bare owner is unaffected by the #3032 fix --
+    # owner == login is still a valid, intentional fallback.
+    rc = m.cmd_repos_dispatch(["account-for", "ThomasMichon"])
+
+    assert rc == 0
+    assert capfd.readouterr().out.strip() == "ThomasMichon"
