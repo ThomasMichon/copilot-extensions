@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -188,23 +189,82 @@ def _plugin_version(footprint: Path) -> str:
 
 _GIT_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 
+#: Git environment variables that let a subprocess override which
+#: repository/worktree/object-store it operates against, independent of
+#: the ``-C <path>`` argument -- an ambient `GIT_DIR`/`GIT_WORK_TREE`/object-
+#: directory value inherited from the caller's environment must never be
+#: allowed to redirect a provenance probe at an unrelated repository.
+_GIT_ENV_PREFIX = "GIT_"
+
+
+def _git_isolated_env() -> dict[str, str]:
+    """A subprocess environment with every ``GIT_*`` variable stripped.
+
+    Mirrors the repository-identity isolation pattern used elsewhere in the
+    facility's own git-identity probes (an inherited `GIT_DIR`/
+    `GIT_WORK_TREE`/object-directory override must never let a caller
+    redirect this probe at a different repository than the one named by
+    ``-C``).
+    """
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(_GIT_ENV_PREFIX)
+    }
+
+
+def _payload_is_clean(git: str, footprint: Path) -> bool:
+    """Whether ``footprint`` has no local modifications or untracked files.
+
+    ``git rev-parse HEAD`` alone only proves the *containing repository's*
+    current commit -- it says nothing about whether the payload on disk at
+    ``footprint`` actually matches that commit. A dirty or untracked file
+    within the payload would otherwise still receive a valid-looking pin,
+    letting the bypass path publish content that was never present at the
+    pinned commit. ``git status --porcelain`` scoped to ``footprint`` (via
+    ``-C`` + a ``.`` pathspec) reports both staged/unstaged modifications
+    and untracked files; any output at all means the payload is not a
+    faithful checkout of ``HEAD``.
+    """
+    try:
+        result = subprocess.run(
+            [git, "-C", str(footprint), "status", "--porcelain", "--", "."],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=_git_isolated_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and not result.stdout.strip()
+
 
 def _plugin_commit(footprint: Path) -> str:
     """Return the immutable git commit SHA a payload was checked out at.
 
     Only resolvable when ``footprint`` lives inside a real git working tree
     -- this repo's own directory-marketplace plugins, or an
-    ``agent-worktrees-repo`` checkout, are the two cases that qualify today.
-    Returns ``""`` -- never raises -- for every other case: git is
-    unavailable, the footprint is not inside a git working tree, or the
-    command fails for any reason. Deliberately never attempts to resolve a
-    commit for a plain installed-plugins payload copy (no local git history
-    to read there) -- that remains a genuinely unsolved case (see
+    ``agent-worktrees-repo`` checkout, are the two cases that qualify today
+    -- **and** that payload has no local modifications or untracked files
+    (see :func:`_payload_is_clean`): a dirty checkout cannot be pinned,
+    since the commit it would report no longer describes what is actually
+    on disk. Returns ``""`` -- never raises -- for every other case: git is
+    unavailable, the footprint is not inside a git working tree, the
+    payload is dirty, or any command fails for any reason. Every git
+    subprocess runs with `GIT_*` environment variables stripped (see
+    :func:`_git_isolated_env`) so an inherited `GIT_DIR`/`GIT_WORK_TREE`
+    override can never redirect this probe at an unrelated repository.
+    Deliberately never attempts to resolve a commit for a plain
+    installed-plugins payload copy (no local git history to read there) --
+    that remains a genuinely unsolved case (see
     ``efforts/active/ambient-guidance-navigability``'s Journal), not
     something to guess at.
     """
     git = shutil.which("git")
     if git is None:
+        return ""
+    if not _payload_is_clean(git, footprint):
         return ""
     try:
         result = subprocess.run(
@@ -213,6 +273,7 @@ def _plugin_commit(footprint: Path) -> str:
             text=True,
             timeout=5,
             check=False,
+            env=_git_isolated_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return ""

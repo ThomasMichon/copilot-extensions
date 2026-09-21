@@ -2819,10 +2819,8 @@ def _git_available() -> bool:
     return shutil.which("git") is not None
 
 
-@pytest.mark.skipif(not _git_available(), reason="git is not installed")
-def test_plugin_commit_resolves_head_inside_a_git_checkout(tmp_path: Path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
+def _clean_git_checkout(repo: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
     _run_git(repo, "init", "-q")
     _run_git(repo, "config", "user.email", "test@example.com")
     _run_git(repo, "config", "user.name", "Test")
@@ -2832,10 +2830,68 @@ def test_plugin_commit_resolves_head_inside_a_git_checkout(tmp_path: Path):
     _run_git(repo, "add", "-A")
     _run_git(repo, "commit", "-q", "-m", "initial")
 
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_plugin_commit_resolves_head_inside_a_git_checkout(tmp_path: Path):
+    repo = tmp_path / "repo"
+    _clean_git_checkout(repo)
+
     sha = scan._plugin_commit(repo)
 
     assert len(sha) == 40
     assert all(ch in "0123456789abcdef" for ch in sha)
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_plugin_commit_empty_with_a_modified_tracked_file(tmp_path: Path):
+    repo = tmp_path / "repo"
+    _clean_git_checkout(repo)
+    (repo / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.1"}), encoding="utf-8"
+    )
+
+    # A modified tracked file means the payload on disk no longer matches
+    # HEAD -- pinning it would be a false claim of reproducibility.
+    assert scan._plugin_commit(repo) == ""
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_plugin_commit_empty_with_an_untracked_file(tmp_path: Path):
+    repo = tmp_path / "repo"
+    _clean_git_checkout(repo)
+    (repo / "extra.json").write_text("{}", encoding="utf-8")
+
+    # An untracked file within the payload is exactly as unproven as a
+    # modification -- HEAD alone does not describe it.
+    assert scan._plugin_commit(repo) == ""
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_plugin_commit_ignores_ambient_git_dir_override(
+    tmp_path: Path, monkeypatch
+):
+    import subprocess
+
+    repo = tmp_path / "repo"
+    _clean_git_checkout(repo)
+    other_repo = tmp_path / "other"
+    _clean_git_checkout(other_repo)
+
+    # An inherited GIT_DIR/GIT_WORK_TREE pointing at a DIFFERENT repository
+    # must never redirect this probe away from the `-C <footprint>` target.
+    monkeypatch.setenv("GIT_DIR", str(other_repo / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other_repo))
+
+    sha = scan._plugin_commit(repo)
+    clean_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    expected = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        env=clean_env,
+    ).stdout.strip()
+
+    assert sha == expected
 
 
 def test_plugin_commit_empty_outside_a_git_checkout(tmp_path: Path):

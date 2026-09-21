@@ -28,6 +28,7 @@ from instruction_projections import discover_enabled_sources
 from projection_reflect import classify_findings
 from projection_reflect_consent import load_consent
 from projection_sync_worker import run_sync_pass
+from scan_plugin_sources import resolve_pinned_commits
 ```
 
 `agent_dispatch.conflict_dispatch` is a normal installed-plugin import (that
@@ -63,10 +64,25 @@ plugin ships a runtime package), so it needs no path setup.
 
    ```python
    sources = discover_enabled_sources(repo_root)
+   # Only compute/enforce pins when this repo's consent explicitly opts in
+   # (require_immutable_pin, default False on Consent): most adopters sync
+   # externally-installed marketplace plugins, which resolve_pinned_commits
+   # cannot pin at all today -- enforcing it unconditionally would silently
+   # disable the bypass path entirely for that common case. This is the
+   # SAME conjunct `projection_sync_worker.main()`'s CLI enforces; a custom
+   # scheduler that calls run_sync_pass() directly (as this template does)
+   # must wire it through itself -- omitting this step silently drops pin
+   # enforcement even when the repo's own consent file requests it.
+   pinned_commits = (
+       resolve_pinned_commits(sources)
+       if consent.require_immutable_pin
+       else None
+   )
    outcome = run_sync_pass(
        Path(repo_root),
        sources,
        trusted_marketplaces=consent.trusted_marketplaces,
+       pinned_commits=pinned_commits,
        refresh=refresh_installed_payloads,  # your own repo's refresh step
    )
    if not outcome.needs_pr:

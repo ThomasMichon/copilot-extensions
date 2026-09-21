@@ -177,9 +177,12 @@ for an externally-installed marketplace plugin) has no local git history to
 read, and is simply absent from the resulting map rather than guessed at
 (see its own docstring, and issue #3132 for that remaining half). See
 `efforts/active/ambient-guidance-navigability`'s Journal for status on the
-remaining pieces (a scheduler wrapper and the setup skill). A conflict a
-worker cannot bypass routes to `agent_dispatch.conflict_dispatch`'s
-generalized dispatch primitive, naming the
+externally-installed-source resolver described just above -- the only
+remaining piece; the scheduler wrapper (`projection_sync_worker.py`) and
+the setup skill (`setting-up-instruction-sync-worker`) are both already
+implemented. A conflict a worker cannot bypass routes to
+`agent_dispatch.conflict_dispatch`'s generalized dispatch primitive, naming
+the
 [`projection-reconciler` agent template](references/projection-reconciler-agent-template.md)
 -- report-only on a hand-edited managed projection, re-derive-fresh on an
 ordinary git-level conflict, never a self-merge.
