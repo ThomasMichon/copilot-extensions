@@ -325,6 +325,10 @@ def test_cli_json_error_without_consent_never_mutates(
     assert exit_code != 0
     lock_path = repo / ".github" / "copilot" / "context-projections.json"
     assert not lock_path.exists()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert "consent" in payload["error"].lower()
+    assert captured.err == ""
 
 
 def test_cli_happy_path_with_consent(
@@ -405,3 +409,42 @@ def test_run_sync_pass_reports_conflict_when_lock_already_held(
     assert outcome.needs_conflict_dispatch
     checks = {getattr(f, "check", None) for f in outcome.findings}
     assert "projection-sync-lock" in checks
+
+
+def test_lock_is_held_through_scan_not_released_after_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The prior test only proves acquisition fails when the lock is ALREADY
+    # held before the call starts -- it would pass even against the old,
+    # buggy implementation that released the lock right after sync and ran
+    # scan/the post-read unlocked. This test proves the lock is genuinely
+    # still held *while scan runs*: from inside a spied scan_repository, a
+    # second, independent attempt to acquire the SAME lock (as a second
+    # worker would) must itself fail -- demonstrating no other worker could
+    # have interleaved between this pass's sync and its scan/lock-read.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    root = projections.validate_repository_root(repo)
+    _plugin, source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+
+    observed: dict[str, bool] = {}
+    real_scan = projections.scan_repository
+
+    def spying_scan(r: Path, sources: object) -> object:
+        second_attempt = projections.repository_sync_lock(root)
+        try:
+            second_attempt.__enter__()
+        except (BlockingIOError, OSError):
+            observed["second_worker_blocked"] = True
+        else:
+            observed["second_worker_blocked"] = False
+            second_attempt.__exit__(None, None, None)
+        return real_scan(r, sources)
+
+    monkeypatch.setattr(worker.projections, "scan_repository", spying_scan)
+
+    worker.run_sync_pass(
+        repo, [source], trusted_marketplaces=["copilot-extensions"]
+    )
+
+    assert observed.get("second_worker_blocked") is True
