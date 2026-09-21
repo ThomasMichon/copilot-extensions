@@ -53,7 +53,7 @@ that pattern to this repository.
 | [Pull-Request Capability](active/pull-request-capability/README.md) | Draft | #2691, #2699, #2700 |
 | [Module Componentization Discipline](active/module-componentization-discipline/README.md) | Active | #2805 |
 | [PR Attribution Codenames](active/pr-attribution-codenames/README.md) | Done; pending archive | #2838 |
-| [Codename Attribution By Default](active/codename-attribution-by-default/README.md) | Done; pending archive | #2977 |
+| [Codename Attribution By Default](active/codename-attribution-by-default/README.md) | Active — all phases landed; one private-repo live observation open | #2977 |
 | [AGENTS.md vs .github/instructions Split](active/agents-md-vs-instructions-split/README.md) | Done; pending archive | #2825 |
 
 ## Local conventions

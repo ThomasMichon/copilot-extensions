@@ -355,17 +355,45 @@ class TestCarvePairedKnowledgeAttributionPolicy:
     def test_residual_race_names_the_orphaned_harness_path_and_branch(
         self, monkeypatch, tmp_path,
     ):
-        # Validation Plan (round-14 finding): simulate the residual TOCTOU
-        # race directly -- the FIRST preflight (pre-lock) passes on a
-        # compliant config, but the config becomes policy-violating by
-        # the time the SECOND revalidation (inside the lock) reloads it.
-        # Assert `create` fails, no automatic rollback is attempted, and
-        # the surfaced error names the exact orphaned harness worktree
-        # path and branch -- not just asserted in prose.
-        from agent_worktrees import config as cfg_mod, codename_tracking
+        # Validation Plan (round-14 finding); round-1 review finding on
+        # this test itself (must drive the real `create` path, not call
+        # `_carve_paired_knowledge` directly, to actually prove `create`
+        # propagates the late race past its outer exception boundary and
+        # leaves the harness side effects behind unrolled-back). Simulate
+        # the residual TOCTOU race: the pre-lock preflights (both
+        # `_paired_knowledge_allocation_preflight` and
+        # `_carve_paired_knowledge`'s own) pass on a compliant config, but
+        # the config becomes policy-violating by the time the SECOND,
+        # lock-held revalidation reloads it. Assert `_create_worktree_core`
+        # itself fails, the HARNESS worktree/branch/record side effects
+        # already happened and are NOT rolled back, and the surfaced error
+        # names the exact orphaned harness worktree path and branch.
+        import types as types_mod
 
-        called = self._setup(
-            monkeypatch, tmp_path, source_attribution_configured=True,
+        from agent_worktrees import codename_tracking
+        from agent_worktrees import config as cfg_mod
+
+        k_anchor = tmp_path / "knowledge"
+        k_anchor.mkdir()
+        monkeypatch.setattr(
+            m.state_root_mod, "resolve_state_root",
+            lambda c: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
+        )
+        entry = repos_mod.RepoEntry(
+            name="citadel-knowledge", repo_class="worktree",
+            remote="https://example.com/citadel-knowledge.git",
+            default_branch="main",
+        )
+        monkeypatch.setattr(repos_mod, "find_repo", lambda n: entry)
+        monkeypatch.setattr(
+            m.git_ops, "resolve_remote_name", lambda value, *, cwd: "origin",
+        )
+        monkeypatch.setattr(
+            m.git_ops, "prepare_worktree_base",
+            lambda *a, **k: types_mod.SimpleNamespace(
+                start_point="origin/main", fetched=True, fetch_error=None,
+                anchor=types_mod.SimpleNamespace(updated=True, reason="updated", behind=0),
+            ),
         )
         compliant_config = self._knowledge_config_with_custom_wordlist(
             tmp_path, source_attribution_configured=True,
@@ -373,14 +401,30 @@ class TestCarvePairedKnowledgeAttributionPolicy:
         noncompliant_config = self._knowledge_config_with_custom_wordlist(
             tmp_path, source_attribution_configured=False,
         )
-        load_calls = {"count": 0}
+        # Flip to policy-violating only after the harness's own worktree is
+        # created AND `_carve_paired_knowledge`'s own first (pre-lock)
+        # preflight has already passed once more -- not a fragile absolute
+        # call-count guess. This models the race landing in the EXACT
+        # window the round-14 finding describes: the config changes after
+        # every pre-lock preflight already passed (both the harness's own
+        # early gate and the carve's own first preflight), and is only
+        # ever observed by the second, lock-held revalidation.
+        state = {"harness_created": False, "post_harness_load_count": 0}
 
         def _stateful_load_config(project=None):
-            load_calls["count"] += 1
-            # First call = the pre-lock preflight (must pass); every call
-            # thereafter = the second, lock-held revalidation (must now
-            # observe the just-changed, policy-violating config).
-            return compliant_config if load_calls["count"] == 1 else noncompliant_config
+            if not state["harness_created"]:
+                return compliant_config
+            state["post_harness_load_count"] += 1
+            # The first load after the harness exists is
+            # `_carve_paired_knowledge`'s own pre-lock preflight -- must
+            # still pass. Every load after that is the second, lock-held
+            # revalidation -- must now observe the changed, violating
+            # config.
+            return (
+                compliant_config
+                if state["post_harness_load_count"] == 1
+                else noncompliant_config
+            )
 
         monkeypatch.setattr(m.cfg, "load_config", _stateful_load_config)
 
@@ -399,24 +443,35 @@ class TestCarvePairedKnowledgeAttributionPolicy:
                 )
             },
         )
-        harness_id = "test-linux-20260806-ab"
+        create_worktree_calls: list[object] = []
+
+        def _create_worktree(*a, **k):
+            create_worktree_calls.append((a, k))
+            state["harness_created"] = True
+
+        monkeypatch.setattr(m.git_ops, "create_worktree", _create_worktree)
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+        monkeypatch.setattr(m.permissions, "clone_permissions", lambda *a: False)
+        monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda *a: False)
+        monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
 
         try:
-            m._carve_paired_knowledge(
-                harness_config, harness_id=harness_id,
-                timestamp="20260806", suffix="ab", plat="linux",
-                plat_short="linux",
-            )
+            m._create_worktree_core(harness_config)
         except codename_tracking.CodenameAttributionPolicyError as exc:
             message = str(exc)
         else:
             raise AssertionError("expected CodenameAttributionPolicyError")
 
-        assert load_calls["count"] >= 2, (
-            "expected the second, lock-held revalidation to actually reload "
-            "config -- the first preflight alone must not be what raised"
-        )
-        assert called["carve"] is False
+        # The HARNESS worktree's own creation already happened (the harness
+        # itself was never policy-blocked and the config only flipped
+        # AFTER that side effect) and is genuinely left behind -- exactly
+        # one `create_worktree` call (the harness's own), proving this is
+        # a real post-side-effect orphan, not an early-preflight refusal
+        # that never reached the harness's own git worktree/branch.
+        assert len(create_worktree_calls) == 1
+        harness_id = tk.list_records(tracking_path=tmp_path / "tracking")[
+            0
+        ].worktree_id
         expected_path = str(harness_worktree_root / harness_id)
         assert expected_path in message
         assert f"worktree/{harness_id}" in message

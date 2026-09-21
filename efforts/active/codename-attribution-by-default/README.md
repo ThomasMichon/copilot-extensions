@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** `pr/<slug>` per phase
 - **Created:** 2026-09-20
-- **Status:** Done <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** vision-extending — `visions/plugins/agent-worktrees/pull-requests`
   now explicitly covers the PR-marker/codename mechanism (revised
   2026-09-20, round-23 finding: it previously described only the
