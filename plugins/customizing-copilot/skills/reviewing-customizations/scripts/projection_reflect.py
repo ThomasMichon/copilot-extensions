@@ -30,24 +30,61 @@ decision layer over an already-produced ``Result`` (or two: `sync`'s and
 internals: callers pass plain findings/entries, so this stays trivially
 testable and reusable if the lock/finding shape is ever renamed.
 
-**Known gap (tracked, not solved here): immutable-pin verification.** The
-existing lock schema records a plugin *version* string, not the immutable
-upstream commit/release a projection was rendered from, so today's byte-exact
-recompute only proves internal self-consistency (the checked-in file matches
-its own lock entry -- which ``scan_repository`` already enforces as
+**Immutable-pin verification: partially closed, gap narrowed.** The existing
+lock schema (``instruction_projections.py``'s ``_LOCK_ENTRY_KEYS``) records a
+plugin *version* string, not the immutable upstream commit/release a
+projection was rendered from, so a byte-exact recompute against it only
+proves internal self-consistency (the checked-in file matches its own lock
+entry -- which ``scan_repository`` already enforces as
 ``projection-local-modification``, correctly conflict-routed by this
 module's allowlist), not that the *source* a reviewer re-fetches later is the
-exact one the PR was rendered from. Closing that gap needs either a lock
-schema extension or a marketplace-source resolver that can return a commit
-SHA, and is deliberately left to a follow-up slice of this same effort (see
-``efforts/active/ambient-guidance-navigability``'s Journal) rather than an ad
-hoc guess that could itself become a false sense of reproducibility.
+exact one the PR was rendered from.
+
+Closing this fully needs a marketplace-source resolver that can return a
+commit SHA for an installed payload -- no such resolver exists today
+(``scan_plugin_sources.py``'s ``PluginSource``/``_plugin_version`` only carry
+a mutable version string), and inventing one blind was deliberately left
+undone rather than guessed. **Widening the lock schema itself was
+deliberately rejected for this slice**: ``_LOCK_ENTRY_KEYS`` is an
+exact-match key set enforced on every already-rendered projection's
+provenance marker repo-wide, so adding a required key there would force a
+disruptive full resync of every managed instruction file in one PR just to
+carry a field nothing can populate yet -- exactly the kind of ad hoc,
+under-designed move the effort's Journal warns against.
+
+Instead this module accepts an **additive, optional pin map**
+(``pinned_commits``: ``"<plugin>@<marketplace>" -> commit SHA``) kept
+entirely outside the lock/marker schema. When a caller has no resolver yet,
+it simply omits the argument (``None``, the default) and behavior is
+unchanged from before this existed. Once *any* resolver -- of any shape --
+can populate such a map for some or all sources, a caller passes it and
+:func:`bypass_decision` will require a pin for every changed source before
+allowing bypass, closing the remaining half of this gap without a schema
+migration. Building that resolver remains a follow-up slice of
+``efforts/active/ambient-guidance-navigability`` (see its Journal).
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Mapping
+
+#: An immutable upstream commit reference: a full 40-character git SHA-1.
+#: Matches the format git itself reports for ``rev-parse HEAD`` and the
+#: identity a reviewer would need to re-fetch the exact pinned source.
+_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+
+def is_valid_commit_pin(value: object) -> bool:
+    """Whether ``value`` is a well-formed immutable commit pin.
+
+    Used both to validate a ``pinned_commits`` map's values and to keep a
+    malformed/placeholder pin (e.g. an empty string or a truncated SHA) from
+    being silently treated as a legitimate one.
+    """
+    return isinstance(value, str) and bool(_COMMIT_SHA.fullmatch(value))
+
 
 #: Finding check names ``scan_repository`` may emit that plain ``sync``
 #: already resolves and that are safe for a deterministic worker to fold into
@@ -131,15 +168,23 @@ def bypass_decision(
     findings: Iterable[object],
     changed_lock_entries: Iterable[dict[str, object]],
     trusted_marketplaces: Iterable[str],
+    pinned_commits: Mapping[str, str] | None = None,
 ) -> BypassDecision:
     """Decide whether this run's diff may land via the bypass path.
 
     Fails closed on every conjunct, evaluated independently so every
     violation is reported (not just the first): no conflict-classified
-    finding, and every changed lock entry's marketplace is in the trusted
-    allowlist. An empty ``trusted_marketplaces`` iterable means nothing is
-    trusted -- every changed source is then rejected, never treated as
-    vacuously trusted.
+    finding, every changed lock entry's marketplace is in the trusted
+    allowlist, and -- only when ``pinned_commits`` is supplied -- every
+    changed lock entry's source carries a well-formed immutable commit pin.
+
+    ``pinned_commits`` is ``None`` by default (no caller has a resolver yet):
+    the immutable-pin conjunct is skipped entirely and behavior is identical
+    to before this parameter existed. A caller that *does* have some way to
+    resolve pins passes a ``"<plugin>@<marketplace>" -> commit SHA`` mapping;
+    any changed source missing from it, or mapped to a malformed value, is
+    then rejected -- a caller opts into the stronger reproducibility
+    guarantee explicitly rather than it being silently assumed.
     """
     reasons: list[str] = []
     classification = classify_findings(findings)
@@ -150,18 +195,27 @@ def bypass_decision(
             + ", ".join(checks)
         )
 
+    changed_plugins = {str(entry.get("plugin", "")) for entry in changed_lock_entries}
     trusted = frozenset(trusted_marketplaces)
     untrusted_sources = sorted(
-        {
-            str(entry.get("plugin"))
-            for entry in changed_lock_entries
-            if marketplace_of(str(entry.get("plugin", ""))) not in trusted
-        }
+        plugin for plugin in changed_plugins if marketplace_of(plugin) not in trusted
     )
     if untrusted_sources:
         reasons.append(
             "changed source(s) outside the trusted-source allowlist: "
             + ", ".join(untrusted_sources)
         )
+
+    if pinned_commits is not None:
+        unpinned_sources = sorted(
+            plugin
+            for plugin in changed_plugins
+            if not is_valid_commit_pin(pinned_commits.get(plugin))
+        )
+        if unpinned_sources:
+            reasons.append(
+                "changed source(s) missing an immutable commit pin: "
+                + ", ".join(unpinned_sources)
+            )
 
     return BypassDecision(eligible=not reasons, reasons=tuple(reasons))
