@@ -1157,10 +1157,22 @@ async def resume_worktree(
         restart_target = session.target
         resolver = getattr(request.app.state, "resolver", None)
         if resolver is not None:
-            _owner_agent, cached_entry = await _find_cached_worktree_entry(
+            owner_agent, cached_entry = await _find_cached_worktree_entry(
                 worktree_id, resolver,
             )
-            if cached_entry is not None:
+            if cached_entry is not None and owner_agent is not None:
+                # Re-resolve a CLEAN venue target rather than layering onto
+                # ``session.target`` -- a session created through the fresh-
+                # spawn path already carries the charter's copilot_args, so
+                # re-applying the charter on top would append them a second
+                # time on every resume-failed restart (review #3163).
+                try:
+                    restart_target = replace(
+                        resolver.resolve(owner_agent),
+                        worktree_id=worktree_id, cwd=cached_entry.path,
+                    )
+                except (KeyError, ValueError):
+                    restart_target = session.target
                 restart_target = _apply_bound_charter(
                     restart_target, resolver, cached_entry, worktree_id,
                 )
