@@ -747,6 +747,7 @@ _ensure_runtime() {
         agent-single-instance-lease
     )
     _pip_install() {  # $1 = package spec
+        local rc
         if [[ "$have_uv" -eq 1 ]]; then
             local refresh_flags=()
             local pkg
@@ -754,10 +755,26 @@ _ensure_runtime() {
                 refresh_flags+=(--reinstall-package "$pkg" --refresh-package "$pkg")
             done
             uv pip install --python "$VENV_PYTHON" "${refresh_flags[@]}" "$1"
+            rc=$?
         else
             "$VENV_PYTHON" -m pip install --force-reinstall --no-deps "$1" \
                 && "$VENV_PYTHON" -m pip install "$1"
+            rc=$?
         fi
+        # Installing FROM the pristine payload directory ("$PLUGIN_DIR",
+        # under ~/.copilot/installed-plugins/) leaves setuptools' own
+        # build/lib + *.egg-info staging behind IN that tree -- pip's build
+        # isolation covers the *environment* the build runs in, not where
+        # the legacy build_meta backend writes intermediate files (CWD-
+        # relative to the project root being built). Left in place, a stale
+        # build/lib/ can silently shadow fresh src/ on a later install if
+        # setuptools' incremental-build mtime check decides nothing
+        # "changed" (the exact failure mode that crashed agent-bridge's
+        # deployed daemon in a restart loop -- aperture-labs#7281/#7279).
+        # Scrub on every attempt (success or not) so the payload directory
+        # stays the pristine clone it's supposed to be.
+        rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info 2>/dev/null || true
+        return "$rc"
     }
     if _pip_install "${PLUGIN_DIR}[mcp]" >/dev/null 2>&1; then
         _ok 'Package installed: agent-dispatch [mcp]'
