@@ -1684,6 +1684,7 @@ def test_validate_config_accepts_azure_devops_provider():
     assert config["forge"] == {
         "provider": "azure-devops",
         "producer_login": "issue-bot",
+        "discovery_scope": None,
     }
 
 
@@ -1706,6 +1707,75 @@ def test_forge_provider_for_selects_azure_devops():
     assert provider.expected_login == "issue-bot"
 
 
+def test_validate_config_accepts_azure_devops_discovery_scope():
+    config = validate_config(
+        _config(
+            repo="example-org/example-project",
+            forge={
+                "provider": "azure-devops",
+                "producer_login": "issue-bot",
+                "discovery_scope": {
+                    "work_item_types": ["Bug", "Task"],
+                    "area_path": "example-project\\Team",
+                    "max_age_days": 180,
+                },
+            },
+        )
+    )
+    assert config["forge"]["discovery_scope"] == {
+        "work_item_types": ["Bug", "Task"],
+        "area_path": "example-project\\Team",
+        "max_age_days": 180,
+    }
+
+
+def test_validate_config_rejects_discovery_scope_for_github():
+    with pytest.raises(RegistrarError, match="only supported"):
+        validate_config(
+            _config(
+                forge={
+                    "provider": "github",
+                    "producer_login": "issue-bot",
+                    "discovery_scope": {"area_path": "x"},
+                }
+            )
+        )
+
+
+def test_validate_config_rejects_empty_discovery_scope():
+    with pytest.raises(RegistrarError, match="must narrow by at least one"):
+        validate_config(
+            _config(
+                repo="example-org/example-project",
+                forge={
+                    "provider": "azure-devops",
+                    "producer_login": "issue-bot",
+                    "discovery_scope": {},
+                },
+            )
+        )
+
+
+def test_forge_provider_for_threads_discovery_scope_to_azure_devops():
+    config = validate_config(
+        _config(
+            repo="example-org/example-project",
+            forge={
+                "provider": "azure-devops",
+                "producer_login": "issue-bot",
+                "discovery_scope": {"area_path": "example-project\\Team"},
+            },
+        )
+    )
+    provider = _forge_provider_for(config)
+    assert isinstance(provider, AzureDevOpsProvider)
+    assert provider.discovery_scope == {
+        "work_item_types": [],
+        "area_path": "example-project\\Team",
+        "max_age_days": None,
+    }
+
+
 def _ado_work_item(
     number,
     *,
@@ -1724,6 +1794,36 @@ def _ado_work_item(
 
 
 class TestAzureDevOpsProvider:
+    def test_list_open_issues_applies_discovery_scope_to_wiql(self):
+        captured_wiql = {}
+
+        def runner(args, **kwargs):
+            del kwargs
+            if len(args) > 2 and args[1] == "boards" and args[2] == "query":
+                captured_wiql["value"] = args[args.index("--wiql") + 1]
+                return SimpleNamespace(returncode=0, stdout="[]", stderr="")
+            if len(args) > 3 and args[1:4] == ["devops", "project", "show"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps({"name": "example-project"}),
+                    stderr="",
+                )
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {"authenticatedUser": {"providerDisplayName": "issue-bot"}}
+                ),
+                stderr="",
+            )
+
+        provider = AzureDevOpsProvider(
+            "issue-bot",
+            runner=runner,
+            discovery_scope={"work_item_types": ["Bug"]},
+        )
+        provider.list_open_issues("example-org/example-project")
+        assert "[System.WorkItemType] = 'Bug'" in captured_wiql["value"]
+
     def test_list_open_issues_resolves_tags_and_comments(self):
         responses = iter(
             [

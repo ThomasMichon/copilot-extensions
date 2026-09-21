@@ -20,6 +20,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from .ado_discovery_scope import (
+    validate_discovery_scope,
+    wiql_literal,
+    wiql_scope_clauses,
+)
 from .issue_loop_markers import _marker, _marker_plain, _parse_marker
 from .registrar import (
     Filters,
@@ -56,7 +61,7 @@ _KNOWN_KEYS = frozenset(
         "allow_self_config_changes",
     }
 )
-_FORGE_KEYS = frozenset({"provider", "producer_login"})
+_FORGE_KEYS = frozenset({"provider", "producer_login", "discovery_scope"})
 _SUPPORTED_FORGE_PROVIDERS = frozenset({"github", "azure-devops"})
 _RESERVATION_KEYS = frozenset({"label", "comment", "orphan_after_seconds"})
 _GITHUB_ISSUE_PAGE_SIZE = 100
@@ -220,6 +225,7 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         raise RegistrarError(
             "repository-issue-loop forge.producer_login: expected a non-empty string"
         )
+    discovery_scope = validate_discovery_scope(forge, provider=forge.get("provider"))
     if not re.fullmatch(r"[^/\s]+/[^/\s]+", repo):
         raise RegistrarError(
             "repository-issue-loop repo: expected 'owner/name' (GitHub) or "
@@ -391,6 +397,7 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         "forge": {
             "provider": forge.get("provider"),
             "producer_login": producer_login,
+            "discovery_scope": discovery_scope,
         },
         "reservation": {
             "label": label,
@@ -859,11 +866,14 @@ class AzureDevOpsProvider:
         self,
         expected_login: str,
         runner: Callable[..., Any] = subprocess.run,
+        *,
+        discovery_scope: Mapping[str, Any] | None = None,
     ):
         if not expected_login:
             raise ValueError("expected_login must be non-empty")
         self.expected_login = expected_login
         self.runner = runner
+        self.discovery_scope = discovery_scope
         self._verified_repos: set[str] = set()
 
     @staticmethod
@@ -941,21 +951,12 @@ class AzureDevOpsProvider:
     ) -> list[dict[str, Any]]:
         # wit/comments is preview-only; omitting --api-version crashes az.
         resp = self._az(
-            "devops",
-            "invoke",
-            "--area",
-            "wit",
-            "--resource",
-            "comments",
+            "devops", "invoke", "--area", "wit", "--resource", "comments",
             "--route-parameters",
-            f"project={project}",
-            f"workItemId={work_item_id}",
-            "--organization",
-            org_url,
-            "--http-method",
-            "GET",
-            "--api-version",
-            "7.1-preview",
+            f"project={project}", f"workItemId={work_item_id}",
+            "--organization", org_url,
+            "--http-method", "GET",
+            "--api-version", "7.1-preview",
         )
         comments = json.loads(resp.stdout or "{}").get("comments") or []
         # ADO returns newest-first (GitHub is oldest-first); normalize.
@@ -965,20 +966,22 @@ class AzureDevOpsProvider:
         self._verify_identity(repo)
         organization, project = self._split(repo)
         org_url = self._org_url(organization)
+        # `az boards query --project` does NOT scope WIQL to that project by
+        # itself (confirmed live: an otherwise-identical query without an
+        # explicit TeamProject clause runs org-wide and can hit the
+        # 20000-item cap even on a small project); TeamProject is always
+        # explicit here, not only under discovery_scope.
+        team_project = wiql_literal(project)
         wiql = (
-            "Select [System.Id] From WorkItems Where "
-            "[System.State] <> 'Closed' And [System.State] <> 'Removed' "
+            "Select [System.Id] From WorkItems Where "  # noqa: S608 -- escaped, not user input
+            f"[System.TeamProject] = '{team_project}' And "
+            "[System.State] <> 'Closed' And [System.State] <> 'Removed'"
+            f"{wiql_scope_clauses(self.discovery_scope)} "
             "Order By [System.CreatedDate] Asc"
         )
         query = self._az(
-            "boards",
-            "query",
-            "--wiql",
-            wiql,
-            "--organization",
-            org_url,
-            "--project",
-            project,
+            "boards", "query", "--wiql", wiql,
+            "--organization", org_url, "--project", project,
         )
         rows = json.loads(query.stdout or "[]")
         issues = []
@@ -1162,7 +1165,10 @@ def _forge_provider_for(config: Mapping[str, Any]) -> ForgeProvider:
     if provider_name == "github":
         return GitHubProvider(producer_login)
     if provider_name == "azure-devops":
-        return AzureDevOpsProvider(producer_login)
+        return AzureDevOpsProvider(
+            producer_login,
+            discovery_scope=config["forge"].get("discovery_scope"),
+        )
     raise RegistrarError(
         f"repository-issue-loop forge.provider: unsupported provider {provider_name!r}"
     )
