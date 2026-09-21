@@ -41,7 +41,8 @@ def _fleet_targets():
     """Yield ``(machine_key, env_name, alias, shell, is_local)`` for every
     Copilot-enabled, ssh-ready machine x environment in ``machines.yaml``,
     plus the current machine's own environment (``is_local=True``, run
-    in-process rather than over a loopback SSH hop).
+    locally via the binstub rather than over a loopback SSH hop -- not
+    literally in-process).
     """
     try:
         config = cfg.load_config()
@@ -123,7 +124,7 @@ def _probe_host(
                 capture_output=True, text=True, timeout=timeout + 4,
             )
     except (subprocess.SubprocessError, OSError) as exc:
-        row["error"] = str(exc)
+        row["error"] = str(exc)[:500]
         return row
     if proc.returncode != 0:
         row["error"] = (proc.stderr or proc.stdout or f"exit {proc.returncode}").strip()[:500]
