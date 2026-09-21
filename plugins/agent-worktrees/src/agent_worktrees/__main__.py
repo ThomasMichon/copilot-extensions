@@ -28547,6 +28547,64 @@ def _is_headless_project() -> bool:
         return False
 
 
+def _is_noninteractive_invocation() -> bool:
+    """True when stdin is not a real, attached terminal.
+
+    A bare binstub invocation (no subcommand) opens the Manager's blocking,
+    full-screen interactive Picker (Textual app) -- correct when a human just
+    typed the project name at a live prompt, but a real hazard otherwise:
+    without an attached terminal there is nothing to drive the UI, and no
+    guarantee anything will ever close it. Observed on book2: a bare
+    `<project>` invocation whose originating console was later torn down
+    (or one reached through a non-terminal automated path) left a fully
+    resident, near-zero-CPU `agent_worktrees`/`worktree_manager` process pair
+    running for hours across a version boundary, discoverable only via a
+    process census -- copilot-extensions#2670. Checked before the headless
+    check so it applies uniformly regardless of per-project configuration.
+    Degrade-safe like the sibling checks in this module: any error resolving
+    `isatty()` is treated as interactive (False), preserving prior behavior
+    rather than risk suppressing a legitimate interactive launch.
+
+    Reads ``sys.stdin`` fresh on every call (not a bound default argument),
+    so tests substitute a fake stream via ``monkeypatch.setattr(sys, "stdin",
+    ...)`` -- an isolated module-attribute rebind -- rather than mutating the
+    real global stdin object's own methods, which was found to leak a broken
+    ``isatty`` across unrelated tests that spawn real subprocesses inheriting
+    the process's actual stdin handle.
+    """
+    try:
+        return not sys.stdin.isatty()
+    except Exception:
+        return False
+
+
+def cmd_noninteractive_bare() -> int:
+    """Bare invocation of a binstub with no attached interactive terminal.
+
+    Mirrors :func:`cmd_headless_bare`'s shape: never open the blocking
+    Manager/Picker UI without a real terminal to drive it. Show the project's
+    worktrees and the available lifecycle commands instead.
+    """
+    try:
+        project = cfg.project_name()
+    except Exception:
+        project = "<project>"
+    print(
+        f"'{project}' was invoked without an attached interactive terminal -- "
+        f"refusing to open the Manager/Picker (nothing would be able to drive "
+        f"or close it).",
+        file=sys.stderr,
+    )
+    print(file=sys.stderr)
+    rc = cmd_worktree_dispatch(["list"])
+    print(file=sys.stderr)
+    print(
+        f"Manage it with: {project} worktree <create|status|push|finalize|cleanup>",
+        file=sys.stderr,
+    )
+    return rc
+
+
 def cmd_headless_bare() -> int:
     """Bare invocation of a headless project's binstub.
 
@@ -28866,8 +28924,16 @@ def main(argv: list[str] | None = None) -> int:
     # rollback/fallback until the compatibility boundary is removed.
     # Headless projects are never interactive, so they keep their CLI-only
     # summary. Any args route programmatically to the CLI (below), never through
-    # this seam.
+    # this seam. A non-interactive invocation (no attached terminal) is checked
+    # ahead of both branches: opening the blocking Manager/Picker UI without a
+    # terminal to drive it risks a resident process nothing will ever close
+    # (copilot-extensions#2670) -- this takes priority over headless/Manager
+    # preference since it is a correctness guard, not a UX preference.
     if not args_list:
+        if _is_noninteractive_invocation():
+            if has_project:
+                return cmd_noninteractive_bare()
+            return cmd_help_unrouted()
         if has_project:
             if _is_headless_project():
                 return cmd_headless_bare()
