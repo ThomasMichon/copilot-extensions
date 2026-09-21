@@ -2453,8 +2453,9 @@ class TestWorktreeRoutes:
         (mgr.start_session is the slow, awaited step) -- a genuinely
         different claimant can register during it. The post-spawn
         reservation attempt's result must be checked: a False result must
-        surface as a 409, never silently return the fresh session as if it
-        were safely owned (that would recreate the duplicate-controller
+        surface as a 409 (with the raced-in fresh session cleaned up, not
+        leaked), never silently return the fresh session as if it were
+        safely owned (that would recreate the duplicate-controller
         race)."""
         from unittest.mock import AsyncMock, MagicMock
 
@@ -2471,20 +2472,33 @@ class TestWorktreeRoutes:
         target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id)
         fresh = Session("fresh-sess-raced", "amber-loop", target, "test-agent")
         fresh.status = SessionStatus.IDLE
-        mgr.start_session = AsyncMock(return_value=fresh)
 
         db = app.state.db
+
+        async def _start_session_races_in_a_claimant(*a, **k):
+            # Simulate a different interactive CLI registering WHILE the
+            # spawn is in flight (after the pre-spawn holder recheck, before
+            # this returns) -- the exact window the fixed post-spawn
+            # reservation check exists to catch.
+            db.register_live_session(
+                "cli-raced-in", machine="test-agent", cwd=None,
+                worktree_id=wt_id, repo=None, branch=None, pid=None,
+                role=None, now=time.time(),
+            )
+            return fresh
+
+        mgr.start_session = AsyncMock(side_effect=_start_session_races_in_a_claimant)
+        mgr.end_session = AsyncMock()
         db.reserve_worktree_ownership = lambda *a, **k: False
-        db.register_live_session(
-            "cli-raced-in", machine="test-agent", cwd=None, worktree_id=wt_id,
-            repo=None, branch=None, pid=None, role=None, now=time.time(),
-        )
 
         resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
         assert resp.status_code == 409
         detail = resp.json()["detail"]
         assert detail["reason"] == "live_cli_holds_worktree"
         assert detail["session_id"] == "cli-raced-in"
+        # The raced-in fresh session must not be leaked -- it's cleaned up
+        # rather than left running unreserved alongside the real holder.
+        mgr.end_session.assert_awaited_once_with("fresh-sess-raced", force=True)
 
     def test_resume_worktree_unknown_still_404s(self, client, app) -> None:
         """A worktree that is not discoverable at all (no session, not on disk)

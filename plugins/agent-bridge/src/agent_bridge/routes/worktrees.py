@@ -1029,15 +1029,17 @@ async def _start_fresh_worktree_session(
                 ),
             )
         # Claim the per-worktree ownership reservation for the fresh owned
-        # session (#2912) so a later live-CLI registration respects it. The
-        # pre-spawn live-holder recheck above does NOT cover the spawn
-        # itself (mgr.start_session is the actual slow, awaited step) -- a
-        # genuinely different claimant can still register in that window,
-        # so the reservation's own result must be checked, not assumed.
+        # session (#2912). The pre-spawn live-holder recheck above doesn't
+        # cover mgr.start_session's own (slow, awaited) window, so this
+        # result must be checked, not assumed.
         db = getattr(request.app.state, "db", None)
         if db is not None and not db.reserve_worktree_ownership(
             worktree_id, fresh.session_id, now=time.time(), reclaim=reclaim
         ):
+            try:  # 'fresh' already started -- best-effort cleanup, don't leak it.
+                await mgr.end_session(fresh.session_id, force=True)
+            except Exception:
+                log.warning("resume_worktree %s: fresh cleanup failed", worktree_id, exc_info=True)
             raise HTTPException(
                 status_code=409, detail=_reservation_conflict_detail(db, worktree_id)
             )
