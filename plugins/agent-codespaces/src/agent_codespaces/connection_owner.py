@@ -807,19 +807,16 @@ def ensure_owner_running(
         import subprocess
         import sys
 
+        from agent_procutil import windowless_daemon_kwargs
+
         argv = [sys.executable, "-m", "agent_codespaces", "owner"]
         popen_kwargs: dict[str, Any] = {
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
             "close_fds": True,
+            **windowless_daemon_kwargs(breakaway=True),
         }
-        if platform.system() == "Windows":
-            popen_kwargs["creationflags"] = (
-                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-            )
-        else:
-            popen_kwargs["start_new_session"] = True
         subprocess.Popen(argv, **popen_kwargs)
     except Exception as exc:
         log.warning("Connection Owner on-demand spin-up failed: %s", exc)
