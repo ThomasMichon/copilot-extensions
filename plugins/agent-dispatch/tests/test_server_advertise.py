@@ -255,7 +255,6 @@ def test_serve_holds_start_lock_until_actually_responsive(monkeypatch, tmp_path)
     import threading as _threading
     import time as _time
 
-    import pytest
     from agent_dispatch.single_instance import SingleInstance
 
     run = tmp_path / "run"
@@ -301,35 +300,33 @@ def test_serve_holds_start_lock_until_actually_responsive(monkeypatch, tmp_path)
     t = _threading.Thread(target=_run_serve, daemon=True)
     t.start()
     try:
-        # Give serve() time to acquire the lock and reach the readiness poll,
-        # then confirm a concurrent starter cannot acquire it while this
-        # instance isn't yet responsive.
+        # Give serve() time to acquire the lock and reach the readiness poll.
+        # Watch the unlocked ".owner" side-car rather than repeatedly
+        # acquiring/releasing the real lock from this thread -- doing that in
+        # a loop creates its own narrow TOCTOU race against serve()'s first
+        # acquire attempt (this thread could be mid-acquire, however briefly,
+        # exactly when serve() tries and spuriously fails).
         deadline = _time.monotonic() + 5.0
         lock_path = routing / "serve-start.lock"
-        contender = None
-        while _time.monotonic() < deadline:
-            if lock_path.exists():
-                contender = SingleInstance(lock_path)
-                if not contender.acquire():
-                    break
-                contender.release()
-                contender = None
+        owner_path = lock_path.with_suffix(lock_path.suffix + ".owner")
+        while _time.monotonic() < deadline and not owner_path.exists():
             _time.sleep(0.02)
-        assert contender is None or not contender.acquire(), (
+        assert owner_path.exists(), "serve() never appeared to acquire the start lock"
+        # Now confirm a concurrent starter cannot acquire it while this
+        # instance isn't yet responsive (a single attempt -- no need to loop).
+        contender = SingleInstance(lock_path)
+        assert not contender.acquire(), (
             "a concurrent starter must not acquire the lock before this "
             "instance is confirmed responsive"
         )
         # Now let it "become ready" -- the lock must be released promptly.
         ready.set()
         deadline = _time.monotonic() + 5.0
-        while _time.monotonic() < deadline and lock_path.exists():
-            probe = SingleInstance(lock_path)
-            if probe.acquire():
-                probe.release()
-                break
+        while _time.monotonic() < deadline and owner_path.exists():
             _time.sleep(0.02)
-        else:
-            pytest.fail("start lock was never released after becoming responsive")
+        assert not owner_path.exists(), (
+            "start lock was never released after becoming responsive"
+        )
     finally:
         release_run.set()
         ready.set()
