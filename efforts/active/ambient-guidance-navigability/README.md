@@ -152,7 +152,7 @@ plugin-version metadata for every enabled plugin). Recorded here only as
 context for Phase 1's sync-freshness guard; not a checklist item of this
 repo's own effort.
 
-### Phase 1 -- Registry + guard mechanism (`customizing-copilot:reviewing-customizations`)
+### Phase 1 -- Registry + coverage guard (`customizing-copilot:reviewing-customizations`)
 - [ ] Design a small per-plugin `troubleshooting-index.json` (or an extension
       of `instruction-projections.json`) declaring the failure-mode
       categories that plugin owns (e.g. `agent-worktrees`:
@@ -165,16 +165,68 @@ repo's own effort.
       scans each plugin's static projections and asserts every declared
       category has an ambient pointer row -- fails closed if a category is
       claimed but not indexed.
-- [ ] Add a **sync-freshness** guard (new): compare a consumer repo's locked
-      `context-projections.json` plugin versions against the currently
-      installed plugin versions and flag drift beyond a reasonable
-      threshold, closing the Phase 0 root cause mechanically going forward.
 - [ ] Extend `docs/patterns/agents-md-vs-instructions-split.md`'s audit
       heuristic with a third question: "Is this a known failure symptom an
       agent can't phrase-match its way into? If yes, it needs an ambient
       index row, not just a skill trigger."
 
-### Phase 2 -- Populate the concrete content gaps found by the audit
+### Phase 2 -- `projection-reflect`: the generic sync-automation recipe (this repo)
+Closes the sync-freshness half of the audit's root cause (superseding a
+plain "compare locked vs. installed versions" guard with an actively
+self-healing flow), modeled directly on this facility's own proven
+`config-reflect` system (reflect/reconcile split, fail-closed producer,
+narrow PR-shape bypass, domain-deduped conflict dispatch, non-self-merging
+reconciler -- see a downstream private effort's architecture summary for the
+exact reusable-primitives mapping; not reproduced here since it cites
+private paths).
+
+- [ ] **Immediate/proactive trigger** (landed, `#3053`): a force-synced
+      ambient rule -- after merging an upstream PR here, immediately
+      force-update installed plugins and re-run the projection sync in the
+      current harness/consumer repo, before ending the turn. This is the
+      cheap, always-on half; the items below are the scheduled backstop for
+      when no session happens to be active in the consumer repo when a
+      change lands.
+- [ ] **Deterministic sync tool**: a script (extends
+      `manage-instruction-projections.py` or a sibling) that, given a
+      consumer repo, does: refresh installed plugin payloads for every
+      enabled plugin, `sync`, `scan --from-settings` for drift, and -- only
+      if the result changed anything -- produces a branch + PR carrying a
+      dedicated stamp label (e.g. `projection-reflect`) and a **recompute
+      manifest**: enough information (plugin name + version + template hash
+      per changed file) for a reviewer to independently recompute the exact
+      expected bytes and confirm a byte-exact match against the diff. This
+      is strictly stronger verification than `config-reflect` can offer
+      (there is no live, unrepeatable device state here -- the source is
+      already-reviewed, already-merged upstream content, so the render is
+      100% reproducible).
+- [ ] **Conflict-dispatch primitive**: a reusable helper (candidate home:
+      `agent-dispatch`, since dispatch itself is a copilot-extensions
+      plugin) generalizing `config-reflect`'s `conflict_dispatch.py` pattern
+      -- domain-scoped dedup key, compact descriptor, async `agent-dispatch
+      create` call -- parameterized so it isn't config-reflect-specific.
+- [ ] **`projection-reconciler` agent template**: modeled on
+      `config-reconciler`, but simpler -- there is no legitimate "local
+      reality" to weigh against a canonical render, so the reconciler always
+      **prefers the freshly-recomputed canonical content** on a real
+      conflict, and treats a hand-edited projected file (a violation of the
+      "never hand-edit a managed projection" rule) as a finding to surface,
+      not a side to blend. Never self-merges; updates the same PR and
+      returns.
+- [ ] **`setting-up-instruction-sync-worker` skill** (or a section within
+      `authoring-harness-plugins`): scaffolds, for any harness repo that
+      asks for it, the scheduler config template, a bypass-config-profile
+      template (label / path-globs / diff-shape rule / recompute-verify
+      callback -- adaptable to whatever review gate that repo uses), and the
+      reconciler agent file.
+- [ ] Reuse the **same** deterministic producer identity a repo already
+      trusts for its own reflect-style automation (do not mint a new
+      identity per feature) -- the safety boundary is the conjunction of
+      identity + stamp label + path-scope + diff-shape + recompute-match,
+      not identity alone (identity alone was already proven insufficient by
+      `config-reflect`'s own hard-won lessons).
+
+### Phase 3 -- Populate the concrete content gaps found by the audit
 - [ ] `agent-worktrees`: claims-ledger index row (-> `claims` command /
       `tracing-claimant-graphs` skill), resource-obligations index row (->
       `worktree/references/obligations.md` / `finalize` failure meaning).
@@ -192,7 +244,7 @@ repo's own effort.
       before trusting a local tool index* -- closing the false-positive
       class found by the audit.
 
-### Phase 3 (downstream, not tracked in this repo's history) -- Terse AGENTS.md category index
+### Phase 4 (downstream, not tracked in this repo's history) -- Terse AGENTS.md category index
 Runs entirely in the private downstream consumer repo's own worktree/PR flow:
 add a compact "Troubleshooting & Where To Look" section to that repo's own
 `AGENTS.md` -- one line per category, pointing at either a direct command or
@@ -201,20 +253,39 @@ context-budget conventions. This repo's part is limited to documenting the
 generic pattern (Phase 1's guard + this doc) so any consumer repo can
 replicate it without re-deriving the model.
 
-### Phase 4 -- Validate
+### Phase 5 (downstream, not tracked in this repo's history) -- Instantiate `projection-reflect`
+Runs entirely in the private downstream consumer repo's own worktree/PR flow,
+consuming Phase 2's generic recipe once it lands here: generalize that
+repo's own review gate's existing reflect-style bypass config from a single
+hardcoded profile into a small list of named profiles (so its existing
+trusted deterministic identity can serve a second, distinctly-scoped reflect
+kind without proliferating identities); add the `projection-reflect` profile
+(that repo's own instructions-file paths + the lock file, diff-shape rule,
+recompute-verify callback); stand up the scheduled worker (a thin
+timer-triggered wrapper around Phase 2's sync tool, no device polling
+needed); add that repo's own `projection-reconciler` agent file, wired to
+whatever dispatches on Phase 2's conflict-dispatch label there.
+
+### Phase 6 -- Validate
 - [ ] Re-run the same 12-question navigability audit (fresh frozen snapshot,
       same nearly-tool-free method) against the fixed state; record the
       before/after verdict table in the Journal.
 - [ ] Confirm the launch-script-ownership question specifically now produces
       a correct "this belongs to copilot-extensions, resolve via `related
       resolve`" answer rather than a false positive.
+- [ ] Confirm Phase 5's scheduled worker actually produces a clean
+      auto-merged PR at least once, and that a deliberately-forced conflict
+      (e.g. a hand-edit to a managed projection) correctly routes to the
+      reconciler rather than silently overwriting or silently blocking.
 
 ## Validation Plan
 
 - [ ] Phase 1's guard test fails on a synthetic plugin with a declared-but-
       unindexed category, and passes once indexed (a real negative-proof
       test, not just a passing positive one).
-- [ ] Phase 4's re-audit shows a materially higher navigable/false-positive
+- [ ] Phase 2's recompute-manifest verification rejects a PR whose diff does
+      not byte-match the recomputed render (a real negative-proof test).
+- [ ] Phase 6's re-audit shows a materially higher navigable/false-positive
       ratio than the baseline table above, with the specific false-positive
       corrected.
 - [ ] `tools/run-plugin-tests.py customizing-copilot` and any touched
@@ -253,3 +324,31 @@ _Pending._
   private effort, not here.
 - Filed umbrella issue `ThomasMichon/copilot-extensions#3033`.
 - Not yet started: Phase 1.
+
+### 2026-09-20 (cont.) -- Designed `projection-reflect`, landed the immediate trigger
+- Operator proposed modeling the sync-freshness fix on this facility's own
+  proven live-config reflect/reconcile system (private, downstream) rather
+  than inventing a new mechanism: a deterministic, non-agentic sync worker
+  producing a narrowly-scoped, stamp-labeled PR a review gate can safely
+  auto-accept, with a conflict-dispatch fallback to a non-self-merging
+  reconciler agent when it can't cleanly land.
+- A downstream research pass confirmed the mapping is sound and identified
+  one improvement over the private prior art: because the source here is
+  already-reviewed, already-merged upstream content (not live, unrepeatable
+  device state), the bypass can require a byte-exact recompute-and-verify
+  match, strictly stronger than what the prior system can offer.
+- Operator confirmed: reuse the downstream repo's existing trusted
+  deterministic identity for this new reflect kind too, rather than minting
+  a new one -- the real safety boundary is the conjunction of identity +
+  stamp label + path-scope + diff-shape + recompute-match, not identity
+  alone (a lesson the prior system's own history had already established).
+- Landed the cheap, always-on half immediately:
+  `ThomasMichon/copilot-extensions#3053` (merged) adds the proactive
+  resync trigger to the force-synced `cross-repo-debug-tracking`
+  instructions -- after merging an upstream PR, immediately resync the
+  current harness/consumer repo rather than waiting for a scheduled pass.
+- Revised the Plan: Phase 1 is now narrowly the content-coverage registry
+  and guard; Phase 2 is the new `projection-reflect` generic recipe (this
+  repo); a new downstream Phase 5 instantiates it. Not yet started: Phase 1
+  or Phase 2's remaining items (the deterministic sync tool, conflict-
+  dispatch primitive, reconciler template, and setup skill).
