@@ -348,3 +348,60 @@ def test_cli_happy_path_with_consent(
     assert payload["needsPr"] is True
     assert payload["bypassEligible"] is True
     assert payload["needsConflictDispatch"] is False
+
+
+def test_cli_json_error_for_invalid_root(tmp_path: Path, capsys) -> None:
+    missing = tmp_path / "does-not-exist"
+
+    exit_code = worker.main([str(missing), "--json"])
+
+    assert exit_code != 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "not a directory" in payload["error"]
+
+
+def test_cli_json_error_for_discovery_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_consent(repo, trusted_marketplaces=["copilot-extensions"])
+
+    def _boom(*_a: object, **_kw: object) -> list[object]:
+        raise ValueError("settings are malformed")
+
+    monkeypatch.setattr(worker.projections, "discover_enabled_sources", _boom)
+
+    exit_code = worker.main([str(repo), "--json"])
+
+    assert exit_code != 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "settings are malformed" in payload["error"]
+
+
+def test_run_sync_pass_reports_conflict_when_lock_already_held(
+    tmp_path: Path,
+) -> None:
+    # A concurrent holder of the same per-repository lock (simulating
+    # another worker mid-pass) must make this call fail closed with a
+    # projection-sync-lock conflict finding, never silently proceed and
+    # interleave with the other run -- the exact race the held-lock
+    # refactor exists to prevent.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    root = projections.validate_repository_root(repo)
+    _plugin, source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+
+    held_lock = projections.repository_sync_lock(root)
+    held_lock.__enter__()
+    try:
+        outcome = worker.run_sync_pass(
+            repo, [source], trusted_marketplaces=["copilot-extensions"]
+        )
+    finally:
+        held_lock.__exit__(None, None, None)
+
+    assert outcome.needs_pr
+    assert outcome.needs_conflict_dispatch
+    checks = {getattr(f, "check", None) for f in outcome.findings}
+    assert "projection-sync-lock" in checks
