@@ -64,8 +64,12 @@ def build_codename_marker(codename: str) -> str:
     """Build the codename-only source-attribution comment (``codename``
     mode). Carries **no** machine, worktree id, session id, or timestamp --
     only the assigned codename, which decodes to nothing without local
-    access to the authoring machine's own tracking store (or a manual SSH
-    session onto it -- there is no automated cross-machine lookup yet).
+    access to the authoring machine's own tracking store, or -- via
+    ``resolve --codename``/``embody --codename``'s automated cross-machine
+    SSH scan (effort ``pr-attribution-codenames`` Phase 3,
+    :mod:`agent_worktrees.codename_reverse_lookup`) -- an author explicitly
+    asking every other known, ssh-ready machine whether its own tracking
+    store has that codename.
     """
     return f"<!-- agent-worktrees:source codename={codename} -->"
 
