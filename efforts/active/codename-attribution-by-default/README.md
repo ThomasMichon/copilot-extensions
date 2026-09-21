@@ -30,7 +30,7 @@
   infrastructure dependency, no runtime-versioning concern); the
   invariants govern plugin-service topology and deployment, which this
   effort does not touch.
-- **Umbrella issue:** [#2977](https://github.com/ThomasMichon/copilot-extensions/issues/2977)
+- **Umbrella issue:** [#2977](https://github.com/ThomasMichon/copilot-extensions/issues/2977) (closed)
 
 ## Guiding Intent
 
