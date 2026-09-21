@@ -192,10 +192,17 @@ run:
 python3 <skill-dir>/scripts/projection_sync_worker.py <repo-root> --json
 ```
 
-`run_sync_pass()` runs `sync_repository` (the only mutation -- it
-writes/locks whatever it can safely resolve) then `scan_repository` (which
-validates the result and reports everything it could not resolve) exactly
-once, and returns a `SyncOutcome` whose `needs_pr` / `bypass_eligible` /
+`run_sync_pass()` acquires `instruction_projections`'s per-repository sync
+lock once (`repository_sync_lock()`), then runs `sync_repository_locked()`
+(the only mutation -- it writes/locks whatever it can safely resolve,
+assuming the caller already holds the lock) then `scan_repository()`
+(which validates the result and reports everything it could not resolve)
+exactly once, keeping the same lock held across both calls and the
+before/after lock-entry reads -- so a concurrent worker's own sync can
+never interleave and get misattributed to this pass's outcome (plain
+`sync_repository()`/`scan_repository()` remain available for a caller that
+only needs one operation standalone, without this atomicity guarantee).
+It returns a `SyncOutcome` whose `needs_pr` / `bypass_eligible` /
 `needs_conflict_dispatch` properties are already the complete decision --
 a caller branches on that outcome directly; it never needs to re-invoke this
 tool to discover more work from the same run, so a scheduler wired to it
@@ -213,11 +220,16 @@ The CLI (`main()`/`__main__`) is the actual consent-gated scheduled-worker
 surface: it calls `projection_reflect_consent.load_consent()` first and
 refuses to run at all -- no mutation, no trust decision made -- without this
 repo's own live, committed opt-in, deriving its trusted-source allowlist
-from that consent object rather than any command-line flag.
-`run_sync_pass()` itself stays a general-purpose library function that
-takes `trusted_marketplaces` explicitly from any caller (including a test
-or an already-consent-resolved scheduler); the consent gate lives at the
-CLI boundary, not inside the pure composition.
+from that consent object rather than any command-line flag. There is
+deliberately no `--installed-root`-style override on this CLI: letting the
+bypass-eligible path source projections from a caller-chosen payload root,
+rather than the repo's own settings-resolved, consent-trusted sources,
+would let a substituted, unverified payload tree ride the same auto-merge
+surface a real trusted source gets. `run_sync_pass()` itself stays a
+general-purpose library function that takes `trusted_marketplaces`
+explicitly from any caller (including a test or an already-consent-resolved
+scheduler); the consent gate lives at the CLI boundary, not inside the pure
+composition.
 
 ### Troubleshooting-category coverage registry
 

@@ -1530,6 +1530,26 @@ def _prepare_destination_parent(root: Path, relative: PurePosixPath) -> Path:
     return _safe_destination(root, relative)
 
 
+def repository_sync_lock(repo_root: Path) -> Iterator[None]:
+    """Public accessor for ``sync_repository``'s own per-repository lock.
+
+    For a caller that must hold it across its own sync + scan + lock-read
+    sequence to stay atomic against a concurrent worker -- pair with
+    ``sync_repository_locked`` (never plain ``sync_repository``, which
+    would deadlock re-acquiring the same lock). ``repo_root`` must already
+    be resolved (see ``validate_repository_root``).
+    """
+    return _repository_sync_lock(repo_root)
+
+
+def sync_repository_locked(repo_root: Path, sources: Iterable[object]) -> Result:
+    """Like ``sync_repository``, but assumes the caller already holds the
+    lock from ``repository_sync_lock`` -- use only inside a ``with
+    repository_sync_lock(root):`` block, on the same already-resolved root.
+    """
+    return _sync_repository_locked(repo_root, list(sources), Result(operation="sync"))
+
+
 def sync_repository(repo_root: Path, sources: Iterable[object]) -> Result:
     """Safely create or update declared projections and their lock."""
     result = Result(operation="sync")
@@ -1778,8 +1798,10 @@ __all__ = [
     "discover_enabled_sources",
     "load_lock_entries",
     "render_projection",
+    "repository_sync_lock",
     "scan_repository",
     "sync_repository",
+    "sync_repository_locked",
     "validate_committed_settings",
     "validate_repository_root",
 ]

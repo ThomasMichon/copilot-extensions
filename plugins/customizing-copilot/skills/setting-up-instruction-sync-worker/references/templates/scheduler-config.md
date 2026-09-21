@@ -7,11 +7,11 @@ systemd timer, a scheduled GitHub Action, cron) differs per repo.
 ## Module loading
 
 `customizing-copilot` is payload-only: `instruction_projections.py`,
-`projection_reflect.py`, and `projection_reflect_consent.py` live under the
-installed plugin's `skills/reviewing-customizations/scripts/` directory, not
-as an importable top-level package. Resolve and add that directory to
-`sys.path` before importing them (the same pattern this plugin's own tests
-use):
+`projection_reflect.py`, `projection_reflect_consent.py`, and
+`projection_sync_worker.py` live under the installed plugin's
+`skills/reviewing-customizations/scripts/` directory, not as an importable
+top-level package. Resolve and add that directory to `sys.path` before
+importing them (the same pattern this plugin's own tests use):
 
 ```python
 import sys
@@ -24,9 +24,10 @@ scripts_dir = plugin_root / "skills" / "reviewing-customizations" / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
-from instruction_projections import discover_enabled_sources, sync_repository, scan_repository
-from projection_reflect import classify_findings, has_actionable_change, bypass_decision
+from instruction_projections import discover_enabled_sources
+from projection_reflect import classify_findings
 from projection_reflect_consent import load_consent
+from projection_sync_worker import run_sync_pass
 ```
 
 `agent_dispatch.conflict_dispatch` is a normal installed-plugin import (that
@@ -44,64 +45,51 @@ plugin ships a runtime package), so it needs no path setup.
        return
    ```
 
-2. **Refresh + sync + scan.** Refresh installed payloads for every enabled
-   plugin, then:
+2. **Refresh, then one deterministic pass.** Refresh installed payloads for
+   every enabled plugin, then let `run_sync_pass` do the rest: it acquires
+   `instruction_projections`'s per-repository lock once and holds it across
+   the sync, the scan, and both before/after lock-entry reads -- so a
+   concurrent worker's own run can never interleave and get misattributed
+   to this pass's outcome. It also already builds the correct
+   `changed_lock_entries` set (the full lock diff, not merely `sync`'s own
+   changed-content list, so a lock-only update such as a version/hash bump
+   still gets checked against the trusted-source allowlist) and folds
+   `sync`'s own findings in alongside `scan`'s. **Never hand-roll the
+   sync/scan/decide sequence separately** -- that was this template's own
+   prior recipe and it is exactly the failure mode `run_sync_pass` exists to
+   close (a hand-rolled sequence can drop a lock-only change or a sync-side
+   failure, or leave a window for a second worker to interleave between
+   steps).
 
    ```python
    sources = discover_enabled_sources(repo_root)
-   sync_result = sync_repository(repo_root, sources)
-   scan_result = scan_repository(repo_root, sources)
-   ```
-
-3. **Decide whether there is anything to report at all.** `sync` can report
-   an empty `changed` list with a lock-only update, and a no-op sync can
-   still pair with a `scan` that finds something -- checking
-   `has_actionable_change` alone is not sufficient; also check for scan
-   findings:
-
-   ```python
-   if not (
-       has_actionable_change(
-           changed=sync_result.changed, lock_updated=sync_result.lock_updated
-       )
-       or scan_result.findings
-   ):
+   outcome = run_sync_pass(
+       Path(repo_root),
+       sources,
+       trusted_marketplaces=consent.trusted_marketplaces,
+       refresh=refresh_installed_payloads,  # your own repo's refresh step
+   )
+   if not outcome.needs_pr:
        return  # nothing changed and nothing was found -- true no-op
    ```
 
-4. **Classify, and build the complete changed-lock-entry set.** Build
-   `changed_lock_entries` from the **full lock diff** (every lock entry
-   whose value differs before vs. after this run), not merely
-   `sync_result.changed`'s destination paths -- a lock-only update (a
-   version/hash bump with no rendered-file diff) still needs its
-   marketplace checked against the trusted-source allowlist, and
-   `sync_result.changed` alone would silently omit it:
-
-   ```python
-   classification = classify_findings(scan_result.findings)
-   changed_lock_entries = [...]  # every lock entry that differs pre/post this run
-   decision = bypass_decision(
-       findings=scan_result.findings,
-       changed_lock_entries=changed_lock_entries,
-       trusted_marketplaces=consent.trusted_marketplaces,
-   )
-   ```
-
-5. **Land, or route -- based on *why* it's ineligible, not just that it is.**
-   An untrusted-source finding and a genuine conflict finding are NOT the
-   same failure: `bypass_decision.eligible=False` covers both, but only a
-   real conflict (`classification.conflict`) is something the
+3. **Land, or route -- based on *why* it's ineligible, not just that it is.**
+   `outcome.bypass_eligible` / `outcome.needs_conflict_dispatch` are already
+   the complete decision: an untrusted-source or missing-pin refusal is NOT
+   the same as a real conflict (`outcome.needs_conflict_dispatch` is only
+   true for a genuine `classify_findings(...).conflict` finding, e.g. a
+   hand-edited managed projection) -- only a real conflict is something the
    `projection-reconciler` agent is authorized to resolve. An otherwise-clean
    change from an untrusted source must stay **review-only** -- never
    dispatched to an agent.
 
    ```python
-   if decision.eligible:
+   if outcome.bypass_eligible:
        # Create/update the stamp-labeled PR (reuse the repo's existing
-       # trusted deterministic identity; commit sync_result's rendered
-       # files + the updated lock).
+       # trusted deterministic identity; commit the rendered files + the
+       # updated lock outcome.changed/lock_updated already describe).
        open_or_update_stamped_pr(...)
-   elif classification.conflict:
+   elif outcome.needs_conflict_dispatch:
        # A genuine conflict exists. Create/update the canonical PR FIRST --
        # even though it will show real git conflicts -- so the dispatch
        # below has an actual PR to point the reconciler at; the recipe's
@@ -124,8 +112,9 @@ plugin ships a runtime package), so it needs no path setup.
        # shell dispatch.argv to enqueue the task; a label-supervisor spawns it
    else:
        # Ineligible for a reason that is NOT a resolvable conflict (e.g. an
-       # untrusted-source finding alone). Leave this as an ordinary
-       # review-only PR/finding -- never dispatch an agent for it.
+       # untrusted-source finding or a missing/malformed immutable pin
+       # alone -- outcome.bypass.reasons names it). Leave this as an
+       # ordinary review-only PR/finding -- never dispatch an agent for it.
        open_or_update_stamped_pr(...)  # or just report the finding, per policy
    ```
 
