@@ -2232,3 +2232,50 @@ def test_self_update_resource_removes_opted_out_task_without_retry_command(tmp_p
     assert res.action == "uninstall"
     assert res.changed is True
     assert res.commands == []
+
+
+def test_self_update_resource_applies_on_linux_and_wsl(tmp_path, monkeypatch):
+    """Regression: the self-update resource's platform gate hard-coded
+    'windows' only, so a Linux/WSL package opting a machine into the
+    watchdog/sweep tiers was silently dropped during resolution -- even
+    after self_update_tasks.py grew a systemd --user backend, the resource
+    itself never reached it because it never resolved on those platforms."""
+    pkg = _pkg(tmp_path, "acme/watchdog", [{"type": "self-update", "tier": "watchdog"}])
+    monkeypatch.setattr(
+        "agent_machines.resource_self_update._self_update.reconcile_scheduled_task",
+        lambda tier, **kwargs: SU.ScheduledTaskReconcileResult(
+            tier=tier,
+            desired_state="present",
+            status="changed",
+            changed=True,
+            detail="registered the systemd --user timer",
+        ),
+    )
+    for plat in ("linux", "wsl"):
+        results = apply_resources(
+            [pkg],
+            "box-1",
+            plat,
+            _ctx(tmp_path, FakeRunner(), plat=plat),
+            dry_run=False,
+        )
+        assert len(results) == 1, f"self-update resource did not resolve on {plat!r}"
+        res = results[0]
+        assert res.type == "self-update"
+        assert res.action == "install"
+        assert res.changed is True
+
+
+def test_self_update_resource_absent_on_unsupported_platform(tmp_path):
+    """Only Windows and Linux/WSL have a scheduling backend; any other
+    platform must not resolve the resource at all rather than silently
+    reporting an opt-in that can never register anything."""
+    pkg = _pkg(tmp_path, "acme/watchdog", [{"type": "self-update", "tier": "watchdog"}])
+    results = apply_resources(
+        [pkg],
+        "box-1",
+        "darwin",
+        _ctx(tmp_path, FakeRunner(), plat="darwin"),
+        dry_run=False,
+    )
+    assert results == []
