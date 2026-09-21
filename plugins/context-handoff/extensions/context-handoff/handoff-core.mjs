@@ -316,8 +316,16 @@ async function rebaseInProgress(cwd) {
 const STALE_LOCK_MS = 5 * 60 * 1000;
 
 function acquireLock(lockPath) {
+  // Ownership token written into the lock file's content, not just its
+  // presence at a path -- see the release-time check in
+  // withWorktreeSyncLock's finally block for why path-only ownership isn't
+  // enough (a suspended/very slow holder resuming after being reclaimed as
+  // stale must not delete whoever reclaimed it).
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   try {
-    return openSync(lockPath, "wx");
+    const fd = openSync(lockPath, "wx");
+    writeFileSync(fd, token);
+    return { fd, token };
   } catch (error) {
     if (error?.code !== "EEXIST") throw error;
     let ageMs;
@@ -356,7 +364,9 @@ function acquireLock(lockPath) {
     try { unlinkSync(graveyardPath); } catch { /* best-effort cleanup */ }
     // Only the single winning reclaimer reaches here, so this create is
     // guaranteed fresh -- no residual race with another reclaimer.
-    return openSync(lockPath, "wx");
+    const fd = openSync(lockPath, "wx");
+    writeFileSync(fd, token);
+    return { fd, token };
   }
 }
 
@@ -377,9 +387,9 @@ async function withWorktreeSyncLock(cwd, fn) {
       reason: "could not resolve a lock path for this worktree; automatic sync was skipped to be safe",
     };
   }
-  let lockFd;
+  let lock;
   try {
-    lockFd = acquireLock(lockPath);
+    lock = acquireLock(lockPath);
   } catch {
     return {
       attempted: false,
@@ -390,8 +400,17 @@ async function withWorktreeSyncLock(cwd, fn) {
   try {
     return await fn();
   } finally {
-    try { closeSync(lockFd); } catch { /* best-effort */ }
-    try { unlinkSync(lockPath); } catch { /* already gone */ }
+    try { closeSync(lock.fd); } catch { /* best-effort */ }
+    // Release only if the lock at this path still carries OUR token. A
+    // holder that ran longer than STALE_LOCK_MS (suspended, an extremely
+    // slow network, not necessarily crashed) can resume here AFTER another
+    // invocation has already reclaimed this path as stale and is actively
+    // running its own sync -- unconditionally unlinking would delete that
+    // new owner's lock, letting a THIRD invocation acquire while the second
+    // is still mid-sync. Reading back and comparing the token closes that.
+    try {
+      if (readFileSync(lockPath, "utf-8") === lock.token) unlinkSync(lockPath);
+    } catch { /* already gone, or no longer ours to remove -- both fine */ }
   }
 }
 

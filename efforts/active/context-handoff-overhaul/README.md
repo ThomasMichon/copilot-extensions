@@ -1848,3 +1848,33 @@ Round 16 surfaced 1 new HIGH finding, fixed in this pass:
   confirming exactly one ever proceeds past it). `node --test`: 147 tests,
   145 pass (2 pre-existing skips), no regressions. All guards pass. No
   version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 17: ownership-token lock release, PR description drift
+
+Round 17 surfaced 2 new findings, both fixed:
+
+- **(HIGH) Lock release used path-only ownership:** round 16's atomic
+  reclaim closed the concurrent-reclaimer race, but the RELEASE side
+  (`withWorktreeSyncLock`'s `finally` block) still unlinked the lock
+  unconditionally by path. If a holder ran longer than `STALE_LOCK_MS`
+  (suspended, an extremely slow network -- not necessarily crashed) and
+  another invocation reclaimed the path as stale while the first was still
+  running, the first invocation's eventual (unconditional) release would
+  delete the SECOND invocation's active lock, letting a THIRD invocation
+  acquire while the second was still mid-sync. Fixed: `acquireLock` now
+  returns an ownership token written into the lock file's own content (not
+  just its presence at a path), and release reads the lock back and only
+  unlinks it if the content still matches this invocation's own token --
+  otherwise it has already been reclaimed by someone else and is no longer
+  this invocation's to remove.
+- **(LOW) PR description validation counts were stale:** the description's
+  Validation section still reported round-9's 133/131 test counts; updated
+  to the final 149/147.
+- 2 new tests (a real acquire+release cycle proves a foreign live lock at
+  the shared path is never touched when this invocation never acquired it;
+  a structural check that `acquireLock` returns a token and release
+  compares it before unlinking -- reliably forcing the actual
+  suspended-holder timing scenario isn't practical in a fast unit test).
+  `node --test`: 149 tests, 147 pass (2 pre-existing skips), no
+  regressions. All guards pass. No version bump needed (still
+  `0.1.1-dev36`).
