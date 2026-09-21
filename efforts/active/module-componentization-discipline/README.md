@@ -716,3 +716,23 @@ the Phase 0 runbook, picked up as capacity allows.
   explicitly queued rather than forcing it. Version bump for this pass:
   `agent-worktrees` `1.5.5-dev207` and marketplace `metadata.version`
   `1.7.7-dev179`.
+
+### 2026-09-21 — Review follow-up: stale marketplace purge guard
+- GitHub Copilot posted one real post-open review finding on PR #3156 after
+  the bounded wait window: `_update_registered_plugins()` was adding a context
+  to the browse/purge set even when `copilot plugin marketplace update` had
+  failed, which could let a stale marketplace browse classify an inactive
+  installed plugin as retired and uninstall it. Fixed the follow-up in
+  `update_runtime.py` by treating marketplace refresh success as the gate for
+  purge-eligible browse contexts (including the `None`/global-catalog path),
+  while leaving the payload refresh itself best-effort.
+- Added a targeted regression test in
+  `tests/test_update_registered_plugins.py` proving that a failed marketplace
+  refresh neither runs the retired-plugin uninstall path nor even attempts the
+  browse-based purge classification; the payload refresh still proceeds
+  opportunistically as before. Re-ran the same extracted-area targeted suite
+  (**244 passed, 4805 deselected**) and the full plugin suite again
+  reproduced only the same independently-confirmed pre-existing
+  `tests/test_doctor.py` failures (**551 passed, 10 failed, 1 skipped**).
+- Version bump for the follow-up PR: `agent-worktrees` `1.5.5-dev208` and
+  marketplace `metadata.version` `1.7.7-dev180`.
