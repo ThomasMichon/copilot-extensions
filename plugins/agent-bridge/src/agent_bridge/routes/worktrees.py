@@ -497,26 +497,17 @@ async def _run_local(
 def _resolve_local_binstub(project: str) -> str:
     """Resolve *project*'s binstub to a directly-executable path.
 
-    ``asyncio.create_subprocess_exec`` (unlike a shell) never consults
-    Windows' ``PATHEXT`` -- an extensionless name like ``aperture-labs``
-    cannot resolve to the installed ``aperture-labs.cmd``/``.ps1`` shim, and
-    raises ``FileNotFoundError: [WinError 2]`` even though the shim exists
-    and runs fine from an interactive shell. This silently zeroed every
-    LOCAL Windows worktree-discovery crawl (WSL/Linux agents were unaffected
-    -- POSIX shims need no extension) -- see
-    aperture-labs efforts/active/agent-bridge-worktree-native-agents.
-
-    :func:`shutil.which` performs the same PATHEXT-aware resolution a shell
-    would, on every platform, so it is used unconditionally rather than
-    hand-rolling a Windows-only extension list.
+    ``asyncio.create_subprocess_exec`` never consults Windows' ``PATHEXT``
+    the way a shell does, so an extensionless name can't resolve to the
+    installed ``.cmd``/``.ps1`` shim (``FileNotFoundError: [WinError 2]``;
+    see aperture-labs effort agent-bridge-worktree-native-agents).
+    ``shutil.which`` does the same PATHEXT-aware lookup on every platform.
     """
     import shutil
     from pathlib import Path
 
-    home = Path.home()
-    explicit = home / ".local" / "bin" / project
-    resolved = shutil.which(str(explicit)) or shutil.which(project)
-    return resolved or project
+    explicit = Path.home() / ".local" / "bin" / project
+    return shutil.which(str(explicit)) or shutil.which(project) or project
 
 
 async def _run_local_ex(
