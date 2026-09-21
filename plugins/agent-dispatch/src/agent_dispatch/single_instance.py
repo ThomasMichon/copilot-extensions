@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from pathlib import Path
 
 
@@ -33,6 +34,13 @@ class SingleInstance:
     def __init__(self, lock_path: str | Path):
         self.lock_path = Path(lock_path)
         self._fd: int | None = None
+        # Guards release() itself (not acquire()): a holder may legitimately
+        # be released from two threads racing the same handoff (e.g. serve()'s
+        # readiness poller vs. its own bounded-join fallback) -- without this,
+        # both could observe the same fd and the second os.close() could close
+        # a descriptor already reused elsewhere (review follow-up on
+        # ThomasMichon/copilot-extensions#3066).
+        self._release_lock = threading.Lock()
 
     @property
     def _owner_path(self) -> Path:
@@ -72,25 +80,32 @@ class SingleInstance:
         return True
 
     def release(self) -> None:
-        """Release the lock (best-effort). The OS would release it on process exit
-        anyway; this makes a clean shutdown immediate."""
-        fd = self._fd
-        if fd is None:
-            return
-        try:
-            _unlock(fd)
-        except OSError:
-            pass
-        finally:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
+        """Release the lock (best-effort, thread-safe/one-shot). The OS would
+        release it on process exit anyway; this makes a clean shutdown
+        immediate."""
+        with self._release_lock:
+            fd = self._fd
+            if fd is None:
+                return
             self._fd = None
+            # Remove the side-car *before* unlocking: unlocking is the moment
+            # another process can acquire and write its own pid into it, so
+            # removing it after would delete that new holder's record instead
+            # of this (now-stale) one (review follow-up on
+            # ThomasMichon/copilot-extensions#3066).
             try:
                 self._owner_path.unlink()
             except OSError:
                 pass
+            try:
+                _unlock(fd)
+            except OSError:
+                pass
+            finally:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
 
     def __enter__(self) -> bool:
         return self.acquire()
