@@ -208,8 +208,15 @@ private paths).
       declares, which `scan` explicitly never deletes and marks for manual
       review) are never auto-resolved or silently folded into a bypass-
       eligible PR -- each routes to conflict-dispatch below for a human
-      decision. Only when there is truly nothing to report does the worker
-      skip opening a PR. **Managed-file
+      decision. **This allowlist is not exhaustive against the manager's
+      full result contract** (it can also emit, among others,
+      `projection-local-modification`, `projection-marker`,
+      `projection-lock`, `projection-source-unavailable`, and
+      `projection-orphan-file`) -- the classification must default
+      **fail-closed**: any check name not explicitly allowlisted as plain
+      drift routes to conflict-dispatch by default, never treated as a
+      no-op or silently included in a bypass-eligible PR. Only when there is
+      truly nothing to report does the worker skip opening a PR. **Managed-file
       conflict routing**: `sync` already returns blocking findings (not a
       git-merge conflict) when it detects a locally hand-edited managed
       projection or an ownership/lock validation failure, leaving `changed`
@@ -284,6 +291,12 @@ private paths).
       it wants this) as its ownership signal before scaffolding anything,
       never merely "the operator asked for it in this session" or "the repo
       is PR-gated" (a repo you only contribute to is often PR-gated too).
+      **Consent must be rechecked live, not only at setup time**: both the
+      scheduled worker and the bypass profile re-read that same committed
+      opt-in signal on every run/every PR, fail-closed (worker refuses to
+      open a PR, bypass refuses to auto-merge) the moment it's missing or
+      revoked -- an adopter withdrawing consent must disable the automation
+      immediately, not only prevent a future `setup`.
 - [ ] Reuse the **same** deterministic producer identity a repo already
       trusts for its own reflect-style automation (do not mint a new
       identity per feature) -- the safety boundary is the conjunction of
@@ -380,7 +393,10 @@ conflict-dispatch label there.
       without ever self-merging.
 - [ ] The setup skill refuses to scaffold the scheduler/bypass without the
       repo's explicit, committed opt-in signal present (a negative-proof
-      test: no opt-in file present -> setup declines).
+      test: no opt-in file present -> setup declines), **and** a live
+      revocation test: opt-in present at setup, then removed -> both the
+      scheduled worker and the bypass profile fail closed on the next run
+      without requiring a second `setup` invocation.
 - [ ] Phase 6's re-audit shows a materially higher navigable/false-positive
       ratio than the baseline table above, with the specific false-positive
       corrected.
