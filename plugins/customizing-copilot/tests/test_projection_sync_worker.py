@@ -291,6 +291,31 @@ def test_resolve_pins_takes_precedence_over_pinned_commits(
     assert outcome.bypass_eligible
 
 
+def test_resolve_pins_returning_none_fails_closed_not_open(
+    tmp_path: Path,
+) -> None:
+    # A resolver that returns None (a transient failure, or simply nothing
+    # resolved) must NOT be treated as "pinned_commits was never supplied"
+    # -- that would silently disable the pin conjunct for a caller that
+    # explicitly opted into it via resolve_pins. It must normalize to an
+    # empty map: the conjunct stays active and rejects the unpinned source.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+
+    outcome = worker.run_sync_pass(
+        repo,
+        [source],
+        trusted_marketplaces=["copilot-extensions"],
+        resolve_pins=lambda sources: None,
+    )
+
+    assert not outcome.bypass_eligible
+    assert any(
+        "immutable commit pin" in reason for reason in outcome.bypass.reasons
+    )
+
+
 # ---- regression coverage for the review findings on PR #3139 ----------------
 
 

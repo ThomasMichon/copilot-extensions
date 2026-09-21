@@ -200,7 +200,12 @@ def run_sync_pass(
     caller doing fresh resolution should not also pass a possibly-stale
     map); ``pinned_commits`` alone remains for callers (tests, or a
     resolver-free scheduler) that accept a caller-supplied map without this
-    revalidation.
+    revalidation. A ``resolve_pins`` call that returns ``None`` is
+    normalized to an empty map, never treated as "no ``pinned_commits`` was
+    ever supplied": a resolver failure must still leave the pin conjunct
+    active (fail-closed, review-only for every changed source), not
+    silently disable pin enforcement for a caller that explicitly opted
+    into it.
     """
     if refresh is not None:
         refresh()
@@ -245,7 +250,17 @@ def run_sync_pass(
         )
     try:
         if resolve_pins is not None:
-            pinned_commits = resolve_pins(sources)
+            # A resolver that returns None (a transient failure, or simply
+            # "nothing resolved") must NOT be treated as "no pinned_commits
+            # was ever supplied" -- bypass_decision() reads pinned_commits
+            # is None as the opt-out/default path, which would silently
+            # disable the pin conjunct entirely for a caller that
+            # explicitly opted into it via resolve_pins. Normalize to an
+            # empty map instead: the conjunct stays active, and an empty
+            # map correctly treats every changed source as unpinned
+            # (fail-closed, review-only) rather than vacuously trusted.
+            resolved = resolve_pins(sources)
+            pinned_commits = resolved if resolved is not None else {}
         entries_before = projections.load_lock_entries(root)
         sync_result = projections.sync_repository_locked(root, sources)
         scan_result = projections.scan_repository(root, sources)

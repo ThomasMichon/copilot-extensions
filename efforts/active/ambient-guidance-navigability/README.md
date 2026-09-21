@@ -1017,10 +1017,23 @@ honestly rather than guessing at the full answer.
   a genuine directory-marketplace footprint, never an installed-plugins
   copy) so the resolver knows which sources are even eligible to
   re-probe, and re-runs `_plugin_commit()` against each one's
-  `payload_root` live. `customizing-copilot`'s full suite: 233 passed, 8
-  skipped (33 new tests total across all four rounds). `check-module-
+  `payload_root` live. A **fifth** review round found `is_local_checkout`
+  itself too permissive (`footprint is not None` alone -- a plain
+  `directory` marketplace source is an arbitrary local path with no
+  provenance guarantee, and could point at a payload copied into a
+  subdirectory of some entirely unrelated git repository) and a
+  fail-open gap (a custom `resolve_pins` returning `None` was
+  indistinguishable from "no `pinned_commits` ever supplied", silently
+  disabling the conjunct for a caller that had explicitly opted in).
+  Fixed: `is_local_checkout` now requires `controlled` (this repo's own
+  tree) or resolution via the trusted `agent-worktrees-repo` source kind;
+  `run_sync_pass()` normalizes a `None` `resolve_pins` result to an empty
+  map (fail-closed) rather than treating it as opt-out. Also fixed a
+  broken markdown code span split across a newline in the scheduler-
+  config recipe. `customizing-copilot`'s full suite: 235 passed, 8
+  skipped (36 new tests total across all five rounds). `check-module-
   size`/`check-version-bump`/`check-version-consistency`/`check-docs-
-  consistency` all pass. Bumped to `0.1.0-dev91`.
+  consistency` all pass. Bumped to `0.1.0-dev92`.
 - **Issue #3132 is half closed, not fully.** What remains genuinely open:
   an externally-installed marketplace plugin -- the common adopter case --
   still cannot be pinned at all. Closing that needs either an install-time

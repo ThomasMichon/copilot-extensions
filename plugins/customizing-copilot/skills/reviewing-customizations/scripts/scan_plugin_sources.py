@@ -25,19 +25,22 @@ class PluginSource:
 
     ``commit`` is a best-effort immutable git commit SHA captured at
     *discovery* time -- when (and only when) the payload lives inside a
-    real git working tree (this repo's own directory-marketplace plugins,
-    or an ``agent-worktrees-repo`` checkout), empty otherwise (e.g. a plain
-    installed-plugins payload copy with no local git history). It can go
-    stale between discovery and use (e.g. across a `refresh` that advances
-    a directory-marketplace checkout) -- :func:`resolve_pinned_commits`
-    re-probes fresh rather than trusting this field for exactly that
-    reason. ``is_local_checkout`` marks which sources are even eligible for
-    that re-probe: only a directory-marketplace footprint (this reviewing
-    repo's own local checkout, or an ``agent-worktrees-repo`` one) is --
-    an installed-plugins footprint is a copied external payload with no
-    source-commit provenance of its own, even when it happens to live
-    under some unrelated enclosing git checkout, and must never be
-    re-probed or pinned.
+    trusted git working tree (this repo's own tree, or a checkout resolved
+    via the ``agent-worktrees-repo`` source kind), empty otherwise (e.g. a
+    plain installed-plugins payload copy with no local git history, or an
+    arbitrary ``directory`` source with no verifiable provenance). It can
+    go stale between discovery and use (e.g. across a `refresh` that
+    advances the checkout) -- :func:`resolve_pinned_commits` re-probes
+    fresh rather than trusting this field for exactly that reason.
+    ``is_local_checkout`` marks which sources are even eligible for that
+    re-probe: only ``controlled`` (this reviewing repo's own tree) or a
+    footprint resolved via ``agent-worktrees-repo`` (a registered, named
+    repo looked up through the trusted ``agent-worktrees`` CLI) qualify --
+    a plain ``directory`` source is an arbitrary local path declared in a
+    marketplace manifest with no provenance guarantee at all (it could
+    point at a payload copied into a subdirectory of some entirely
+    unrelated git repository), and an installed-plugins footprint is
+    always a copied external payload; neither is ever re-probed or pinned.
     """
 
     skills_root: Path
@@ -305,13 +308,16 @@ def _plugin_commit(footprint: Path) -> str:
     that remains a genuinely unsolved case (see
     ``efforts/active/ambient-guidance-navigability``'s Journal), not
     something to guess at. **Callers must only invoke this against a
-    directory-marketplace footprint** (a plugin this reviewing repo, or an
-    ``agent-worktrees-repo``, owns as its own local checkout) -- an
-    installed-plugins footprint is a copied external payload with no
-    source-commit provenance of its own, even when it happens to live
-    under some unrelated enclosing git checkout; `assemble_enabled_plugins`
-    and `_sources_from_raw_dir` enforce this by construction (see their own
-    call sites) rather than this function guessing at the caller's intent.
+    trusted-checkout footprint** (``controlled`` -- this reviewing repo's
+    own tree -- or one resolved via the ``agent-worktrees-repo`` source
+    kind) -- a plain ``directory`` source is an arbitrary local path with
+    no provenance guarantee, and an installed-plugins footprint is always a
+    copied external payload with no source-commit provenance of its own,
+    even when either happens to live under some unrelated enclosing git
+    checkout; `assemble_enabled_plugins` and `_sources_from_raw_dir`
+    enforce this by construction (see their own call sites, and
+    `PluginSource.is_local_checkout`) rather than this function guessing at
+    the caller's intent.
 
     **HEAD is read before *and* after the cleanliness check**, and both
     reads must agree: the clean check and a single ``rev-parse`` are two
@@ -603,14 +609,20 @@ def assemble_enabled_plugins(
         )
 
         footprint = _directory_marketplace_plugin(mkt, name, declaration, base)
-        # Only a directory-marketplace footprint is this repo's own local
-        # git checkout -- an installed_root footprint (the `else` branch
-        # below) is a copied external payload with no source-commit
-        # provenance of its own, even when it happens to live under some
-        # unrelated enclosing git checkout. _plugin_commit() must never run
-        # against it: doing so could return that enclosing repository's
-        # HEAD and let requireImmutablePin accept the wrong identity.
-        is_directory_marketplace = footprint is not None
+        # A directory-marketplace footprint is only trusted checkout
+        # provenance when it is EITHER this reviewing repo's own tree
+        # (`controlled`) OR resolved via the `agent-worktrees-repo` source
+        # kind (a registered, named repo looked up through the trusted
+        # `agent-worktrees` CLI). A plain `directory` source is an
+        # arbitrary local path declared in the marketplace manifest -- it
+        # could point at a payload copied into a subdirectory of some
+        # entirely unrelated git repository, so `footprint is not None`
+        # alone is not proof of provenance. An installed_root footprint
+        # (the `else` branch below) is always a copied external payload
+        # with no source-commit provenance of its own. `_plugin_commit()`
+        # must never run against anything that fails this check: doing so
+        # could return an unrelated enclosing repository's HEAD and let
+        # `requireImmutablePin` accept the wrong identity.
         if footprint is not None:
             try:
                 controlled = (
@@ -619,12 +631,14 @@ def assemble_enabled_plugins(
                 )
             except Exception:
                 controlled = False
+            is_local_checkout = controlled or src_kind == "agent-worktrees-repo"
             skills_root = footprint / "skills"
             source_url = "" if controlled else _plugin_repo_url(footprint)
         else:
             footprint = installed_root / mkt / name if mkt else installed_root / name
             skills_root = footprint / "skills"
             controlled = False
+            is_local_checkout = False
             source_url = ""
             if isinstance(src, dict) and src_kind == "github" and src.get("repo"):
                 source_url = f"https://github.com/{str(src['repo']).strip()}"
@@ -638,8 +652,8 @@ def assemble_enabled_plugins(
                 controlled=controlled,
                 source=source_url,
                 version=_plugin_version(footprint),
-                commit=_plugin_commit(footprint) if is_directory_marketplace else "",
-                is_local_checkout=is_directory_marketplace,
+                commit=_plugin_commit(footprint) if is_local_checkout else "",
+                is_local_checkout=is_local_checkout,
             )
         )
     return out

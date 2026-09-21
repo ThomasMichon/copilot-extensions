@@ -2947,6 +2947,59 @@ def test_plugin_commit_empty_when_head_moves_during_the_check(
 
 
 @pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_assemble_never_pins_an_uncontrolled_directory_marketplace_source(
+    tmp_path: Path,
+):
+    # A plain `directory` marketplace source is an arbitrary local path --
+    # it could point at a payload copied into a subdirectory of some
+    # entirely unrelated git repository (as it does here). footprint being
+    # non-None alone must not be treated as trusted checkout provenance:
+    # only `controlled` (this reviewing repo's own tree) or an
+    # `agent-worktrees-repo` resolution qualify.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    unrelated_checkout = tmp_path / "unrelated"
+    plugin = unrelated_checkout / "payloads" / "cap"
+    (plugin / "skills").mkdir(parents=True)
+    _skill(plugin / "skills", "cap")
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.0"}), encoding="utf-8"
+    )
+    _marketplace(
+        unrelated_checkout,
+        "outside-plugins",
+        plugin_root="payloads",
+        entries=[{"name": "cap", "source": "cap"}],
+    )
+    _run_git(unrelated_checkout, "init", "-q")
+    _run_git(unrelated_checkout, "config", "user.email", "test@example.com")
+    _run_git(unrelated_checkout, "config", "user.name", "Test")
+    _run_git(unrelated_checkout, "add", "-A")
+    _run_git(unrelated_checkout, "commit", "-q", "-m", "add payload")
+    _settings(
+        repo,
+        {"cap@outside-plugins": True},
+        {
+            "outside-plugins": {
+                "source": {
+                    "source": "directory",
+                    "path": str(unrelated_checkout),
+                },
+            },
+        },
+    )
+
+    sources = scan.assemble_enabled_plugins(
+        repo, installed_root=tmp_path / "none", home=tmp_path / "home"
+    )
+
+    assert len(sources) == 1
+    assert sources[0].controlled is False
+    assert sources[0].is_local_checkout is False
+    assert sources[0].commit == ""
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
 def test_assemble_never_pins_an_installed_root_footprint(tmp_path: Path):
     # A plain installed-plugins footprint is a copied external payload with
     # no source-commit provenance of its own -- even when the installed

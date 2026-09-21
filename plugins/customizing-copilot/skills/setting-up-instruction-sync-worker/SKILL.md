@@ -110,10 +110,10 @@ gap).
    `projection_sync_worker.run_sync_pass()` -- never hand-roll the
    sync/scan/decide sequence separately, which risks dropping a lock-only
    change, a sync-side failure, or a race between two workers, exactly the
-   failure modes `run_sync_pass` exists to close. When `outcome.
-   bypass_eligible`, open or update the stamp-labeled PR. When not eligible,
-   distinguish *why*: only `outcome.needs_conflict_dispatch` (a real
-   conflict-classified finding) is dispatched to the reconciler via
+   failure modes `run_sync_pass` exists to close. When
+   `outcome.bypass_eligible`, open or update the stamp-labeled PR. When not
+   eligible, distinguish *why*: only `outcome.needs_conflict_dispatch` (a
+   real conflict-classified finding) is dispatched to the reconciler via
    `agent_dispatch.conflict_dispatch.build_dispatch`, naming the consent
    file's own `reconcilerAgent`/`dispatchLabel` -- an otherwise-clean change
    from an untrusted source alone stays review-only and is never dispatched
