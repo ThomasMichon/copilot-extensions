@@ -1424,5 +1424,18 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def console_entry() -> None:
+    """Entry point for both the ``python -m worktree_manager`` guard below
+    and the installed ``worktree-manager`` console script
+    (`pyproject.toml`'s ``[project.scripts]``) -- the generated script
+    wrapper calls this directly, bypassing the ``__main__`` guard, so
+    routing both through here is required for the shutdown-crash workaround
+    to cover the installed command too.
+    """
+    from ._shutdown_exit import run_and_exit
+
+    run_and_exit(main)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    console_entry()
