@@ -422,46 +422,37 @@ async function resolveRuntimePythonAsyncNoProvision(resolved, env, cwd, timeout)
 // blanket commit could hit, but here there is no agent to scope it). Only a
 // worktree that is already clean gets synced.
 //
+// --ignored --untracked-files=all matches this repo's own established
+// dirty-check safety pattern
+// (customizing-copilot/skills/reviewing-customizations/scripts/
+// scan_plugin_sources.py's _payload_is_clean): plain `--porcelain` omits
+// ignored files entirely and collapses an untracked directory to one
+// summary line, and can also be suppressed entirely for untracked files
+// by a local `status.showUntrackedFiles=no` config -- any of which would
+// let real content (including an ignored/untracked secret-adjacent file
+// that could collide with what the sync brings in) slip through as
+// "clean". This deliberately over-rejects (e.g. an ordinary ignored
+// build/dependency directory also blocks a sync attempt) in favor of the
+// same fail-closed philosophy this whole function already follows for any
+// other uncommitted state. Extracted so it can run INSIDE the worktree
+// sync lock (see attemptWorktreeSync below) rather than before it -- a
+// review finding: checking cleanliness before acquiring the lock left a
+// window where a file could become dirty between the check and the
+// locked sync actually running.
+async function worktreeIsDirty(cwd) {
+  const result = await execFileAsync(
+    "git", ["status", "--porcelain", "--ignored", "--untracked-files=all"],
+    { cwd, encoding: "utf-8", timeout: 5000, env: sanitizedGitEnv() },
+  );
+  return Boolean(result.stdout.trim());
+}
+
 // Fully async (execFile, not execFileSync/runCli) end to end: this is invoked
 // synchronously at the top of a fire-and-forget async function
 // (autoForceHandoff) before its first await, so any blocking child-process
 // call here would freeze the SDK event loop for the length of that call
 // regardless of the caller's own fire-and-forget intent.
 export async function attemptWorktreeSync(cwd) {
-  let status;
-  try {
-    // --ignored --untracked-files=all matches this repo's own established
-    // dirty-check safety pattern
-    // (customizing-copilot/skills/reviewing-customizations/scripts/
-    // scan_plugin_sources.py's _payload_is_clean): plain `--porcelain` omits
-    // ignored files entirely and collapses an untracked directory to one
-    // summary line, and can also be suppressed entirely for untracked files
-    // by a local `status.showUntrackedFiles=no` config -- any of which
-    // would let real content (including an ignored/untracked secret-adjacent
-    // file that could collide with what the sync brings in) slip through as
-    // "clean". This deliberately over-rejects (e.g. an ordinary ignored
-    // build/dependency directory also blocks a sync attempt) in favor of the
-    // same fail-closed philosophy this whole function already follows for
-    // any other uncommitted state.
-    const result = await execFileAsync(
-      "git", ["status", "--porcelain", "--ignored", "--untracked-files=all"],
-      { cwd, encoding: "utf-8", timeout: 5000, env: sanitizedGitEnv() },
-    );
-    status = result.stdout;
-  } catch (error) {
-    return {
-      attempted: false,
-      synced: false,
-      reason: `not a git checkout or git unavailable: ${describeSyncError(error)}`,
-    };
-  }
-  if (status.trim()) {
-    return {
-      attempted: false,
-      synced: false,
-      reason: "worktree has uncommitted, untracked, or ignored content; automatic sync never commits, so it was skipped",
-    };
-  }
   return withWorktreeSyncLock(cwd, () => attemptWorktreeSyncLocked(cwd));
 }
 
@@ -554,6 +545,17 @@ export async function plainGitSync(cwd) {
         reason: "a rebase started in this worktree just before the plain-git sync; it was skipped rather than touching an in-progress rebase",
       };
     }
+    // Same recheck-immediately-before-exec pattern, for dirtiness: the
+    // fetch above is another gap where a file could become dirty, and a
+    // local `rebase.autoStash` config would otherwise let `git rebase`
+    // silently stash/pop unreviewed content instead of refusing to run.
+    if (await worktreeIsDirty(cwd)) {
+      return {
+        attempted: false,
+        synced: false,
+        reason: "the worktree became dirty just before the plain-git sync; it was skipped rather than risking rebase.autoStash moving unreviewed content",
+      };
+    }
     await execFileAsync(
       "git", ["rebase", `origin/${defaultBranch}`],
       { cwd, encoding: "utf-8", timeout, env },
@@ -577,9 +579,29 @@ export async function plainGitSync(cwd) {
   }
 }
 
-// sync exec. Split out so the lock (withWorktreeSyncLock) wraps exactly this
-// window -- the dirty-tree check above needs no serialization on its own.
+// sync exec. Split out so the lock (withWorktreeSyncLock) wraps this
+// function's entire body -- including the dirty-tree check, which now runs
+// AFTER the lock is held rather than before (a review finding: checking
+// before acquiring the lock left a window for a file to become dirty
+// between the check and the locked sync actually running).
 async function attemptWorktreeSyncLocked(cwd) {
+  let dirty;
+  try {
+    dirty = await worktreeIsDirty(cwd);
+  } catch (error) {
+    return {
+      attempted: false,
+      synced: false,
+      reason: `not a git checkout or git unavailable: ${describeSyncError(error)}`,
+    };
+  }
+  if (dirty) {
+    return {
+      attempted: false,
+      synced: false,
+      reason: "worktree has uncommitted, untracked, or ignored content; automatic sync never commits, so it was skipped",
+    };
+  }
   // A rebase can be paused at a clean step (e.g. `edit`), which reports a
   // clean `git status --porcelain` even though a rebase is genuinely in
   // progress. Proceeding to sync in that state would let the sync helper's
