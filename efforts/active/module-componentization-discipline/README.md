@@ -987,6 +987,14 @@ the Phase 0 runbook, picked up as capacity allows.
   pre-existing `tests/test_doctor.py` failures (**551 passed, 10 failed,
   1 skipped**) already called out in prior slices, so the extraction itself is
   green apart from that known unrelated suite issue.
+- GitHub Copilot's first review round on the PR then found one real
+  compatibility seam miss before merge: `cmd_session_role()` and
+  `cmd_history_digest()` were still calling the extracted module's private
+  `_resolve_worktree_for_read()` directly, so tests or callers monkeypatching
+  `agent_worktrees.__main__._resolve_worktree_for_read` no longer intercepted
+  those commands. Fixed by routing both handlers back through the re-exported
+  `__main__` helper surface (`_core()._resolve_worktree_for_read(...)`), which
+  restores the exact monkeypatch seam the slice promised to preserve.
 - Followed through on the remaining contract checks after the code stabilized:
   `python tools/check-module-size.py` passed, `python tools/check-module-size.py
   --refresh-baseline` lowered `tools/module-size-baseline.json`'s ceiling for
