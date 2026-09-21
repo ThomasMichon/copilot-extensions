@@ -1878,3 +1878,38 @@ Round 17 surfaced 2 new findings, both fixed:
   `node --test`: 149 tests, 147 pass (2 pre-existing skips), no
   regressions. All guards pass. No version bump needed (still
   `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 18: atomic lock release, disable rebase.autoStash
+
+Round 18 confirmed 2 of round 17's fixes resolved (including the aggregate
+guidance ordering, finally cleared) and surfaced 2 new HIGH findings:
+
+- **Lock release itself was a TOCTOU:** round 17's fix (read the lock's
+  content, compare to this invocation's token, then unlink) is still two
+  separate filesystem operations -- another invocation could reclaim and
+  replace the path after the read but before the unlink, and this
+  invocation's unlink would then delete the NEW holder's active lock.
+  Replaced with `releaseLock()`: `renameSync(lockPath, claimedPath)`
+  atomically CLAIMS whatever is at the path first (the same single-winner
+  guarantee `acquireLock`'s own reclaim step already relies on), and only
+  THEN reads/compares the content it has already exclusively taken
+  possession of -- nothing else can be racing over those same bytes by the
+  time the check runs. A claimed-but-foreign lock (this invocation ran long
+  enough that someone else reclaimed and is using it) is renamed back
+  rather than destroyed.
+- **Plain-git fallback didn't disable `rebase.autoStash`:** the dirty-tree
+  recheck immediately before `plainGitSync`'s own rebase narrows but cannot
+  fully close that TOCTOU (a file can still become dirty in the instant
+  between the check and the exec) -- a repository or user
+  `rebase.autoStash=true` config would otherwise let git silently
+  stash/pop that content instead of failing, contradicting the whole
+  clean-tree safety gate's intent. Added `--no-autostash` to the rebase
+  invocation so a residual race fails loudly instead of moving unreviewed
+  local content.
+- Also fixed the PR description's stale validation counts (already
+  addressed in round 17, but round 18 confirmed it cleanly).
+- 2 new tests (structural checks: `releaseLock` claims via `renameSync`
+  BEFORE reading content, ordering asserted directly; the rebase
+  invocation includes `--no-autostash`). `node --test`: 150 tests, 148 pass
+  (2 pre-existing skips), no regressions. All guards pass. No version bump
+  needed (still `0.1.1-dev36`).

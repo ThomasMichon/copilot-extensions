@@ -401,16 +401,50 @@ async function withWorktreeSyncLock(cwd, fn) {
     return await fn();
   } finally {
     try { closeSync(lock.fd); } catch { /* best-effort */ }
-    // Release only if the lock at this path still carries OUR token. A
-    // holder that ran longer than STALE_LOCK_MS (suspended, an extremely
-    // slow network, not necessarily crashed) can resume here AFTER another
-    // invocation has already reclaimed this path as stale and is actively
-    // running its own sync -- unconditionally unlinking would delete that
-    // new owner's lock, letting a THIRD invocation acquire while the second
-    // is still mid-sync. Reading back and comparing the token closes that.
-    try {
-      if (readFileSync(lockPath, "utf-8") === lock.token) unlinkSync(lockPath);
-    } catch { /* already gone, or no longer ours to remove -- both fine */ }
+    releaseLock(lockPath, lock.token);
+  }
+}
+
+// Releases a worktree sync lock atomically against a concurrent reclaimer,
+// rather than a separate read-then-unlink (itself a TOCTOU: another
+// invocation could reclaim and replace the path after the read returns this
+// invocation's own token but before the unlink runs, letting this invocation
+// delete the new holder's active lock). `renameSync` atomically CLAIMS
+// whatever is at `lockPath` right now -- the same single-winner guarantee
+// `acquireLock`'s reclaim step relies on -- so the content check below only
+// ever inspects content this invocation has already exclusively taken
+// possession of; nothing else can be racing over the SAME bytes by the time
+// it runs.
+function releaseLock(lockPath, token) {
+  const claimedPath = `${lockPath}.release-${process.pid}-${Date.now()}`;
+  let claimed;
+  try {
+    renameSync(lockPath, claimedPath);
+    claimed = true;
+  } catch {
+    // Nothing at that path to claim -- already released, or reclaimed and
+    // released again by someone else. Either way, not this invocation's to
+    // touch.
+    return;
+  }
+  try {
+    if (readFileSync(claimedPath, "utf-8") === token) {
+      unlinkSync(claimedPath);
+      return;
+    }
+    // Claimed content that is NOT this invocation's own token -- this
+    // invocation ran long enough that another one reclaimed the path as
+    // stale and is (or was) actively using it. Put it back rather than
+    // destroying an active lock; a brief window where the path is empty is
+    // the same residual, unavoidable gap acquireLock's own reclaim step
+    // already accepts.
+    renameSync(claimedPath, lockPath);
+  } catch {
+    // Best-effort: if the restore-rename itself fails (e.g. lockPath was
+    // recreated by yet another acquire in the interim), fall through to
+    // cleaning up the orphaned claimedPath below rather than leaving stray
+    // files behind.
+    if (claimed) { try { unlinkSync(claimedPath); } catch { /* already gone */ } }
   }
 }
 
@@ -593,7 +627,15 @@ export async function plainGitSync(cwd) {
       };
     }
     await execFileAsync(
-      "git", ["rebase", `origin/${defaultBranch}`],
+      // --no-autostash: the recheck immediately above narrows but cannot
+      // fully close the dirty-tree TOCTOU (a file could still become dirty
+      // in the instant between that check and this exec) -- a repository
+      // or user `rebase.autoStash=true` config would otherwise let this
+      // automatic path silently stash/pop that content instead of failing,
+      // contrary to the whole clean-tree safety gate's intent. Explicitly
+      // disabling it makes a race fail loudly instead of moving unreviewed
+      // local content.
+      "git", ["rebase", "--no-autostash", `origin/${defaultBranch}`],
       { cwd, encoding: "utf-8", timeout, env },
     );
     return { attempted: true, synced: true, reason: null };
