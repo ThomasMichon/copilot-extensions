@@ -94,7 +94,7 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "13fd6c82e76b0a897e31d3be1db1b09a65d442cefbf1a8fc5dd3c2dcccd561f3",
+          "sha256": "26d98da35d39be081569a68d09c6b7ec5e30685aad8f23981b1de7c781afccdf",
           "role": "current health response",
           "generation": 16
         },
@@ -124,13 +124,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "5ddc727d79ec5d68ae91155513d4906bcda9820088750ab91309be110c8becc3",
+          "sha256": "c81d668b720196d866a6ec988e2dc5fabae1207a4eb09b923b9fe0e93be619b2",
           "role": "current session-create response",
           "generation": 16
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "f44257d47833e34c41f0ee69f805546d9067110392c71b5fde2ee01ce9337171",
+          "sha256": "15ecc37b77e2140f40525665bdb6b6a5fd9910a12855af94f3cbd24f15966796",
           "role": "current representative FastAPI error",
           "generation": 16
         },
@@ -154,13 +154,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "18bbdeac1980d0f66e706fc8b71d7d68a053ad322d1799ea5c4733d505cff34c",
+          "sha256": "686ee935f5167a83db64ae07ed04ad2d152a8a1357225e13254d5017d123a4bf",
           "role": "current HTTP range and capability constants",
           "generation": 16
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
-          "sha256": "ebf7c2fc7d41e739da7cdbc003c95bb08b7e0cdc62f1b25f9c8b07e88d086758",
+          "sha256": "f4633484e14f277ded3f3c0fcb3e5ff4c26cc59497e41f32be17eacbe1759c0d",
           "role": "current carrier-backed remote command request and response",
           "generation": 16
         },
@@ -373,7 +373,7 @@
           "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response; re-attested after adding the cold-store -provider session-lookup fallback (Phase 2b, session-worktree-archive-linkout effort), which does not touch this code path."
         },
         {
-          "commit": "ed8280b993c06535a63ea07735bdf4febf4fec29",
+          "commit": "fe76e9ae6a31315c972f518fdf9dd247de1e3b62",
           "plugin_version": "0.4.0-dev533",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
@@ -381,7 +381,7 @@
           "capture_method": "Validate and serialize representative session-create request and response models; re-attested after removing StartSessionRequest.reclaim (agent-bridge-cold-resume Phase 3, #6744) -- create's own break-glass was removed, which drops an accepted-but-ignorable field rather than altering the representative session-create wire shape's required fields."
         },
         {
-          "commit": "ed8280b993c06535a63ea07735bdf4febf4fec29",
+          "commit": "fe76e9ae6a31315c972f518fdf9dd247de1e3b62",
           "plugin_version": "0.4.0-dev533",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
@@ -389,7 +389,7 @@
           "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response; re-attested after removing the create-time reclaim bypass of the session-lifecycle head guard (agent-bridge-cold-resume Phase 3, #6744), which does not touch this code path."
         },
         {
-          "commit": "a7704df6e715314269a8ddb7c280cbd9b0596794",
+          "commit": "053460fc978167fc53ecc967555b19217a44e837",
           "plugin_version": "0.4.0-dev533",
           "generation": 16,
           "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
@@ -397,7 +397,7 @@
           "capture_method": "Read production constants and serialize representative models from this exact source revision; HTTP_PROTOCOL_VERSION bumped to 16 (agent-bridge-cold-resume Phase 3, #6744): POST /api/v1/sessions no longer honors 'reclaim' now that create's session-lifecycle head-guard bypass is removed."
         },
         {
-          "commit": "a7704df6e715314269a8ddb7c280cbd9b0596794",
+          "commit": "053460fc978167fc53ecc967555b19217a44e837",
           "plugin_version": "0.4.0-dev533",
           "generation": 16,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -405,7 +405,7 @@
           "capture_method": "Invoke the health route with a controlled empty runtime state and zeroed carrier diagnostics; re-attested for the generation-16 bump (#6744) -- this file's own content is unchanged."
         },
         {
-          "commit": "a7704df6e715314269a8ddb7c280cbd9b0596794",
+          "commit": "053460fc978167fc53ecc967555b19217a44e837",
           "plugin_version": "0.4.0-dev533",
           "generation": 16,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
@@ -413,7 +413,7 @@
           "capture_method": "Serialize the reviewed carrier-backed remote command request and response surface; re-attested for the generation-16 bump (#6744) -- this file's own content is unchanged."
         },
         {
-          "commit": "a7704df6e715314269a8ddb7c280cbd9b0596794",
+          "commit": "053460fc978167fc53ecc967555b19217a44e837",
           "plugin_version": "0.4.0-dev533",
           "generation": 16,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
@@ -421,7 +421,7 @@
           "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response; re-attested for the generation-16 bump (#6744) alongside the create-time reclaim bypass removal already captured in this file's prior generation-15 entry."
         },
         {
-          "commit": "a7704df6e715314269a8ddb7c280cbd9b0596794",
+          "commit": "053460fc978167fc53ecc967555b19217a44e837",
           "plugin_version": "0.4.0-dev533",
           "generation": 16,
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
