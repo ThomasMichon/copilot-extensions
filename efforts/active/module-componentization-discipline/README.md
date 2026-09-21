@@ -875,9 +875,9 @@ the Phase 0 runbook, picked up as capacity allows.
 - Net result: `plugins/agent-worktrees/src/agent_worktrees/__main__.py`
   dropped from **13,669** lines at the start of this slice to **11,300**
   after the baseline refresh (**29,173 → 11,300** across the
-  eight-slice campaign so far). The new modules land at **629** lines
+  eight-slice campaign so far). The new modules land at **636** lines
   (`resolve_cli.py`), **618** (`resolve_launch_cli.py`), **234**
-  (`resolve_machine_cli.py`), **578** (`resolve_picker_cli.py`), and **391**
+  (`resolve_machine_cli.py`), **578** (`resolve_picker_cli.py`), and **465**
   (`resolve_system_cli.py`), all under the 1,000-line cap.
 - Validation matched the effort's stricter bar. `ruff check --select F,E9`
   passed on `__main__.py`, the five new modules, and the one touched test
