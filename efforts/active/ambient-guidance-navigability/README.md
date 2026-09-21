@@ -421,15 +421,20 @@ conflict-dispatch label there.
       whose lock entries match but whose actual generated file content does
       not (the lock-hash-vs-real-file split case), and a PR with a managed
       path present in one but absent from the other (three distinct
-      negative-proof tests, not one). **Transferred, not dropped:** this
-      depends on the immutable-pin verification gap `projection_reflect.py`
-      explicitly tracks as unsolved (today's lock schema has no commit/
-      release reference to recompute against) -- cannot be validated until
-      that gap closes in a follow-up slice. **Narrowed 2026-09-20:**
-      `bypass_decision`'s pin conjunct is now built and proven (see the
-      Journal) -- what remains is solely the marketplace-source commit
-      resolver that would populate it for a real run; no further schema
-      work is needed once that resolver exists.
+      negative-proof tests, not one). **Scoped-closed 2026-09-21, not
+      dropped:** `bypass_decision`'s pin conjunct is built and proven (see
+      the Journal), and `resolve_pinned_commits()` (PR #3159) is the
+      complete, final resolver for this effort's actual scope --
+      self-hosted/directory-marketplace sources only, per the operator's
+      explicit decision not to extend trust/pinning to externally-installed
+      marketplace plugins generally (instruction-projection is a narrow,
+      bespoke workaround, not a general provenance system). The deep
+      byte-exact clone-and-recompute automation this item originally
+      envisioned remains unbuilt -- it is optional further hardening for
+      the self-hosted case (technically buildable with only local git
+      operations, no network dependency), not currently pursued given that
+      framing. This is a closed decision, not an open gap awaiting a
+      resolver.
 - [ ] Phase 2's bypass safety boundary is proven with negative tests for
       *each* conjunct, not just recompute mismatch: a no-change run opens no
       PR; a disabled plugin's projection is never touched even if its
@@ -1034,13 +1039,43 @@ honestly rather than guessing at the full answer.
   skipped (36 new tests total across all five rounds). `check-module-
   size`/`check-version-bump`/`check-version-consistency`/`check-docs-
   consistency` all pass. Bumped to `0.1.0-dev92`.
-- **Issue #3132 is half closed, not fully.** What remains genuinely open:
-  an externally-installed marketplace plugin -- the common adopter case --
-  still cannot be pinned at all. Closing that needs either an install-time
-  provenance record (the harness's own plugin-install mechanism recording
-  a source commit alongside the payload copy) or a marketplace-release-API
-  lookup (network-dependent, its own design questions around auth/rate
-  limits/trust) -- correctly left as a further follow-up rather than
-  guessed at in this slice.
+- **Issue #3132 resolved as scoped, not left open.** The operator made an
+  explicit scope decision: copilot-extensions trusts *itself*
+  (self-hosted/directory-marketplace sources) for this instruction-sync
+  mechanism, but does not want that trust extended to externally-installed
+  marketplace plugins generally -- instruction-projection is a narrow,
+  bespoke workaround for the harness's own static-fallback problem, not a
+  general-purpose provenance system worth the added network/auth/trust
+  surface a marketplace-release-API lookup would require. The
+  self-hosted/directory-marketplace resolver already ships
+  (`resolve_pinned_commits()`, PR #3159) and is the complete, final answer
+  for this effort's actual scope -- there is no remaining resolver work to
+  build. #3132 closed accordingly; see its own closing comment for the
+  operator's exact framing.
+
+### 2026-09-21 (cont.) -- Closed out: sub-issues closed, scope decision on #3132
+
+- Closed sub-issues #3071 (Phase 1), #3082 (Phase 2), and #3120 (Phase 3),
+  each with a comment citing the PRs that resolved them -- all three were
+  done and merged but had been left open. Posted a status-update comment
+  on the umbrella #3033 (left open: it's the tracking parent, and the
+  downstream private companion effort's Phase 0/4/5 are still pending
+  there, out of this repo's scope).
+- Asked the operator how to proceed on #3132's remaining externally-
+  installed-marketplace half (a network-dependent marketplace-release-API
+  lookup, or an install-time provenance record outside this repo's
+  control) rather than unilaterally designing a network/auth surface after
+  the six-round review cycle the self-hosted half already went through.
+  **Operator's answer:** copilot-extensions is trusted for its own
+  self-hosted sync, but that trust should not extend generally to external
+  marketplaces -- instruction-projection is a bespoke workaround, not
+  worth a general provenance system. Closed #3132 as scoped-complete
+  rather than leaving it open pending further design.
+- **Effort status:** every repo-scoped Plan/Validation Plan item this
+  effort can carry is now resolved, transferred (downstream Phase 0/4/5),
+  or explicitly scoped-closed (the externally-installed pin half). Left
+  `Status: Active` rather than `Done` pending the downstream companion
+  effort and the umbrella issue's own closure -- not a false completion
+  claim; see the umbrella issue for the durable pointer to what remains.
 
 
