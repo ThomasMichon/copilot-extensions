@@ -865,6 +865,16 @@ async def _start_fresh_worktree_session(
             owner_agent, entry = probed
     if entry is None or owner_agent is None:
         return None
+    if not entry.path:
+        # Defense in depth alongside the live probe's own exclusion of
+        # reaped/tombstoned records (review #3121): even a cache-sourced
+        # entry must carry a usable on-disk path before we spawn a fresh
+        # session into it.
+        log.warning(
+            "resume_worktree %s: resolved entry has no on-disk path; "
+            "refusing fresh-session fallback", worktree_id,
+        )
+        return None
 
     lock = _fresh_start_locks.setdefault(worktree_id, asyncio.Lock())
     async with lock:
@@ -1325,13 +1335,15 @@ async def _probe_live_worktree(
     every eligible agent, returning the first match's owner + entry (#6744).
 
     Mirrors :func:`_probe_archived_owner`'s fan-out (returning on first
-    match instead of waiting on a slow/unreachable agent), but is not
-    restricted to ``--tracking-status archived`` -- a fresh, genuinely-live
-    worktree the crawl cache simply hasn't seen yet (cache-blind or
-    stale-cache) must resolve here too, not only a tombstoned one. Returns
-    the full ``_WorktreeEntry`` (needed for the worktree's on-disk path),
-    not just the owning agent. Only ever called single-flight via
-    :meth:`WorktreeDiscoveryCache.probe_live`.
+    match instead of waiting on a slow/unreachable agent), but resolves a
+    fresh, genuinely-live worktree the crawl cache simply hasn't seen yet
+    (cache-blind or stale-cache), not a tombstoned one -- deliberately
+    **without** ``--all``/``--tracking-status archived``, so a reaped
+    record whose on-disk directory is gone never matches here (a resumed
+    worktree must have a real checkout to spawn a fresh session into,
+    review #3121). Returns the full ``_WorktreeEntry`` (needed for the
+    worktree's on-disk path), not just the owning agent. Only ever called
+    single-flight via :meth:`WorktreeDiscoveryCache.probe_live`.
     """
     eligible = [
         (name, cfg) for name, cfg in resolver.agents.items()
@@ -1339,10 +1351,7 @@ async def _probe_live_worktree(
     ]
     if not eligible:
         return None
-    args = [
-        "list", "--json", "--mux-details", "--all",
-        "--tracking-status", "all", "--worktree-id", worktree_id,
-    ]
+    args = ["list", "--json", "--mux-details", "--worktree-id", worktree_id]
     tasks = {
         asyncio.create_task(_run_for_agent(name, cfg, resolver, args)): name
         for name, cfg in eligible
