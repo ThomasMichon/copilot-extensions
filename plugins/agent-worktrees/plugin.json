@@ -19,7 +19,7 @@
   ],
   "hooks": "hooks.json",
   "sessionContext": "session-context.json",
-  "version": "1.5.5-dev204",
+  "version": "1.5.5-dev205",
   "runtimeScope": "universal",
   "installerReadiness": "installer-readiness.json"
 }
