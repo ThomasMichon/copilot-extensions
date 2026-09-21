@@ -207,6 +207,32 @@ def test_no_mux_session_to_stop_refuses_to_force(monkeypatch):
     assert len(calls) == 2  # one resume attempt, one stop attempt -- never a 2nd resume
     assert not any("--force" in c for c in calls)
 
+
+def test_missing_holder_session_id_refuses_before_attempting_a_stop(monkeypatch):
+    """A ``live_cli_holds_worktree`` refusal with no usable (missing/non-
+    string) ``session_id`` must be refused outright -- attempting the stop
+    anyway would call restart-worktree with no --expected-holder (an
+    unfenced restart that could invalidate a different claimant's
+    registration)."""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _proc(
+            cmd, 1,
+            json.dumps({
+                "error": "a live interactive CLI still holds worktree wt-1",
+                "reason": "live_cli_holds_worktree", "session_id": None,
+            }),
+        )
+
+    result = _resume(monkeypatch, fake_run)
+    assert result.returncode == 1
+    assert "no usable holder session id" in result.stderr
+    assert len(calls) == 1  # never attempts the stop at all
+    assert not any(_is_restart(c) for c in calls)
+
+
 def test_missing_session_id_reports_failure_not_a_legacy_fallback(monkeypatch):
     """A successful (returncode 0) resume whose stdout carries no session_id
     means a not-yet-upgraded daemon already resumed/created a session via

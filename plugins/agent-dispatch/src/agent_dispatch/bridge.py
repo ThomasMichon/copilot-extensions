@@ -196,9 +196,22 @@ def _spawn_worker_via_worktree(
         )
         ensured_worktree_id = str(created["worktree"])
 
-    resume_cmd = [*exe, "resume", ensured_worktree_id]
     if reclaim:
-        resume_cmd.append("--force")
+        # Route through the same stop-then-revalidate-then-force sequence as
+        # the direct-spawn path (see spawn_worker's own docstring) -- a bound
+        # -charter worker must never blindly 'resume --force' over a live
+        # interactive CLI either, which would recreate the exact
+        # duplicate-controller race this whole reclaim path exists to
+        # prevent.
+        from . import bridge_reclaim
+
+        return bridge_reclaim.resume_worktree_and_send(
+            ensured_worktree_id, prompt, exe=exe, agent=agent,
+            caller=f"agent-dispatch:{worker_id}", wait=wait,
+            json_output=json_output, timeout=timeout,
+        )
+
+    resume_cmd = [*exe, "resume", ensured_worktree_id]
     resumed = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         resume_cmd,
         check=False,

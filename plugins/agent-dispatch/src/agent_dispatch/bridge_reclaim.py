@@ -308,6 +308,18 @@ def resume_worktree_and_send(
         reason, holder = _resume_refusal(resumed)
         if reason != _LIVE_CLI_HOLDS_WORKTREE:
             return resumed
+        if not isinstance(holder, str) or not holder:
+            # No usable holder id to fence the stop on -- forcing through
+            # would run 'agent-bridge restart-worktree' unfenced (no
+            # --expected-holder), which could invalidate a DIFFERENT
+            # claimant's registration. Refuse rather than guess.
+            return subprocess.CompletedProcess(
+                args=resumed.args, returncode=1, stdout=resumed.stdout,
+                stderr=(resumed.stderr or "")
+                + f"\n{worktree_id}: live_cli_holds_worktree refusal named no "
+                "usable holder session id -- refusing to force an unfenced "
+                "restart",
+            )
         failure, session_id = _take_over_live_holder(
             worktree_id, exe=exe, original_holder=holder, timeout=timeout,
         )
@@ -324,6 +336,15 @@ def resume_worktree_and_send(
         # busy turn and resume again for its replacement (end deletes the
         # busy session outright, so the prompt can no longer reach that
         # exact id), then send to the new one, once.
+        #
+        # Residual gap: 'end' releases the worktree's ownership reservation,
+        # and the following plain resume has no prior session id of its own
+        # to fence a revalidation against (unlike the live-CLI-holder path
+        # above) -- if a genuinely different ACP controller claims the
+        # worktree in that gap, this would send the prompt to that unrelated
+        # claimant instead of failing closed. Closing this fully needs a
+        # single atomic "end-and-reclaim" server primitive agent-bridge does
+        # not yet expose; tracked as a known limitation, not solved here.
         ended = subprocess.run(  # noqa: S603
             [*exe, "end", session_id, "--force"], check=False,
             capture_output=True, text=True, timeout=timeout, **no_window_kwargs(),

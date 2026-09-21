@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from agent_dispatch import bridge, bridge_agent_registry, procutil
+from agent_dispatch import bridge, bridge_agent_registry, bridge_reclaim, procutil
 from agent_dispatch.queue import Status
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
@@ -199,6 +199,47 @@ def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkey
         "--handle",
         "wt-1",
     ]
+
+
+def test_spawn_worker_via_worktree_routes_reclaim_through_bridge_reclaim(monkeypatch):
+    """A bound-charter worker (the non-direct-spawn-target path) with
+    reclaim=True must go through the same stop-then-revalidate-then-force
+    sequence as the direct-spawn path -- not a blind 'resume --force', which
+    would take over a live interactive CLI without ever confirming it was
+    actually stopped."""
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_resolve_agent_record",
+        lambda name, **_kw: {
+            "name": name,
+            "managed": False,
+            "spawnable_as_target": False,
+        },
+    )
+    calls = []
+    monkeypatch.setattr(
+        bridge_reclaim, "resume_worktree_and_send",
+        lambda worktree_id, prompt, **kw: calls.append((worktree_id, prompt, kw))
+        or subprocess.CompletedProcess([], 0, stdout='{"session_id": "sid-9"}', stderr=""),
+    )
+
+    result = bridge.spawn_worker(
+        "task42", agent="task-worker", worker_id="w1",
+        worktree_id="wt-1", reclaim=True, wait=False, json_output=True,
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["session_id"] == "sid-9"
+    assert len(calls) == 1
+    worktree_id, prompt, kw = calls[0]
+    assert worktree_id == "wt-1"
+    assert kw["exe"] == ["/usr/bin/agent-bridge"]
+    assert kw["caller"] == "agent-dispatch:w1"
+    assert kw["wait"] is False
+    assert kw["json_output"] is True
 
 
 def test_spawn_worker_passes_caller_for_picker_origin(monkeypatch):
