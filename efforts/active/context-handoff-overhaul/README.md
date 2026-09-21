@@ -2152,3 +2152,51 @@ missed ones were fixed:
   scenario proving the sync still resolves it correctly). `node --test`:
   163 tests, 161 pass (2 pre-existing skips), no regressions. All guards
   pass. No version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 25: shared lock-restore helper, instructions ordering fix, CI test-lane split
+
+Round 25 surfaced 2 new HIGH findings, both fixed, plus a re-flag of the
+round-24 deferred CI-lane item -- this time actually implemented instead of
+deferred again:
+
+- **(HIGH) linkSync-restore-on-mismatch error handling was duplicated and
+  inconsistent between acquireLock and releaseLock:** each had its own
+  copy of the restore-via-no-clobber-linkSync logic, discriminating EEXIST
+  (benign) from any other failure (fail closed, keep the orphaned copy),
+  and the two copies had drifted slightly out of sync across rounds 18-24.
+  Extracted a single shared restoreClaimedLock(claimedPath, lockPath)
+  helper; both call sites now delegate to it, so the discrimination logic
+  only needs to be correct -- and tested -- once.
+- **(HIGH) `handoff-fallback.instructions.md` referenced `$CH` before it was
+  ever defined:** the Preparing a brief section used `$CH` several
+  paragraphs before the variable's actual resolution later in the file, so
+  a reader following it top-to-bottom would hit an undefined reference.
+  Fixed by inlining the resolution directly into that section instead of
+  relying on a forward reference.
+- **(Actually implemented this time) Moved the exhaustive real-git/
+  child-process/lock-race test matrix out of the required CI lane:** split
+  plugins/context-handoff/tests/handoff-core.test.mjs (2321 lines, 163
+  tests) into a fast contract file (44 pure-logic tests, ~0.3s, unchanged
+  path/name, still covered by the checks job's node --test
+  plugins/*/tests/*.test.mjs glob) and a new
+  plugins/context-handoff/tests/exhaustive/handoff-lock-process-matrix.test.mjs
+  (the real-git-repo/subprocess/timing-sensitive lock-race matrix, ~1094
+  lines, 36 tests). The extra directory level means Node's default test
+  glob (a single * does not recurse into subdirectories) naturally
+  excludes it from the required lane with no separate ignore mechanism
+  needed. Added a new context-handoff-exhaustive job to ci.yml, gated on
+  workflow_dispatch or a new weekly schedule trigger (Monday 06:00 UTC) --
+  never blocks a PR/push. Several of the moved file's structural tests
+  (which readFileSync the handoff-core.mjs source to assert on function
+  bodies) needed their relative path depth corrected for the new
+  location, and two tests that inspected releaseLock's/acquireLock's
+  inline restore logic directly were rewritten to inspect the
+  newly-extracted restoreClaimedLock helper instead (the logic they guard
+  moved there).
+- Bumped plugin.json/marketplace.json to 0.1.1-dev37 (content changed).
+  node --test: fast suite 163 tests/161 pass (2 pre-existing skips,
+  unchanged); exhaustive suite 36/36 pass. Full guard suite
+  (version-consistency, version-bump, module-size, marketplace-isolation,
+  skills, docs-consistency, runbook-references) all pass -- no new
+  findings beyond the pre-existing report-only marketplace-isolation
+  baseline and skill-length warnings on unrelated plugins.
