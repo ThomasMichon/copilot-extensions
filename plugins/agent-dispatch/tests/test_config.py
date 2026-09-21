@@ -357,6 +357,24 @@ def test_discovered_endpoint_health_responsive_probes_tcp_as_http(monkeypatch):
     assert captured["url"] == "http://127.0.0.1:59999"
 
 
+def test_discovered_endpoint_health_responsive_brackets_ipv6(monkeypatch):
+    # advertise_endpoint() writes a raw "host:port" address; for an IPv6 host
+    # that's e.g. "::1:1234" -- Endpoint.tcp_host_port splits it correctly,
+    # but the http:// URL still needs brackets around the IPv6 literal or
+    # urllib misparses it, permanently misclassifying a live IPv6 incumbent
+    # as dead (review follow-up on ThomasMichon/copilot-extensions#3066).
+    captured = {}
+
+    def _fake_health_responsive(url, **_k):
+        captured["url"] = url
+        return True
+
+    monkeypatch.setattr(config_mod, "_health_responsive", _fake_health_responsive)
+    endpoint = rendezvous.Endpoint(transport="tcp", address="::1:1234")
+    assert config_mod._discovered_endpoint_health_responsive(endpoint) is True
+    assert captured["url"] == "http://[::1]:1234"
+
+
 def test_discovered_endpoint_health_responsive_true_for_non_tcp_transport(monkeypatch):
     # No plain-HTTP mapping exists for a unix socket / named pipe here -- trust
     # the existing connect-probe-verified liveness for those transports rather

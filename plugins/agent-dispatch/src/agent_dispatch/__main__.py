@@ -835,11 +835,33 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         make_client=make_client,
         pick_free_port=pick_free_port,
     )
-    result = orch.run(
-        health_timeout=args.health_timeout,
-        drain_timeout=args.drain_timeout,
-        force=args.force,
-    )
+    # Share the same routing-transition lock `serve()`'s non-passive guard
+    # uses (keyed by routing_dir(), the actual raced-over resource): without
+    # it, a cold-start `deploy`/`_cutover` and a direct non-passive `serve()`
+    # can each observe no live coordinator, then one publishes right after
+    # the other's flip -- and since cutover captured the prior `old` endpoint
+    # before spawning, it won't drain a direct `serve()` that raced in after,
+    # recreating the exact undrained-duplicate incident this guard exists to
+    # prevent (review follow-up on ThomasMichon/copilot-extensions#3066).
+    from .single_instance import SingleInstance
+
+    routing_lock = SingleInstance(routing_dir() / "serve-start.lock")
+    if not routing_lock.acquire():
+        print(
+            "agent-dispatch: another process is concurrently starting or "
+            "cutting over a coordinator on this host; refusing to race it "
+            "for the active route. Retry once it finishes.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        result = orch.run(
+            health_timeout=args.health_timeout,
+            drain_timeout=args.drain_timeout,
+            force=args.force,
+        )
+    finally:
+        routing_lock.release()
     if result.ok:
         _reap_superseded_coordinators(result)
     if getattr(args, "json", False):

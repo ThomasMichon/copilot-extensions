@@ -382,7 +382,16 @@ def _discovered_endpoint_health_responsive(
     """
     if endpoint.transport != "tcp":
         return True
-    return _health_responsive(f"http://{endpoint.address}", token=token)
+    host, port = endpoint.tcp_host_port
+    # ``endpoint.address`` (and ``host`` split from it) is a raw
+    # ``host:port`` pair -- an IPv6 literal such as ``::1`` needs bracketing
+    # (``http://[::1]:port``) or ``urllib`` misparses it, permanently
+    # misclassifying a live IPv6 incumbent as dead and letting the new
+    # non-passive serve guard start a duplicate (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return _health_responsive(f"http://{host}:{port}", token=token)
 
 
 def has_live_local_coordinator(*, token: str | None = None) -> bool:

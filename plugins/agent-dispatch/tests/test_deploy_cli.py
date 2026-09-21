@@ -51,6 +51,66 @@ def test_deploy_is_publicly_documented_not_suppressed():
     assert help_texts.get("_cutover") == argparse.SUPPRESS
 
 
+def test_cutover_serializes_against_concurrent_route_lock(tmp_path, monkeypatch):
+    """``deploy``/``_cutover`` must share the same routing-transition lock
+    ``serve()``'s non-passive guard uses -- otherwise a cold-start deploy and
+    a direct non-passive ``serve()`` can each observe no live coordinator and
+    race the flip, recreating the undrained-duplicate incident this guard
+    exists to prevent (review follow-up on
+    ThomasMichon/copilot-extensions#3066)."""
+    import zdd.breadcrumb as zdd_breadcrumb
+    import zdd.cutover as zdd_cutover
+
+    from agent_dispatch import __main__ as main_mod
+    from agent_dispatch.single_instance import SingleInstance
+
+    routing = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing))
+    monkeypatch.setattr("agent_dispatch.config.client_token", lambda: None)
+    monkeypatch.setattr(zdd_breadcrumb, "recover_stale_cutover", lambda *a, **k: {"recovered": False})
+    monkeypatch.setattr(zdd_breadcrumb, "read_breadcrumb", lambda *a, **k: None)
+    monkeypatch.setattr(main_mod, "_reap_abandoned_passive", lambda *_a, **_k: {"reaped": False})
+    monkeypatch.setattr(main_mod, "_reap_superseded_coordinators", lambda *_a, **_k: None)
+
+    seen: dict = {}
+
+    class _FakeResult:
+        ok = True
+        new_port = 1234
+        error = None
+        rolled_back = False
+        steps: list = []
+
+        def to_dict(self):
+            return {"ok": True}
+
+    class _FakeOrchestrator:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def run(self, **_kwargs):
+            # While "running", the lock must be held -- a concurrent acquire
+            # attempt (as a direct `serve()` would make) must fail.
+            contender = SingleInstance(routing / "serve-start.lock")
+            seen["acquired_during_run"] = contender.acquire()
+            if seen["acquired_during_run"]:
+                contender.release()
+            return _FakeResult()
+
+    monkeypatch.setattr(zdd_cutover, "CutoverOrchestrator", _FakeOrchestrator)
+
+    parser = main_mod.build_parser()
+    ns = parser.parse_args(["deploy", "--json"])
+    exit_code = main_mod._cmd_cutover(ns)
+
+    assert exit_code == 0
+    assert seen["acquired_during_run"] is False, "lock must be held during orch.run()"
+    # ... and released afterward, for a subsequent attempt.
+    probe = SingleInstance(routing / "serve-start.lock")
+    assert probe.acquire(), "lock was not released after the cutover completed"
+    probe.release()
+
+
 def test_reap_abandoned_passive_delegates_to_reap_module(tmp_path, monkeypatch):
     """#5195: the CLI-level wrapper is a thin, correctly-anchored delegate to
     ``agent_dispatch.reap.reap_abandoned_passive_backstop``."""
