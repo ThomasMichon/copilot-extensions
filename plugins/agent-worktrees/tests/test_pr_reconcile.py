@@ -205,3 +205,19 @@ class TestReconcileCli:
         rc = reconcile_cli.run_reconcile(["--worktree-id", "no-such-wt", "--json"])
         assert rc == 1
         assert "no-such-wt" in capsys.readouterr().out
+
+    def test_reconcile_rejects_path_traversal_worktree_id(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        # A worktree_id is a raw user-supplied string -- '../../etc/passwd'
+        # must never be allowed to escape cfg.tracking_dir().
+        monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+        monkeypatch.setattr(cfg, "load_config", lambda: _config())
+        secret = tmp_path.parent / "escaped.yaml"
+        secret.write_text("do-not-touch: true", encoding="utf-8")
+        rc = reconcile_cli.run_reconcile(
+            ["--worktree-id", "../escaped", "--json"]
+        )
+        assert rc == 1
+        assert "invalid --worktree-id" in capsys.readouterr().out
+        assert secret.read_text(encoding="utf-8") == "do-not-touch: true"

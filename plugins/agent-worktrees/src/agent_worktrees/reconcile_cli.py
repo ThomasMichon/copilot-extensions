@@ -19,10 +19,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 
 from . import config as cfg
 from . import tracking
+
+# ``--worktree-id`` is a raw user-supplied string, not resolved through any
+# registry -- a value like ``../../etc`` must not be allowed to escape
+# ``cfg.tracking_dir()`` (mirrors ``handoff_trace._UNSAFE_COMPONENT``).
+_UNSAFE_COMPONENT = re.compile(r"[/\\\0]|^\.\.?$")
 
 
 def run_reconcile(argv: list[str]) -> int:
@@ -50,6 +56,13 @@ def run_reconcile(argv: list[str]) -> int:
 
     tracking_path = cfg.tracking_dir()
     if args.worktree_id:
+        if _UNSAFE_COMPONENT.search(args.worktree_id):
+            message = f"invalid --worktree-id: {args.worktree_id!r}"
+            if args.json:
+                print(json.dumps({"error": message}, default=str))
+            else:
+                print(f"agent-worktrees reconcile: {message}", file=sys.stderr)
+            return 1
         yaml_path = tracking_path / f"{args.worktree_id}.yaml"
         if not yaml_path.exists():
             message = f"No tracking record found for '{args.worktree_id}'."
