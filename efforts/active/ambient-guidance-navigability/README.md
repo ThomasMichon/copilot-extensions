@@ -191,7 +191,7 @@ private paths).
       cheap, always-on half; the items below are the scheduled backstop for
       when no session happens to be active in the consumer repo when a
       change lands.
-- [ ] **Deterministic sync tool**: a script (extends
+- [x] **Deterministic sync tool**: a script (extends
       `manage-instruction-projections.py` or a sibling) that, given a
       consumer repo, does: refresh installed plugin payloads for every
       enabled plugin, `sync`, `scan --from-settings` for drift. **The
@@ -263,15 +263,26 @@ private paths).
       untrustworthy source can be perfectly reproducible and still unsafe to
       auto-merge.
 
-      **2026-09-20: the orchestration half of this item is built and
-      tested** -- `scripts/projection_sync_worker.py`'s `run_sync_pass()`
+      **2026-09-20/21: the orchestration half of this item is built,
+      tested, and merged** (PRs #3139, #3149 -- 3149 fixed a genuine
+      lock-atomicity race the first PR's review caught: `sync`'s own lock
+      is now held across sync + scan + both lock-entry reads via
+      `repository_sync_lock()`/`sync_repository_locked()`, so a concurrent
+      worker can never interleave and get misattributed to a pass's
+      outcome). `scripts/projection_sync_worker.py`'s `run_sync_pass()`
       composes `sync`/`scan`/`projection_reflect` into exactly one
       deterministic pass per call (the correct actionable-change trigger,
-      fail-closed classification, and managed-file-conflict routing above
-      are all exercised by its test suite), returning a single `SyncOutcome`
-      a caller never needs a second invocation of this tool to complete --
-      closing the "onerous multi-round-trip PR" failure mode this item
-      warns against. **What remains open** is solely the deep byte-exact
+      fail-closed classification, managed-file-conflict routing, and now
+      cross-worker atomicity are all exercised by its test suite), returning
+      a single `SyncOutcome` a caller never needs a second invocation of
+      this tool to complete -- closing the "onerous multi-round-trip PR"
+      failure mode this item warns against. The consent-gated CLI entry
+      point derives its trusted-source allowlist from
+      `projection_reflect_consent.load_consent()` only (no
+      caller-suppliable override), and the
+      `setting-up-instruction-sync-worker` scaffolder template was updated
+      to call `run_sync_pass()` instead of hand-rolling the sequence.
+      **What remains open** is solely the deep byte-exact
       recompute-against-a-pinned-artifact verification described above,
       which depends on the still-missing marketplace-source commit resolver
       (tracked in #3132) to actually populate `projection_reflect.py`'s
@@ -847,4 +858,61 @@ per run and trust to be finished.
   against-a-pinned-artifact sub-requirement is still gated on the same
   resolver as above -- see the inline annotation on the Plan item itself
   for the precise split.
+
+### 2026-09-20/21 (cont.) -- Deterministic sync tool: merged, race fixed, item checked
+
+PR #3139 (the entry above) merged **while its third review round was still
+in flight** -- this repo's `pr-self-merge` flow treats the automated
+Copilot review as advisory (checks are the real gate), and checks were
+green at that point. That round's findings were genuinely still open:
+
+- **A real lock-atomicity race**, correctly caught: `sync_repository()`
+  released its own per-repository lock before returning, so
+  `scan_repository()` and the before/after `load_lock_entries()` reads ran
+  *unlocked* -- a second concurrent worker's own sync could interleave
+  between this pass's sync and its scan, and get misattributed to this
+  pass's `SyncOutcome`. Fixed via two small new public functions in
+  `instruction_projections.py` -- `repository_sync_lock()` (a public
+  accessor for the existing lock) and `sync_repository_locked()`
+  (`sync_repository`'s body, assuming the caller already holds it, so
+  re-acquiring the same lock twice in one process never self-deadlocks).
+  `run_sync_pass()` now acquires the lock once and holds it across sync,
+  scan, and both lock-entry reads. Proven with a test that goes further
+  than "acquisition fails when the lock is already held" (which would have
+  passed even against the old, buggy code): a spied `scan_repository`,
+  still nested under the held lock, itself attempts a second independent
+  acquisition and must fail -- proving no other worker could interleave
+  during the scan step specifically.
+- Also fixed on the same PR: an unsafe pre/post-sync lock read (bypassed
+  `_load_lock`'s own symlink/size-bound safety -- replaced with a new
+  public `instruction_projections.load_lock_entries()` wrapper), a
+  lock-only-update exemption gap (`_policy_relevant_destinations()` now
+  diffs the lock's entries before/after the pass, not just `sync`'s
+  content-diff `changed` list), dropped sync-side findings (a failed sync
+  no longer looks like a clean scan), `needs_conflict_dispatch` incorrectly
+  covering every bypass refusal (narrowed to real
+  `classify_findings(...).conflict` findings only -- an untrusted-source or
+  missing-pin refusal is review-only, not reconciler-dispatchable), a
+  `--installed-root` CLI override that could substitute an unverified
+  payload tree onto the same bypass-eligible surface (removed entirely),
+  and JSON/text error-output parity across every CLI failure branch.
+- The PR being already-merged left these fixes as unpushed local commits
+  on a now-closed branch/PR -- recovered by extracting the diff and
+  reapplying it as a fresh commit in a new worktree, landed as **PR #3149**
+  (6 review rounds; one raised finding -- "exclude user/local settings from
+  source discovery" -- was a genuine false positive rebutted with the
+  existing test proving `discover_enabled_sources()` already hardcodes
+  `include_user=False`/`include_local=False` internally, documented at the
+  call site so a future review pass doesn't have to re-derive it). Also
+  updated the `setting-up-instruction-sync-worker` scaffolder template
+  (`scheduler-config.md`) to call `run_sync_pass()` instead of hand-rolling
+  the sync/scan/decide sequence it was written to replace. Final review
+  verdict: "Approval recommended -- no unresolved blocking issues remain."
+  Merged; `customizing-copilot` at `0.1.0-dev86`.
+- **Phase 2's "Deterministic sync tool" Plan item is now checked** -- the
+  orchestration half is complete, tested (35 tests across
+  `test_projection_reflect.py` + `test_projection_sync_worker.py`), and
+  merged. Only the deep byte-exact recompute-against-a-pinned-artifact
+  verification remains open, gated on the still-missing marketplace-source
+  commit resolver (#3132) -- unchanged from the prior entry's assessment.
 
