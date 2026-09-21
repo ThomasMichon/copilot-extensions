@@ -21,12 +21,12 @@
 // throws into the CLI.
 
 import { existsSync, readFileSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 import { homedir, release } from "node:os";
-import { execFileSync, execSync } from "node:child_process";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { buildDeliveredSendOptions } from "./delivery.mjs";
+import { resolveMetadataAsync } from "./metadata.mjs";
 
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
@@ -91,19 +91,6 @@ function extLog(msg) {
   }
 }
 
-// --- Portable CLI runner (Windows binstubs are .cmd -> need a shell) ---
-function runCli(bin, args, cwd) {
-  try {
-    if (process.platform === "win32") {
-      const line = [bin, ...args.map((a) => `"${String(a).replace(/"/g, '""')}"`)].join(" ");
-      return execSync(line, { cwd, timeout: 8000, encoding: "utf-8" }).trim();
-    }
-    return execFileSync(bin, args, { cwd, timeout: 8000, encoding: "utf-8" }).trim();
-  } catch {
-    return null;
-  }
-}
-
 // --- Bridge discovery (files written by the local daemon) ---
 function resolveBaseUrl() {
   const host = "127.0.0.1";
@@ -148,39 +135,6 @@ function resolveToken() {
     /* ignore */
   }
   return null;
-}
-
-// --- One-time session metadata (safe to run sync at load: not a hot path) ---
-function resolveMetadata() {
-  const cwd = process.cwd();
-  const get = (key) => runCli("agent-worktrees", ["get", key], cwd); // marketplace-isolation: allow agent-worktrees-management
-  let branch = null;
-  try {
-    branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd,
-      timeout: 5000,
-      encoding: "utf-8",
-    }).trim();
-  } catch {
-    branch = null;
-  }
-  const wtDir = get("worktree-dir");
-  return {
-    machine: get("machine"),
-    cwd,
-    worktree_id: wtDir ? basename(wtDir) : null,
-    repo: get("project"),
-    branch: branch || null,
-    // process.pid is the extension host process -- a liveness hint, not the
-    // copilot PID. The durable key is session_id; liveness is heartbeat-based.
-    pid: process.pid,
-    role: null,
-    // D4: who is steering this session, if an agent embodied it (set by
-    // `agent-worktrees embody --driver`). Surfaces the "driven by <agent>"
-    // banner so a human dropping in via Neuron Forge sees who's at the wheel.
-    // Absent/null for an operator-launched session.
-    driven_by: process.env.AGENT_BRIDGE_DRIVEN_BY || null,
-  };
 }
 
 // --- Bridge I/O (off the event loop; always best-effort) ---
@@ -404,7 +358,16 @@ session.on((event) => {
 try {
   state.base = resolveBaseUrl();
   state.token = resolveToken();
-  state.meta = resolveMetadata();
+  // state.meta starts unset -- resolveMetadataAsync() below fills it in the
+  // background. Deliberately NOT awaited here: this whole init block must
+  // finish (and the extension report ready) without waiting on any child
+  // process. register()'s payload spreads `...(state.meta || {})`, so the
+  // very first heartbeat may go out with only session_id if metadata hasn't
+  // resolved yet -- self-correcting on the next HEARTBEAT_MS tick, which is a
+  // fully acceptable trade for never blocking readiness on it.
+  resolveMetadataAsync()
+    .then((meta) => { state.meta = meta; })
+    .catch((e) => extLog(`metadata resolution failed (degrading, session unaffected): ${e.message}`));
 
   if (!state.token) {
     extLog("no local agent-bridge auth token found; not registering (ok)");
