@@ -174,7 +174,7 @@ Its contract is:
    path when available, otherwise a worktree-state file),
 3. **only when `.context-handoff/config.yaml`'s `mode` is `auto`** (the
    default is `manual-only` -- see "Mode gate" below): note it in the
-   worktree's own record via `agent-worktrees note-handoff` (this creates a
+   worktree's own record via `agent-worktrees note-handoff` <!-- marketplace-isolation: allow agent-worktrees-management --> (this creates a
    `pending_handoffs` entry agent-worktrees' resident monitor can discover
    and claim independently -- a live-cutover trigger point, not merely
    advisory, so it is gated the same as the two below), refresh
