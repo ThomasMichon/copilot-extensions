@@ -12239,56 +12239,6 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
     return 0
 
 
-def _cmd_list_glance(records) -> int:
-    """Render a compact "at a glance" digest of ACTIVE worktrees for agent /
-    sub-agent consumption (situational awareness).
-
-    Title + agent-asserted disposition summary only, ranked by disposition
-    recency. Worktrees with no recorded disposition are **named, not hidden** --
-    honesty about coverage matters more than a tidy list (a blank worktree is a
-    real gap, not an absence). Machine-local by design; a fleet view unions this
-    across machines (agent-bridge's cross-machine ``list`` crawl).
-    """
-    active = [r for r in records if r.status == "active"]
-
-    def _has_disp(r) -> bool:
-        return bool((r.title and r.title != "null") or r.summary)
-
-    disposed = [r for r in active if _has_disp(r)]
-    blank = [r for r in active if not _has_disp(r)]
-    # Rank by disposition recency (status_note_at desc); undated sort last.
-    disposed.sort(key=lambda r: r.status_note_at or "", reverse=True)
-
-    try:
-        proj = cfg.project_name() or "?"
-    except Exception:
-        proj = "?"
-    print(
-        f"Active worktrees on this machine ({proj}): {len(active)} "
-        f"-- {len(disposed)} with a recorded disposition, {len(blank)} without"
-    )
-    if disposed:
-        print()
-    for r in disposed:
-        sid = r.worktree_id[-8:]
-        age = _activity_age_str(r.status_note_at) or "?"
-        title = (r.title if (r.title and r.title != "null") else "").strip()
-        summ = (r.summary or "").strip().replace("\n", " ")
-        if len(summ) > 220:
-            summ = summ[:217] + "..."
-        line = f"  {sid}  {age:>7}  {title or '(untitled)'}"
-        if summ:
-            line += f" -- {summ}"
-        if r.follow_up:
-            line += "  [follow-up]"
-        print(line)
-    if blank:
-        print()
-        ids = ", ".join(r.worktree_id[-8:] for r in blank)
-        print(f"  No recorded disposition ({len(blank)}): {ids}")
-    return 0
-
-
 def _list_records_for_args(args: argparse.Namespace):
     """Load the filtered record set shared by ``list`` and daemon cache warm."""
     tracking_path = cfg.tracking_dir()
@@ -12507,7 +12457,8 @@ def cmd_list(args: argparse.Namespace) -> int:
         # Compact situational-awareness digest -- active worktrees only, title +
         # disposition summary, ranked by recency; consumed by agents/sub-agents.
         profile_assignment.maintain()
-        return _cmd_list_glance(records)
+        from . import list_views_cli
+        return list_views_cli.cmd_list_glance(records)
 
     if getattr(args, "stream", False):
         # NDJSON streaming path (implies --json): the Picker's streaming SSH
@@ -26241,6 +26192,18 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             return lease_cli.run_lease(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # fleet -- aggregate `list --json` across every reachable machine x
+    # environment (agent-worktrees-fleet-flows Phase 1, aperture-labs #2740).
+    # Manual dispatch: its own argparse, self-contained SSH fan-out.
+    if args_list[0] == "fleet":
+        from . import list_views_cli
+
+        try:
+            return list_views_cli.run_fleet(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
