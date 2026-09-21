@@ -13,10 +13,16 @@ interactive git/GCM prompts. This is the **public seam** agent-bridge calls
 from __future__ import annotations
 
 import os
+import json
+import re
 import shlex
+import shutil
 import socket
+import subprocess
 import sys
 from pathlib import Path
+
+from agent_procutil import no_window_flags
 
 # Static PATs a CodeSpace injects that must be neutralized so a dispatched agent
 # never relies on a stale/expired token instead of the credential relay.
@@ -43,6 +49,60 @@ RELAY_PORTMAP_DIR = "$HOME/.agent-bridge/relay-ports"
 # ``build_azure_auth_helper_compat_shim``) -- never persisted to a dotfile, so
 # it never survives past this one launch's shell.
 AZURE_AUTH_HELPER_COMPAT_DIR = "$HOME/.cache/agent-codespaces/compat-path"
+_SUBPROCESS_FLAGS = no_window_flags()
+_ENV_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _az_argv(rest: list[str]) -> list[str] | None:
+    """Build an argv that can launch the Azure CLI cross-platform."""
+    az = shutil.which("az")
+    if not az:
+        return None
+    if sys.platform == "win32" and az.lower().endswith((".cmd", ".bat")):
+        return ["cmd", "/c", az, *rest]
+    return [az, *rest]
+
+
+def current_identity(*, timeout: float = 10.0) -> str | None:
+    """Return the current host Azure-login identity string, or ``None``."""
+    args = _az_argv(["account", "show", "--output", "json"])
+    if args is None:
+        return None
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            creationflags=_SUBPROCESS_FLAGS,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    user = data.get("user") if isinstance(data, dict) else None
+    if not isinstance(user, dict):
+        return None
+    raw = str(user.get("name") or "").strip()
+    if not raw or any(ch in raw for ch in "\r\n\0"):
+        return None
+    if str(user.get("type") or "").strip().casefold() == "user" and "@" in raw:
+        alias = raw.split("@", 1)[0].strip()
+        if alias:
+            return alias
+    return raw
+
+
+def _valid_env_names(var_names) -> list[str]:
+    """Return only safe shell env-var names."""
+    return [
+        name for name in (var_names or ())
+        if isinstance(name, str) and _ENV_VAR_NAME_RE.fullmatch(name)
+    ]
 
 
 def build_azure_auth_helper_compat_shim() -> str:
@@ -156,13 +216,34 @@ def build_feed_token_exports(var_names) -> str:
     outlives it re-borrows on the next launch, matching the relay's own model).
     """
     out = ""
-    for name in var_names or ():
-        if not name:
-            continue
+    for name in _valid_env_names(var_names):
         out += (
             f'export {name}="$({ADO_AUTH_HELPER} get-access-token '
             '2>/dev/null || true)"; '
         )
+    return out
+
+
+def build_identity_env_exports(var_names) -> str:
+    """POSIX snippet exporting each identity env var from the host Azure login.
+
+    Unlike feed-token exports, these values are resolved on the HOST while the
+    launch prelude is being built, so they do not depend on
+    ``LC_GIT_CREDENTIAL_RELAY`` and can be emitted for any launch shape. The
+    resolved value comes from the same host Azure CLI session the relay mints
+    Azure bearers from; ordinary user principals export a short login-like
+    alias, while other principal types keep the reported identity string.
+    """
+    names = _valid_env_names(var_names)
+    if not names:
+        return ""
+    identity = current_identity()
+    if not identity:
+        return ""
+    out = ""
+    quoted = shlex.quote(identity)
+    for name in names:
+        out += f"export {name}={quoted}; "
     return out
 
 
@@ -173,6 +254,7 @@ def build_relay_env(
     use_relay: bool,
     ado_host: str | None = None,
     feed_token_env: list[str] | None = None,
+    identity_env: list[str] | None = None,
 ) -> str:
     """Build the CodeSpace launch-prelude env string.
 
@@ -181,23 +263,26 @@ def build_relay_env(
     and appends the relay exports when ``use_relay``. ``GIT_TERMINAL_PROMPT=0``
     keeps git from blocking on an interactive prompt when a credential can't be
     resolved; ``GCM_INTERACTIVE=never`` makes Git Credential Manager fail fast
-    rather than starting an interactive broker in a headless ACP session. When
-    ``use_relay``, also publishes a port-mapping file so the auth helpers can
-    rediscover this relay channel by liveness probe even if the env is not
-    inherited by a later tool shell (see :func:`build_relay_portmap_write`),
-    exposes the bare ``azure-auth-helper`` name RushStack's
-    ``AdoCodespacesAuthCredential`` requires -- session/process-scoped only,
-    never a persisted shadow (see :func:`build_azure_auth_helper_compat_shim`,
-    #415) -- and -- for any ``feed_token_env`` var names -- exports a
-    feed-auth token minted from the ADO auth helper so env-token feed auth
-    (npm/nuget/rush) works over the relay (dotfiles#1221). The feed-token
-    exports come LAST so they can use the just-exported
-    ``LC_GIT_CREDENTIAL_RELAY``.
+    rather than starting an interactive broker in a headless ACP session. Any
+    ``identity_env`` vars are resolved on the host at prelude-build time and
+    exported regardless of ``use_relay`` because they do not depend on
+    ``LC_GIT_CREDENTIAL_RELAY``. When ``use_relay``, also publishes a
+    port-mapping file so the auth helpers can rediscover this relay channel by
+    liveness probe even if the env is not inherited by a later tool shell (see
+    :func:`build_relay_portmap_write`), exposes the bare
+    ``azure-auth-helper`` name RushStack's ``AdoCodespacesAuthCredential``
+    requires -- session/process-scoped only, never a persisted shadow (see
+    :func:`build_azure_auth_helper_compat_shim`, #415) -- and -- for any
+    ``feed_token_env`` var names -- exports a feed-auth token minted from the
+    ADO auth helper so env-token feed auth (npm/nuget/rush) works over the
+    relay (dotfiles#1221). The feed-token exports come LAST so they can use the
+    just-exported ``LC_GIT_CREDENTIAL_RELAY``.
     """
     from .codespace_assets import build_auth_error_policy_command
 
     env = "".join(f"unset {v}; " for v in SCRUB_ENV_VARS)
     env += build_auth_error_policy_command()
+    env += build_identity_env_exports(identity_env)
     if use_relay:
         env += (
             f"export LC_GIT_CREDENTIAL_RELAY={relay_port}; "
@@ -269,6 +354,7 @@ def build_relay_launch_env(
             use_relay=True,
             ado_host=getattr(cfg.credentials, "ado_host", None),
             feed_token_env=getattr(cfg.credentials, "feed_token_env", None),
+            identity_env=getattr(cfg.credentials, "identity_env", None),
         ),
         port,
     )
