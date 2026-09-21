@@ -734,7 +734,7 @@ def test_live_session_deferral_reason_reports_busy_worktree():
     assert reason == "live session is active in worktree busy worktree"
 
 
-def test_sweep_continues_despite_unrelated_live_session_and_uses_maintenance_safe_restore(
+def test_sweep_continues_despite_unrelated_live_session_and_uses_repo_update_and_binstub_restore(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(self_update.sys, "platform", "win32")
@@ -754,7 +754,7 @@ def test_sweep_continues_despite_unrelated_live_session_and_uses_maintenance_saf
             ("git", "fetch"): self_update.CommandResult(list(argv), 0, "", ""),
             ("git", "rev-list"): self_update.CommandResult(list(argv), 0, "0\t0\n", ""),
             ("agent-worktrees", "-p"): self_update.CommandResult(list(argv), 0, "", ""),
-            (self_update.sys.executable, "-m"): self_update.CommandResult(list(argv), 0, "", ""),
+            ("agent-machines", "restore"): self_update.CommandResult(list(argv), 0, "", ""),
         }
         for prefix, result in mapping.items():
             if tuple(argv[: len(prefix)]) == prefix:
@@ -780,7 +780,16 @@ def test_sweep_continues_despite_unrelated_live_session_and_uses_maintenance_saf
     assert result.steps[0].name == "git-pull"
     assert result.steps[0].status == "skipped"
     assert "dirty" in result.steps[0].detail
+    update_step = next(step for step in result.steps if step.name == "update:copilot-extensions")
+    assert update_step.command == [
+        "agent-worktrees",
+        "-p",
+        "copilot-extensions",
+        "update",
+        "--no-manager",
+    ]
     restore_step = next(step for step in result.steps if step.name == "restore")
+    assert (restore_step.command or [None])[0] == "agent-machines"
     assert "--maintenance-safe" in (restore_step.command or [])
 
 
