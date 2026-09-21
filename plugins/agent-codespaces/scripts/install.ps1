@@ -966,9 +966,26 @@ function Sync-ConnectionOwnerService {
             -DontStopIfGoingOnBatteries -StartWhenAvailable `
             -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
             -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-        Register-ScheduledTask -TaskName $OwnerTaskName -Action $action -Trigger $trigger `
-            -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
-        Write-ServiceChanged "Registered Connection Owner scheduled task ($OwnerTaskName; interval=$($co.Interval)s)"
+        # Idempotent no-op when nothing changed (mirrors agent-vault/agent-index/
+        # agent-dispatch): the task's action points at a stable binstub
+        # ($stub) plus a stable host binary ($exe, resolved above the same way
+        # those plugins do), so it is byte-identical across routine updates and
+        # never needs a rewrite. Registering it again via `-Force` regardless
+        # requires the same elevation as any other Task Scheduler write, so a
+        # routine, nothing-changed update would otherwise fail with the same
+        # Access-Denied WARN every single run on a non-elevated host.
+        $existingTask = Get-ScheduledTask -TaskName $OwnerTaskName -ErrorAction SilentlyContinue
+        $existingAction = if ($existingTask) { @($existingTask.Actions) | Select-Object -First 1 } else { $null }
+        $actionCurrent = $existingAction -and
+            $existingAction.Execute -eq $action.Execute -and
+            ("$($existingAction.Arguments)").Trim() -eq ("$($action.Arguments)").Trim()
+        if ($actionCurrent) {
+            Write-ServiceOk "Connection Owner scheduled task already correct ($OwnerTaskName) -- left registered as-is"
+        } else {
+            Register-ScheduledTask -TaskName $OwnerTaskName -Action $action -Trigger $trigger `
+                -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+            Write-ServiceChanged "Registered Connection Owner scheduled task ($OwnerTaskName; interval=$($co.Interval)s)"
+        }
         try {
             Start-ScheduledTask -TaskName $OwnerTaskName -ErrorAction Stop
             Write-ServiceOk 'Connection Owner daemon started'

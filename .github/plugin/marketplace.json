@@ -24,7 +24,7 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev144",
+      "version": "0.4.0-dev145",
       "source": "plugins/agent-codespaces"
     },
     {
@@ -48,7 +48,7 @@
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync local or validated provider-rescued sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.1.2-dev27",
+      "version": "0.1.2-dev28",
       "source": "plugins/agent-logger"
     },
     {
