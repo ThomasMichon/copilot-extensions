@@ -61,9 +61,12 @@ from .reviewer_loop_commands import (  # noqa: F401 -- re-exported for existing 
 )
 from .producers_cli import (  # noqa: F401 -- re-exported for existing call sites/tests
     _cmd_emitter,
+    _cmd_reservations,
     _cmd_schedule,
     _cmd_webhook,
+    _parse_label_max_attempts,
     register_producer_commands,
+    register_reservations_command,
     register_webhook_command,
 )
 
@@ -2659,48 +2662,6 @@ def _reject_worktree_checkout_as_repo_root(repo_root: Path) -> None:
             "outside repos.yaml/projects.yaml)."
         )
 
-def _parse_label_max_attempts(items: list[str] | None) -> dict[str, int]:
-    """Parse repeated ``LABEL=N`` flags into a ``{label: max_attempts}`` map.
-
-    Raises ``SystemExit`` on a malformed entry (bad shape or non-int N) so the
-    supervisor fails loudly at startup rather than silently ignoring a policy.
-    """
-    out: dict[str, int] = {}
-    for raw in items or []:
-        label, sep, num = str(raw).partition("=")
-        label = label.strip()
-        if not sep or not label:
-            raise SystemExit(f"--label-max-attempts expects LABEL=N, got {raw!r}")
-        try:
-            out[label] = max(0, int(num.strip()))
-        except ValueError:
-            raise SystemExit(f"--label-max-attempts: N must be an integer, got {num!r}")
-    return out
-
-
-def _cmd_reservations(args: argparse.Namespace) -> int:
-    """Operator visibility + manual control over spawn reservations."""
-    with _client(args) as c:
-        if args.reservations_command == "list":
-            rows = c.list_reservations(task_id=args.task, state=args.state, limit=args.limit)
-            return _emit(rows)
-        if args.reservations_command == "fail":
-            return _emit(c.fail_spawn(args.key, detail=args.detail))
-        if args.reservations_command == "defer":
-            return _emit(c.defer_spawn(args.key, detail=args.detail))
-        if args.reservations_command == "settle":
-            return _emit(c.settle_spawn(args.key, detail=args.detail))
-        if args.reservations_command == "rearm":
-            return _emit(
-                c.rearm_spawn(
-                    args.task,
-                    permitted=args.permit,
-                    reason=args.reason,
-                    min_failures=args.min_failures,
-                )
-            )
-    return 2
-
 
 def _run_resolution_step(step: Any, *, cwd: str | None = None) -> dict:
     """Execute one non-advisory :class:`ResolutionStep` in the caller's worktree.
@@ -4572,52 +4533,7 @@ def build_parser() -> argparse.ArgumentParser:
     ol = op_sub.add_parser("list", help="list the current operator overrides")
     ol.set_defaults(func=_cmd_supervise)
     op.set_defaults(func=_cmd_supervise)
-    p = sub.add_parser("reservations", help="inspect / manually control spawn reservations")
-    res_sub = p.add_subparsers(dest="reservations_command", required=True)
-    rp = res_sub.add_parser("list", help="list spawn reservations")
-    rp.add_argument("--task", help="filter by task id")
-    rp.add_argument("--state", help="filter by state (comma-list ok)")
-    rp.add_argument("--limit", type=int, default=200)
-    rp.set_defaults(func=_cmd_reservations)
-    rp = res_sub.add_parser(
-        "fail", help="mark a reservation failed (releases the task for a fresh attempt)"
-    )
-    rp.add_argument("key")
-    rp.add_argument("--detail")
-    rp.set_defaults(func=_cmd_reservations)
-    rp = res_sub.add_parser(
-        "defer",
-        help=(
-            "mark a reservation deferred: a carried session was confirmed "
-            "still live/busy, not a failure (releases the task for a fresh "
-            "attempt without counting toward dead-lettering)"
-        ),
-    )
-    rp.add_argument("key")
-    rp.add_argument("--detail")
-    rp.set_defaults(func=_cmd_reservations)
-    rp = res_sub.add_parser("settle", help="mark a reservation settled (attempt over)")
-    rp.add_argument("key")
-    rp.add_argument("--detail")
-    rp.set_defaults(func=_cmd_reservations)
-    rp = res_sub.add_parser(
-        "rearm",
-        help="atomically retire a dead-lettered task's failed spawn attempts",
-    )
-    rp.add_argument("task", help="queued, unowned task id")
-    rp.add_argument(
-        "--permit",
-        action="store_true",
-        help="explicitly authorize the reservation-history mutation",
-    )
-    rp.add_argument("--reason", required=True, help="auditable operator reason")
-    rp.add_argument(
-        "--min-failures",
-        type=int,
-        default=3,
-        help="required failed-attempt count (minimum/default: 3)",
-    )
-    rp.set_defaults(func=_cmd_reservations)
+    register_reservations_command(sub)
 
     p = sub.add_parser(
         "producer-fence",
