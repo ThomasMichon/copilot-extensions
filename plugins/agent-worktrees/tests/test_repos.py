@@ -558,7 +558,7 @@ def test_is_unresolved_registered_target_false_with_explicit_account_override(
     assert repos.account_for_github_slug("azdo-proj") == "explicit-login"
 
 
-def test_account_for_github_slug_preserves_matched_entrys_own_override(
+def test_account_for_github_slug_preserves_matched_entry_own_override(
     home: Path,
 ):
     # Two registered repos share a github owner but have different explicit

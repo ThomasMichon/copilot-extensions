@@ -197,3 +197,94 @@ def test_repos_account_for_unregistered_bare_owner_prints_itself(
 
     assert rc == 0
     assert capfd.readouterr().out.strip() == "ThomasMichon"
+
+
+# --- omitted-target GitHub-only inference wiring (#3032 follow-up) --------
+#
+# `repos gh`/`account-for` with no explicit target infer the active repo via
+# `_infer_active_github_slug`. A dispatcher-level test guards the actual call
+# site -- a helper-level test alone would still pass if the dispatcher
+# reverted to the provider-generic `_infer_active_repo_slug`.
+
+
+def test_repos_gh_omitted_target_infers_github_remote(monkeypatch):
+    import subprocess
+
+    from agent_worktrees import config as cfg
+
+    monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(cfg, "load_config", lambda: object())
+    monkeypatch.setattr(
+        m, "_infer_active_github_slug", lambda cfg: "ThomasMichon/copilot-extensions",
+    )
+    monkeypatch.setattr(repos, "is_unresolved_registered_target", lambda t: False)
+    monkeypatch.setattr(repos, "account_for_github_slug", lambda t: "ThomasMichon")
+    monkeypatch.setattr(git_ops, "gh_token_for_account", lambda a: "tok")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **k: calls.append(list(a[0]) if a else []) or type(
+            "R", (), {"returncode": 0},
+        )(),
+    )
+
+    rc = m.cmd_repos_dispatch(["gh", "--", "issue", "list"])
+
+    assert rc == 0
+    assert calls == [["gh", "issue", "list"]]
+
+
+def test_repos_gh_omitted_target_refuses_non_github_active_remote(monkeypatch):
+    # The active project's remote is non-GitHub (e.g. Azure DevOps) --
+    # `_infer_active_github_slug` returns None, so with no explicit target the
+    # command must refuse (never fall back to a provider-generic slug that
+    # would mis-resolve as a bogus GitHub owner).
+    import subprocess
+
+    from agent_worktrees import config as cfg
+
+    monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(cfg, "load_config", lambda: object())
+    monkeypatch.setattr(m, "_infer_active_github_slug", lambda cfg: None)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: calls.append(list(a[0]) if a else []),
+    )
+
+    rc = m.cmd_repos_dispatch(["gh", "--", "issue", "list"])
+
+    assert rc == 1
+    assert not calls
+
+
+def test_repos_account_for_omitted_target_infers_github_remote(
+    monkeypatch, capfd,
+):
+    from agent_worktrees import config as cfg
+
+    monkeypatch.setattr(cfg, "load_config", lambda: object())
+    monkeypatch.setattr(
+        m, "_infer_active_github_slug", lambda cfg: "ThomasMichon/copilot-extensions",
+    )
+    monkeypatch.setattr(repos, "account_for_github_slug", lambda t: "ThomasMichon")
+
+    rc = m.cmd_repos_dispatch(["account-for"])
+
+    assert rc == 0
+    assert capfd.readouterr().out.strip() == "ThomasMichon"
+
+
+def test_repos_account_for_omitted_target_refuses_non_github_active_remote(
+    monkeypatch, capfd,
+):
+    from agent_worktrees import config as cfg
+
+    monkeypatch.setattr(cfg, "load_config", lambda: object())
+    monkeypatch.setattr(m, "_infer_active_github_slug", lambda cfg: None)
+
+    rc = m.cmd_repos_dispatch(["account-for"])
+
+    assert rc == 1
+    # The usage/error message goes to stdout (via output.err) -- what matters
+    # is that no *login* was printed as if it were a resolved account.
+    assert "Usage:" in capfd.readouterr().out
