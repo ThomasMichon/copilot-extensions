@@ -98,7 +98,7 @@
   "plugins/agent-worktrees/src/agent_worktrees/session_projection.py": 2124,
   "plugins/agent-worktrees/src/agent_worktrees/sessions.py": 2669,
   "plugins/agent-worktrees/src/agent_worktrees/state_root.py": 1056,
-  "plugins/agent-worktrees/src/agent_worktrees/tracking.py": 5848,
+  "plugins/agent-worktrees/src/agent_worktrees/tracking.py": 5855,
   "plugins/budget-guidance/scripts/versioned_runtime.py": 1245,
   "plugins/customizing-copilot/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/customizing-copilot/skills/reviewing-customizations/scripts/instruction_projections.py": 1770,

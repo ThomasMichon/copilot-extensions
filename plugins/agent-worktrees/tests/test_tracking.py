@@ -416,6 +416,47 @@ class TestSaveLoadRoundTrip:
         assert reloaded.codename_source == "custom"
         assert reloaded.title == "touch"
 
+    def test_disk_codename_source_wins_over_a_disagreeing_stale_value(
+        self, tmp_path: Path,
+    ):
+        # Round-7 review finding: the fix above only handled an EMPTY
+        # in-memory `codename_source` -- if the stale in-memory copy
+        # instead holds a DIFFERENT non-empty value (e.g. it saw
+        # "built-in" before an operator reclassified the same codename to
+        # "custom" on disk, a direct promotion that bypasses the ordinary
+        # merge entirely via `preserve_handoff_reservations=False`), the
+        # merge must still prefer the on-disk value on the next ordinary
+        # (stale) save, not silently keep the stale one merely because it
+        # isn't empty. This matters because `may_publish_codename` gates
+        # on `codename_source`.
+        from agent_worktrees.tracking import _save_record_unlocked
+
+        path = tmp_path / "wt.yaml"
+        rec = self._make_record(codename="amber-thicket", codename_source="built-in")
+        save_record(rec, path)
+        stale_snapshot = load_record(path)
+        assert stale_snapshot.codename_source == "built-in"
+
+        # A direct reclassification write (bypasses the merge above --
+        # this is the "operator promotes it on disk" scenario the review
+        # describes, distinct from an ordinary racing in-memory writer).
+        promoted = load_record(path)
+        promoted.codename_source = "custom"
+        _save_record_unlocked(
+            promoted, path, preserve_handoff_reservations=False,
+        )
+        assert load_record(path).codename_source == "custom"
+
+        # The genuinely stale in-memory snapshot (never saw the
+        # reclassification) now saves an unrelated field.
+        stale_snapshot.title = "touch"
+        save_record(stale_snapshot, path)
+
+        reloaded = load_record(path)
+        assert reloaded.codename == "amber-thicket"
+        assert reloaded.codename_source == "custom"
+        assert reloaded.title == "touch"
+
     def test_owner_ref_round_trip(self, tmp_path: Path):
         # resource-claims: the backward owner link survives save/load, is
         # omitted when unset, and parses into a qualified ClaimRef.

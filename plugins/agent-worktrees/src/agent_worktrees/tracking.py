@@ -2686,14 +2686,21 @@ def _save_record_unlocked(
         elif (
             record.codename
             and record.codename == current.codename
-            and not record.codename_source
             and current.codename_source
+            and record.codename_source != current.codename_source
         ):
             # fix-PR-#3037-review finding: the SAME codename is already
-            # assigned on both sides, but only the on-disk copy carries a
-            # KNOWN codename_source (e.g. an operator's manual per-record
-            # promotion, or a concurrent writer's classification landing
-            # moments before this stale save). Preserve that known
+            # assigned on both sides, but the on-disk copy carries a
+            # DIFFERENT known codename_source (e.g. an operator's manual
+            # per-record promotion, or a concurrent writer's
+            # classification landing moments before this stale save) --
+            # not only when this snapshot's own source was unset, but ALSO
+            # when it holds a now-STALE value that disagrees with the
+            # on-disk one (round-7 review finding: a stale writer holding
+            # e.g. "built-in" must not silently overwrite an on-disk
+            # reclassification to "custom", which could let
+            # `may_publish_codename` authorize a marker for a custom
+            # vocabulary it should have blocked). Preserve that known
             # provenance rather than silently overwriting it with an
             # unset value merely because this snapshot never saw it.
             record.codename_source = current.codename_source
