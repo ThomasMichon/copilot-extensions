@@ -16,7 +16,7 @@ visions:
   Behavior `task-detail-on-demand` and Feature `navigable-on-demand-grounding`
   already state the target; reality currently violates both.
 - **Umbrella issue:** [ThomasMichon/copilot-extensions#3033](https://github.com/ThomasMichon/copilot-extensions/issues/3033)
-- **Sub-issues:** filed per-phase below as each phase starts.
+- **Sub-issues:** [Phase 1 -- #3071](https://github.com/ThomasMichon/copilot-extensions/issues/3071).
 
 ## Guiding Intent
 
@@ -154,19 +154,19 @@ this
 repo's own effort.
 
 ### Phase 1 -- Registry + coverage guard (`customizing-copilot:reviewing-customizations`)
-- [ ] Design a small per-plugin `troubleshooting-index.json` (or an extension
+- [x] Design a small per-plugin `troubleshooting-index.json` (or an extension
       of `instruction-projections.json`) declaring the failure-mode
       categories that plugin owns (e.g. `agent-worktrees`:
       `claims-ledger`, `resource-obligations`, `head-session` [already
       covered by `head-claim-fallback`]; `agent-dispatch`:
       `blocked-task-recovery`; `agent-bridge`: `path-not-found`,
       `service-not-responding` [already partly in `diagnosing-...`]).
-- [ ] Add a guard test (parallel to
+- [x] Add a guard test (parallel to
       `test_dynamic_pointer_projections_have_exact_session_writers`) that
       scans each plugin's static projections and asserts every declared
       category has an ambient pointer row -- fails closed if a category is
       claimed but not indexed.
-- [ ] Extend `docs/patterns/agents-md-vs-instructions-split.md`'s audit
+- [x] Extend `docs/patterns/agents-md-vs-instructions-split.md`'s audit
       heuristic with a third question: "Is this a known failure symptom an
       agent can't phrase-match its way into? If yes, it needs an ambient
       index row, not just a skill trigger."
@@ -464,3 +464,31 @@ _Pending._
   repo); a new downstream Phase 5 instantiates it. Not yet started: Phase 1
   or Phase 2's remaining items (the deterministic sync tool, conflict-
   dispatch primitive, reconciler template, and setup skill).
+
+### 2026-09-20 (cont.) -- Phase 1 landed
+- Designed and shipped `troubleshooting-index.json` as an opt-in, per-plugin
+  sidecar to `instruction-projections.json`: each declared category carries
+  an `id`, `summary`, `pointer`, and `markers` (substrings the guard checks
+  for in that plugin's own static projection templates).
+- Added `plugins/customizing-copilot/skills/reviewing-customizations/scripts/troubleshooting_index.py`
+  (schema validation + coverage check, independent of the larger
+  `instruction_projections.py` render/sync machinery) and the guard test
+  `plugins/customizing-copilot/tests/test_troubleshooting_index.py` --
+  parallel to `test_dynamic_pointer_projections_have_exact_session_writers`,
+  it proves both directions with synthetic plugins (uncovered category
+  reported, covered category not reported, no-declaration and
+  no-static-projections edge cases, five malformed-declaration fail-closed
+  cases) plus a real repository-wide guard (`test_every_real_plugin_...`)
+  that will start enforcing coverage the moment Phase 3 populates any
+  plugin's registry.
+- Extended `docs/patterns/agents-md-vs-instructions-split.md`'s audit
+  heuristic with the fourth question this effort's audit motivated, and
+  documented the new registry in `reviewing-customizations`' `SKILL.md`.
+- No plugin populates `troubleshooting-index.json` yet -- that's Phase 3's
+  content-gap work, deliberately decoupled from this phase's mechanism.
+- Incidentally found and fixed an unrelated, pre-existing `marketplace.json`
+  version-consistency drift for `agent-worktrees` (stale by one dev version
+  from the just-merged `#3062`) as a separate atomic commit.
+- `customizing-copilot`'s full suite (163 passed, 6 skipped),
+  `check-version-bump`, `check-version-consistency`, and
+  `check-docs-consistency` all green. Not yet started: Phase 2.
