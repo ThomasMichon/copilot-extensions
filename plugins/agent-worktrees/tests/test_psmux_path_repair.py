@@ -12,7 +12,6 @@ import pytest
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _HELPER = _PLUGIN_ROOT / "scripts" / "psmux-path.ps1"
 _INSTALLER = _PLUGIN_ROOT / "scripts" / "install.ps1"
-_LAUNCHER = _PLUGIN_ROOT / "bin" / "launch-session.ps1"
 _PWSH = shutil.which("pwsh") or shutil.which("powershell")
 
 
@@ -111,10 +110,9 @@ $failed = Get-AwPsmuxSessionState -Path 'unused.exe' -SessionProbe {
     assert result == {"known": False, "count": 0}
 
 
-def test_installer_and_launcher_use_compatible_version_helper():
+def test_installer_uses_compatible_version_helper():
     helper = _HELPER.read_text(encoding="utf-8")
     installer = _INSTALLER.read_text(encoding="utf-8")
-    launcher = _LAUNCHER.read_text(encoding="utf-8")
     assert "marlocarlo.psmux_*" in helper
     assert "Get-AwPsmuxBinaryVersion" in helper
     assert "Find-AwCompatiblePsmuxPackageBinary" in installer
@@ -128,7 +126,6 @@ def test_installer_and_launcher_use_compatible_version_helper():
         "Get-Command psmux -CommandType Application -ErrorAction Stop | "
         "Select-Object -First 1"
     ) in installer
-    assert "Find-AwCompatiblePsmuxPackageBinary" in launcher
     assert "Test-AwPsmuxVersionCompatible" in helper
     assert "[string]$MinimumVersion = '3.3.5'" in helper
     assert "[string[]]$BlockedVersions = @('3.3.6')" in helper

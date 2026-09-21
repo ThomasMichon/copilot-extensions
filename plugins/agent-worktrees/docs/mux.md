@@ -78,12 +78,14 @@ for what each one means.
 ## Two backends, one model
 
 `tmux` (Linux/WSL) and `psmux` (Windows) are different implementations of the
-**same** model — a named, detachable session with a status bar. agent-worktrees
-configures them **per session** (`set -t <session>`, never a global `-g`), so it
-**does not own or overwrite** your personal `~/.tmux.conf` / `~/.psmux.conf`, and
-ad-hoc mux sessions you start yourself are untouched. The few server-global
-settings it can't scope per-session (keystroke passthrough, `escape-time`) live
-in an **opt-in** `apply-mux-keybinds.{sh,ps1}` you run only if you want them.
+**same** model — a named, detachable session with a status bar. The launcher
+(relocated to Worktree Manager's `bin/` in Phase 3b Sub-slice 2a Step 2)
+configures them **per session** (`set -t <session>`, never a global `-g`), so
+**neither agent-worktrees nor Worktree Manager owns or overwrites** your
+personal `~/.tmux.conf` / `~/.psmux.conf`, and ad-hoc mux sessions you start
+yourself are untouched. The few server-global settings it can't scope
+per-session (keystroke passthrough, `escape-time`) live in an **opt-in**
+`apply-mux-keybinds.{sh,ps1}` you run only if you want them.
 Full detail: [cli-reference.md § Status bar segment](cli-reference.md#status-bar-segment-tmux--psmux).
 
 ## See also

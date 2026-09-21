@@ -1046,30 +1046,13 @@ deploy_runtime_resolvers() {
 }
 
 deploy_wrappers() {
+    # The interactive mux launch-session/pane-wrapper scripts are no longer
+    # deployed here: Phase 3b Sub-slice 2a Step 2 (efforts/active/worktree-
+    # manager-control-plane/phase-3b-mux-relocation.md) completed the cutover
+    # to the relocated Worktree Manager copy as the one true implementation;
+    # agent-worktrees' own cmd_launch resolves that install live (or the
+    # direct, non-mux fallback) instead of an in-plugin copy.
     mkdir -p "$BIN_DIR"
-    local src="$PLUGIN_DIR/bin/launch-session.sh"
-    if [[ ! -f "$src" ]]; then
-        err "Wrapper source not found: $src"
-        return 1
-    fi
-    # Atomic replace -- write to temp then mv, so a concurrent session
-    # reading launch-session.sh isn't corrupted mid-write.
-    local tmp
-    tmp="$(mktemp "$BIN_DIR/launch-session.sh.XXXXXX")"
-    cp "$src" "$tmp"
-    chmod +x "$tmp"
-    mv -f "$tmp" "$BIN_DIR/launch-session.sh"
-    ok "Wrapper: launch-session.sh"
-
-    # Deploy pane wrapper (handles exit codes inside tmux/psmux panes)
-    local pane_src="$PLUGIN_DIR/bin/pane-wrapper.sh"
-    if [[ -f "$pane_src" ]]; then
-        tmp="$(mktemp "$BIN_DIR/pane-wrapper.sh.XXXXXX")"
-        cp "$pane_src" "$tmp"
-        chmod +x "$tmp"
-        mv -f "$tmp" "$BIN_DIR/pane-wrapper.sh"
-        ok "Wrapper: pane-wrapper.sh"
-    fi
 
     deploy_runtime_resolvers || return 1
 
@@ -1719,27 +1702,6 @@ deploy_git_hooks_path() {
     changed "Set git core.hooksPath = tools/hooks"
 }
 
-deploy_terminal_scripts() {
-    # Deploy the terminal-integration scripts to BIN_DIR. agent-worktrees no
-    # longer owns ~/.tmux.conf: the launcher applies the status bar + behaviors
-    # per-session from session-options.sh, and apply-mux-keybinds.sh is an
-    # opt-in server-global tuning script the user (or a restore flow) may run.
-    local src_dir="$PLUGIN_DIR/terminal"
-    local script src tmp
-    for script in session-options.sh apply-mux-keybinds.sh; do
-        src="$src_dir/$script"
-        if [[ ! -f "$src" ]]; then
-            echo "  ⚠ terminal script not found at $src" >&2
-            continue
-        fi
-        tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"
-        cp "$src" "$tmp"
-        chmod +x "$tmp"
-        mv -f "$tmp" "$BIN_DIR/$script"
-        ok "Terminal script: $script"
-    done
-}
-
 resolve_executable_command_path() {
     # Resolve only an executable file from PATH. Bash's `command -v` may return
     # an alias or function, neither of which a Python subprocess can execute.
@@ -1988,10 +1950,6 @@ case "$ACTION" in
         deploy_copilot_plugin
         ensure_copilot_experimental
         assert_path
-        # Machine-wide terminal integration: deploy the per-session options +
-        # opt-in keybind scripts. We do NOT touch ~/.tmux.conf -- the launcher
-        # applies the status bar per-session at runtime.
-        deploy_terminal_scripts
 
         # -- Project-specific (only when adopting) --
         if $HAS_PROJECT; then
@@ -2131,11 +2089,13 @@ case "$ACTION" in
             err "Package not importable in venv"
         fi
 
-        # Wrapper
-        if [[ -f "$BIN_DIR/launch-session.sh" ]]; then
-            ok "launch-session.sh deployed"
+        # Interactive mux launch (relocated to Worktree Manager since Phase
+        # 3b Sub-slice 2a Step 2; no in-plugin wrapper is deployed anymore).
+        wm_root="${WORKTREE_MANAGER_ROOT:-$HOME/.worktree-manager}"
+        if [[ -f "$wm_root/current-version" ]]; then
+            ok "Interactive launch: Worktree Manager found at $wm_root"
         else
-            err "launch-session.sh missing"
+            skipped "Interactive launch: no Worktree Manager found; direct non-mux fallback"
         fi
 
         # Tool binstubs
@@ -2175,13 +2135,6 @@ case "$ACTION" in
             fi
         else
             skipped "Project status skipped (no project specified)"
-        fi
-
-        # Terminal-integration scripts (per-session options; opt-in keybinds)
-        if [[ -x "$BIN_DIR/session-options.sh" ]]; then
-            ok "terminal scripts at $BIN_DIR (session-options.sh)"
-        else
-            echo "  ! terminal scripts missing -- run 'update' to deploy" >&2
         fi
 
         assert_path
@@ -2273,11 +2226,6 @@ case "$ACTION" in
         deploy_tool_binstub
         deploy_copilot_plugin
         ensure_copilot_experimental
-        # Machine-wide terminal integration: redeploy the per-session options +
-        # opt-in keybind scripts regardless of project context. agent-worktrees
-        # no longer owns ~/.tmux.conf (the launcher configures each session at
-        # runtime), so a project-less update just refreshes these scripts.
-        deploy_terminal_scripts
 
         # -- Project-specific (only when a project is known) --
         if $HAS_PROJECT; then

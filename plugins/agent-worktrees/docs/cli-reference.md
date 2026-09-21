@@ -316,8 +316,9 @@ set status-left  '#{@aw_ctx} '          # identity  (machine | env | repo:id4)
 set status-right '#{@aw_seg} %H:%M '     # disposition block + live clock
 ```
 
-Two seams spawn one detached updater per session (psmux via
-`launch-session.ps1`, tmux via `launch-session.sh`):
+Two seams spawn one detached updater per session (psmux via the relocated
+`launch-session.ps1`, tmux via `launch-session.sh` -- both now owned by
+Worktree Manager, see below):
 
 - the **launcher**, on psmux/tmux create and on every attach/join; and
 - the **`sessionStart` hook** (`register-session` → `_spawn_status_updater`),
@@ -363,24 +364,27 @@ agent-worktrees does **not** deploy, overwrite, or delete your global
 `tmux set -t <session>` (session-scoped, no `-g`) when it creates or rejoins a
 worktree session, so your personal tmux config and any ad-hoc tmux sessions
 sharing the same server are left untouched. The single source of truth is the
-deployed `~/.agent-worktrees/bin/session-options.sh`.
+Worktree Manager-deployed `~/.worktree-manager/versions/<current>/bin/session-options.sh`
+(the interactive mux launch scripts relocated there in Phase 3b Sub-slice 2a
+Step 2; agent-worktrees no longer ships or deploys its own copy).
 
 Settings that **cannot** be session-scoped -- server-global `escape-time` and
 the keystroke-passthrough root key table -- are **not** applied automatically
 (they would leak onto every session on the server). They live in the opt-in
-`~/.agent-worktrees/bin/apply-mux-keybinds.sh`. Run it once per machine, or wire
-it into a machine-restore flow, if you want that behavior: it persists a
-clearly-marked managed block in `~/.tmux.conf` (so it survives server restarts)
-**and** applies to any running server. The installer never touches
-`~/.tmux.conf` -- only this script does, and only when you elect to run it
-(`--no-persist` tunes the running server without writing the file; deleting the
-marked block removes the settings).
+`apply-mux-keybinds.sh`, deployed alongside `session-options.sh`. Run it once
+per machine, or wire it into a machine-restore flow, if you want that
+behavior: it persists a clearly-marked managed block in `~/.tmux.conf` (so it
+survives server restarts) **and** applies to any running server. Neither
+agent-worktrees nor Worktree Manager's installer ever touches `~/.tmux.conf`
+outside this script, and only when you elect to run it (`--no-persist` tunes
+the running server without writing the file; deleting the marked block
+removes the settings).
 
 > Both tmux (Linux/WSL) and psmux (Windows) are configured **per session** by
 > the launcher: `session-options.{sh,ps1}` stamps the bar + behaviors with
 > `set -t` (no `-g`), and the server-global keystroke passthrough lives in the
-> opt-in `apply-mux-keybinds.{sh,ps1}`. agent-worktrees no longer owns
-> `~/.tmux.conf` or `~/.psmux.conf`.
+> opt-in `apply-mux-keybinds.{sh,ps1}`. Neither agent-worktrees nor Worktree
+> Manager owns `~/.tmux.conf` or `~/.psmux.conf`.
 
 
 ## Keeping worktrees current

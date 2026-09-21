@@ -1,5 +1,12 @@
 """Guards for the launch-session.sh nested-plan unwrap.
 
+Migrated from plugins/agent-worktrees/tests/test_launch_session_unwrap.py as
+part of the Phase 3b Sub-slice 2a Step 2 cutover (efforts/active/worktree-
+manager-control-plane/phase-3b-mux-relocation.md): Worktree Manager's bin/ is
+now the sole copy of the interactive mux launch scripts (flat, not under a
+separate terminal/ subdirectory), so their regression coverage lives here
+instead of in agent-worktrees.
+
 Non-interactive resolves (``resolve --json --worktree-id`` / ``--json --new``,
 used by agent-bridge ACP launches) emit the bridge's *nested* plan shape::
 
@@ -26,13 +33,9 @@ _UNWRAP_SNIPPET = (
     "print(json.dumps(d['launch'] if isinstance(d, dict) and 'launch' in d else d))"
 )
 
-_LAUNCH_SCRIPT = (
-    Path(__file__).resolve().parents[1] / "bin" / "launch-session.sh"
-)
-
-_LAUNCH_PS1 = (
-    Path(__file__).resolve().parents[1] / "bin" / "launch-session.ps1"
-)
+_BIN = Path(__file__).resolve().parents[1] / "bin"
+_LAUNCH_SCRIPT = _BIN / "launch-session.sh"
+_LAUNCH_PS1 = _BIN / "launch-session.ps1"
 
 
 def _unwrap(plan: dict) -> dict:
@@ -178,9 +181,6 @@ def test_windows_launcher_encodes_wrapped_psmux_pane_argv():
     assert "-c $plan.work_dir @envFlags @paneCmd" in ps
 
 
-_TERMINAL = Path(__file__).resolve().parents[1] / "terminal"
-
-
 def test_windows_launcher_applies_psmux_passthrough_per_session():
     """psmux runs a SEPARATE server per wt-<id> and command-line
     bind-key/unbind-key silently no-op there, so the launcher must `source-file`
@@ -194,14 +194,14 @@ def test_windows_launcher_applies_psmux_passthrough_per_session():
 
 
 def test_session_options_source_files_passthrough_fragment():
-    so = (_TERMINAL / "session-options.ps1").read_text()
+    so = (_BIN / "session-options.ps1").read_text()
     assert "function Invoke-AwPsmuxPassthrough" in so
     assert "source-file -t $Session" in so
     assert "psmux-passthrough.conf" in so
 
 
 def test_psmux_passthrough_fragment_carries_the_directives():
-    frag = (_TERMINAL / "psmux-passthrough.conf").read_text()
+    frag = (_BIN / "psmux-passthrough.conf").read_text()
     assert "unbind-key -a -T root" in frag
     assert "WheelUpPane" in frag and "WheelDownPane" in frag
     assert "paste-detection off" in frag
@@ -210,7 +210,7 @@ def test_psmux_passthrough_fragment_carries_the_directives():
 def test_apply_mux_keybinds_source_files_every_session():
     """The opt-in/restore script must apply per SERVER (source-file each live
     session), not just the last_session server -- command-line binds no-op."""
-    amk = (_TERMINAL / "apply-mux-keybinds.ps1").read_text()
+    amk = (_BIN / "apply-mux-keybinds.ps1").read_text()
     assert "source-file -t $name $fragment" in amk
     assert "psmux-passthrough.conf" in amk
 
@@ -329,3 +329,62 @@ def test_launchers_propagate_attach_failures_without_killing_shared_sessions():
     assert "Failed to attach to new tmux session" in sh
     assert "reason=attach_failed" in sh
     assert sh.count('_aw_cleanup_owned_tmux_session "$TMUX_SESS"') == 1
+
+
+def test_launchers_compose_after_plan_before_copilot_handoff():
+    """Migrated from plugins/agent-worktrees/tests/test_knowledge_plugins.py."""
+    """Migrated from plugins/agent-worktrees/tests/test_knowledge_plugins.py."""
+    sh = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
+    ps = _LAUNCH_PS1.read_text(encoding="utf-8")
+
+    sh_compose = sh.index("_KNOWLEDGE_ARGS+=(knowledge compose-plugins")
+    assert sh.index('cd "$WORK_DIR"') < sh_compose
+    assert sh_compose < sh.index('if [[ "$NO_MUX" == "1" ]]')
+    sh_refresh = sh.index('_REFRESHED_PYTHON="$(resolve_runtime_python)"')
+    assert sh.rfind("invoke_update_apply 1 1", 0, sh_refresh) < sh_refresh
+    assert sh_refresh < sh_compose
+    assert 'PYTHON="$_REFRESHED_PYTHON"' in sh[sh_refresh:sh_compose]
+    assert "runtime is unavailable after update apply" in sh[sh_refresh:sh_compose]
+    assert '"${_KNOWLEDGE_ARGS[@]}" 2>&1' in sh
+    assert 'exit "$_KNOWLEDGE_RC"' in sh
+    assert "Knowledge plugin preflight failed" in sh
+    assert sh_compose < sh.index('PANE_CMD=("${CLEAN_ENV[@]}"')
+    assert sh_compose < sh.index('"${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}"')
+
+    ps_compose = ps.index("'knowledge', 'compose-plugins'")
+    assert ps.index("Set-Location $plan.work_dir") < ps_compose
+    assert ps_compose < ps.index("# Apply environment variables from the launch plan")
+    ps_refresh = ps.index("$refreshedVenvPython = Resolve-RuntimePython")
+    assert ps.rfind("Invoke-UpdateApply", 0, ps_refresh) < ps_refresh
+    assert ps_refresh < ps_compose
+    assert "$VenvPython = $refreshedVenvPython" in ps[ps_refresh:ps_compose]
+    assert "runtime is unavailable after update apply" in ps[ps_refresh:ps_compose]
+    assert "$knowledgeOutput = & $VenvPython @knowledgeArgs 2>&1" in ps
+    assert "exit $knowledgeExit" in ps
+    assert "Knowledge plugin preflight failed" in ps
+    assert ps_compose < ps.index("& $cmd[0] $cmd[1..($cmd.Count - 1)]")
+
+
+def test_launchers_prefer_resolved_plan_project_over_ambient():
+    """Migrated from plugins/agent-worktrees/tests/test_launch_project_scoping.py
+    (regression guard for #2338). Once the plan carries `project`, the
+    launcher scripts must let it win over whatever ambient/starting project
+    the launcher itself had -- never only filling in an empty value."""
+    ps1 = _LAUNCH_PS1.read_text(encoding="utf-8")
+    sh = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
+
+    # The stale guard ("only if empty") must be gone from both launchers.
+    assert (
+        "if (-not $script:LaunchProject -and $plan.PSObject.Properties.Name "
+        "-contains 'project') {" not in ps1
+    )
+    assert 'if [[ -z "$LAUNCH_PROJECT" ]]; then\n    LAUNCH_PROJECT=$(printf' not in sh
+
+    # The plan's project must now be preferred unconditionally when present.
+    assert (
+        "if ($plan.PSObject.Properties.Name -contains 'project' "
+        "-and $plan.project) {" in ps1
+    )
+    assert "$script:LaunchProject = [string]$plan.project" in ps1
+    assert '_PLAN_PROJECT=$(printf' in sh
+    assert 'if [[ -n "$_PLAN_PROJECT" ]]; then\n    LAUNCH_PROJECT="$_PLAN_PROJECT"' in sh

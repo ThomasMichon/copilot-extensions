@@ -14,6 +14,7 @@ from agent_bridge.transport import (
     AgentProcess,
     SpawnTarget,
     _agent_worktrees_python,
+    _agent_worktrees_root,
     _build_remote_cmd,
     _extract_json_object,
     _looks_unprovisioned_project,
@@ -1359,6 +1360,37 @@ class TestAgentWorktreesPython:
         got = _agent_worktrees_python()
         assert got == want
         assert ".venv" not in got
+
+    def test_honors_agent_rt_root_override(self, tmp_path, monkeypatch):
+        """The standard cross-plugin resolution override every plugin's own
+        resolve-runtime.ps1/.sh honors -- a non-default agent-worktrees
+        install location must resolve consistently here too, not only via
+        the hardcoded ~/.agent-worktrees default."""
+        import os
+        import sys
+        custom_root = tmp_path / "custom-agent-worktrees-root"
+        rel = ("Scripts", "python.exe") if sys.platform == "win32" else ("bin", "python")
+        want = os.path.join(str(custom_root), "versions", "1.5.3-dev467", *rel)
+        os.makedirs(os.path.dirname(want), exist_ok=True)
+        open(want, "w").close()
+        os.makedirs(str(custom_root), exist_ok=True)
+        with open(os.path.join(str(custom_root), "current-version"), "w") as fh:
+            fh.write("1.5.3-dev467\n")
+        # A default-location slot must be ignored while the override is set.
+        self._make_slot(tmp_path, "1.5.3-dev999")
+        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+        monkeypatch.setenv("AGENT_RT_ROOT", str(custom_root))
+        assert _agent_worktrees_python() == want
+
+    def test_agent_worktrees_root_honors_override(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AGENT_RT_ROOT", str(tmp_path / "custom"))
+        assert _agent_worktrees_root() == str(tmp_path / "custom")
+
+    def test_agent_worktrees_root_defaults_to_home(self, tmp_path, monkeypatch):
+        import os
+        monkeypatch.delenv("AGENT_RT_ROOT", raising=False)
+        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+        assert _agent_worktrees_root() == os.path.join(str(tmp_path), ".agent-worktrees")
 
 
 class TestLocalResolvePassesProject:

@@ -1,5 +1,10 @@
 """Guards for launch-session.ps1's ``--`` Copilot-passthrough split.
 
+Migrated from plugins/agent-worktrees/tests/test_launch_passthrough.py as part
+of the Phase 3b Sub-slice 2a Step 2 cutover (efforts/active/worktree-manager-
+control-plane/phase-3b-mux-relocation.md): Worktree Manager's bin/ is now the
+sole copy of the interactive mux launch scripts.
+
 agent-bridge spawns a Windows SSH ACP session through the project binstub as::
 
     test-chamber --json --worktree-id <id> --no-mux --no-update --no-resume \\
