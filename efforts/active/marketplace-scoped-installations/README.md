@@ -375,6 +375,79 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-21 — `agent-bridge` registered as a new OWNERS member; `handoff-check` converted
+
+- Full-architecture audit (all 11 `agent-*` plugins) found `agent-bridge` and
+  `agent-worktrees` were themselves calling sibling plugins via ambient
+  `shutil.which`/`Get-Command`, but neither was registered in `peer-launch`'s
+  `OWNERS` set (the pre-existing set only covered agent-dispatch,
+  agent-codespaces, agent-containers, agent-logger, agent-index,
+  agent-machines as callers), so those call sites could never route through
+  the same-cell boundary.
+- Registered `agent-bridge` as a new `OWNERS` member: added it to the
+  canonical `libs/peer-launch/peer_launch.py` OWNERS set, vendored a new
+  `_peer_launch.py` + `_installation_context.py` copy into
+  `plugins/agent-bridge/src/agent_bridge/` via `tools/sync-peer-launch.py`
+  and `tools/sync-installation-context.py`, and updated both tools'
+  destination/adopter lists so future syncs keep it in scope. `agent-bridge`
+  remains a `PEERS` target too (dual membership is valid and already
+  implicit in the code -- nothing enforces disjointness).
+- Converted `agent-bridge`'s `handoff-check` command
+  (`_cmd_handoff_check` -> `agent-worktrees handoffs-check`) to resolve the
+  same-cell peer boundary first. The legacy ambient-`PATH` lookup (marked
+  `# marketplace-isolation: allow legacy-compatibility`) is used only when
+  no explicit context is set at all; once a context is set, an
+  owner/receipt/governance refusal propagates as `ContextRefused` and a
+  valid owner with no same-cell peer is genuine absence -- neither degrades
+  to ambient `PATH`, matching agent-logger's `compact.py`/`origin.py`
+  pattern. Copilot PR review caught that an earlier draft of this
+  conversion silently fell back to ambient `PATH` on any explicit-context
+  failure -- unsafe here since `--execute` mutates predecessor state, so a
+  silent fallback could operate on a foreign cell's `agent-worktrees` --
+  and a second finding that the same-cell subprocess spawn was missing
+  `no_window_kwargs()` (present on agent-logger's equivalent same-cell
+  call); both fixed before merge. A follow-up review round raised a third
+  concern -- that `install_dir()` (honoring `AGENT_BRIDGE_INSTALL_DIR`)
+  might not equal the required plugin root for a long-lived daemon -- and a
+  fix switched to `AGENT_BRIDGE_PAYLOAD_ROOT` instead; a *subsequent* review
+  round caught that this "fix" was itself wrong: `AGENT_BRIDGE_PAYLOAD_ROOT`
+  is a different, replaceable path (the marketplace source payload
+  `runtime-gate` resolves *from*), while tracing `installation_context.py`'s
+  own `_activation_result` confirms `runtime-gate.sh`/`.ps1` set
+  `AGENT_BRIDGE_INSTALL_DIR` to the *validated* `runtimeRoot`, which equals
+  the plugin root exactly when namespaced/active
+  (`runtime_root = plugin_root if actual_mode == "namespaced" else
+  legacy_root`). Reverted to `install_dir()` and added a regression test
+  with a distinct (wrong) `AGENT_BRIDGE_PAYLOAD_ROOT` value to prove
+  resolution ignores it.
+- Found and fixed a **pre-existing gap** in `tools/check-version-bump.py`
+  while touching it: its hardcoded `packaged_peers` list (which plugins must
+  bump when `libs/peer-launch` changes) already omitted `agent-index` and
+  `agent-machines`, both real `OWNERS` members since an earlier slice. Added
+  `agent-bridge` and both previously-missing plugins to that list.
+- Bumped all 7 affected plugins (`agent-bridge`, `agent-dispatch`,
+  `agent-codespaces`, `agent-containers`, `agent-logger`, `agent-index`,
+  `agent-machines`) per `check-version-bump.py`'s shared-lib rule, and
+  updated every version-consistency surface `check-version-consistency.py`
+  checks (marketplace.json, per-plugin `__init__.py`/`_build_info.py`, and
+  agent-index's `agent-dispatch` registrar reference) for all 7.
+- Audit also confirmed: (a) `agent-mcp` and `agent-vault`'s absence from
+  `OWNERS`/`PEERS` is not a gap -- neither actually launches a sibling
+  plugin; (b) `agent-dispatch -> agent-bridge` (`bridge.py`'s `agent-bridge
+  send` over SSH) is a remote-transport call, correctly out of
+  `peer-launch`'s local-only scope; (c) `agent-worktrees`'s own sibling
+  calls to `agent-dispatch`, `agent-codespaces`, and `agent-machines` remain
+  unconverted -- `agent-worktrees` is not yet an `OWNERS` member and those
+  three are not yet `PEERS` targets, both open for a future slice.
+- Clean-room dual-cell validation remains intentionally scoped to 2 of 11
+  plugins (`agent-index`, `agent-machines`) per Phase 3's own non-goal ("the
+  exemplars prove the primitive; Phases 4-5 roll it out") -- not a gap, but
+  worth naming: 9 of 11 plugins have never been individually proven under
+  concurrent-cell conditions.
+- `check-marketplace-isolation.py`'s `path-sibling-launch` count dropped
+  from 43 to 42, confirming the guard tracks this conversion; the guard
+  stays report-only (Phase 6's last checkbox).
+
 ### 2026-09-20 — agent-logger's `state-root` sibling-launch caller converted (#3095)
 
 - Converted `agent-logger`'s `origin.py::_bound_knowledge_repo_cached` (its

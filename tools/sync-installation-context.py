@@ -83,8 +83,8 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
         )
         for plugin in ADOPTERS
         if plugin in {
-            "agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger",
-            "agent-index", "agent-machines",
+            "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
+            "agent-logger", "agent-index", "agent-machines",
         }
     ] + [
         (
