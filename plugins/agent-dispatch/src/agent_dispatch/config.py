@@ -710,9 +710,16 @@ def satellite_max_concurrent() -> int:
 
 
 def satellite_project() -> str | None:
-    """The ``agent-worktrees`` project a satellite embodies claimed work into
-    (``AGENT_DISPATCH_SATELLITE_PROJECT``), or ``None`` to let
-    ``embody.spawn_embodied_worker`` fall back to its own CWD-based
-    discovery. Explicit is safer for a satellite's work-intake loop, which
-    runs from a daemon/service context with no meaningful CWD of its own."""
+    """An explicit override for the ``agent-worktrees`` project a satellite
+    embodies claimed work into (``AGENT_DISPATCH_SATELLITE_PROJECT``), or
+    ``None`` to derive one **per task** instead
+    (:func:`agent_dispatch.satellite_work_intake.SatelliteWorkIntake._resolve_project`
+    -- from the task's own repo lane via
+    :func:`agent_dispatch.embody.project_for_task`). Set this only when every
+    task this satellite pulls belongs to the same project; leave it unset for
+    a satellite that pulls affinitied work across more than one. Either way,
+    a task-intake spawn never falls back to CWD-based discovery: this loop
+    runs from a daemon/service context with no meaningful CWD, and a silent
+    CWD fallback there would risk embodying the wrong project rather than
+    surfacing the misconfiguration."""
     return os.environ.get("AGENT_DISPATCH_SATELLITE_PROJECT") or None

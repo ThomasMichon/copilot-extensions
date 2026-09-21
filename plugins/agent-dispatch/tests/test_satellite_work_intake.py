@@ -20,6 +20,11 @@ class FakeClock:
         self.t += float(seconds)
 
 
+class FakeProc:
+    def __init__(self, returncode: int = 0) -> None:
+        self.returncode = returncode
+
+
 class FakeClient:
     """A minimal stand-in for :class:`agent_dispatch.client.DispatchClient`:
     just enough ``list(**params)`` behavior to drive the loop deterministically."""
@@ -38,15 +43,22 @@ class FakeClient:
         return []
 
 
-def _loop(client, *, spawned=None, **kwargs) -> tuple[SatelliteWorkIntake, list]:
+def _loop(
+    client, *, spawned=None, project="test-project", **kwargs
+) -> tuple[SatelliteWorkIntake, list]:
     spawned = spawned if spawned is not None else []
 
     def fake_spawn(task_id, **_kw):
         spawned.append(task_id)
-        return object()
+        return FakeProc(0)
 
     loop = SatelliteWorkIntake(
-        client, machine="book2", spawn_fn=fake_spawn, clock=FakeClock(), **kwargs
+        client,
+        machine="book2",
+        project=project,
+        spawn_fn=fake_spawn,
+        clock=FakeClock(),
+        **kwargs,
     )
     return loop, spawned
 
@@ -61,9 +73,7 @@ def test_spawns_for_each_queued_task_up_to_capacity():
 
 
 def test_no_capacity_when_already_at_active_cap():
-    client = FakeClient(
-        active=[{"id": "running"}], queued=[{"id": "t1"}]
-    )
+    client = FakeClient(active=[{"id": "running"}], queued=[{"id": "t1"}])
     loop, spawned = _loop(client, max_concurrent=1)
     result = loop.tick()
     assert spawned == []
@@ -91,10 +101,15 @@ def test_recently_triggered_task_reconsidered_after_ttl_expires():
 
     def fake_spawn(task_id, **_kw):
         spawned.append(task_id)
-        return object()
+        return FakeProc(0)
 
     loop = SatelliteWorkIntake(
-        client, machine="book2", spawn_fn=fake_spawn, clock=clock, trigger_ttl=50.0,
+        client,
+        machine="book2",
+        project="test-project",
+        spawn_fn=fake_spawn,
+        clock=clock,
+        trigger_ttl=50.0,
         max_concurrent=1,
     )
     loop.tick()
@@ -102,6 +117,33 @@ def test_recently_triggered_task_reconsidered_after_ttl_expires():
     clock.advance(51)
     loop.tick()
     assert spawned == ["t1", "t1"]
+
+
+def test_recently_triggered_entry_cleared_once_observed_active():
+    # t1 was triggered last tick and hasn't shown up as claimed/started yet
+    # -- still counted (recent_triggers). Once the coordinator confirms it
+    # active, the placeholder must be dropped so it doesn't ALSO keep
+    # squatting on a slot after the real task finishes and drops off the
+    # active list.
+    client = FakeClient(queued=[{"id": "t1"}, {"id": "t2"}])
+    loop, spawned = _loop(client, max_concurrent=1)
+    loop.tick()
+    assert spawned == ["t1"]
+
+    # Next tick: t1 now shows as claimed (coordinator-confirmed) and no
+    # longer appears in `queued`.
+    client._active = [{"id": "t1"}]
+    client._queued = [{"id": "t2"}]
+    result = loop.tick()
+    # capacity: max_concurrent(1) - active(1) - recent_triggers(0, cleared) = 0
+    assert result["spawned"] == []
+    assert result["skipped_at_capacity"] is True
+
+    # Once t1 finishes and drops off the active list entirely, capacity
+    # frees up for t2 -- proving the stale trigger didn't linger.
+    client._active = []
+    result = loop.tick()
+    assert result["spawned"] == ["t2"]
 
 
 def test_active_list_failure_degrades_to_at_capacity():
@@ -129,25 +171,40 @@ def test_queued_list_failure_degrades_to_empty_spawned():
     assert result["error"] == "list_failed"
 
 
-def test_spawn_failure_releases_the_slot_immediately():
+def test_spawn_exception_releases_the_slot_immediately():
     client = FakeClient(queued=[{"id": "t1"}, {"id": "t2"}])
-    clock = FakeClock()
 
     def flaky_spawn(task_id, **_kw):
         if task_id == "t1":
             raise RuntimeError("embody failed to launch")
-        return object()
+        return FakeProc(0)
 
-    loop = SatelliteWorkIntake(
-        client, machine="book2", spawn_fn=flaky_spawn, clock=clock, max_concurrent=1
-    )
+    loop, _ = _loop(client, spawned=[], max_concurrent=1)
+    loop._spawn_fn = flaky_spawn
     result = loop.tick()
-    # t1's spawn attempt failed and released its slot -- t2 gets the capacity
-    # instead of the whole tick going to waste.
+    # t1's spawn attempt raised and released its slot -- t2 gets the
+    # capacity instead of the whole tick going to waste.
     assert result["spawned"] == ["t2"]
 
 
-def test_list_calls_scoped_to_this_machine():
+def test_spawn_nonzero_returncode_counts_as_failure_not_success():
+    # spawn_embodied_worker runs with check=False, so a failed
+    # `agent-worktrees embody` invocation comes back as an ordinary
+    # CompletedProcess with a nonzero returncode, not a raised exception.
+    client = FakeClient(queued=[{"id": "t1"}, {"id": "t2"}])
+
+    def half_flaky_spawn(task_id, **_kw):
+        return FakeProc(1) if task_id == "t1" else FakeProc(0)
+
+    loop, _ = _loop(client, max_concurrent=1)
+    loop._spawn_fn = half_flaky_spawn
+    result = loop.tick()
+    assert result["spawned"] == ["t2"]
+    # t1's slot was released, not left squatting for the TTL.
+    assert "t1" not in loop._recent_triggers
+
+
+def test_list_calls_scoped_to_this_machine_and_capped_active_limit():
     client = FakeClient(queued=[])
     loop, _ = _loop(client)
     loop.tick()
@@ -155,6 +212,7 @@ def test_list_calls_scoped_to_this_machine():
         "status": "claimed,started",
         "target_machine": "book2",
         "repo": None,
+        "limit": 200,
     }
     assert client.calls[1] == {
         "status": "queued",
@@ -163,12 +221,84 @@ def test_list_calls_scoped_to_this_machine():
     }
 
 
+def test_active_list_limit_covers_a_cap_above_the_endpoint_default():
+    client = FakeClient(queued=[])
+    loop, _ = _loop(client, max_concurrent=500)
+    loop.tick()
+    assert client.calls[0]["limit"] == 500
+
+
 def test_satellite_repo_scopes_the_discovery_queries():
     client = FakeClient(queued=[])
     loop, _ = _loop(client, repo="aperture-labs")
     loop.tick()
     assert client.calls[0]["repo"] == "aperture-labs"
     assert client.calls[1]["repo"] == "aperture-labs"
+
+
+# -- project resolution -------------------------------------------------------
+
+
+def test_explicit_project_override_used_for_every_task():
+    captured = []
+
+    def fake_spawn(task_id, **kw):
+        captured.append(kw["project"])
+        return FakeProc(0)
+
+    client = FakeClient(queued=[{"id": "t1", "repo": "some/other-repo"}])
+    loop = SatelliteWorkIntake(
+        client,
+        machine="book2",
+        project="explicit-project",
+        spawn_fn=fake_spawn,
+        clock=FakeClock(),
+    )
+    loop.tick()
+    assert captured == ["explicit-project"]
+
+
+def test_project_derived_from_task_repo_when_unconfigured(monkeypatch):
+    import agent_dispatch.embody as embody_mod
+
+    captured = []
+
+    def fake_spawn(task_id, **kw):
+        captured.append(kw["project"])
+        return FakeProc(0)
+
+    def fake_project_for_task(task):
+        return f"derived-{task['repo']}"
+
+    monkeypatch.setattr(embody_mod, "project_for_task", fake_project_for_task)
+
+    client = FakeClient(queued=[{"id": "t1", "repo": "acme"}])
+    loop = SatelliteWorkIntake(
+        client, machine="book2", spawn_fn=fake_spawn, clock=FakeClock()
+    )
+    loop.tick()
+    assert captured == ["derived-acme"]
+
+
+def test_unresolvable_project_fails_the_spawn_and_releases_the_slot():
+    # No explicit project, and the task carries no repo lane to derive one
+    # from -- must degrade to a per-task spawn failure (never a silent
+    # CWD-discovery fallback, since this loop runs from a daemon/service
+    # context with no meaningful CWD).
+    client = FakeClient(queued=[{"id": "t1"}])
+    spawn_calls = []
+
+    def fake_spawn(task_id, **kw):
+        spawn_calls.append(task_id)
+        return FakeProc(0)
+
+    loop = SatelliteWorkIntake(
+        client, machine="book2", spawn_fn=fake_spawn, clock=FakeClock()
+    )
+    result = loop.tick()
+    assert result["spawned"] == []
+    assert spawn_calls == []  # spawn_fn never even reached
+    assert "t1" not in loop._recent_triggers
 
 
 def test_requires_machine():

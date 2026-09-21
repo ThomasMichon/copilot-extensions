@@ -95,14 +95,48 @@ class SatelliteWorkIntake:
         for task_id in expired:
             del self._recent_triggers[task_id]
 
-    def _spawn(self, task_id: str) -> Any:
+    def _clear_observed_triggers(self, active: list[dict]) -> None:
+        """Drop any in-memory "recently triggered" entry the coordinator now
+        confirms as actually `claimed`/`started` -- it no longer needs this
+        loop's own placeholder bookkeeping and, left in place, would keep
+        squatting on a concurrency slot for the rest of its TTL even after
+        the task it stood in for has already finished (default cap of 1: a
+        single stale entry would starve all newly queued work for up to
+        `trigger_ttl` seconds after every job)."""
+        for task in active:
+            task_id = task.get("id")
+            if task_id is not None:
+                self._recent_triggers.pop(task_id, None)
+
+    def _resolve_project(self, task: dict) -> str | None:
+        """The ``--project`` to embody a claimed task under: an explicit
+        override always wins; otherwise derive it from the task's own repo
+        lane (:func:`agent_dispatch.embody.project_for_task`) rather than
+        ever falling back to CWD discovery -- this loop runs from a
+        daemon/service context with no meaningful CWD, so an unresolvable
+        project must surface as a per-task spawn failure (handled the same
+        as any other failed launch), never a silent misembodiment."""
+        if self._project:
+            return self._project
+        from .embody import project_for_task  # noqa: PLC0415
+
+        return project_for_task(task)
+
+    def _spawn(self, task: dict) -> Any:
         spawn_fn = self._spawn_fn
         if spawn_fn is None:
             from .embody import spawn_embodied_worker as spawn_fn  # noqa: PLC0415
+        project = self._resolve_project(task)
+        if project is None:
+            raise ValueError(
+                f"cannot resolve a project for task {task.get('id')!r} -- no "
+                f"AGENT_DISPATCH_SATELLITE_PROJECT configured and the task "
+                f"carries no repo lane to derive one from"
+            )
         return spawn_fn(
-            task_id,
+            task.get("id"),
             worker_id=self._worker_id,
-            project=self._project,
+            project=project,
             repo=self._repo,
             route=" --shared",
         )
@@ -116,17 +150,24 @@ class SatelliteWorkIntake:
         the loop" contract)."""
         now = self._clock()
         self._reap_expired_triggers(now)
+        # `limit` defaults to the `/tasks` endpoint's own 200 -- request at
+        # least `max_concurrent` so an operator-configured cap above 200
+        # can never be undercounted into "capacity available" by a
+        # truncated active-task read.
+        active_limit = max(200, self._max_concurrent)
         try:
             active = self._client.list(
                 status=_ACTIVE_STATUSES,
                 target_machine=self._machine,
                 repo=self._repo,
+                limit=active_limit,
             )
         except Exception:
             # Can't confirm current occupancy -- degrade to "assume full" so
             # a coordinator hiccup can never be misread as "clear to spawn
             # more", which would risk over-claiming past the cap.
             return {"spawned": [], "skipped_at_capacity": True, "error": "list_failed"}
+        self._clear_observed_triggers(active)
         capacity = self._max_concurrent - len(active) - len(self._recent_triggers)
         if capacity <= 0:
             return {"spawned": [], "skipped_at_capacity": True}
@@ -144,13 +185,33 @@ class SatelliteWorkIntake:
             if not task_id or task_id in self._recent_triggers:
                 continue
             self._recent_triggers[task_id] = now
-            try:
-                self._spawn(task_id)
-            except Exception:
-                # Spawn failed to even launch -- release the slot immediately
-                # rather than let a hard failure squat on it for the full TTL.
+            if not self._try_spawn(task):
+                # Failed to even launch (or launched but exited nonzero) --
+                # release the slot immediately rather than let a hard
+                # failure squat on it for the full TTL.
                 del self._recent_triggers[task_id]
                 continue
             spawned.append(task_id)
             capacity -= 1
         return {"spawned": spawned, "skipped_at_capacity": False}
+
+    def _try_spawn(self, task: dict) -> bool:
+        """Trigger a spawn for ``task``; ``True`` only on a genuine launch.
+
+        ``embody.spawn_embodied_worker`` runs its subprocess with
+        ``check=False``, so a nonzero ``returncode`` (the ``agent-worktrees
+        embody`` invocation itself failing) does **not** raise -- it comes
+        back as an ordinary result. Duck-type for a ``returncode`` attribute
+        so both that real return shape and a caller-supplied ``spawn_fn`` in
+        tests (which may return a plain sentinel with no such attribute) are
+        handled: a present, nonzero ``returncode`` is a failure exactly like
+        a raised exception; anything else (no such attribute, or zero) is a
+        successful trigger.
+        """
+        try:
+            result = self._spawn(task)
+        except Exception:
+            return False
+        returncode = getattr(result, "returncode", None)
+        return returncode is None or returncode == 0
+
