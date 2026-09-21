@@ -48,6 +48,7 @@ import {
   sanitizedGitEnv,
   sessionBindingForSession,
   triggerHandoff,
+  waitForWorktreeSyncToSettle,
   writeJsonAtomic,
   writeSessionStateHandoff,
   readSessionStateHandoff,
@@ -1203,6 +1204,98 @@ test("resolveRuntimePython with allowProvision:false fails fast instead of riski
     assert.ok(elapsedMs < 10_000, `expected a fast failure, took ${elapsedMs}ms`);
   } finally {
     rmSync(fakePluginRoot, { recursive: true, force: true });
+  }
+});
+
+test("waitForWorktreeSyncToSettle returns immediately (settled) when no sync lock is present", async () => {
+  const dir = initGitRepo();
+  try {
+    const start = Date.now();
+    const result = await waitForWorktreeSyncToSettle(dir, { timeoutMs: 5000, pollMs: 100 });
+    const elapsedMs = Date.now() - start;
+    assert.equal(result.waited, true);
+    assert.equal(result.settled, true);
+    assert.equal(result.reason, "lock-absent");
+    assert.ok(elapsedMs < 2000, `expected a near-instant return, took ${elapsedMs}ms`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("waitForWorktreeSyncToSettle returns immediately (settled) when the recorded lock holder is confirmed dead", async () => {
+  const dir = initGitRepo();
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, `${deadPid()}-0-deadholder`);
+    const start = Date.now();
+    const result = await waitForWorktreeSyncToSettle(dir, { timeoutMs: 5000, pollMs: 100 });
+    const elapsedMs = Date.now() - start;
+    assert.equal(result.waited, true);
+    assert.equal(result.settled, true);
+    assert.equal(result.reason, "holder-dead");
+    assert.ok(elapsedMs < 2000, `expected a near-instant return, took ${elapsedMs}ms`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("waitForWorktreeSyncToSettle keeps waiting (up to its timeout) while the recorded lock holder is genuinely alive, then reports unsettled", async () => {
+  // Real regression this guards: a naive implementation might only check
+  // the lock ONCE and immediately report "settled" (or "not settled")
+  // without actually polling -- proving this requires a lock whose holder
+  // stays alive for the entire wait window, confirming the function keeps
+  // re-checking rather than resolving on its first read.
+  const dir = initGitRepo();
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    // This test process's own pid is unambiguously alive for the entire
+    // test -- a stand-in for a genuinely slow, still-running sync.
+    writeFileSync(lockPath, `${process.pid}-unknown-liveholder`);
+    const start = Date.now();
+    const result = await waitForWorktreeSyncToSettle(dir, { timeoutMs: 600, pollMs: 100 });
+    const elapsedMs = Date.now() - start;
+    assert.equal(result.waited, true);
+    assert.equal(result.settled, false);
+    assert.equal(result.reason, "timeout");
+    // Must have actually waited close to the timeout, not returned instantly.
+    assert.ok(elapsedMs >= 500, `expected to wait close to the timeout, took ${elapsedMs}ms`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("waitForWorktreeSyncToSettle stops waiting as soon as the lock is released mid-poll", async () => {
+  // Proves this is a genuine poll loop, not just "wait the full timeout
+  // then re-check once": the lock is released partway through the
+  // configured timeout window, and the function must notice and return
+  // well before that timeout elapses.
+  const dir = initGitRepo();
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, `${process.pid}-unknown-liveholder`);
+    setTimeout(() => {
+      try { rmSync(lockPath); } catch { /* ignore */ }
+    }, 300);
+    const start = Date.now();
+    const result = await waitForWorktreeSyncToSettle(dir, { timeoutMs: 5000, pollMs: 100 });
+    const elapsedMs = Date.now() - start;
+    assert.equal(result.settled, true);
+    assert.equal(result.reason, "lock-absent");
+    assert.ok(elapsedMs < 2000, `expected to notice the release well before the 5s timeout, took ${elapsedMs}ms`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

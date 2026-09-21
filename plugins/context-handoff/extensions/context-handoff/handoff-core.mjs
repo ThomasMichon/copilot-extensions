@@ -368,7 +368,10 @@ const STALE_LOCK_MS = 60 * 60 * 1000;
 // it only tests existence. Fails OPEN (reports alive) on any inability to
 // tell (e.g. EPERM for a pid owned by another user), matching this whole
 // lock's fail-closed philosophy: never reclaim on ambiguous evidence.
-function isProcessAlive(pid) {
+// Exported for waitForWorktreeSyncToSettle below, which needs the same
+// liveness check to decide whether a still-present sync lock is worth
+// continuing to wait on.
+export function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
@@ -565,14 +568,23 @@ async function acquireLock(lockPath) {
   }
 }
 
+// Resolves the shared per-worktree sync-lock path (the same lock
+// attemptWorktreeSync's own withWorktreeSyncLock uses), so any OTHER
+// caller that needs to observe (not acquire) that lock -- e.g.
+// waitForWorktreeSyncToSettle below -- resolves it identically rather than
+// duplicating the git invocation.
+async function resolveWorktreeSyncLockPath(cwd) {
+  const gitPath = await execFileAsync(
+    "git", ["rev-parse", "--git-path", "context-handoff-sync.lock"],
+    { cwd, encoding: "utf-8", timeout: 5000, env: sanitizedGitEnv() },
+  );
+  return resolve(cwd, gitPath.stdout.trim());
+}
+
 async function withWorktreeSyncLock(cwd, fn) {
   let lockPath;
   try {
-    const gitPath = await execFileAsync(
-      "git", ["rev-parse", "--git-path", "context-handoff-sync.lock"],
-      { cwd, encoding: "utf-8", timeout: 5000, env: sanitizedGitEnv() },
-    );
-    lockPath = resolve(cwd, gitPath.stdout.trim());
+    lockPath = await resolveWorktreeSyncLockPath(cwd);
   } catch {
     // Can't even resolve the lock location -- fail closed the same way the
     // rebase check does, rather than proceeding unserialized.
@@ -597,6 +609,55 @@ async function withWorktreeSyncLock(cwd, fn) {
   } finally {
     try { closeSync(lock.fd); } catch { /* best-effort */ }
     releaseLock(lockPath, lock.token);
+  }
+}
+
+// Polls the SAME shared worktree-sync lock attemptWorktreeSync itself
+// acquires, WITHOUT ever trying to acquire it -- a read-only observer for a
+// caller on either side of a handoff cutover that needs to know "is a sync
+// still genuinely in flight for this worktree right now?" before it reads
+// or trusts the working tree's contents:
+//   - the predecessor's force-tier trigger (extension.mjs's
+//     autoForceHandoff) uses this to decide when it is safe to arm live
+//     pickup, instead of a blind fixed-duration wait;
+//   - a successor's consume_handoff call uses this defensively at startup,
+//     in case pickup was armed (or a manual /consume-handoff was run)
+//     while the predecessor's sync was still settling.
+// Bounded by `timeoutMs` regardless of outcome -- a slow/unreachable
+// remote must never turn this into an unbounded wait on EITHER side. Never
+// reclaims or otherwise mutates the lock; that remains attemptWorktreeSync's
+// own job alone.
+export async function waitForWorktreeSyncToSettle(cwd, { timeoutMs = 15000, pollMs = 500 } = {}) {
+  let lockPath;
+  try {
+    lockPath = await resolveWorktreeSyncLockPath(cwd);
+  } catch {
+    // Not a git worktree, or git itself unavailable -- nothing to wait on.
+    return { waited: false, settled: true, reason: "could not resolve a lock path for this worktree" };
+  }
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  for (;;) {
+    let content;
+    try {
+      content = readFileSync(lockPath, "utf-8");
+    } catch {
+      // No lock present -- either no sync ever started, or one already
+      // finished and released cleanly. Either way, nothing to wait for.
+      return { waited: true, settled: true, reason: "lock-absent" };
+    }
+    const match = content.match(/^(\d+)-(\d+|unknown)-/);
+    const holderPid = match ? Number(match[1]) : null;
+    if (holderPid === null || !isProcessAlive(holderPid)) {
+      // Unparseable/foreign content, or a confirmed-dead holder -- not
+      // something currently in flight from this waiter's point of view.
+      // (Reclaiming a stale-but-parseable lock remains attemptWorktreeSync's
+      // own job; this function only ever reads.)
+      return { waited: true, settled: true, reason: holderPid === null ? "lock-unparseable" : "holder-dead" };
+    }
+    if (Date.now() >= deadline) {
+      return { waited: true, settled: false, reason: "timeout" };
+    }
+    await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
   }
 }
 

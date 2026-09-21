@@ -54,6 +54,7 @@ import {
   runCli,
   storeHandoff,
   triggerHandoff,
+  waitForWorktreeSyncToSettle,
 } from "./handoff-core.mjs";
 import { extractRecoveryLocatorFromPrompt, recoveryLocatorFor } from "./cutover-seed.mjs";
 import { defaultConfig, loadContextHandoffConfigAsync } from "./config.mjs";
@@ -325,18 +326,16 @@ async function onPermissionRequest(request, invocation) {
   return approveAll(request, invocation);
 }
 
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 // Ceiling on how long the force-tier trigger will wait for the post-store
 // worktree sync to settle before arming live pickup (see autoForceHandoff's
-// beforeArmPickup comment for the round-12/26/27 tension this bounds).
+// beforeArmPickup comment for the round-12/26/27/28 tension this bounds),
+// and how long consume_handoff (below) will defensively wait at successor
+// startup in case pickup was armed while a sync was still settling.
 // Comfortably shorter than triggerHandoff's own default 30s pickup-wait
 // window, so this can never itself become the dominant source of the
 // force-tier trigger's total latency, while still covering a healthy,
 // reachable remote's typical fetch+rebase duration in the common case.
-const FORCE_TIER_SYNC_ARM_TIMEOUT_MS = 10000;
+const FORCE_TIER_SYNC_ARM_TIMEOUT_MS = 15000;
 
 // Auto-draft, store, and trigger a handoff without agent involvement. Fire-
 // and-forget from the session.usage_info handler (below); reports its own
@@ -374,28 +373,32 @@ async function autoForceHandoff(sid, cwd) {
     // human resuming it later still wants the latest code), not just an
     // auto-mode live pickup.
     //
-    // beforeArmPickup below awaits this SAME promise, but only up to
+    // beforeArmPickup below polls the SAME shared worktree-sync lock via
+    // waitForWorktreeSyncToSettle (not syncPromise directly), bounded to
     // FORCE_TIER_SYNC_ARM_TIMEOUT_MS -- resolving a genuine tension
-    // between two prior findings rather than picking one side over the
-    // other:
+    // between prior findings rather than picking one side over the other:
     //   - round 12: arming pickup with NO regard for the sync at all let a
     //     fast live monitor launch a successor before the sync had even
-    //     begun (or, per round 27's re-statement of the same concern,
+    //     begun (or, per round 27/28's re-statement of the same concern,
     //     while it was still mid-fetch/rebase), handing the successor a
     //     stale or momentarily-inconsistent worktree.
     //   - round 26: awaiting the sync's FULL completion (multiple 20s+
     //     network/CLI timeouts stacked) could hold the last-chance/fire-
     //     and-forget trigger long enough for compaction to happen,
     //     defeating the guarantee this path exists for.
-    // A bounded wait gets both in the common case: a healthy, reachable
-    // remote finishes well inside the timeout, so pickup is armed only
-    // AFTER the sync genuinely settled; an unreachable/slow remote still
-    // cannot block the trigger past a small, fixed ceiling, and the sync
-    // keeps running in the background regardless -- its outcome is only
-    // ever logged, never folded back into the already-stored baton
-    // (there is no update path for a handoff that has already been
-    // triggered).
-    let syncPromise = null;
+    // Polling the lock's own liveness (via waitForWorktreeSyncToSettle,
+    // not the promise below) gets both AND settles faster than a blind
+    // wait whenever the sync finishes early: a healthy, reachable
+    // remote's lock clears well inside the timeout, so pickup is armed
+    // immediately once it does; an unreachable/slow remote still cannot
+    // block the trigger past a small, fixed ceiling. consume_handoff
+    // below performs the SAME bounded wait defensively at successor
+    // startup, in case pickup was armed (by this path or a manual
+    // /consume-handoff) while the lock was still held. The sync keeps
+    // running in the background regardless of which side stops waiting
+    // first -- its outcome is only ever logged, never folded back into
+    // the already-stored baton (there is no update path for a handoff
+    // that has already been triggered).
     result = await triggerHandoff({
       promptText: markdown,
       sid,
@@ -403,7 +406,7 @@ async function autoForceHandoff(sid, cwd) {
       title: "Force-threshold auto-handoff",
       mode: handoffConfig.mode,
       afterStore: () => {
-        syncPromise = attemptWorktreeSync(cwd)
+        attemptWorktreeSync(cwd)
           .then((syncResult) => {
             if (syncResult.synced) {
               session.log(
@@ -425,10 +428,7 @@ async function autoForceHandoff(sid, cwd) {
           .catch(() => {});
       },
       beforeArmPickup: () =>
-        Promise.race([
-          syncPromise || Promise.resolve(),
-          delay(FORCE_TIER_SYNC_ARM_TIMEOUT_MS),
-        ]),
+        waitForWorktreeSyncToSettle(cwd, { timeoutMs: FORCE_TIER_SYNC_ARM_TIMEOUT_MS }),
     });
   } catch (error) {
     session.log(
@@ -766,6 +766,27 @@ const session = await joinSession({
         const handoffId = (args?.handoff_id ?? "").toString().trim();
         const path = (args?.path ?? "").toString().trim();
         const deferComplete = Boolean(args?.defer_complete);
+
+        // Defensive: if the predecessor's own bounded wait (autoForceHandoff's
+        // beforeArmPickup) already elapsed while its sync was still running,
+        // or pickup was armed via a path with no such gate at all (a manual
+        // /consume-handoff run right after cutover), this worktree could
+        // still be mid-fetch/rebase right now. Poll the SAME shared lock
+        // once more here, bounded the same way, before reading anything --
+        // never blocking indefinitely, just narrowing the window where a
+        // successor reads a momentarily-inconsistent tree.
+        const settleResult = await waitForWorktreeSyncToSettle(cwd, {
+          timeoutMs: FORCE_TIER_SYNC_ARM_TIMEOUT_MS,
+        });
+        if (settleResult.waited && !settleResult.settled) {
+          session.log(
+            "[Context Handoff] consume_handoff: the predecessor's worktree " +
+            "sync still appears to be in progress after the wait window; " +
+            "proceeding anyway -- verify the worktree yourself if anything " +
+            "looks unexpectedly stale or mid-rebase.",
+            { level: "warning" },
+          );
+        }
 
         let result;
         if (taskId) {

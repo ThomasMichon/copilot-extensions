@@ -2331,3 +2331,54 @@ per-item confirmation, unchanged since):
   39/39 pass (166 total, no regressions). No version bump needed for the
   code fixes themselves (still `0.1.1-dev38`, bumped last round) --
   guards all pass.
+
+### 2026-09-21 (cont.) -- PR #3167 round 28: shared liveness-aware wait replaces the fixed-delay pickup gate, defends consume_handoff too
+
+Round 28 re-flagged "Wait for worktree sync before starting successor
+handoff" for the THIRD time -- round 27's bounded-but-fixed 10s
+`Promise.race` compromise did not satisfy either of the finding's two
+suggested remedies ("gate live pickup on sync completion" or "make
+successor startup wait on the same completion marker"), and the reviewer
+kept it open with an unchanged body pointing at the same call site. All 5
+other re-flagged carryovers (dedup baton, fallback workflow sync, emitted
+guidance, and the 3 PR-metadata version-number threads) were confirmed
+already resolved again, unchanged from round 26/27's verification --
+including confirming "Restore claimed lock when unlink fails" is now
+marked resolved (round 27's reasoning-only comment fix, not a functional
+change, satisfied it).
+
+Rather than tightening the fixed-delay compromise further, implemented
+the review's second suggested remedy properly -- a genuine shared,
+liveness-aware wait usable from BOTH ends of a handoff:
+
+- **New `waitForWorktreeSyncToSettle(cwd, { timeoutMs, pollMs })`**
+  (`handoff-core.mjs`, exported): polls the SAME shared worktree-sync
+  lock `attemptWorktreeSync` itself acquires -- WITHOUT ever trying to
+  acquire it, purely observational -- returning as soon as the lock is
+  absent or its recorded holder is confirmed dead (reusing the existing
+  `isProcessAlive` check, now exported), or once `timeoutMs` elapses,
+  whichever comes first. Extracted `resolveWorktreeSyncLockPath()` out of
+  `withWorktreeSyncLock` so both the acquire path and this new read-only
+  observer resolve the lock location identically.
+- **`extension.mjs`'s `autoForceHandoff`:** `beforeArmPickup` now calls
+  `waitForWorktreeSyncToSettle` directly instead of racing a bare
+  `syncPromise` against a fixed timer -- this settles the INSTANT the
+  lock actually clears (a healthy, reachable remote's common case is now
+  faster than the old fixed 10s wait, not slower), while still bounded to
+  a fixed ceiling (`FORCE_TIER_SYNC_ARM_TIMEOUT_MS`, raised to 15s now
+  that it is a real completion signal rather than a guess) for an
+  unreachable/slow remote.
+- **`extension.mjs`'s `consume_handoff` tool handler:** now performs the
+  SAME bounded wait defensively at successor startup, before reading
+  anything -- covering the case the reviewer specifically called out
+  (pickup armed, or a manual `/consume-handoff` run, while the
+  predecessor's sync might still be settling), which the predecessor-side
+  gate alone can never fully close given the fire-and-forget/last-chance
+  constraint on that side.
+- 4 new real-git-repo exhaustive tests for `waitForWorktreeSyncToSettle`
+  (no-lock, confirmed-dead-holder, genuinely-alive-holder-times-out, and a
+  genuine poll-loop proof via mid-wait lock release) plus the existing
+  suite's own regressions. `node --test`: fast suite 127 tests/125 pass
+  (2 pre-existing skips, unchanged), exhaustive suite 43/43 pass (170
+  total, no regressions). Bumped plugin.json/marketplace.json to
+  `0.1.1-dev39`. All guards pass.
