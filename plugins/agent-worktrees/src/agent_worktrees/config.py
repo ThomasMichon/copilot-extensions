@@ -428,6 +428,14 @@ class RepoConfig:
     validate_paths: list[str] = field(default_factory=list)
     validate_hook: dict[str, list[str]] = field(default_factory=dict)
     service_paths: list[str] = field(default_factory=list)
+    bootstrap_services: list[str] = field(default_factory=list)
+    """Optional additional service names (from ``service_paths`` manifests)
+    that the normalized launcher's pre-launch check must keep current before
+    starting Copilot, alongside agent-worktrees itself. The launcher is
+    provider-neutral and declares no facility- or repo-specific service names
+    by default; a repo opts a service into this launch-blocking check
+    explicitly here (e.g. ``bootstrap_services: [vault]``) rather than the
+    launcher assuming any particular name exists."""
     post_install_hook: dict[str, list[str]] = field(default_factory=dict)
     pr: PRConfig = field(default_factory=PRConfig)
     codename: CodenameConfig = field(default_factory=CodenameConfig)
@@ -1542,6 +1550,11 @@ def _build_repo_config(
         [str(p) for p in raw_spaths] if isinstance(raw_spaths, list) else []
     )
 
+    raw_bootstrap = data.get("bootstrap_services", [])
+    bootstrap_services = (
+        [str(s) for s in raw_bootstrap] if isinstance(raw_bootstrap, list) else []
+    )
+
     post_install_hook: dict[str, list[str]] = {}
     for plat_key, cmd_list in (data.get("post_install_hook") or {}).items():
         if isinstance(cmd_list, list):
@@ -1562,6 +1575,7 @@ def _build_repo_config(
         validate_paths=validate_paths,
         validate_hook=validate_hook,
         service_paths=service_paths,
+        bootstrap_services=bootstrap_services,
         post_install_hook=post_install_hook,
         pr=_parse_pr(data.get("pr")),
         codename=parse_codename(data.get("codename")),

@@ -298,7 +298,7 @@ def _validate_repo_fragment(repo: object, *, location: str) -> str | None:
             for key in session_env
         ):
             return f"{location}.session_env keys must be non-empty strings"
-    for name in ("validate_paths", "service_paths"):
+    for name in ("validate_paths", "service_paths", "bootstrap_services"):
         if name in repo:
             error = _validate_string_list(
                 repo[name], location=f"{location}.{name}"
