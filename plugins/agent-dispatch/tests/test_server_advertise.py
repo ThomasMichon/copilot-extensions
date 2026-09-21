@@ -245,6 +245,35 @@ def test_loopback_probe_url_normalizes_wildcard_binds():
     assert server._loopback_probe_url("[::]", 1234) == "http://[::1]:1234"
 
 
+def test_publish_routing_normalizes_bracketed_ipv6_wildcard(monkeypatch, tmp_path):
+    # zdd.routing.Endpoint.client_host only special-cases the unbracketed
+    # "::" wildcard, not "[::]" -- WILDCARD_BIND_HOSTS explicitly permits
+    # both as a configured Config.host, so a bracketed bind must be
+    # normalized before it reaches the routing table, or it round-trips
+    # unnormalized and produces an unroutable "http://[::]:<port>" client
+    # URL, misclassifying a healthy wildcard-bound coordinator as dead
+    # (review follow-up on ThomasMichon/copilot-extensions#3066).
+    import zdd.routing as zdd_routing
+
+    run = tmp_path / "run"
+    routing = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing))
+    monkeypatch.setattr(zdd_routing, "reap_stale_active", lambda *a, **k: None)
+
+    captured: dict = {}
+
+    def _fake_publish_active(_routing_dir, *, bind, **kwargs):
+        captured["bind"] = bind
+
+    monkeypatch.setattr(zdd_routing, "publish_active", _fake_publish_active)
+
+    cfg = Config(host="[::]", port=0, db_path=str(tmp_path / "tasks.db"))
+    server._publish_routing(cfg, 1234)
+
+    assert captured["bind"] == "::"
+
+
 def test_serve_holds_start_lock_until_actually_responsive(monkeypatch, tmp_path):
     """The start lock must stay held past the route publish, through
     uvicorn's own startup, until this instance is verifiably answering its

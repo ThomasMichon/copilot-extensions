@@ -205,7 +205,15 @@ def _publish_routing(cfg: Config, bound_port: int, *, passive: bool = False) -> 
 
         routing.publish_active(
             routing_dir(),
-            bind=cfg.host,
+            # Normalize a bracketed IPv6 wildcard ("[::]") to zdd routing's
+            # own canonical form ("::") before publishing: zdd.routing
+            # .Endpoint.client_host only special-cases the unbracketed form,
+            # so a bracketed bind would otherwise round-trip through the
+            # routing table unnormalized and produce an unroutable
+            # "http://[::]:<port>" client URL, misclassifying a healthy
+            # wildcard-bound coordinator as dead (review follow-up on
+            # ThomasMichon/copilot-extensions#3066).
+            bind="::" if cfg.host == "[::]" else cfg.host,
             port=bound_port,
             pid=os.getpid(),
             version=__version__,
