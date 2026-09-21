@@ -23,20 +23,29 @@ performs the whole sequence: ``agent-worktrees restart <worktree_id>``
 confirms the interactive CLI is actually gone, and only then does
 ``agent-bridge resume <worktree_id> --force`` take the worktree over.
 
-:func:`resume_worktree_and_send` orchestrates: try a plain (non-forcing)
-resume first -- the common "abandoned handoff" case needs no take-over at
-all, since agent-bridge's own liveness check (agent-bridge-cold-resume
-Phase 2) already settles a dead RUNNING/IDLE session before resuming
-through. Only on the specific 409 ``live_cli_holds_worktree`` refusal does
-this stop the interactive CLI via agent-worktrees, then retry with
-``--force``. The resumed/created session has no prompt yet, so this follows
-up with ``send <session_id> --prompt-file - --caller <caller>`` to deliver
-the seed attributed to the worker -- mirroring ``bridge.resume_worker``'s
-own resume-then-send shape for a known session id, plus the same synthetic
-``--caller`` the old ``create`` invocation always supplied (without it,
-``send`` resolves no caller from this coordinator's neutral CWD, and
-successive workers could consume or advance one another's shared delivery
-cursor).
+**Race between the stop and the forced resume.** ``restart`` and the
+following ``resume --force`` are two separate calls; a *different* live
+interactive CLI could attach to the worktree in the gap between them, and
+``--force`` bypasses the ownership guard unconditionally. Forcing straight
+through in that window would recreate the exact duplicate-controller race
+the guard exists to prevent -- forcing past a holder we never actually
+confirmed dead. So after ``restart`` succeeds, this repeats the *plain*
+(non-forcing) resume check once more before ever forcing: if that
+succeeds outright, no force was even needed (best case). If it is refused
+again for the same reason, this compares the refusal's holder session id
+against the one recorded on the *original* refusal -- identical means the
+guard is still keyed on the (now confirmed-dead) process we just stopped,
+so forcing through it is safe; a *different* id means a fresh claimant won
+the worktree in the race window, and this refuses rather than force
+through a live process it never confirmed dead.
+
+:func:`resume_worktree_and_send` orchestrates the whole sequence, then
+delivers ``prompt`` via ``send <session_id> --prompt-file - --caller
+<caller>`` -- mirroring ``bridge.resume_worker``'s own resume-then-send
+shape for a known session id, plus the same synthetic ``--caller`` the old
+``create`` invocation always supplied (without it, ``send`` resolves no
+caller from this coordinator's neutral CWD, and successive workers could
+consume or advance one another's shared delivery cursor).
 
 **No legacy-daemon fallback.** A not-yet-upgraded agent-bridge daemon's
 ``resume`` predates ``--json`` support entirely, so a *successful*
@@ -69,7 +78,7 @@ import json
 import subprocess
 from collections.abc import Sequence
 
-from .procutil import agent_worktrees_launch_prefix, no_window_kwargs
+from .procutil import agent_worktrees_environment, agent_worktrees_launch_prefix, no_window_kwargs
 
 _SEND_BUSY_EXIT = 75
 _LIVE_CLI_HOLDS_WORKTREE = "live_cli_holds_worktree"
@@ -101,13 +110,17 @@ def _resume(
     return resumed, (session_id or None)
 
 
-def _resume_refusal_reason(resumed: subprocess.CompletedProcess) -> str | None:
-    """Parse the ``reason`` out of a failed ``--json resume``'s stdout, if any."""
+def _resume_refusal(resumed: subprocess.CompletedProcess) -> tuple[str | None, str | None]:
+    """Parse ``(reason, holder_session_id)`` out of a failed ``--json
+    resume``'s stdout, or ``(None, None)`` if it isn't a structured refusal.
+    """
     try:
         detail = json.loads(resumed.stdout or "{}")
     except json.JSONDecodeError:
-        return None
-    return detail.get("reason") if isinstance(detail, dict) else None
+        return None, None
+    if not isinstance(detail, dict):
+        return None, None
+    return detail.get("reason"), detail.get("session_id")
 
 
 def _stop_worktree_copilot(worktree_id: str, *, timeout: float | None) -> dict:
@@ -125,7 +138,7 @@ def _stop_worktree_copilot(worktree_id: str, *, timeout: float | None) -> dict:
     cmd = [*exe, "restart", worktree_id, "--json"]
     proc = subprocess.run(  # noqa: S603
         cmd, check=False, capture_output=True, text=True, timeout=timeout,
-        **no_window_kwargs(),
+        env=agent_worktrees_environment(), **no_window_kwargs(),
     )
     try:
         payload = json.loads(proc.stdout or "{}")
@@ -166,6 +179,54 @@ def _no_session_id_failure(
     )
 
 
+def _take_over_live_holder(
+    worktree_id: str, *, exe: Sequence[str], original_holder: str | None,
+    timeout: float | None,
+) -> tuple[subprocess.CompletedProcess | None, str | None]:
+    """Stop the interactive CLI holding ``worktree_id``, revalidate it's
+    actually gone, and only then force-resume. Returns ``(failure_or_None,
+    session_id_or_None)`` -- exactly one is non-``None``.
+    """
+    stopped = _stop_worktree_copilot(worktree_id, timeout=timeout)
+    if not stopped.get("ok"):
+        return subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="",
+            stderr=f"could not stop the interactive CLI holding {worktree_id}: "
+            f"{stopped.get('error', stopped)}",
+        ), None
+
+    # Revalidate before forcing (see the module docstring): a different live
+    # CLI could have attached in the gap between 'restart' returning and
+    # here. Repeat the plain check once more.
+    revalidated, session_id = _resume(worktree_id, exe=exe, force=False, timeout=timeout)
+    if session_id is not None:
+        return None, session_id  # no force needed at all -- best case
+    if revalidated.returncode == 0:
+        return _no_session_id_failure(
+            revalidated, extra=" after stopping the interactive CLI holder"
+        ), None
+    reason, holder = _resume_refusal(revalidated)
+    if reason != _LIVE_CLI_HOLDS_WORKTREE:
+        return revalidated, None
+    if holder != original_holder:
+        return subprocess.CompletedProcess(
+            args=revalidated.args, returncode=1, stdout=revalidated.stdout,
+            stderr=(revalidated.stderr or "")
+            + f"\na different interactive CLI ({holder}) claimed {worktree_id} "
+            f"while stopping the original holder ({original_holder}) -- "
+            "refusing to force through a live process never confirmed dead",
+        ), None
+
+    forced, session_id = _resume(worktree_id, exe=exe, force=True, timeout=timeout)
+    if session_id is None:
+        if forced.returncode == 0:
+            return _no_session_id_failure(
+                forced, extra=" after stopping and revalidating the interactive CLI holder"
+            ), None
+        return forced, None
+    return None, session_id
+
+
 def resume_worktree_and_send(
     worktree_id: str,
     prompt: str,
@@ -185,39 +246,29 @@ def resume_worktree_and_send(
     parameter) but is otherwise unused here.
 
     Tries a plain (non-forcing) resume first. On a genuine 409
-    ``live_cli_holds_worktree`` refusal, stops that interactive CLI via
-    ``agent-worktrees restart`` and retries with ``--force`` -- the complete
-    "reclaim" sequence (see the module docstring). Any other failure --
-    including a stop that didn't succeed, a connect/spawn error, or a
-    resume whose JSON can't be parsed even on success (a not-yet-upgraded
-    daemon; reported rather than risking a duplicate controller) -- is
-    returned as-is. Otherwise returns the ``send`` call's result -- reshaped
-    to carry ``{"session_id": ...}`` on stdout when ``json_output`` is
-    requested, since ``send`` itself has no reason to echo an id the caller
-    already knows.
+    ``live_cli_holds_worktree`` refusal, delegates the whole
+    stop-then-revalidate-then-force sequence to
+    :func:`_take_over_live_holder` (see the module docstring). Any other
+    failure -- a connect/spawn error, a failed stop, a revalidation naming a
+    different holder, or a resume whose JSON can't be parsed even on success
+    (a not-yet-upgraded daemon) -- is returned as-is. Otherwise returns the
+    ``send`` call's result -- reshaped to carry ``{"session_id": ...}`` on
+    stdout when ``json_output`` is requested, since ``send`` itself has no
+    reason to echo an id the caller already knows.
     """
     _ = agent
     resumed, session_id = _resume(worktree_id, exe=exe, force=False, timeout=timeout)
     if session_id is None:
         if resumed.returncode == 0:
             return _no_session_id_failure(resumed)
-        if _resume_refusal_reason(resumed) != _LIVE_CLI_HOLDS_WORKTREE:
+        reason, holder = _resume_refusal(resumed)
+        if reason != _LIVE_CLI_HOLDS_WORKTREE:
             return resumed
-        stopped = _stop_worktree_copilot(worktree_id, timeout=timeout)
-        if not stopped.get("ok"):
-            return subprocess.CompletedProcess(
-                args=resumed.args, returncode=1, stdout=resumed.stdout,
-                stderr=(resumed.stderr or "")
-                + f"\ncould not stop the interactive CLI holding {worktree_id}: "
-                f"{stopped.get('error', stopped)}",
-            )
-        resumed, session_id = _resume(worktree_id, exe=exe, force=True, timeout=timeout)
-        if session_id is None:
-            if resumed.returncode == 0:
-                return _no_session_id_failure(
-                    resumed, extra=" after stopping the interactive CLI holder"
-                )
-            return resumed
+        failure, session_id = _take_over_live_holder(
+            worktree_id, exe=exe, original_holder=holder, timeout=timeout,
+        )
+        if failure is not None:
+            return failure
 
     sent = _send(
         session_id, prompt, exe=exe, caller=caller, wait=wait,

@@ -1,7 +1,8 @@
 """Tests for agent_dispatch.bridge_reclaim -- the reclaim path's replacement
 for the removed ``create --reclaim`` (agent-bridge-cold-resume Phase 3,
 #6744): resume, and if a live interactive CLI holds the worktree, actually
-stop it (via agent-worktrees) before forcing the take-over."""
+stop it (via agent-worktrees), revalidate it's gone, and only then force
+the take-over."""
 
 from __future__ import annotations
 
@@ -21,12 +22,26 @@ def _resume(monkeypatch, fake_run, **overrides):
         bridge_reclaim, "agent_worktrees_launch_prefix",
         lambda: ["/usr/bin/agent-worktrees"],
     )
+    monkeypatch.setattr(
+        bridge_reclaim, "agent_worktrees_environment", lambda: {"SCRUBBED": "1"},
+    )
     kwargs = dict(
         exe=["/usr/bin/agent-bridge"], agent="task-worker",
         caller="agent-dispatch:w1", wait=True, json_output=False, timeout=None,
     )
     kwargs.update(overrides)
     return bridge_reclaim.resume_worktree_and_send("wt-1", "the seed", **kwargs)
+
+
+def _live_cli_refusal(cmd, holder="live-7"):
+    return _proc(
+        cmd, 1,
+        json.dumps({
+            "error": f"a live interactive CLI ({holder}) still holds worktree wt-1",
+            "reason": "live_cli_holds_worktree", "session_id": holder,
+        }),
+        "",
+    )
 
 
 def test_resume_then_send_happy_path_no_holder(monkeypatch):
@@ -63,11 +78,11 @@ def test_resume_failure_short_circuits(monkeypatch):
     assert len(calls) == 1  # send is never attempted, no stop attempted either
 
 
-def test_live_cli_holder_is_stopped_then_force_resumed(monkeypatch):
+def test_live_cli_holder_is_stopped_revalidated_then_force_resumed(monkeypatch):
     """The actual 'reclaim' verb: kill the interactive CLI holding the
-    worktree (agent-worktrees restart), THEN force-take-over via resume
-    --force -- never bypass the guard without confirming the holder is
-    actually gone first."""
+    worktree (agent-worktrees restart), REVALIDATE it's actually gone (the
+    revalidation resume still names the SAME holder -- a lingering stale
+    registration, not a fresh claimant), THEN force-take-over."""
     calls = []
 
     def fake_run(cmd, **kwargs):
@@ -77,29 +92,71 @@ def test_live_cli_holder_is_stopped_then_force_resumed(monkeypatch):
                 {"ok": True, "had_session": True, "method": "graceful"}
             ))
         if cmd[1:3] == ["--json", "resume"]:
-            if "--force" not in cmd:
-                return _proc(
-                    cmd, 1,
-                    '{"error": "a live interactive CLI (live-7) still holds '
-                    'worktree wt-1", "reason": "live_cli_holds_worktree", '
-                    '"session_id": "live-7"}',
-                    "",
-                )
-            return _proc(cmd, 0, json.dumps({"session_id": "reclaimed-1"}))
+            if "--force" in cmd:
+                return _proc(cmd, 0, json.dumps({"session_id": "reclaimed-1"}))
+            # 1st (pre-stop) and 2nd (revalidation) both still see 'live-7'.
+            return _live_cli_refusal(cmd)
         return _proc(cmd, 0, "ok")
 
     result = _resume(monkeypatch, fake_run)
     assert result.returncode == 0
     kinds = [(c[0], c[1] if len(c) > 1 else None) for c in calls]
     assert kinds == [
-        ("/usr/bin/agent-bridge", "--json"),   # 1st resume, no --force -> 409
+        ("/usr/bin/agent-bridge", "--json"),      # 1st resume, no --force -> 409
         ("/usr/bin/agent-worktrees", "restart"),  # stop the interactive CLI
-        ("/usr/bin/agent-bridge", "--json"),   # 2nd resume, --force -> ok
+        ("/usr/bin/agent-bridge", "--json"),      # revalidation resume -> still 409
+        ("/usr/bin/agent-bridge", "--json"),      # force resume -> ok
         ("/usr/bin/agent-bridge", "send"),
     ]
     assert calls[1] == ["/usr/bin/agent-worktrees", "restart", "wt-1", "--json"]
-    assert "--force" in calls[2]
-    assert "reclaimed-1" in calls[3]
+    assert "--force" not in calls[2]
+    assert "--force" in calls[3]
+    assert "reclaimed-1" in calls[4]
+
+
+def test_revalidation_succeeding_needs_no_force_at_all(monkeypatch):
+    """If the revalidation resume (right after 'restart') succeeds outright,
+    the stale registration already cleared on its own -- no --force needed."""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if cmd[:2] == ["/usr/bin/agent-worktrees", "restart"]:
+            return _proc(cmd, 0, json.dumps({"ok": True}))
+        if cmd[1:3] == ["--json", "resume"]:
+            if calls.count(list(cmd)) == 1:
+                return _live_cli_refusal(cmd)
+            return _proc(cmd, 0, json.dumps({"session_id": "cleared-1"}))
+        return _proc(cmd, 0, "ok")
+
+    result = _resume(monkeypatch, fake_run)
+    assert result.returncode == 0
+    assert not any("--force" in c for c in calls)
+    assert "cleared-1" in calls[-1]
+
+
+def test_different_holder_after_stop_refuses_to_force(monkeypatch):
+    """A DIFFERENT live interactive CLI claimed the worktree in the race
+    window between 'restart' returning and the revalidation check -- this
+    must refuse to force through it, since it never confirmed THAT process
+    dead."""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if cmd[:2] == ["/usr/bin/agent-worktrees", "restart"]:
+            return _proc(cmd, 0, json.dumps({"ok": True}))
+        if cmd[1:3] == ["--json", "resume"]:
+            if calls.count(list(cmd)) == 1:
+                return _live_cli_refusal(cmd, holder="live-7")
+            return _live_cli_refusal(cmd, holder="new-claimant-2")
+        return _proc(cmd, 0, "ok")
+
+    result = _resume(monkeypatch, fake_run)
+    assert result.returncode == 1
+    assert "new-claimant-2" in result.stderr
+    assert "live-7" in result.stderr
+    assert not any("--force" in c for c in calls)
 
 
 def test_stop_failure_is_reported_without_forcing_through(monkeypatch):
@@ -113,11 +170,7 @@ def test_stop_failure_is_reported_without_forcing_through(monkeypatch):
         if cmd[:2] == ["/usr/bin/agent-worktrees", "restart"]:
             return _proc(cmd, 0, json.dumps({"ok": False, "error": "quit hung"}))
         if cmd[1:3] == ["--json", "resume"]:
-            return _proc(
-                cmd, 1,
-                '{"reason": "live_cli_holds_worktree", "session_id": "live-7"}',
-                "",
-            )
+            return _live_cli_refusal(cmd)
         return _proc(cmd, 0, "ok")
 
     result = _resume(monkeypatch, fake_run)
@@ -125,6 +178,21 @@ def test_stop_failure_is_reported_without_forcing_through(monkeypatch):
     assert "could not stop the interactive CLI" in result.stderr
     assert len(calls) == 2  # one resume attempt, one stop attempt -- never a 2nd resume
     assert not any("--force" in c for c in calls)
+
+
+def test_stop_uses_scrubbed_environment(monkeypatch):
+    seen_env = {}
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["/usr/bin/agent-worktrees", "restart"]:
+            seen_env.update(kwargs.get("env") or {})
+            return _proc(cmd, 0, json.dumps({"ok": True}))
+        if cmd[1:3] == ["--json", "resume"]:
+            return _live_cli_refusal(cmd)
+        return _proc(cmd, 0, "ok")
+
+    _resume(monkeypatch, fake_run)
+    assert seen_env == {"SCRUBBED": "1"}
 
 
 def test_missing_session_id_reports_failure_not_a_legacy_fallback(monkeypatch):

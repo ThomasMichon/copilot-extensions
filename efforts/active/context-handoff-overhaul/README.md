@@ -1460,3 +1460,33 @@ gate land._
   above; the plugin-load investigation as a whole stays open pending
   confirmation that `agent-bridge`'s fix (the dominant contributor)
   resolves the operator's original live symptom.
+
+### 2026-09-21 — Stale guidance correction: `agent-bridge create --reclaim` removed
+
+- This effort's Phase 3-slice-2 entry above (2026-09-15/16) documented
+  `agent-bridge create --reclaim` as the implemented mechanism behind
+  `agent_dispatch.bridge.spawn_worker(reclaim=...)`. That CLI flag no
+  longer exists: `agent-bridge-cold-resume` Phase 3 (aperture-labs #6744,
+  copilot-extensions PR #3161) removed `create`'s own session-lifecycle
+  head-guard bypass entirely -- `create` into an occupied worktree has no
+  break-glass of its own now.
+- `spawn_worker(reclaim=...)` **still exists** and this effort's
+  handoff-fallback path (`coordinator.py`'s reconciliation loop) still
+  calls it unchanged -- only the mechanism underneath moved, to a new
+  `agent_dispatch.bridge_reclaim` module: try a plain `agent-bridge resume
+  <worktree_id>` first, and only on a genuine `live_cli_holds_worktree`
+  refusal does it actually stop that interactive CLI (`agent-worktrees
+  restart` -- the same primitive behind the Picker's "Stop" action and
+  Neuron Forge's "Take over") before retaking the worktree with `resume
+  --force`. This is closer to the originally-intended "reclaim" semantics
+  (kill the other process, then re-create) than the old `create --reclaim`
+  ever was -- that flag only ever bypassed the guard, with no kill step of
+  its own, silently relying on a human having already stopped the CLI by
+  hand. See `bridge_reclaim.py`'s own module docstring for the full
+  design/rationale.
+- No action needed on this effort's own Phase 3-slice-2 deliverables --
+  `handoff_fallback_seed.py`/`queue_handoff_fallback.py`'s atomic
+  single-attempt fence are unaffected; only the historical journal
+  entry's implementation description above is now stale, corrected here
+  rather than rewritten in place.
+
