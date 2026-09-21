@@ -1643,6 +1643,170 @@ class TestWorktreeRoutes:
             resp = client.get(f"/api/v1/worktrees/{wt_id}/sessions")
         assert resp.status_code == 502
 
+    def test_list_worktree_sessions_resolves_archived_worktree(
+        self, client, app,
+    ) -> None:
+        # session-worktree-archive-linkout: a worktree agent-worktrees has
+        # tombstoned as "archived" (retire_record, #3015) never appears in
+        # the live discovery cache (it only crawls `list --json`'s on-disk,
+        # non-archived default). The owner-resolution fallback must still
+        # find it via an explicit archived-record probe instead of 404ing.
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "anomalous-potato-wsl-20250101-193000-archived"
+        self._register_agent(app, "test-agent")
+        # Deliberately NOT seeded into the live discovery cache.
+
+        archive_probe_payload = (
+            '{"worktrees": [{"id": "%s", "status": "archived"}]}' % wt_id
+        )
+        sessions_payload = '{"sessions": [{"id": "s1"}]}'
+
+        async def _fake_run_for_agent(agent_name, config, resolver, args):
+            if "--tracking-status" in args:
+                assert args == [
+                    "list", "--json", "--tracking-status", "archived",
+                    "--all", "--worktree-id", wt_id,
+                ]
+                return archive_probe_payload
+            assert args == ["list-sessions", "--worktree", wt_id, "--json"]
+            return sessions_payload
+
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(side_effect=_fake_run_for_agent),
+        ):
+            resp = client.get(f"/api/v1/worktrees/{wt_id}/sessions")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["agent_name"] == "test-agent"
+        assert data["sessions"][0]["id"] == "s1"
+
+    @pytest.mark.asyncio
+    async def test_archive_probe_single_flight_coalesces_concurrent_lookups(
+        self,
+    ) -> None:
+        # Concurrent callers for the same archived worktree_id must share
+        # one in-flight probe (an N-agent subprocess/SSH fan-out), not each
+        # trigger their own -- the same stampede _crawl_lock prevents for
+        # the main discovery crawl.
+        import asyncio as _asyncio
+
+        from agent_bridge.agent_registry import AgentConfig, AgentResolver
+        from agent_bridge.routes import worktrees as wt_routes
+
+        wt_id = "anomalous-potato-wsl-20250101-194500-coalesce"
+        resolver = AgentResolver(
+            agents={"test-agent": AgentConfig(name="test-agent", project="test-chamber")},
+            machines={},
+        )
+        call_count = 0
+
+        async def _slow_run_for_agent(agent_name, config, resolver, args):
+            nonlocal call_count
+            call_count += 1
+            await _asyncio.sleep(0.05)
+            return '{"worktrees": [{"id": "%s", "status": "archived"}]}' % wt_id
+
+        cache = wt_routes.WorktreeDiscoveryCache()
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=_slow_run_for_agent,
+        ):
+            results = await _asyncio.gather(
+                cache.probe_archived(wt_id, resolver),
+                cache.probe_archived(wt_id, resolver),
+                cache.probe_archived(wt_id, resolver),
+            )
+
+        assert call_count == 1, "concurrent probes for the same id must coalesce"
+        assert all(r == ("test-agent", resolver.agents["test-agent"]) for r in results)
+        # Eviction runs via the task's done-callback, which is only guaranteed
+        # to have fired -- not necessarily before gather() returns -- once the
+        # event loop gets a further tick.
+        await _asyncio.sleep(0)
+        assert wt_id not in cache._archive_probe_inflight
+
+    @pytest.mark.asyncio
+    async def test_archive_probe_survives_a_cancelled_concurrent_caller(
+        self,
+    ) -> None:
+        # A cancelled caller (client disconnect/timeout) must not cancel
+        # the shared in-flight task out from under a concurrent caller
+        # still waiting on the same worktree_id.
+        import asyncio as _asyncio
+
+        from agent_bridge.agent_registry import AgentConfig, AgentResolver
+        from agent_bridge.routes import worktrees as wt_routes
+
+        wt_id = "anomalous-potato-wsl-20250101-194600-shielded"
+        resolver = AgentResolver(
+            agents={"test-agent": AgentConfig(name="test-agent", project="test-chamber")},
+            machines={},
+        )
+
+        async def _slow_run_for_agent(agent_name, config, resolver, args):
+            await _asyncio.sleep(0.1)
+            return '{"worktrees": [{"id": "%s", "status": "archived"}]}' % wt_id
+
+        cache = wt_routes.WorktreeDiscoveryCache()
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=_slow_run_for_agent,
+        ):
+            doomed = _asyncio.ensure_future(cache.probe_archived(wt_id, resolver))
+            survivor = _asyncio.ensure_future(cache.probe_archived(wt_id, resolver))
+            await _asyncio.sleep(0.02)  # let both attach to the shared task
+            doomed.cancel()
+            with pytest.raises(_asyncio.CancelledError):
+                await doomed
+            result = await survivor
+
+        assert result == ("test-agent", resolver.agents["test-agent"])
+
+    @pytest.mark.asyncio
+    async def test_archive_probe_returns_early_on_first_match(self) -> None:
+        # A match from a fast agent must return without waiting for a
+        # slow/unreachable agent to finish or time out.
+        import asyncio as _asyncio
+
+        from agent_bridge.agent_registry import AgentConfig, AgentResolver
+        from agent_bridge.routes import worktrees as wt_routes
+
+        wt_id = "anomalous-potato-wsl-20250101-194700-early-exit"
+        resolver = AgentResolver(
+            agents={
+                "fast-agent": AgentConfig(name="fast-agent", project="test-chamber"),
+                "slow-agent": AgentConfig(name="slow-agent", project="test-chamber"),
+            },
+            machines={},
+        )
+        slow_agent_awaited = _asyncio.Event()
+
+        async def _fake_run_for_agent(agent_name, config, resolver, args):
+            if agent_name == "fast-agent":
+                return '{"worktrees": [{"id": "%s", "status": "archived"}]}' % wt_id
+            try:
+                await _asyncio.sleep(30)
+            except _asyncio.CancelledError:
+                slow_agent_awaited.set()
+                raise
+            return '{"worktrees": []}'
+
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=_fake_run_for_agent,
+        ):
+            result = await _asyncio.wait_for(
+                wt_routes._probe_archived_owner(wt_id, resolver), timeout=1,
+            )
+            # The slow agent's task should have been cancelled, not awaited
+            # to completion, once the fast match returned.
+            await _asyncio.wait_for(slow_agent_awaited.wait(), timeout=1)
+
+        assert result == ("fast-agent", resolver.agents["fast-agent"])
+
     def test_get_worktree_session_transcript_proxies(self, client, app) -> None:
         from unittest.mock import AsyncMock, patch
 
