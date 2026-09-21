@@ -199,6 +199,99 @@ def test_serve_raises_when_coordinator_already_live(monkeypatch, tmp_path):
     assert rendezvous.read_endpoint(run) is None
 
 
+def test_serve_holds_start_lock_until_actually_responsive(monkeypatch, tmp_path):
+    """The start lock must stay held past the route publish, through
+    uvicorn's own startup, until this instance is verifiably answering its
+    own ``/health`` -- otherwise a concurrent starter racing in during that
+    gap would see the brand-new, not-yet-serving route as "not live" and
+    seize it right back out (review follow-up on
+    ThomasMichon/copilot-extensions#3066)."""
+    import threading as _threading
+    import time as _time
+
+    import pytest
+    from agent_dispatch.single_instance import SingleInstance
+
+    run = tmp_path / "run"
+    routing = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing))
+    monkeypatch.setattr(server, "has_live_local_coordinator", lambda **_: False)
+
+    release_run = _threading.Event()
+    ready = _threading.Event()
+
+    def _fake_run(self, sockets=None):
+        # Simulate uvicorn taking a moment to actually start serving.
+        release_run.wait(timeout=5.0)
+
+    monkeypatch.setattr(uvicorn.Server, "run", _fake_run)
+
+    became_responsive_calls: list[bool] = []
+
+    def _fake_self_health_responsive(url, *, timeout=None, token=None):
+        # First few polls: not yet responsive (simulating uvicorn still
+        # starting up). Once we decide to let it "become ready", report True
+        # and let the real serve() call proceed to release the lock.
+        result = ready.is_set()
+        became_responsive_calls.append(result)
+        if result:
+            release_run.set()
+        return result
+
+    monkeypatch.setattr(
+        "agent_dispatch.config._health_responsive", _fake_self_health_responsive
+    )
+
+    cfg = Config(host="127.0.0.1", port=0, db_path=str(tmp_path / "tasks.db"))
+    result: dict = {}
+
+    def _run_serve():
+        try:
+            server.serve(cfg)
+        except BaseException as exc:  # noqa: BLE001 -- surfaced to the test thread
+            result["error"] = exc
+
+    t = _threading.Thread(target=_run_serve, daemon=True)
+    t.start()
+    try:
+        # Give serve() time to acquire the lock and reach the readiness poll,
+        # then confirm a concurrent starter cannot acquire it while this
+        # instance isn't yet responsive.
+        deadline = _time.monotonic() + 5.0
+        lock_path = routing / "serve-start.lock"
+        contender = None
+        while _time.monotonic() < deadline:
+            if lock_path.exists():
+                contender = SingleInstance(lock_path)
+                if not contender.acquire():
+                    break
+                contender.release()
+                contender = None
+            _time.sleep(0.02)
+        assert contender is None or not contender.acquire(), (
+            "a concurrent starter must not acquire the lock before this "
+            "instance is confirmed responsive"
+        )
+        # Now let it "become ready" -- the lock must be released promptly.
+        ready.set()
+        deadline = _time.monotonic() + 5.0
+        while _time.monotonic() < deadline and lock_path.exists():
+            probe = SingleInstance(lock_path)
+            if probe.acquire():
+                probe.release()
+                break
+            _time.sleep(0.02)
+        else:
+            pytest.fail("start lock was never released after becoming responsive")
+    finally:
+        release_run.set()
+        ready.set()
+        t.join(timeout=5.0)
+    assert "error" not in result
+    assert any(became_responsive_calls), "readiness probe was never consulted"
+
+
 def test_serve_raises_when_start_lock_already_held(monkeypatch, tmp_path):
     """A second, concurrent non-passive serve() must not slip past the
     friendly caller-side pre-check and seize the route -- the lock itself is
@@ -228,7 +321,13 @@ def test_serve_raises_when_start_lock_already_held(monkeypatch, tmp_path):
 
 def test_serve_force_bypasses_live_coordinator_guard(monkeypatch, tmp_path):
     run = tmp_path / "run"
+    # Isolate routing_dir()/install_dir() too -- force=True skips the guard
+    # and reaches _publish_routing()/write_running_version(), which would
+    # otherwise write this test's PID/port into the real user's routing
+    # table and install manifest.
     monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(tmp_path / "routing"))
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "install"))
     monkeypatch.setattr(server, "has_live_local_coordinator", lambda **_: True)
 
     def _fake_run(self, sockets=None):

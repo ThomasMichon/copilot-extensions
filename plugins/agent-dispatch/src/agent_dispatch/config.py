@@ -343,6 +343,15 @@ def _health_responsive(base_url: str, *, timeout: float = 3.0, token: str | None
     with an explicit ``--token``/``Config.token`` override differing from the
     ambient environment) probe accurately instead of always falling back to
     the environment's token (ThomasMichon/copilot-extensions#3066 follow-up).
+
+    Any HTTP response at all -- including a 401/403 from an *authenticated*
+    endpoint rejecting our credentials -- is treated as **live**: a process
+    that answers with an auth error is still definitely running and serving
+    requests, it's simply protected by a token this caller doesn't hold (e.g.
+    a healthy incumbent started with a different token than the one we're
+    probing with). Only a genuine connection failure (refused, timed out,
+    reset) means dead -- credential mismatch must never be conflated with
+    "no coordinator is there" (ThomasMichon/copilot-extensions#3066 follow-up).
     """
     request = urllib.request.Request(f"{base_url.rstrip('/')}/health")
     token = token if token is not None else client_token()
@@ -351,6 +360,10 @@ def _health_responsive(base_url: str, *, timeout: float = 3.0, token: str | None
     try:
         with urllib.request.urlopen(request, timeout=timeout) as resp:  # noqa: S310 -- fixed loopback host from our own routing table
             return 200 <= resp.status < 300
+    except urllib.error.HTTPError:
+        # Any HTTP status (401/403/...) proves a live process answered --
+        # only connection-level failures below mean nothing is there.
+        return True
     except (OSError, urllib.error.URLError, ValueError, TimeoutError):
         return False
 

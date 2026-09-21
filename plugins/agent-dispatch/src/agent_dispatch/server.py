@@ -6,6 +6,7 @@ import logging
 import os
 import socket
 import sys
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -314,6 +315,8 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
                 "refusing to seize its active route non-passively"
             )
     try:
+        sock = None
+        fed_runner = None
         try:
             check_bind_safety(cfg)
         except UnsafeBindError as exc:
@@ -340,32 +343,59 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
         # Publish the zdd routing table (skipped while passive) so clients follow this
         # generation across a graceful cutover (docs/patterns/graceful-daemon-cutover.md).
         _publish_routing(cfg, bound_port, passive=passive)
+        # Record the *actually-running* version so the launch-path reconciler can tell
+        # a lagging live coordinator from an up-to-date on-disk manifest (dotfiles
+        # #533). Best-effort; a dead-pid/missing file is treated as absent by readers.
+        from .runtime_version import write_running_version
+
+        write_running_version()
+        fed_runner = _maybe_start_federation()
+        app = build_app(cfg)
+        server = uvicorn.Server(uvicorn.Config(app, log_level="info"))
+        # Expose the uvicorn server so the app's /shutdown drain-seam can request a
+        # clean exit when the cutover orchestrator retires this daemon.
+        app.state.uvicorn_server = server
+        if start_lock is not None:
+            # Publishing the route above is not the same moment as actually being
+            # able to answer requests on it: uvicorn's startup (ASGI lifespan +
+            # accepting connections) still has to run, and a concurrent starter
+            # racing in during that gap would see this brand-new, not-yet-serving
+            # route as "not live" and seize it right back out from under us. Run
+            # uvicorn in a background thread (uvicorn's own signal-handler
+            # install is a documented no-op off the main thread, so this is
+            # safe) and hold the start lock until *this* instance's own
+            # ``/health`` actually answers, bounded so a genuinely broken
+            # startup doesn't wedge the lock forever (review follow-up on
+            # ThomasMichon/copilot-extensions#3066).
+            server_thread = threading.Thread(
+                target=server.run, kwargs={"sockets": [sock]}, daemon=True
+            )
+            server_thread.start()
+            from .config import _health_responsive as _self_health_responsive
+
+            deadline = time.monotonic() + 10.0
+            self_url = f"http://{cfg.host}:{bound_port}"
+            while time.monotonic() < deadline and server_thread.is_alive():
+                if _self_health_responsive(self_url, timeout=0.5, token=cfg.token):
+                    break
+                time.sleep(0.05)
+            start_lock.release()
+            start_lock = None
+            server_thread.join()
+        else:
+            server.run(sockets=[sock])
     finally:
-        # Release right after the routing-table publish (the actual seizure
-        # moment) -- never hold this lock across the long-blocking serve loop
-        # below, and always release it even on an early raise/SystemExit above.
+        # Always release even on an early raise/SystemExit above -- the
+        # readiness-gated release path above already cleared this to None on
+        # its own success, so this is a no-op there.
         if start_lock is not None:
             start_lock.release()
-    # Record the *actually-running* version so the launch-path reconciler can tell
-    # a lagging live coordinator from an up-to-date on-disk manifest (dotfiles
-    # #533). Best-effort; a dead-pid/missing file is treated as absent by readers.
-    from .runtime_version import write_running_version
-
-    write_running_version()
-    fed_runner = _maybe_start_federation()
-    app = build_app(cfg)
-    server = uvicorn.Server(uvicorn.Config(app, log_level="info"))
-    # Expose the uvicorn server so the app's /shutdown drain-seam can request a
-    # clean exit when the cutover orchestrator retires this daemon.
-    app.state.uvicorn_server = server
-    try:
-        server.run(sockets=[sock])
-    finally:
         if fed_runner is not None:
             fed_runner.stop()
         _clear_routing()
         clear_endpoint(run_dir(), owner_pid=os.getpid())
-        sock.close()
+        if sock is not None:
+            sock.close()
 
 
 #: (reserved) -- the live uvicorn server is attached to ``app.state.uvicorn_server``
