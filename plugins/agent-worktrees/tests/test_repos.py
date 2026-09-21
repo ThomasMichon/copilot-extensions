@@ -482,7 +482,7 @@ def test_account_for_github_slug_honors_override(home: Path):
 # --- bare registered repo name resolution (#3032) ---------------------------
 
 
-def test_resolve_slug_owner_bare_owner_unregistered():
+def test_resolve_slug_owner_bare_owner_unregistered(home: Path):
     # No registered repo by that name -> treated as a literal owner, exactly
     # as before (personal/org owners keep resolving this way).
     assert repos.resolve_slug_owner("ThomasMichon") == "ThomasMichon"
@@ -627,7 +627,7 @@ def test_is_unresolved_registered_target_false_for_github_registered_repo(
     assert repos.is_unresolved_registered_target("copilot-extensions") is False
 
 
-def test_is_unresolved_registered_target_false_for_unregistered_name():
+def test_is_unresolved_registered_target_false_for_unregistered_name(home: Path):
     # No registered repo by this name -> not a "known but unresolvable"
     # target; it is just an ordinary (possibly personal) bare owner, and
     # ambient auth remains the safe, documented fallback.
