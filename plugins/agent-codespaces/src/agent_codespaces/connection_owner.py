@@ -512,13 +512,17 @@ def owner_serves_relay(codespace: str, now: float | None = None) -> bool:
 def should_defer_to_owner(
     config: Any, *, no_relay: bool = False, env: Any | None = None
 ) -> bool:
-    """Whether a one-off tenant should defer its credential relay to a live Owner.
+    """Whether a one-off tenant should defer its credential relay to the Owner.
 
     True only when the relay is wanted (not ``no_relay``), the operator has not
-    set the ``AGENT_CODESPACES_NO_OWNER_DEFER`` escape hatch,
-    ``connection_owner.enabled`` is on, and an Owner daemon is actually live. On
-    the default fleet (feature off / no daemon) this is False, so the tenant keeps
-    owning its own relay and behavior is unchanged.
+    set the ``AGENT_CODESPACES_NO_OWNER_DEFER`` escape hatch, and
+    ``connection_owner.enabled`` is on. The Owner does not need to already be
+    running: this spins it up on-demand (:func:`ensure_owner_running`) when it
+    is not yet live, since the daemon is deliberately not assumed to be a
+    permanently-resident background service. Only when the feature is disabled,
+    or spin-up genuinely fails, does this return False -- the tenant then keeps
+    owning its own relay and behavior is unchanged from before this feature
+    existed.
     """
     if no_relay:
         return False
@@ -528,7 +532,9 @@ def should_defer_to_owner(
     co = getattr(config, "connection_owner", None)
     if not (co and getattr(co, "enabled", False)):
         return False
-    return is_owner_live()
+    if is_owner_live():
+        return True
+    return ensure_owner_running(config)
 
 
 async def await_owner_relay(
@@ -729,6 +735,7 @@ async def run_owner_daemon(
     *,
     interval: float = 15.0,
     stop_event: asyncio.Event | None = None,
+    idle_shutdown_after: float | None = None,
 ) -> None:
     """Run the Connection Owner reconcile loop until ``stop_event`` is set.
 
@@ -737,9 +744,17 @@ async def run_owner_daemon(
     one interval). A failed reconcile cycle is logged and the loop continues (a
     transient error must not kill the daemon). On exit -- normal stop or an
     unexpected error -- all channels are stopped (registry intent is untouched).
-    Additive + opt-in: nothing starts this by default.
+
+    Deliberately **not** meant to run forever unconditionally: when
+    ``idle_shutdown_after`` is set (the default), the loop exits cleanly on its
+    own once the hold registry has been completely empty (no pinned CodeSpace,
+    no live tenant -- nothing bridge-controlled or direct-driven currently needs
+    it) for that many seconds, rather than being forced to remain resident
+    indefinitely. A tenant that needs it again later starts it back up
+    on-demand (:func:`ensure_owner_running`). ``None`` disables idle shutdown.
     """
     stop = stop_event if stop_event is not None else asyncio.Event()
+    idle_since: float | None = None
     try:
         _write_liveness(interval, active=owner.active_codespaces())
         while not stop.is_set():
@@ -750,6 +765,20 @@ async def run_owner_daemon(
             # Refresh the beacon each cycle, publishing which CodeSpaces now have
             # a live relay channel so tenants can defer to them.
             _write_liveness(interval, active=owner.active_codespaces())
+            if idle_shutdown_after is not None:
+                if list_holds():
+                    idle_since = None
+                else:
+                    if idle_since is None:
+                        idle_since = time.monotonic()
+                    elif time.monotonic() - idle_since >= idle_shutdown_after:
+                        log.info(
+                            "Connection Owner idle (no held CodeSpaces) for "
+                            "%.0fs -- exiting; a tenant will start it back up "
+                            "on demand when needed.",
+                            idle_shutdown_after,
+                        )
+                        break
             try:
                 await asyncio.wait_for(stop.wait(), timeout=interval)
             except (TimeoutError, asyncio.TimeoutError):
@@ -757,3 +786,47 @@ async def run_owner_daemon(
     finally:
         _clear_liveness()
         await owner.shutdown()
+
+
+def ensure_owner_running(
+    config: Any, *, spawn_timeout: float = 5.0, poll: float = 0.2
+) -> bool:
+    """Best-effort on-demand start of the Connection Owner daemon.
+
+    Returns ``True`` once the Owner is live -- already running, or freshly
+    spawned (detached, surviving this caller's own exit) and observed to become
+    live within ``spawn_timeout``. Returns ``False`` (never raises) on any
+    spawn failure or timeout, so a caller always has a safe fallback: keep
+    owning its own relay exactly as if the Owner did not exist. This is the
+    on-demand half of "spins up when needed, exits when idle" -- the daemon is
+    never assumed to already be running as a permanent background service.
+    """
+    if is_owner_live():
+        return True
+    try:
+        import subprocess
+        import sys
+
+        argv = [sys.executable, "-m", "agent_codespaces", "owner"]
+        popen_kwargs: dict[str, Any] = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "close_fds": True,
+        }
+        if platform.system() == "Windows":
+            popen_kwargs["creationflags"] = (
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            )
+        else:
+            popen_kwargs["start_new_session"] = True
+        subprocess.Popen(argv, **popen_kwargs)
+    except Exception as exc:
+        log.warning("Connection Owner on-demand spin-up failed: %s", exc)
+        return False
+    deadline = time.monotonic() + max(0.0, spawn_timeout)
+    while time.monotonic() < deadline:
+        if is_owner_live():
+            return True
+        time.sleep(poll)
+    return is_owner_live()
