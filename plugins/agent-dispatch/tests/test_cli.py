@@ -1542,6 +1542,94 @@ def test_cmd_serve_runtime_dir_resolution_failure_is_nonfatal(
     assert "could not resolve runtime cwd" in capsys.readouterr().err
 
 
+# -- non-passive serve() refuses to seize an already-live route (#3066) -----
+
+
+def test_cmd_serve_refuses_when_coordinator_already_live(monkeypatch, capsys):
+    import argparse
+
+    from agent_dispatch import __main__, server
+
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda: True)
+    calls = []
+    monkeypatch.setattr(server, "serve", lambda *a, **k: calls.append((a, k)))
+    args = argparse.Namespace(
+        host="127.0.0.1", port=None, db=None, token=None, passive=False, force=False,
+    )
+
+    rc = __main__._cmd_serve(args)
+
+    assert rc == 2
+    assert not calls, "serve() must never be invoked when a live coordinator exists"
+    err = capsys.readouterr().err
+    assert "already live" in err
+    assert "#3066" in err
+
+
+def test_cmd_serve_force_bypasses_live_coordinator_guard(monkeypatch, tmp_path):
+    import argparse
+
+    from agent_dispatch import __main__, runtime_version, server
+
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda: True)
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path / "runtime")
+    calls = []
+    monkeypatch.setattr(server, "serve", lambda *a, **k: calls.append((a, k)))
+    args = argparse.Namespace(
+        host="127.0.0.1", port=None, db=None, token=None, passive=False, force=True,
+    )
+
+    rc = __main__._cmd_serve(args)
+
+    assert rc == 0
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert kwargs.get("passive") is False
+
+
+def test_cmd_serve_passive_bypasses_live_coordinator_guard(monkeypatch, tmp_path):
+    # A passive cutover instance is intentionally spawned while the old
+    # coordinator is still live -- the orchestrator, not this guard, owns
+    # the drain/retire sequence for that case.
+    import argparse
+
+    from agent_dispatch import __main__, runtime_version, server
+
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda: True)
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path / "runtime")
+    calls = []
+    monkeypatch.setattr(server, "serve", lambda *a, **k: calls.append((a, k)))
+    args = argparse.Namespace(
+        host="127.0.0.1", port=None, db=None, token=None, passive=True, force=False,
+    )
+
+    rc = __main__._cmd_serve(args)
+
+    assert rc == 0
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert kwargs.get("passive") is True
+
+
+def test_cmd_serve_proceeds_when_no_coordinator_live(monkeypatch, tmp_path):
+    import argparse
+
+    from agent_dispatch import __main__, runtime_version, server
+
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda: False)
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path / "runtime")
+    calls = []
+    monkeypatch.setattr(server, "serve", lambda *a, **k: calls.append((a, k)))
+    args = argparse.Namespace(
+        host="127.0.0.1", port=None, db=None, token=None, passive=False, force=False,
+    )
+
+    rc = __main__._cmd_serve(args)
+
+    assert rc == 0
+    assert len(calls) == 1
+
+
 def test_parser_dashdash_tail_captured_for_drive_and_run():
     """`recipes drive` (leading positional) and `run` capture a verbatim
     `-- <command>` tail via `_dashdash_tail`, robustly across CPython versions

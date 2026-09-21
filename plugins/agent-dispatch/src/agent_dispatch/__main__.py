@@ -521,6 +521,19 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     from .config import load_config
     from .server import serve
 
+    passive = bool(getattr(args, "passive", False))
+    force = bool(getattr(args, "force", False))
+    if not passive and not force and has_live_local_coordinator():
+        print(
+            "agent-dispatch: a coordinator is already live and answering on this "
+            "host; refusing to start a second one non-passively (it would seize "
+            "the active route without draining the running one -- see "
+            "ThomasMichon/copilot-extensions#3066). Use `agent-dispatch deploy` "
+            "for a graceful, zero-downtime cutover onto new code, or pass "
+            "--force if you intend a deliberate, unmanaged manual restart.",
+            file=sys.stderr,
+        )
+        return 2
     _reroot_serve_cwd()
     base = load_config()
     cfg = Config(
@@ -530,7 +543,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         token=args.token or base.token,
         control_token=getattr(args, "control_token", None) or base.control_token,
     )
-    serve(cfg, passive=bool(getattr(args, "passive", False)))
+    serve(cfg, passive=passive)
     return 0
 
 
@@ -3284,6 +3297,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--passive",
         action="store_true",
         help=argparse.SUPPRESS,  # internal: a graceful-cutover passive instance
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="start even if a coordinator is already live and answering on this "
+        "host (bypasses the #3066 guard); the running one is left undrained -- "
+        "prefer `agent-dispatch deploy` for a graceful cutover instead",
     )
     p.set_defaults(func=_cmd_serve)
 
