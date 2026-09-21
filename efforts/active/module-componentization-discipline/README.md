@@ -58,7 +58,7 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees __main__.py` resolve-design slice)
+### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees __main__.py` session-metadata/maintenance/git slice)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
 — re-run before starting a phase, this list moves; it already has once per
@@ -67,15 +67,15 @@ table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 11,300 | +10,300 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Eighth dedicated slice landed: the `resolve` planner now delegates through `resolve_cli.py`, `resolve_launch_cli.py`, `resolve_machine_cli.py`, `resolve_picker_cli.py`, and `resolve_system_cli.py` using explicit command/launch/picker state objects. The launch-planning knot is no longer the main blocker; what remains in `__main__` is the smaller TTY-facing `cmd_copilot` seam plus the still-large monitor / hook / status / history core |
+| 9,420 | +8,420 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Ninth dedicated slice landed: session metadata/history/effort binding now lives in `session_metadata_cli.py`, diagnostics + maintenance in `maintenance_cli.py`, and the git collaboration subgroup in `git_cli.py`. With `cmd_resolve` already thin and `cmd_copilot` explicitly off-limits, what remains in `__main__` is now the resident `status-monitor`, the bare/front-door launch seam (`cmd_help_unrouted`, Worktree Manager fallback, headless/noninteractive bare flow), and the shared launch/router glue around `cmd_launch` / `cmd_execution_leg` |
 | 9,267 | +8,267 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression); it drifted again while this slice was in flight, so the baseline was manually widened (9191 → 9267) to restore a green full-tree guard pending its own future split |
 | 9,169 | +8,169 | `libs/installation-context/installation_context.py` (+17 vendored copies) | Split the **canonical** copy only; `sync-installation-context.py` propagates to every vendored copy |
-| 6,873 | +5,873 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
+| 6,962 | +5,962 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
 | 6,751 | +5,751 | `plugins/agent-bridge/src/agent_bridge/session_manager.py` | |
 | 5,872 | +4,872 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | |
-| 5,161 | +4,161 | `plugins/agent-index/scripts/cell-runtime.py` | |
-| 4,886 | +3,886 | `plugins/agent-dispatch/src/agent_dispatch/__main__.py` | Already partially split (`producers_cli.py` et al. extracted) — still a strong model for how far a CLI-registration split can continue |
-| 4,692 | +3,692 | `plugins/agent-codespaces/src/agent_codespaces/__main__.py` | CLI registration surface |
+| 5,145 | +4,145 | `plugins/agent-index/scripts/cell-runtime.py` | |
+| 4,901 | +3,901 | `plugins/agent-dispatch/src/agent_dispatch/__main__.py` | Already partially split (`producers_cli.py` et al. extracted) — still a strong model for how far a CLI-registration split can continue |
+| 4,693 | +3,693 | `plugins/agent-codespaces/src/agent_codespaces/__main__.py` | CLI registration surface |
 | 4,508 | +3,508 | `plugins/agent-dispatch/src/agent_dispatch/queue.py` | The original motivating case for the cap itself |
 | 3,512 | +2,512 | `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` | |
 | 2,940 | +1,940 | `plugins/agent-bridge/src/agent_bridge/agent_registry.py` | |
@@ -89,12 +89,15 @@ table):
 | 2,124 | +1,124 | `plugins/agent-worktrees/src/agent_worktrees/session_projection.py` | |
 
 **Suggested next pick (Phase 2, next slice):** re-rank `agent-worktrees`
-`__main__.py` with `resolve` gone. The obvious remaining launch-surface seam is
-now just `cmd_copilot` (its TTY wrapper still lives in `__main__`), but the
-larger absolute weight may now be the resident-monitor / hook / status / history
-cluster. Take a fresh measurement-driven pass rather than assuming the next move
-is still the old `resolve` knot. If that does not yield a clean `__main__`
-sub-flow, pivot to another large production module
+`__main__.py` again with the session-metadata / maintenance / git surfaces
+gone. Because `cmd_copilot` remains explicitly excluded and `cmd_resolve` is
+already a thin wrapper, the next real choices are the resident
+`status-monitor` runtime body or the bare/front-door launch seam
+(`cmd_help_unrouted`, Worktree Manager fallback, headless/noninteractive bare
+flow, and the surrounding router glue). Take a fresh measurement-driven pass
+rather than assuming the bigger-looking status monitor is automatically the
+better abstraction. If that does not yield a clean `__main__` sub-flow, pivot
+to another large production module
 (`plugins/agent-worktrees/src/agent_worktrees/tracking.py`,
 `plugins/agent-worktrees/src/agent_worktrees/pr_ops.py`, or the canonical
 `libs/installation-context/installation_context.py`) instead of forcing a weak
@@ -944,3 +947,69 @@ the Phase 0 runbook, picked up as capacity allows.
   fix commit in response to review feedback, wait for one more full review
   round to actually complete (or an explicit "no new findings" confirmation)
   before self-merging, rather than merging as soon as checks go green.
+
+### 2026-09-21 — Phase 2 continued: `agent-worktrees/__main__.py` session-metadata + maintenance + git slice
+- Took the next **real** cohesive seams left after the resolve split instead of
+  forcing the still-risky live launch core. Extracted three sibling modules
+  while keeping `__main__.py` as the composition root and compatibility
+  surface: `session_metadata_cli.py` now owns the session/history/effort
+  family (`session-lock`, `session-role`, `history-digest`, `effort-focus`,
+  `claimant-liveness`, `codename-lookup`) plus the supporting succession /
+  binding helpers; `maintenance_cli.py` now owns the diagnostics/maintenance
+  family (`hygiene`, `dev`, `backfill-sessions`, `doctor`,
+  `reconcile-binstubs`, `register-project-entry`, `anchor-check`,
+  `config-migrate`) plus the backfill/doctor render helpers; and `git_cli.py`
+  now owns the `git` collaboration subgroup (`sync`, `feature-branch`,
+  `merge-to-feature`) plus its parser/target-resolution helpers. Rewired
+  `build_parser()` to delegate those parser stubs to the new modules and
+  re-exported the moved names back onto `agent_worktrees.__main__` so existing
+  monkeypatch seams and direct imports keep landing where the tests expect.
+- Net result: `plugins/agent-worktrees/src/agent_worktrees/__main__.py`
+  dropped from **11,305** lines at slice start to **9,420** (a **1,885-line**
+  reduction this pass; **29,173 → 9,420** across the full nine-slice
+  campaign). The new modules land at **655** (`session_metadata_cli.py`),
+  **987** (`maintenance_cli.py`), and **219** (`git_cli.py`) lines, all under
+  the 1,000-line cap. With `cmd_resolve` already thin and `cmd_copilot`
+  explicitly excluded, the remaining `__main__.py` backlog is now much more
+  sharply constrained: the resident `status-monitor` body, the bare/front-door
+  launch seam (`cmd_help_unrouted`, Worktree Manager fallback,
+  `cmd_noninteractive_bare`, `cmd_headless_bare`), and the shared launch/router
+  glue around `cmd_launch` / `cmd_execution_leg`.
+- Validation stayed at the stricter componentization bar. Ruff (`--select
+  F,E9`) passed on `__main__.py` and all three new modules. The first full
+  `python tools/run-plugin-tests.py agent-worktrees` pass exposed one real
+  regression from the move itself: the transferred `effort-focus release
+  --transfer` path had accidentally preserved the wrong `follow_up` /
+  disposition behavior. Restored the original semantics, then re-ran a broad
+  extracted-area targeted sweep covering the moved command families and their
+  preserved seams (**311 passed, 1 skipped, 4789 deselected**). The final full
+  plugin run again reproduced only the same independently-confirmed
+  pre-existing `tests/test_doctor.py` failures (**551 passed, 10 failed,
+  1 skipped**) already called out in prior slices, so the extraction itself is
+  green apart from that known unrelated suite issue.
+- GitHub Copilot's first review round on the PR then found one real
+  compatibility seam miss before merge: `cmd_session_role()` and
+  `cmd_history_digest()` were still calling the extracted module's private
+  `_resolve_worktree_for_read()` directly, so tests or callers monkeypatching
+  `agent_worktrees.__main__._resolve_worktree_for_read` no longer intercepted
+  those commands. Fixed by routing both handlers back through the re-exported
+  `__main__` helper surface (`_core()._resolve_worktree_for_read(...)`), which
+  restores the exact monkeypatch seam the slice promised to preserve.
+- The fresh post-fix review round then caught one smaller previously-missed
+  compatibility contract: the extracted `cmd_effort_focus()` had changed the
+  fallback invalid-action exit code from the pre-extraction `1` to `2`. Even
+  though argparse normally prevents that path, the handler is still
+  re-exported for direct callers/tests, so restored the original `return 1`
+  behavior before merge.
+- Followed through on the remaining contract checks after the code stabilized:
+  `python tools/check-module-size.py` passed, `python tools/check-module-size.py
+  --refresh-baseline` lowered `tools/module-size-baseline.json`'s ceiling for
+  `agent_worktrees/__main__.py` to **9,420**, and
+  `python tools/check-install-contract.py` plus
+  `python tools/check-version-consistency.py` both pass. Dogfooded the moved
+  surfaces through the plugin test venv with read-only `--help` / `--json`
+  invocations (`session-role`, `history-digest`, `effort-focus`,
+  `claimant-liveness`, `codename-lookup`, `hygiene`, `doctor`, `anchor-check`,
+  and the `git` subgroup's usage forms). Version bump for this slice:
+  `agent-worktrees` **`1.5.5-dev220`** and marketplace `metadata.version`
+  **`1.7.7-dev188`**.
