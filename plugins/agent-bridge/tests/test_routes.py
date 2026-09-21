@@ -2679,8 +2679,8 @@ def test_crawl_agent_falls_back_when_classify_unsupported() -> None:
     "by test_resolve_local_binstub_falls_back_to_path_when_no_local_shim.",
 )
 def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path, monkeypatch) -> None:
-    """Regression (aperture-labs effort agent-bridge-worktree-native-agents):
-    ``asyncio.create_subprocess_exec`` never consults Windows' PATHEXT the way
+    """Regression: ``asyncio.create_subprocess_exec`` never consults
+    Windows' PATHEXT the way
     a shell does, so an extensionless ``Path(...).exists()`` check silently
     fell through to a bare project name that could never actually spawn on
     Windows (``FileNotFoundError: [WinError 2]``) even though the installed
