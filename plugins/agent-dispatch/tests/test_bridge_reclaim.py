@@ -78,50 +78,56 @@ def test_never_forces_past_a_live_cli_holder(monkeypatch):
     assert "--force" not in calls[0]
 
 
-def test_missing_session_id_falls_back_to_legacy_create_reclaim(monkeypatch):
+def test_missing_session_id_reports_failure_not_a_legacy_fallback(monkeypatch):
     """A successful (returncode 0) resume whose stdout carries no session_id
-    is a not-yet-upgraded daemon's old human ``[OK] ...`` text, not a new
-    failure mode -- falls back to the legacy 'create --reclaim' invocation."""
+    means a not-yet-upgraded daemon already reused-or-created the worktree's
+    session via its old human '[OK] ...' text -- NOT a genuine new failure.
+    But this must never fall back to 'create --reclaim': that daemon already
+    has a live session on this worktree, and create --reclaim force-news a
+    *second* one, leaving two controllers. Report the failure instead (the
+    caller degrades by leaving the task queued) -- resolved once agent-bridge
+    is upgraded too."""
     calls = []
 
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
-        if cmd[1:3] == ["--json", "resume"]:
-            return _proc(cmd, 0, "[OK] Worktree wt-1 loaded as owned session s1 (idle)")
-        return _proc(cmd, 0, "legacy create ok")
+        return _proc(cmd, 0, "[OK] Worktree wt-1 loaded as owned session s1 (idle)")
 
     result = _resume(monkeypatch, fake_run, wait=False)
-    assert result.returncode == 0
-    assert len(calls) == 2
-    assert calls[1] == [
-        "/usr/bin/agent-bridge", "create", "--worktree-id", "wt-1", "--reclaim",
-        "task-worker", "the seed", "--caller", "agent-dispatch:w1", "--no-wait",
-    ]
+    assert result.returncode == 1
+    assert "no session_id" in result.stderr
+    assert len(calls) == 1  # never falls back to 'create'
+    assert not any("create" in c for c in calls[0])
 
 
-def test_busy_reused_session_is_ended_and_retried(monkeypatch):
+def test_busy_reused_session_is_ended_then_resumed_again_for_its_replacement(
+    monkeypatch,
+):
     """resume *reuses* an existing live session; if it is mid-turn, plain
-    send refuses busy (exit 75) -- this path ends it and retries once,
-    mirroring the old create --reclaim's force_new=True (which never
-    deferred to an existing session at all)."""
+    send refuses busy (exit 75). 'end --force' *deletes* that exact session,
+    so the prompt can no longer reach it -- this path resumes the worktree
+    again (getting its replacement) and sends to THAT session, once."""
     calls = []
 
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
         if cmd[1:3] == ["--json", "resume"]:
-            return _proc(cmd, 0, json.dumps({"session_id": "reused-1"}))
-        if cmd[1] == "send" and calls.count(list(cmd)) == 1:
-            # First send attempt: busy.
+            # First resume reuses 'reused-1'; the post-end resume creates
+            # a fresh replacement, 'fresh-2'.
+            sid = "reused-1" if calls.count(list(cmd)) == 1 else "fresh-2"
+            return _proc(cmd, 0, json.dumps({"session_id": sid}))
+        if cmd[1] == "send" and "reused-1" in cmd:
             return _proc(cmd, bridge_reclaim._SEND_BUSY_EXIT, "", "busy")
         if cmd[1] == "end":
             return _proc(cmd, 0, "ended")
-        return _proc(cmd, 0, "ok")  # the retried send
+        return _proc(cmd, 0, "ok")  # send to fresh-2
 
     result = _resume(monkeypatch, fake_run)
     assert result.returncode == 0
     kinds = [c[1] for c in calls]
-    assert kinds == ["--json", "send", "end", "send"]
+    assert kinds == ["--json", "send", "end", "--json", "send"]
     assert calls[2] == ["/usr/bin/agent-bridge", "end", "reused-1", "--force"]
+    assert "fresh-2" in calls[4]
 
 
 def test_json_output_reshapes_send_result(monkeypatch):
