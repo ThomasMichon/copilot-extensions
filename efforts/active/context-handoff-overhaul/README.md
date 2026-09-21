@@ -2429,3 +2429,33 @@ MEDIUM findings, both fixed:
   same known flake documented earlier in this journal). Bumped
   plugin.json/marketplace.json to `0.1.1-dev40`. All guards pass,
   including `check-trusted-ci.py` on the new workflow file.
+
+### 2026-09-21 (cont.) -- PR #3167 round 30: fail-closed on non-ENOENT lock-read errors in waitForWorktreeSyncToSettle
+
+Round 30 confirmed both round-29 fixes (the dedicated exhaustive-suite
+workflow file, and the startGraceMs start barrier) resolved -- the "still
+open" listing for those two carried a null line anchor, consistent with
+this session's established pattern of stale carryovers the bot cannot
+re-anchor after a structural change, confirmed resolved by direct
+inspection of both files. One new HIGH finding, fixed:
+
+- **`waitForWorktreeSyncToSettle`'s `readFileSync` catch treated every
+  failure as "no lock present":** conflating a genuinely absent lock
+  (`ENOENT`, safe to treat as settled) with a read failure that proves
+  NOTHING either way (permissions, a sharing violation, transient I/O)
+  meant the function could report `settled: true` while an active lock
+  was actually still there, just unreadable to that one read attempt --
+  the exact "fail open on ambiguous evidence" mistake this whole lock
+  epic has repeatedly had to close elsewhere. Now only `ENOENT`
+  is treated as a genuinely absent lock; any other read error is skipped
+  as an inconclusive reading for that iteration (neither absent nor live)
+  rather than trusted either way, so the overall `timeoutMs` alone bounds
+  how long a persistently-unreadable lock can be waited out -- it is
+  never silently reported "settled".
+- 1 new exhaustive-suite test: a directory placed AT the lock path forces
+  a portable, reliably-reproducible non-`ENOENT` failure (`EISDIR`) on
+  every read attempt, proving the function times out (never falsely
+  settles) rather than treating it as absent. `node --test`: fast suite
+  127 tests/125 pass (2 pre-existing skips, unchanged), exhaustive suite
+  46/46 pass (173 total, no regressions). Bumped
+  plugin.json/marketplace.json to `0.1.1-dev41`. All guards pass.

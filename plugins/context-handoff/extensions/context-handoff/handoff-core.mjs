@@ -643,6 +643,13 @@ async function withWorktreeSyncLock(cwd, fn) {
 // e.g. consume_handoff's defensive startup check, which has no reason to
 // believe a sync is in flight at all and must stay fast in the overwhelmingly
 // common case where none is.
+//
+// Fail-closed on read errors: readFileSync failing with anything OTHER
+// than ENOENT (permissions, a sharing violation, transient I/O) proves
+// NOTHING about whether a sync is in flight -- it is silently skipped as
+// an inconclusive reading (never counted as "absent") rather than treated
+// as evidence of settlement, so a genuinely-still-active lock this
+// process merely failed to read once cannot be mistaken for "done".
 export async function waitForWorktreeSyncToSettle(cwd, { timeoutMs = 15000, pollMs = 500, startGraceMs = 0 } = {}) {
   let lockPath;
   try {
@@ -657,39 +664,54 @@ export async function waitForWorktreeSyncToSettle(cwd, { timeoutMs = 15000, poll
   let everObservedLive = false;
   for (;;) {
     let content = null;
+    let inconclusive = false;
     try {
       content = readFileSync(lockPath, "utf-8");
-    } catch {
-      // No lock file at this instant.
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        // Genuinely absent -- content stays null, handled below exactly
+        // like before.
+      } else {
+        // Any OTHER read failure (permissions, a sharing violation,
+        // transient I/O) proves NOTHING about whether a sync is in
+        // flight -- treating it the same as "absent" could conclude
+        // settled while an active lock is actually still there, just
+        // unreadable to THIS read attempt. Skip this reading entirely
+        // (neither absent nor live) rather than trusting it either way;
+        // the overall timeout still bounds how long this can persist.
+        inconclusive = true;
+      }
     }
-    const match = content !== null ? content.match(/^(\d+)-(\d+|unknown)-/) : null;
-    const holderPid = match ? Number(match[1]) : null;
-    const liveNow = holderPid !== null && isProcessAlive(holderPid);
-    if (liveNow) {
-      everObservedLive = true;
-    } else if (everObservedLive) {
-      // Was genuinely observed live at least once, and is now
-      // absent/unparseable/dead -- this really is settled (released or
-      // reclaimed since we last saw it in flight), not a startup artifact.
-      return {
-        waited: true,
-        settled: true,
-        reason: content === null ? "lock-absent-after-live" : (holderPid === null ? "lock-unparseable-after-live" : "holder-dead"),
-      };
-    } else if (Date.now() >= startGraceDeadline) {
-      // Never once observed live, and the startup grace window (zero by
-      // default) has fully elapsed -- genuinely nothing in flight (never
-      // started, or a dead/unparseable lock that predates this wait
-      // entirely).
-      return {
-        waited: true,
-        settled: true,
-        reason: content === null ? "lock-absent" : (holderPid === null ? "lock-unparseable" : "holder-dead"),
-      };
+    if (!inconclusive) {
+      const match = content !== null ? content.match(/^(\d+)-(\d+|unknown)-/) : null;
+      const holderPid = match ? Number(match[1]) : null;
+      const liveNow = holderPid !== null && isProcessAlive(holderPid);
+      if (liveNow) {
+        everObservedLive = true;
+      } else if (everObservedLive) {
+        // Was genuinely observed live at least once, and is now
+        // absent/unparseable/dead -- this really is settled (released or
+        // reclaimed since we last saw it in flight), not a startup artifact.
+        return {
+          waited: true,
+          settled: true,
+          reason: content === null ? "lock-absent-after-live" : (holderPid === null ? "lock-unparseable-after-live" : "holder-dead"),
+        };
+      } else if (Date.now() >= startGraceDeadline) {
+        // Never once observed live, and the startup grace window (zero by
+        // default) has fully elapsed -- genuinely nothing in flight (never
+        // started, or a dead/unparseable lock that predates this wait
+        // entirely).
+        return {
+          waited: true,
+          settled: true,
+          reason: content === null ? "lock-absent" : (holderPid === null ? "lock-unparseable" : "holder-dead"),
+        };
+      }
     }
     // Still within an opted-in startup grace window with no live evidence
-    // yet, or observed live and still waiting for it to clear -- keep
-    // polling.
+    // yet, an inconclusive read this iteration, or observed live and
+    // still waiting for it to clear -- keep polling.
     if (Date.now() >= deadline) {
       return { waited: true, settled: false, reason: "timeout" };
     }

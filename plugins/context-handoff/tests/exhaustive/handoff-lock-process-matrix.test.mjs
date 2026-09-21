@@ -1299,6 +1299,32 @@ test("waitForWorktreeSyncToSettle stops waiting as soon as the lock is released 
   }
 });
 
+test("waitForWorktreeSyncToSettle fails closed (never settles) on a persistent non-ENOENT read error, distinguishing it from a genuinely absent lock", async () => {
+  // Real regression this guards (round 30): treating EVERY readFileSync
+  // failure as "no lock present" conflates a genuinely absent lock
+  // (ENOENT, safe to treat as settled) with a read failure that proves
+  // NOTHING either way (permissions, a sharing violation, transient I/O)
+  // -- the latter could silently report "settled: true" while an active
+  // lock is actually still there, just unreadable to this one read
+  // attempt. A directory at the lock path is a portable, reliably-
+  // reproducible way to force a persistent non-ENOENT failure (EISDIR):
+  // the function must never conclude settled from that, only time out.
+  const dir = initGitRepo();
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(lockPath, { recursive: true });
+    const result = await waitForWorktreeSyncToSettle(dir, { timeoutMs: 500, pollMs: 100 });
+    assert.equal(result.waited, true);
+    assert.equal(result.settled, false);
+    assert.equal(result.reason, "timeout");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("waitForWorktreeSyncToSettle with no startGraceMs (the default) does NOT wait for a lock that appears late", async () => {
   // Documents the deliberate trade-off default: a caller with no
   // certainty a sync was just dispatched (consume_handoff) must stay fast
