@@ -58,7 +58,7 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees __main__.py` session-metadata/maintenance/git slice)
+### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees __main__.py` status/front-door slice)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
 — re-run before starting a phase, this list moves; it already has once per
@@ -67,18 +67,18 @@ table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 9,420 | +8,420 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Ninth dedicated slice landed: session metadata/history/effort binding now lives in `session_metadata_cli.py`, diagnostics + maintenance in `maintenance_cli.py`, and the git collaboration subgroup in `git_cli.py`. With `cmd_resolve` already thin and `cmd_copilot` explicitly off-limits, what remains in `__main__` is now the resident `status-monitor`, the bare/front-door launch seam (`cmd_help_unrouted`, Worktree Manager fallback, headless/noninteractive bare flow), and the shared launch/router glue around `cmd_launch` / `cmd_execution_leg` |
 | 9,267 | +8,267 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression); it drifted again while this slice was in flight, so the baseline was manually widened (9191 → 9267) to restore a green full-tree guard pending its own future split |
 | 9,169 | +8,169 | `libs/installation-context/installation_context.py` (+17 vendored copies) | Split the **canonical** copy only; `sync-installation-context.py` propagates to every vendored copy |
-| 6,962 | +5,962 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
+| 8,139 | +7,139 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
+| 6,972 | +5,972 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
 | 6,751 | +5,751 | `plugins/agent-bridge/src/agent_bridge/session_manager.py` | |
 | 5,872 | +4,872 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | |
 | 5,145 | +4,145 | `plugins/agent-index/scripts/cell-runtime.py` | |
-| 4,901 | +3,901 | `plugins/agent-dispatch/src/agent_dispatch/__main__.py` | Already partially split (`producers_cli.py` et al. extracted) — still a strong model for how far a CLI-registration split can continue |
+| 4,902 | +3,902 | `plugins/agent-dispatch/src/agent_dispatch/__main__.py` | Already partially split (`producers_cli.py` et al. extracted) — still a strong model for how far a CLI-registration split can continue |
 | 4,693 | +3,693 | `plugins/agent-codespaces/src/agent_codespaces/__main__.py` | CLI registration surface |
 | 4,508 | +3,508 | `plugins/agent-dispatch/src/agent_dispatch/queue.py` | The original motivating case for the cap itself |
-| 3,512 | +2,512 | `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` | |
-| 2,940 | +1,940 | `plugins/agent-bridge/src/agent_bridge/agent_registry.py` | |
+| 3,514 | +2,514 | `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` | |
+| 2,963 | +1,963 | `plugins/agent-bridge/src/agent_bridge/agent_registry.py` | |
 | 2,680 | +1,680 | `plugins/agent-worktrees/src/agent_worktrees/sessions.py` | |
 | 2,583 | +1,583 | `plugins/agent-codespaces/src/agent_codespaces/config.py` | |
 | 2,429 | +1,429 | `tools/clean-room/scenarios/agent-index-installation-cells/scenario.py` | Clean-room fixture, not production code — lower urgency |
@@ -88,20 +88,18 @@ table):
 | 2,195 | +1,195 | `plugins/agent-worktrees/src/agent_worktrees/reconcile.py` | |
 | 2,124 | +1,124 | `plugins/agent-worktrees/src/agent_worktrees/session_projection.py` | |
 
-**Suggested next pick (Phase 2, next slice):** re-rank `agent-worktrees`
-`__main__.py` again with the session-metadata / maintenance / git surfaces
-gone. Because `cmd_copilot` remains explicitly excluded and `cmd_resolve` is
-already a thin wrapper, the next real choices are the resident
-`status-monitor` runtime body or the bare/front-door launch seam
-(`cmd_help_unrouted`, Worktree Manager fallback, headless/noninteractive bare
-flow, and the surrounding router glue). Take a fresh measurement-driven pass
-rather than assuming the bigger-looking status monitor is automatically the
-better abstraction. If that does not yield a clean `__main__` sub-flow, pivot
-to another large production module
-(`plugins/agent-worktrees/src/agent_worktrees/tracking.py`,
-`plugins/agent-worktrees/src/agent_worktrees/pr_ops.py`, or the canonical
-`libs/installation-context/installation_context.py`) instead of forcing a weak
-abstraction.
+**Suggested next pick (Phase 2, next slice):** pivot away from
+`agent-worktrees/__main__.py`'s command-surface campaign. After this slice,
+the remaining `cmd_*` bodies in `__main__.py` are the true launch / execution
+core (`cmd_launch`, `cmd_execution_leg`), the explicitly-excluded
+`cmd_copilot`, and thin wrappers (`cmd_resolve`, `cmd_handoff_trace`). In
+other words: the clean command-handler seams are exhausted, and any further
+split would be a weaker internal-helper carve rather than the strong
+command-family/module seam the first ten slices used. If the next priority is
+the biggest remaining production offender overall, take the canonical
+`libs/installation-context/installation_context.py`; if the operator wants to
+stay in `agent-worktrees`, pivot to `tracking.py` (or `pr_ops.py`) instead of
+forcing `__main__.py` past this point.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
 margin of their own ceiling (most likely to tip over next from unrelated
@@ -1013,3 +1011,66 @@ the Phase 0 runbook, picked up as capacity allows.
   and the `git` subgroup's usage forms). Version bump for this slice:
   `agent-worktrees` **`1.5.5-dev220`** and marketplace `metadata.version`
   **`1.7.7-dev188`**.
+
+### 2026-09-21 — Phase 2 continued: `agent-worktrees/__main__.py` status/front-door slice
+- Took the two last strong command-surface seams still left in
+  `agent-worktrees/__main__.py` without touching the explicitly forbidden
+  `cmd_copilot`. The resident monitor command itself now lives in a dedicated
+  `status_monitor_cli.py` (parser + `cmd_status_monitor()` only), while the
+  already-existing `status_monitor_runtime.py` stays the runtime/reconcile/
+  restart helper module. Separately, the no-project / bare-launch front door
+  now lives in `front_door_cli.py`: global `--project` extraction, the
+  `<repo> <slug>` sibling router, no-project command classification, project
+  resolution from cwd, `cmd_help_unrouted()`, Worktree Manager probing and
+  handoff, the install trigger, and the noninteractive/headless bare fallback
+  surfaces all moved there as one cohesive seam. `__main__.py` remains the
+  composition root and compatibility surface by re-exporting those moved names
+  back onto `agent_worktrees.__main__`.
+- The first attempt put `cmd_status_monitor()` straight into
+  `status_monitor_runtime.py`, but that produced a brand-new **1,086-line**
+  module and failed `check-module-size.py`. Rather than widen the baseline on a
+  file that had just been created, split the command surface back out into
+  `status_monitor_cli.py` so the runtime helper file lands at **800** lines and
+  the command wrapper at **303**. `front_door_cli.py` lands at **897** lines.
+  Net result for the parent module: `plugins/agent-worktrees/src/agent_worktrees/__main__.py`
+  dropped from **9,420** lines at slice start to **8,139** (a **1,281-line**
+  reduction this pass; **29,173 → 8,139** across the full ten-slice campaign).
+- The live `cmd_*` inventory after this slice is now down to exactly:
+  `cmd_launch`, `cmd_execution_leg`, the explicitly excluded `cmd_copilot`,
+  thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace`. That is the
+  campaign's key structural result: the clean command-family seams in
+  `__main__.py` are effectively exhausted. Pushing further would mean carving
+  internal helper logic out of the launch/execution composition root, not
+  continuing the same strong "one command family → one sibling module" pattern.
+- Validation caught and then closed several compatibility-seam regressions that
+  came specifically from moving monkeypatch targets out of `__main__`. The
+  targeted routing/lock sweep (**139 passed**) first exposed missing re-exports
+  (`_NO_PROJECT_COMMANDS`, `_CORE_SLUGS`, Worktree Manager constants) and local
+  helper calls inside `front_door_cli.py` that bypassed monkeypatched
+  `agent_worktrees.__main__` aliases. Fixed by re-exporting the constants and
+  routing the moved helper calls back through `_core_helper(...)` / the
+  re-exported `__main__` surface where callers/tests already patch them.
+  A second targeted monitor/launch sweep (**147 passed**) then caught one more
+  preserved test seam: `tests/test_status_monitor.py` still monkeypatches
+  `agent_worktrees.__main__.loop_governance_mod`, so restored that import as a
+  compatibility re-export even though the real implementation now lives in the
+  extracted command module.
+- Final validation for the slice: Ruff (`--select F,E9`) passes on
+  `__main__.py`, `front_door_cli.py`, `status_monitor_cli.py`, and
+  `status_monitor_runtime.py`; `python tools/run-plugin-tests.py
+  agent-worktrees -k "cli_routing or bridge_lock"` passes (**139 passed**);
+  `python tools/run-plugin-tests.py agent-worktrees -k "status_monitor or
+  launch_cmd"` passes (**147 passed**); and the full
+  `python tools/run-plugin-tests.py agent-worktrees` run again stops only at the
+  same independently-confirmed unrelated `tests/test_doctor.py` failures
+  (**551 passed, 10 failed, 1 skipped**) already accepted as pre-existing.
+  `python tools/check-module-size.py --refresh-baseline` lowered
+  `tools/module-size-baseline.json`'s ceiling for `agent_worktrees/__main__.py`
+  to **8,139**, and `python tools/check-install-contract.py` plus
+  `python tools/check-version-consistency.py` both pass. Dogfooded the touched
+  surfaces with read-only help/output paths through the plugin test venv:
+  global `--help`, `status-monitor --help`, `reconcile-sessions --help`,
+  `status-monitor-restart --help`, plain `reconcile-sessions` JSON output, the
+  no-project bare help fallback, and the Worktree Manager install trigger.
+  Version bump for this slice: `agent-worktrees` **`1.5.5-dev221`** and
+  marketplace `metadata.version` **`1.7.7-dev189`**.
