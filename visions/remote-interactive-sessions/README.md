@@ -70,18 +70,30 @@ Session Host to wrap a process two other owners already keep alive and
 already speak for would be a second, redundant lifecycle manager — precisely
 what this vision's non-goals rule out.
 
-What CLI mode actually still needs, and does not yet have, is Session Host's
-**third** job: durable discoverability. A directly-spawned session is durably
-findable and reattachable through `host_index` — the daemon's own map of
-"where is this session's process and how do I reach it again." A CLI-mode
-session must be findable and reattachable the exact same durable way, through
-the exact same index — not a separate, bespoke correlation mechanism — even
-though *how* to reach it differs fundamentally: an ACP-mode record's endpoint
-is "dial this local port"; a CLI-mode record's endpoint is "attach to this mux
-session" (locally: `tmux`/`psmux attach-session`; remotely: reach the venue
-over its existing transport, then attach). One index, two honest record
-shapes for two different reattach mechanisms — not a second host type, and
-not a second discovery mechanism.
+Discoverability, the third thing a Session Host would otherwise provide, is
+**already handled correctly** by a different, already-existing mechanism: the
+extension's self-registration into the coordination layer's durable
+`live_sessions` registry — the same registry every attended (non-daemon-spawned)
+interactive session already uses to be observable/messageable, CLI-mode or
+not. This is deliberately a *different* map from `host_index` (the daemon's
+record of processes *it itself spawned*, addressed by a dialable local port
+and polled by `host_pid`/`child_pid` liveness) — a CLI-mode session was never
+spawned by the daemon, so it has neither a port nor a host process for that
+model to describe. One process, two owners covering survival and control, one
+already-correct self-registration path for discovery: no fourth mechanism
+needed.
+
+What genuinely still blocks a *remote*-venue CLI-mode session from being
+discoverable this same way is narrower and more concrete: the extension
+always registers against `http://127.0.0.1:<port>` (its own loopback), and
+today only the credential-relay port is reverse-forwarded into a CodeSpace or
+container — the daemon's own API port is not. A muxed session launched inside
+a venue has no network path back to the host daemon to register at all yet.
+Closing that is a transport-provisioning detail (reuse the existing
+reverse-forward machinery for a second port), not a data-model change; a
+related, equally concrete gap is that `live_sessions` today carries no
+venue/reattach descriptor (which CodeSpace/container, what mux session name)
+for an operator or the daemon to later act on.
 
 ### Worktree-keyed reservation, not ambient self-registration
 
@@ -93,8 +105,7 @@ starts. This is sound specifically because the fabric already guarantees
 *[single-current-session-per-worktree](../agent-fabric/README.md#single-current-session-per-worktree)*
 — at most one current session per worktree — so a worktree-keyed reservation
 is never ambiguous. Correlating a registering session against a pending
-reservation, and **promoting that reservation into a real `host_index`
-registration** (a CLI-mode-shaped record, not a boolean flag), is the
+reservation, and marking the matched `live_sessions` row accordingly, is the
 daemon's own responsibility at registration time; an
 extension that already resolves and sends its worktree identity needs no
 separate lookup step to participate. Only once a *remote* venue's own local
@@ -109,12 +120,12 @@ exclusive to the local worktree/mux launch path. Any venue provider —
 `agent-codespaces`, `agent-containers`, or a future `agent-ssh`-reachable
 machine — can offer the same launch shape: prepare the venue, allocate the
 paired CLI-mode reservation, and start a standard muxed CLI process bound to
-it, registering into the same `host_index` with a reattach descriptor that
-knows how to reach that venue. This rides the single SSH transport and
-auth-relay back-channel
-[venue-parity](../venue-parity/README.md) already establishes for headless
-dispatch; it does not require or invent a second, venue-specific transport for
-the interactive case.
+it, self-registering into `live_sessions` with a reattach descriptor that
+knows how to reach that venue over a daemon-port reverse forward set up as
+part of the same launch. This rides the single SSH transport and auth-relay
+back-channel [venue-parity](../venue-parity/README.md) already establishes
+for headless dispatch; it does not require or invent a second,
+venue-specific transport for the interactive case.
 
 ### Human-attended, honestly marked
 
@@ -139,9 +150,9 @@ to carry this over a network boundary.
 
 A registering session's binding to its CLI-mode designation is resolved from
 an explicit reservation keyed by worktree identity, correlated at
-registration time and promoted into the same durable `host_index` every
-Session Host-backed session is found through — not inferred from an ambient
-default, and not tracked in a second, parallel discovery mechanism.
+registration time in the same durable `live_sessions` registry every
+attended session is found through — not inferred from an ambient default,
+and not tracked in a second, parallel discovery mechanism.
 
 ### symmetric-muxed-venue-launch
 
@@ -196,10 +207,10 @@ the extension-host locking its own plugin directory.
 
 ### no-duplicate-lifecycle-machinery
 
-A CLI-mode-bound session reuses the exact `host_index` registration, reattach,
-observation, and retirement machinery any other durably-registered session
-uses — a second, honestly-different record shape (mux-reattach instead of a
-dialable port) in the same index, never a second index or a forked protocol.
+A CLI-mode-bound session reuses the exact `live_sessions` registration,
+messaging, and observation machinery any other attended session uses —
+never a second registry or a forked protocol, and never wrapped in a
+Session Host it does not need.
 
 ### opt-in-not-ambient-default
 
@@ -226,9 +237,8 @@ headless session's mechanics do not actually extend to an attended one.
 - **Not a second Session Host process or discovery mechanism.** CLI mode
   spawns no wrapping host process — the multiplexer and the already-loaded
   extension already provide a Session Host's survival and daemon-facing
-  duties — but it registers into the exact same `host_index` any Session
-  Host-backed session uses, as a second, honest record shape (mux-reattach,
-  not a dialable port), never a parallel index or lifecycle.
+  duties — and it discovers through `live_sessions`, the same registry any
+  attended session already uses, never a parallel index or lifecycle.
 - **Not reaching local capabilities from the remote session.** Whether and how
   a CLI-mode session reaches locally-provided resources (a browser profile,
   local configuration, etc.) is
@@ -268,6 +278,24 @@ headless session's mechanics do not actually extend to an attended one.
 
 ## Provenance
 
+- **2026-09-20** — Same-day correction to the entry directly below: the
+  `host_index` framing was itself wrong, found while starting the
+  implementation follow-up it called for. `host_index` is specifically the
+  daemon's map of processes **it spawned** (a dialable local port,
+  `host_pid`/`child_pid` liveness) — a CLI-mode session was never spawned by
+  the daemon, so it has neither a port nor a host process for that model to
+  describe. The self-registration a CLI-mode session already performs writes
+  into `live_sessions` — a different, already-existing, already-correct
+  discovery registry every attended (non-daemon-spawned) session uses, CLI
+  mode included. Phase 2 got the *mechanism* choice right the first time;
+  there was no discovery mechanism to unify. What genuinely still blocks a
+  *remote*-venue CLI-mode session is narrower: the extension always resolves
+  its daemon at `127.0.0.1`, and only the credential-relay port is currently
+  reverse-forwarded into a venue -- the daemon's own API port is not, so a
+  remote CLI-mode session has no network path back to register at all yet.
+  A related, separate gap: `live_sessions` carries no venue/reattach
+  descriptor today. Both are transport/schema additions tracked in the
+  realizing effort, not a `host_index` unification.
 - **2026-09-20** — Course-corrected "Session Host CLI mode" after operator
   challenge to a hypothetical "always spawn a real Session Host, even
   locally" reading of Phase 2/3's implementation gap. Neither extreme is
@@ -291,6 +319,8 @@ headless session's mechanics do not actually extend to an attended one.
   promoting the Phase 2 reservation-claim into a real registration) is
   tracked in the realizing effort, reopening parts of already-merged Phase 2/3
   work rather than treating them as closed.
+  **(Superseded same-day by the entry above — the `host_index` target was
+  wrong; kept for the record of what was actually tried.)**
 - **2026-09-19** — Refined "cwd-keyed discovery" to **worktree-id-keyed
   reservation + server-side correlation** after implementing Phase 2: the
   fabric's own `single-current-session-per-worktree` identity unit is the
