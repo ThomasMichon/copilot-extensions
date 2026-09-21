@@ -21,6 +21,7 @@ import {
 } from "node:fs";
 import { join, basename, dirname, resolve } from "node:path";
 import { execFileSync, execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -229,6 +230,35 @@ function describeSyncError(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+// `--git-path` resolves the correct per-worktree location for either rebase
+// strategy (merge-based `rebase -i` vs. the older apply-based path).
+// Returns { inProgress, error } rather than throwing so callers can
+// distinguish "definitely mid-rebase" from "couldn't tell, fail closed" with
+// one shape. Deliberately cheap/side-effect-free so it is safe to call twice
+// (see attemptWorktreeSync's TOCTOU note on its two call sites).
+async function rebaseInProgress(cwd) {
+  try {
+    const [mergeDir, applyDir] = await Promise.all([
+      execFileAsync("git", ["rev-parse", "--git-path", "rebase-merge"], {
+        cwd, encoding: "utf-8", timeout: 5000,
+      }),
+      execFileAsync("git", ["rev-parse", "--git-path", "rebase-apply"], {
+        cwd, encoding: "utf-8", timeout: 5000,
+      }),
+    ]);
+    return {
+      inProgress: existsSync(resolve(cwd, mergeDir.stdout.trim()))
+        || existsSync(resolve(cwd, applyDir.stdout.trim())),
+      error: false,
+    };
+  } catch {
+    // If we can't even ask git where its rebase state would live, treat that
+    // the same as "not a git checkout" would have -- fail closed by
+    // reporting in-progress rather than guessing.
+    return { inProgress: true, error: true };
+  }
+}
+
 // Async-only twin of resolveRuntimePython's `resolve()` step, for a caller
 // that must never block the event loop (see attemptWorktreeSync below).
 // Always behaves as allowProvision:false -- an unprovisioned runtime is
@@ -281,9 +311,15 @@ async function resolveRuntimePythonAsyncNoProvision(resolved, env, cwd, timeout)
 export async function attemptWorktreeSync(cwd) {
   let status;
   try {
-    const result = await execFileAsync("git", ["status", "--porcelain"], {
-      cwd, encoding: "utf-8", timeout: 5000,
-    });
+    // --untracked-files=all matches this repo's own established dirty-check
+    // convention (service-utils.ps1): plain `--porcelain` collapses an
+    // untracked directory to one summary line and can also be suppressed
+    // entirely by a local `status.showUntrackedFiles=no` config, either of
+    // which would let real untracked content slip through as "clean".
+    const result = await execFileAsync(
+      "git", ["status", "--porcelain", "--untracked-files=all"],
+      { cwd, encoding: "utf-8", timeout: 5000 },
+    );
     status = result.stdout;
   } catch (error) {
     return {
@@ -305,33 +341,21 @@ export async function attemptWorktreeSync(cwd) {
   // own failure-path `git rebase --abort` cancel a rebase this session
   // never started -- never our call to make. `--git-path` resolves the
   // correct per-worktree location for either rebase strategy.
-  try {
-    const [mergeDir, applyDir] = await Promise.all([
-      execFileAsync("git", ["rev-parse", "--git-path", "rebase-merge"], {
-        cwd, encoding: "utf-8", timeout: 5000,
-      }),
-      execFileAsync("git", ["rev-parse", "--git-path", "rebase-apply"], {
-        cwd, encoding: "utf-8", timeout: 5000,
-      }),
-    ]);
-    if (
-      existsSync(resolve(cwd, mergeDir.stdout.trim()))
-      || existsSync(resolve(cwd, applyDir.stdout.trim()))
-    ) {
-      return {
-        attempted: false,
-        synced: false,
-        reason: "a rebase is already in progress in this worktree; automatic sync never touches an in-progress rebase, so it was skipped",
-      };
-    }
-  } catch {
-    // If we can't even ask git where its rebase state would live, treat that
-    // the same as "not a git checkout" below would have -- fail closed by
-    // skipping the sync rather than guessing.
+  //
+  // This check and the actual sync exec below are NOT atomic -- another
+  // process could start a rebase in the window between them, and we do not
+  // control (or want to invent) a cross-process worktree lock here. Rather
+  // than pretend a single check makes this airtight, `rebaseInProgress` is
+  // re-run again immediately before the sync exec call, right after the
+  // last other await, to shrink that window to the minimum unavoidable gap.
+  const rebaseState = await rebaseInProgress(cwd);
+  if (rebaseState.inProgress || rebaseState.error) {
     return {
       attempted: false,
       synced: false,
-      reason: "could not determine rebase state; automatic sync was skipped to be safe",
+      reason: rebaseState.error
+        ? "could not determine rebase state; automatic sync was skipped to be safe"
+        : "a rebase is already in progress in this worktree; automatic sync never touches an in-progress rebase, so it was skipped",
     };
   }
   let resolved;
@@ -360,12 +384,31 @@ export async function attemptWorktreeSync(cwd) {
       if (resolved.payloadRootEnv) {
         env[resolved.payloadRootEnv] = resolved.pluginRoot;
       }
+      // Recheck immediately before the actual sync subprocess launch --
+      // narrows (never fully closes) the TOCTOU window noted above, since
+      // this is the last point before the exec that could abort a rebase.
+      const recheck = await rebaseInProgress(cwd);
+      if (recheck.inProgress || recheck.error) {
+        return {
+          attempted: false,
+          synced: false,
+          reason: "a rebase started in this worktree just before sync; automatic sync never touches an in-progress rebase, so it was skipped",
+        };
+      }
       await execFileAsync(
         python,
         isolatedPythonArgs(resolved.module, ["git", "sync"]),
         { cwd, timeout, env, encoding: "utf-8" },
       );
     } else {
+      const recheck = await rebaseInProgress(cwd);
+      if (recheck.inProgress || recheck.error) {
+        return {
+          attempted: false,
+          synced: false,
+          reason: "a rebase started in this worktree just before sync; automatic sync never touches an in-progress rebase, so it was skipped",
+        };
+      }
       await execFileAsync(resolved.path, ["git", "sync"], {
         cwd, timeout, encoding: "utf-8",
       });
@@ -1081,6 +1124,21 @@ export function runAgentDispatchConsume(cwd, taskId, deferComplete) {
   return runCli("agent-dispatch", argv, { cwd, timeout: 20000 });
 }
 
+// Exported for testability (pure function, no I/O): the dedup key folds in a
+// short content hash rather than just the session id. agent-dispatch's
+// `create` is idempotent per dedup-key -- a repeat call with the SAME key
+// returns the existing nonterminal task unchanged, even with different
+// --payload-file content. Without the hash, a deliberate re-save after this
+// session's own worktree sync (guidance tells the agent to always re-save
+// post-sync) would silently keep the stale pre-sync payload live. Identical
+// content still maps to the same key, so a true accidental duplicate call
+// still dedupes as before; only genuinely different content earns a fresh
+// task, and `abandonSupersededHandoffs` retires whatever it superseded.
+export function handoffDedupKey(sid, promptText) {
+  const contentHash = createHash("sha256").update(promptText).digest("hex").slice(0, 12);
+  return `handoff-${sid}-${contentHash}`;
+}
+
 export function dispatchHandoff(promptText, sid, cwd, title) {
   const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "agent-dispatch" });
   const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
@@ -1098,7 +1156,7 @@ export function dispatchHandoff(promptText, sid, cwd, title) {
     const argv = [
       "create", title || "Handoff: continue this session",
       "--proposed", "--label", "handoff", "--source", "context-handoff",
-      "--dedup-key", `handoff-${sid}`, "--payload-file", tmp,
+      "--dedup-key", handoffDedupKey(sid, promptText), "--payload-file", tmp,
       "--target-worktree", worktree, "--affinity", `worktree=${worktree}`,
     ];
     if (machine) argv.push("--target-machine", machine);

@@ -1490,3 +1490,59 @@ gate land._
   in the handoff brief rather than blocking on it. Bumped
   `plugin.json`/`marketplace.json` to `0.1.1-dev35` across several review
   rounds (dev33 collided with a concurrent main merge).
+
+### 2026-09-21 (cont.) -- PR #3167 round 9: dirty-check gap, TOCTOU narrowing, stale task-backed re-save
+
+Continuing automated review response on PR #3167 (`context-handoff: sync
+worktree onto latest default branch before triggering a handoff`); round 9
+surfaced three new HIGH-severity findings, all fixed in this pass:
+
+- **`git status --porcelain` dirty-check gap:** the default invocation can
+  report a clean tree even with real untracked content present, if the
+  worktree's local git config sets `status.showUntrackedFiles=no` --
+  masking exactly the kind of untracked/secret-adjacent file a sync should
+  never risk touching. Added `--untracked-files=all`, matching this repo's
+  own established dirty-check convention already used in
+  `agent-worktrees/scripts/service-utils.ps1`. New regression test sets
+  that config explicitly, confirms bare `--porcelain` really is fooled by
+  it (so the fix is meaningfully exercised), then confirms
+  `attemptWorktreeSync` correctly skips.
+- **Rebase-check/sync TOCTOU:** the in-progress-rebase check and the actual
+  `agent-worktrees git sync` call were not atomic -- another process could
+  start a rebase in the gap between them, and the sync helper's own
+  failure-path `git rebase --abort` could then cancel a rebase this
+  session never started. A cross-process worktree lock is out of scope
+  (not something this plugin owns), so the check (extracted into a
+  `rebaseInProgress()` helper) is now re-run a second time immediately
+  before each sync exec call, right after the last other `await` --
+  narrowing the unavoidable race to the true minimum rather than pretending
+  a single check makes it airtight. Structural test confirms the recheck
+  call site exists (no DI seam for the underlying git calls, matching this
+  file's existing pattern for such checks).
+- **Stale task-backed baton on re-save:** `save_handoff_prompt`'s
+  agent-dispatch path (`dispatchHandoff`) used a fixed dedup key
+  (`handoff-${sid}`) -- `agent-dispatch create --dedup-key K` is idempotent
+  per K, so a repeat call with the SAME key silently returns the existing
+  nonterminal task **unchanged**, even with different payload content. This
+  meant round 7's "always re-save after post-approval sync" fix was a
+  no-op for the task-backed storage path specifically: a successor could
+  still receive the stale pre-sync brief. Fixed by folding a short content
+  hash into the dedup key (`handoffDedupKey()`, new, pure/exported for
+  testability): identical content still maps to the same key (a true
+  accidental duplicate call still dedupes as before), but genuinely
+  different content now earns a fresh task -- and the existing
+  `abandonSupersededHandoffs()` call (already wired in, worktree-scoped,
+  not dedup-key-scoped) correctly retires whatever it superseded, with no
+  further changes needed there. 4 new unit tests cover stability,
+  content-sensitivity, session-scoping, and the key's debuggable shape.
+- Re-verified the review's other 6 "carried over" items against current
+  file state -- all genuinely already resolved in rounds 5-8 (the known
+  re-flagging pattern for this repo's automated reviewer), no action
+  needed.
+- `node --test`: 128 tests, 126 pass (2 pre-existing skips), no
+  regressions -- confirmed the 3 bash-dependent `test_emit_guidance.py`
+  failures are baseline-identical (same failure on the pre-change commit
+  via a stash/restore check), not new. All guards
+  (`check-marketplace-isolation`, `check-skills`, `check-docs-consistency`,
+  `check-no-internal-identifiers`, `check-version-bump`) pass. Bumped
+  `plugin.json`/`marketplace.json` to `0.1.1-dev36`.
