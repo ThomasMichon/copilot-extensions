@@ -66,12 +66,14 @@ and the parent agent-dispatch vision:
   `_SUPPORTED_FORGE_PROVIDERS = {"github", "azure-devops"}`; a new
   `_forge_provider_for(config)` factory selects the adapter class, replacing
   `run_tick`'s hard-coded `GitHubProvider(...)` default.
-- [ ] Prove one live Azure DevOps-backed declaration end-to-end (discovery,
+- [x] Prove one live Azure DevOps-backed declaration end-to-end (discovery,
   batching, reservation, settlement) alongside the existing GitHub declaration
-  it must not regress. Still open -- no live Azure DevOps organization/project
-  has exercised this adapter yet; today it is validated only by mocked-`az`
-  unit tests (17 new tests: identity mismatch, tag-as-label round-trip,
-  reservation-marker parity with GitHub, provider selection).
+  it must not regress. Proved 2026-09-20 against a real sandbox project
+  (reserve/claim/release cycle on real work items); full discovery
+  (`list_open_issues`) is proven for the per-item REST paths it shares with
+  reserve/claim/release but is separately gated on the scale finding below.
+  See the dated journal entry for the six real bugs this live pass found and
+  fixed -- only mocked-`az` unit tests had exercised this adapter before.
 
 ### Phase 2 - Declarative worker identity
 
@@ -676,6 +678,77 @@ declaration always preferred over the built-in tier when run with that
 repo's checkout as `cwd`. Any reader relying on the 2026-09-08 entries'
 description of the packaged path should treat this entry as the current
 state instead.
+
+### 2026-09-20 - Proved the Azure DevOps provider live; found and fixed six real bugs
+
+- Prior status check this same day surfaced that the dotfiles-switch item
+  from the prior handoff was stale (already done 2026-09-08, and the
+  declaration it applied to was independently retired 9/15 in favor of a new
+  `effort-lane` system -- unrelated to this effort, no action needed). With
+  that cleared, picked up the effort's other open item: proving Phase 1's
+  Azure DevOps adapter against a real org (never exercised live before,
+  only mocked `az` unit tests).
+- Ran the adapter against a real sandbox project (`SPO Project Outcomes` /
+  `onedrive.visualstudio.com`, throwaway work items, all deleted after).
+  Found and fixed six real bugs the mocks could not have caught:
+  1. `_verify_identity`'s `az devops invoke --area connectionData --resource
+     connectionData` always fails against a real org --
+     `connectionData`/`ConnectionData` is not a project-collection resource
+     area (confirmed absent from `_apis/resourceareas`); it is a
+     deployment/VSSPS-level endpoint. Fixed by calling
+     `{org_url}/_apis/connectionData` directly via `az rest` instead.
+  2. `_az` passed `"az"` straight to `subprocess.run` with no shell and no
+     `PATHEXT` resolution -- fails with `FileNotFoundError` on any Windows
+     host where Azure CLI installs as `az.cmd` (confirmed: `gh` ships a real
+     `.exe` and has no such problem, so the GitHub adapter never hit this).
+     Fixed with `shutil.which("az") or "az"`.
+  3. The `wit/comments` GET call in both `list_open_issues` and `release`
+     omitted `--api-version`, which crashes with an unhandled CLI-internal
+     `TypeError` (not a clean error) against a real org, since that resource
+     is preview-only -- the sibling POST call already knew to pass
+     `7.1-preview`. Added the same flag to both GET call sites.
+  4. `_comment`'s `--in-file -` does not read stdin the way `gh`'s
+     `--input -` convention does; `az devops invoke` requires a real file
+     path. Fixed by writing the comment body to a real temp file.
+  5. The state marker is an HTML comment (`<!-- ... -->`); Azure DevOps
+     work-item comments are stored/sanitized as HTML server-side and strip
+     HTML comments from the persisted text entirely (confirmed: posted,
+     read back, marker gone). Added a bracket-delimited marker form
+     (`_marker_plain`/`_MARKER_PLAIN_RE` in `issue_loop_markers.py`) that the
+     Azure DevOps adapter uses instead; `_parse_marker` recognizes either
+     form so history from both providers reads back correctly. Also found
+     Azure DevOps returns comment text with HTML entities escaped (`"` ->
+     `&quot;`) even for content posted as literal JSON quotes -- `_parse_marker`
+     now unescapes before matching (a no-op for GitHub's plain-text bodies).
+  6. Azure DevOps's `wit/comments` GET returns comments newest-first
+     (confirmed against a real work item's timestamps) -- the opposite of
+     the GitHub GraphQL query's `last:N` (oldest-first within the page).
+     `_latest_reservations` assumes chronological input order, so a claim
+     comment could sort ahead of the reserve comment it followed and get
+     silently ignored. Fixed by sorting comments by `createdDate` ascending
+     in both `list_open_issues` and `release` before marker extraction.
+  All 60 `test_repository_issue_loops.py` unit tests still pass unchanged
+  after these six fixes (none of the fixes altered the mocked call shapes
+  the tests assert on). Live proof: created a throwaway work item, ran
+  identity verification -> fetch -> reserve -> claim -> release end to end,
+  confirmed the reservation-marker history read back as
+  `["reserved", "claimed", "released"]`, then deleted all scratch work items
+  (`az boards work-item delete --yes`, recoverable via ADO's recycle bin if
+  ever needed).
+- **Not fixed, flagged as a distinct follow-up**: `list_open_issues`'s WIQL
+  (`Select [System.Id] From WorkItems Where [System.State] <> 'Closed' ...`,
+  no date/type/area scoping) hit Azure DevOps's 20000-item result cap
+  against this real project's full history (confirmed: a narrower,
+  date-scoped variant of the same query returned 292 items from this year
+  alone). GitHub's adapter never hits an equivalent limit because a
+  `repo` is a naturally small discovery boundary; an Azure DevOps `project`
+  is not -- any real, long-lived project can exceed the cap. The
+  declaration schema today has no field to narrow discovery (area path,
+  iteration path, work item type, or max-age), so `list_open_issues` as
+  written cannot be proven end-to-end against a project of meaningful age
+  without one. This is the next slice for Phase 1's Validation Plan item,
+  not closed by this leg.
+
 
 
 
