@@ -32,3 +32,29 @@ live rather than relying on the snapshot:
 - `agent-worktrees state-root --pair --json`
 - `agent-worktrees related list`
 - `agent-worktrees related resolve <name>`
+
+## Never clone another repo as a child directory of this checkout
+
+Needing another repo's own files (its instructions, source, or docs) is a
+cross-repo need, not a reason to `git clone`/copy it into a subdirectory of
+the current checkout (e.g. `external/<repo>/`, `vendor/<repo>/`,
+`third_party/<repo>/`). A child clone drifts silently (no update path), is
+never tracked by this tool's worktree/finalize lifecycle, shows the current
+checkout as permanently dirty (an untracked directory git will never
+recognize as intentional), and duplicates a repo this tool almost certainly
+already has a registered, resolvable worktree home for.
+
+Instead, resolve the other repo the same way as any related work:
+
+- `agent-worktrees repos list --json` / `agent-worktrees repos find <name>` --
+  discover whether it is already registered and where its checkout lives.
+- `agent-worktrees related resolve <name>` -- the delegation-aware answer for
+  *how* to work on it from here (direct worktree vs. an agent-guarded repo).
+- `agent-worktrees -p <name> create --json` -- open your own worktree on that
+  repo when you need to read or edit its real, live tree; read its
+  instructions/docs directly from that worktree, never from a copy embedded
+  in this one.
+
+If a repo genuinely is not registered anywhere, that is a topology gap to
+fix in the registry (or ask the operator), not a reason to reach for `git
+clone` into a subdirectory here.
