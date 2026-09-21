@@ -293,6 +293,131 @@ def test_resolve_live_session_runs_over_ssh_for_remote_owner(monkeypatch):
     assert captured["timeout"] == 6.0
 
 
+def _reset_satellite_cache(monkeypatch):
+    monkeypatch.setattr(tracking, "_satellite_cache", None)
+    monkeypatch.setattr(tracking, "_satellite_cache_at", 0.0)
+
+
+def test_satellite_roster_empty_without_shared_url(monkeypatch):
+    from agent_dispatch import config
+
+    _reset_satellite_cache(monkeypatch)
+    monkeypatch.setattr(config, "shared_url", lambda: None)
+    assert tracking._satellite_roster() == {}
+
+
+def test_satellite_roster_reads_directory_over_hosted_rendezvous(monkeypatch):
+    from agent_dispatch import config, federation_runner
+
+    _reset_satellite_cache(monkeypatch)
+    monkeypatch.setattr(config, "shared_url", lambda: "https://gw.example/dispatch")
+
+    class _FakeRendezvous:
+        def discover_peers(self, *, role=None):
+            assert role == "satellite"
+            return [{"instance": "book2", "machine": "Book2", "status": {}}]
+
+    monkeypatch.setattr(federation_runner, "hosted_rendezvous", lambda: _FakeRendezvous())
+    roster = tracking._satellite_roster()
+    assert set(roster) == {"book2"}
+
+
+def test_satellite_roster_degrades_on_directory_error(monkeypatch):
+    from agent_dispatch import config, federation_runner
+
+    _reset_satellite_cache(monkeypatch)
+    monkeypatch.setattr(config, "shared_url", lambda: "https://gw.example/dispatch")
+
+    def boom():
+        raise RuntimeError("directory unreachable")
+
+    monkeypatch.setattr(federation_runner, "hosted_rendezvous", boom)
+    assert tracking._satellite_roster() == {}
+
+
+def test_satellite_roster_caches_within_ttl(monkeypatch):
+    from agent_dispatch import config, federation_runner
+
+    _reset_satellite_cache(monkeypatch)
+    monkeypatch.setattr(config, "shared_url", lambda: "https://gw.example/dispatch")
+    calls = []
+
+    class _FakeRendezvous:
+        def discover_peers(self, *, role=None):
+            calls.append(1)
+            return [{"instance": "book2", "status": {}}]
+
+    monkeypatch.setattr(federation_runner, "hosted_rendezvous", lambda: _FakeRendezvous())
+    tracking._satellite_roster()
+    tracking._satellite_roster()
+    assert len(calls) == 1  # second call hit the cache, not the directory again
+
+
+def test_resolve_live_session_satellite_uses_pushed_status(monkeypatch):
+    # A registered role=satellite owner opens no inbound listener -- resolve
+    # from its pushed directory status instead of ever touching SSH/the
+    # carrier (see the `satellite-agent-exposure` effort's Design item D).
+    monkeypatch.setattr(
+        tracking,
+        "_satellite_roster",
+        lambda: {
+            "book2": {"status": {"wt-x": {"session_id": "s-sat", "worktree_id": "wt-x"}}}
+        },
+    )
+    monkeypatch.setattr(
+        tracking.shutil,
+        "which",
+        lambda _name: pytest.fail("a satellite resolve must never touch ssh"),
+    )
+    monkeypatch.setattr(
+        tracking.bridge_remote.LocalBridgeRemoteClient,
+        "resolve_live_session",
+        lambda *_a, **_k: pytest.fail("a satellite resolve must never use the carrier"),
+    )
+
+    got = tracking.resolve_live_session("wt-x", machine="book2")
+    assert got == {"session_id": "s-sat", "worktree_id": "wt-x"}
+
+
+def test_resolve_live_session_satellite_missing_worktree_is_none(monkeypatch):
+    # Registered as a satellite, but this particular worktree isn't in its
+    # pushed status (not currently embodied there) -> no overlay, not a fall
+    # through to SSH (which would only ever time out for a no-inbound leaf).
+    monkeypatch.setattr(
+        tracking, "_satellite_roster", lambda: {"book2": {"status": {}}}
+    )
+    monkeypatch.setattr(
+        tracking.shutil,
+        "which",
+        lambda _name: pytest.fail("a satellite resolve must never touch ssh"),
+    )
+    assert tracking.resolve_live_session("wt-x", machine="book2") is None
+
+
+def test_resolve_live_session_non_satellite_falls_through_to_ssh(monkeypatch):
+    # An ordinary (non-satellite) remote owner is unaffected: an empty
+    # roster is a fast no-op and the pre-existing SSH-back path still runs.
+    monkeypatch.setattr(tracking, "_satellite_roster", lambda: {})
+    monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        tracking.bridge_remote.LocalBridgeRemoteClient,
+        "resolve_live_session",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            tracking.bridge_remote.RemoteBridgeUnavailable("not installed")
+        ),
+    )
+    monkeypatch.setattr(
+        tracking,
+        "run_ssh_capture",
+        lambda *_a, **_k: types.SimpleNamespace(
+            returncode=0, stdout=json.dumps({"session_id": "s-peer"}), stderr=""
+        ),
+    )
+    assert tracking.resolve_live_session("wt-x", machine="peer-box") == {
+        "session_id": "s-peer"
+    }
+
+
 def test_resolve_live_session_uses_carrier_without_ssh(monkeypatch):
     calls = {}
 

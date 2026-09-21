@@ -147,10 +147,69 @@ def _run_capture(
     return run_background_capture(argv, timeout=timeout, env=env)
 
 
+#: How long a fetched satellite roster is trusted before re-fetching (seconds).
+#: A `list`/`show` enrichment batch can resolve many owners in one call; without
+#: this cache each one would separately hit the shared coordinator's directory
+#: endpoint even though the satellite roster cannot change mid-batch.
+_SATELLITE_CACHE_TTL_S = 5.0
+_satellite_cache: dict[str, dict] | None = None
+_satellite_cache_at: float = 0.0
+
+
+def _satellite_roster() -> dict[str, dict]:
+    """Normalized-machine -> live directory entry, for every ``role=satellite``
+    entry on the shared/hosted federation directory (see the
+    ``satellite-agent-exposure`` effort's Design item D).
+
+    Best-effort and cheap to call repeatedly: no ``AGENT_DISPATCH_SHARED_URL``
+    configured, or the directory unreachable, degrades to ``{}`` -- exactly the
+    signal a caller needs to fall through to its existing SSH-back path (the
+    pre-existing behavior, for a machine this cannot confirm is a satellite).
+    Cached briefly (:data:`_SATELLITE_CACHE_TTL_S`) so a whole enrichment batch
+    pays for at most one directory round-trip.
+    """
+    global _satellite_cache, _satellite_cache_at
+    now = time.time()
+    if _satellite_cache is not None and (now - _satellite_cache_at) < _SATELLITE_CACHE_TTL_S:
+        return _satellite_cache
+    roster: dict[str, dict] = {}
+    try:
+        from . import config
+        from .federation_runner import hosted_rendezvous
+        from .satellites import ROLE_SATELLITE
+
+        if config.shared_url():
+            rv = hosted_rendezvous()
+            if rv is not None:
+                for entry in rv.discover_peers(role=ROLE_SATELLITE):
+                    candidate = entry.get("machine") or entry.get("instance")
+                    if candidate:
+                        roster[bridge_remote.normalize_host(str(candidate))] = entry
+    except Exception:
+        roster = {}
+    _satellite_cache = roster
+    _satellite_cache_at = now
+    return roster
+
+
+def _satellite_entry_for(machine: str) -> dict | None:
+    """The live directory entry for ``machine`` if it is currently registered
+    as ``role=satellite``, else ``None``."""
+    return _satellite_roster().get(bridge_remote.normalize_host(machine))
+
+
 def resolve_live_session(
     worktree: str, *, machine: str | None = None, timeout: float | None = None
 ) -> dict[str, Any] | None:
     """Resolve a worktree handle through Agent Bridge.
+
+    A registered ``role=satellite`` owner opens **no** inbound listener, so an
+    SSH-back (or any dial-in) would only ever time out -- resolve straight from
+    its own **pushed** status instead (see
+    :func:`satellite_status_snapshot`/the ``satellite-agent-exposure`` effort's
+    Design item D). Every other remote owner is unaffected: this check is a
+    no-op (fast cache hit or a quick ``{}``) for a machine that isn't a live
+    satellite, and falls through to the pre-existing behavior below.
 
     Remote owners use the local Bridge carrier first and shell the remote
     ``agent-bridge`` binstub over SSH only when that optional capability is
@@ -160,6 +219,10 @@ def resolve_live_session(
     if not worktree:
         return None
     if machine is not None:
+        satellite_entry = _satellite_entry_for(machine)
+        if satellite_entry is not None:
+            data = satellite_entry.get("status") or {}
+            return data.get(worktree)
         machine = bridge_remote.normalize_host(machine)
         effective_timeout = timeout if timeout is not None else 6.0
         try:
@@ -427,7 +490,10 @@ def liveness_verdict(
     ``supervisor.release_requested_bodies``.
 
     Never raises. Mirrors :func:`resolve_live_session`'s transport (local
-    ``agent-bridge``; a remote owner over ``ssh <machine> agent-bridge``).
+    ``agent-bridge``; a remote owner over ``ssh <machine> agent-bridge``; a
+    registered ``role=satellite`` owner over its own pushed status instead of
+    an SSH-back that would only ever time out -- see that function's matching
+    branch).
     """
     if not worktree:
         return UNKNOWN
@@ -439,6 +505,17 @@ def liveness_verdict(
     # takes.
     if machine is not None and not remote_dispatch.is_peer_machine(machine):
         machine = None
+    if machine is not None:
+        satellite_entry = _satellite_entry_for(machine)
+        if satellite_entry is not None:
+            # A registered satellite opens no inbound listener, so an SSH-back
+            # probe would only ever time out -- read its own pushed status
+            # instead (see `resolve_live_session`'s matching branch and the
+            # `satellite-agent-exposure` effort's Design item D). A worktree
+            # absent from the pushed status is "not embodied there right now",
+            # the same as the CLI's `{}` empty-registry answer below.
+            data = (satellite_entry.get("status") or {}).get(worktree) or {}
+            return _verdict_from_resolved_data(data, owner_session_id)
     argv = _bridge_resolve_argv(worktree, machine=machine)
     if argv is None:
         return UNKNOWN
@@ -466,10 +543,20 @@ def liveness_verdict(
     # not yet registered" for a still-live worker. A caller that knows better
     # (its own spawn-reservation-owned worktree) layers its own additional
     # check on top of this result instead -- see `worktree_directory_present`.
+    return _verdict_from_resolved_data(data, owner_session_id)
+
+
+def _verdict_from_resolved_data(
+    data: dict[str, Any], owner_session_id: str | None
+) -> str:
+    """Shared tail of :func:`liveness_verdict`: turn an already-resolved
+    ``{session_id: ...}``-shaped answer (or ``{}`` for "worktree empty") into
+    the tri-state verdict. Shared by both the SSH-back path and the satellite
+    pushed-status path so they apply identical identity-attribution rules."""
     if owner_session_id is None:
         return UNKNOWN
     if not data:
-        return GONE  # `{}` (CLI 404): the worktree is empty -> our owner is gone
+        return GONE  # empty registry: the worktree is empty -> our owner is gone
     current = data.get("session_id") or data.get("id")
     if current is None:
         return UNKNOWN  # answered but unattributable
