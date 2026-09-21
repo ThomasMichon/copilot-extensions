@@ -311,13 +311,15 @@ def audit_source_attribution_risk(
     """Flag a repo PR config combination that risks the branch-name leak class.
 
     Migration-audit helper (Phase 5): a repo is at risk when
-    ``source_attribution`` is not exactly ``True`` (``False`` **or absent** --
-    the key defaults to ``False``, so a config that omits it entirely is
-    just as much at risk as one that sets it explicitly) *and* its
-    ``head_pattern`` embeds a ``{machine}`` token (in any ``str.format``
-    conversion/spec variant) that could carry a private identifier into a
-    published branch name -- see :func:`head_pattern_leak_risk` for why
-    ``{worktree_id}`` is deliberately excluded. Returns a list of
+    ``source_attribution`` is not exactly ``True`` (``False``, ``"codename"``,
+    **or absent** -- codename-attribution-by-default flipped the runtime
+    default to ``"codename"``, so a config that omits the key entirely is
+    just as much at risk as one that sets it explicitly to ``codename``)
+    *and* its ``head_pattern`` embeds a ``{machine}`` token (in any
+    ``str.format`` conversion/spec variant) that could carry a private
+    identifier into a published branch name -- see
+    :func:`head_pattern_leak_risk` for why ``{worktree_id}`` is deliberately
+    excluded. Returns a list of
     human-readable findings (empty when the config is not at risk).
     """
     if source_attribution is True:
@@ -326,11 +328,17 @@ def audit_source_attribution_risk(
     if not risky_tokens:
         return []
     if source_attribution is None:
-        attribution_desc = "absent (defaults to false)"
+        # The repo omitted the key entirely -- since the runtime default
+        # flipped to "codename" (codename-attribution-by-default), an
+        # absent key now behaves identically to an explicit `codename` at
+        # allocation/publish time. Reuse that branch's remedy verbatim
+        # (not "false"'s) -- telling this repo to "migrate to codename"
+        # would be a no-op, same as the already-`codename` case below.
+        attribution_desc = "absent (defaults to 'codename')"
         remedy = (
-            "migrate to source_attribution: true (if this repo accepts "
-            "full exposure) or codename (public-safe body marker), and "
-            "either way drop {tok} from head_pattern"
+            "codename mode only protects the PR-body marker, not the "
+            "branch name itself -- set source_attribution: true if this "
+            "repo accepts full exposure, or drop {tok} from head_pattern"
         )
     elif source_attribution == "codename":
         # Already in codename mode -- telling this repo to "migrate to

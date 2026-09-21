@@ -2483,18 +2483,37 @@ def _merge_pr_attribution_state(
        snapshot was taken), append ``current``'s entry into
        ``record.prs`` unchanged.
     """
+    # Round-5 review finding: the legacy branch/number fallback in
+    # `_pr_identity_match` can match MORE than one on-disk `current_pr` to
+    # the SAME in-memory `record.prs` entry when legacy tracking reuses one
+    # branch across sequential PRs (a terminal PR followed by a fresh one
+    # on the same branch, both still lacking `pr_id`). Track which
+    # `record.prs` entries this call has already claimed so matching stays
+    # one-to-one; a `current_pr` that can only find an already-claimed
+    # candidate is treated as unmatched (appended as its own entry) rather
+    # than silently overwriting/dropping the earlier match's frozen state.
+    claimed_match_ids: set[int] = set()
     for current_pr in current.prs:
         match = next(
-            (rp for rp in record.prs if _pr_identity_match(rp, current_pr)),
+            (
+                rp for rp in record.prs
+                if id(rp) not in claimed_match_ids
+                and _pr_identity_match(rp, current_pr)
+            ),
             None,
         )
+        if match is not None:
+            claimed_match_ids.add(id(match))
         if match is None:
             # A concurrent writer created this PR after the stale snapshot
             # was taken -- append it unchanged (backfilling pr_id first if
-            # it's a legacy entry with none).
+            # it's a legacy entry with none). Claim it immediately too, so
+            # a LATER same-branch current_pr in this same loop can't match
+            # this freshly-appended entry via the legacy branch fallback.
             if not current_pr.pr_id:
                 current_pr.pr_id = secrets.token_hex(16)
             record.prs.append(current_pr)
+            claimed_match_ids.add(id(current_pr))
             continue
         # Reconcile pr_id onto whichever side is missing it -- this is the
         # bridging step for a legacy match (identity was established via

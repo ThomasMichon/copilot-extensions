@@ -1067,6 +1067,46 @@ class TestPrAttributionMerge:
         assert reloaded.prs[0].pr_revision == 1
         assert reloaded.title == "unrelated update"
 
+    def test_legacy_same_branch_matches_stay_one_to_one(self, tmp_path: Path):
+        # Round-5 review finding: two on-disk legacy PRs (no pr_id) that
+        # reuse the SAME branch -- a terminal PR followed by a fresh one
+        # opened on the same branch, the ordinary sequential-PR case --
+        # must not both match the SAME single in-memory legacy entry via
+        # `_pr_identity_match`'s branch fallback. Matching must stay
+        # one-to-one, or the second on-disk PR is silently dropped.
+        from agent_worktrees.tracking import PRRecord, load_record, save_record
+
+        path, stale = self._make(tmp_path)
+        # The in-memory snapshot has only the FIRST (now-terminal) legacy
+        # PR on this branch, captured before the second was opened on disk.
+        stale.prs = [
+            PRRecord(state="merged", branch="feature/x", number=1),
+        ]
+        save_record(stale, path)
+        stale_snapshot = load_record(path)
+
+        # On disk, a second PR opens on the SAME branch after the first
+        # merged (both still legacy: no pr_id).
+        current = load_record(path)
+        current.prs.append(
+            PRRecord(state="open", branch="feature/x", number=2),
+        )
+        save_record(current, path)
+
+        # Saving the stale (single-entry) snapshot must not collapse the
+        # on-disk record back down to one entry.
+        stale_snapshot.title = "unrelated update"
+        save_record(stale_snapshot, path)
+
+        reloaded = load_record(path)
+        assert len(reloaded.prs) == 2
+        numbers = {pr.number for pr in reloaded.prs}
+        assert numbers == {1, 2}
+        # Both entries end up with distinct, non-empty pr_ids.
+        pr_ids = {pr.pr_id for pr in reloaded.prs}
+        assert len(pr_ids) == 2
+        assert all(pr_ids)
+
     def test_merge_protects_non_active_parallel_pr_entry(self, tmp_path: Path):
         # round-32 finding: the merge must operate on the full `prs` list,
         # keyed by identity -- not just the single `.pr` active-PR

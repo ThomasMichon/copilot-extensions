@@ -236,11 +236,12 @@ class PRConfig:
     source_attribution: SourceAttribution = "codename"
     # Whether ``pr.source_attribution`` was an explicit key in the merged
     # raw config, versus omitted entirely (both parse ``source_attribution``
-    # above to ``False``, indistinguishable from each other on that field
-    # alone). The migration audit (Phase 5,
+    # above to the same ``"codename"`` value, indistinguishable from each
+    # other on that field alone). The migration audit (Phase 5,
     # `providers.attribution.audit_source_attribution_risk`) needs this
-    # distinction to report "absent (defaults to false)" accurately rather
-    # than always describing an omitted key as an explicit `false`.
+    # distinction to report "absent (defaults to 'codename')" accurately
+    # rather than always describing an omitted key as an explicit
+    # `codename`.
     source_attribution_configured: bool = False
     # Markdown headings whose sections must contain visible text before
     # create-pr may auto-open a PR. Empty keeps the generic default permissive.

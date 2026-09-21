@@ -539,6 +539,21 @@ class TestAuditSourceAttributionRisk:
         assert len(findings) == 1
         assert "absent" in findings[0]
 
+    def test_absent_key_message_reflects_codename_default(self):
+        # Round-5 review finding: codename-attribution-by-default flipped
+        # the runtime default from False to "codename" -- the omitted-key
+        # message must describe THAT default, and its remedy must match
+        # the "codename" branch's (not tell the repo to "migrate to
+        # source_attribution: true (if...) or codename", a no-op since it
+        # is effectively already in codename mode).
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=None, head_pattern="{machine}/{slug}",
+        )
+        assert len(findings) == 1
+        assert "defaults to false" not in findings[0]
+        assert "codename" in findings[0]
+        assert "migrate to source_attribution: true or codename" not in findings[0]
+
     def test_worktree_id_token_is_never_flagged(self):
         # {worktree_id} is not part of pr_head_name's actual rendering
         # contract (only prefix/slug/suffix/username/machine are) -- a

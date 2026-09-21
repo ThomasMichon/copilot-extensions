@@ -3076,3 +3076,34 @@ class TestPRThreads:
         config, wid, _wt, _ = pr_repo
         res = pr_ops.pr_threads(wid, config=config)
         assert res["has_pr"] is False
+
+
+class TestCreatePRCLIPolicyError:
+    """Round-5 review finding: `cmd_create_pr --json` must serialize a
+    `CodenameAttributionPolicyError` from `pr_ops.create_pr`'s allocation
+    preflight as a clean JSON error, never a raw traceback."""
+
+    def test_json_policy_error_is_a_clean_json_error(
+        self, pr_repo, monkeypatch, capfd,
+    ):
+        import json
+
+        config, wid, _wt_path, _ = pr_repo
+
+        def _raise_policy_error(*_a, **_k):
+            raise m.codename_tracking.CodenameAttributionPolicyError(
+                "PR-active repo 'ext' has a custom codename wordlist "
+                "configured but pr.source_attribution is not explicit"
+            )
+
+        monkeypatch.setattr(m.pr_ops, "create_pr", _raise_policy_error)
+        args = m.build_parser().parse_args([
+            "create-pr", "--json", wid,
+        ])
+
+        rc = m.cmd_create_pr(args)
+
+        captured = capfd.readouterr()
+        assert rc == 1
+        assert "Traceback" not in captured.out + captured.err
+        assert "custom codename wordlist" in json.loads(captured.out)["error"]

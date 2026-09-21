@@ -218,10 +218,11 @@ def audit_attribution_risk(config: Config) -> list[str]:
     configured ``pr.head_pattern`` for the branch-name leak class.
 
     Config-only: it does not run ``create-pr`` or touch git. A repo is at
-    risk when ``pr.source_attribution`` is not exactly ``true`` -- ``false``
-    **or omitted entirely** (the key defaults to ``false``, so an absent key
-    is just as much at risk as an explicit one) -- and its configured
-    ``head_pattern`` embeds ``{machine}`` (in any ``str.format``
+    risk when ``pr.source_attribution`` is not exactly ``true`` -- ``false``,
+    ``"codename"``, **or omitted entirely** (codename-attribution-by-default
+    flipped the runtime default to ``"codename"``, so an absent key is just
+    as much at risk as one explicitly set to ``codename``) -- and its
+    configured ``head_pattern`` embeds ``{machine}`` (in any ``str.format``
     conversion/format-spec variant), which could carry a private identifier
     into a published branch name. ``{worktree_id}`` is deliberately never
     flagged: it is not part of ``pr_head_name``'s actual rendering contract

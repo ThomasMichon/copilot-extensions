@@ -6251,10 +6251,18 @@ def _resolve_resume(
     # skipped rather than crashing inside `ensure_codename`'s own attribute
     # access.
     if hasattr(fresh, "codename") and not fresh.codename:
-        fresh = codename_tracking.ensure_codename(
-            fresh, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config),
-            **codename_tracking.allocation_policy_kwargs_for_repo(config),
-        )
+        try:
+            fresh = codename_tracking.ensure_codename(
+                fresh, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config),
+                **codename_tracking.allocation_policy_kwargs_for_repo(config),
+            )
+        except codename_tracking.CodenameAttributionPolicyError as exc:
+            # Round-5 review finding: surface this the same way the
+            # profile-assignment error above does -- a clean, JSON-safe
+            # `_emit_plan` error envelope, never a raw traceback.
+            output.err(str(exc))
+            _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+            return 3
         record.codename = fresh.codename
         record.codename_source = fresh.codename_source
 
@@ -7020,21 +7028,29 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 msg = f"Could not read --body-file '{body_file}': {e}"
                 return _json_error(msg) if use_json else (output.err(msg) or 1)
 
-        result = pr_ops.create_pr(
-            worktree_id,
-            config,
-            title=args.title,
-            branch=args.branch,
-            target_repo=getattr(args, "repo", None),
-            new=getattr(args, "new", False),
-            body=body,
-            open_pr=(False if getattr(args, "no_open", False) else None),
-            hold=getattr(args, "hold", False),
-            draft=getattr(args, "draft", False),
-            attribution=(False if getattr(args, "no_attribution", False) else None),
-            dry_run=args.dry_run,
-            confirm_fork=getattr(args, "confirm_fork", False),
-        )
+        try:
+            result = pr_ops.create_pr(
+                worktree_id,
+                config,
+                title=args.title,
+                branch=args.branch,
+                target_repo=getattr(args, "repo", None),
+                new=getattr(args, "new", False),
+                body=body,
+                open_pr=(False if getattr(args, "no_open", False) else None),
+                hold=getattr(args, "hold", False),
+                draft=getattr(args, "draft", False),
+                attribution=(False if getattr(args, "no_attribution", False) else None),
+                dry_run=args.dry_run,
+                confirm_fork=getattr(args, "confirm_fork", False),
+            )
+        except codename_tracking.CodenameAttributionPolicyError as e:
+            # Round-5 review finding: this preflight raises before
+            # `create_pr` can build a result dict -- serialize it as a
+            # normal nonzero error (fail-closed behavior preserved) rather
+            # than letting a raw traceback escape the CLI boundary.
+            msg = str(e)
+            return _json_error(msg) if use_json else (output.err(msg) or 1)
 
         _reminder = _pr_reminder_for(
             config,
@@ -7568,10 +7584,18 @@ def _cmd_status_write(
     # lock via `create_new_record`'s own `save_record`).
     peek = tracking.load_record(yaml_path)
     if not peek.codename:
-        codename_tracking.ensure_codename(
-            peek, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config),
-            **codename_tracking.allocation_policy_kwargs_for_repo(config),
-        )
+        try:
+            codename_tracking.ensure_codename(
+                peek, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config),
+                **codename_tracking.allocation_policy_kwargs_for_repo(config),
+            )
+        except codename_tracking.CodenameAttributionPolicyError as e:
+            # Round-5 review finding: this backfill can raise a policy
+            # rejection -- report it cleanly instead of a raw traceback
+            # (this command has no --json envelope of its own to
+            # preserve, but a plain traceback is still a defect).
+            output.err(str(e))
+            return 1
     # Foreground verb (#4547): the whole load -> set_disposition -> save is a
     # critical RMW held under the blocking record lock, so a concurrent Picker
     # best-effort sweep skips rather than clobbering the disposition overlay.
