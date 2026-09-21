@@ -296,7 +296,16 @@ def session_activity(session: dict[str, Any] | None) -> str | None:
         return "ACTIVE"
     if status == "idle" or liveness == "idle" or turn_state == "idle":
         return "IDLE"
-    if status in {"starting", "running"} and liveness not in {"idle", "stalled"}:
+    if status in {"starting", "running"} and liveness not in {
+        "idle",
+        "stalled",
+        "disconnected",
+    }:
+        # A "disconnected" liveness means the transport is down (agent-bridge
+        # __main__.py's own vocabulary: "DISCONNECTED - transport down") --
+        # a status of running/starting with a dead transport is not doing
+        # live work and must never be reported as ACTIVE, particularly now
+        # that satellite_status_snapshot() can publish this fleet-wide.
         return "ACTIVE"
     return None
 

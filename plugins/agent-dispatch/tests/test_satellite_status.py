@@ -104,6 +104,18 @@ def test_satellite_status_snapshot_excludes_terminal_sessions(monkeypatch, termi
     assert status == {}
 
 
+def test_satellite_status_snapshot_never_reports_disconnected_session_as_active(monkeypatch):
+    # A session whose transport is disconnected (dead) but still nominally
+    # "running" must not be published with activity=ACTIVE -- the worktree is
+    # still advertised (it's not a terminal status), just without a live
+    # activity label.
+    sessions = [{"worktree_id": "wt-a", "status": "running", "liveness": "disconnected"}]
+    monkeypatch.setattr(tracking, "list_local_body_sessions", lambda **_: sessions)
+    worktrees, status = tracking.satellite_status_snapshot()
+    assert worktrees == ["wt-a"]
+    assert "activity" not in status["wt-a"]
+
+
 def test_satellite_status_snapshot_deduplicates_by_worktree_keeping_first_row(monkeypatch):
     # The bridge's session list is newest-first; a worktree can appear more
     # than once after a session roll (retired predecessor + successor). Only

@@ -533,3 +533,15 @@ def test_session_activity_reports_explicit_idle():
 
 def test_session_activity_reports_idle_status_without_liveness_fields():
     assert tracking.session_activity({"status": "idle"}) == "IDLE"
+
+
+def test_session_activity_does_not_report_disconnected_as_active():
+    # A "disconnected" liveness means the transport is down (agent-bridge's
+    # own vocabulary: "DISCONNECTED - transport down"); a running/starting
+    # status with a dead transport must not be reported as ACTIVE.
+    assert tracking.session_activity(
+        {"status": "running", "liveness": "disconnected"}
+    ) is None
+    assert tracking.session_activity(
+        {"status": "starting", "liveness": "disconnected"}
+    ) is None
