@@ -31,35 +31,37 @@ def store(monkeypatch, tmp_path):
 
 # --- config parsing --------------------------------------------------------
 
-def test_connection_owner_default_off(monkeypatch):
+def test_connection_owner_default_on(monkeypatch):
     monkeypatch.setattr(cfg, "load_adopted_repos", lambda: [])
     monkeypatch.setattr(cfg, "discover_dropin_configs", lambda: [])
     merged = cfg.load_merged_config(include_cwd=False)
-    assert merged.connection_owner.enabled is False
+    assert merged.connection_owner.enabled is True
     assert merged.connection_owner.reconcile_interval == 15.0
+    assert merged.connection_owner.idle_shutdown_after == 300.0
 
 
-def test_connection_owner_parsed_from_repo(tmp_path, monkeypatch):
+def test_connection_owner_can_opt_out_from_repo(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     conf = repo / ".agent-codespaces" / "config.yaml"
     conf.parent.mkdir(parents=True)
     conf.write_text(
-        "connection_owner:\n  enabled: true\n  reconcile_interval: 30\n",
+        "connection_owner:\n  enabled: false\n  reconcile_interval: 30\n",
         "utf-8",
     )
     monkeypatch.setattr(cfg, "load_adopted_repos", lambda: [AdoptedRepo(path=repo)])
     monkeypatch.setattr(cfg, "discover_dropin_configs", lambda: [])
     merged = cfg.load_merged_config(include_cwd=False)
-    assert merged.connection_owner.enabled is True
+    assert merged.connection_owner.enabled is False
     assert merged.connection_owner.reconcile_interval == 30.0
 
 
 # --- CLI entrypoint gating -------------------------------------------------
 
-def _stub_config(enabled=False, interval=15.0):
+def _stub_config(enabled=False, interval=15.0, idle_shutdown_after=300.0):
     c = CodespacesConfig()
     c.connection_owner = ConnectionOwnerConfig(
-        enabled=enabled, reconcile_interval=interval
+        enabled=enabled, reconcile_interval=interval,
+        idle_shutdown_after=idle_shutdown_after,
     )
     return c
 
@@ -144,7 +146,9 @@ def test_owner_status_disabled(monkeypatch, capsys):
     import json
 
     payload = json.loads(capsys.readouterr().out)
-    assert payload == {"enabled": False, "reconcile_interval": 15.0}
+    assert payload == {
+        "enabled": False, "reconcile_interval": 15.0, "idle_shutdown_after": 300.0,
+    }
     assert built["factory"] is False  # never constructs the transport for a probe
 
 
@@ -163,7 +167,9 @@ def test_owner_status_enabled(monkeypatch, capsys):
     import json
 
     payload = json.loads(capsys.readouterr().out)
-    assert payload == {"enabled": True, "reconcile_interval": 30.0}
+    assert payload == {
+        "enabled": True, "reconcile_interval": 30.0, "idle_shutdown_after": 300.0,
+    }
 
 
 def test_connection_owner_empty_block_claims_slot(tmp_path, monkeypatch):
@@ -175,7 +181,7 @@ def test_connection_owner_empty_block_claims_slot(tmp_path, monkeypatch):
     repo2 = tmp_path / "r2"
     c2 = repo2 / ".agent-codespaces" / "config.yaml"
     c2.parent.mkdir(parents=True)
-    c2.write_text("connection_owner:\n  enabled: true\n", "utf-8")
+    c2.write_text("connection_owner:\n  enabled: false\n", "utf-8")
     monkeypatch.setattr(
         cfg,
         "load_adopted_repos",
@@ -183,5 +189,6 @@ def test_connection_owner_empty_block_claims_slot(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(cfg, "discover_dropin_configs", lambda: [])
     merged = cfg.load_merged_config(include_cwd=False)
-    # repo1's empty block claimed the slot -> repo2's enabled:true is ignored.
-    assert merged.connection_owner.enabled is False
+    # repo1's empty block claimed the slot (defaults -> enabled=True) -> repo2's
+    # enabled:false is ignored.
+    assert merged.connection_owner.enabled is True

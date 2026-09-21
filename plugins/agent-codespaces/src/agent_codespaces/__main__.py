@@ -641,13 +641,16 @@ def main(argv: list[str] | None = None) -> int:
     # Runs the reconcile loop that owns + self-heals each CodeSpace's credential
     # relay per machine, independent of any one agent-bridge dispatch, so a caller
     # disconnect / bridge restart no longer drops the relay mid-task
-    # (dotfiles#1320/#1333). Config-gated (default off) + additive: nothing starts
-    # it by default. Making the ssh/dispatch paths defer to it is a later
-    # increment; this entrypoint makes the daemon runnable + live-validatable.
+    # (dotfiles#1320/#1333). Config-gated (default ON) + on-demand: a tenant
+    # starts it itself if it isn't already running (ensure_owner_running), and
+    # the daemon exits on its own after being idle (no held CodeSpace) for
+    # connection_owner.idle_shutdown_after -- it is never assumed to be a
+    # permanently-resident background service.
     owner_p = sub.add_parser(
         "owner",
         help="Run the persistent Connection Owner relay daemon "
-             "(config-gated: connection_owner.enabled; default off)",
+             "(config-gated: connection_owner.enabled; default on; idles out "
+             "on its own when nothing needs it)",
     )
     owner_p.add_argument(
         "--force", action="store_true",
@@ -662,10 +665,18 @@ def main(argv: list[str] | None = None) -> int:
         help="override the reconcile interval in seconds (default: config or 15)",
     )
     owner_p.add_argument(
+        "--idle-shutdown-after", dest="idle_shutdown_after", type=float,
+        default=None,
+        help="override the idle-shutdown window in seconds (default: config or "
+             "300); pass a non-positive value to disable idle shutdown "
+             "(run until stopped)",
+    )
+    owner_p.add_argument(
         "--status", action="store_true",
         help="print the resolved connection_owner config as JSON "
-             "(enabled/reconcile_interval) and exit; install/update uses this to "
-             "gate service provisioning (does not start the daemon)",
+             "(enabled/reconcile_interval/idle_shutdown_after) and exit; "
+             "install/update uses this to gate service provisioning (does not "
+             "start the daemon)",
     )
 
     # --- status ---
@@ -1182,14 +1193,15 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     manager = ConnectionManager()
     relay_forward = None
 
-    # Connection Owner defer (dotfiles#1345): when the Owner daemon is live and
-    # enabled, this one-off ssh becomes a non-owning tenant -- it places a hold so
-    # the Owner keeps this CodeSpace's relay up and does NOT stand up its own -R
-    # (which would collide, #561). Default-off + fail-safe: if the feature is off,
-    # no daemon is live, or the hold fails, we own the relay exactly as before.
-    # The decision here is side-effect-free; the hold itself is placed only AFTER
-    # the target lock is acquired (below), so a busy-target rejection can't leak a
-    # hold that would linger until its TTL.
+    # Connection Owner defer (dotfiles#1345): when enabled, this one-off ssh
+    # becomes a non-owning tenant -- it places a hold so the Owner keeps this
+    # CodeSpace's relay up and does NOT stand up its own -R (which would
+    # collide, #561). Default-on + fail-safe: `should_defer_to_owner` spins the
+    # daemon up on-demand if it isn't already live; if the feature is off or
+    # spin-up genuinely fails, we own the relay exactly as before. The decision
+    # here is side-effect-free; the hold itself is placed only AFTER the target
+    # lock is acquired (below), so a busy-target rejection can't leak a hold
+    # that would linger until its TTL.
     from . import connection_owner as _owner
     owner_tenant = f"ssh:{os.getpid()}"
     defer_to_owner = _owner.should_defer_to_owner(config, no_relay=args.no_relay)
@@ -4553,23 +4565,34 @@ def _cmd_config_migrate() -> int:
 
 
 def _cmd_owner(args: argparse.Namespace) -> int:
-    """Run the Connection Owner relay reconcile daemon (config-gated; default off).
+    """Run the Connection Owner relay reconcile daemon (config-gated; default on).
 
     The Owner is the single, persistent per-machine owner of each CodeSpace's
     credential relay, independent of any one agent-bridge dispatch -- so a caller
     disconnect / bridge restart no longer drops the relay mid-task
-    (dotfiles#1320/#1333). Additive + opt-in: it refuses to run unless
-    ``connection_owner.enabled`` is set (or ``--force`` for validation), so nothing
-    starts it by default. Making the ssh/dispatch paths defer to it is a later
-    increment; this entrypoint makes the daemon runnable + live-validatable.
+    (dotfiles#1320/#1333). Config-gated: it refuses to run unless
+    ``connection_owner.enabled`` is set (or ``--force`` for validation) --
+    default is now on, so this refuses only when a repo/operator has explicitly
+    opted out. It is deliberately on-demand rather than a required
+    always-resident service: ``ssh``/dispatch spin it up themselves
+    (``ensure_owner_running``) when it is not already live, and this loop exits
+    cleanly on its own once idle (see ``--idle-shutdown-after`` below) -- a
+    login-triggered service registration is a convenience, not a requirement.
 
     ``--once`` reconciles a single cycle and exits (validation): with no holds it
     is a safe no-op that exercises the wiring without touching a real CodeSpace.
 
+    ``--idle-shutdown-after`` overrides ``connection_owner.idle_shutdown_after``
+    (default 300s): once the hold registry has been completely empty (no
+    pinned CodeSpace, no live tenant) for that long, the loop exits by itself
+    rather than being forced to remain resident indefinitely. A non-positive
+    value disables idle shutdown.
+
     ``--status`` prints the resolved ``connection_owner`` config as JSON
-    (``enabled`` / ``reconcile_interval``) and exits without starting anything --
-    the install/update scripts call it to decide whether to provision the
-    per-machine Owner service (config-gated cutover; default off -> inert).
+    (``enabled`` / ``reconcile_interval`` / ``idle_shutdown_after``) and exits
+    without starting anything -- the install/update scripts call it to decide
+    whether to provision the per-machine Owner service (config-gated cutover;
+    disabled -> inert).
     """
     import asyncio
 
@@ -4584,12 +4607,17 @@ def _cmd_owner(args: argparse.Namespace) -> int:
     cfg = load_merged_config(include_cwd=False)
     co = getattr(cfg, "connection_owner", None)
     enabled = bool(co and co.enabled)
+    default_idle = co.idle_shutdown_after if co else 300.0
 
     if getattr(args, "status", False):
         import json
 
         interval = float(co.reconcile_interval) if co else 15.0
-        print(json.dumps({"enabled": enabled, "reconcile_interval": interval}))
+        print(json.dumps({
+            "enabled": enabled,
+            "reconcile_interval": interval,
+            "idle_shutdown_after": default_idle,
+        }))
         return 0
 
     if not enabled and not args.force:
@@ -4610,6 +4638,13 @@ def _cmd_owner(args: argparse.Namespace) -> int:
             f"connection-owner reconcile interval must be > 0 (got {interval}); "
             "check --interval / connection_owner.reconcile_interval."
         )
+    idle_shutdown_after = (
+        args.idle_shutdown_after
+        if getattr(args, "idle_shutdown_after", None) is not None
+        else default_idle
+    )
+    if idle_shutdown_after is not None and idle_shutdown_after <= 0:
+        idle_shutdown_after = None
     factory = make_supervised_relay_factory(cfg)
     owner = ConnectionOwner(factory)
 
@@ -4622,11 +4657,15 @@ def _cmd_owner(args: argparse.Namespace) -> int:
 
     print(
         f"connection-owner: starting reconcile daemon (interval={interval}s; "
-        "Ctrl-C to stop)...",
+        f"idle_shutdown_after={idle_shutdown_after}; Ctrl-C to stop)...",
         file=sys.stderr,
     )
     try:
-        asyncio.run(run_owner_daemon(owner, interval=interval))
+        asyncio.run(
+            run_owner_daemon(
+                owner, interval=interval, idle_shutdown_after=idle_shutdown_after,
+            )
+        )
     except KeyboardInterrupt:
         pass
     return 0

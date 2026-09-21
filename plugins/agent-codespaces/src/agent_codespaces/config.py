@@ -523,6 +523,12 @@ def _validate_dropin_config(raw: object) -> str | None:
         or not isinstance(connection_owner["reconcile_interval"], (int, float))
     ):
         return "connection_owner.reconcile_interval must be a number"
+    if "idle_shutdown_after" in connection_owner:
+        idle_val = connection_owner["idle_shutdown_after"]
+        if idle_val is not None and (
+            isinstance(idle_val, bool) or not isinstance(idle_val, (int, float))
+        ):
+            return "connection_owner.idle_shutdown_after must be a number or null"
 
     repos = raw.get("repos", {})
     for repo_name, repo in repos.items():
@@ -1524,16 +1530,33 @@ class CredentialsConfig:
 class ConnectionOwnerConfig:
     """Persistent Connection Owner relay daemon (dotfiles#1320 / #1333).
 
-    Default OFF. When ``enabled``, a single per-machine daemon owns + self-heals
-    each CodeSpace's credential-relay independent of any one agent-bridge
-    dispatch, so a caller disconnect / bridge restart no longer drops the relay
-    mid-task. Nothing starts it by default; enabling is "flip the config, run
-    install/update" (the cutover contract). ``reconcile_interval`` bounds how
-    quickly the live relay set tracks the hold registry.
+    Default ON. A single per-machine daemon owns + self-heals each CodeSpace's
+    credential-relay independent of any one agent-bridge dispatch, so a caller
+    disconnect / bridge restart no longer drops the relay mid-task -- this is
+    also the correctness prerequisite for a remote-venue CLI-mode session's
+    daemon-port reverse-forward staying up for the session's whole lifetime,
+    not just one dispatch (agent-bridge-cli-mode-sessions Phase 4). Was
+    deploy-gated default-off while the daemon + defer wiring were rolled out
+    incrementally (#1333/#1345, both landed); this flips the already-built
+    cutover contract ("flip the config, run install/update") to its intended
+    end state rather than leaving a finished feature permanently opt-in. An
+    operator/repo can still set ``enabled: false`` explicitly to opt back out.
+    ``reconcile_interval`` bounds how quickly the live relay set tracks the
+    hold registry.
+
+    The daemon is deliberately **on-demand, not indefinitely resident**: a
+    tenant that finds it not live spins it up itself
+    (:func:`connection_owner.ensure_owner_running`), and the reconcile loop
+    exits cleanly on its own once no CodeSpace has been held for
+    ``idle_shutdown_after`` seconds (nothing bridge-controlled or
+    direct-driven currently needs it) -- a login-triggered service is a
+    convenience, not a requirement to keep it running forever. ``None``
+    disables idle shutdown (run until stopped).
     """
 
-    enabled: bool = False
+    enabled: bool = True
     reconcile_interval: float = 15.0
+    idle_shutdown_after: float | None = 300.0
 
 
 @dataclass
@@ -2486,7 +2509,7 @@ def load_merged_config(
                     )
                     existing.allowed_resources = sorted(new_resources)
 
-        # Connection Owner (first repo with a block wins; default off). An
+        # Connection Owner (first repo with a block wins; default on). An
         # explicit block claims the slot even when empty ({} -> defaults), so a
         # later repo cannot override a deliberate empty declaration.
         if "connection_owner" in raw and not connection_owner_set:
@@ -2499,6 +2522,12 @@ def load_merged_config(
                     "reconcile_interval",
                     merged.connection_owner.reconcile_interval,
                 )
+            )
+            idle_raw = co_raw.get(
+                "idle_shutdown_after", merged.connection_owner.idle_shutdown_after
+            )
+            merged.connection_owner.idle_shutdown_after = (
+                None if idle_raw is None else float(idle_raw)
             )
             connection_owner_set = True
 
