@@ -1,7 +1,7 @@
 {
   "name": "copilot-extensions-harness",
   "description": "Operator harness for the copilot-extensions repo. Primary purpose: help any consumer identify which local scripts/processes/paths belong to this plugin suite, and enforce never-monkey-patch -- file a bug upstream (sanitized) or auto-update instead of hand-editing a deployed copy. Secondary: portable owner-authored contribution, deployment, and clean-room validation guidance for repos that also choose to contribute, plus an ambient pointer to the general-purpose, organization-neutral contribution boundary. Any control repo can enable this instead of hand-writing a per-repo narrative.",
-  "version": "0.1.0-dev44",
+  "version": "0.1.0-dev45",
   "author": {
     "name": "Thomas Michon"
   },

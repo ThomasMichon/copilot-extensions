@@ -18,4 +18,9 @@ both directions: cite the upstream number in the local tracking issue and the
 local tracking issue in the upstream one, so the trail between the observed
 symptom and its root cause survives across sessions. Invoke the
 `agent-worktrees:working-cross-repo` skill for the complete resolution and
-cross-linking flow.
+cross-linking flow. After merging a PR to `ThomasMichon/copilot-extensions`,
+if you are also operating in a harness/consumer repo this session,
+immediately force-update installed plugins and re-run the projection sync
+(`<agent-worktrees catalog argv[0]> update --force`, then the
+`customizing-copilot:reviewing-customizations` projection sync) in that repo
+before ending your turn -- do not wait for a later drift audit to catch it.
