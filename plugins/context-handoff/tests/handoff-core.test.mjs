@@ -1551,6 +1551,61 @@ test("attemptWorktreeSync reclaims a stale worktree lock left by a crashed proce
   }
 });
 
+test("stale-lock reclaim uses an atomic rename-away, not unlink+create", () => {
+  // Real regression this guards: an unconditional unlink+create reclaim is
+  // NOT concurrency-safe -- two processes racing to reclaim the SAME stale
+  // lock could each pass the staleness check, then one process's unlink
+  // could delete the OTHER's freshly-created replacement lock, letting both
+  // acquire and run concurrently (defeating the entire point of the lock).
+  // `renameSync` on the source path is the only step here the OS actually
+  // guarantees single-winner semantics for: only one racing renamer can
+  // ever succeed, since the source stops existing the instant the first one
+  // wins. Structural check (no DI seam for the internal fs calls):
+  // acquireLock's reclaim path must use renameSync, not a bare unlinkSync,
+  // to hand off the stale lock's path.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const body = source.slice(
+    source.indexOf("function acquireLock("),
+    source.indexOf("async function withWorktreeSyncLock("),
+  );
+  assert.ok(body.length > 0, "could not locate acquireLock's body");
+  assert.match(body, /renameSync\(lockPath,/);
+});
+
+test("attemptWorktreeSync exactly one of several concurrent attempts proceeds past a stale lock", async () => {
+  // Best-effort concurrency integration check (real fs timing, not a forced
+  // interleave): fires several real attemptWorktreeSync calls at the same
+  // stale lock at once. Exactly one may ever get past the lock (report
+  // something other than "already in progress"); the rest must correctly
+  // back off, never all "winning" simultaneously.
+  const dir = initGitRepo();
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, "");
+    const staleTime = new Date(Date.now() - 10 * 60 * 1000);
+    utimesSync(lockPath, staleTime, staleTime);
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => attemptWorktreeSync(dir)),
+    );
+    const proceeded = results.filter(
+      (r) => r.reason !== "another sync attempt for this worktree is already in progress; automatic sync was skipped",
+    );
+    assert.equal(proceeded.length, 1, `expected exactly one winner, got ${proceeded.length}: ${JSON.stringify(results)}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("acquireLock treats a failed stat on lock contention as contention, not as reclaimable", () => {
   // Real regression this guards: if statSync throws for a reason OTHER
   // than "the lock is genuinely gone" (a permission error, a transient FS
