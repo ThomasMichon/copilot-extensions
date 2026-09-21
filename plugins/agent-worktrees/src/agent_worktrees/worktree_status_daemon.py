@@ -59,6 +59,23 @@ def _is_safe_identity_token(value: str) -> bool:
     return bool(value) and value not in _UNSAFE_EXACT and not _UNSAFE_TOKEN.search(value)
 
 
+def coalescing_key(project: str, worktree_id: str) -> str:
+    """Build an injective ``CoalescingServer`` dedup key for one
+    ``(project, worktree_id)`` request.
+
+    A plain ``f"{project}|{worktree_id}"`` is not injective: neither
+    component is restricted to reject ``|`` (unlike ``/``, ``\\``, ``..``,
+    and NUL, which matter for the *filesystem* path each is later used to
+    build), so ``("a", "b|c")`` and ``("a|b", "c")`` would coalesce onto the
+    identical key -- letting two different worktrees' concurrent requests
+    join the same in-flight computation and each receive the *other's*
+    bundle. Length-prefixing ``project`` makes the split point unambiguous
+    regardless of either component's own content, with no new character
+    restriction needed.
+    """
+    return f"{len(project)}:{project}:{worktree_id}"
+
+
 #: A single-worktree status bundle (~5 git calls + a lineage read + a live
 #: mux/lock probe + a claims read) is comparable in cost to a *single*
 #: worktree's slice of the classify daemon's fleet pass -- fast, but real
@@ -302,12 +319,22 @@ def status_via_daemon(
     request_deadline_s: float = REQUEST_DEADLINE_S,
 ) -> dict:
     """Try a live daemon (per ``lock_data``'s rendezvous fields) first, else
-    run ``fallback`` immediately. Never boots a daemon itself -- mirrors
-    ``classify_daemon.classify_via_daemon`` exactly."""
+    run ``fallback`` immediately. Never boots a daemon itself.
+
+    Unlike ``classify_daemon.classify_via_daemon`` (which this otherwise
+    mirrors), this call always carries a per-call ``client_id`` and releases
+    it in a ``finally`` right after -- same as :func:`status_with_boot`.
+    Without one, a cold/slow compute this request triggers has no live
+    ``CoalescingServer`` subscriber and no completed cache entry yet, so
+    :meth:`InProcessRuntime.has_active_demand` sees no activity at all and
+    the monitor's own empty-strike idle-shutdown could close the runtime
+    (and its cache) while this request is still in flight.
+    """
     endpoint = endpoint_from_rendezvous(lock_data)
     if endpoint is None:
         return fallback()
     host, port, token = endpoint
+    client_id = wcs_client.new_client_id()
     try:
         return wcs_client.request(
             host,
@@ -317,9 +344,12 @@ def status_via_daemon(
             key=key,
             payload=payload,
             request_deadline_s=request_deadline_s,
+            client_id=client_id,
         )
     except wcs_client.DaemonUnavailable:
         return fallback()
+    finally:
+        wcs_client.release(host, port, token, client_id, timeout=request_deadline_s)
 
 
 class InProcessRuntime:

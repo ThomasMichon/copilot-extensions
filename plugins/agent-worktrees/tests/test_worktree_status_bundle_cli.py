@@ -137,13 +137,22 @@ def test_falls_back_to_direct_compute_when_daemon_unreachable(monkeypatch, tmp_p
     assert outputs == [{"from": "direct-compute"}]
 
 
-def test_direct_fallback_rejects_a_tampered_record_worktree_id(monkeypatch, tmp_path):
-    """Copilot review finding: `record.worktree_id` comes from the YAML's
-    own content, not necessarily `args.worktree_id` -- a malformed/tampered
-    record could carry a traversal token past the file-path resolution the
-    CLI already did, so the direct-compute fallback must apply the same
-    `validated_refresh` guard the daemon request path and sweep already
-    use."""
+def test_rejects_a_tampered_record_worktree_id_before_any_substitution(monkeypatch, tmp_path):
+    """Copilot review finding (originally): `record.worktree_id` comes from
+    the YAML's own content, not necessarily `args.worktree_id` -- a
+    malformed/tampered record could carry a traversal token past the
+    file-path resolution the CLI already did.
+
+    Fixed twice: round 5/6 wrapped the direct-compute fallback with
+    `validated_refresh`, but a later review caught that this call site
+    substitutes `worktree_id = record.worktree_id` *before* calling
+    `_worktree_status_compute` -- making that function's own
+    ``record.worktree_id != worktree_id`` mismatch guard a tautology (both
+    sides are the same substituted value). The real fix is to validate the
+    loaded record's identity against the *requested filename*
+    (`yaml_path.stem`) in this command itself, before any substitution, and
+    reject with a JSON error -- consistent with this function's other
+    early-exit checks (not a raised exception from deep in the fallback)."""
     record_path = tmp_path / "wt1.yaml"
     tampered_record = tracking.WorktreeRecord(
         worktree_id="../evil", branch="worktree/wt1", worktree_path="/tmp/wt1",
@@ -178,16 +187,68 @@ def test_direct_fallback_rejects_a_tampered_record_worktree_id(monkeypatch, tmp_
     outputs = []
     monkeypatch.setattr(cli, "_json_output", outputs.append)
 
-    raised = False
-    try:
-        cli.cmd_worktree_status_bundle(
-            argparse.Namespace(worktree_id="wt1", force_refresh=False, json=True)
-        )
-    except ValueError:
-        raised = True
-    # The command itself doesn't catch this ValueError (that's the CLI
-    # dispatch layer's job elsewhere) -- what matters here is the
-    # fact-assembly function was never reached with the tampered id.
-    assert raised
+    rc = cli.cmd_worktree_status_bundle(
+        argparse.Namespace(worktree_id="wt1", force_refresh=False, json=True)
+    )
+    assert rc == 1
+    assert errors  # a JSON error, not a raised exception
+    assert not outputs
+    # The fact-assembly function was never reached with the tampered id.
+    assert not assembled
+
+
+def test_rejects_a_record_declaring_a_different_real_worktrees_identity(
+    monkeypatch, tmp_path
+):
+    """Copilot review finding: the tampered-id test above only exercises an
+    *unsafe* substituted id (one `_worktree_status_compute`'s own path-
+    traversal guard would reject anyway). It does not prove the bypass this
+    finding actually describes: `wt1.yaml` declaring the *safe, real*
+    identity `wt2` (with `wt2.yaml` also existing) would previously make
+    this call site substitute `worktree_id = "wt2"` and call
+    `_worktree_status_compute(project, "wt2")` -- serving worktree `wt2`'s
+    facts for a request that asked about `wt1`, with no guard anywhere ever
+    catching it. Must be rejected before any substitution."""
+    record_path = tmp_path / "wt1.yaml"
+    mismatched_record = tracking.WorktreeRecord(
+        worktree_id="wt2", branch="worktree/wt2", worktree_path="/tmp/wt2",
+        repo="ext", machine="m1", platform="wsl",
+        started_at="2026-06-01T10:00:00", last_resumed_at="2026-06-01T10:00:00",
+        resume_count=0, title=None, status="active", completed_at=None,
+        sessions=None,
+    )
+    monkeypatch.setattr(
+        session_tracking_cli, "_find_tracking_file", lambda _worktree_id: record_path
+    )
+    monkeypatch.setattr(
+        session_tracking_cli, "_project_for_tracking_file", lambda _path: "proj"
+    )
+    monkeypatch.setattr(tracking, "load_record", lambda _path: mismatched_record)
+    monkeypatch.setattr(cli, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
+    monkeypatch.setattr(cli, "_status_monitor_enabled", lambda: False)
+
+    assembled = []
+    monkeypatch.setattr(
+        cli, "_worktree_status_compute",
+        lambda project, worktree_id: assembled.append(worktree_id) or {"from": "direct-compute"},
+    )
+
+    def fake_status_with_boot(*, read_lock_data, ensure_monitor, key, payload, fallback):
+        return fallback()
+
+    monkeypatch.setattr(worktree_status_daemon, "status_with_boot", fake_status_with_boot)
+
+    errors = []
+    monkeypatch.setattr(cli, "_json_error", lambda msg: errors.append(msg) or 1)
+    outputs = []
+    monkeypatch.setattr(cli, "_json_output", outputs.append)
+
+    rc = cli.cmd_worktree_status_bundle(
+        argparse.Namespace(worktree_id="wt1", force_refresh=False, json=True)
+    )
+    assert rc == 1
+    assert errors
+    assert not outputs
+    # Never called with "wt2" (nor "wt1") -- the mismatch is caught first.
     assert not assembled
 
