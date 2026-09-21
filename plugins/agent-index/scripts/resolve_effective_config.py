@@ -581,8 +581,7 @@ def _git_root(start: Path) -> Path | None:
     # no work-tree files, so `_load_repo_candidate` below correctly finds no
     # repo-local config there ("repository-config-absent") instead of this
     # function reporting the root as unresolvable ("repository-unavailable",
-    # which is fatal to the whole multi-scope resolution -- see
-    # `_active_environment` in companion-provider.py).
+    # which is fatal to the whole multi-scope resolution).
     bare = _run_git(git, start, "rev-parse", "--is-bare-repository")
     if bare is None or bare.returncode != 0 or bare.stdout.strip() != "true":
         return None
@@ -624,8 +623,7 @@ def _load_peer_launch() -> Any:
 
     This script runs standalone (not necessarily under an installed
     ``agent_index`` package import path), so it loads its packaged sibling by
-    file location the same way :mod:`companion_context` loads
-    ``installation_context.py``, rather than assuming a package import.
+    file location rather than assuming a package import.
     """
     import importlib.util
 
@@ -773,7 +771,7 @@ def _run_state_root(
             # `command` can resolve to the PATH `.cmd` binstub (shutil.which
             # prefers .cmd over .ps1 on Windows), which Windows must interpret
             # through a fresh cmd.exe -- CREATE_NO_WINDOW keeps that console
-            # invisible instead of flashing on every companion-provider probe.
+            # invisible instead of flashing on every runtime-resolution probe.
             creationflags=(0x08000000 if os.name == "nt" else 0),
         )
     except (OSError, subprocess.SubprocessError):
