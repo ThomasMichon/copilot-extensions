@@ -114,17 +114,27 @@ fi
 
 # =========================================================================
 phase 3 "resolve the runtime's bootstrap entrypoint + bundled SDK path"
+# The CLI extracts its versioned runtime payload to a per-platform cache dir
+# (~/.cache/copilot/pkg/<platform>/<version>/ on Linux, mirroring
+# %LOCALAPPDATA%\copilot\pkg\<platform>\<version>\ on Windows) -- NOT inside
+# the npm package itself, which only ships the launcher. Prefer the slot
+# whose version matches the currently-installed CLI so the manually-joined
+# connection speaks the exact same protocol revision as the live session.
 BOOTSTRAP_PATH=""
 SDK_PATH=""
-if command -v npm >/dev/null 2>&1; then
-    NPM_ROOT="$(npm root -g 2>/dev/null || true)"
-    if [ -n "$NPM_ROOT" ] && [ -d "$NPM_ROOT/@github/copilot" ]; then
-        BOOTSTRAP_PATH="$(find "$NPM_ROOT/@github/copilot" -type f -name extension_bootstrap.mjs 2>/dev/null | head -1)"
-        if [ -n "$BOOTSTRAP_PATH" ]; then
-            PKG_ROOT="$(dirname "$(dirname "$BOOTSTRAP_PATH")")"   # .../preloads/.. -> pkg root
-            [ -d "$PKG_ROOT/copilot-sdk" ] && SDK_PATH="$PKG_ROOT/copilot-sdk"
-        fi
-    fi
+CLI_VERSION="$(copilot --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+CACHE_PKG_ROOT="$HOME/.cache/copilot/pkg"
+if [ -n "$CLI_VERSION" ] && [ -d "$CACHE_PKG_ROOT" ]; then
+    BOOTSTRAP_PATH="$(find "$CACHE_PKG_ROOT" -path "*/$CLI_VERSION/preloads/extension_bootstrap.mjs" 2>/dev/null | head -1)"
+fi
+# Fall back to whatever slot exists if the exact version isn't cached (e.g. an
+# auto-updated CLI left only a newer slot behind).
+if [ -z "$BOOTSTRAP_PATH" ] && [ -d "$CACHE_PKG_ROOT" ]; then
+    BOOTSTRAP_PATH="$(find "$CACHE_PKG_ROOT" -type f -name extension_bootstrap.mjs 2>/dev/null | sort | tail -1)"
+fi
+if [ -n "$BOOTSTRAP_PATH" ]; then
+    PKG_ROOT="$(dirname "$(dirname "$BOOTSTRAP_PATH")")"   # .../preloads/.. -> pkg root
+    [ -d "$PKG_ROOT/copilot-sdk" ] && SDK_PATH="$PKG_ROOT/copilot-sdk"
 fi
 
 if [ -n "$BOOTSTRAP_PATH" ] && [ -n "$SDK_PATH" ]; then
