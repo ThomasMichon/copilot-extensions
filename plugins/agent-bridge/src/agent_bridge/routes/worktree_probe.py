@@ -147,7 +147,7 @@ async def probe_live_worktree(
     ]
     if not eligible:
         return None
-    args = ["list", "--json", "--mux-details", "--worktree-id", worktree_id]
+    args = ["list", "--json", "--worktree-id", worktree_id]
     tasks = {
         asyncio.create_task(wt._run_for_agent(name, cfg, resolver, args)): name
         for name, cfg in eligible
