@@ -1581,6 +1581,41 @@ class TestWorktreeRoutes:
         assert detail["session_id"] == "cli-real-holder"
         assert detail["session_id"] != stopped.session_id
 
+    def test_reservation_conflict_without_live_cli_reports_distinct_reason(
+        self, client, app,
+    ) -> None:
+        """``reserve_worktree_ownership`` also refuses when another active
+        ACP reservation owns the worktree, entirely without a live CLI. That
+        must NOT be reported as ``live_cli_holds_worktree`` -- a reclaim
+        caller treats that reason as "stop-and-force through the interactive
+        CLI", which does nothing for an ACP ownership conflict and would
+        otherwise run a pointless (and unfenced, since there is no CLI
+        holder id) restart."""
+        wt_id = "anomalous-potato-wsl-20250101-190100-acpowned"
+        self._seed_worktree("test-agent", wt_id)
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        stopped = Session("sess-resuming-2", "still-pond", target, "test-agent")
+        stopped.status = SessionStatus.STOPPED
+        mgr._sessions[stopped.session_id] = stopped
+
+        db = app.state.db
+        db.reserve_worktree_ownership = lambda *a, **k: False
+        # No live_session registered at all -- the refusal is purely an ACP
+        # ownership conflict. Seed the reservation row directly.
+        db.execute_write(
+            "INSERT INTO worktree_ownership (worktree_id, session_id, "
+            "reserved_at, updated_at) VALUES (?, ?, ?, ?)",
+            (wt_id, "acp-other-owner", time.time(), time.time()),
+        )
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["reason"] == "worktree_owned_by_another_session"
+        assert detail["session_id"] == "acp-other-owner"
+
     def test_resume_worktree_does_not_bypass_provider_refresh_failure(
         self, client, app,
     ) -> None:

@@ -27,7 +27,10 @@ from ..session_manager import (
     ProviderTargetRefreshError,
     SessionManager,
 )
-from .worktree_holders import chosen_holder_id as _chosen_holder_id
+from .worktree_holders import (
+    chosen_holder_id as _chosen_holder_id,
+    reservation_conflict_detail as _reservation_conflict_detail,
+)
 from .worktree_probe import (
     owning_agent as _owning_agent,
     probe_archived_owner as _probe_archived_owner,
@@ -1105,27 +1108,19 @@ async def resume_worktree(
     # Ownership reservation (#2912): take the per-worktree ACP-ownership
     # reservation before resuming, so a live-CLI registration must respect
     # it. Atomic across processes; ``reclaim`` force-takes it. A False
-    # result means a fresh live CLI raced it -- surface the top guard's 409.
+    # result means either a fresh live CLI raced it, or another active ACP
+    # reservation owns it -- see worktree_holders.reservation_conflict_detail.
     if db is not None:
         reserved = db.reserve_worktree_ownership(
             worktree_id, session.session_id, now=time.time(), reclaim=reclaim
         )
         if not reserved:
-            # session_id must be the live CLI holder, not the resuming session.
-            holders = db.list_fresh_live_sessions(worktree_id, now=time.time())
-            holder_id = _chosen_holder_id(holders)
+            detail = _reservation_conflict_detail(db, worktree_id)
             log.info(
-                "resume_worktree %s refused: live CLI %s raced the reservation",
-                worktree_id, holder_id,
+                "resume_worktree %s refused: %s (session %s)",
+                worktree_id, detail["reason"], detail["session_id"],
             )
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "reason": "live_cli_holds_worktree",
-                    "worktree_id": worktree_id,
-                    "session_id": holder_id,
-                },
-            )
+            raise HTTPException(status_code=409, detail=detail)
 
     if await _resolve_already_live(mgr, worktree_id, session):  # live-checked, #6744
         return _session_info(session)
