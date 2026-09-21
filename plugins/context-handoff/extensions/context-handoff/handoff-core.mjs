@@ -332,29 +332,23 @@ async function rebaseInProgress(cwd) {
 // immediately before the sync exec even while this lock is held.
 //
 // STALE_LOCK_MS: an ultimate, last-resort fallback threshold ONLY for when
-// the recorded holder's liveness genuinely cannot be determined (its PID
-// can't be parsed from the lock, or querying process liveness itself
-// errors) -- see `isProcessAlive` below. The PRIMARY reclaim criterion is
-// liveness, not age: an aged-but-still-running holder (a slow network, a
-// suspended process -- not crashed) must never be reclaimed out from under
-// itself, because that is exactly what forced the whole chain of
-// release-side races rounds 16-20 kept surfacing (a resumed live holder
-// finding its lock already replaced). Gating reclaim on confirmed death
-// removes the scenario that necessitates any of that entirely: a genuinely
-// dead process can never resume and race on release.
+// the recorded holder's identity genuinely cannot be determined (its PID
+// can't be parsed from the lock, its start time can't be queried, or
+// querying process liveness itself errors) -- see `isProcessAlive` and
+// `processStartTimeMs` below. The PRIMARY reclaim criterion is PROCESS
+// IDENTITY (pid + start time), not age: an aged-but-still-running holder (a
+// slow network, a suspended process -- not crashed) must never be reclaimed
+// out from under itself, because that is exactly what forced the whole
+// chain of release-side races rounds 16-20 kept surfacing (a resumed live
+// holder finding its lock already replaced). Bare pid liveness alone is not
+// enough either (round 23 finding): `process.kill(pid, 0)` only proves SOME
+// process holds that pid right now, not that it is the SAME process that
+// created the lock -- the OS can and does reuse pids. Comparing the
+// holder's recorded START TIME against the CURRENT process occupying that
+// pid distinguishes "still the same process, just slow" (never reclaim, no
+// matter how old) from "a different process now recycling that pid" (safe
+// to reclaim immediately, regardless of age).
 const STALE_LOCK_MS = 60 * 60 * 1000;
-
-// ABSOLUTE_STALE_LOCK_MS: a hard ceiling that overrides even a "confirmed
-// alive" verdict. `process.kill(pid, 0)` can only observe whether SOME
-// process holds that pid RIGHT NOW -- it cannot tell whether that pid was
-// reused by a completely unrelated process after the original (crashed)
-// holder exited. Without this, a crashed holder whose pid gets recycled by
-// the OS would look permanently "alive" and sync would never self-heal for
-// this worktree again. Deliberately far longer than STALE_LOCK_MS: this is
-// the rare-but-bounded safety net for pid reuse specifically, not the
-// everyday reclaim path, so it must never fire for a merely slow-but-real
-// holder.
-const ABSOLUTE_STALE_LOCK_MS = 24 * 60 * 60 * 1000;
 
 // True if `pid` is still running. `process.kill(pid, 0)` sends no signal
 // (POSIX) / merely checks accessibility (Windows via Node's libuv layer) --
@@ -371,13 +365,55 @@ function isProcessAlive(pid) {
   }
 }
 
-function acquireLock(lockPath) {
+// Queries the OS's own record of when `pid` started, normalized to epoch
+// milliseconds -- used as a process-identity fingerprint alongside the pid
+// itself (a bare pid, once its original holder exits, can be reused by a
+// completely unrelated live process; comparing start times distinguishes
+// that from "still the same process"). Both the write side (this
+// invocation queries its OWN pid at acquire time) and the read side (a
+// later invocation queries the RECORDED holder's pid) go through this SAME
+// function, so both sides use identical measurement precision -- comparing
+// Node's own `process.uptime()`-derived estimate against the OS's official
+// answer for someone else's pid would not reliably match even for the
+// exact same process. Returns null if it cannot be determined (unsupported
+// platform tool, permissions, the pid no longer exists).
+export async function processStartTimeMs(pid) {
+  try {
+    if (process.platform === "win32") {
+      const { stdout } = await execFileAsync(
+        windowsPowerShell(),
+        [
+          "-NoProfile", "-Command",
+          `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToFileTimeUtc()`,
+        ],
+        { timeout: 5000, encoding: "utf-8" },
+      );
+      const fileTimeTicks = Number(stdout.trim());
+      if (!Number.isFinite(fileTimeTicks)) return null;
+      // FILETIME: 100ns intervals since 1601-01-01; 11644473600000 is the
+      // epoch offset in ms between that and the Unix epoch.
+      return Math.round(fileTimeTicks / 10000 - 11644473600000);
+    }
+    const { stdout } = await execFileAsync(
+      "ps", ["-o", "lstart=", "-p", String(pid)],
+      { timeout: 5000, encoding: "utf-8" },
+    );
+    const parsed = Date.parse(stdout.trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function acquireLock(lockPath) {
   // Ownership token written into the lock file's content, not just its
   // presence at a path -- see the release-time check in
   // withWorktreeSyncLock's finally block for why path-only ownership isn't
-  // enough. Leads with this process's own pid (parsed back out below to
-  // gate reclaim on liveness) followed by a random suffix for uniqueness.
-  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  // enough. Leads with this process's own pid and its OS-reported start
+  // time (both parsed back out below for identity comparison), followed by
+  // a random suffix for uniqueness.
+  const ownStartTime = await processStartTimeMs(process.pid);
+  const token = `${process.pid}-${ownStartTime ?? "unknown"}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   try {
     const fd = openSync(lockPath, "wx");
     writeFileSync(fd, token);
@@ -385,28 +421,43 @@ function acquireLock(lockPath) {
   } catch (error) {
     if (error?.code !== "EEXIST") throw error;
     let holderPid = null;
+    let holderStartTime = null;
     try {
       const content = readFileSync(lockPath, "utf-8");
-      const match = content.match(/^(\d+)-/);
-      if (match) holderPid = Number(match[1]);
+      const match = content.match(/^(\d+)-(\d+|unknown)-/);
+      if (match) {
+        holderPid = Number(match[1]);
+        holderStartTime = match[2] === "unknown" ? null : Number(match[2]);
+      }
     } catch {
       // Couldn't read the existing lock's content at all -- fall through
       // to the age-only fallback below rather than guessing a pid.
     }
-    if (holderPid !== null && isProcessAlive(holderPid)) {
-      // Liveness is the primary signal: a live holder is NEVER reclaimed on
-      // age alone, no matter how long it has been running -- EXCEPT the
-      // absolute ceiling below, which exists specifically for pid reuse
-      // (a crashed holder's pid recycled by an unrelated live process),
-      // not as a normal reclaim path.
-      let ageMs;
-      try {
-        ageMs = Date.now() - statSync(lockPath).mtimeMs;
-      } catch {
-        throw error;
+    let reclaimable = false;
+    if (holderPid !== null) {
+      if (!isProcessAlive(holderPid)) {
+        // Confirmed dead -- always reclaimable, no age check needed.
+        reclaimable = true;
+      } else if (holderStartTime !== null) {
+        // A live pid: compare start times to tell "still the same process"
+        // from "a different process now recycling that pid". Query through
+        // the SAME function used to record it, for measurement parity.
+        const currentStartTime = await processStartTimeMs(holderPid);
+        if (currentStartTime !== null && currentStartTime !== holderStartTime) {
+          // Confirmed different process -- safe to reclaim regardless of
+          // age; no ambiguity to wait out.
+          reclaimable = true;
+        }
+        // Either the start times match (genuinely still the same process --
+        // NEVER reclaim, no matter its age) or the current start time
+        // couldn't be queried (ambiguous -- fail closed, do not reclaim).
       }
-      if (ageMs <= ABSOLUTE_STALE_LOCK_MS) throw error;
-    } else if (holderPid === null) {
+      // A live pid with no recorded start time (an older/foreign lock
+      // format) has no basis for identity comparison -- fail closed
+      // (never reclaim) rather than guessing from age alone (the exact
+      // round-23 finding: age-based reclaim of a live-but-slow holder
+      // reintroduces the very race this whole scheme exists to prevent).
+    } else {
       // No parseable pid (a corrupt/legacy lock, or it vanished before this
       // read) -- fall back to the age-only heuristic as a last resort so a
       // genuinely unreadable abandoned lock can still self-heal eventually.
@@ -421,20 +472,21 @@ function acquireLock(lockPath) {
         // risk unlinking a lock another process re-created a moment ago.
         // Fail closed as contention instead -- a lock that is genuinely
         // gone will simply succeed to acquire on the NEXT attempt.
-        throw error;
+        ageMs = -Infinity;
       }
-      if (ageMs <= STALE_LOCK_MS) throw error;
+      reclaimable = ageMs > STALE_LOCK_MS;
     }
-    // Confirmed dead (or unreadable-and-old) -- reclaim it, but atomically:
-    // renaming lockPath AWAY (not unlinking it) is the only step here the
-    // OS actually guarantees single-winner semantics for. If two processes
-    // race to reclaim the SAME stale lock, only one `renameSync` can
-    // succeed (the source path stops existing the instant the first one
-    // wins); the loser's rename throws ENOENT and it must NOT proceed to
-    // acquire -- an unconditional unlink+open here (an earlier approach)
-    // let a second reclaimer delete the FIRST reclaimer's fresh lock and
-    // acquire its own, letting both run concurrently and defeating the
-    // whole point of the lock.
+    if (!reclaimable) throw error;
+    // Confirmed dead, confirmed a different process, or unreadable-and-old
+    // -- reclaim it, but atomically: renaming lockPath AWAY (not unlinking
+    // it) is the only step here the OS actually guarantees single-winner
+    // semantics for. If two processes race to reclaim the SAME stale lock,
+    // only one `renameSync` can succeed (the source path stops existing
+    // the instant the first one wins); the loser's rename throws ENOENT and
+    // it must NOT proceed to acquire -- an unconditional unlink+open here
+    // (an earlier approach) let a second reclaimer delete the FIRST
+    // reclaimer's fresh lock and acquire its own, letting both run
+    // concurrently and defeating the whole point of the lock.
     const graveyardPath = `${lockPath}.stale-${process.pid}-${Date.now()}`;
     try {
       renameSync(lockPath, graveyardPath);
@@ -472,7 +524,7 @@ async function withWorktreeSyncLock(cwd, fn) {
   }
   let lock;
   try {
-    lock = acquireLock(lockPath);
+    lock = await acquireLock(lockPath);
   } catch {
     return {
       attempted: false,

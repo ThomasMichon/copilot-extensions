@@ -2056,3 +2056,39 @@ Round 22 surfaced 3 new findings, all fixed:
   remote scenario proving the cache fallback is never consulted). `node
   --test`: 158 tests, 156 pass (2 pre-existing skips), no regressions. All
   guards pass. No version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 23: process-identity (pid + start time) replaces age-based reclaim entirely
+
+Round 23 surfaced 1 new HIGH finding that correctly identified a real
+tension in round 22's own fix:
+
+- **The pid-reuse safety net (round 22) reintroduced the exact race it was
+  meant to fix:** `ABSOLUTE_STALE_LOCK_MS` overrode even a "confirmed
+  alive" verdict once a lock exceeded 24h -- but a live pid can genuinely
+  belong to the SAME original holder for longer than that (a suspended
+  process, an extremely slow network), and reclaiming it then reintroduces
+  the very race this whole scheme exists to prevent. Bare pid liveness
+  alone cannot resolve this: `process.kill(pid, 0)` only proves SOME
+  process holds that pid right now, not that it is the SAME process that
+  created the lock. Replaced the age-based override entirely with
+  **process-identity comparison**: the lock now records the holder's pid
+  AND its OS-reported start time (queried via `Get-Process
+  ...StartTime.ToFileTimeUtc()` on Windows, `ps -o lstart=` on POSIX --
+  both write and read sides use the SAME query function for measurement
+  parity, since comparing Node's own `process.uptime()`-derived estimate
+  against the OS's official answer for someone else's pid would not
+  reliably match even for the exact same process). A live pid whose
+  CURRENT start time matches the recorded one is the SAME process --
+  NEVER reclaimed, no matter its age; a mismatch proves it is a DIFFERENT
+  process now recycling that pid -- reclaimed immediately, no age wait
+  needed at all; a live pid with no recorded start time (an
+  older/corrupt lock) fails closed (never reclaimed) rather than guessing
+  from age. `acquireLock` is now async (queries its own start time at
+  acquire) -- `withWorktreeSyncLock` awaits it.
+- 3 new/changed tests (a genuine pid-reuse-standin lock -- alive pid,
+  deliberately wrong recorded start time -- is reclaimed immediately
+  regardless of age; a genuinely matching recorded start time is never
+  reclaimed regardless of age, using a REAL queried value not just a
+  placeholder; a no-recorded-start-time lock still fails closed). `node
+  --test`: 159 tests, 157 pass (2 pre-existing skips), no regressions. All
+  guards pass. No version bump needed (still `0.1.1-dev36`).
