@@ -17,7 +17,7 @@ import json
 import os
 import shutil
 import subprocess
-import sys
+import sys  # noqa: F401 - tests patch self_update.sys.platform directly
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -844,17 +844,16 @@ def run_tier(
                         "agent-worktrees",
                         "-p",
                         repo_name,
-                        "reconcile-plugins",
-                        "--apply",
-                        "--with-payload-refresh",
+                        "update",
+                        "--no-manager",
                     ],
                     timeout=3600,
                 )
                 steps.append(
                     StepResult(
-                        f"reconcile-plugins:{repo_name}",
+                        f"update:{repo_name}",
                         "changed" if plugin_refresh.returncode == 0 else "error",
-                        plugin_refresh.output or "reconciled plugin payloads and runtimes",
+                        plugin_refresh.output or "updated plugin payloads and runtimes",
                         command=plugin_refresh.argv,
                     )
                 )
@@ -863,15 +862,13 @@ def run_tier(
                         tier=tier,
                         status="error",
                         opted_in=True,
-                        detail=plugin_refresh.output or "agent-worktrees reconcile-plugins failed",
+                        detail=plugin_refresh.output or "agent-worktrees update failed",
                         lock_reclaimed=lock.reclaimed,
                         attempted_at=attempted_at,
                         steps=steps,
                     )
             restore_cmd = [
-                sys.executable,
-                "-m",
-                "agent_machines",
+                "agent-machines",
                 "restore",
                 "--apply",
                 "--all-projects",

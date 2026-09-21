@@ -230,7 +230,7 @@ with independent authority and locking.
 | `owner` | no | Override the collision owner label (defaults to the package name). |
 
 `watchdog` is the narrow hourly dtssh-launcher liveness tier; `sweep` is the
-broader daily pull + plugin-reconcile + **maintenance-safe** restore tier.
+broader daily pull + repo `update` + **maintenance-safe** restore tier.
 Declaring the resource controls both `agent-machines self-update run` and the
 machine-local scheduler presence reconciled by `agent-machines self-update
 install` and `agent-machines restore --apply` (Windows Scheduled Tasks; Linux /

@@ -165,8 +165,8 @@ Run `<catalog argv[0]> validate` after authoring to catch conflicts.
 A reachable, logged-in machine can converge on its own, on a schedule, without
 a live interactive session -- two independently-scheduled, independently-locked
 tiers: `watchdog` (hourly; dtssh launcher liveness only) and `sweep` (daily;
-fast-forward pulls of discovered adopted repos, `agent-worktrees
-reconcile-plugins --apply --with-payload-refresh`, and `agent-machines restore <!-- marketplace-isolation: allow self-update-watchdog-description -->
+fast-forward pulls of discovered adopted repos, each owning repo's
+`update --no-manager` flow, and `agent-machines restore <!-- marketplace-isolation: allow self-update-watchdog-description -->
 --apply --all-projects --maintenance-safe`). Maintenance-safe sweep restores
 always include `manage:` Copilot settings/permissions, include only resources
 that declare `maintenance_safe: true`, and also allow already-installed pinned
