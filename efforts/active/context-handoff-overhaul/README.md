@@ -419,9 +419,18 @@ Verbatim from the operator:
   explicit `mode: auto` opt-in now. Manual handoffs (compose/save/consume)
   keep working unconditionally under the new default -- only `mode: off`
   blocks them. **PR #3041 (merged `9cdf4f3a0`).**
-- [ ] Investigate why the `context-handoff` plugin frequently fails to load
+- [x] Investigate why the `context-handoff` plugin frequently fails to load
   in Copilot CLI sessions at all -- needs controlled experimentation with
   the plugin's manifest/extension shape to isolate the rejection cause.
+  **This plugin's own contribution addressed:** confirmed a shared root
+  cause with a parallel investigation -- synchronous,
+  blocking I/O at extension load time, before `joinSession()`, delaying the
+  readiness handshake. `agent-bridge`'s dominant instance (blocking
+  subprocess spawns) was fixed separately (PR #3098); this plugin's smaller,
+  spawn-free instance (a synchronous config directory walk + file reads) is
+  now non-blocking too (see journal below). The plugin-load investigation as
+  a *whole* stays open pending confirmation the combined fixes resolve the
+  operator's original live symptom.
 - [ ] Fix Worktree Manager's `trigger_handoff` pickup reliability: cases
   where a "successful" report corresponds to no actual live pane.
 - [ ] Harden the successor-side fallback so an agent with zero working
@@ -1384,3 +1393,70 @@ gate land._
   `agent-worktrees` suite passes aside from a pre-existing, unrelated
   `test_doctor.py` failure batch (confirmed failing identically on
   unmodified `main`, out of scope for this change).
+
+### 2026-09-20 (still later) -- Phase 7 item 1: plugin-load investigation, first pass
+
+- Picked up this effort's internal-tracker issue #7264 (plugin frequently
+  fails to load) per this effort's own recommendation that it unblocks
+  reasoning about the other four remaining Phase 7 items.
+- Structural diff against known-reliable sibling plugins (`agent-worktrees`,
+  `agent-bridge`): `plugin.json`, `hooks.json`, and `session-context.json`
+  shapes are unremarkable and match the working plugins' conventions
+  (`runtimeScope: none` is a legitimate value, not a misconfiguration --
+  this plugin has no venv/runtime to manage). Ruled out as the cause.
+- Live-load smoke tests, both clean: (1) `copilot --plugin-dir
+  .../context-handoff -p "list tools containing 'handoff'"` from an
+  isolated scratch directory (no repo root above it) surfaced all four
+  tools (`generate_handoff_prompt`, `save_handoff_prompt`,
+  `consume_handoff`, `trigger_handoff`) correctly; (2) this very picked-up
+  session (a real production worktree, full plugin marketplace, `.git`
+  several directories deep) also had all four tools available, confirmed
+  via `tool_search_tool`. So the plugin is not *categorically* broken --
+  matches the issue's own "frequently", not "always", framing.
+- **Leading suspect identified, not yet confirmed:** `extension.mjs` line
+  ~30 runs `loadContextHandoffConfig(process.cwd())` synchronously at
+  **module top level**, before `joinSession()` and before any hook fires.
+  That call chain (`findRepositoryRoot` walking up the directory tree with
+  repeated `existsSync`, then `readFileSync`-ing up to two config layers)
+  is blocking I/O performed during the extension host's import/registration
+  phase. None of the sibling plugins checked (`agent-worktrees`,
+  `agent-bridge`) do comparable synchronous work at import time -- their
+  `extension.mjs` files only *define* handlers before `joinSession()`. If
+  the host enforces any load-time budget per extension (unconfirmed -- the
+  SDK internals aren't in this repo to inspect), a slow directory walk or
+  file read (e.g. a deeply nested worktree, a network/cloud-sync-backed
+  path where `existsSync`/`readFileSync` block on a placeholder hydration)
+  would be a plausible, environment-dependent way for *this* plugin
+  specifically to lose a race that others structurally can't lose, without
+  surfacing any diagnostic (a silent host-side drop, not a thrown error the
+  plugin's own try/catch could catch).
+  `fs.existsSync` swallows errors and returns `false` rather than throwing,
+  so this is a **latency** hypothesis, not an uncaught-exception hypothesis
+  -- ruled out crash-on-permission-error as the mechanism.
+- **Confirmed by a parallel investigation, same session window:** a
+  companion investigation root-caused the dominant instance of this exact
+  bug class in `agent-bridge`'s `resolveMetadata()` -- four sequential,
+  blocking `execSync`/`execFileSync` subprocess spawns (up to ~29s combined)
+  run synchronously before `joinSession()`, freezing the event loop long
+  enough that the readiness handshake itself missed its window (fixed
+  upstream in copilot-extensions PR #3098: async, parallel, fire-and-forget
+  from load-time init). That investigation explicitly flagged this plugin's
+  smaller `loadContextHandoffConfig()` directory walk as a secondary,
+  lower-risk instance of the same class -- confirming the lead above
+  without requiring the deeper live-session instrumentation originally
+  called for.
+- **Fixed in this same pass:** `loadContextHandoffConfigAsync()` (new,
+  `config.mjs`) replaces the synchronous call on `extension.mjs`'s
+  load-time path with non-blocking `node:fs/promises` equivalents, resolved
+  via `handoffConfigPromise` fired fire-and-forget -- never awaited on the
+  path to `joinSession()`/readiness. The synchronous original is unchanged
+  and still used by `handoff-cli.mjs` and its existing tests, where
+  blocking a short-lived CLI process is harmless. 4 new parity tests
+  confirm the async loader agrees with the synchronous one on every
+  scenario. `node --test`: 116 tests, 114 pass (2 pre-existing skips), no
+  regressions. Live smoke test (`copilot --plugin-dir ... -p "..."`)
+  reconfirmed all four tools load correctly after the change.
+- Issue #7264 -- this plugin's own contribution is addressed by the fix
+  above; the plugin-load investigation as a whole stays open pending
+  confirmation that `agent-bridge`'s fix (the dominant contributor)
+  resolves the operator's original live symptom.

@@ -13,7 +13,9 @@ import { join } from "node:path";
 import {
   describeError,
   findRepositoryRoot,
+  findRepositoryRootAsync,
   loadContextHandoffConfig,
+  loadContextHandoffConfigAsync,
   parseContextHandoffConfig,
   parseThresholdConfig,
 } from "../extensions/context-handoff/config.mjs";
@@ -24,6 +26,22 @@ function withRepository(fn) {
   try {
     writeFileSync(join(root, ".git"), "gitdir: elsewhere\n");
     fn(root, home);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+// Async twin of withRepository: `fn` may return a Promise, and cleanup waits
+// for it before removing the fixture directories. `withRepository` above
+// cleans up synchronously right after `fn` returns, which would delete the
+// fixture out from under an async assertion's `.then()` microtask.
+async function withRepositoryAsync(fn) {
+  const root = mkdtempSync(join(tmpdir(), "context-handoff-"));
+  const home = mkdtempSync(join(tmpdir(), "context-handoff-home-"));
+  try {
+    writeFileSync(join(root, ".git"), "gitdir: elsewhere\n");
+    await fn(root, home);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
@@ -216,4 +234,67 @@ test("symlinked config directory is rejected", { skip: process.platform === "win
     const loaded = loadContextHandoffConfig(root, { homeDir: home });
     assert.match(loaded.warning, /non-symlink directory/);
   });
+});
+
+// findRepositoryRootAsync / loadContextHandoffConfigAsync are the
+// non-blocking twins extension.mjs's load-time init uses (fired
+// fire-and-forget alongside joinSession() rather than blocking the event
+// loop before it). They must agree with the synchronous originals on every
+// outcome.
+test("async findRepositoryRoot agrees with the synchronous original", async () => {
+  await withRepositoryAsync(async (root) => {
+    const nested = join(root, "src", "feature");
+    mkdirSync(nested, { recursive: true });
+    const asyncRoot = await findRepositoryRootAsync(nested);
+    assert.equal(asyncRoot, findRepositoryRoot(nested));
+    assert.equal(asyncRoot, root);
+  });
+});
+
+test("async loader discovers config from a nested directory in a git worktree", async () => {
+  await withRepositoryAsync(async (root, home) => {
+    const nested = join(root, "src", "feature");
+    mkdirSync(nested, { recursive: true });
+    mkdirSync(join(root, ".context-handoff"));
+    writeFileSync(
+      join(root, ".context-handoff", "config.yaml"),
+      "thresholds:\n  soft_percent: 65\n  hard_percent: 75\n",
+    );
+
+    const loaded = await loadContextHandoffConfigAsync(nested, { homeDir: home });
+    assert.equal(loaded.mode, "manual-only");
+    assert.deepEqual(
+      loaded.thresholds,
+      { softPercent: 65, hardPercent: 75, forcePercent: 79 },
+    );
+    assert.equal(loaded.warning, null);
+    assert.deepEqual(loaded, loadContextHandoffConfig(nested, { homeDir: home }));
+  });
+});
+
+test("async loader falls back to defaults with an invalid config, matching the sync loader's warning", async () => {
+  await withRepositoryAsync(async (root, home) => {
+    mkdirSync(join(root, ".context-handoff"));
+    writeFileSync(
+      join(root, ".context-handoff", "config.yaml"),
+      "mode: manual-only\nthresholds:\n  hard_percent: 80\n",
+    );
+
+    const loaded = await loadContextHandoffConfigAsync(root, { homeDir: home });
+    assert.equal(loaded.mode, "manual-only");
+    assert.match(loaded.warning, /using defaults/);
+    assert.deepEqual(loaded, loadContextHandoffConfig(root, { homeDir: home }));
+  });
+});
+
+test("async loader returns the same default config as the sync loader outside any repository", async () => {
+  const outside = mkdtempSync(join(tmpdir(), "context-handoff-none-"));
+  const home = mkdtempSync(join(tmpdir(), "context-handoff-none-home-"));
+  try {
+    const loaded = await loadContextHandoffConfigAsync(outside, { homeDir: home });
+    assert.deepEqual(loaded, loadContextHandoffConfig(outside, { homeDir: home }));
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
 });
