@@ -16,7 +16,13 @@ from pathlib import Path
 import pytest
 
 from agent_machines import __main__ as cli
-from agent_machines import fleet_update, fleet_update_lock, fleet_update_state, fleet_update_tasks
+from agent_machines import (
+    cli_fleet_update,
+    fleet_update,
+    fleet_update_lock,
+    fleet_update_state,
+    fleet_update_tasks,
+)
 from agent_machines.manifest import ManifestError, load_package
 from agent_machines.reconcile import plan
 from agent_machines.resources import ResourceContext, apply_resources, resolve_resources
@@ -416,7 +422,7 @@ def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch,
 # --------------------------------------------------------------------------- #
 def test_cli_fleet_update_run_emits_json(monkeypatch, capsys):
     monkeypatch.setattr(
-        cli,
+        cli_fleet_update,
         "_resolve_machine_identity",
         lambda args: type(
             "Identity",
@@ -424,17 +430,23 @@ def test_cli_fleet_update_run_emits_json(monkeypatch, capsys):
             {"canonical": "box-1", "accepted": ("box-1",), "warnings": [], "raw": "box-1"},
         )(),
     )
-    monkeypatch.setattr(cli, "_emit_identity_warnings", lambda identity: None)
-    monkeypatch.setattr(cli, "_self_update_packages", lambda machine, accepted_machines=None: [])
+    monkeypatch.setattr(cli_fleet_update, "_emit_identity_warnings", lambda identity: None)
     monkeypatch.setattr(
-        cli._reconcile, "resolve_union", lambda packages, machine, accepted_machines=None: []
-    )
-    monkeypatch.setattr(cli._validator, "validate", lambda resolved, machine, plat=None: [])
-    monkeypatch.setattr(
-        cli._resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
+        cli_fleet_update, "_collect_all_packages", lambda machine, accepted_machines=None: []
     )
     monkeypatch.setattr(
-        cli._fleet_update,
+        cli_fleet_update._reconcile,
+        "resolve_union",
+        lambda packages, machine, accepted_machines=None: [],
+    )
+    monkeypatch.setattr(
+        cli_fleet_update._validator, "validate", lambda resolved, machine, plat=None: []
+    )
+    monkeypatch.setattr(
+        cli_fleet_update._resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
+    )
+    monkeypatch.setattr(
+        cli_fleet_update._fleet_update,
         "run_tier",
         lambda tier, **kwargs: fleet_update.RunResult(
             tier=tier,
@@ -454,7 +466,7 @@ def test_cli_fleet_update_install_skips_non_opted_in_tier_without_registration(
     monkeypatch, capsys
 ):
     monkeypatch.setattr(
-        cli,
+        cli_fleet_update,
         "_resolve_machine_identity",
         lambda args: type(
             "Identity",
@@ -462,18 +474,24 @@ def test_cli_fleet_update_install_skips_non_opted_in_tier_without_registration(
             {"canonical": "box-1", "accepted": ("box-1",), "warnings": [], "raw": "box-1"},
         )(),
     )
-    monkeypatch.setattr(cli, "_emit_identity_warnings", lambda identity: None)
-    monkeypatch.setattr(cli, "_self_update_packages", lambda machine, accepted_machines=None: [])
+    monkeypatch.setattr(cli_fleet_update, "_emit_identity_warnings", lambda identity: None)
     monkeypatch.setattr(
-        cli._reconcile, "resolve_union", lambda packages, machine, accepted_machines=None: []
+        cli_fleet_update, "_collect_all_packages", lambda machine, accepted_machines=None: []
     )
-    monkeypatch.setattr(cli._validator, "validate", lambda resolved, machine, plat=None: [])
     monkeypatch.setattr(
-        cli._resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
+        cli_fleet_update._reconcile,
+        "resolve_union",
+        lambda packages, machine, accepted_machines=None: [],
+    )
+    monkeypatch.setattr(
+        cli_fleet_update._validator, "validate", lambda resolved, machine, plat=None: []
+    )
+    monkeypatch.setattr(
+        cli_fleet_update._resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
     )
     registered = []
     monkeypatch.setattr(
-        cli._fleet_update,
+        cli_fleet_update._fleet_update,
         "reconcile_scheduled_task",
         lambda tier, **kwargs: registered.append(tier),
     )
@@ -486,7 +504,7 @@ def test_cli_fleet_update_install_skips_non_opted_in_tier_without_registration(
 
 def test_cli_fleet_update_status_emits_json(monkeypatch, capsys):
     monkeypatch.setattr(
-        cli,
+        cli_fleet_update,
         "_resolve_machine_identity",
         lambda args: type(
             "Identity",
@@ -494,17 +512,23 @@ def test_cli_fleet_update_status_emits_json(monkeypatch, capsys):
             {"canonical": "box-1", "accepted": ("box-1",), "warnings": [], "raw": "box-1"},
         )(),
     )
-    monkeypatch.setattr(cli, "_emit_identity_warnings", lambda identity: None)
-    monkeypatch.setattr(cli, "_self_update_packages", lambda machine, accepted_machines=None: [])
+    monkeypatch.setattr(cli_fleet_update, "_emit_identity_warnings", lambda identity: None)
     monkeypatch.setattr(
-        cli._reconcile, "resolve_union", lambda packages, machine, accepted_machines=None: []
-    )
-    monkeypatch.setattr(cli._validator, "validate", lambda resolved, machine, plat=None: [])
-    monkeypatch.setattr(
-        cli._resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
+        cli_fleet_update, "_collect_all_packages", lambda machine, accepted_machines=None: []
     )
     monkeypatch.setattr(
-        cli._fleet_update,
+        cli_fleet_update._reconcile,
+        "resolve_union",
+        lambda packages, machine, accepted_machines=None: [],
+    )
+    monkeypatch.setattr(
+        cli_fleet_update._validator, "validate", lambda resolved, machine, plat=None: []
+    )
+    monkeypatch.setattr(
+        cli_fleet_update._resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
+    )
+    monkeypatch.setattr(
+        cli_fleet_update._fleet_update,
         "scheduled_task_status",
         lambda tier, **kwargs: fleet_update.ScheduledTaskStatus(
             tier=tier,
