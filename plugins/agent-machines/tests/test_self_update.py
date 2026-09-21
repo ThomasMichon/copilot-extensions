@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from agent_machines import __main__ as cli
-from agent_machines import self_update, self_update_state, self_update_tasks
+from agent_machines import self_update, self_update_lock, self_update_state, self_update_tasks
 from agent_machines.manifest import ManifestError, load_package
 from agent_machines.reconcile import plan
 from agent_machines.resources import resolve_resources
@@ -136,7 +137,7 @@ def test_lock_refuses_live_owner_without_double_drive(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("timeout"))
+    monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("timeout"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("timeout"))
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
@@ -163,7 +164,7 @@ def test_lock_reclaims_dead_owner_only_after_stale_window(tmp_path, monkeypatch)
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
@@ -198,7 +199,7 @@ def test_lock_refuses_recent_dead_owner(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
@@ -214,6 +215,44 @@ def test_lock_refuses_recent_dead_owner(tmp_path, monkeypatch):
     assert "stale window has not elapsed" in detail
     assert lock.snapshot is not None
     assert json.loads(path.read_text(encoding="utf-8"))["pid"] == 4321
+
+
+def test_tier_lock_acquires_and_releases_on_posix(tmp_path):
+    """Regression: TierLock.acquire() used to unconditionally refuse with
+    'self-update locking is supported only on Windows' on any non-Windows
+    platform, so `agent-machines self-update run` could never actually
+    execute a tier there -- opting in and registering the scheduled timer
+    (see the systemd --user support above) still hit this wall every time
+    the timer fired. Exercises the real (non-mocked) POSIX flock()-based
+    path -- this test only runs meaningfully on a POSIX host."""
+    if sys.platform == "win32":
+        pytest.skip("POSIX-only lock path")
+    lock = self_update.TierLock(tier="watchdog", home=tmp_path)
+    acquired, detail = lock.acquire()
+    assert acquired is True
+    assert detail == "acquired"
+    assert self_update.lock_path("watchdog", tmp_path).exists()
+    lock.release()
+    assert not self_update.lock_path("watchdog", tmp_path).exists()
+
+
+def test_tier_lock_refuses_concurrent_holder_on_posix(tmp_path):
+    if sys.platform == "win32":
+        pytest.skip("POSIX-only lock path")
+    first = self_update.TierLock(tier="sweep", home=tmp_path, pid=111)
+    acquired_first, _ = first.acquire()
+    assert acquired_first is True
+
+    second = self_update.TierLock(tier="sweep", home=tmp_path, pid=222, pid_alive=lambda _p: True)
+    acquired_second, detail = second.acquire()
+    assert acquired_second is False
+    assert "already active" in detail
+
+    first.release()
+    third = self_update.TierLock(tier="sweep", home=tmp_path, pid=333)
+    acquired_third, _ = third.acquire()
+    assert acquired_third is True
+    third.release()
 
 
 def test_watchdog_starts_launcher_when_missing(monkeypatch):
@@ -387,7 +426,7 @@ def test_refresh_dtssh_mesh_propagates_context_refusal(monkeypatch, tmp_path):
 def test_run_tier_watchdog_appends_mesh_refresh_step(monkeypatch, tmp_path):
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
-    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     config = self_update.DtsshConfig(
         config_path=tmp_path / "config.json",
@@ -424,7 +463,7 @@ def test_run_tier_watchdog_appends_mesh_refresh_step(monkeypatch, tmp_path):
 def test_run_tier_watchdog_fails_when_mesh_refresh_errors(monkeypatch, tmp_path):
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
-    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     config = self_update.DtsshConfig(
         config_path=tmp_path / "config.json",
@@ -698,7 +737,7 @@ def test_sweep_continues_despite_unrelated_live_session_and_uses_maintenance_saf
 ):
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
-    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     repo = type("Repo", (), {"path": tmp_path / "repo"})
     repo.path.mkdir()
@@ -806,7 +845,7 @@ def test_cli_self_update_run_emits_json(monkeypatch, capsys):
 def test_reconcile_task_registers_new_opt_in(monkeypatch, tmp_path):
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
-    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     state = {"present": False}
 
@@ -874,7 +913,7 @@ def test_reconcile_task_defers_to_elevated_install_when_registration_is_denied(
 ):
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
-    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(
         self_update_tasks,
@@ -896,7 +935,7 @@ def test_reconcile_task_defers_to_elevated_install_when_registration_is_denied(
 def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch, tmp_path):
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
-    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(
         self_update_tasks,
