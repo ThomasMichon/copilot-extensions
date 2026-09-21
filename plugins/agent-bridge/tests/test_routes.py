@@ -1722,6 +1722,10 @@ class TestWorktreeRoutes:
 
         assert call_count == 1, "concurrent probes for the same id must coalesce"
         assert all(r == ("test-agent", resolver.agents["test-agent"]) for r in results)
+        # Eviction runs via the task's done-callback, which is only guaranteed
+        # to have fired -- not necessarily before gather() returns -- once the
+        # event loop gets a further tick (review r4058565895).
+        await _asyncio.sleep(0)
         assert wt_id not in cache._archive_probe_inflight
 
     @pytest.mark.asyncio
