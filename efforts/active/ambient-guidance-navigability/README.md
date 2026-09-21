@@ -208,12 +208,19 @@ private paths).
       `renderedBytes`/`renderedSha256` per destination) -- no new manifest
       format is needed; a reviewer independently re-runs `sync` against the
       same installed-plugin state and requires a byte-exact match against
-      the PR's own lock-entry diff. This is strictly stronger verification
-      than `config-reflect` can offer (there is no live, unrepeatable device
-      state here -- the source is already-reviewed, already-merged upstream
-      content, so the render is 100% reproducible). **Byte-exact match
-      proves reproducibility, not trust**: `discover_enabled_sources`
-      resolves every repository-enabled marketplace, including third-party
+      **both** the PR's lock-entry diff **and** the actual generated
+      instruction files it declares (hash each managed destination file on
+      disk and confirm it matches its own lock entry's `renderedSha256`, not
+      just that the lock entries match each other) -- a producer that left
+      lock hashes untouched while altering a managed file's real content
+      must fail this check, and any managed path present in the diff but
+      absent from the lock (or vice versa) must fail it too. This is
+      strictly stronger verification than `config-reflect` can offer (there
+      is no live, unrepeatable device state here -- the source is
+      already-reviewed, already-merged upstream content, so the render is
+      100% reproducible). **Byte-exact match proves reproducibility, not
+      trust**: `discover_enabled_sources` resolves every repository-enabled
+      marketplace, including third-party
       ones this repo did not author. The bypass must additionally restrict
       itself to an explicit **trusted-source allowlist** (defaulting to this
       repo's own marketplace only; any other marketplace/plugin source is
@@ -292,7 +299,8 @@ add a compact "Troubleshooting & Where To Look" section to that repo's own
 `AGENTS.md` -- one line per category, pointing at either a direct command or
 the owning plugin's ambient index / skill, sized to respect that repo's own
 context-budget conventions. This repo's part is limited to documenting the
-generic pattern (Phase 1's guard + this doc) so any consumer repo can
+generic pattern (Phase 1's coverage guard, Phase 2's `projection-reflect`
+recipe, Phase 3's content-gap fixes, and this doc) so any consumer repo can
 replicate it without re-deriving the model.
 
 ### Phase 5 (downstream, not tracked in this repo's history) -- Instantiate `projection-reflect`
@@ -329,7 +337,11 @@ conflict-dispatch label there.
       unindexed category, and passes once indexed (a real negative-proof
       test, not just a passing positive one).
 - [ ] Phase 2's recompute verification rejects a PR whose diff does not
-      byte-match the recomputed lock entries (a real negative-proof test).
+      byte-match the recomputed lock entries, and separately rejects one
+      whose lock entries match but whose actual generated file content does
+      not (the lock-hash-vs-real-file split case), and a PR with a managed
+      path present in one but absent from the other (three distinct
+      negative-proof tests, not one).
 - [ ] Phase 2's bypass safety boundary is proven with negative tests for
       *each* conjunct, not just recompute mismatch: a no-change run opens no
       PR; a disabled plugin's projection is never touched even if its
