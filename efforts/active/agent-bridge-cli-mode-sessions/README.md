@@ -470,11 +470,33 @@ mechanism CLI mode binds through.
       after extraction, a deliberate reviewed edit per its own stated
       escape hatch). 9 new unit tests per plugin (fakes throughout); full
       plugin suites otherwise unchanged (only the same pre-existing,
-      unrelated Windows/bash failures). **Not yet done:** the live
-      clean-room validation pass this checklist itself requires (a real
-      CodeSpace/container, confirming the daemon-port forward survives past
-      the launch command's own exit and tears down on detach) — no
-      disposable venue was available this session.
+      unrelated Windows/bash failures). **Still not done:** the full
+      end-to-end `copilot` attach/reattach pass this checklist requires
+      (confirming the daemon-port forward survives past the launch
+      command's own exit and tears down on detach) — that needs a
+      registered worktree + host daemon coordination this session didn't
+      set up.
+      **Read-only re-confirmation against a real, currently-available
+      operator CodeSpace (2026-09-21):** rather than leave the venue-prep
+      checklist's findings above resting only on the 2026-09-20 session's
+      earlier probe, re-checked them live against a different currently-
+      running venue (`gh codespace ssh -c <name> -- <probe>`, a plain read
+      probe, no writes): `copilot` present (v1.0.86, `/usr/local/share/
+      nvm/current/bin/copilot`) alongside `node`/`python3`/`uv`/`git`;
+      **`tmux` still absent** (`apt-cache policy` shows `Candidate:
+      3.4-1ubuntu0.1`, `Installed: (none)`) with passwordless `sudo`
+      confirmed working; `~/.agent-worktrees` exists but holds only
+      `.install-stage`/`payload-dir` -- no `agent-worktrees`/`agent-bridge`
+      binstub resolves on `PATH`. This reconfirms, on a second independent
+      venue, exactly the venue-prep gaps the 2026-09-20 probe found (lean
+      self-provisioning, no full install) -- not a one-off. Also confirmed
+      (operationally, not a code change) that `agent-codespaces ssh`'s own
+      `--remote-cmd` path 404s mid-connect against this account's
+      codespaces (`getting full codespace details ... refresh=true`) while
+      plain `gh codespace ssh` connects fine -- a real, pre-existing,
+      unrelated quirk in that refresh-details call, not this change's
+      concern; noted here only so a future session doesn't re-diagnose it
+      from scratch.
 - [x] **New finding (2026-09-20): `live_sessions` needs a reattach-shaped
       field for remote CLI-mode sessions.** Today's schema (`machine`,
       `cwd`, `worktree_id`, `pid`, ...) has no venue identity or mux-session
