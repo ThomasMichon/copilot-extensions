@@ -487,10 +487,12 @@ def create_pr(
     When a provider is configured and ``pr.auto_open`` is on (and ``open_pr``
     is not False), the matching provider plugin **opens the PR** right after
     the push and **auto-recording** the resulting url/number on the worktree (no
-    skippable manual ``set-pr``). Repos that explicitly enable
-    ``pr.source_attribution`` also receive a hidden source-worktree marker in
-    the body; it is off by default because its raw machine/worktree/session
-    values are unsuitable for public PRs. Provider failure is non-fatal: the
+    skippable manual ``set-pr``). By default (codename-attribution-by-default),
+    the body also receives a public-safe hidden marker carrying only the
+    worktree's assigned codename. Repos that explicitly enable the full raw
+    ``pr.source_attribution: true`` instead receive a hidden marker with the
+    raw machine/worktree/session values -- unsuitable for public PRs, so this
+    stays off outside closed-circuit repos. Provider failure is non-fatal: the
     feature branch is already pushed, so the result carries ``pr_open_error``
     and the agent can fall back to delegating PR creation manually.
 

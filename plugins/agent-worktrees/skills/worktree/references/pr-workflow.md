@@ -327,20 +327,20 @@ credentials (`pr.api_base`, `pr.token_command`/`pr.token_env`) and
 `pr.auto_open` is on, `create-pr` **opens the PR itself** right after the push
 -- via the provider CLI (`curl` for Gitea, `gh` for GitHub, `az` for Azure
 DevOps) -- and **auto-records** the url/number on the worktree (no manual
-`set-pr`). A closed-circuit repo may additionally set
-`pr.source_attribution: true` to embed a hidden marker containing the raw source
-worktree, machine, session, and head SHA. The marker is **off by default** and
-must stay off for public PRs. A public repo that still wants author-side
-traceability can instead set `pr.source_attribution: codename`, which embeds
-**only** the worktree's assigned codename -- resolve it back via
-`resolve --codename` (or `embody --codename`) on the same machine, or on a
-*different* machine it now runs a cross-machine SSH scan automatically
-(effort `pr-attribution-codenames` Phase 3): every other known, ssh-ready
-machine is asked over SSH whether its own tracking store has that codename.
-A match on a different machine still fails closed -- it reports the
-resolving machine and worktree id rather than attempting a remote launch;
-SSH there directly (or use a future agent-bridge dispatch) to actually
-resume it. Useful flags: `--no-open` (push only),
+`set-pr`). By default (codename-attribution-by-default), `create-pr` embeds a
+public-safe marker carrying **only** the worktree's assigned codename --
+resolve it back via `resolve --codename` (or `embody --codename`) on the same
+machine, or on a *different* machine it now runs a cross-machine SSH scan
+automatically (effort `pr-attribution-codenames` Phase 3): every other known,
+ssh-ready machine is asked over SSH whether its own tracking store has that
+codename. A match on a different machine still fails closed -- it reports the
+resolving machine and worktree id rather than attempting a remote launch; SSH
+there directly (or use a future agent-bridge dispatch) to actually resume it.
+A closed-circuit repo may instead set `pr.source_attribution: true` to embed
+a hidden marker containing the raw source worktree, machine, session, and
+head SHA -- this must stay off for a public repo. Setting
+`pr.source_attribution: false` opts fully out of any marker (the anonymous
+opt-out). Useful flags: `--no-open` (push only),
 `--no-attribution` (suppress a configured marker), `--body`/`--body-file`,
 `--repo owner/name`. If the provider call fails the branch is still pushed, and
 the result carries `pr_open_error` so you can fall back to Steps 2-3 below. A
