@@ -293,26 +293,33 @@ async function selectMain(sid) {
 }
 function openMain(sid) {
   if (mainConn) { mainConn.close(); mainConn = null; }
-  $("#mainlog").textContent = "";
-  // SSE requires the token; EventSource can't set headers, so pass via query is
-  // not supported here -- poll the events endpoint instead for portability.
-  let after = 0, stop = false;
-  async function poll() {
-    while (!stop) {
-      try {
-        const data = await api(`/api/v1/live-sessions/${encodeURIComponent(sid)}/events?after=${after}`);
-        const evs = (data && (data.events || data)) || [];
-        for (const e of (Array.isArray(evs) ? evs : [])) {
-          after = e.id || e.event_id || after;
-          const line = e.text || e.content || JSON.stringify(e);
-          const log = $("#mainlog"); log.textContent += line + "\n"; log.scrollTop = log.scrollHeight;
-        }
-      } catch (e) { /* endpoint may be SSE-only; degrade quietly */ await sleep(2000); }
-      await sleep(1200);
-    }
-  }
-  poll();
-  mainConn = { close: () => { stop = true; } };
+  const log = $("#mainlog"); log.textContent = "";
+  const append = (s) => { log.textContent += s + "\n"; log.scrollTop = log.scrollHeight; };
+  // The represented-event feed is an SSE stream (text/event-stream), NOT a JSON
+  // poll. Loopback is token-free, so EventSource (which cannot set an auth
+  // header) connects directly. Each represented event arrives as a NAMED SSE
+  // event with a JSON data payload (see live_representation.translate_sdk_event).
+  const url = `/api/v1/live-sessions/${encodeURIComponent(sid)}/events?after=0`;
+  let es;
+  try { es = new EventSource(url); }
+  catch (e) { append("(could not open the session stream: " + e.message + ")"); return; }
+  append("(streaming the main session -- its full reasoning appears here)");
+  const render = (name) => (ev) => {
+    let d = {}; try { d = JSON.parse(ev.data); } catch { d = {}; }
+    if (name === "user_message") append("\n\u00bb " + (d.content || ""));
+    else if (name === "agent_message") append(d.text || "");
+    else if (name === "agent_thought") append("\u00b7 " + (d.text || ""));
+    else if (name === "tool_call_start") {
+      append("\u23f5 " + (d.kind || d.name || "tool") + (d.fullCommandText ? ": " + d.fullCommandText : ""));
+    } else if (name === "permission_request") {
+      append("\u26a0 permission requested (answer in the CLI or here): " + (d.kind || d.intention || ""));
+    } else if (name === "turn_complete") append("\u2014 turn complete \u2014");
+  };
+  const evNames = ["user_message", "agent_message", "agent_thought",
+    "tool_call_start", "permission_request", "turn_complete"];
+  for (const n of evNames) { es.addEventListener(n, render(n)); }
+  es.onerror = () => { /* EventSource auto-reconnects; stay quiet to avoid noise */ };
+  mainConn = { close: () => { try { es.close(); } catch (e) {} } };
 }
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
