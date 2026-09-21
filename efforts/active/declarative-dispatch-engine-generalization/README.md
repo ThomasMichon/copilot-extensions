@@ -171,21 +171,32 @@ and the parent agent-dispatch vision:
   selected identity). Landed
   `plugins/agent-dispatch/docs/repository-issue-loop-adoption.md`, linked
   from the README, the SKILL, and `repository-issue-loop.md`.
-- [ ] Identify and remove any remaining step in that path that requires
+- [x] Identify and remove any remaining step in that path that requires
   reading engine source rather than the declaration schema and an identity's
-  own documentation. One known gap remains and is named explicitly in the
-  new doc's closing section: diagnosing a genuinely novel `doctor` failure
-  not already covered by the Operations list still benefits from engine
-  source. Left open rather than closed by assertion.
+  own documentation. The one gap the prior slice named -- diagnosing a
+  `doctor` failure -- is now closed: added a complete, code-derived
+  failure-mode reference table (every one of the 12 possible `diagnoses`
+  entries plus `healthy`, cross-checked directly against
+  `loop_commands.py`'s diagnosis logic) to the adoption doc's closing
+  section, replacing the "read engine source" fallback with a real
+  resolution for each. A genuinely novel diagnosis outside that closed set
+  is now the only case that should still need source-reading, and the doc
+  says to add it there when found rather than normalizing the fallback.
 
 ## Validation Plan
 
 - [ ] A new Azure DevOps-backed declaration reaches the same discovery →
   batch → settle outcomes as the existing GitHub-backed one, provider
   differences fully behind the adapter.
-- [ ] A declaration authored against a named worker identity contains no
+- [x] A declaration authored against a named worker identity contains no
   inlined behavioral policy prose, only eligibility/cadence/identity
-  selection.
+  selection. Proven live 2026-09-08: the `dotfiles`
+  `odsp-web-harness-issue-loop` declaration was switched from inlined
+  `worker_guidance` prose to `worker_identity: odsp-web-harness-backlog`,
+  verified byte-for-byte identical resolved guidance post-merge (see the
+  dated journal entry above). This Validation Plan item was left unchecked
+  by oversight in earlier legs despite already being satisfied; corrected
+  here rather than re-proven.
 - [ ] Per-embodiment seed size and token cost drop materially for a
   known-event embodiment versus today's always-inlined prompt, with no
   behavioral regression in claim/evaluate/complete/decline flows.
@@ -899,6 +910,34 @@ state instead.
   there) rather than treated as this bullet's job to implement. This
   effort's own Phase 2 bullet is closed by the assessment itself, per its
   own wording ("assess whether...").
+
+### 2026-09-20 (cont. 4) - Phase 5: closed the doctor-diagnosis gap the prior slice named
+
+- The prior Phase 5 slice's adoption doc named one open gap: diagnosing a
+  novel `doctor` failure still benefited from reading engine source. Closed
+  it for real instead of leaving it as a named-but-unaddressed follow-up.
+  Read `loop_commands.py`'s `diagnoses.append(...)` call sites directly (12
+  distinct failure codes plus `healthy` -- confirmed exhaustive by grepping
+  every call site, not sampled) and added a complete resolution table to
+  the adoption doc: each diagnosis's actual trigger condition and the
+  concrete resolving action (an exact CLI command where one exists, e.g.
+  `enable`/`setup`/the dead-letter `rearm` action `doctor` itself prints;
+  a description of what to check otherwise, e.g. `supervisor-stalled`'s
+  180-second-cycle stall threshold from `supervisor_health.py`).
+  A genuinely novel diagnosis outside this closed set is now the only
+  remaining case that should need source-reading, and the doc says to add
+  it there when found.
+- This closes Phase 5's second bullet: both bullets in Phase 5 are now
+  checked. The Validation Plan's "colleague can stand up a new loop...
+  without reading engine source" item remains deliberately unchecked --
+  still an external validation this session cannot self-assert.
+- Also corrected a Validation Plan oversight found while reviewing the
+  section: "a declaration authored against a named worker identity contains
+  no inlined behavioral policy prose" was left unchecked in earlier legs
+  despite already being proven live on 2026-09-08 (the `dotfiles` switch to
+  `worker_identity: odsp-web-harness-backlog`, verified byte-for-byte
+  identical resolved guidance post-merge). Checked it off with a pointer to
+  that existing evidence rather than re-proving it.
 
 
 

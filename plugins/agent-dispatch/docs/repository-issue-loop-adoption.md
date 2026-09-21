@@ -153,15 +153,32 @@ identical. Add `forge.discovery_scope` only if the target project's own item
 count is large enough that the always-applied `TeamProject` scoping alone
 isn't narrow enough (see [`repository-issue-loop.md`](repository-issue-loop.md)).
 
-## 4. What still requires engine source (open gap)
+## 4. `doctor`/`status` failure-mode reference
 
-Everything above is resolvable from this doc, the schema table, and an
-identity's own file. One gap remains: diagnosing a `doctor` failure's exact
-cause today still benefits from reading
-`repository_issue_loops.py`/`registrar_discovery.py` for a genuinely novel
-failure mode not covered by the **Operations** section's list in
-`repository-issue-loop.md`. Closing this fully (e.g. an expanded, colleague-facing
-failure-mode reference) is left as a follow-up; it was not bundled with this
-adoption-path pass. Once anyone identifies a `doctor` failure that couldn't
-be resolved from this doc, add its resolution here rather than treating
-engine source as an unavoidable last resort.
+`doctor`'s `diagnoses` array is a closed, code-derived set -- every entry
+below is exhaustive as of this writing (`loop_commands.py`); a declaration
+in good health reports `["healthy"]` and nothing else. This table is the
+resolution for every diagnosis the command can actually emit, so a genuinely
+novel `doctor` failure not listed here is the only case that should still
+require reading engine source -- if you hit one, add it here rather than
+falling back to source-reading as the default.
+
+| Diagnosis | Meaning | Resolution |
+|---|---|---|
+| `healthy` | No problem found. | -- |
+| `missing-pointer` | The declaration isn't registered with the registrar. | `agent-dispatch repository-issue-loop setup <declaration>` (also the action `doctor` prints). |
+| `supervisor-stalled` | The daemon is alive but its current reconcile cycle has been running >180s without finishing (a genuinely wedged call, not just an old status file). | Check the daemon's log for a hung call; update via `install.ps1 update`, **never** a manual process kill. |
+| `declared-but-unserved` | This declaration matches the current machine's placement filter, but the running daemon isn't actually serving it. | Confirm the daemon has picked up the current registrar state (may need a restart/reconcile) -- not self-resolving by re-running `setup`. |
+| `overridden-off` | A local kill switch has disabled this declaration on this machine. | `agent-dispatch repository-issue-loop enable <declaration>`. |
+| `coordinator-unavailable` | The coordinator couldn't be reached to list tasks. | Check `agent-dispatch health`; usually a wrong URL or a down daemon, not an empty queue. |
+| `forge-unavailable` | Listing open issues/work items from the forge failed. | Check the `forge.producer_login`'s credentials/authentication and the adapter's own error text (surfaced in the full `doctor` JSON's `forge_error`). |
+| `emitter-failure` | The emitter's own last-written health snapshot reports `ok: false`. | Read the snapshot at the health path `doctor` reports; the failure is whatever the emitter itself last recorded. |
+| `emitter-health-unreadable` | The emitter's health snapshot file exists but couldn't be parsed. | Check for a corrupted/partial write at that path; a fresh emitter tick should overwrite it. |
+| `emitter-never-ran` | The supervised-lane unit is served, but the emitter has no health snapshot at all yet. | Wait one `tick_interval_seconds`; if it persists, the emitter process itself likely isn't starting -- check the daemon's log. |
+| `emitter-stale` | The emitter's last health update is older than `cadence_seconds + 2 * tick_interval_seconds`. | The emitter has stopped ticking; check the daemon's log for why its periodic call stopped running. |
+| `blocked` | The active occurrence's task is awaiting steering. | `agent-dispatch steer` the task (per its own steering card), or `release`/`abandon` it explicitly. |
+| `spawn-dead-lettered` | The active occurrence exhausted its spawn-attempt budget without ever starting. | Use the `rearm` action `doctor` prints for the dead-lettered task id -- never hand-clear the dead-letter state another way. |
+
+`status` reports the same underlying fields without the pass/fail verdict --
+useful for watching `active_occurrence`, `emitter`, and `pool` state directly
+rather than only a health summary.
