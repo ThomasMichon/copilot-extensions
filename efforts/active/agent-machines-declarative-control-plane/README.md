@@ -8,8 +8,10 @@
 - **Vision:** agent-fabric `derive-dont-duplicate` and agent-ssh
   `declared-mesh-adoption`, `derived-agent-roster`, and
   `live-machine-introspection`
-- **Umbrella issue:** #1418
+- **Umbrella issue:** #1418 (closed; historical -- all listed sub-issues are
+  also closed, and no successor umbrella has been opened yet)
 - **Sub-issues:** #1455 · #1507 · #1529 · #1627 · #1631 · #1721 · #1961
+  (all closed)
 
 ## Guiding Intent
 
@@ -31,12 +33,14 @@ actions are derived views rather than separately maintained inventories.
 
 - **Topology:** schema-first host with independently reviewable resource modules.
 - **Host (owns PRs):** schema host.
-- **Delegates:** the package-discovery owner implements #1418; module owners
-  implement only their declared resource type.
+- **Delegates:** the package-discovery owner implemented #1418 (closed);
+  module owners implement only their declared resource type.
 - **Handoff:** each module contributes validation, plan/apply behavior, and
   observable status to the shared control plane.
-- **Public coordination token:** #1418 for relationship-aware package discovery;
-  later slices use their own dedicated issues.
+- **Public coordination token:** #1418 (closed; historical) for the
+  already-delivered relationship-aware package discovery slice; later slices
+  use their own dedicated issues, and this effort currently has no live
+  umbrella/coordination token for new work until one is opened.
 
 ## Context
 
@@ -150,6 +154,13 @@ fleet, topology, or operating environment.
 - [ ] Non-Windows (systemd/launchd) scheduler parity for the self-update
   resource: define and apply an equivalent unattended self-update scheduling
   mechanism on POSIX hosts, matching the Windows Scheduled Task tier model.
+  Tracked in
+  [#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115),
+  currently a standalone issue: this effort's own umbrella
+  ([#1418](https://github.com/ThomasMichon/copilot-extensions/issues/1418))
+  and all listed sub-issues are closed, so there is no active umbrella to
+  attach it to yet -- needs a live umbrella issue for this effort before
+  Phase 3 acceptance is complete.
 - [ ] Keep examples synthetic and repository-neutral.
 
 ## Validation Plan
