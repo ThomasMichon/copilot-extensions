@@ -82,7 +82,6 @@ class FakeClient:
         force_new=False,
         caller_owner_ref=None,
         worktree_id=None,
-        reclaim=False,
         model=None,
         effort=None,
         request_timeout=None,
@@ -93,7 +92,6 @@ class FakeClient:
              "sender_repo": sender_repo, "force_new": force_new,
              "caller_owner_ref": caller_owner_ref,
              "worktree_id": worktree_id,
-             "reclaim": reclaim,
              "model": model, "effort": effort,
              "request_timeout": request_timeout}
         )
@@ -249,38 +247,17 @@ def test_create_passes_existing_checkout_target(fixed_caller, monkeypatch):
     assert client.started[0]["worktree_id"] == "wt-review"
 
 
-def test_create_reclaim_defaults_false_and_threads_when_set(fixed_caller, monkeypatch):
-    # The break-glass head-guard bypass (mirrors `resume --reclaim`): unset by
-    # default, and threaded verbatim to client.start_session when passed.
+def test_create_reclaim_removed_no_such_param(fixed_caller, monkeypatch):
+    # agent-bridge-cold-resume Phase 3: create's break-glass reclaim was
+    # removed entirely -- _start_agent_session no longer accepts a `reclaim`
+    # kwarg (TypeError), and `create` in the CLI has no --reclaim flag.
     monkeypatch.setattr(m, "_wait_for_idle", lambda *a, **k: None)
     client = FakeClient(sessions=[])
-
-    m._start_agent_session(
-        client, "task-worker", force_new=True, worktree_id="wt-review",
-    )
-    assert client.started[0]["reclaim"] is False
-
-    m._start_agent_session(
-        client, "task-worker", force_new=True, worktree_id="wt-review",
-        reclaim=True,
-    )
-    assert client.started[1]["reclaim"] is True
-
-
-def test_cmd_create_threads_reclaim_flag(fixed_caller, monkeypatch):
-    # End-to-end from the `create` CLI's --reclaim flag through _cmd_create ->
-    # _resolve_target -> _start_agent_session -> client.start_session.
-    monkeypatch.setattr(m, "_wait_for_idle", lambda *a, **k: None)
-    client = FakeClient(sessions=[], agents=["task-worker"])
-    monkeypatch.setattr(m, "_get_client", lambda: client)
-    monkeypatch.setattr(m, "_resolve_prompt", lambda args, required=False: None)
-    args = argparse.Namespace(
-        target="task-worker", worktree_id="wt-review", reclaim=True,
-        model=None, effort=None, target_dir=None, json=False,
-    )
-    m._cmd_create(args)
-    assert client.started and client.started[0]["reclaim"] is True
-    assert client.started[0]["worktree_id"] == "wt-review"
+    with pytest.raises(TypeError):
+        m._start_agent_session(
+            client, "task-worker", force_new=True, worktree_id="wt-review",
+            reclaim=True,
+        )
 
 
 def test_create_refuse_on_conflict_raises(fixed_caller):

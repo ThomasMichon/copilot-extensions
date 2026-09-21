@@ -26,7 +26,6 @@
     "caller_owner_ref": null,
     "force_new": false,
     "parity_fault": null,
-    "reclaim": false,
     "model": null,
     "effort": null,
     "mcp_servers": null,

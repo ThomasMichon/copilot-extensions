@@ -3475,7 +3475,6 @@ def _resolve_target(
     effort: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
-    reclaim: bool = False,
 ) -> str:
     """Resolve a target string to a session ID.
 
@@ -3490,9 +3489,9 @@ def _resolve_target(
     ``force_new`` (``create``) skips caller-affinity reuse and always asks
     the server for a fresh session; ``refuse_on_conflict`` turns the
     one-session-per-CodeSpace guard into an ``_AgentSessionConflict`` raise
-    instead of reusing the existing session. ``reclaim`` is the head-guard
-    break-glass (mirrors ``resume --reclaim``): threaded through so a create
-    into an occupied ``worktree_id`` takes over instead of a 409.
+    instead of reusing the existing session. A create into an occupied
+    ``worktree_id`` has no break-glass of its own (agent-bridge-cold-resume
+    Phase 3) -- it is refused with a 409 pointing at ``resume ... --force``.
     """
     from .client import BridgeClientError
 
@@ -3577,7 +3576,6 @@ def _resolve_target(
             effort=effort,
             target_dir=target_dir,
             worktree_id=worktree_id,
-            reclaim=reclaim,
         )
 
     # Not in the cached agent list -- hand the target to the server as-is so its
@@ -3593,7 +3591,6 @@ def _resolve_target(
             effort=effort,
             target_dir=target_dir,
             worktree_id=worktree_id,
-            reclaim=reclaim,
         )
     except BridgeClientError as exc:
         if exc.status != 404:
@@ -3680,7 +3677,6 @@ def _cmd_create(args: argparse.Namespace) -> None:
             effort=getattr(args, "effort", None),
             target_dir=getattr(args, "target_dir", None),
             worktree_id=getattr(args, "worktree_id", None),
-            reclaim=bool(getattr(args, "reclaim", False)),
         )
     except _AgentSessionConflict as conflict:
         sid = conflict.existing_session_id
@@ -4234,7 +4230,6 @@ def _start_agent_session(
     effort: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
-    reclaim: bool = False,
 ) -> str:
     """Start or reuse a session for a named agent.
 
@@ -4250,10 +4245,10 @@ def _start_agent_session(
     ``create`` can tell the user to end the existing session first) instead of
     silently reusing it.
 
-    ``reclaim`` is the session-lifecycle head-guard break-glass: passed
-    through to ``client.start_session`` so a create into an occupied
-    ``worktree_id`` takes over in place instead of being refused 409 (see
-    ``_render_head_guard_refusal``).
+    A create into an occupied ``worktree_id`` has no break-glass of its own
+    (agent-bridge-cold-resume Phase 3): the server always refuses it 409 (see
+    ``_render_head_guard_refusal``), pointing the caller at
+    ``resume ... --force`` instead.
     """
     from .client import BridgeClientError
 
@@ -4303,14 +4298,13 @@ def _start_agent_session(
             sender_repo=_sender_repo(), force_new=force_new,
             caller_owner_ref=_worktrees_get("owner-ref"),
             worktree_id=worktree_id,
-            reclaim=reclaim,
             model=model, effort=effort,
             request_timeout=_startup_request_timeout(),
         )
     except BridgeClientError as exc:
         # Session-lifecycle head guard: a create into an existing worktree whose
-        # ground-layer head is still active is refused (reuse / handoff / sunset,
-        # or reclaim to take over). Render the choices and stop.
+        # ground-layer head is still active is refused (reuse / handoff / sunset;
+        # 'resume ... --force' is the only take-over). Render the choices and stop.
         if _render_head_guard_refusal(exc):
             sys.exit(_SEND_BUSY_EXIT)
         # Server-side concurrency guard: this agent (e.g. a CodeSpace) already
@@ -4391,9 +4385,11 @@ def _render_head_guard_refusal(exc: "BridgeClientError") -> bool:
     """Print the session-lifecycle head-guard refusal, if that's what ``exc`` is.
 
     The server refuses a create into an occupied worktree with a 409 active- or
-    pending-head reason, choices, and the ``reclaim`` break-glass. Renders them
-    for a human and returns True when handled; False when
-    ``exc`` is some other error (caller keeps its normal handling).
+    pending-head reason and choices (reuse / handoff / sunset); ``create`` has
+    no break-glass override of its own (agent-bridge-cold-resume Phase 3) --
+    the server's ``override`` field names the ``resume ... --force`` command
+    instead. Renders them for a human and returns True when handled; False
+    when ``exc`` is some other error (caller keeps its normal handling).
     """
     if getattr(exc, "status", None) != 409:
         return False
@@ -4412,9 +4408,8 @@ def _render_head_guard_refusal(exc: "BridgeClientError") -> bool:
         tag = " (preferred)" if choice.get("preferred") else ""
         print(f"  - {choice.get('action')}{tag}: {choice.get('description', '')}",
               file=sys.stderr)
-    override = detail.get("override", "reclaim=true")
-    print(f"  Break-glass: re-issue with {override} to take over the worktree.",
-          file=sys.stderr)
+    override = detail.get("override", f"agent-bridge resume {wt} --force")
+    print(f"  Take-over: {override}", file=sys.stderr)
     return True
 
 
@@ -6579,13 +6574,6 @@ def build_parser() -> argparse.ArgumentParser:
     create_p.add_argument(
         "--worktree-id", dest="worktree_id", default=None, metavar="ID",
         help="Bind the created session to an existing agent-worktrees worktree id.",
-    )
-    create_p.add_argument(
-        "--reclaim", action="store_true",
-        help=(
-            "Break-glass take-over: create into --worktree-id even if occupied "
-            "(bypasses the 409 worktree-head guard). Mirrors 'resume --reclaim'."
-        ),
     )
     _add_stream_args(create_p)
     create_p.set_defaults(func=_cmd_create)

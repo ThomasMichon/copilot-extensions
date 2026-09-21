@@ -1019,7 +1019,6 @@ class BridgeClient:
         force_new: bool = False,
         parity_fault: str | None = None,
         worktree_id: str | None = None,
-        reclaim: bool = False,
         env: dict[str, str] | None = None,
         model: str | None = None,
         effort: str | None = None,
@@ -1031,8 +1030,10 @@ class BridgeClient:
         is set, the server enforces the session-lifecycle head guard: a create
         into a worktree whose ground-layer head is active or whose numbered
         handoff is pending is refused (409 ``worktree_head_active`` /
-        ``worktree_head_pending``) unless ``reclaim=true`` -- the
-        break-glass take-over (sibling of ``resume_worktree(reclaim=...)``).
+        ``worktree_head_pending``) with no break-glass override of its own
+        (agent-bridge-cold-resume Phase 3) -- resolve the incumbent (reuse /
+        handoff / sunset) or take over via ``resume_worktree(reclaim=True)``,
+        then create.
 
         ``env`` sets per-session environment overrides merged onto the resolved
         agent's declared env and applied to the spawned Copilot CLI -- e.g. BYOK
@@ -1066,8 +1067,6 @@ class BridgeClient:
             body["parity_fault"] = parity_fault
         if worktree_id:
             body["worktree_id"] = worktree_id
-        if reclaim:
-            body["reclaim"] = True
         if env:
             body["env"] = env
         if model:
