@@ -612,7 +612,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
 def _resolve_noninteractive_worktree(state: ResolveCommandState) -> int:
     assert state.worktree_id is not None
     worktree_id = _resolve_worktree_id(state.worktree_id)
-    _relocate_active_project_for_worktree(worktree_id)
+    if _relocate_active_project_for_worktree(worktree_id):
+        state.config = None
     config = state.load_config()
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
