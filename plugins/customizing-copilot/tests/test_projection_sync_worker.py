@@ -110,7 +110,11 @@ def test_first_sync_is_bypass_eligible_when_trusted(tmp_path: Path) -> None:
     assert outcome.changed
 
 
-def test_untrusted_source_routes_to_conflict_dispatch(tmp_path: Path) -> None:
+def test_untrusted_source_is_review_only_not_dispatched(tmp_path: Path) -> None:
+    # An untrusted-marketplace refusal is not a reconciler-resolvable
+    # conflict -- there is no hand-edit or git-level conflict here, just a
+    # policy refusal -- so it must open a normal review-only PR, never
+    # route to conflict-dispatch.
     repo = tmp_path / "repo"
     repo.mkdir()
     _plugin, source = _write_plugin(tmp_path, "third-party-marketplace", "policy")
@@ -121,7 +125,7 @@ def test_untrusted_source_routes_to_conflict_dispatch(tmp_path: Path) -> None:
 
     assert outcome.needs_pr
     assert not outcome.bypass_eligible
-    assert outcome.needs_conflict_dispatch
+    assert not outcome.needs_conflict_dispatch
     assert any(
         "trusted-source allowlist" in reason for reason in outcome.bypass.reasons
     )
@@ -166,6 +170,7 @@ def test_missing_pin_blocks_bypass_when_pins_supplied(tmp_path: Path) -> None:
 
     assert outcome.needs_pr
     assert not outcome.bypass_eligible
+    assert not outcome.needs_conflict_dispatch
     assert any(
         "immutable commit pin" in reason for reason in outcome.bypass.reasons
     )
@@ -271,4 +276,33 @@ def test_sync_findings_are_not_dropped_when_scan_is_clean(
     assert outcome.needs_pr
     assert sync_finding in outcome.findings
     assert not outcome.bypass.eligible
+    assert outcome.needs_conflict_dispatch
     assert any("conflict-dispatch" in reason for reason in outcome.bypass.reasons)
+
+
+# ---- CLI consent gate (regression coverage for the review findings on
+# PR #3139's second round) --------------------------------------------------
+
+
+def test_cli_refuses_to_run_without_consent(tmp_path: Path, capsys) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    exit_code = worker.main([str(repo)])
+
+    assert exit_code != 0
+    err = capsys.readouterr().err
+    assert "consent" in err.lower()
+
+
+def test_cli_json_error_without_consent_never_mutates(
+    tmp_path: Path, capsys
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    exit_code = worker.main([str(repo), "--json"])
+
+    assert exit_code != 0
+    lock_path = repo / ".github" / "copilot" / "context-projections.json"
+    assert not lock_path.exists()

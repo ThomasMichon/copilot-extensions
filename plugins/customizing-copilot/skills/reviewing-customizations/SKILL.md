@@ -189,8 +189,7 @@ wraps that whole recipe into **one function, one call, one outcome** per
 run:
 
 ```bash
-python3 <skill-dir>/scripts/projection_sync_worker.py <repo-root> \
-  --trusted-marketplace copilot-extensions --json
+python3 <skill-dir>/scripts/projection_sync_worker.py <repo-root> --json
 ```
 
 `run_sync_pass()` runs `sync_repository` (the only mutation -- it
@@ -200,11 +199,25 @@ once, and returns a `SyncOutcome` whose `needs_pr` / `bypass_eligible` /
 `needs_conflict_dispatch` properties are already the complete decision --
 a caller branches on that outcome directly; it never needs to re-invoke this
 tool to discover more work from the same run, so a scheduler wired to it
-opens at most one PR per invocation. It performs no git or PR/dispatch
+opens at most one PR per invocation. `needs_conflict_dispatch` is true only
+for a real conflict-classified finding (a hand-edit, a failed sync); an
+untrusted-marketplace source or a missing/malformed immutable pin refuses
+the bypass but opens a normal review-only PR instead, since there is
+nothing there for a reconciler to act on. It performs no git or PR/dispatch
 operations of its own (that remains the calling scheduler's job, per-adopting-
 repo and out of this repo's own scope -- see Phase 5); refreshing installed
 plugin payloads is similarly the caller's job, via an optional `refresh`
 callback run once before the pass (never retried mid-pass).
+
+The CLI (`main()`/`__main__`) is the actual consent-gated scheduled-worker
+surface: it calls `projection_reflect_consent.load_consent()` first and
+refuses to run at all -- no mutation, no trust decision made -- without this
+repo's own live, committed opt-in, deriving its trusted-source allowlist
+from that consent object rather than any command-line flag.
+`run_sync_pass()` itself stays a general-purpose library function that
+takes `trusted_marketplaces` explicitly from any caller (including a test
+or an already-consent-resolved scheduler); the consent gate lives at the
+CLI boundary, not inside the pure composition.
 
 ### Troubleshooting-category coverage registry
 

@@ -1047,6 +1047,24 @@ def _load_lock(
     return entries, True, raw
 
 
+def load_lock_entries(repo_root: Path) -> dict[str, dict[str, object]]:
+    """Safely read the current lock's validated entries, keyed by destination.
+
+    Reuses ``_load_lock``'s bounded, path-safe reader (symlink/reparse
+    rejection, the 256 KiB size bound, and full ``_validate_lock_entry``
+    validation) rather than a caller doing its own ad hoc file read -- a
+    caller that needs the lock's current entries (e.g. to diff them across
+    a sync pass) must never bypass those checks. Returns an empty mapping
+    -- never raises -- for every refusal case: missing, unreadable,
+    malformed, oversized, or unsafely-reached lock file. A caller that needs
+    to distinguish "no lock" from "invalid lock" should call
+    ``scan_repository``/``sync_repository`` directly to get findings.
+    """
+    result = Result(operation="lock-read")
+    entries, _lock_exists, _raw = _load_lock(repo_root, result)
+    return entries
+
+
 def _parse_marker(raw: bytes) -> dict[str, object]:
     try:
         text = raw.decode("utf-8", errors="strict")
@@ -1762,6 +1780,7 @@ __all__ = [
     "RenderedProjection",
     "Result",
     "discover_enabled_sources",
+    "load_lock_entries",
     "render_projection",
     "scan_repository",
     "sync_repository",

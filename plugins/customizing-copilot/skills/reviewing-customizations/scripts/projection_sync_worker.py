@@ -42,6 +42,16 @@ PR -- to fully resolve one round of upstream change:
   callback run before the sync/scan pass -- never implicit, and never
   retried mid-pass (a flaky refresh should fail the whole pass rather than
   silently sync against a half-refreshed source set).
+* :func:`run_sync_pass` is a general-purpose library function: it takes an
+  explicit ``trusted_marketplaces`` value from any caller (a test, or a
+  scheduler that has already resolved consent) and performs no consent
+  check itself. The CLI entry point (``main()``/``__main__``) is different:
+  it is the actual consent-gated scheduled-worker surface, so it calls
+  ``projection_reflect_consent.load_consent()`` first and refuses to run at
+  all -- no mutation, no trust decision -- when this repo has no live,
+  committed opt-in; when consent is present, the CLI derives
+  ``trusted_marketplaces`` from that consent object, never from a
+  caller-suppliable command-line flag.
 """
 
 from __future__ import annotations
@@ -55,30 +65,7 @@ from typing import Callable, Iterable, Mapping
 
 import instruction_projections as projections
 import projection_reflect as reflect
-
-
-def _load_lock_entries(repo_root: Path) -> list[dict[str, object]]:
-    """Best-effort read of the current lock's projection entries.
-
-    Called once before and once after a ``sync_repository`` call in the
-    same process, against a lock ``sync``/``scan`` just validated -- a
-    missing or unparsable lock at either point simply yields no entries
-    (the caller's ``changed``/finding lists remain the source of truth for
-    whether anything happened; this is only used to look up per-destination
-    lock fields ``bypass_decision`` needs).
-    """
-    lock_path = repo_root.joinpath(*projections.LOCK_RELATIVE.parts)
-    try:
-        raw = lock_path.read_text(encoding="utf-8")
-        document = json.loads(raw)
-    except (OSError, ValueError, UnicodeDecodeError):
-        return []
-    if not isinstance(document, dict):
-        return []
-    entries = document.get("projections")
-    if not isinstance(entries, list):
-        return []
-    return [entry for entry in entries if isinstance(entry, dict)]
+import projection_reflect_consent
 
 
 def _policy_relevant_destinations(
@@ -115,10 +102,17 @@ class SyncOutcome:
     * ``needs_pr`` false: nothing to report; do not open a PR at all.
     * ``needs_pr`` true and ``bypass_eligible`` true: the sync's own diff is
       safe to land via a bypass-eligible, auto-mergeable PR.
-    * ``needs_pr`` true and ``bypass_eligible`` false: open the PR (it still
-      carries whatever ``sync`` resolved) but route it through
-      conflict-dispatch instead of auto-merging -- ``bypass.reasons`` names
-      every violated conjunct.
+    * ``needs_pr`` true, ``bypass_eligible`` false, and
+      ``needs_conflict_dispatch`` true: open the PR (it still carries
+      whatever ``sync`` resolved) and route it through conflict-dispatch --
+      a real conflict-classified finding (e.g. a hand-edited managed
+      projection, or a failed sync) needs the reconciler's attention.
+    * ``needs_pr`` true, ``bypass_eligible`` false, and
+      ``needs_conflict_dispatch`` false: open a normal, review-only PR
+      without dispatching anything -- the bypass was refused for a reason
+      no reconciler can resolve (an untrusted-marketplace source, or a
+      missing/malformed immutable-pin), not because of an actual conflict
+      finding.
     """
 
     changed: tuple[str, ...]
@@ -146,7 +140,16 @@ class SyncOutcome:
 
     @property
     def needs_conflict_dispatch(self) -> bool:
-        return self.needs_pr and not self.bypass.eligible
+        # Only a real conflict-classified finding (per
+        # `classify_findings`'s fail-closed allowlist) is reconciler-
+        # resolvable and warrants dispatch. A bypass refusal for an
+        # untrusted marketplace or a missing/malformed immutable pin is
+        # correctly review-only -- there is no hand-edit or git-level
+        # conflict for a reconciler to act on, so it must not be
+        # dispatched merely because `bypass.eligible` is False.
+        return self.needs_pr and bool(
+            reflect.classify_findings(self.findings).conflict
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -182,16 +185,10 @@ def run_sync_pass(
         refresh()
 
     sources = list(sources)
-    entries_before = {
-        str(entry.get("destination")): entry
-        for entry in _load_lock_entries(repo_root)
-    }
+    entries_before = projections.load_lock_entries(repo_root)
     sync_result = projections.sync_repository(repo_root, sources)
     scan_result = projections.scan_repository(repo_root, sources)
-    entries_after = {
-        str(entry.get("destination")): entry
-        for entry in _load_lock_entries(repo_root)
-    }
+    entries_after = projections.load_lock_entries(repo_root)
 
     # Policy-relevant destinations are `sync`'s own changed-content list
     # *plus* any destination whose lock entry differs before vs. after --
@@ -236,14 +233,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", nargs="?", default=".")
     parser.add_argument(
-        "--trusted-marketplace",
-        action="append",
-        default=[],
-        dest="trusted_marketplaces",
-        help="a marketplace name to trust for the bypass allowlist "
-        "(repeatable; default: none, so every source is review-only)",
-    )
-    parser.add_argument(
         "--installed-root",
         type=Path,
         help="override the installed plugin payload root",
@@ -255,6 +244,29 @@ def main(argv: list[str] | None = None) -> int:
     if not root.is_dir():
         print(f"error: {root} is not a directory", file=sys.stderr)
         return 2
+
+    # The CLI is the consent-gated scheduled-worker entry point: it must
+    # never mutate the repo, and never derive its trusted-source allowlist
+    # from a caller-suppliable flag, without this repo's own live, committed
+    # opt-in (see projection_reflect_consent.py and the
+    # setting-up-instruction-sync-worker skill). `run_sync_pass()` itself
+    # stays a general-purpose library function that any caller (including a
+    # test) may drive with an explicit trusted_marketplaces value; this gate
+    # belongs at the CLI boundary, not inside the pure composition.
+    consent = projection_reflect_consent.load_consent(root)
+    if consent is None:
+        consent_path = "/".join(projection_reflect_consent.CONSENT_PATH_PARTS)
+        message = (
+            f"no live projection-reflect consent found ({consent_path}); "
+            "refusing to sync -- see the setting-up-instruction-sync-worker "
+            "skill"
+        )
+        if args.json:
+            print(json.dumps({"error": message}, indent=2, sort_keys=True))
+        else:
+            print(f"error: {message}", file=sys.stderr)
+        return 2
+
     try:
         projections.validate_repository_root(root)
         sources = projections.discover_enabled_sources(
@@ -271,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     outcome = run_sync_pass(
-        root, sources, trusted_marketplaces=args.trusted_marketplaces
+        root, sources, trusted_marketplaces=consent.trusted_marketplaces
     )
     if args.json:
         print(json.dumps(outcome.to_dict(), indent=2, sort_keys=True))
@@ -283,11 +295,18 @@ def main(argv: list[str] | None = None) -> int:
                 f"[BYPASS] {len(outcome.changed)} destination(s) changed; "
                 "safe to auto-merge"
             )
-        else:
+        elif outcome.needs_conflict_dispatch:
             print(
                 f"[CONFLICT] {len(outcome.changed)} destination(s) changed, "
                 f"{len(outcome.findings)} finding(s); route to "
                 "conflict-dispatch:"
+            )
+            for reason in outcome.bypass.reasons:
+                print(f"  - {reason}")
+        else:
+            print(
+                f"[REVIEW] {len(outcome.changed)} destination(s) changed; "
+                "not conflict-classified, but not bypass-eligible either:"
             )
             for reason in outcome.bypass.reasons:
                 print(f"  - {reason}")
