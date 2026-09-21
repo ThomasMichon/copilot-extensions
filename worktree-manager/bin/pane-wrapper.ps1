@@ -109,7 +109,18 @@ while ($rest.Count -ge 2) {
     } else {
         break
     }
-    $rest = if ($rest.Count -gt 2) { @($rest[2..($rest.Count - 1)]) } else { @() }
+    # Direct branch-local assignment (not `$rest = if (...) {...} else {...}`):
+    # PowerShell's if-as-expression assignment silently unwraps a single-
+    # element array result to a bare scalar even when each branch forces
+    # array typing with @() -- exactly the shape reached here once every
+    # known control-flag pair has been stripped and one payload token (e.g.
+    # bare `copilot`) remains. Assigning inside each branch instead of
+    # through the if-expression's return value avoids that unwrap.
+    if ($rest.Count -gt 2) {
+        $rest = @($rest[2..($rest.Count - 1)])
+    } else {
+        $rest = @()
+    }
 }
 
 if ($rest.Count -eq 0) { exit 0 }

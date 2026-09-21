@@ -39,7 +39,7 @@ from .models import (
     ServiceConfig,
     SessionStatus,
 )
-from .transport import AgentProcess, SpawnTarget, _agent_worktrees_python, spawn
+from .transport import AgentProcess, SpawnTarget, _agent_worktrees_python, _agent_worktrees_root, spawn
 
 log = logging.getLogger("agent-bridge")
 
@@ -597,7 +597,7 @@ async def _cleanup_worktree(target: SpawnTarget, turn_count: int) -> None:
         return
 
     env = os.environ.copy()
-    aw_lib = os.path.join(os.path.expanduser("~"), ".agent-worktrees", "lib")
+    aw_lib = os.path.join(_agent_worktrees_root(), "lib")
     if os.path.isdir(aw_lib):
         env["PYTHONPATH"] = aw_lib
     env["PYTHONUTF8"] = "1"

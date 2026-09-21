@@ -32,12 +32,13 @@ of the `worktree-manager-control-plane` effort.
 
 **Migrated verbatim from `plugins/agent-worktrees/bin/`,
 `plugins/agent-worktrees/terminal/`, and `plugins/agent-worktrees/scripts/`**
-(proven, tested
-implementation; the still-shipping copy there remains the resolved target of
-`cmd_launch` until Phase 3b Slice 2's cutover step repoints it — see the linked
-plan for the ordered steps and the "clean cutover" invariant: this becomes the
-one true copy, not a second implementation living alongside an old
-Worktree-Manager-native prototype).
+(proven, tested implementation). Phase 3b Sub-slice 2a Step 2's cutover is
+complete: this is now the **one true copy** of the interactive mux launch
+scripts. `agent-worktrees`'s `cmd_launch` resolves this installed location
+live and execs into it; when this Manager is absent or unusable it falls back
+to a small, direct non-mux Copilot invocation instead of a second, in-plugin
+implementation of the mux launcher. The in-plugin scripts and their deploy
+steps were deleted from `plugins/agent-worktrees/` in the same cutover.
 
 Deployed automatically: `self_install.py`'s `_copy_payload` copies the whole
 `worktree-manager/` payload directory (this one included) into each versioned

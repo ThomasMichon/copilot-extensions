@@ -54,8 +54,6 @@ _PLUGIN_ID = "agent-worktrees@copilot-extensions"
 _FINGERPRINT_FILES = (
     "pyproject.toml",
     "plugin.json",
-    "bin/launch-session.ps1",
-    "bin/launch-session.sh",
     "scripts/install.ps1",
     "scripts/install.sh",
 )

@@ -75,7 +75,6 @@ After full installation and project registration:
   versions/<v>/                     #   Immutable per-version venv slots
   current-version                   #   Plain-text marker -> the active slot
   bin/                              #   Shell wrappers
-    launch-session.{ps1,cmd,sh}     #     Session launcher
     bootstrap-check.{ps1,sh}        #     Session-start health check
     provision-check.{ps1,sh}        #     Repo-enabled plugin runtime provision
     *guard.py                       #     preToolUse guard scripts
@@ -316,7 +315,11 @@ If you add a blocking edge, add the equivalent offload + assertion.
 {project}                         # launch binstub
   |
   v
-launch-session.{ps1,sh}           # pre-flight update, venv activation
+launch-session.{ps1,sh}           # Worktree Manager launcher: pre-flight
+                                   # update, venv activation (agent-worktrees'
+                                   # own cmd_launch resolves this install
+                                   # live, or falls back to a direct, non-mux
+                                   # launch when Worktree Manager is absent)
   |
   v
 agent-worktrees resolve           # picker UI, worktree creation
@@ -911,13 +914,20 @@ are safe to reach for immediately:
 
 ## Terminal Integration
 
+The interactive mux launch scripts and their per-session terminal-integration
+scripts relocated to Worktree Manager's `bin/` in Phase 3b Sub-slice 2a Step 2
+(efforts/active/worktree-manager-control-plane/phase-3b-mux-relocation.md).
+agent-worktrees' `cmd_launch` resolves that install live and no longer ships
+or deploys its own copies; a `tabby-template.yaml` profile is the only file
+remaining here.
+
 | File | Platform | Description |
 |------|----------|-------------|
 | `session-options.sh` | Linux/WSL | Per-session tmux options the launcher stamps onto each session (status bar + behaviors); replaces a global `~/.tmux.conf` |
 | `apply-mux-keybinds.sh` | Linux/WSL | **Opt-in** server-global tmux tuning (keystroke passthrough + `escape-time`); run by the user or a machine-restore flow |
 | `session-options.ps1` | Windows | Per-session psmux options the launcher stamps onto each session (status bar + behaviors); replaces a global `~/.psmux.conf` |
 | `apply-mux-keybinds.ps1` | Windows | **Opt-in** server-global psmux tuning (keystroke passthrough); run by the user or a machine-restore flow |
-| `tabby-template.yaml` | Linux | Tabby terminal profile template |
+| `tabby-template.yaml` | Linux | Tabby terminal profile template (still deployed by agent-worktrees) |
 
 The Windows installer generates **Windows Terminal fragments** at
 `%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments\AgentWorktrees\`

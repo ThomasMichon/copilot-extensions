@@ -1,4 +1,14 @@
-"""Decoupling invariants: agent-worktrees must not own the global mux config.
+"""Decoupling invariants: the mux launch scripts must not own global mux config.
+
+Migrated from plugins/agent-worktrees/tests/test_terminal_decoupling.py as part
+of the Phase 3b Sub-slice 2a Step 2 cutover (efforts/active/worktree-manager-
+control-plane/phase-3b-mux-relocation.md): Worktree Manager's bin/ is now the
+sole copy of the interactive mux launch scripts (flat, not under a separate
+terminal/ subdirectory), so their regression coverage lives here instead of in
+agent-worktrees. The installer-specific assertions from the original file are
+dropped: Worktree Manager has no per-script install.ps1/install.sh deploy loop
+to check -- self_install.py's ``_copy_payload`` copies this whole ``bin/``
+directory verbatim (see ``test_self_install.py``).
 
 These are file-level regression guards for the move from a deployed global
 ``~/.tmux.conf`` to per-session ``tmux set -t`` configuration (issue: relinquish
@@ -11,26 +21,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-_TERMINAL = _PLUGIN_ROOT / "terminal"
-_SESSION_OPTS = _TERMINAL / "session-options.sh"
-_KEYBINDS = _TERMINAL / "apply-mux-keybinds.sh"
-_LAUNCHER = _PLUGIN_ROOT / "bin" / "launch-session.sh"
-_INSTALL = _PLUGIN_ROOT / "scripts" / "install.sh"
+_BIN = Path(__file__).resolve().parents[1] / "bin"
+_SESSION_OPTS = _BIN / "session-options.sh"
+_KEYBINDS = _BIN / "apply-mux-keybinds.sh"
+_LAUNCHER = _BIN / "launch-session.sh"
 
 # psmux (Windows) counterparts -- the same decoupling, ported to PowerShell.
-_SESSION_OPTS_PS = _TERMINAL / "session-options.ps1"
-_KEYBINDS_PS = _TERMINAL / "apply-mux-keybinds.ps1"
-_LAUNCHER_PS = _PLUGIN_ROOT / "bin" / "launch-session.ps1"
-_INSTALL_PS = _PLUGIN_ROOT / "scripts" / "install.ps1"
+_SESSION_OPTS_PS = _BIN / "session-options.ps1"
+_KEYBINDS_PS = _BIN / "apply-mux-keybinds.ps1"
+_LAUNCHER_PS = _BIN / "launch-session.ps1"
 
 
 def test_terminal_scripts_exist():
     assert _SESSION_OPTS.is_file(), "per-session options script must ship"
     assert _KEYBINDS.is_file(), "opt-in keybind script must ship"
     # The legacy global config must be gone.
-    assert not (_TERMINAL / "tmux.conf").exists(), "global tmux.conf must not ship"
-    assert not (_TERMINAL / "psmux.conf").exists(), "global psmux.conf must not ship"
+    assert not (_BIN / "tmux.conf").exists(), "global tmux.conf must not ship"
+    assert not (_BIN / "psmux.conf").exists(), "global psmux.conf must not ship"
 
 
 def test_session_options_are_session_scoped():
@@ -78,19 +85,6 @@ def test_launcher_applies_session_options():
     assert "aw_apply_tmux_session_options" in text or "_aw_apply_session_opts" in text
 
 
-def test_installer_does_not_own_global_tmux_conf():
-    text = _INSTALL.read_text(encoding="utf-8")
-    # No deployment of, or drift-overwrite into, ~/.tmux.conf.
-    assert "deploy_tmux_config" not in text
-    assert 'cp "$src" "$dst"' not in text or "$HOME/.tmux.conf" not in text
-    # Uninstall must not delete the user's global config.
-    assert 'rm -f "$HOME/.tmux.conf"' not in text
-    # The new terminal scripts must be deployed instead.
-    assert "deploy_terminal_scripts" in text
-    assert "session-options.sh" in text
-    assert "apply-mux-keybinds.sh" in text
-
-
 # --- Status bar reads precomputed @vars, not the CLI on the render path ---
 
 
@@ -117,13 +111,9 @@ def test_launcher_spawns_common_status_updater():
 
 
 def test_status_writer_retired():
-    assert not (_TERMINAL / "status-writer.sh").exists(), (
+    assert not (_BIN / "status-writer.sh").exists(), (
         "the bash status-writer is superseded by the common status-updater"
     )
-    install = _INSTALL.read_text(encoding="utf-8")
-    # Dropped from the deploy + uninstall loops (only legacy cleanup may name it).
-    assert "for script in session-options.sh apply-mux-keybinds.sh; do" in install
-    assert "session-options.sh apply-mux-keybinds.sh status-writer.sh" not in install
 
 
 # --- psmux (Windows) decoupling: the same invariants, ported to PowerShell ---
@@ -166,10 +156,7 @@ def test_psmux_keybind_trailing_blank_trim_never_infinite_loops_on_a_single_line
     ``0..-1`` range yields *two* elements (indices ``0`` and ``-1``, both the
     same lone element) instead of an empty array, so ``$lines`` never shrinks
     and the trim loop hangs forever -- a real, reproducible infinite loop on
-    a config with exactly one blank line before the managed block. The
-    Worktree Manager copy of this script carries the identical logic, so the
-    guard must hold structurally in both places, not just at runtime on one
-    machine's config."""
+    a config with exactly one blank line before the managed block."""
     text = _KEYBINDS_PS.read_text(encoding="utf-8")
     assert "if ($lines.Count -eq 1) { $lines = @() }" in text, (
         "the single-remaining-blank-line case must be special-cased before "
@@ -181,16 +168,3 @@ def test_psmux_launcher_applies_session_options():
     text = _LAUNCHER_PS.read_text(encoding="utf-8")
     assert "session-options.ps1" in text, "launcher must dot-source the options script"
     assert "Set-AwPsmuxSessionOptions" in text or "Set-AwSessionOptionsSafe" in text
-
-
-def test_psmux_installer_does_not_own_global_conf():
-    text = _INSTALL_PS.read_text(encoding="utf-8")
-    # No deployment of, or drift-overwrite into, ~/.psmux.conf.
-    assert "Deploy-PsmuxConfig" not in text
-    assert "psmux config drift detected" not in text
-    # The new terminal scripts must be deployed instead, and the legacy global
-    # config relinquished (header-matched), never blindly redeployed.
-    assert "Deploy-TerminalScripts" in text
-    assert "session-options.ps1" in text
-    assert "apply-mux-keybinds.ps1" in text
-    assert "Relinquished legacy psmux config" in text

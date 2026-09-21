@@ -1,5 +1,11 @@
 """Regression test for pane-wrapper.ps1's flag-stripping argv parser.
 
+Migrated from plugins/agent-worktrees/tests/test_pane_wrapper_argv.py as part
+of the Phase 3b Sub-slice 2a Step 2 cutover (efforts/active/worktree-manager-
+control-plane/phase-3b-mux-relocation.md): Worktree Manager's bin/ is now the
+sole copy of the interactive mux launch scripts, so their regression coverage
+lives here instead of in agent-worktrees.
+
 PowerShell's ``$x = if (cond) { @(...) } else { @() }`` (if-as-expression
 assignment) silently unwraps a single-element array result to a bare scalar,
 even though the branch itself forces array typing with ``@()``. The

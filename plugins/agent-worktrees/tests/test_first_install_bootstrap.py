@@ -102,8 +102,6 @@ def test_direct_posix_payload_entrypoints_are_tracked_executable() -> None:
     repo = PLUGIN.parents[1]
     paths = (
         "plugins/agent-worktrees/bin/agent-worktrees",
-        "plugins/agent-worktrees/bin/launch-session.sh",
-        "plugins/agent-worktrees/bin/pane-wrapper.sh",
         "plugins/agent-worktrees/bin/payload/agent-worktrees",
     )
     result = subprocess.run(
@@ -264,14 +262,6 @@ def test_generated_project_binstubs_use_payload_dispatchers() -> None:
     assert "last-known-good" not in sh_binstub
 
 
-def test_launch_session_cmd_preserves_windows_powershell_fallback() -> None:
-    cmd = (PLUGIN / "bin" / "launch-session.cmd").read_text(encoding="utf-8")
-
-    assert "%SystemRoot%\\System32\\where.exe" in cmd
-    assert "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" in cmd
-    assert '"%_PSHOST%"' in cmd
-
-
 @pytest.mark.skipif(os.name != "nt", reason="Windows cmd regression")
 def test_windows_binstub_survives_overlong_path(tmp_path: Path) -> None:
     cmd = tmp_path / "agent-worktrees.cmd"
@@ -320,30 +310,6 @@ def test_windows_binstub_discovers_pwsh_by_absolute_path(tmp_path: Path) -> None
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows cmd regression")
-def test_launch_session_cmd_survives_overlong_path(tmp_path: Path) -> None:
-    cmd = tmp_path / "launch-session.cmd"
-    shutil.copyfile(PLUGIN / "bin" / "launch-session.cmd", cmd)
-    runtime_bin = tmp_path / ".agent-worktrees" / "bin"
-    runtime_bin.mkdir(parents=True)
-    (runtime_bin / "launch-session.ps1").write_text(
-        "Write-Output ($args -join '|')\n",
-        encoding="utf-8",
-    )
-    env = os.environ.copy()
-    env["USERPROFILE"] = str(tmp_path)
-    env["PATH"] = ";".join([r"C:\missing"] * 1000)
-
-    proc = subprocess.run(
-        [os.environ["ComSpec"], "/d", "/c", str(cmd), "path-overflow"],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-
-    assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.strip() == "path-overflow"
-
-
 def test_windows_stamp_reuses_immutable_version_snapshot() -> None:
     installer = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     stamp = installer.split("function Invoke-Stamp", 1)[1].split(

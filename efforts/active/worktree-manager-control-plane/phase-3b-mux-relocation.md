@@ -28,9 +28,15 @@
   merely *fast*.
 - **Status:** In progress — Sub-slice 2a Step 1 landed (script files copied
   verbatim; deployment mechanism proven). Sub-slice 2a Step 2's
-  `cmd_launch` repoint + direct non-mux fallback is now implemented; the
-  old in-plugin scripts are intentionally still deployed as a temporary
-  rollback until the relocated path is proven live on real hardware.
+  `cmd_launch` repoint, direct non-mux fallback, and the deferred in-plugin
+  script deletion are all now complete (the relocated Worktree Manager path
+  had already been proven live across many self-updated versions). While
+  the deletion was deferred, the two copies drifted (a post-exit stale-venv
+  re-resolve fix landed only in agent-worktrees' now-deleted copy); that fix
+  and a matching cross-plugin resolution consistency fix were ported into
+  Worktree Manager's copy as part of completing this step, along with a
+  latent PowerShell if-as-expression array-collapse bug in
+  `pane-wrapper.ps1` found by the migrated test suite.
   Sub-slice 2b's design was revised twice (2026-09-12, see below): first
   after discovering the `sessions.py` coupling depth, then again (before any
   code was written) after discovering `_perform_remux` also backs the
@@ -140,13 +146,27 @@ about leaving Mux itself half-migrated.
      Manager / relocated launcher is found, `cmd_launch` now resolves the
      normal launch plan and runs Copilot directly in the target worktree, then
      calls `agent-worktrees post-exit` after the child exits.
-   - [ ] **Delete** `plugins/agent-worktrees/bin/launch-session.{sh,ps1,cmd}`
-     and `pane-wrapper.{sh,ps1}` from agent-worktrees. **Temporary
-     deviation:** keep them deployed as the explicit rollback path until live
-     proof shows the relocated Worktree Manager launcher preserves mux,
-     post-exit, and activity journaling on real hardware. The prior regression
-     that silently degraded interactive launches makes "prove first, delete
-     second" the safer sequencing here.
+   - [x] **Delete** `plugins/agent-worktrees/bin/launch-session.{sh,ps1,cmd}`
+     and `pane-wrapper.{sh,ps1}` from agent-worktrees, along with the
+     mux-exclusive `terminal/session-options.{sh,ps1}`,
+     `terminal/apply-mux-keybinds.{sh,ps1}`, and
+     `terminal/psmux-passthrough.conf` (all four already had verbatim
+     Worktree Manager copies; nothing else in agent-worktrees referenced
+     them). The temporary deviation's own condition -- the relocated
+     Worktree Manager launcher proven live on real hardware -- was met (the
+     Manager's `bin/` scripts had already been the live path across many
+     self-updated versions before this deletion landed); `cmd_launch` no
+     longer tries an in-plugin fallback tier at all, only the relocated
+     Worktree Manager launcher and the direct, non-mux fallback below.
+     `install.{ps1,sh}` no longer deploy or health-check the deleted files
+     (a lightweight Worktree Manager presence check replaced the old
+     wrapper/terminal-script status lines); `scripts/psmux-path.ps1` stays,
+     since it also serves agent-worktrees' own `Ensure-Psmux`/
+     `Ensure-PsmuxSshSafe` install-time provisioning independent of the
+     launch scripts. Regression coverage for the four deleted-and-relocated
+     files (`test_pane_wrapper_argv.py`, `test_terminal_decoupling.py`,
+     `test_launch_session_unwrap.py`) moved to `worktree-manager/tests/`
+     rather than being dropped.
    - [x] The scripts' own calls into `agent-worktrees resolve` /
      `agent-worktrees post-exit` are unchanged in contract — still the same CLI
      subprocess boundary, now invoked from a different installed location.

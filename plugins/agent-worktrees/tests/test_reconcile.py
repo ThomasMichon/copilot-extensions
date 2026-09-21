@@ -2128,11 +2128,15 @@ def test_apply_plan_strips_caller_payload_environment(monkeypatch, tmp_path):
 
 
 def test_launch_adapters_apply_planned_runtime_environment():
+    # The interactive mux launch scripts relocated to Worktree Manager in
+    # Phase 3b Sub-slice 2a Step 2 (efforts/active/worktree-manager-control-
+    # plane/phase-3b-mux-relocation.md); agent-worktrees no longer ships its
+    # own copy.
     powershell = (
-        REPO / "plugins" / "agent-worktrees" / "bin" / "launch-session.ps1"
+        REPO / "worktree-manager" / "bin" / "launch-session.ps1"
     ).read_text(encoding="utf-8")
     posix = (
-        REPO / "plugins" / "agent-worktrees" / "bin" / "launch-session.sh"
+        REPO / "worktree-manager" / "bin" / "launch-session.sh"
     ).read_text(encoding="utf-8")
 
     assert "$u.PSObject.Properties['unset_environment']" in powershell

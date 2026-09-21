@@ -155,7 +155,11 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         exit 1
     }
 else
-    RUNTIME_DIR="$HOME/.agent-worktrees"
+    # Standard cross-plugin resolution: AGENT_RT_ROOT is the marketplace-
+    # specific install-folder override every plugin's own resolve-runtime.sh
+    # already honors (see below); default here too so this pre-check (which
+    # locates resolve-runtime.sh itself) stays consistent with it.
+    RUNTIME_DIR="${AGENT_RT_ROOT:-$HOME/.agent-worktrees}"
 fi
 AW_PY=""
 if [[ -f "$RUNTIME_DIR/bin/resolve-runtime.sh" ]]; then
@@ -185,6 +189,19 @@ unset PYTHONHOME
 
 run_post_exit() {
     local worktree_id="$1"
+    # Re-resolve before use: post-exit runs after the interactive Copilot
+    # session ends, and the runtime may have been upgraded/pruned to a
+    # different version dir in the meantime, leaving the cached $PYTHON
+    # pointing at a now-deleted interpreter (#stale-venv).
+    local refreshed
+    if refreshed="$(resolve_runtime_python)" && [[ -n "$refreshed" && -x "$refreshed" ]]; then
+        PYTHON="$refreshed"
+    fi
+    if [[ -z "$PYTHON" || ! -x "$PYTHON" ]]; then
+        setup_log ERROR "Post-exit: runtime python unavailable (cached path stale and re-resolve failed)"
+        echo "WARNING: Post-exit finalization skipped: agent-worktrees runtime python not found. Run 'agent-worktrees finalize' to retry." >&2
+        return 1
+    fi
     local post_args=(-m agent_worktrees)
     [[ -n "$LAUNCH_PROJECT" ]] && post_args+=(--project "$LAUNCH_PROJECT")
     post_args+=(post-exit "$worktree_id")
@@ -197,6 +214,14 @@ run_post_exit() {
 activity_log() {
     local event="$1" wt="${2:-}"; shift 2 2>/dev/null || shift $# 
     [[ -z "$event" || -z "$wt" ]] && return 0
+    # Re-resolve before use: this can fire long after the interactive Copilot
+    # session ends, and the runtime may have been upgraded/pruned to a
+    # different version dir in the meantime (#stale-venv).
+    local refreshed
+    if refreshed="$(resolve_runtime_python)" && [[ -n "$refreshed" && -x "$refreshed" ]]; then
+        PYTHON="$refreshed"
+    fi
+    [[ -n "$PYTHON" && -x "$PYTHON" ]] || return 0
     local fields=()
     local kv
     for kv in "$@"; do

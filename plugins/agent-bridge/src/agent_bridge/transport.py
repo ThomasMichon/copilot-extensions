@@ -311,6 +311,20 @@ def _wrap_batch_for_windows(
     return args
 
 
+def _agent_worktrees_root() -> str:
+    """The agent-worktrees runtime root, honoring ``AGENT_RT_ROOT``.
+
+    The standard cross-plugin resolution override every plugin's own
+    ``resolve-runtime.ps1``/``resolve-runtime.sh`` honors; defaulting here too
+    keeps every consumer of the runtime root (the interpreter resolver below,
+    and the legacy ``lib/`` PYTHONPATH compatibility shim) consistent with an
+    active override instead of only the interpreter lookup respecting it.
+    """
+    return os.environ.get("AGENT_RT_ROOT") or os.path.join(
+        os.path.expanduser("~"), ".agent-worktrees"
+    )
+
+
 def _agent_worktrees_python() -> str:
     """Absolute path to the agent-worktrees runtime interpreter.
 
@@ -321,8 +335,15 @@ def _agent_worktrees_python() -> str:
     back to the newest ``versions/`` slot, then -- best-effort, for un-migrated
     hosts -- the legacy ``.venv``. Raises ``RuntimeError`` when no interpreter is
     found.
+
+    Honors ``AGENT_RT_ROOT`` as the runtime-root override (see
+    :func:`_agent_worktrees_root`), exactly as ``resolve-runtime.ps1``/
+    ``resolve-runtime.sh`` do -- the standard cross-plugin resolution signal,
+    so a machine using a non-default agent-worktrees install location resolves
+    consistently everywhere, rather than only via a hardcoded
+    ``~/.agent-worktrees`` default.
     """
-    root = os.path.join(os.path.expanduser("~"), ".agent-worktrees")
+    root = _agent_worktrees_root()
     rel = ("Scripts", "python.exe") if sys.platform == "win32" else ("bin", "python")
 
     # Preferred: the current-version marker.
@@ -382,7 +403,7 @@ async def _resolve_worktree(
     # a legacy host that still carries ~/.agent-worktrees/lib gets it for
     # compatibility.
     env = dict(env)
-    _aw_lib = os.path.join(os.path.expanduser("~"), ".agent-worktrees", "lib")
+    _aw_lib = os.path.join(_agent_worktrees_root(), "lib")
     if os.path.isdir(_aw_lib):
         env["PYTHONPATH"] = _aw_lib
     env["PYTHONUTF8"] = "1"

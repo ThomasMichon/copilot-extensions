@@ -1152,19 +1152,15 @@ def test_windows_interactive_falls_back_to_cmd_when_ps1_absent(monkeypatch, tmp_
     assert argv[0] == "cmd.exe"
 
 
-def test_cmd_launch_falls_back_to_in_plugin_scripts_when_relocated_unavailable(
+def test_cmd_launch_uses_direct_fallback_when_relocated_unavailable(
     monkeypatch, tmp_path
 ):
-    """Sub-slice 2a Step 2 retains the in-plugin launch-session scripts as an
-    ACTIVE fallback tier (not merely undeleted files): when the relocated
-    Worktree Manager launcher is unusable, cmd_launch must still use the
-    in-plugin scripts at ``<inst_dir>/bin`` before degrading to the new
-    direct, non-mux path."""
+    """Phase 3b Sub-slice 2a Step 2 cutover complete: agent-worktrees no
+    longer carries an in-plugin launch-session fallback tier. When the
+    relocated Worktree Manager launcher is unusable, cmd_launch must degrade
+    straight to the direct, non-mux launch path."""
     cell_runtime = tmp_path / "cell" / "plugins" / "agent-worktrees"
-    legacy_bin = cell_runtime / "bin"
-    legacy_bin.mkdir(parents=True)
-    (legacy_bin / "launch-session.ps1").write_text("# ps\n", encoding="utf-8")
-    (legacy_bin / "launch-session.cmd").write_text("@echo off\r\n", encoding="utf-8")
+    cell_runtime.mkdir(parents=True)
     monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", "example")
     monkeypatch.setattr(m.cfg, "detect_platform", lambda: "windows")
     monkeypatch.setattr(m, "_usable_worktree_manager_launcher_dir", lambda: None)
@@ -1189,15 +1185,16 @@ def test_cmd_launch_falls_back_to_in_plugin_scripts_when_relocated_unavailable(
             },
         ),
     )
-    captured: list[list[str]] = []
-    monkeypatch.setattr(m.subprocess, "Popen", _fake_popen(captured))
+    direct_calls = []
+    monkeypatch.setattr(
+        m, "_run_direct_launch_fallback",
+        lambda project, passthrough: direct_calls.append((project, passthrough)) or 0,
+    )
 
-    with pytest.raises(SystemExit) as exc:
-        m.cmd_launch([])
-    assert exc.value.code == 0
-    argv = captured[0]
-    assert argv[0] == "pwsh.exe"
-    assert argv[argv.index("-File") + 1] == str(legacy_bin / "launch-session.ps1")
+    rc = m.cmd_launch([])
+
+    assert rc == 0
+    assert direct_calls == [("example", [])]
 
 
 def test_cmd_launch_uses_relocated_worktree_manager_launcher_when_available(
