@@ -11,7 +11,7 @@ import threading
 from . import activity, output, profile_assignment, sessions, tracking
 from . import codename_tracking, config as cfg
 from .launch_trace import append_launch_event
-from .resolve_picker_cli import ResolvePickerContext, _run_new_picker, _start_picker_monitor_root, run_legacy_picker
+from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
 
 
 def _core():
@@ -100,6 +100,10 @@ def _resolve_new(*args, **kwargs):
     return _core()._resolve_new(*args, **kwargs)
 
 
+def _run_new_picker(*args, **kwargs):
+    return _core()._run_new_picker(*args, **kwargs)
+
+
 def _resolve_profile(*args, **kwargs):
     return _core()._resolve_profile(*args, **kwargs)
 
@@ -122,6 +126,10 @@ def _try_machine_handoff(*args, **kwargs):
 
 def _validate_profile_assignment_config(*args, **kwargs):
     return _core()._validate_profile_assignment_config(*args, **kwargs)
+
+
+def _start_picker_monitor_root(*args, **kwargs):
+    return _core()._start_picker_monitor_root(*args, **kwargs)
 
 
 def _worktree_to_dict(*args, **kwargs):

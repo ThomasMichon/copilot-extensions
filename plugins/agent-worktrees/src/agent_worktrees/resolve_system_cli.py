@@ -16,6 +16,13 @@ def _core():
     return core
 
 
+def _core_helper(name: str, local):
+    candidate = getattr(_core(), name, None)
+    if callable(candidate) and candidate is not local:
+        return candidate
+    return local
+
+
 def _apply_tracking_override(*args, **kwargs):
     return _core()._apply_tracking_override(*args, **kwargs)
 
@@ -74,13 +81,13 @@ def _run_system_menu(config: cfg.Config, args: argparse.Namespace) -> int | None
         return None
 
     if action == "cleanup":
-        return _system_cleanup(config)
+        return _core_helper("_system_cleanup", _system_cleanup)(config)
     if action == "update":
-        return _system_update(config)
+        return _core_helper("_system_update", _system_update)(config)
     if action == "status":
-        return _system_status(config)
+        return _core_helper("_system_status", _system_status)(config)
     if action == "system-worktrees":
-        return _system_worktrees_browse(config)
+        return _core_helper("_system_worktrees_browse", _system_worktrees_browse)(config)
     return None
 
 
