@@ -2495,6 +2495,59 @@ async def test_idle_unwatched_session_goes_dormant_after_repeated_recovery_failu
 
 
 @pytest.mark.asyncio
+async def test_recoverable_stopped_session_also_reaches_idle_dormancy(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    """A daemon restart rehydrates every formerly RUNNING/IDLE/STARTING
+    session as STOPPED (still recoverable, unless explicitly stopped). Such a
+    session must still reach idle auto-dormancy after repeated failures
+    (review of #3058) -- excluding STOPPED here would let an unwatched
+    post-restart session retry forever under backoff, never truly dormant."""
+    import agent_bridge.session_manager as sm
+    from agent_bridge.session_manager import _BACKGROUND_RECOVERY_IDLE_DORMANCY_AFTER
+
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.STOPPED  # as rehydrate() would leave it
+    session.acp_session_id = "acp-1"
+    session.client = None
+    session.background_recovery_enabled = True  # not an explicit stop
+    manager._sessions[session.session_id] = session
+    rec = SimpleNamespace(
+        session_id=session.session_id,
+        protocol_version=1,
+        host_version="test",
+        host_pid=123,
+        child_pid=456,
+        created_at=1000.0,
+        resume_on_reattach=False,
+        boundary="local",
+    )
+    manager._host_index.register(
+        HostRecord(
+            session_id=session.session_id,
+            port=49555,
+            host_pid=123,
+            child_pid=456,
+        )
+    )
+    now = 1000.0
+    monkeypatch.setattr(sm.time, "time", lambda: now)
+    monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(manager, "_recover_remote_host_records", AsyncMock(return_value=0))
+    attach = AsyncMock(return_value=False)
+    monkeypatch.setattr(manager, "_reattach_one", attach)
+
+    for _ in range(_BACKGROUND_RECOVERY_IDLE_DORMANCY_AFTER):
+        assert await manager.recover_disconnected_hosts() == 0
+        now = manager._disconnected_reattach_retry_at.get(session.session_id, now)
+
+    assert attach.await_count == _BACKGROUND_RECOVERY_IDLE_DORMANCY_AFTER
+    assert session.background_recovery_enabled is False
+
+
+@pytest.mark.asyncio
 async def test_stop_serializes_with_inflight_reattach(
     tmp_db, tmp_path, monkeypatch,
 ) -> None:

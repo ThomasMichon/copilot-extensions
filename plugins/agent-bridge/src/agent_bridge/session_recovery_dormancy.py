@@ -60,9 +60,16 @@ class _RecoveryDormancyMixin:
     def _can_background_dormant_after_failure(
         self, session: "Session", failures: int
     ) -> bool:
+        # STOPPED is included alongside IDLE: a daemon restart rehydrates
+        # every formerly RUNNING/IDLE/STARTING session as STOPPED (still
+        # recoverable, since only an explicit stop -- excluded above by the
+        # background_recovery_enabled guard -- clears that flag), so
+        # excluding it would let an unwatched post-restart session retry
+        # forever under backoff without ever truly reaching dormancy
+        # (review of #3058).
         return (
             failures >= _BACKGROUND_RECOVERY_IDLE_DORMANCY_AFTER
-            and session.status == SessionStatus.IDLE
+            and session.status in (SessionStatus.IDLE, SessionStatus.STOPPED)
             and session.subscriber_count == 0
             and not session.has_active_background_tasks
         )
