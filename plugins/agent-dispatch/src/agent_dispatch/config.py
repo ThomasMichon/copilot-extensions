@@ -658,3 +658,28 @@ def federation_devtunnel_label() -> str:
     under (``AGENT_DISPATCH_FEDERATION_DEVTUNNEL_LABEL``)."""
     raw = (os.environ.get("AGENT_DISPATCH_FEDERATION_DEVTUNNEL_LABEL") or "").strip()
     return raw or DEFAULT_FEDERATION_DEVTUNNEL_LABEL
+
+
+# -- satellite outbound gate --------------------------------------------------
+#
+# The ``satellite-agent-exposure`` effort's security steer (2026-08-03): a
+# satellite is *exposed* only under an explicit, operator-controlled criterion,
+# never unconditionally just because a federation role is configured. This gate
+# sits strictly in front of the ``role=satellite`` presence loop
+# (:class:`~agent_dispatch.federation_runner.FederationRunner`) -- it decides
+# *whether* the node registers/heartbeats/pushes its embodiment status at all,
+# not merely what it advertises once registered. Default-closed: an operator
+# must deliberately open it.
+
+#: Values that open the gate. Anything else (unset, "closed", a typo) closes
+#: it -- fails closed, never open, on a misconfiguration.
+_SATELLITE_GATE_OPEN_VALUES = frozenset({"open", "1", "true", "yes", "on"})
+
+
+def satellite_gate_open() -> bool:
+    """Whether this node's satellite exposure gate is open
+    (``AGENT_DISPATCH_SATELLITE_GATE``). Closed (``False``) by default and on
+    any unrecognized value -- opening exposure is something an operator must
+    say explicitly, never something a typo or an unset var accidentally does."""
+    raw = (os.environ.get("AGENT_DISPATCH_SATELLITE_GATE") or "").strip().lower()
+    return raw in _SATELLITE_GATE_OPEN_VALUES
