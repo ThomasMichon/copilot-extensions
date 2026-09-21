@@ -283,7 +283,7 @@ def test_reap_stale_active_promotes_live_previous_when_active_missing(
     A clean coordinator shutdown demotes its own claim to ``previous`` and
     leaves no ``active`` behind, trusting a successor to publish itself. If
     that successor never starts, nothing else ever notices -- confirmed live
-    on 2026-09-21 (dotfiles#2143): a wake sat ``pending`` with
+    in production: a wake sat ``pending`` with
     ``last_error: "bridge delivery unavailable"`` for 15+ minutes because the
     only coordinator that could have drained it never believed it owned the
     route. ``reap_stale_active`` must promote a still-live ``previous`` in

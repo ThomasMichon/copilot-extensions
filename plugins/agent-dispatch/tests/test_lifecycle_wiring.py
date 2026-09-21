@@ -93,8 +93,8 @@ def test_wake_drain_self_heals_missing_active_by_promoting_live_previous(
     ``previous`` and leaves no ``active`` behind, trusting a successor to
     publish itself. ``reap_stale_active`` otherwise runs only at a new
     coordinator's startup or the start of a cutover -- neither of which
-    happens if the successor never starts. This confirmed-live bug (see
-    dotfiles#2143, 2026-09-21) stranded a pending wake for 15+ minutes with
+    happens if the successor never starts. This confirmed-live bug stranded a
+    pending wake for 15+ minutes with
     ``last_error: "bridge delivery unavailable"`` because no live process ever
     re-checked route ownership. ``_owns_active_route`` must notice a missing
     ``active`` and trigger the same promotion the wake-drain loop already
