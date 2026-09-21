@@ -2,13 +2,11 @@
 
 Windows uses Scheduled Tasks (``schtasks``/``Register-ScheduledTask`` via
 PowerShell). Linux/WSL uses per-user ``systemd`` timers (``systemctl
---user``) -- the same mechanism already used elsewhere in this facility for
-unattended per-user timers (e.g. ``vei-push-daemon.timer``,
-``agent-logger-sync.timer``), and reachable without an active login session
-when ``loginctl enable-linger`` has been set for the account. Both platforms
-share the same reconcile/status result shapes so callers (the CLI, the
-``self-update`` resource, and ``restore``'s drift reconciliation) never
-branch on platform themselves.
+--user``) -- a common pattern for unattended per-user timers, reachable
+without an active login session once ``loginctl enable-linger`` has been
+set for the account. Both platforms share the same reconcile/status result
+shapes so callers (the CLI, the ``self-update`` resource, and ``restore``'s
+drift reconciliation) never branch on platform themselves.
 """
 
 from __future__ import annotations
@@ -408,13 +406,29 @@ def _linux_timer_unit_path(tier: str, home: Path | None = None) -> Path:
     return _linux_unit_dir(home) / _linux_timer_name(tier)
 
 
+def _systemd_quote(value: str) -> str:
+    """Quote one command-line token per systemd's unit-file syntax.
+
+    ``systemd`` splits ``ExecStart=`` similarly to a shell, honoring both
+    ``'``/``"`` quoting and backslash escapes -- so an unquoted token
+    containing whitespace (a real risk for ``sys.executable``, which is
+    environment-dependent and can legitimately live under a path with
+    spaces) silently splits into multiple arguments and the unit fails to
+    start. Wrap in double quotes and escape embedded backslashes/quotes
+    whenever the token needs it; leave plain tokens unquoted for
+    readability.
+    """
+    if value and not any(ch.isspace() or ch in ('"', "'", "\\") for ch in value):
+        return value
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def _linux_exec_start(tier: str, *, machine: str | None = None) -> str:
     parts = [task_runtime_python(), "-m", "agent_machines", "self-update", "run", "--tier", tier]
     if machine:
         parts.extend(["--machine", machine])
-    # systemd ExecStart= splits on whitespace itself; no extra quoting needed
-    # since none of these arguments can contain spaces.
-    return " ".join(parts)
+    return " ".join(_systemd_quote(part) for part in parts)
 
 
 def render_linux_service_unit(
@@ -464,10 +478,15 @@ def linux_systemd_user_available(*, resolve_binary, runner) -> bool:
         result = runner(["systemctl", "--user", "is-system-running"], timeout=15)
     except Exception:
         return False
-    # "running" and "degraded" both mean the user manager itself is up and
-    # answering; only a hard failure to reach it (non-zero with no output,
-    # timeout, or missing binary) means "unavailable here".
-    return result.returncode == 0 or bool(result.stdout.strip())
+    # Only a known-reachable manager state means the unit-management calls
+    # below will actually work: "running" is normal, "degraded" still means
+    # the manager itself is up (some unrelated unit merely failed). Anything
+    # else -- including "offline" (manager present but not started for this
+    # session) or unrecognized output -- is not usable and must not be
+    # treated as available, or the subsequent is-enabled/registration calls
+    # fail with an error instead of the documented "skipped" result.
+    state = result.stdout.strip()
+    return state in {"running", "degraded"}
 
 
 def query_systemd_timer(
@@ -715,7 +734,7 @@ def reconcile_scheduled_task(
     record_task_config,
     home: Path | None = None,
 ) -> ScheduledTaskReconcileResult:
-    if sys.platform != "win32":
+    if sys.platform == "linux":
         return _reconcile_linux_timer(
             tier,
             desired_present=desired_present,
@@ -724,6 +743,18 @@ def reconcile_scheduled_task(
             resolve_binary=resolve_binary,
             record_task_config=record_task_config,
             home=home,
+        )
+    if sys.platform != "win32":
+        return ScheduledTaskReconcileResult(
+            tier=tier,
+            desired_state="present" if desired_present else "absent",
+            status="skipped",
+            changed=False,
+            detail=(
+                f"self-update scheduling is not supported on {sys.platform!r} -- "
+                "only Windows (Scheduled Tasks) and Linux/WSL (systemd --user "
+                "timers) are supported"
+            ),
         )
     snapshot = query_scheduled_task(
         tier,
@@ -864,7 +895,7 @@ def scheduled_task_status(
     home: Path | None = None,
 ) -> ScheduledTaskStatus:
     observed = tier_status(home, tier)
-    if sys.platform != "win32":
+    if sys.platform == "linux":
         return _linux_timer_status(
             tier,
             opted_in=opted_in,
@@ -872,6 +903,23 @@ def scheduled_task_status(
             runner=runner,
             resolve_binary=resolve_binary,
             home=home,
+        )
+    if sys.platform != "win32":
+        return ScheduledTaskStatus(
+            tier=tier,
+            opted_in=opted_in,
+            task_name=TIER_SPECS[tier].task_name,
+            registered=False,
+            enabled=None,
+            matching=False,
+            state=None,
+            detail=(
+                f"self-update scheduling is not supported on {sys.platform!r} -- "
+                "only Windows (Scheduled Tasks) and Linux/WSL (systemd --user "
+                "timers) are supported"
+            ),
+            last_attempt=observed.last_attempt,
+            last_success=observed.last_success,
         )
     snapshot = query_scheduled_task(
         tier,
