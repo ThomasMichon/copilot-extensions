@@ -1460,3 +1460,32 @@ gate land._
   above; the plugin-load investigation as a whole stays open pending
   confirmation that `agent-bridge`'s fix (the dominant contributor)
   resolves the operator's original live symptom.
+
+### 2026-09-21 -- Successor-prompt race investigation + sync-before-trigger fix
+
+- Investigated a distinct, narrower symptom: a successor spawned via
+  `--interactive "<prompt>"` can attempt a tool call in its very first turn
+  before that tool's extension has actually finished registering, and the
+  turn stalls. Traced the actual gate in the CLI's own source
+  (`envLoadingComplete`, an `extensions` participant wired to
+  `embeddedServer.onExtensionsLoaded`) and confirmed live, via a throwaway
+  psmux pane probe, that extension readiness tracking is active for our
+  sessions (Worktree Manager and `agent-worktrees` force-enable the
+  experimental flag this gate depends on) -- so this narrower race is not
+  fully closed out, but isn't as wide-open as first suspected either.
+- Separately confirmed (same probe) that `/env`'s Skills panel only lists
+  project-sourced skills, never plugin-sourced ones -- a genuine display gap
+  in the CLI upstream, but not a functional one: directly asked a probe
+  session whether a plugin-sourced skill (`playwright-cli`) was available,
+  and it was. No action taken here since the fix is outside this repo.
+- **Actioned:** regardless of exactly how tight the extension-readiness race
+  is, a successor always inherits the *same on-disk worktree* as its
+  predecessor -- so if that worktree is behind the repo's default branch,
+  the successor starts on stale plugin code and stale instructions even
+  when the CLI's own readiness gate works perfectly. Added a "Sync before
+  triggering" step to both trigger flows in the `context-handoff` skill:
+  before calling `trigger_handoff`, commit local WIP and sync the worktree
+  onto the latest default branch (`agent-worktrees git sync` when
+  available, conflict-safe by construction), noting an unresolved conflict
+  in the handoff brief rather than blocking on it. Bumped
+  `plugin.json`/`marketplace.json` to `0.1.1-dev33`.
