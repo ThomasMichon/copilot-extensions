@@ -8,8 +8,11 @@ selection/reservation state machine and the initial GitHub adapter.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
+import tempfile
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -17,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from .issue_loop_markers import _marker, _parse_marker
+from .issue_loop_markers import _marker, _marker_plain, _parse_marker
 from .registrar import (
     Filters,
     ProfileDeclaration,
@@ -880,7 +883,12 @@ class AzureDevOpsProvider:
         }
         if input is not None:
             kwargs["input"] = input
-        completed = self.runner(["az", *args, "--output", "json"], **kwargs)
+        # PATHEXT resolution: az installs as az.cmd on Windows, and bare
+        # subprocess.run(["az", ...]) raises FileNotFoundError there.
+        az_executable = shutil.which("az") or "az"
+        completed = self.runner(
+            [az_executable, *args, "--output", "json"], **kwargs
+        )
         if int(completed.returncode) != 0:
             raise RuntimeError(
                 f"Azure DevOps operation failed: {str(completed.stderr or '').strip()}"
@@ -892,17 +900,13 @@ class AzureDevOpsProvider:
             return
         organization, project = self._split(repo)
         org_url = self._org_url(organization)
+        # connectionData is a deployment/VSSPS resource, not reachable via
+        # `az devops invoke`'s area/resource routing; call the REST endpoint
+        # directly instead (see journal entry 2026-09-20 for detail).
         connection = self._az(
-            "devops",
-            "invoke",
-            "--area",
-            "connectionData",
-            "--resource",
-            "connectionData",
-            "--organization",
-            org_url,
-            "--http-method",
-            "GET",
+            "rest", "--method", "GET",
+            "--url", f"{org_url}/_apis/connectionData?api-version=7.1-preview.1",
+            "--resource", "499b84ac-1321-427f-aa17-267ca6975798",
         )
         data = json.loads(connection.stdout or "{}")
         display_name = str(
@@ -931,6 +935,31 @@ class AzureDevOpsProvider:
             )
         if allow_cache:
             self._verified_repos.add(repo)
+
+    def _comments_get(
+        self, org_url: str, project: str, work_item_id: int
+    ) -> list[dict[str, Any]]:
+        # wit/comments is preview-only; omitting --api-version crashes az.
+        resp = self._az(
+            "devops",
+            "invoke",
+            "--area",
+            "wit",
+            "--resource",
+            "comments",
+            "--route-parameters",
+            f"project={project}",
+            f"workItemId={work_item_id}",
+            "--organization",
+            org_url,
+            "--http-method",
+            "GET",
+            "--api-version",
+            "7.1-preview",
+        )
+        comments = json.loads(resp.stdout or "{}").get("comments") or []
+        # ADO returns newest-first (GitHub is oldest-first); normalize.
+        return sorted(comments, key=lambda c: str(c.get("createdDate") or ""))
 
     def list_open_issues(self, repo: str) -> list[Issue]:
         self._verify_identity(repo)
@@ -965,24 +994,7 @@ class AzureDevOpsProvider:
                 org_url,
             )
             fields = json.loads(show.stdout or "{}").get("fields") or {}
-            comments_resp = self._az(
-                "devops",
-                "invoke",
-                "--area",
-                "wit",
-                "--resource",
-                "comments",
-                "--route-parameters",
-                f"project={project}",
-                f"workItemId={work_item_id}",
-                "--organization",
-                org_url,
-                "--http-method",
-                "GET",
-            )
-            comments = json.loads(comments_resp.stdout or "{}").get(
-                "comments"
-            ) or []
+            comments = self._comments_get(org_url, project, work_item_id)
             reservations = tuple(
                 marker
                 for comment in comments
@@ -1030,26 +1042,24 @@ class AzureDevOpsProvider:
         organization, project = self._split(repo)
         org_url = self._org_url(organization)
         self._verify_identity(repo, allow_cache=False)
-        self._az(
-            "devops",
-            "invoke",
-            "--area",
-            "wit",
-            "--resource",
-            "comments",
-            "--route-parameters",
-            f"project={project}",
-            f"workItemId={issue.number}",
-            "--organization",
-            org_url,
-            "--http-method",
-            "POST",
-            "--in-file",
-            "-",
-            "--api-version",
-            "7.1-preview",
-            input=json.dumps({"text": f"{summary}\n\n{_marker(payload)}"}),
-        )
+        body = json.dumps({"text": f"{summary}\n\n{_marker_plain(payload)}"})
+        # `az devops invoke --in-file -` needs a real file path (unlike
+        # `gh`'s `--input -`, it does not read stdin); write a temp file.
+        fd, path = tempfile.mkstemp(suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(body)
+            self._az(
+                "devops", "invoke", "--area", "wit", "--resource", "comments",
+                "--route-parameters",
+                f"project={project}", f"workItemId={issue.number}",
+                "--organization", org_url,
+                "--http-method", "POST",
+                "--in-file", path,
+                "--api-version", "7.1-preview",
+            )
+        finally:
+            os.unlink(path)
 
     def _set_tags(self, repo: str, issue: Issue, tags: tuple[str, ...]) -> None:
         organization, project = self._split(repo)
@@ -1106,24 +1116,7 @@ class AzureDevOpsProvider:
         )
         organization, project = self._split(repo)
         org_url = self._org_url(organization)
-        comments_resp = self._az(
-            "devops",
-            "invoke",
-            "--area",
-            "wit",
-            "--resource",
-            "comments",
-            "--route-parameters",
-            f"project={project}",
-            f"workItemId={issue.number}",
-            "--organization",
-            org_url,
-            "--http-method",
-            "GET",
-        )
-        comments = json.loads(comments_resp.stdout or "{}").get(
-            "comments"
-        ) or []
+        comments = self._comments_get(org_url, project, issue.number)
         current = Issue(
             number=issue.number,
             title=issue.title,

@@ -8,6 +8,7 @@ without duplicating the payload schema or its validation.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from typing import Any
@@ -16,6 +17,16 @@ _MARKER_RE = re.compile(
     r"<!-- agent-dispatch:repository-issue-loop:v1 "
     r"(?P<payload>\{.*\}) -->"
 )
+# Azure DevOps work-item comments are stored/sanitized as HTML server-side,
+# which strips HTML comments (`<!-- ... -->`) from the persisted `text`
+# entirely -- confirmed by posting one against a real work item and reading
+# it back with the comment silently gone. A bracket-delimited marker with no
+# HTML-special characters survives that sanitization unchanged, so the
+# Azure DevOps adapter uses this form instead; both forms are recognized on
+# parse so either provider's history can be read back.
+_MARKER_PLAIN_RE = re.compile(
+    r"\[agent-dispatch:repository-issue-loop:v1 (?P<payload>\{.*\})\]"
+)
 
 
 def _marker(payload: dict[str, Any]) -> str:
@@ -23,6 +34,14 @@ def _marker(payload: dict[str, Any]) -> str:
         "<!-- agent-dispatch:repository-issue-loop:v1 "
         + json.dumps(payload, sort_keys=True, separators=(",", ":"))
         + " -->"
+    )
+
+
+def _marker_plain(payload: dict[str, Any]) -> str:
+    return (
+        "[agent-dispatch:repository-issue-loop:v1 "
+        + json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        + "]"
     )
 
 
@@ -35,7 +54,13 @@ def _parse_marker(
 ) -> dict[str, Any] | None:
     if author.casefold() != expected_author.casefold():
         return None
-    match = _MARKER_RE.search(body)
+    # Azure DevOps returns comment `text` with HTML entities escaped (e.g.
+    # `"` -> `&quot;`) even though the JSON payload's quotes were posted
+    # literally -- confirmed by round-tripping a real comment. Unescaping is
+    # a no-op for GitHub's plain-text comments, so it is safe to apply
+    # unconditionally before matching either marker form.
+    body = html.unescape(body)
+    match = _MARKER_RE.search(body) or _MARKER_PLAIN_RE.search(body)
     if not match:
         return None
     try:
