@@ -285,6 +285,41 @@ dedicated
 `handoff-trace` render command is
 still open follow-on work.
 
+## Plugin-load reliability
+
+Whether this extension's tools (`generate_handoff_prompt`,
+`save_handoff_prompt`, `consume_handoff`, `trigger_handoff`) are even
+*available* in a given session is a separate question from the
+handoff-lifecycle observability above -- if the extension never loads, none
+of that machinery is reachable at all. Copilot CLI already writes a
+per-launch diagnostic log for every extension fork under
+`~/.copilot/logs/extensions/plugin-<name>_<name>-<launch-epoch-ms>-<pid>.log`,
+ending in a terminal marker (`ready`, `ready-timeout`,
+`peer-closed-before-ready`, or an `exit code=N disposition=<disposition>`
+line) -- real, already-being-written data, no new instrumentation required
+to read it.
+
+`scripts/extension_load_reliability.py` summarizes that data into a
+reliability report for one plugin over a time window:
+
+```
+python scripts/extension_load_reliability.py --plugin context-handoff --days 7
+python scripts/extension_load_reliability.py --plugin context-handoff \
+  --split-at 2026-09-21T05:00:00+00:00 --json   # before/after a fix
+```
+
+`--split-at` partitions the window into `before`/`after` summaries around a
+timestamp, e.g. when a fix's new version actually lands on a machine (a
+merge only primes deployment; check the installed plugin's own version/mtime
+under `~/.copilot/installed-plugins/` to find when it actually took effect,
+not the merge time). Empirically, a plugin's own `ready-timeout` rate has
+tracked closely with *every* concurrently-launching plugin's rate on the
+same machine, not just the ones with heavier load-time work -- consistent
+with shared host/CPU contention across simultaneously-forking extensions
+being a real contributor, not only a given plugin's own synchronous work.
+Compare against a sibling plugin's rate over the same window before
+attributing a change in rate to a specific fix.
+
 ## Payload-local CLI fallback
 
 When the extension does not resolve or fails to load, the plugin's payload
