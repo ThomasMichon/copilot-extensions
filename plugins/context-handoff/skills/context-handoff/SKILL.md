@@ -138,11 +138,12 @@ listing a set of follow-up ideas or questions:
 4. **Replace the usual follow-up list** with one short, low-friction offer to
    continue via handoff.
 5. **Only once the user says yes:** sync the worktree (see "Sync before
-   triggering" below). If the sync changed anything relevant (branch moved,
-   or a rebase conflicted and was left unresolved), **re-run
-   `generate_handoff_prompt` and `save_handoff_prompt`** so the stored baton
-   reflects the post-sync state -- otherwise `trigger_handoff` reuses the
-   pre-sync brief and silently omits the sync/conflict outcome. Then **call
+   triggering" below), then **always re-run `generate_handoff_prompt` and
+   `save_handoff_prompt`** -- even if the sync looked like a no-op -- so the
+   stored baton reflects the post-sync state. A WIP commit, a failed sync
+   attempt, or a conflict left unresolved all matter to the successor even
+   when the branch itself didn't move; `trigger_handoff` otherwise reuses
+   the pre-sync brief and silently omits that outcome. Then **call
    `trigger_handoff`.** Do not sync or mutate local history before the user
    has agreed -- a decline must leave the worktree untouched.
 

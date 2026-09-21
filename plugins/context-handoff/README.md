@@ -127,9 +127,10 @@ listing follow-up ideas or questions, the flow is different:
 - **compose + save** the baton,
 - **ask the user** whether to continue via handoff,
 - only after a brief yes (for example, "sure"), **sync the worktree** (same
-  rule as above); if the sync changed anything relevant, **recompose and
-  re-save** the baton so it reflects the post-sync state, then call
-  `trigger_handoff`.
+  rule as above), then **always recompose and re-save** the baton -- even if
+  the sync looked like a no-op, since a WIP commit or a failed sync still
+  changes what the successor needs to know -- so it reflects the post-sync
+  state, then call `trigger_handoff`.
 
 Only this turn-end follow-up path is skipped by autopilot mode or prior user
 pre-authorization.

@@ -1175,6 +1175,28 @@ test("attemptWorktreeSync skips (never commits) when the tree is dirty", async (
   }
 });
 
+test("attemptWorktreeSync skips a worktree with an in-progress rebase, even when the tree reports clean", async () => {
+  // Real regression this guards: a rebase paused at a clean step (e.g.
+  // "edit") reports an empty `git status --porcelain`, so the dirty-tree
+  // check alone would let this through -- and agent-worktrees' own sync
+  // helper aborts a failed rebase on its failure path, which could cancel a
+  // rebase this session never started.
+  const dir = initGitRepo();
+  try {
+    const gitDirRaw = execFileSync("git", ["rev-parse", "--git-dir"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const gitDir = join(dir, gitDirRaw);
+    mkdirSync(join(gitDir, "rebase-merge"), { recursive: true });
+    const result = await attemptWorktreeSync(dir);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /rebase is already in progress/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("attemptWorktreeSync reports not-a-git-checkout for a plain directory", async () => {
   const dir = mkdtempSync(join(tmpdir(), "context-handoff-nosync-"));
   try {
@@ -1203,26 +1225,31 @@ test("attemptWorktreeSync attempts a sync on a clean tree and reports failure ho
   }
 });
 
-test("attemptWorktreeSync never blocks the event loop -- it returns a pending Promise, not a synchronous result", () => {
+test("attemptWorktreeSync never blocks the event loop before its first await", async () => {
   // Real regression this guards: attemptWorktreeSync is invoked synchronously
   // at the top of autoForceHandoff, before that function's first await, from
   // a fire-and-forget call site (session.usage_info never awaits
-  // autoForceHandoff). If attemptWorktreeSync itself performed any
-  // synchronous (execFileSync-style) child-process work before its own first
-  // await, that work would run immediately and freeze the SDK event loop
-  // regardless of the caller's fire-and-forget intent. Asserting it returns
-  // a Promise synchronously (rather than the finished result) proves control
-  // returns to the event loop immediately.
+  // autoForceHandoff). If attemptWorktreeSync performed any synchronous
+  // (execFileSync-style) child-process work before its own first await, the
+  // CALLING statement itself would not return control until that work
+  // finished -- proving it merely "returns a Promise" is not sufficient,
+  // since every async function eventually does that regardless of what ran
+  // synchronously first. Measuring how long the bare call expression itself
+  // takes to return (without awaiting the settled result) is the real test:
+  // a truly async implementation returns near-instantly; a blocking one
+  // takes as long as the underlying git/CLI work.
   const dir = initGitRepo();
   try {
-    const pending = attemptWorktreeSync(dir);
-    assert.ok(pending instanceof Promise);
-    // Clean up after the promise settles so the fixture removal below doesn't
-    // race a still-running child process against this same directory.
-    return pending.finally(() => rmSync(dir, { recursive: true, force: true }));
-  } catch (error) {
+    const start = Date.now();
+    const syncPromise = attemptWorktreeSync(dir);
+    const callElapsedMs = Date.now() - start;
+    assert.ok(
+      callElapsedMs < 50,
+      `expected the call itself to return near-instantly, took ${callElapsedMs}ms`,
+    );
+    await syncPromise; // let the real work finish before cleanup
+  } finally {
     rmSync(dir, { recursive: true, force: true });
-    throw error;
   }
 });
 

@@ -24,7 +24,7 @@ try {
     ) -join "`n"
     $AggregateContext = @(
         "[owner: context-handoff@$Version]"
-        'An owned objective may span sessions: a context boundary or handoff is progress, never completion. Near token pressure, compose/store the baton, sync, then call `trigger_handoff` if work remains. Turn-end follow-ups ask before `trigger_handoff` unless autopilot/pre-authorized. `trigger_handoff` always stores/seeds; live signaling needs `mode: auto` (default: manual-only). With efforts, one session owns one slice and hands the next forward. Preserve objective, work, decisions, and state in the handoff. Never stop for a stopping point, long session, or lateness alone; hand off first. Use the `context-handoff` skill for mechanics.'
+        'An owned objective may span sessions: a context boundary or handoff is progress, never completion. Near token pressure, sync, compose/store the baton, then call `trigger_handoff` if work remains. Turn-end follow-ups ask before `trigger_handoff` unless autopilot/pre-authorized. `trigger_handoff` always stores/seeds; live signaling needs `mode: auto` (default: manual-only). With efforts, one session owns one slice and hands the next forward. Preserve objective, work, decisions, and state in the handoff. Never stop for a stopping point, long session, or lateness alone; hand off first. Use the `context-handoff` skill for mechanics.'
     ) -join "`n"
     if ([Text.Encoding]::UTF8.GetByteCount($Context) -ge $MaxContextBytes) {
         throw 'guidance exceeds context budget'
