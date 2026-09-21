@@ -31,6 +31,34 @@ than ``ttl_seconds`` -- the same TTL-reap vocabulary
 backend. A stale tunnel is not deleted here (that would race a
 still-registering peer); ``reap_stale`` is an explicit opt-in for a caller
 that wants to garbage-collect old entries.
+
+**Enumeration backs off on repeated failure:** every enumeration path
+(:meth:`DevTunnelRendezvous._list_tunnels` for
+:meth:`~DevTunnelRendezvous.discover_peers`;
+:meth:`DevTunnelRendezvous._list_tunnels_fresh` for
+:meth:`~DevTunnelRendezvous.discover_coordinator` and
+:meth:`~DevTunnelRendezvous.reap_stale`) shares one backoff timer that
+doubles on each consecutive ``devtunnel list`` failure (a lapsed
+``dtssh login`` being the common case) up to a cap, so a persistent failure
+does not re-invoke the CLI at the federation runner's full tick rate. **What
+differs is what each caller does while backed off:**
+
+- ``discover_peers`` (awareness plane) serves the last successfully
+  enumerated snapshot -- a degraded but harmless stale presence picture.
+- ``discover_coordinator`` (**claim plane** --
+  :class:`~agent_dispatch.lease.CoordinatorLease` takes ``None`` as license to
+  take over) raises :class:`DevTunnelError` **without even attempting the
+  CLI call** while backed off, rather than answering from stale/cached data:
+  a backed-off node's *own* enumeration outage says nothing about whether the
+  real coordinator is actually gone, and its own ``register``/``heartbeat``
+  calls are a *separate*, unbacked-off path that could still succeed --
+  serving a stale "no coordinator" reply here would let it register itself
+  as coordinator anyway, producing two simultaneous coordinators.
+- ``reap_stale`` (maintenance) always attempts a **fresh** enumeration,
+  ignoring the backoff timer entirely -- deciding what to delete from a
+  stale snapshot is a correctness bug in its own right (a tunnel that looked
+  dead when last cached may have since refreshed), independent of the
+  runner-tick-rate concern the timer otherwise protects against.
 """
 
 from __future__ import annotations
@@ -62,6 +90,14 @@ DEFAULT_EXPIRATION = "30d"
 #: a network round trip; generous but bounded so a hung call doesn't wedge a
 #: federation tick.
 DEFAULT_TIMEOUT = 20.0
+
+#: Enumeration backoff (``devtunnel list``, the awareness-plane read every
+#: tick makes). A repeated enumeration failure -- most commonly a lapsed
+#: ``dtssh login`` -- must not hot-loop the CLI at the runner's tick interval;
+#: the delay doubles on each consecutive failure up to the cap, and resets on
+#: the next success.
+DEFAULT_ENUM_BACKOFF_SECONDS = 5.0
+MAX_ENUM_BACKOFF_SECONDS = 300.0
 
 CommandRunner = Callable[[list[str]], "subprocess.CompletedProcess[str] | None"]
 
@@ -133,6 +169,7 @@ class DevTunnelRendezvous:
         ttl_seconds: float = DEFAULT_TTL_SECONDS,
         timeout: float = DEFAULT_TIMEOUT,
         runner: CommandRunner | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._binary = binary or _default_binary()
         self._label = label
@@ -140,6 +177,18 @@ class DevTunnelRendezvous:
         self._ttl = float(ttl_seconds)
         self._timeout = timeout
         self._runner = runner or self._spawn
+        # Backoff-deadline clock only (never entry liveness -- _is_live and
+        # register/heartbeat's last_seen/registered_at compare against real
+        # wall-clock time embedded in tunnel descriptions, so they always use
+        # time.time() directly). Defaults to time.monotonic() specifically
+        # *because* an NTP correction or manual wall-clock adjustment must
+        # never extend or truncate a purely-local, in-process backoff window
+        # -- monotonic time can only ever move forward at a steady rate.
+        self._clock = clock
+        # Enumeration backoff state (see DEFAULT_ENUM_BACKOFF_SECONDS).
+        self._enum_backoff_seconds = 0.0
+        self._enum_backoff_until = 0.0
+        self._enum_cache: list[dict] = []
 
     # -- transport --------------------------------------------------------
 
@@ -410,8 +459,47 @@ class DevTunnelRendezvous:
         return True
 
     def discover_peers(self, *, role: str | None = None) -> list[dict]:
-        result = self._call(["list", "--all-labels", self._label])
-        tunnels = (result or {}).get("tunnels") or []
+        tunnels = self._list_tunnels()
+        return self._decode_live(tunnels, role=role)
+
+    def discover_coordinator(self) -> dict | None:
+        """The claim-plane read -- **never** answers from stale/cached data,
+        while still respecting the same backoff timer as
+        :meth:`discover_peers` so a persistent failure doesn't re-invoke the
+        CLI on every federation tick.
+
+        This feeds :class:`~agent_dispatch.lease.CoordinatorLease`, which
+        takes ``discover_coordinator() is None`` as license to take over the
+        role. A backed-off node's *own* enumeration outage says nothing about
+        whether the real coordinator is actually gone -- serving a stale/
+        cached "no coordinator" answer here would let a standby that merely
+        can't currently list tunnels register itself as coordinator anyway
+        (registration is a separate, unbacked-off call), producing two
+        simultaneous coordinators the directory would never have allowed a
+        live enumeration to see.
+
+        So while backed off, this raises :class:`DevTunnelError` **without**
+        even attempting the CLI call (fail-closed *and* rate-limited); once
+        the backoff window elapses it attempts one live enumeration exactly
+        like :meth:`discover_peers` would, and raises on failure (extending
+        the backoff) or returns fresh data on success. Either way the lease's
+        ``tick()`` sees a raised exception rather than a fabricated "no
+        coordinator" reply, and aborts that cycle (fail-closed) exactly as it
+        did before backoff existed.
+        """
+        now = self._clock()
+        if now < self._enum_backoff_until:
+            raise DevTunnelError(
+                "enumeration is currently backed off after a prior failure -- "
+                "refusing to answer coordinator discovery from stale/cached data"
+            )
+        tunnels = self._list_tunnels_fresh()
+        coordinators = self._decode_live(tunnels, role="coordinator")
+        if not coordinators:
+            return None
+        return max(coordinators, key=lambda e: (e["epoch"], e["instance"]))
+
+    def _decode_live(self, tunnels: list[dict], *, role: str | None = None) -> list[dict]:
         entries = []
         for tunnel in tunnels:
             entry = self._decode(tunnel)
@@ -421,11 +509,64 @@ class DevTunnelRendezvous:
             entries = [e for e in entries if e["role"] == role]
         return sorted(entries, key=lambda e: e["instance"])
 
-    def discover_coordinator(self) -> dict | None:
-        coordinators = self.discover_peers(role="coordinator")
-        if not coordinators:
-            return None
-        return max(coordinators, key=lambda e: (e["epoch"], e["instance"]))
+    # -- enumeration backoff -------------------------------------------------
+
+    def _list_tunnels(self) -> list[dict]:
+        """``devtunnel list --all-labels <label>``, serving the last
+        successfully enumerated snapshot while backed off.
+
+        A federation tick calls this every interval; a persistent enumeration
+        failure (most commonly a lapsed ``dtssh login``) must not re-invoke
+        the CLI at that same rate indefinitely **for the awareness plane**
+        (:meth:`discover_peers`). While backed off, this returns the cached
+        snapshot (degrading to an already-known, possibly-stale awareness
+        picture) instead of hammering the management API; the backoff clears
+        -- and a fresh enumeration is attempted -- as soon as it elapses.
+        Never used by the claim plane (:meth:`discover_coordinator`) or
+        maintenance (:meth:`reap_stale`), which both need a guaranteed-fresh
+        answer -- see :meth:`_list_tunnels_fresh`.
+        """
+        now = self._clock()
+        if now < self._enum_backoff_until:
+            return self._enum_cache
+        return self._list_tunnels_fresh()
+
+    def _list_tunnels_fresh(self) -> list[dict]:
+        """Always attempts a live ``devtunnel list --all-labels <label>``,
+        ignoring any active backoff window -- the *first* failure still
+        propagates (via :class:`DevTunnelError`) so a caller sees it at least
+        once rather than the backoff silently swallowing it forever.
+
+        Used by :meth:`reap_stale` (an explicit, infrequent maintenance
+        action where deciding what to delete from a stale snapshot is itself
+        a correctness bug -- a tunnel that looked dead when last cached but
+        has since refreshed must not be deleted) and, after
+        :meth:`discover_coordinator` has already checked the backoff timer
+        itself, by the claim plane.
+        """
+        try:
+            result = self._call(["list", "--all-labels", self._label])
+        except DevTunnelError:
+            # Capture "now" AFTER the call fails, not before it starts: the
+            # call itself can block up to ``timeout`` seconds (a slow
+            # failure, e.g. a hung network request), and anchoring the
+            # deadline to the pre-call clock would let that elapsed time eat
+            # into (or exceed) the backoff window before it is even set --
+            # the next tick would then immediately retry, defeating the
+            # rate-limiting this backoff exists for.
+            now = self._clock()
+            self._enum_backoff_seconds = min(
+                self._enum_backoff_seconds * 2 if self._enum_backoff_seconds else (
+                    DEFAULT_ENUM_BACKOFF_SECONDS
+                ),
+                MAX_ENUM_BACKOFF_SECONDS,
+            )
+            self._enum_backoff_until = now + self._enum_backoff_seconds
+            raise
+        self._enum_backoff_seconds = 0.0
+        self._enum_backoff_until = 0.0
+        self._enum_cache = (result or {}).get("tunnels") or []
+        return self._enum_cache
 
     # -- maintenance (explicit opt-in, not called by the Protocol) ----------
 
@@ -435,9 +576,15 @@ class DevTunnelRendezvous:
         Not part of the :class:`~agent_dispatch.federation.Rendezvous`
         Protocol -- an operator/cron convenience so a permanently-dead
         instance's tunnel doesn't linger for its full ``--expiration``.
+        Always enumerates fresh (:meth:`_list_tunnels_fresh`, ignoring any
+        backoff window) rather than deciding what to delete from a
+        potentially-stale cached snapshot -- a tunnel this backend hasn't
+        re-listed since backoff kicked in could have been refreshed in the
+        meantime, and deleting a now-live instance's tunnel out from under it
+        would be a real, unrelated correctness bug, not a mere efficiency
+        trade-off.
         """
-        result = self._call(["list", "--all-labels", self._label])
-        tunnels = (result or {}).get("tunnels") or []
+        tunnels = self._list_tunnels_fresh()
         removed = 0
         for tunnel in tunnels:
             entry = self._decode(tunnel)
