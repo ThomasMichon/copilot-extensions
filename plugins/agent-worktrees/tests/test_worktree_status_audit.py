@@ -330,10 +330,14 @@ def test_daemon_liveness_calls_ensure_monitor_when_nothing_is_reachable(tmp_path
 
 def test_daemon_liveness_ensure_monitor_boot_is_picked_up_within_the_wait(tmp_path, monkeypatch):
     """The full boot-and-wait path: `ensure_monitor` starts a real server
-    and writes the lock shortly after being called (simulating a resident
-    monitor's real spawn latency) -- `status_with_boot`'s own poll loop
-    must pick it up before its wait expires, exactly as any real caller's
-    first request after an idle-exit would."""
+    but only publishes the lock after a short delay on a background
+    thread (simulating a resident monitor's real spawn latency, not an
+    immediate write that would pass even without any actual polling) --
+    `status_with_boot`'s own poll loop must still pick it up before its
+    wait expires, exactly as any real caller's first request after an
+    idle-exit would."""
+    import threading
+
     from agent_worktrees import locks
 
     lock_path = tmp_path / "status-monitor.lock"
@@ -342,10 +346,15 @@ def test_daemon_liveness_ensure_monitor_boot_is_picked_up_within_the_wait(tmp_pa
     )
     server.start()
     try:
-        def _ensure_monitor():
+        def _write_lock_after_delay():
+            time.sleep(0.3)
             locks.write_lock(lock_path, extra=worktree_status_daemon.rendezvous_fields(server))
+
+        def _ensure_monitor():
+            threading.Thread(target=_write_lock_after_delay, daemon=True).start()
             return True
 
+        assert not lock_path.exists()
         liveness = wsa.check_daemon_liveness(
             lock_path, probe=("proj", "wt1"), ensure_monitor=_ensure_monitor,
         )

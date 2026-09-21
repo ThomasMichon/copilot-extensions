@@ -1335,3 +1335,31 @@ deployed: after this change, `responsive` should reliably read `true`
 even when the monitor was resting between callers, because the audit's
 own probe now boots and waits for it exactly as a real caller would.
 
+### 2026-09-21 — PR #3206 review round 1: 1 real bug, 1 weak test tightened
+1. **A stale (dead-owner) lock would never trigger `ensure_monitor`.**
+   `status_with_boot`'s own dial step treats any syntactically parseable
+   rendezvous as reachable -- it doesn't check whether the lock's owner
+   PID is still alive. Passing `locks.read_lock` straight through as
+   `read_lock_data` meant a monitor that crashed without cleaning up its
+   own lock file would look "dialable" forever: the probe would keep
+   trying (and failing) to reach the dead process and report
+   `responsive: false` instead of ever booting a live replacement --
+   regressing the `lock_is_live` guard the audit's own non-probe static
+   read branch already applies. Fixed by wrapping the reader
+   (`_read_live_lock`) to reject a non-live lock owner before it ever
+   reaches `status_with_boot`'s dial step, treating a stale lock exactly
+   like no lock at all.
+2. **The delayed-readiness boot-wait test wrote its lock synchronously.**
+   `test_daemon_liveness_ensure_monitor_boot_is_picked_up_within_the_wait`
+   had `ensure_monitor` write the lock immediately, before
+   `status_with_boot`'s poll loop even ran once -- it would have passed
+   even if the poll loop didn't exist at all. Tightened to publish the
+   lock from a background thread after a real ~0.3s delay, so the test
+   actually exercises the poll loop picking up a lock that lands *during*
+   the wait window, not merely before it starts.
+3. This PR body's own doc-impact note: no user-facing documentation
+   changes are needed -- the only behavior visible to a human is the
+   audit's exit code/telemetry now reliably reflecting a real caller's
+   own daemon-boot experience instead of a bare snapshot; the effort
+   README's journal (this file) is the durable record of that change.
+

@@ -423,8 +423,24 @@ def check_daemon_liveness(
         reached_fallback = True
         return {}
 
+    def _read_live_lock() -> dict | None:
+        # `status_with_boot`'s own dial step treats any syntactically
+        # parseable rendezvous as reachable -- it does not check whether
+        # the lock's owner PID is still alive. A crashed monitor that
+        # never cleaned up its own lock file would otherwise look
+        # "dialable" forever, so this probe would keep trying (and
+        # failing) to reach a dead process instead of ever triggering
+        # `ensure_monitor` to boot a live replacement. Reject a non-live
+        # owner here (same `lock_is_live` guard `check_daemon_liveness`'s
+        # own static-read branch already applies) so a stale lock is
+        # treated exactly like no lock at all.
+        data = locks.read_lock(lock_path)
+        if data is not None and not locks.lock_is_live(data):
+            return None
+        return data
+
     worktree_status_daemon.status_with_boot(
-        read_lock_data=lambda: locks.read_lock(lock_path),
+        read_lock_data=_read_live_lock,
         ensure_monitor=ensure_monitor,
         key=worktree_status_daemon.coalescing_key(project, worktree_id),
         payload={"project": project, "worktree_id": worktree_id},
