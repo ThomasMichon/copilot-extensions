@@ -239,6 +239,141 @@ def test_satellite_work_intake_rebuilt_when_shared_url_changes(monkeypatch, dire
     ]
 
 
+class _FakeCloseableClient:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_work_intake_client_closed_when_shared_url_changes(monkeypatch, directory):
+    from agent_dispatch import client as client_mod
+    from agent_dispatch import satellite_work_intake as swi_mod
+
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
+    url_box = {"url": "https://gw-a.example/dispatch"}
+    monkeypatch.setattr(config, "shared_url", lambda: url_box["url"])
+
+    built_clients = []
+    monkeypatch.setattr(
+        client_mod,
+        "DispatchClient",
+        lambda url, **kw: built_clients.append(_FakeCloseableClient()) or built_clients[-1],
+    )
+
+    class FakeWorkIntake:
+        def __init__(self, client, **kwargs):
+            pass
+
+        def tick(self):
+            return {"spawned": []}
+
+    monkeypatch.setattr(swi_mod, "SatelliteWorkIntake", FakeWorkIntake)
+
+    runner = FederationRunner(directory, "sat-1", role="satellite")
+    runner.tick()
+    first_client = built_clients[0]
+    assert first_client.closed is False
+
+    url_box["url"] = "https://gw-b.example/dispatch"
+    runner.tick()
+    # The OLD client (gw-a) must be closed once superseded by the new one.
+    assert first_client.closed is True
+    assert built_clients[1].closed is False
+
+
+def test_work_intake_client_closed_when_shared_url_unset(monkeypatch, directory):
+    from agent_dispatch import client as client_mod
+    from agent_dispatch import satellite_work_intake as swi_mod
+
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
+    url_box = {"url": "https://gw.example/dispatch"}
+    monkeypatch.setattr(config, "shared_url", lambda: url_box["url"])
+
+    built_clients = []
+    monkeypatch.setattr(
+        client_mod,
+        "DispatchClient",
+        lambda url, **kw: built_clients.append(_FakeCloseableClient()) or built_clients[-1],
+    )
+
+    class FakeWorkIntake:
+        def __init__(self, client, **kwargs):
+            pass
+
+        def tick(self):
+            return {"spawned": []}
+
+    monkeypatch.setattr(swi_mod, "SatelliteWorkIntake", FakeWorkIntake)
+
+    runner = FederationRunner(directory, "sat-1", role="satellite")
+    runner.tick()
+    assert built_clients[0].closed is False
+
+    url_box["url"] = None
+    runner.tick()
+    assert built_clients[0].closed is True
+    assert runner._work_intake_client is None
+
+
+def test_work_intake_client_closed_on_construction_failure(monkeypatch, directory):
+    from agent_dispatch import client as client_mod
+    from agent_dispatch import satellite_work_intake as swi_mod
+
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
+    monkeypatch.setattr(config, "shared_url", lambda: "https://gw.example/dispatch")
+
+    built_clients = []
+    monkeypatch.setattr(
+        client_mod,
+        "DispatchClient",
+        lambda url, **kw: built_clients.append(_FakeCloseableClient()) or built_clients[-1],
+    )
+
+    def boom(client, **kwargs):
+        raise RuntimeError("bad config")
+
+    monkeypatch.setattr(swi_mod, "SatelliteWorkIntake", boom)
+
+    runner = FederationRunner(directory, "sat-1", role="satellite")
+    runner.tick()  # must not raise
+    assert len(built_clients) == 1
+    assert built_clients[0].closed is True  # never leaked despite the failure
+    assert runner._work_intake is None
+    assert runner._work_intake_client is None
+
+
+def test_work_intake_client_closed_on_stop(monkeypatch, directory):
+    from agent_dispatch import client as client_mod
+    from agent_dispatch import satellite_work_intake as swi_mod
+
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
+    monkeypatch.setattr(config, "shared_url", lambda: "https://gw.example/dispatch")
+
+    built_clients = []
+    monkeypatch.setattr(
+        client_mod,
+        "DispatchClient",
+        lambda url, **kw: built_clients.append(_FakeCloseableClient()) or built_clients[-1],
+    )
+
+    class FakeWorkIntake:
+        def __init__(self, client, **kwargs):
+            pass
+
+        def tick(self):
+            return {"spawned": []}
+
+    monkeypatch.setattr(swi_mod, "SatelliteWorkIntake", FakeWorkIntake)
+
+    runner = FederationRunner(directory, "sat-1", role="satellite")
+    runner.tick()
+    assert built_clients[0].closed is False
+    runner.stop(resign=False)
+    assert built_clients[0].closed is True
+
+
 def test_satellite_work_intake_failure_does_not_disrupt_presence(monkeypatch, directory):
     from agent_dispatch import client as client_mod
     from agent_dispatch import satellite_work_intake as swi_mod
