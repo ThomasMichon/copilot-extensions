@@ -545,3 +545,12 @@ def test_session_activity_does_not_report_disconnected_as_active():
     assert tracking.session_activity(
         {"status": "starting", "liveness": "disconnected"}
     ) is None
+
+
+def test_session_activity_disconnected_beats_a_lingering_running_turn_state():
+    # A dead transport can still carry a stale turn_state=="running" from
+    # before it dropped -- the earlier liveness=="active"-or-turn_state==
+    # "running" shortcut must not resurrect it as ACTIVE either.
+    assert tracking.session_activity(
+        {"status": "running", "liveness": "disconnected", "turn_state": "running"}
+    ) is None

@@ -292,7 +292,14 @@ def session_activity(session: dict[str, Any] | None) -> str | None:
     turn_state = str(session.get("turn_state") or "").lower()
     if liveness == "stalled":
         return "STALLED"
-    if liveness == "active" or turn_state == "running":
+    # "disconnected" (agent-bridge __main__.py's own vocabulary: "DISCONNECTED
+    # - transport down") must never be reported ACTIVE, however stale/live-
+    # looking the rest of the snapshot's fields are -- a dead transport can
+    # still carry a lingering turn_state=="running" from before it dropped,
+    # particularly now that satellite_status_snapshot() can publish this
+    # fleet-wide. Guarded on every ACTIVE-producing branch below, not just
+    # the last one.
+    if liveness != "disconnected" and (liveness == "active" or turn_state == "running"):
         return "ACTIVE"
     if status == "idle" or liveness == "idle" or turn_state == "idle":
         return "IDLE"
@@ -301,11 +308,6 @@ def session_activity(session: dict[str, Any] | None) -> str | None:
         "stalled",
         "disconnected",
     }:
-        # A "disconnected" liveness means the transport is down (agent-bridge
-        # __main__.py's own vocabulary: "DISCONNECTED - transport down") --
-        # a status of running/starting with a dead transport is not doing
-        # live work and must never be reported as ACTIVE, particularly now
-        # that satellite_status_snapshot() can publish this fleet-wide.
         return "ACTIVE"
     return None
 
