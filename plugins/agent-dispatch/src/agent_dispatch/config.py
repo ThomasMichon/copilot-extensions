@@ -47,6 +47,7 @@ lone dev box or against a designated coordinator host on a shared network:
 
 from __future__ import annotations
 
+import math
 import os
 import socket
 import urllib.error
@@ -683,3 +684,96 @@ def satellite_gate_open() -> bool:
     say explicitly, never something a typo or an unset var accidentally does."""
     raw = (os.environ.get("AGENT_DISPATCH_SATELLITE_GATE") or "").strip().lower()
     return raw in _SATELLITE_GATE_OPEN_VALUES
+
+
+#: Default cap on concurrently self-spawned local worktrees a satellite's
+#: work-intake loop will maintain (see the ``satellite-agent-exposure``
+#: effort's Phase 3 design). Deliberately small: a satellite is a field
+#: machine, not a fleet coordinator, and an unbounded claim loop could
+#: otherwise drain the whole queue into local spawns on one drain cycle.
+_SATELLITE_MAX_CONCURRENT_DEFAULT = 1
+
+
+def satellite_max_concurrent() -> int:
+    """The concurrency cap for satellite work-intake
+    (``AGENT_DISPATCH_SATELLITE_MAX_CONCURRENT``). Degrades to the safe
+    default on unset/non-positive/unparseable values -- a misconfiguration
+    must never silently raise the cap."""
+    raw = os.environ.get("AGENT_DISPATCH_SATELLITE_MAX_CONCURRENT")
+    if raw:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return _SATELLITE_MAX_CONCURRENT_DEFAULT
+
+
+def satellite_project() -> str | None:
+    """An explicit override for the ``agent-worktrees`` project a satellite
+    embodies claimed work into (``AGENT_DISPATCH_SATELLITE_PROJECT``), or
+    ``None`` to derive one **per task** instead
+    (:func:`agent_dispatch.satellite_work_intake.SatelliteWorkIntake._resolve_project`
+    -- from the task's own repo lane via
+    :func:`agent_dispatch.embody.project_for_task`). Set this only when every
+    task this satellite pulls belongs to the same project; leave it unset for
+    a satellite that pulls affinitied work across more than one. Either way,
+    a task-intake spawn never falls back to CWD-based discovery: this loop
+    runs from a daemon/service context with no meaningful CWD, and a silent
+    CWD fallback there would risk embodying the wrong project rather than
+    surfacing the misconfiguration."""
+    return os.environ.get("AGENT_DISPATCH_SATELLITE_PROJECT") or None
+
+
+#: Default bound (seconds) on one satellite work-intake spawn attempt
+#: (``agent-worktrees embody``). This loop's spawn call runs synchronously
+#: inside the same federation tick that also asserts this node's presence
+#: (register/heartbeat) -- an unbounded launch could otherwise hang that
+#: tick indefinitely and starve heartbeats behind it. Long enough for a
+#: normal embody invocation (process spawn + initial mux/session bring-up,
+#: not the task itself, which runs detached) to complete.
+_SATELLITE_SPAWN_TIMEOUT_DEFAULT = 30.0
+
+
+def satellite_spawn_timeout() -> float:
+    """The bound (seconds) on one satellite work-intake spawn attempt
+    (``AGENT_DISPATCH_SATELLITE_SPAWN_TIMEOUT``). Degrades to the safe
+    default on unset/non-positive/non-finite/unparseable values -- a
+    misconfiguration (including ``inf``/an overflowing literal, both of
+    which satisfy a plain ``value > 0`` check) must never silently make a
+    hung launch block heartbeats indefinitely."""
+    raw = os.environ.get("AGENT_DISPATCH_SATELLITE_SPAWN_TIMEOUT")
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0 and math.isfinite(value):
+                return value
+        except ValueError:
+            pass
+    return _SATELLITE_SPAWN_TIMEOUT_DEFAULT
+
+
+#: Default wall-clock budget (seconds) for one satellite work-intake tick's
+#: WHOLE queued-task discovery pagination -- independent of any single
+#: request's own HTTP timeout. Several slow-but-responsive round trips
+#: could otherwise sum well past the federation directory's presence TTL
+#: once a spawn attempt's own bound is added on top.
+_SATELLITE_DISCOVERY_TIMEOUT_DEFAULT = 10.0
+
+
+def satellite_discovery_timeout() -> float:
+    """The wall-clock budget (seconds) for one satellite work-intake tick's
+    queued-task discovery pagination
+    (``AGENT_DISPATCH_SATELLITE_DISCOVERY_TIMEOUT``). Degrades to the safe
+    default on unset/non-positive/non-finite/unparseable values, mirroring
+    :func:`satellite_spawn_timeout`'s validation."""
+    raw = os.environ.get("AGENT_DISPATCH_SATELLITE_DISCOVERY_TIMEOUT")
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0 and math.isfinite(value):
+                return value
+        except ValueError:
+            pass
+    return _SATELLITE_DISCOVERY_TIMEOUT_DEFAULT

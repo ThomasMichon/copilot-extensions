@@ -1530,6 +1530,23 @@ The gate defaults **closed**: a configured `role=satellite` node never
 registers, heartbeats, or pushes status until an operator explicitly opens
 it, and it withdraws on the very next tick if the gate closes mid-session.
 
+While the gate is open, a satellite also **pulls its own affinitied work**
+(the `satellite-agent-exposure` effort's Phase 3 claim-loop --
+:mod:`agent_dispatch.satellite_work_intake`): it discovers its own `queued`
+tasks on the shared coordinator and locally embodies a bounded number of
+them via `agent-worktrees embody` (the spawned session performs the actual
+atomic claim itself, under its own worktree identity -- no new claim
+transport). Tunable via `AGENT_DISPATCH_SATELLITE_MAX_CONCURRENT`
+(concurrency cap, default `1`), `AGENT_DISPATCH_SATELLITE_PROJECT` (an
+explicit `--project` override; unset derives one per task from its own repo
+lane instead -- set this only when every task this satellite pulls belongs
+to the same project), `AGENT_DISPATCH_SATELLITE_SPAWN_TIMEOUT` (seconds
+bounding one spawn attempt so a hung `embody` launch can never block this
+node's own heartbeats indefinitely; default `30`), and
+`AGENT_DISPATCH_SATELLITE_DISCOVERY_TIMEOUT` (seconds bounding the whole
+queued-task discovery pagination for one tick, independent of any single
+request's own HTTP timeout; default `10`).
+
 Bearer scheme matching is case-insensitive. Prefer environment or token-command
 configuration over token flags where process arguments may be observable.
 

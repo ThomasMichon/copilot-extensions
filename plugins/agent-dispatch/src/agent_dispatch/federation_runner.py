@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import config
 from .federation import CoordinatorRendezvous
@@ -31,6 +31,7 @@ from .satellites import ROLE_SATELLITE
 
 if TYPE_CHECKING:
     from .federation import Rendezvous
+    from .satellite_work_intake import SatelliteWorkIntake
 
 
 # -- rendezvous factories ----------------------------------------------------
@@ -123,6 +124,9 @@ class FederationRunner:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lease: CoordinatorLease | None = None
+        self._work_intake: SatelliteWorkIntake | None = None
+        self._work_intake_url: str | None = None
+        self._work_intake_client: Any | None = None
         if role in config.FEDERATION_LEASE_ROLES:
             lease_kwargs = {} if lease_ttl is None else {"lease_ttl": lease_ttl}
             self._lease = CoordinatorLease(
@@ -170,6 +174,13 @@ class FederationRunner:
             # so attempting it unconditionally is always safe.
             self._rv.deregister(self._instance)
             self._registered = False
+            # The gate closing must retire any live work-intake client too --
+            # otherwise its transport stays open while gated off, and
+            # reopening the gate would resume the STALE cached instance
+            # instead of picking up any config changed while closed.
+            self._close_work_intake_client()
+            self._work_intake = None
+            self._work_intake_url = None
             return {
                 "instance": self._instance,
                 "role": self._role,
@@ -186,6 +197,12 @@ class FederationRunner:
             except Exception:
                 # Entry expired between beats -> re-assert it.
                 self._register()
+        if self._role == ROLE_SATELLITE:
+            # Work-intake (Phase 3): only ever attempted once presence is
+            # asserted for this tick, and only for the satellite role -- a
+            # transient failure here must never disrupt the presence half
+            # above (see `_attempt_work_intake`'s own try/except).
+            self._attempt_work_intake()
         return {
             "instance": self._instance,
             "role": self._role,
@@ -204,6 +221,85 @@ class FederationRunner:
 
         worktrees, status = satellite_status_snapshot()
         return {"worktrees": worktrees, "status": status}
+
+    def _attempt_work_intake(self) -> None:
+        """Discover + trigger a bounded number of local spawns for this
+        machine's own queued work (Phase 3 -- see
+        :mod:`agent_dispatch.satellite_work_intake`). A no-op, not an error,
+        when no shared coordinator is configured (``AGENT_DISPATCH_SHARED_URL``
+        unset): work-intake needs the shared coordinator's task queue, which
+        is a separate concern from the awareness-plane directory this
+        runner's rendezvous already talks to (and which may itself be a
+        *different* backend, e.g. Dev Tunnels).
+
+        The shared URL is re-read on **every** tick, not just once: an
+        operator unsetting/changing ``AGENT_DISPATCH_SHARED_URL`` at runtime
+        must disable (or repoint) work-intake on its very next tick, not
+        leave a cached client silently polling a stale/removed coordinator
+        indefinitely -- the cached :class:`SatelliteWorkIntake` is rebuilt
+        whenever the configured URL no longer matches the one it was built
+        from (including "now unset", which tears it down entirely).
+
+        Every teardown/rebuild also **closes** the previous
+        :class:`~agent_dispatch.client.DispatchClient` (its HTTP transport,
+        and any tunnel it owns): otherwise a URL that changes/clears
+        repeatedly would leak a connection per change instead of releasing
+        the old one.
+
+        Everything past the shared-URL check -- building the client, building
+        the work-intake object, and ticking it -- is one guarded block: a
+        transient coordinator/spawn error must never disrupt this tick's
+        presence half, nor kill the caller's loop (mirrors `run`'s own "a
+        transient error must not kill the loop" contract), and that guarantee
+        has to cover *construction* failures (e.g. a malformed shared
+        endpoint) exactly as much as a failure inside `tick()` itself."""
+        try:
+            url = config.shared_url()
+            if not url:
+                self._close_work_intake_client()
+                self._work_intake = None
+                self._work_intake_url = None
+                return
+            if self._work_intake is None or url != self._work_intake_url:
+                self._close_work_intake_client()
+                from .client import DispatchClient
+                from .satellite_work_intake import SatelliteWorkIntake
+
+                client = DispatchClient(url, token=config.shared_token())
+                try:
+                    self._work_intake = SatelliteWorkIntake(
+                        client,
+                        machine=self._machine or self._instance,
+                        project=config.satellite_project(),
+                        max_concurrent=config.satellite_max_concurrent(),
+                        spawn_timeout=config.satellite_spawn_timeout(),
+                        discovery_time_budget=config.satellite_discovery_timeout(),
+                        clock=self._clock,
+                    )
+                except Exception:
+                    # Never leak the just-built client if constructing the
+                    # work-intake object around it fails for any reason.
+                    client.close()
+                    raise
+                self._work_intake_client = client
+                self._work_intake_url = url
+            self._work_intake.tick()
+        except Exception:
+            pass
+
+    def _close_work_intake_client(self) -> None:
+        """Close and drop this runner's owned
+        :class:`~agent_dispatch.client.DispatchClient` (if any) -- its HTTP
+        transport (and any tunnel it owns) must not outlive the
+        :class:`SatelliteWorkIntake` it was built for. Idempotent and never
+        raises: a close failure is display-only cleanup, not a reason to
+        disrupt whatever teardown/rebuild triggered it."""
+        if self._work_intake_client is not None:
+            try:
+                self._work_intake_client.close()
+            except Exception:
+                pass
+            self._work_intake_client = None
 
     def _register(self) -> None:
         self._rv.register(
@@ -260,13 +356,30 @@ class FederationRunner:
         self._thread.start()
 
     def stop(self, *, resign: bool = True, timeout: float = 5.0) -> None:
-        """Stop the background loop and (by default) give up our directory entry."""
+        """Stop the background loop and (by default) give up our directory entry.
+
+        Closing this runner's work-intake `DispatchClient` must never race a
+        still-running tick using it: if the bounded `join()` below returns
+        while the loop thread is genuinely still alive (e.g. mid-`tick()`
+        blocked in a synchronous spawn attempt up to `spawn_timeout`), this
+        skips closing the client / clearing `_work_intake` and leaves
+        `_thread` set so a caller can `join()` again once it actually
+        exits -- never yanking a resource out from under a live in-flight
+        tick. Resigning presence (deregister/release lease) is unaffected:
+        it touches no work-intake resource."""
         self._stop.set()
+        thread_exited = True
         if self._thread is not None:
             self._thread.join(timeout=timeout)
-            self._thread = None
+            thread_exited = not self._thread.is_alive()
+            if thread_exited:
+                self._thread = None
         if resign:
             self.resign()
+        if thread_exited:
+            self._close_work_intake_client()
+            self._work_intake = None
+            self._work_intake_url = None
 
     def resign(self) -> None:
         """Give up this node's standing: release the lease (eligible) or deregister
