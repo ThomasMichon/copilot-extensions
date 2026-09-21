@@ -390,3 +390,132 @@ def test_powershell_wrapper_falls_back_on_cold_cache(tmp_path):
     assert "[owner: ai-attribution@" in content
     # Recomputing via python must also have warmed the cache for next time.
     assert (writer._cache_dir(home) / f"{writer._repo_cache_key(str(repo))}.json").is_file()
+
+
+def _bash_prereqs():
+    bash = shutil.which("bash")
+    jq = shutil.which("jq")
+    sha = shutil.which("sha256sum") or shutil.which("shasum")
+    return bash, jq, sha
+
+
+def test_bash_wrapper_writes_bounded_session_file(tmp_path):
+    bash, jq, sha = _bash_prereqs()
+    if not (bash and jq and sha):
+        pytest.skip("bash/jq/sha256sum unavailable")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    payload = json.dumps(
+        {"sessionId": "session-1", "cwd": str(repo), "source": "copilot-cli"}
+    )
+    env = {**os.environ, "HOME": str(home), "COPILOT_PLUGIN_ROOT": str(_PLUGIN)}
+    result = subprocess.run(
+        [bash, str(_PLUGIN / "scripts" / "write-session-guidance.sh")],
+        cwd=repo,
+        env=env,
+        input=payload,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout == "{}"
+    content = _target(home).read_text(encoding="utf-8")
+    assert content.startswith("# AI attribution session guidance\n\n")
+    assert "[owner: ai-attribution@" in content
+    assert len(content.encode("utf-8")) <= writer._GUIDANCE_MAX_BYTES
+
+
+def test_bash_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
+    """Same proof as the PowerShell equivalent, adapted for bash: build an
+    isolated PATH containing symlinks only to the tools the fast path needs
+    (bash, jq, sha256sum/shasum, git, coreutils) and deliberately excluding
+    every python3/python/py -- if the fast path did not serve this from
+    cache and fell through to python, there would be none to invoke."""
+    bash, jq, sha = _bash_prereqs()
+    if not (bash and jq and sha):
+        pytest.skip("bash/jq/sha256sum unavailable")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    key = writer._repo_cache_key(str(repo))
+    cache_dir = writer._cache_dir(home)
+    cache_dir.mkdir(parents=True)
+    (cache_dir / f"{key}.json").write_text(
+        json.dumps(
+            {
+                "version": writer._CACHE_FORMAT_VERSION,
+                "computed_at": time_module.time(),
+                "guidance": "[owner: ai-attribution@1.0.0]\ncached policy only",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    isolated_bin = tmp_path / "isolated-bin"
+    isolated_bin.mkdir()
+    for tool in (
+        "bash", "jq", "sha256sum", "shasum", "git", "mkdir", "cat", "printf",
+        "awk", "date", "mv", "rm", "dirname", "cut", "sed", "grep",
+    ):
+        src = shutil.which(tool)
+        if src:
+            try:
+                (isolated_bin / tool).symlink_to(src)
+            except OSError:
+                pytest.skip("symlinks are unavailable")
+
+    payload = json.dumps(
+        {"sessionId": "session-1", "cwd": str(repo), "source": "copilot-cli"}
+    )
+    env = {
+        "PATH": str(isolated_bin),
+        "HOME": str(home),
+        "COPILOT_PLUGIN_ROOT": str(_PLUGIN),
+    }
+    result = subprocess.run(
+        [str(isolated_bin / "bash"), str(_PLUGIN / "scripts" / "write-session-guidance.sh")],
+        cwd=repo,
+        env=env,
+        input=payload,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout == "{}"
+    content = _target(home).read_text(encoding="utf-8")
+    assert "cached policy only" in content
+    assert "unavailable" not in content
+
+
+def test_bash_wrapper_falls_back_on_cold_cache(tmp_path):
+    bash, jq, sha = _bash_prereqs()
+    if not (bash and jq and sha):
+        pytest.skip("bash/jq/sha256sum unavailable")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    payload = json.dumps(
+        {"sessionId": "session-1", "cwd": str(repo), "source": "copilot-cli"}
+    )
+    env = {**os.environ, "HOME": str(home), "COPILOT_PLUGIN_ROOT": str(_PLUGIN)}
+    result = subprocess.run(
+        [bash, str(_PLUGIN / "scripts" / "write-session-guidance.sh")],
+        cwd=repo,
+        env=env,
+        input=payload,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout == "{}"
+    content = _target(home).read_text(encoding="utf-8")
+    assert "[owner: ai-attribution@" in content
+    assert (writer._cache_dir(home) / f"{writer._repo_cache_key(str(repo))}.json").is_file()
