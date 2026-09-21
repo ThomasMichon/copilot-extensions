@@ -77,6 +77,33 @@ def add_parsers(sub) -> None:
         "--json", action="store_true", help="Emit JSON (the default; accepted for consistency)"
     )
 
+    sp = sub.add_parser(
+        "worktree-status-bundle",
+        help=(
+            "Show one worktree's full status bundle -- git state, session "
+            "lineage, liveness, claims, disposition -- via the resident "
+            "worktree-status accelerator (JSON)"
+        ),
+    )
+    sp.add_argument(
+        "--worktree",
+        "--worktree-id",
+        dest="worktree_id",
+        required=True,
+        help="Worktree ID (full or unique suffix)",
+    )
+    sp.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help=(
+            "Bypass the accelerator's cache for this one read (explicit "
+            "discretion only -- never set this implicitly)"
+        ),
+    )
+    sp.add_argument(
+        "--json", action="store_true", help="Emit JSON (the default; accepted for consistency)"
+    )
+
     # conclude-session -- assert a session's conclusion (handed-off | concluded)
     sp = sub.add_parser(
         "conclude-session",
@@ -486,6 +513,67 @@ def cmd_worktree_lineage(args: argparse.Namespace) -> int:
         return _core()._json_error(f"No worktree found: {args.worktree_id}")
     record = tracking.load_record(yaml_path)
     _core()._json_output(lineage_surfaces.worktree_lineage(record))
+    return 0
+
+
+def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
+    """Emit one worktree's full status bundle: git state, session lineage,
+    liveness, claims, and disposition (agent-worktrees-external-status-
+    accelerator effort, Phase 4 -- the in-process reference consumer proving
+    the accelerator design before any cross-venv client builds against the
+    same wire contract).
+
+    Tries the resident status-monitor's ``worktree_status`` daemon first
+    (booting one via ``_ensure_status_monitor`` when none is reachable and
+    the resident monitor isn't opted out), falling back to an uncoalesced,
+    cache-free direct compute (:func:`agent_worktrees.__main__
+    ._worktree_status_compute`) on any miss -- mirroring
+    ``_classify_records``'s own daemon-first structure exactly. ``--force-
+    refresh`` sets the payload's ``force`` flag, bypassing the daemon's
+    cache for this one read (still coalesced against a concurrent
+    force-refresh for the same worktree).
+    """
+    from . import locks as _locks
+    from . import worktree_status_daemon
+
+    core = _core()
+    yaml_path = _find_tracking_file(args.worktree_id)
+    if yaml_path is None:
+        return core._json_error(f"No worktree found: {args.worktree_id}")
+    project = _project_for_tracking_file(yaml_path)
+    if project is None:
+        return core._json_error(
+            f"Could not resolve the owning project for: {args.worktree_id}"
+        )
+    record = tracking.load_record(yaml_path)
+    worktree_id = record.worktree_id
+    force = bool(getattr(args, "force_refresh", False))
+
+    # `record.worktree_id` comes from the YAML's own content, not
+    # necessarily `args.worktree_id` -- a malformed/tampered record could
+    # carry a traversal token here even though the *file path* itself was
+    # already resolved safely. The daemon request path validates via
+    # `worktree_status_daemon.validated_refresh` (see `build_cached_compute`
+    # and the sweep's own wiring in `cmd_status_monitor`); this direct
+    # fallback must apply the identical guard so the uncoalesced path can't
+    # escape the selected project's tracking directory either.
+    fallback = worktree_status_daemon.validated_refresh(core._worktree_status_compute)
+
+    def _fallback() -> dict:
+        return fallback(project, worktree_id)
+
+    lock = core._monitor_lock_path()
+    payload = {"project": project, "worktree_id": worktree_id, "force": force}
+    bundle = worktree_status_daemon.status_with_boot(
+        read_lock_data=lambda: _locks.read_lock(lock),
+        # Honor the resident-monitor opt-out (AGENT_WORKTREES_STATUS_
+        # MONITOR=0), same as `_classify_records`'s own daemon fast path.
+        ensure_monitor=core._ensure_status_monitor if core._status_monitor_enabled() else None,
+        key=f"{project}|{worktree_id}",
+        payload=payload,
+        fallback=_fallback,
+    )
+    core._json_output(bundle)
     return 0
 
 

@@ -117,13 +117,27 @@ session never has to re-derive "what's already done" from the Journal alone.
   cached-projection read path for this data — now recorded in its own
   vision (`visions/plugins/agent-worktrees/README.md`'s new
   *external-status-consumer-contract* Feature) — but agent-dispatch's own
-  consumer of that cache is still undesigned. **Next step for whoever picks
-  this up:** design agent-dispatch's read side once `agent-worktrees`
-  actually exposes the cache the vision now promises; it must stay a
+  consumer of that cache is still undesigned. **The accelerator itself is
+  now BUILT and landed** (`efforts/active/agent-worktrees-external-status-
+  accelerator/README.md`, all six phases done 2026-09-20): a resident
+  `worktree_status_daemon` (SQLite/WAL-backed cache, background sweep,
+  per-worktree coalescing) is wired into `cmd_status_monitor`, with an
+  in-process reference consumer (`agent-worktrees worktree-status-bundle
+  --worktree <id> [--force-refresh]`) proving the design end-to-end. The cross-venv
+  wire contract (rendezvous discovery via the existing `hook_client.py`/
+  `registry_root.py` precedent + the plain JSON-over-socket protocol) is
+  documented in `docs/patterns/work-coalescing-singleton.md`'s new
+  "Cross-venv consumers" section — read that before designing
+  agent-dispatch's own client. **Next step for whoever picks
+  this up:** design agent-dispatch's own read side against that documented
+  contract (a small stdlib-only client in `board_cli.py`, mirroring its
+  existing HTTP-client-to-agent-dispatch's-own-coordinator pattern); it must
+  stay a
   non-authoritative, transient view (never a persisted task-row copy of
   worktree state — a real ownership conflict a Copilot review already
   flagged once). Do not start Phase 8 by reaching for a per-render
-  subprocess. **Phase 5 (Artifacts/claims) is now BLOCKED on the same
+  subprocess (a socket call to the resident accelerator is fine; a spawned
+  subprocess is not). **Phase 5 (Artifacts/claims) is now BLOCKED on the same
   prerequisite** (its own claims computation must consume this same
   not-yet-built projection, per its 2026-09-20 reconciliation note) — it is
   no longer simply "next in Plan order" until that lands; Phase 6 (Repo
@@ -2133,4 +2147,22 @@ worktree via `agent-worktrees -p copilot-extensions create`.
   `agent-worktrees` vision, `docs/patterns/work-coalescing-singleton.md`
   (the shared fallback invariant + validation scenarios), and this
   effort's own Plan/Journal.
+
+### 2026-09-20 — agent-worktrees accelerator landed; Runbook updated
+The `agent-worktrees-external-status-accelerator` effort (started earlier
+the same day) landed all six of its planned phases: a resident
+`worktree_status_daemon` (SQLite/WAL-backed cache, background sweep,
+per-worktree coalescing keyed independently of classify's per-project batch
+key) wired into `cmd_status_monitor`, an in-process reference consumer
+(`agent-worktrees worktree-status-bundle --worktree <id> [--force-refresh]`),
+and the
+cross-venv wire contract documented in `docs/patterns/work-coalescing-
+singleton.md`'s new "Cross-venv consumers" section (rendezvous discovery via
+the existing `hook_client.py`/`registry_root.py` precedent, no new
+mechanism). Updated this effort's Runbook (above) to point at the landed
+daemon and documented contract instead of the earlier "still being built"
+pointer. **Not implemented this session**: agent-dispatch's own client design
+(Phase 8) and the Phase 5 claims-projection consumption — those remain this
+effort's own next steps, now genuinely unblocked rather than waiting on
+foundational work elsewhere.
 

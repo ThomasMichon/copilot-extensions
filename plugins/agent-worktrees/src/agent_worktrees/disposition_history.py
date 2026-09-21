@@ -59,9 +59,19 @@ DIGEST_OMITTED = "- ... older entries omitted ..."
 _FIELDS = ("summary", "title", "follow_up")
 
 
-def history_path(worktree_id: str) -> Path:
-    """Path to a worktree's disposition-history sidecar (not created)."""
-    return cfg.tracking_dir() / f"{worktree_id}.history.jsonl"
+def history_path(worktree_id: str, *, tracking_path: Path | None = None) -> Path:
+    """Path to a worktree's disposition-history sidecar (not created).
+
+    ``tracking_path`` scopes the read/write to an explicit project's
+    tracking directory instead of the ambient active project
+    (``cfg.tracking_dir()``) -- required for any caller with no active
+    project set (e.g. a cross-project daemon resolving an explicit
+    ``project`` argument, per the agent-worktrees-external-status-
+    accelerator effort's own contract), and safer for any caller that
+    already knows which project it means rather than trusting whichever
+    project happens to be ambiently active.
+    """
+    return (tracking_path or cfg.tracking_dir()) / f"{worktree_id}.history.jsonl"
 
 
 def append(
@@ -125,10 +135,13 @@ def append(
         pass
 
 
-def read(worktree_id: str, *, limit: int | None = None) -> list[dict[str, Any]]:
+def read(
+    worktree_id: str, *, limit: int | None = None, tracking_path: Path | None = None
+) -> list[dict[str, Any]]:
     """Return a worktree's disposition history oldest-first. Malformed lines are
-    skipped. ``limit`` keeps only the most recent N entries. Never raises."""
-    path = history_path(worktree_id)
+    skipped. ``limit`` keeps only the most recent N entries. Never raises.
+    ``tracking_path`` -- see :func:`history_path`."""
+    path = history_path(worktree_id, tracking_path=tracking_path)
     entries: list[dict[str, Any]] = []
     try:
         if not path.exists():
