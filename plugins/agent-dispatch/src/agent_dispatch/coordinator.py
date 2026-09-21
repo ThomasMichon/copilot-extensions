@@ -127,6 +127,61 @@ def _self_retire_settings() -> tuple[bool, float, int]:
     return enabled, poll, k
 
 
+# Self-retire force-exit backstop (#3068): a confirmed live incident where a
+# superseded coordinator logged "self-retiring" (i.e. requested a graceful
+# uvicorn shutdown via ``server.should_exit = True``) and then never actually
+# exited -- an unreachable-but-alive zombie that ``has_live_local_coordinator()``
+# correctly refuses to call live (no listening socket, no ``/health`` response),
+# but that nothing reaps, so the CLI's lazy-autostart just layers a brand-new
+# coordinator generation on top of it indefinitely. Overridable via
+# ``AGENT_DISPATCH_SELF_RETIRE_FORCE_EXIT_S``.
+_SELF_RETIRE_FORCE_EXIT_DEFAULT_S = 20.0
+
+
+def _self_retire_force_exit_seconds() -> float:
+    """Deadline (seconds) after ``should_exit`` before self-retire force-exits."""
+    import os
+
+    try:
+        deadline = float(
+            os.environ.get("AGENT_DISPATCH_SELF_RETIRE_FORCE_EXIT_S", "")
+            or _SELF_RETIRE_FORCE_EXIT_DEFAULT_S
+        )
+        return max(1.0, deadline)
+    except ValueError:
+        return _SELF_RETIRE_FORCE_EXIT_DEFAULT_S
+
+
+async def _force_exit_after_should_exit(
+    *,
+    deadline_s: float,
+    my_gen: int,
+    my_pid: int,
+    sleep=asyncio.sleep,
+    force_exit=os._exit,
+) -> None:
+    """Hard backstop for self-retire's graceful uvicorn shutdown (#3068).
+
+    Setting ``server.should_exit = True`` only *requests* a graceful uvicorn
+    shutdown; a request or background task wedging the ASGI shutdown sequence
+    can leave the process alive indefinitely with no way for anything else to
+    detect or reap it. If the process is still running ``deadline_s`` seconds
+    after the graceful request, force-exit rather than leave that zombie.
+
+    ``sleep``/``force_exit`` are injected (default ``asyncio.sleep``/
+    ``os._exit``) so this is independently unit-testable without a real event
+    loop deadline or an actual process exit.
+    """
+    await sleep(deadline_s)
+    log.error(
+        "self-retire: graceful shutdown did not complete within %.0fs of "
+        "should_exit -- force-exiting to avoid an unreachable zombie "
+        "coordinator (was gen %d, pid %d, see #3068)",
+        deadline_s, my_gen, my_pid,
+    )
+    force_exit(1)
+
+
 # Abandoned-passive reap (#5195): the periodic backstop for a passive
 # `spawn_passive` stood up for a cutover whose orchestrator process died
 # before that passive was ever promoted. Self-retire (above) only ever arms
@@ -1504,6 +1559,14 @@ def create_app(
                         server = getattr(_app.state, "uvicorn_server", None)
                         if server is not None:
                             server.should_exit = True
+                        # #3068: `should_exit` only requests a graceful shutdown --
+                        # arm a hard backstop in case it never actually completes.
+                        asyncio.create_task(
+                            _force_exit_after_should_exit(
+                                deadline_s=_self_retire_force_exit_seconds(),
+                                my_gen=my_gen, my_pid=my_pid,
+                            )
+                        )
                         return
 
             self_retire_task = asyncio.create_task(_self_retire_loop())
