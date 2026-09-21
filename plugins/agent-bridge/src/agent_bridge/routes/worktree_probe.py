@@ -45,21 +45,39 @@ if TYPE_CHECKING:
 log = logging.getLogger("agent-bridge")
 
 
+def _local_host_child_alive(mgr: object, session_id: str) -> bool | None:
+    """Live LOCAL Session Host pid check (Phase 2, #6744); None = no record
+    or a remote/unverifiable boundary, so the caller falls back to status.
+
+    Reaches into ``mgr``'s "private" host-liveness helpers (``_host_index``,
+    ``_rec_host_alive``, ``_rec_child_alive``) rather than a public
+    SessionManager method -- mirrors this module's existing
+    module-qualified-reach-in pattern for ``_run_for_agent`` et al., and
+    keeps this Phase 2 addition out of ``session_manager.py``, whose
+    module-size ceiling has repeatedly tightened from unrelated concurrent
+    work during this same PR's review cycle.
+    """
+    rec = mgr._host_index.get(session_id) if mgr._host_index else None
+    if rec is None or getattr(rec, "boundary", "local") != "local":
+        return None
+    return mgr._rec_host_alive(rec) and mgr._rec_child_alive(rec)
+
+
 def resolve_already_live(
     mgr: object | None, db: object | None, worktree_id: str, session: object,
 ) -> bool:
     """True if ``session`` should be returned as-is (still live).
 
-    RUNNING/IDLE is never trusted blindly (Phase 2, #6744): when
-    ``mgr.local_host_child_alive`` confirms the local Session Host child is
-    actually dead, reclassify the session to STOPPED (in-memory + DB) and
-    return False so the caller falls through to the normal resume path.
-    Any other status, or an inconclusive/confirmed-alive live check,
-    returns True/False matching the plain "was it live" question.
+    RUNNING/IDLE is never trusted blindly (Phase 2, #6744): when a live
+    local-host pid check confirms the Session Host child is actually dead,
+    reclassify the session to STOPPED (in-memory + DB) and return False so
+    the caller falls through to the normal resume path. Any other status,
+    or an inconclusive/confirmed-alive live check, returns True/False
+    matching the plain "was it live" question.
     """
     if session.status not in (SessionStatus.RUNNING, SessionStatus.IDLE):
         return False
-    if mgr is None or mgr.local_host_child_alive(session.session_id) is not False:
+    if mgr is None or _local_host_child_alive(mgr, session.session_id) is not False:
         return True
     log.info(
         "resume_worktree %s: %s reports %s but its local host child is "

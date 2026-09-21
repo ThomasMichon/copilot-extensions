@@ -2055,13 +2055,6 @@ class SessionManager(_RecoveryDormancyMixin):
             return pid_alive(rec.child_pid)
         return True
 
-    def local_host_child_alive(self, session_id: str) -> bool | None:
-        """Live LOCAL host pid check (Phase 2, #6744); None = fall back to status."""
-        rec = self._host_index.get(session_id) if self._host_index else None
-        if rec is None or getattr(rec, "boundary", "local") != "local":
-            return None
-        return self._rec_host_alive(rec) and self._rec_child_alive(rec)
-
     def _live_host_records(self) -> list[Any]:
         """Records whose host is (boundary-appropriately) alive."""
         if self._host_index is None:
