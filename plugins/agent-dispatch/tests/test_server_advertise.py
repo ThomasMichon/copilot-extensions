@@ -338,6 +338,55 @@ def test_serve_holds_start_lock_until_actually_responsive(monkeypatch, tmp_path)
     assert any(became_responsive_calls), "readiness probe was never consulted"
 
 
+def test_serve_releases_lock_even_if_poller_join_times_out(monkeypatch, tmp_path):
+    """The bounded ``poller.join()`` in ``serve()``'s finally block is a
+    best-effort wait, not a guarantee the readiness poller has actually
+    released the lock -- a slow DNS/HTTP probe can still be mid-flight past
+    that timeout. ``serve()`` must release the lock itself as a fallback
+    (a safe no-op if the poller already did it), or a stuck probe could
+    strand ``serve-start.lock`` until process exit and block every later
+    start/cutover (review follow-up on ThomasMichon/copilot-extensions#3066).
+    """
+    import time as _time
+
+    from agent_dispatch.single_instance import SingleInstance
+
+    run = tmp_path / "run"
+    routing = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing))
+    monkeypatch.setattr(server, "has_live_local_coordinator", lambda **_: False)
+
+    def _fake_run(self, sockets=None):
+        pass  # returns immediately, well before the readiness poller does
+
+    monkeypatch.setattr(uvicorn.Server, "run", _fake_run)
+
+    def _slow_health_responsive(url, *, timeout=None, token=None):
+        # Simulate a probe call that outlives serve()'s own bounded
+        # poller.join() window.
+        _time.sleep(3.0)
+        return True
+
+    monkeypatch.setattr(
+        "agent_dispatch.config._health_responsive", _slow_health_responsive
+    )
+
+    cfg = Config(host="127.0.0.1", port=0, db_path=str(tmp_path / "tasks.db"))
+    server.serve(cfg)
+
+    # The core assertion: even though the poller's own health probe outlived
+    # serve()'s bounded join, the lock must still end up released (the
+    # fallback release in the finally block), not stranded until process
+    # exit.
+    probe = SingleInstance(routing / "serve-start.lock")
+    assert probe.acquire(), (
+        "start lock must be released even after a slow probe outlives the "
+        "poller's bounded join"
+    )
+    probe.release()
+
+
 def test_serve_raises_when_start_lock_already_held(monkeypatch, tmp_path):
     """A second, concurrent non-passive serve() must not slip past the
     friendly caller-side pre-check and seize the route -- the lock itself is

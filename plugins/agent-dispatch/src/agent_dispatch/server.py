@@ -416,9 +416,15 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
             finally:
                 _server_exited.set()
                 poller.join(timeout=2.0)
-                # The poller above has now released it (or is finishing up
-                # doing so within a moment of `_server_exited` being set) --
-                # clear the reference so the outer finally doesn't double-release.
+                # The bounded join above does not *guarantee* the poller has
+                # released it -- a slow DNS/HTTP probe can still be mid-flight
+                # past the timeout. Release it here as a fallback regardless
+                # (SingleInstance.release() is a safe no-op if the poller
+                # already did it) before clearing the reference, or a stuck
+                # probe could strand serve-start.lock until process exit and
+                # block every later start/cutover (review follow-up on
+                # ThomasMichon/copilot-extensions#3066).
+                _lock.release()
                 start_lock = None
         else:
             server.run(sockets=[sock])
