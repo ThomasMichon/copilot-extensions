@@ -21,6 +21,7 @@ import time
 
 from rich.panel import Panel
 from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
@@ -357,6 +358,42 @@ def _poll_secs() -> float:
 
 
 POLL_SECS = _poll_secs()
+
+
+def _idle_timeout_secs() -> float:
+    """Self-exit threshold (seconds) for the Picker's own idle-liveness check
+    (copilot-extensions#2761 follow-up).
+
+    An ``isatty()`` check at spawn time (``run_tui_picker``) only rejects a
+    launch that never had a real terminal to begin with; it cannot detect a
+    genuinely-interactive-at-spawn session whose owning terminal is later torn
+    down without the child process noticing (observed on book2: a resident
+    Picker process pair surviving for hours, discoverable only via a process
+    census). Rather than attempt a platform-specific "is my controlling
+    terminal still alive" probe -- there is no single reliable cross-platform
+    signal for that short of a failed read/write, and Textual's own driver
+    already surfaces those as a crash (logged by
+    ``_write_picker_crash_log``) when they occur -- this bounds the exposure
+    the same way the engine's resident status-monitor bounds its own orphaned
+    instances: a generous, self-retiring idle timeout. A picker with zero
+    real input events (keys/mouse/paste; background poll/render timers do NOT
+    count) for this many seconds exits gracefully, same as the user
+    confirming "quit" with no launch decision made.
+
+    Conservative default (30 minutes) so normal interactive use -- reading a
+    long worktree list, stepping away briefly -- is never affected.
+    ``AGENT_WORKTREES_PICKER_IDLE_TIMEOUT_SECONDS`` overrides it, and ``<= 0``
+    disables the check entirely (mirrors ``_poll_secs``'s own disable idiom).
+    """
+    try:
+        return float(
+            os.environ.get("AGENT_WORKTREES_PICKER_IDLE_TIMEOUT_SECONDS", "1800")
+        )
+    except (TypeError, ValueError):
+        return 1800.0
+
+
+IDLE_TIMEOUT_SECS = _idle_timeout_secs()
 
 # Maintenance groups worktrees by state; this is the display order (#1345).
 # Any state not listed is appended after these, in first-seen order.
@@ -9181,6 +9218,11 @@ class PickerApp(App):
         self._mock_mode = mock_mode
         self._after_first_refresh = after_first_refresh
         self.result = None            # set by the screen on a launch decision
+        # Idle-liveness self-exit (copilot-extensions#2761 follow-up) -- see
+        # `_idle_timeout_secs` for the full rationale. Tracked in monotonic
+        # time so a system clock change never produces a spurious timeout.
+        self._last_input_activity = time.monotonic()
+        self._idle_check_timer = None
 
     def compose(self) -> ComposeResult:
         yield PickerScreen(
@@ -9189,3 +9231,37 @@ class PickerApp(App):
             mock_mode=self._mock_mode,
             after_first_refresh=self._after_first_refresh,
         )
+
+    def on_mount(self) -> None:
+        if IDLE_TIMEOUT_SECS > 0:
+            # Check at 1/10th the timeout (bounded to a sane range) so the
+            # actual exit lands within ~10% of the configured threshold
+            # without polling needlessly often for a long timeout.
+            check_interval = max(5.0, min(60.0, IDLE_TIMEOUT_SECS / 10))
+            self._idle_check_timer = self.set_interval(
+                check_interval, self._check_idle_timeout)
+
+    async def on_event(self, event) -> None:
+        # Only a real input event counts as activity -- the background
+        # poll/render timers elsewhere in this module fire continuously and
+        # must never reset the idle clock, or this check would never fire.
+        if isinstance(event, (events.Key, events.MouseEvent, events.Paste)):
+            self._last_input_activity = time.monotonic()
+        await super().on_event(event)
+
+    def _check_idle_timeout(self) -> None:
+        if IDLE_TIMEOUT_SECS <= 0:
+            return
+        idle_for = time.monotonic() - self._last_input_activity
+        if idle_for < IDLE_TIMEOUT_SECS:
+            return
+        try:
+            from .frame_health import append_launch_event
+
+            append_launch_event(
+                "picker_idle_timeout_exit", idle_seconds=round(idle_for, 1))
+        except Exception:
+            pass
+        # No launch decision was made -- self.result stays None, exactly like
+        # the user confirming "quit" on QuitConfirmScreen with no selection.
+        self.exit()

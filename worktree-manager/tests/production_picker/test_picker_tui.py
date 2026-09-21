@@ -8692,3 +8692,126 @@ def test_codespaces_state_column_is_colour_coded(tmp_path, monkeypatch):
             assert _rgb(C_STATE["ACTIVE"]) in ansi
 
     asyncio.run(run())
+
+
+# ── idle-liveness self-exit (copilot-extensions#2761 follow-up) ──────────────
+# A bare Picker invocation whose owning terminal is torn down mid-session
+# (rather than never having one at all, which `run_tui_picker`'s isatty()
+# gate already rejects at spawn) previously had nothing to bound its
+# lifetime: no real input ever arrives again, and the process sits resident
+# indefinitely. These tests exercise the App-level idle-check independent of
+# any real terminal teardown (which is not reproducible in a headless test
+# harness) by manipulating the tracked activity timestamp directly.
+
+
+def test_idle_timeout_exits_with_no_result_when_stale(monkeypatch):
+    """A Picker whose last recorded input activity is older than the
+    configured idle timeout self-exits with no launch decision -- the same
+    outcome as the user confirming "quit" without selecting anything."""
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    monkeypatch.setattr(eng, "IDLE_TIMEOUT_SECS", 60.0)
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)):
+            app._last_input_activity = time.monotonic() - 3600
+            app._check_idle_timeout()
+            assert app.result is None
+
+    asyncio.run(run())
+
+
+def test_idle_timeout_does_not_exit_when_recently_active(monkeypatch):
+    """A Picker with recent activity must never be exited by the idle check,
+    regardless of how frequently the periodic timer polls it."""
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    monkeypatch.setattr(eng, "IDLE_TIMEOUT_SECS", 60.0)
+    src = _fixture_source()
+    exited = []
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)):
+            app.exit = lambda *a, **k: exited.append(True)
+            app._last_input_activity = time.monotonic()
+            app._check_idle_timeout()
+
+    asyncio.run(run())
+    assert exited == []
+
+
+def test_idle_timeout_disabled_by_nonpositive_value(monkeypatch):
+    """`AGENT_WORKTREES_PICKER_IDLE_TIMEOUT_SECONDS <= 0` disables the check
+    entirely, mirroring `_poll_secs`'s own disable idiom -- a Picker must
+    never self-exit no matter how long it sits with no configured timeout."""
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    monkeypatch.setattr(eng, "IDLE_TIMEOUT_SECS", 0.0)
+    src = _fixture_source()
+    exited = []
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)):
+            app.exit = lambda *a, **k: exited.append(True)
+            app._last_input_activity = time.monotonic() - 10_000_000
+            app._check_idle_timeout()
+
+    asyncio.run(run())
+    assert exited == []
+
+
+def test_real_key_press_resets_idle_activity_clock():
+    """A genuine key event -- what the App's own `on_event` override is
+    supposed to treat as activity -- must push the tracked timestamp forward,
+    proving the idle clock is wired to real input and not just app startup."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            app._last_input_activity = time.monotonic() - 10_000
+            before = app._last_input_activity
+            await pilot.press("down")
+            assert app._last_input_activity > before
+
+    asyncio.run(run())
+
+
+def test_background_poll_timer_does_not_count_as_activity():
+    """The screen's own frequent internal repaint tick (`_tick`, 100ms) must
+    NOT reset the idle-activity clock -- only real input events may, or the
+    idle timeout could never fire in a picker just sitting open and
+    rendering."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            app._last_input_activity = time.monotonic() - 10_000
+            before = app._last_input_activity
+            # Let the screen's own internal 100ms tick fire several times.
+            scr._tick()
+            scr._tick()
+            await pilot.pause()
+            assert app._last_input_activity == before
+
+    asyncio.run(run())
+
+
+def test_idle_timeout_secs_env_override(monkeypatch):
+    """`AGENT_WORKTREES_PICKER_IDLE_TIMEOUT_SECONDS` overrides the default,
+    and a malformed value degrades to the documented default rather than
+    raising -- mirroring `_poll_secs`'s own malformed-value behavior."""
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_IDLE_TIMEOUT_SECONDS", "120")
+    assert eng._idle_timeout_secs() == 120.0
+
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_IDLE_TIMEOUT_SECONDS", "not-a-number")
+    assert eng._idle_timeout_secs() == 1800.0
+
