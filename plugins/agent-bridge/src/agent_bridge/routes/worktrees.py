@@ -201,9 +201,9 @@ class WorktreeDiscoveryCache:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        # Same shutdown discipline for classify backfills (#discussion_
-        # r4004943069) and in-flight archived-owner probes: cancel/await so
-        # neither outlives the rest of application shutdown.
+        # Same shutdown discipline for classify backfills
+        # (#discussion_r4004943069) and in-flight archived-owner probes:
+        # cancel/await so neither outlives the rest of application shutdown.
         for pending in (
             [t for t in self._backfill_tasks if not t.done()],
             [t for t in self._archive_probe_inflight.values() if not t.done()],
