@@ -16,7 +16,8 @@ visions:
   Behavior `task-detail-on-demand` and Feature `navigable-on-demand-grounding`
   already state the target; reality currently violates both.
 - **Umbrella issue:** [ThomasMichon/copilot-extensions#3033](https://github.com/ThomasMichon/copilot-extensions/issues/3033)
-- **Sub-issues:** [Phase 1 -- #3071](https://github.com/ThomasMichon/copilot-extensions/issues/3071).
+- **Sub-issues:** [Phase 1 -- #3071](https://github.com/ThomasMichon/copilot-extensions/issues/3071),
+  [Phase 2 -- #3082](https://github.com/ThomasMichon/copilot-extensions/issues/3082).
 
 ## Guiding Intent
 
@@ -492,3 +493,39 @@ _Pending._
 - `customizing-copilot`'s full suite (163 passed, 6 skipped),
   `check-version-bump`, `check-version-consistency`, and
   `check-docs-consistency` all green. Not yet started: Phase 2.
+
+### 2026-09-20 (cont.) -- Phase 2 slice 1: the deterministic worker's decision layer
+- Read the private `config-reflect` architecture this phase is modeled on
+  (`services/config-reflect-daemon/docs/architecture.md`,
+  `tools/config-reflect/conflict_dispatch.py`) to ground the reusable-
+  primitives mapping before writing any code, per the Plan's own pointer.
+- Landed `plugins/customizing-copilot/skills/reviewing-customizations/scripts/projection_reflect.py`:
+  the **policy layer** the deterministic sync tool needs on top of the
+  already-existing `sync_repository`/`scan_repository` mechanism -- the
+  `changed or lock_updated` actionable-change trigger, fail-closed finding
+  classification (only `projection-missing`/`projection-source-update` are
+  plain drift; every other check name, known or not, conflict-routes), and
+  a trusted-source allowlist keyed off a lock entry's own
+  `plugin@marketplace` identity. Pure, dependency-free functions -- no
+  rendering, writing, or pushing.
+- 20 tests (`test_projection_reflect.py`, `pytest.mark.guard`): unit-level
+  proofs for each function plus two integration tests against the real
+  `sync_repository`/`scan_repository` engine (a clean sync/scan against a
+  trusted source is bypass-eligible; a simulated hand-edit of a managed
+  projection -- the actual conflict-dispatch trigger case -- correctly
+  routes away from bypass).
+- **Explicitly did not claim the "Deterministic sync tool" checklist item
+  done** -- this slice is the decision layer only. Still open: the actual
+  worker script that orchestrates refresh-payloads -> sync -> scan and
+  opens the stamp-labeled PR; and the Plan's **immutable-pin verification**
+  requirement (a commit SHA/release digest per changed source, not just
+  today's version string) has no home yet in the lock schema or the
+  marketplace-source resolver -- flagged as a tracked, unsolved gap in the
+  module's own docstring rather than guessed at. A hand-edit conflict is
+  proven to correctly conflict-route; wiring that finding through to an
+  actual `conflict-dispatch` call is the next slice, alongside the
+  conflict-dispatch primitive and `projection-reconciler` agent template
+  items.
+- `customizing-copilot`'s full suite (175 passed, 6 skipped),
+  `check-version-bump`, `check-version-consistency`, and
+  `check-docs-consistency` all green.
