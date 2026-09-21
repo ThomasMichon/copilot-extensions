@@ -18,7 +18,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.4.0-dev528",
+      "version": "0.4.0-dev529",
       "source": "plugins/agent-bridge"
     },
     {
@@ -72,13 +72,13 @@
     {
       "name": "customizing-copilot",
       "description": "Customize, diagnose, and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, hoisting plugin agents around a delegation limitation, componentizing oversized modules, authoring <repo>-harness plugins, and setting up an instruction-projection sync worker - with the per-skill folder conventions and Agent Skills best practices; ships eleven focused skills",
-      "version": "0.1.0-dev86",
+      "version": "0.1.0-dev87",
       "source": "plugins/customizing-copilot"
     },
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.2-dev155",
+      "version": "0.1.2-dev156",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -108,7 +108,7 @@
     {
       "name": "agent-machines",
       "description": "Portable machine setup and restore for Copilot CLI. Derives setup from declared topology, enabled capabilities, and in-repo requirement packages, then converges the current machine through Copilot settings, resources, and repo-local modules. Organization policy and per-machine values remain downstream while the engine and conductor stay generic.",
-      "version": "0.1.0-dev129",
+      "version": "0.1.0-dev130",
       "source": "plugins/agent-machines"
     },
     {

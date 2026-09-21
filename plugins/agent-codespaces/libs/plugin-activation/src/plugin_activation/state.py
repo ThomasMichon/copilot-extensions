@@ -96,6 +96,31 @@ def read_json_object(
     return header, value
 
 
+def _object_unchanged(
+    path: Path,
+    value: dict[str, Any],
+    header: str = "",
+    *,
+    jsonc_header: bool = False,
+) -> bool:
+    """Return whether ``path`` already holds this exact object and header.
+
+    Used to skip a write entirely when nothing would actually change. This
+    file is shared, user-global state (``~/.copilot/settings.json`` /
+    ``config.json``) that every open Copilot CLI session on the machine
+    watches; an unconditional rewrite on every call -- even one that changes
+    nothing -- fires a distinct file-change event per call and can trigger a
+    cross-session extension-host reload storm.
+    """
+    if not path.exists():
+        return False
+    try:
+        existing_header, existing = read_json_object(path, jsonc_header=jsonc_header)
+    except PluginStateError:
+        return False
+    return existing_header == header and existing == value
+
+
 def write_json_object_atomic(
     path: Path,
     value: dict[str, Any],
@@ -399,7 +424,8 @@ def restore(snapshot: ActivationSnapshot, home: Path | None = None) -> None:
     else:
         settings.pop("enabledPlugins", None)
     if settings or snapshot.settings_existed:
-        write_json_object_atomic(settings_path, settings)
+        if not _object_unchanged(settings_path, settings):
+            write_json_object_atomic(settings_path, settings)
     elif settings_path.exists():
         settings_path.unlink()
 
@@ -408,13 +434,16 @@ def restore(snapshot: ActivationSnapshot, home: Path | None = None) -> None:
     for record in inventory_records(config, config_path):
         if inventory_identity(record) != snapshot.identity:
             continue
-        record["enabled"] = (
+        new_enabled = (
             snapshot.inventory_enabled
             if snapshot.inventory_enabled is not None
             else bool(snapshot.user_value)
             if snapshot.user_value_existed
             else False
         )
+        if record.get("enabled") == new_enabled:
+            return
+        record["enabled"] = new_enabled
         write_json_object_atomic(config_path, config, header)
         return
 

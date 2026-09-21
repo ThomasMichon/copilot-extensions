@@ -100,6 +100,38 @@ def test_snapshot_restore_preserves_user_activation_tristate(tmp_path, before):
     assert state["userActivation"] == expected
 
 
+def test_restore_skips_rewrite_when_nothing_changed(tmp_path):
+    # restore() previously rewrote the shared, user-global settings.json/
+    # config.json on every call regardless of whether anything actually
+    # changed, generating a distinct file-change event per plugin per update
+    # sweep. Confirm it now leaves both files untouched (same mtime) when the
+    # install left activation exactly as captured.
+    home = _write_state(tmp_path, True, inventory_enabled=True)
+    settings_path = home / "settings.json"
+    config_path = home / "config.json"
+    settings_before = settings_path.stat().st_mtime_ns
+    config_before = config_path.stat().st_mtime_ns
+
+    snapshot = capture(IDENTITY, home)
+    restore(snapshot, home)
+
+    assert settings_path.stat().st_mtime_ns == settings_before
+    assert config_path.stat().st_mtime_ns == config_before
+
+
+def test_restore_still_writes_when_activation_actually_changed(tmp_path):
+    home = _write_state(tmp_path, True, inventory_enabled=True)
+    snapshot = capture(IDENTITY, home)
+    _, settings = read_json_object(home / "settings.json")
+    settings["enabledPlugins"][IDENTITY] = False
+    write_json_object_atomic(home / "settings.json", settings)
+
+    restore(snapshot, home)
+
+    state = inspect_plugin_state(IDENTITY, home)
+    assert state["userActivation"] == "true"
+
+
 def test_installing_missing_inventory_preserves_absent_user_activation(
     tmp_path,
     monkeypatch,
