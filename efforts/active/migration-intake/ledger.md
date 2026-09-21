@@ -1,8 +1,12 @@
 # Migration Intake — Candidate Ledger
 
-Append-only. One row per candidate. See `README.md` § Intake Contract for the
-disposition taxonomy and ownership rules. A candidate leaves `residual` only
-once a later pass can resolve its disposition with evidence.
+Append-only. One row per candidate per pass. See `README.md` § Intake
+Contract for the disposition taxonomy and ownership rules. A prior pass's
+row is never edited in place -- a later pass appends its own dated section
+recording the candidate's current disposition, so the full history from
+initial scan to final outcome stays comparable and auditable.
+
+## Initial scan (2026-09-20)
 
 | # | Candidate (general-purpose statement) | Source (internal only, never published) | Disposition | Owner | Tracker outcome |
 |---|----------------------------------------|-------------------------------------------|--------------|-------|------------------|
@@ -33,3 +37,34 @@ once a later pass can resolve its disposition with evidence.
 - `context-handoff-overhaul` and `budget-aware-model-routing` are the clearest candidates for "should this join the canonical domain-plans list" if either grows into a standing domain plan, but neither currently has enough evidence to add on this pass.
 
 *(Initial pass, 2026-09-20: ~47 active effort directories skimmed for Journal/Plan deferral language; see README.md Journal for scan scope. Not exhaustive -- prioritized breadth over depth. Every row above is `pending Phase 2 revalidation` in spirit: none have been re-validated against current code/docs/issues yet, so no tracker entries have been created from this pass.)*
+
+## Phase 2 revalidation (2026-09-20)
+
+Re-checks the same 19 candidate numbers above against current source/target
+effort text. This section records the *revalidated* disposition/owner/
+outcome per candidate; it does not edit the Initial scan table above, so a
+reader can compare what changed and why.
+
+| # | Revalidated disposition | Revalidated owner | Outcome | What changed vs. initial scan |
+|---|--------------------------|--------------------|---------|-------------------------------|
+| 1 | superseded | worktree-manager-control-plane | already covered by Phase 3b Slice 1 -- no action | confirmed unchanged |
+| 2 | residual | migration-intake | source effort is Done and deliberately leaves this open; no domain owner fits yet | owner narrowed from "candidate: worktree-finality-and-obligations" to confirmed-unclear (stays with intake) |
+| 3 | routed | worktree-manager-control-plane | accepted into Phase 8 | candidate statement sharpened to the specific deferred item (cached worktree-status projection); Phase 3 action completed |
+| 4 | closed-obsolete | n/a | delivered in source's own Phase 7 since the initial scan | corrected from `rejected` -- the work landed, so no disposition was even needed |
+| 5 | routed | agent-machines-declarative-control-plane | accepted into new Phase 5 | corrected from `rejected` -- on re-read this is portable deferred scheduler-parity work, not an out-of-scope quirk |
+| 6 | residual | migration-intake | still optional/out-of-scope at source; no active domain owns daemon self-retire semantics | confirmed unchanged |
+| 7 | rejected | n/a | blocked on facility-specific SSH/WSL transport proof, not a portable product gap | confirmed unchanged |
+| 8 | residual | migration-intake | agent-machines-declarative-control-plane is about machine/resource declarations, not dispatch worker identity -- no fitting owner found | corrected from `routed` -- the proposed owner does not actually fit |
+| 9 | routed | worktree-finality-and-obligations | accepted into Phase 7 | confirmed; Phase 3 action completed |
+| 10 | closed-obsolete | n/a | delivered upstream since the initial scan (2026-09-20); a different spawn-retry-loop issue remains open separately | corrected from `routed` -- the work landed |
+| 11 | residual | migration-intake | next componentization candidate, not a reusable cross-domain capability | confirmed unchanged |
+| 12 | superseded | native-construct-convergence | already covered by its own Phase C (#988) -- no action | corrected owner from the initial mis-routing guess (worktree-manager-control-plane) to the effort's own existing Phase C |
+| 13 | closed-obsolete | n/a | effort is Done; the work landed since the initial scan | corrected from `residual` -- the work landed |
+| 14 | routed | account-aware-operations | accepted into new Phase 5 | corrected owner from initial "unclear" -- the deferred overlay is blocked specifically on caller-identity/network resolution, which account-aware-operations owns |
+| 15 | routed | review-automation-reliability | accepted into new Phase 11 | confirmed; Phase 3 action completed |
+| 16 | routed | worktree-finality-and-obligations | accepted into Phase 7 | confirmed; Phase 3 action completed |
+| 17 | routed | marketplace-scoped-installations | accepted into Phase 7 | confirmed; Phase 3 action completed |
+| 18 | closed-obsolete | n/a | source is Done; guard is strict-clean in CI | confirmed unchanged |
+| 19 | routed | marketplace-scoped-installations | accepted into Phase 7 | corrected owner from initial "unclear" -- the audit scope squarely belongs to the install-cell/install-contract surface |
+
+*(Phase 2 revalidation, 2026-09-20: all 19 raw candidates re-checked against current source/target effort text. 8 were stale on second read (4 already delivered since the initial scan -> `closed-obsolete`; 1 mis-routed owner corrected to its own already-covering effort). 8 accepted `routed` candidates were placed into their target effort's own "Reconcile deferred backlog" phase (adding that phase where it did not yet exist: `agent-machines-declarative-control-plane` Phase 5, `account-aware-operations` Phase 5, `review-automation-reliability` Phase 11). 4 remain `residual` under `migration-intake` itself: no fitting canonical domain owner was found among the known domain plans. No public GitHub issues were created -- Phase 3's "create or update a public issue" step still requires domain-owner acceptance of each newly-added Plan item, which happens through that domain effort's own normal review, not this ledger.)*

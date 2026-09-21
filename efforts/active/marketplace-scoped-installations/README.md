@@ -328,6 +328,13 @@ because they provide tools or services.
       contract; return obsolete or unsafe candidates for explicit disposition.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
       extending this plan before implementation when necessary.
+- [ ] Unify installed-payload self-provisioning semantics, including Windows
+      stamp parity for self-provisioning/first-use stamps, across the
+      installer/payload-invocation contract.
+- [ ] Audit duplicated installer helpers across plugins and classify each as
+      engine-worthy (candidate for consolidation into a shared engine/helper)
+      or a permanent, deliberate per-plugin exception, before deciding which
+      to consolidate.
 - [ ] Keep examples synthetic and distribution-neutral.
 
 ## Validation Plan

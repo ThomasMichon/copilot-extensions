@@ -400,6 +400,11 @@ realized in `main`; unchecked items are the remaining delta.
       disposition.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
       extending this plan before implementation when necessary.
+- [ ] Cached worktree-status projection for external consumers: expose a
+      manager/engine-backed, cached worktree-status view (e.g. the
+      agent-dispatch Tasks-pane's Worktree Status card) over the `--json`
+      engine boundary so external consumers stop polling `agent-worktrees`
+      directly per render.
 - [ ] Keep configuration examples synthetic and repository-neutral.
 
 ## Validation Plan

@@ -464,6 +464,15 @@ below for the carved implementation plan.
   disposition.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
   extending this plan before implementation when necessary.
+- [ ] Durable end-to-end lifecycle auditability: instrument session/handoff
+  cutover transitions (creation, transfer, completion, abandonment) so the
+  full audit trail is traceable, closing the remaining cross-link/session-
+  state trace gaps beyond what the session-claim lifecycle (Phase 8) already
+  covers.
+- [ ] Claim-safe terminal reclamation: finish reclaiming terminal workspaces
+  with obligation-preserving release semantics -- inbound-claim release,
+  multi-claim safety, and historical adoption/status surfaces -- rather than
+  as a standalone reclamation slice.
 - [ ] Keep fixtures synthetic and independent of any adopting worktree registry.
 
 ### Phase 8 - Session-claim lifecycle (proposed 2026-09-14; designed 2026-09-16; build started 2026-09-17)
@@ -1849,7 +1858,7 @@ The approved design is the faceted model in [design.md](design.md):
   2. PR #2792 (closed as duplicate once #2790 landed).
   3. A **third draft, never pushed or reviewed**, sitting as a local,
      unpushed commit in a since-finalized scratch worktree
-     (`tmichon-book2-win-20260916-111901-9750`). Discovered during this
+     (`operator-book2-win-20260916-111901-9750`). Discovered during this
      sweep; confirmed via `git merge-base --is-ancestor` that its content
      never reached `main` through any path. Diffed against the merged
      #2790 text and found genuinely different wording/structure (not a
@@ -1861,7 +1870,7 @@ The approved design is the faceted model in [design.md](design.md):
      without operator direction would be an unrequested redesign, not a
      cleanup. Flagging here for the record rather than silently
      discarding it. The retry-storm bug itself is filed as
-     [gim-home/odsp-web-harness#431](https://github.com/gim-home/odsp-web-harness/issues/431)
+     [example-org/example-web-harness#431](https://github.com/example-org/example-web-harness/issues/431)
      (separately tracked; not this effort's concern to fix).
   - The scratch worktree holding that third draft, plus one unrelated idle
     stray worktree from the same busy window, were finalized/cleaned up as
@@ -1879,8 +1888,8 @@ The approved design is the faceted model in [design.md](design.md):
   (Phase 9) as complete, and posted a status comment on umbrella issue
   [#1312](https://github.com/ThomasMichon/copilot-extensions/issues/1312):
   Phase 9 fully done, Phase 8 designed but not yet built.
-- Cleaned up this effort's own worktree-tracking fallout on the odsp-web-
-  harness worktree that drove the retry storm: both stale
+- Cleaned up this effort's own worktree-tracking fallout on the
+  example-web-harness worktree that drove the retry storm: both stale
   `pending_handoffs` ordinals (tokens `6da32566d54244b4be9ec26cab00b04f`
   and a third, separately-saved `8566349f91a644f4b262d4c4e9ca9ab5` baton
   that was never picked up) marked `cancelled` rather than left dangling;
