@@ -1019,3 +1019,258 @@ def test_cli_self_update_status_emits_json(monkeypatch, capsys):
     assert rc == 0
     assert payload["tiers"][0]["registered"] is True
     assert payload["tiers"][0]["opted_in"] is True
+
+
+# --- Linux/WSL: per-user systemd timer scheduling --------------------------
+#
+# Companion to the Windows Scheduled Task tests above: on Linux/WSL,
+# `agent-machines self-update` used to unconditionally report "Scheduled
+# Tasks are supported only on Windows" with no fallback -- opting a
+# Linux/WSL machine in to the `watchdog`/`sweep` tiers silently did nothing,
+# so the self-correcting drift check the tiers exist to provide never ran
+# there. These tests cover the `systemctl --user` timer equivalent that
+# closes that gap.
+
+
+def _fake_command_result(argv, returncode=0, stdout="", stderr=""):
+    return self_update.CommandResult(list(argv), returncode, stdout, stderr)
+
+
+def test_render_linux_timer_unit_hourly_vs_daily():
+    hourly = self_update_tasks.render_linux_timer_unit("watchdog")
+    assert "OnBootSec=5min" in hourly
+    assert "OnUnitActiveSec=1h" in hourly
+    assert "OnCalendar" not in hourly
+
+    daily = self_update_tasks.render_linux_timer_unit("sweep")
+    assert "OnCalendar=*-*-* 03:00:00" in daily
+    assert "OnUnitActiveSec" not in daily
+
+    for unit in (hourly, daily):
+        assert "WantedBy=timers.target" in unit
+        assert "Persistent=true" in unit
+
+
+def test_render_linux_service_unit_includes_machine_and_workdir(tmp_path):
+    unit = self_update_tasks.render_linux_service_unit(
+        "sweep", machine="box-1", home=tmp_path
+    )
+    assert "Type=oneshot" in unit
+    assert "-m agent_machines self-update run --tier sweep --machine box-1" in unit
+    assert f"WorkingDirectory={self_update_tasks.task_working_directory(tmp_path)}" in unit
+
+
+def test_linux_systemd_user_available_false_without_binary():
+    available = self_update_tasks.linux_systemd_user_available(
+        resolve_binary=lambda _name: None,
+        runner=lambda *a, **k: _fake_command_result(["systemctl"]),
+    )
+    assert available is False
+
+
+def test_linux_systemd_user_available_true_when_running():
+    available = self_update_tasks.linux_systemd_user_available(
+        resolve_binary=lambda _name: "/usr/bin/systemctl",
+        runner=lambda argv, **k: _fake_command_result(argv, 0, "running\n"),
+    )
+    assert available is True
+
+
+def test_linux_systemd_user_available_false_when_offline():
+    """Regression: `systemctl --user is-system-running` can exit non-zero
+    with a non-empty state like 'offline' -- the manager process exists but
+    isn't usable yet, so treating any non-empty stdout as "available" let
+    the subsequent is-enabled/registration calls fail with a raw error
+    instead of the documented graceful 'skipped' result."""
+    available = self_update_tasks.linux_systemd_user_available(
+        resolve_binary=lambda _name: "/usr/bin/systemctl",
+        runner=lambda argv, **k: _fake_command_result(argv, 1, "offline\n"),
+    )
+    assert available is False
+
+
+def test_linux_exec_start_quotes_executable_with_spaces():
+    """Regression: systemd's `ExecStart=` splits the command line similarly
+    to a shell, so an unquoted executable path containing whitespace (a real
+    possibility for `sys.executable`) silently becomes multiple arguments and
+    the unit fails to start."""
+    exec_start = self_update_tasks._systemd_quote("/opt/Program Files/python3")
+    assert exec_start == '"/opt/Program Files/python3"'
+    plain = self_update_tasks._systemd_quote("/usr/bin/python3")
+    assert plain == "/usr/bin/python3"
+
+
+def test_reconcile_scheduled_task_skips_non_linux_posix_platform(monkeypatch, tmp_path):
+    """Regression: dispatching every non-Windows platform (including macOS)
+    into the Linux systemd path attempted to write/query systemd units
+    wherever a `systemctl` binary happened to be present, instead of leaving
+    genuinely unsupported platforms at the existing skipped result."""
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "darwin")
+    calls: list[str] = []
+    monkeypatch.setattr(
+        self_update_tasks,
+        "linux_systemd_user_available",
+        lambda **kwargs: calls.append("probed"),
+    )
+    result = self_update.reconcile_scheduled_task(
+        "watchdog",
+        desired_present=True,
+        runner=lambda *a, **k: _fake_command_result(["systemctl"]),
+        home=tmp_path,
+    )
+    assert result.status == "skipped"
+    assert calls == []
+    assert "darwin" in result.detail
+
+
+def test_query_systemd_timer_absent_when_units_missing(tmp_path):
+    snapshot = self_update_tasks.query_systemd_timer(
+        "watchdog",
+        runner=lambda *a, **k: _fake_command_result(["systemctl"]),
+        resolve_binary=lambda name: f"/usr/bin/{name}",
+        home=tmp_path,
+    )
+    assert snapshot.present is False
+
+
+def test_query_systemd_timer_matches_after_register(tmp_path):
+    def runner(argv, **kwargs):
+        if "is-enabled" in argv:
+            return _fake_command_result(argv, 0, "enabled\n")
+        if "is-active" in argv:
+            return _fake_command_result(argv, 0, "active\n")
+        return _fake_command_result(argv, 0)
+
+    registered = self_update_tasks.register_systemd_timer(
+        "watchdog",
+        machine="box-1",
+        runner=runner,
+        resolve_binary=lambda name: f"/usr/bin/{name}",
+        home=tmp_path,
+    )
+    assert registered.returncode == 0
+    assert self_update_tasks._linux_service_unit_path("watchdog", tmp_path).exists()
+    assert self_update_tasks._linux_timer_unit_path("watchdog", tmp_path).exists()
+
+    snapshot = self_update_tasks.query_systemd_timer(
+        "watchdog",
+        machine="box-1",
+        runner=runner,
+        resolve_binary=lambda name: f"/usr/bin/{name}",
+        home=tmp_path,
+    )
+    assert snapshot.present is True
+    assert snapshot.enabled is True
+    assert snapshot.state == "active"
+    assert snapshot.matching is True
+
+
+def test_query_systemd_timer_not_matching_when_unit_content_drifted(tmp_path):
+    def runner(argv, **kwargs):
+        if "is-enabled" in argv:
+            return _fake_command_result(argv, 0, "enabled\n")
+        if "is-active" in argv:
+            return _fake_command_result(argv, 0, "active\n")
+        return _fake_command_result(argv, 0)
+
+    self_update_tasks.register_systemd_timer(
+        "sweep",
+        runner=runner,
+        resolve_binary=lambda name: f"/usr/bin/{name}",
+        home=tmp_path,
+    )
+    # Simulate hand-edited/stale drift in the installed unit.
+    self_update_tasks._linux_service_unit_path("sweep", tmp_path).write_text(
+        "[Unit]\nDescription=stale\n", encoding="utf-8"
+    )
+    snapshot = self_update_tasks.query_systemd_timer(
+        "sweep",
+        runner=runner,
+        resolve_binary=lambda name: f"/usr/bin/{name}",
+        home=tmp_path,
+    )
+    assert snapshot.present is True
+    assert snapshot.matching is False
+
+
+def test_unregister_systemd_timer_removes_units_and_disables(tmp_path):
+    calls: list[list[str]] = []
+
+    def runner(argv, **kwargs):
+        calls.append(list(argv))
+        return _fake_command_result(argv, 0)
+
+    self_update_tasks.register_systemd_timer(
+        "watchdog", runner=runner, resolve_binary=lambda name: f"/usr/bin/{name}", home=tmp_path
+    )
+    removed = self_update_tasks.unregister_systemd_timer(
+        "watchdog", runner=runner, resolve_binary=lambda name: f"/usr/bin/{name}", home=tmp_path
+    )
+    assert removed.returncode == 0
+    assert not self_update_tasks._linux_service_unit_path("watchdog", tmp_path).exists()
+    assert not self_update_tasks._linux_timer_unit_path("watchdog", tmp_path).exists()
+    assert any("disable" in call for call in calls)
+
+
+def test_reconcile_scheduled_task_registers_on_linux_when_systemd_available(monkeypatch, tmp_path):
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "linux")
+    monkeypatch.setattr(
+        self_update_tasks,
+        "linux_systemd_user_available",
+        lambda **kwargs: True,
+    )
+
+    def runner(argv, **kwargs):
+        if "is-enabled" in argv:
+            return _fake_command_result(argv, 0, "enabled\n")
+        if "is-active" in argv:
+            return _fake_command_result(argv, 0, "active\n")
+        return _fake_command_result(argv, 0)
+
+    result = self_update.reconcile_scheduled_task(
+        "sweep", desired_present=True, runner=runner, home=tmp_path
+    )
+    assert result.status == "changed"
+    assert result.changed is True
+    assert result.snapshot is not None and result.snapshot.matching is True
+
+
+def test_reconcile_scheduled_task_skips_when_no_systemd_user_manager(monkeypatch, tmp_path):
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "linux")
+    monkeypatch.setattr(
+        self_update_tasks,
+        "linux_systemd_user_available",
+        lambda **kwargs: False,
+    )
+    result = self_update.reconcile_scheduled_task(
+        "watchdog",
+        desired_present=True,
+        runner=lambda *a, **k: _fake_command_result(["systemctl"]),
+        home=tmp_path,
+    )
+    assert result.status == "skipped"
+    assert result.changed is False
+    assert "systemd --user" in result.detail
+
+
+def test_scheduled_task_status_reports_linux_timer(monkeypatch, tmp_path):
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "linux")
+
+    def runner(argv, **kwargs):
+        if "is-system-running" in argv:
+            return _fake_command_result(argv, 0, "running\n")
+        if "is-enabled" in argv:
+            return _fake_command_result(argv, 0, "enabled\n")
+        if "is-active" in argv:
+            return _fake_command_result(argv, 0, "active\n")
+        return _fake_command_result(argv, 0)
+
+    self_update_tasks.register_systemd_timer(
+        "watchdog", runner=runner, resolve_binary=lambda name: f"/usr/bin/{name}", home=tmp_path
+    )
+    status = self_update.scheduled_task_status(
+        "watchdog", opted_in=True, runner=runner, home=tmp_path
+    )
+    assert status.registered is True
+    assert status.matching is True
+    assert status.detail == "systemd --user timer is registered"
