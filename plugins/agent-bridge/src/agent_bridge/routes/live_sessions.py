@@ -31,6 +31,7 @@ from ..models import (
     LiveProgressRequest,
     LiveSessionInfo,
     LiveSessionListResponse,
+    LiveSessionVenue,
     RegisterLiveSessionRequest,
     SendMessageRequest,
     SendMessageResult,
@@ -138,6 +139,26 @@ def _parse_progress(raw: Any) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def _parse_venue(raw: Any) -> LiveSessionVenue | None:
+    """Parse the stored ``venue`` JSON string into a model, or None.
+
+    Malformed/legacy-shaped stored JSON reads back as "no venue" rather than
+    raising -- this is read-side reattach guidance, not an admission gate.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        return LiveSessionVenue(**data)
+    except (TypeError, ValueError):
+        return None
+
+
 def _to_info(row: dict[str, Any]) -> LiveSessionInfo:
     return LiveSessionInfo(
         session_id=row["session_id"],
@@ -155,6 +176,7 @@ def _to_info(row: dict[str, Any]) -> LiveSessionInfo:
         liveness=_live_liveness(row),
         latest_progress=_parse_progress(row.get("latest_progress")),
         cli_mode=bool(row.get("cli_mode")),
+        venue=_parse_venue(row.get("venue")),
         registered_at=row["registered_at"],
         updated_at=row["updated_at"],
     )
@@ -196,6 +218,7 @@ async def register_live_session(
         pid=body.pid,
         role=body.role,
         driven_by=body.driven_by,
+        venue=body.venue.model_dump_json() if body.venue is not None else None,
         now=now,
     )
     if status != "live":

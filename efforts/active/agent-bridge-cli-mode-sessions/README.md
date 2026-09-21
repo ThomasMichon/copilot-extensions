@@ -338,7 +338,7 @@ mechanism CLI mode binds through.
       the existing relay forward (reusing the same reverse-forward
       machinery, not inventing a second one) as part of venue-side CLI-mode
       launch prep.
-- [ ] **New finding (2026-09-20): `live_sessions` needs a reattach-shaped
+- [x] **New finding (2026-09-20): `live_sessions` needs a reattach-shaped
       field for remote CLI-mode sessions.** Today's schema (`machine`,
       `cwd`, `worktree_id`, `pid`, ...) has no venue identity or mux-session
       descriptor, so nothing durably records "which CodeSpace/container this
@@ -346,6 +346,18 @@ mechanism CLI mode binds through.
       Needs an additive field (e.g. a `venue`/reattach descriptor: boundary +
       target + mux session name) alongside the existing columns — additive
       only, no schema break for the ordinary local case.
+      **Done** — schema v18→v19 adds a nullable `live_sessions.venue` TEXT
+      column (JSON; `NULL` for the ordinary local case). New
+      `LiveSessionVenue` model (`kind`/`target`/`mux_session_name`) on both
+      `RegisterLiveSessionRequest` and `LiveSessionInfo`; `register_live_session`
+      takes an optional `venue` JSON string and carries it through the
+      upsert; the route serializes/deserializes at the JSON boundary
+      (`_parse_venue`, mirroring `_parse_progress`). Every existing read path
+      (`_to_info`) surfaces it automatically since it already reads through
+      one function. New coverage in `test_live_sessions.py`
+      (`test_route_register_carries_venue_for_remote_cli_mode`): the
+      descriptor round-trips through register/list/get, and an ordinary
+      local registration carries `venue: null`.
 - [ ] Extend `agent-codespaces` **and** `agent-containers` to offer the same
       CLI-mode launch shape — prepare the venue (the checklist above),
       allocate the CLI-mode reservation, start a standard muxed CLI process
@@ -421,6 +433,34 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-09-20 — Implemented `live_sessions.venue`: the reattach-descriptor half of the corrected Phase 4 plan
+
+Landed the schema/model half of the two corrected Phase 4 findings (the
+network-reachability finding is next, folded into the actual venue launch
+verb since it only matters once something dispatches into a venue).
+
+Schema v18→v19: nullable `live_sessions.venue` TEXT column (JSON; `NULL` for
+the ordinary local case, matching the existing `latest_progress` pattern
+rather than a new table). New `LiveSessionVenue` model
+(`kind`/`target`/`mux_session_name`) added to `RegisterLiveSessionRequest`
+and `LiveSessionInfo`; `register_live_session` takes an optional `venue` JSON
+string threaded through the existing upsert; the route serializes at the
+Pydantic/JSON boundary (`_parse_venue`, mirroring the existing
+`_parse_progress`). Every existing read path goes through the one `_to_info`
+function, so register/list/get/resolve all surface it for free -- no route
+needed touching individually. New test
+(`test_route_register_carries_venue_for_remote_cli_mode`) proves the
+descriptor round-trips and an ordinary local registration stays `venue:
+null`. Full local test run: `test_live_sessions.py` +
+`test_cli_mode_reservations.py` (55 passed); contract hash and
+`models.py`/module-size baseline refreshed for the new lines. Version bumped
+to `0.4.0-dev511`.
+
+Deliberately did **not** yet touch the reverse-forward gap (the extension
+resolving `127.0.0.1`) -- that only matters once an actual venue launch verb
+exists to dispatch into, so it lands together with that verb rather than as
+speculative plumbing with nothing to exercise it.
 
 ### 2026-09-20 — Second-pass correction: `host_index` was the wrong unification target; the real gaps are cross-venue reachability + reattach metadata, and the "no ContainerSpawner" claim was wrong
 

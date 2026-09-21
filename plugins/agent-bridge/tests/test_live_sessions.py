@@ -284,6 +284,34 @@ def test_route_register_list_get_deregister(client: TestClient) -> None:
     assert client.delete("/api/v1/live-sessions/cli-1").status_code == 200
 
 
+def test_route_register_carries_venue_for_remote_cli_mode(client: TestClient) -> None:
+    """A venue-launched CLI-mode registration's reattach descriptor round-trips
+    (agent-bridge-cli-mode-sessions Phase 4); an ordinary local registration
+    carries none."""
+    venue = {
+        "kind": "codespace",
+        "target": "odsp-web-codespaces",
+        "mux_session_name": "wt-abc123",
+    }
+    r = client.post(
+        "/api/v1/live-sessions",
+        json={"session_id": "cli-remote", "worktree_id": "wt-1", "venue": venue},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["venue"] == venue
+
+    # Read back consistently from every route that surfaces LiveSessionInfo.
+    assert client.get("/api/v1/live-sessions/cli-remote").json()["venue"] == venue
+    listed = client.get("/api/v1/live-sessions").json()["live_sessions"]
+    assert next(s for s in listed if s["session_id"] == "cli-remote")["venue"] == venue
+
+    r_local = client.post(
+        "/api/v1/live-sessions",
+        json={"session_id": "cli-local", "worktree_id": "wt-2"},
+    )
+    assert r_local.json()["venue"] is None
+
+
 def test_route_list_hides_dead_by_default(
     client: TestClient, tmp_db: Database
 ) -> None:
