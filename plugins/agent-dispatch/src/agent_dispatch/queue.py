@@ -495,6 +495,22 @@ class AttachmentRecord:
 
 
 @dataclass(frozen=True)
+class TaskAttachmentEntry:
+    """One entry in the reverse of :class:`AttachmentRecord`: a task a given
+    session id has ever attached to (:meth:`Queue.tasks_for_session`).
+    Same shape, ``task_id`` in place of ``session_id`` -- the two directions
+    of the same ``task_attachments`` row.
+    """
+
+    task_id: str
+    worktree_id: str | None
+    machine: str | None
+    attached_at: float
+    detached_at: float | None
+    detach_reason: str | None
+
+
+@dataclass(frozen=True)
 class CreationOutcome:
     """A create result plus whether it inserted a new lifecycle row."""
 
@@ -1389,6 +1405,37 @@ class TaskQueue(
         return [
             AttachmentRecord(
                 session_id=row["session_id"],
+                worktree_id=row["worktree_id"],
+                machine=row["machine"],
+                attached_at=row["attached_at"],
+                detached_at=row["detached_at"],
+                detach_reason=row["detach_reason"],
+            )
+            for row in rows
+        ]
+
+    def tasks_for_session(self, session_id: str) -> list[TaskAttachmentEntry]:
+        """The reverse of :meth:`attachment_history`: every task this
+        ``session_id`` has ever attached to (on *this* host's coordinator),
+        newest first.
+
+        An arbitrary session id -- an escrow id from agent-bridge, or a
+        durable ACP UUID -- attaches to at most a handful of tasks in
+        practice, but the table carries no index on ``session_id`` (it is
+        keyed for the forward direction, ``task_id``); this is a full-table
+        scan over ``task_attachments``, acceptable for the reverse-lookup
+        CLI/diagnostic use this exists for, not a hot path.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT task_id, worktree_id, machine, attached_at, detached_at, "
+                "detach_reason FROM task_attachments WHERE session_id = ? "
+                "ORDER BY attached_at DESC",
+                (session_id,),
+            ).fetchall()
+        return [
+            TaskAttachmentEntry(
+                task_id=row["task_id"],
                 worktree_id=row["worktree_id"],
                 machine=row["machine"],
                 attached_at=row["attached_at"],

@@ -122,6 +122,12 @@ class DispatchClient(RegistrationClientMixin):
         that has ever attached, distinct from its current owner session."""
         return self._unwrap(self._http.get(f"/tasks/{task_id}/attachments"))
 
+    def tasks_for_session(self, session_id: str) -> list[dict]:
+        """The reverse lookup: every task ``session_id`` has ever attached to
+        on this host's coordinator, newest first. Empty, not an error, when
+        the session id never attached to a task here."""
+        return self._unwrap(self._http.get(f"/sessions/{session_id}/tasks"))
+
     def payload(self, task_id: str) -> dict:
         return self._unwrap(self._http.get(f"/tasks/{task_id}/payload"))
 
