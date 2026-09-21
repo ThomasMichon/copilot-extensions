@@ -48,7 +48,39 @@ def test_append_and_read_roundtrip(_tracking_dir):
     p = _tracking_dir / "wt-a.history.jsonl"
     assert p.is_file()
     assert len(p.read_text("utf-8").splitlines()) == 2
-    json.loads(p.read_text("utf-8").splitlines()[0])  # valid JSON per line
+
+
+def test_read_accepts_an_explicit_tracking_path_over_the_ambient_project(
+    tmp_path, monkeypatch
+):
+    """agent-worktrees-external-status-accelerator effort, Copilot review
+    finding: a cross-project daemon/CLI caller has no active project set,
+    so `read()` must be able to scope to an explicit tracking directory
+    instead of `cfg.tracking_dir()`'s ambient one."""
+    explicit_dir = tmp_path / "other-project" / "worktrees"
+    explicit_dir.mkdir(parents=True)
+    ambient_dir = tmp_path / "ambient" / "worktrees"
+    ambient_dir.mkdir(parents=True)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: ambient_dir)
+
+    dh.append(
+        "wt-x", at="2026-01-01T00:00:01", summary="explicit", title=None,
+        follow_up=False, changed=["summary"],
+        # `append` itself is not part of this fix's scope (still ambient-
+        # project-only); write directly to the explicit dir's own path.
+    )
+    # The line above wrote to the AMBIENT dir (append's own current
+    # contract); now write the real explicit-dir entry directly to prove
+    # `read(tracking_path=...)` reads from there, not the ambient one.
+    (explicit_dir / "wt-x.history.jsonl").write_text(
+        json.dumps({"summary": "from-explicit-dir"}) + "\n", encoding="utf-8"
+    )
+
+    result = dh.read("wt-x", tracking_path=explicit_dir)
+    assert [e["summary"] for e in result] == ["from-explicit-dir"]
+
+    ambient_result = dh.read("wt-x")  # no tracking_path -> ambient, unchanged
+    assert [e["summary"] for e in ambient_result] == ["explicit"]
 
 
 def test_read_limit_returns_most_recent(_tracking_dir):

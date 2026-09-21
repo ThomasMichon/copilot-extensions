@@ -170,7 +170,7 @@ this tier existed.
   can discover a stale endpoint mid-shutdown (same discipline `zdd`'s
   cutover already uses for its routing table).
 
-## Applying the shape: the two named consumers
+## Applying the shape: the named consumers
 
 - **#2323 — agent-worktrees resident accelerator (classify/list).** Extends
   `hook_ipc.py`'s existing listener with a new coalescing request kind, and
@@ -178,6 +178,23 @@ this tier existed.
   document's ref-count/linger algorithm instead of the current fixed-TTL
   heuristic. The Phase 4c single-instance-lease around `_classify_records`
   remains the fallback path for "no daemon reachable," not superseded.
+- **agent-worktrees-external-status-accelerator — per-worktree status
+  bundle.** A second, independent daemon instance
+  (`worktree_status_daemon.py`) alongside `classify_daemon.py`'s, keyed
+  per-worktree rather than per-project-batch (a Tasks-board card asks about
+  exactly one worktree, so batching unrelated worktrees into one compute
+  call would make one caller wait on -- or receive -- another's data). Adds
+  a genuine cache layer this pattern's other two consumers don't need
+  (`worktree_status_cache.py`, SQLite/WAL-backed, in-memory hot-path read
+  authority): `CoalescingServer` alone only deduplicates concurrent
+  requests, so a caller needing real fast-cache reads with an explicit
+  force-refresh (per the `agent-worktrees` vision's
+  `force-refresh-is-opt-in-not-implicit`) layers that cache in front of the
+  coalescing server rather than expecting `CoalescingServer` itself to
+  provide it. This is also the first consumer exercising this pattern's
+  **cross-venv** discovery path (see below) -- its intended external
+  consumer (agent-dispatch's Tasks-board card) is a separate plugin in its
+  own venv, not an in-process caller.
 - **#744 (this issue) — agent-mcp multiplexer.** A per-`(host, server)`
   daemon holding one warm runtime + one shared upstream connection; each
   session's stdio process becomes a thin shim that subscribes and forwards.
@@ -187,6 +204,56 @@ this tier existed.
   never share a runtime. A session that cannot reach the multiplexer (or
   whose credentials don't match any pooled instance) falls back to today's
   direct, per-session bridge — unconditionally correct, per invariant 4.
+
+## Cross-venv consumers: discovery without an in-process import
+
+Every consumer above so far calls the daemon **from inside the same plugin**
+that owns it (agent-worktrees' own `_classify_records`, its own future
+`worktree_status_bundle` caller). A **cross-venv** consumer — a different
+plugin, installed standalone in its own venv, that cannot import the owning
+plugin's Python at all (see `pivots.py`'s own venv-isolation contract: a
+contributed pivot's data flows only through the contributing plugin's CLI on
+`PATH`, never a cross-venv import) — still needs a way to find the daemon's
+rendezvous fields and speak the wire protocol, without that import.
+
+This pattern's wire protocol already makes this possible: it is a plain
+JSON-over-socket protocol (see `client.py`'s `request()`/`subscribe()`/
+`release()`, ~80 lines of pure stdlib), so a cross-venv consumer never needs
+the owning plugin's Python — only its rendezvous fields and the protocol
+version. **Do not invent a new discovery mechanism for this.** The exact
+precedent already exists for agent-worktrees' own resident monitor:
+`scripts/hook_client.py` (itself a standalone script that does not import
+the `agent_worktrees` package) resolves the runtime root via the reusable
+`scripts/registry_root.py` helper — `~/.agent-worktrees` (or
+`%USERPROFILE%\.agent-worktrees` on Windows) by default, or an
+installation-cell-scoped root when `COPILOT_EXTENSIONS_CONTEXT` is set — then
+reads `status-monitor.lock` at that root for the rendezvous fields it needs.
+
+A cross-venv consumer of any daemon under this pattern follows the same
+shape:
+
+1. **Locate the lock file** via the standard, already-established,
+   user-global discovery flow above — either vendor `registry_root.py`
+   verbatim (it carries no dependency on the rest of the owning plugin's
+   Python) or implement the simpler legacy-only fallback
+   (`home/.agent-worktrees`) if installation-cell awareness isn't needed.
+   Never invent a dedicated pointer file for this — the lock file already
+   is one.
+2. **Read the daemon's own namespaced rendezvous fields** out of that lock
+   file (e.g. `classify_transport`/`classify_endpoint`/`classify_token`/
+   `classify_generation` for classify_daemon;
+   `worktree_status_transport`/`worktree_status_endpoint`/
+   `worktree_status_token`/`worktree_status_generation` for
+   worktree_status_daemon) — each daemon's own module documents its exact
+   field names.
+3. **Speak the wire protocol directly** (`PROTOCOL_VERSION`, the
+   request/subscribe/release message shapes in `client.py`) — reimplement
+   or vendor it; it has no dependency on the owning plugin.
+4. **On any miss** (no daemon, unreachable, malformed response), report the
+   requested facts as stale/unknown rather than blocking a render/click
+   path or silently recomputing — the narrow, named exception to invariant
+   4 above for a consumer whose own contract forbids the inline fallback an
+   in-process caller would use instead.
 
 ## Validation
 
@@ -278,3 +345,20 @@ open was a clean-room process-topology scenario, **landed** as
 (#866): asserts N sessions collapse onto exactly one resident host, the
 `AGENT_MCP_NO_MULTIPLEX` direct fallback spawns zero hosts, and the host
 self-evicts after its last attached session detaches.
+
+**Landed — `agent-worktrees-external-status-accelerator` (per-worktree
+status bundle).** A second, independent `CoalescingServer` instance
+(`worktree_status_daemon.py`), keyed per-worktree rather than per-project-
+batch, wired into `cmd_status_monitor` alongside `classify_daemon`'s own
+server (started/torn down the same never-fatal way). Adds
+`worktree_status_cache.py`, a genuine SQLite/WAL-backed durable cache this
+pattern's other two consumers don't need — in-memory hot-path reads, a
+background sweep keeping demanded worktrees warm, and an explicit `force`
+payload flag for the vision's `force-refresh-is-opt-in-not-implicit`. Also
+the first consumer to exercise this document's own "Cross-venv consumers"
+section above, and the first in-process reference consumer wired end-to-end
+(`agent-worktrees worktree-status-bundle --worktree <id> [--force-refresh]`,
+mirroring
+`_classify_records`'s own daemon-first/fallback structure). Its intended
+cross-venv consumer (agent-dispatch's Tasks-board card) is tracked in a
+separate effort (`agent-dispatch-tasks-pane-ux-overhaul`), not built here.
