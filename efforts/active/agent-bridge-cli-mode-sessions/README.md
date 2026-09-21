@@ -497,6 +497,62 @@ mechanism CLI mode binds through.
       unrelated quirk in that refresh-details call, not this change's
       concern; noted here only so a future session doesn't re-diagnose it
       from scratch.
+      **Full end-to-end live run (2026-09-21), two real bugs found and
+      fixed.** Ran `agent-codespaces copilot <name> --worktree-id <id>`
+      itself (not just a read probe) against the same real CodeSpace, via
+      this repo's own `.test-venvs` build of the merged code (so the exact
+      shipped logic, not a hand-simulation). Two genuine, reproducible bugs
+      surfaced and were fixed (follow-up PR, since #3144 had already
+      merged):
+      1. **`venue_copilot._run_bridge` couldn't actually spawn
+         `agent-bridge` on Windows.** A bare binstub name in list-argv
+         `subprocess.run(["agent-bridge", ...], shell=False)` is never
+         resolved against `.cmd`/PATHEXT the way a real shell would --
+         `FileNotFoundError: [WinError 2]`, every time. Fixed: resolve via
+         `shutil.which(argv[0]) or argv[0]` before spawning (same
+         cross-platform-safe shape the rest of this shared lib already
+         assumes).
+      2. **The same call leaked `PYTHONHOME`/`PYTHONPATH`/`VIRTUAL_ENV`/
+         `__PYVENV_LAUNCHER__` into the spawned `agent-bridge` process**
+         (`subprocess` inherits `os.environ` verbatim by default), forcing
+         its own re-exec'd interpreter to resolve the WRONG stdlib/native-
+         extension tree -- observed as `ImportError: DLL load failed ...
+         not a valid Win32 application` importing `socket`, deterministically
+         reproducible whenever the *caller* is itself a Python process (a
+         plain shell-invoked `agent-bridge` worked every time; a
+         python-child-spawned one failed every time). This is the exact bug
+         class `agent_dispatch.procutil`'s `_AGENT_WORKTREES_ENV_SCRUB`
+         already guards against for `agent-worktrees` (its own comment cites
+         an analogous `_sre` mismatch) -- `venue_copilot` needed the same
+         scrub for its own sibling-binstub spawn of `agent-bridge`. Fixed:
+         mirrored that exact scrub set.
+      A third, smaller bug surfaced once the daemon calls actually worked:
+      `agent-codespaces`'s own (pre-existing, never-before-exercised with
+      real content) `_interactive_ssh` reverse-forward loop appended each
+      bare `"port:127.0.0.1:port"` spec after its own `--` separator with
+      **no `-R` flag** -- `gh codespace ssh` then handed ssh a bare spec
+      string with nothing marking it as an option, so ssh treated it as the
+      **remote command** to run (`bash: line 1: 51234:127.0.0.1:51234:
+      command not found`) instead of an actual reverse forward. Fixed:
+      build a single `--` separator followed by proper `["-R", spec]` pairs,
+      with the remote command (if any) appended last -- confirmed
+      unchanged behavior for the pre-existing empty-forwards case via
+      `test_workspace_discovery.py`'s existing regression test, plus new
+      dedicated coverage in `test_copilot_venue.py`.
+      With all three fixed, the full run reserved, held/heartbeated the
+      Connection Owner, connected over SSH with both reverse forwards
+      correctly established, ran `agent-worktrees copilot --worktree-id
+      <id> --ensure-mux` **inside** the CodeSpace, and failed at exactly
+      the expected, already-documented boundary --
+      `agent-worktrees: command not found` (this venue's `agent-worktrees`
+      is only lean-staged, matching every prior probe) -- and released its
+      CLI-mode reservation cleanly (`agent-bridge --json live-sessions
+      cli-mode status` confirmed no leftover reservation after the run).
+      This is now genuinely full end-to-end validation up to that
+      documented, pre-existing gap; installing a full `agent-worktrees` on
+      a disposable venue to clear that last gap remains open for a future
+      session (this session did not write to a shared, non-disposable
+      operator CodeSpace to do so).
 - [x] **New finding (2026-09-20): `live_sessions` needs a reattach-shaped
       field for remote CLI-mode sessions.** Today's schema (`machine`,
       `cwd`, `worktree_id`, `pid`, ...) has no venue identity or mux-session
