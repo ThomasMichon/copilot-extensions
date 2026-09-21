@@ -727,3 +727,35 @@ def test_fleet_update_resource_defers_registration_with_install_retry(tmp_path, 
     assert res.status == "deferred"
     assert res.deferred_reason is not None and "elevated PowerShell" in res.deferred_reason
     assert res.commands == [["agent-machines", "fleet-update", "install", "--tier", "sweep"]]
+
+
+def test_fleet_update_resource_dry_run_queries_systemd_timer_on_linux(tmp_path, monkeypatch):
+    # Regression: apply()'s dry-run path called query_scheduled_task() (always
+    # the Windows PowerShell/Scheduled Task probe) directly, unconditionally,
+    # instead of dispatching by platform the way reconcile_scheduled_task()
+    # does -- so a Linux/WSL dry-run tried to run pwsh/Get-ScheduledTask (or
+    # errored) instead of reporting the systemd --user timer's real state.
+    from agent_machines.resources import RunOutcome
+
+    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "linux")
+    monkeypatch.setattr(fleet_update, "shutil_which", lambda _b: "/usr/bin/systemctl")
+
+    class FakeRunner:
+        def __call__(self, argv):
+            if "is-system-running" in argv:
+                return RunOutcome(0, "running\n", "")
+            return RunOutcome(0, "", "")
+
+    pkg = _pkg(tmp_path, "acme/fleet", [{"type": "fleet-update", "tier": "sweep"}])
+    results = apply_resources(
+        [pkg],
+        "box-1",
+        "linux",
+        _ctx(tmp_path, FakeRunner(), plat="linux"),
+        dry_run=True,
+    )
+    res = results[0]
+    assert res.type == "fleet-update"
+    assert res.action == "install"
+    assert res.changed is True
+    assert "Scheduled Task" in res.detail

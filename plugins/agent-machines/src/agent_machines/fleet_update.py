@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import sys  # noqa: F401 - tests patch fleet_update.sys.platform directly
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -128,6 +128,32 @@ def query_scheduled_task(
         runner=runner or default_command_runner,
         resolve_binary=shutil_which,
         home=home,
+    )
+
+
+def query_task_state(
+    tier: str,
+    *,
+    runner: Callable[..., CommandResult] | None = None,
+    home: Path | None = None,
+) -> ScheduledTaskSnapshot:
+    """Platform-dispatching query for the declarative resource's dry-run path.
+
+    Unlike ``query_scheduled_task()`` above (always the Windows Scheduled
+    Task query -- correct for the Windows-only register/reconcile call sites
+    that use it directly), this mirrors ``reconcile_scheduled_task()``'s own
+    internal ``sys.platform`` dispatch so a platform-agnostic caller (the
+    resource handler's ``apply(dry_run=True)``) gets the systemd --user timer
+    state on Linux/WSL instead of unconditionally probing for `pwsh`/
+    `Get-ScheduledTask`.
+    """
+    resolved_runner = runner or default_command_runner
+    if sys.platform == "linux":
+        return _tasks.query_systemd_timer(
+            tier, runner=resolved_runner, resolve_binary=shutil_which, home=home
+        )
+    return _query_scheduled_task(
+        tier, runner=resolved_runner, resolve_binary=shutil_which, home=home
     )
 
 

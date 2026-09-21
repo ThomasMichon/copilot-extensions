@@ -86,7 +86,7 @@ class FleetUpdateResourceHandler(ResourceHandler):
             )
 
         if dry_run:
-            task = _fleet_update.query_scheduled_task(resolved.id, runner=runner, home=ctx.home)
+            task = _fleet_update.query_task_state(resolved.id, runner=runner, home=ctx.home)
             if desired_present and not task.present:
                 return ResourceResult(
                     self.TYPE,
