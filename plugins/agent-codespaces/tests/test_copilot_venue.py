@@ -9,11 +9,83 @@ between them is exercised end-to-end without a real CodeSpace.
 from __future__ import annotations
 
 import argparse
+from unittest.mock import patch
 
 import pytest
 from agent_codespaces import config as config_mod
 from agent_codespaces import connection_owner as owner
 from agent_codespaces import copilot_venue
+from agent_codespaces.__main__ import _interactive_ssh
+
+
+class TestInteractiveSshReverseForwardsAndRemoteCommand:
+    """Regression coverage for a real bug found live (agent-bridge-cli-mode-
+    sessions Phase 4 validation): a bare reverse-forward spec with no ``-R``
+    flag was appended after its own ``--`` separator, so `gh codespace ssh`
+    handed ssh a bare ``port:127.0.0.1:port`` string with nothing to mark it
+    as an option -- ssh then treated it as the REMOTE COMMAND to run
+    (`bash: line 1: 51234:127.0.0.1:51234: command not found`) instead of an
+    actual reverse forward.
+    """
+
+    def test_forwards_use_proper_dash_r_flag_pairs(self) -> None:
+        with (
+            patch("agent_codespaces.lifecycle.account_for_codespace", return_value=None),
+            patch("subprocess.call", return_value=0) as call,
+        ):
+            assert _interactive_ssh(
+                "cs-example", ["51234:127.0.0.1:51234", "9280:127.0.0.1:9280"],
+            ) == 0
+        call.assert_called_once_with(
+            [
+                "gh", "codespace", "ssh", "-c", "cs-example", "--",
+                "-R", "51234:127.0.0.1:51234",
+                "-R", "9280:127.0.0.1:9280",
+            ],
+            env=None,
+        )
+
+    def test_remote_command_appended_after_forwards(self) -> None:
+        with (
+            patch("agent_codespaces.lifecycle.account_for_codespace", return_value=None),
+            patch("subprocess.call", return_value=0) as call,
+        ):
+            assert _interactive_ssh(
+                "cs-example", ["51234:127.0.0.1:51234"],
+                remote_command="agent-worktrees copilot --worktree-id wt-A",
+            ) == 0
+        call.assert_called_once_with(
+            [
+                "gh", "codespace", "ssh", "-c", "cs-example", "--",
+                "-R", "51234:127.0.0.1:51234",
+                "agent-worktrees copilot --worktree-id wt-A",
+            ],
+            env=None,
+        )
+
+    def test_remote_command_alone_still_gets_a_single_separator(self) -> None:
+        with (
+            patch("agent_codespaces.lifecycle.account_for_codespace", return_value=None),
+            patch("subprocess.call", return_value=0) as call,
+        ):
+            assert _interactive_ssh(
+                "cs-example", [], remote_command="echo hi",
+            ) == 0
+        call.assert_called_once_with(
+            ["gh", "codespace", "ssh", "-c", "cs-example", "--", "echo hi"],
+            env=None,
+        )
+
+    def test_no_forwards_or_command_keeps_prior_bare_argv(self) -> None:
+        """Existing behavior for a plain interactive connect is unchanged."""
+        with (
+            patch("agent_codespaces.lifecycle.account_for_codespace", return_value=None),
+            patch("subprocess.call", return_value=0) as call,
+        ):
+            assert _interactive_ssh("cs-example", []) == 0
+        call.assert_called_once_with(
+            ["gh", "codespace", "ssh", "-c", "cs-example"], env=None,
+        )
 
 
 @pytest.fixture
