@@ -1087,10 +1087,7 @@ def _runtime_module_path(
 
 def _runtime_install_target(snapshot_root: Path, role: str | None) -> str:
     if role == "host":
-        raise CellError(
-            "host dependencies are dispatch-managed; namespaced host "
-            "provisioning is unavailable"
-        )
+        return f"{snapshot_root}[store]"
     return str(snapshot_root)
 
 
@@ -4138,8 +4135,6 @@ def _provision_locked(
     plugin_root = Path(str(validated["pluginRoot"]))
     environment = _cell_environment(validated, context, marketplace_id)
     role = _configured_role(environment)
-    if role == "host":
-        raise CellError("host provisioning is dispatch-managed")
     pending = _load_selection_transaction(plugin_root, context, marketplace_id)
     if pending is not None:
         return _resume_selection_transaction(
@@ -5105,14 +5100,11 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     payload_root = _absolute_path(Path(__file__).parent.parent)
     try:
-        if args.action in {"bootstrap", "service-ensure-kick", "service-ensure-worker"}:
-            print(json.dumps({"status": "dispatch-managed", "started": False}))
-            return 0
         if args.action in {
             "cell-provision", "slot-cutover", "cell-recover", "service-ensure"
         }:
             context = _absolute_path(args.context)
-            validated = _validate_context(
+            _validate_context(
                 payload_root,
                 context,
                 args.expected_marketplace_id,
@@ -5121,14 +5113,6 @@ def main(argv: list[str] | None = None) -> int:
                     getattr(args, "origin_payload_root", None) or payload_root
                 ),
             )
-            environment = _cell_environment(
-                validated, context, args.expected_marketplace_id
-            )
-            if _configured_role(environment) == "host":
-                raise CellError(
-                    "host service lifecycle is dispatch-managed; this "
-                    "namespaced installation context does not support managed hosts"
-                )
         if args.action == "cell-provision":
             value = provision(args, payload_root)
         elif args.action == "slot-cutover":

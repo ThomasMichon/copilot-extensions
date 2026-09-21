@@ -583,175 +583,21 @@ def _config_from_args(args: argparse.Namespace) -> Config:
 
 
 def cmd_start(args: argparse.Namespace) -> int:
-    """Public commands never launch or provision the optional host service."""
-    print(
-        "agent-index: the host service is managed by agent-dispatch. "
-        "An already-running dispatch supervisor must provision and start it; "
-        "this command cannot start, restart, deploy, or install the host runtime.",
-        file=sys.stderr,
-    )
-    return 2
-
-
-def cmd_managed_start(args: argparse.Namespace) -> int:
-    """Run an already-selected interpreter without any provisioning fallback."""
-    from . import transport
-
-    role, indexer = transport.plan_route()
-    if (
-        not _selected_interpreter_matches("AGENT_INDEX_MANAGED_PYTHON")
-        or _expected_installation_id()
-        or os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
-        or role != "host"
-        or not indexer
-    ):
-        print(
-            "agent-index: managed host launch requires the dispatch-selected "
-            "interpreter and an effective host configuration in a supported "
-            "installation context.",
-            file=sys.stderr,
-        )
-        return 2
-    serve(_config_from_args(args), passive=False)
+    """Run the local service in the current interpreter."""
+    serve(_config_from_args(args), passive=bool(getattr(args, "passive", False)))
     return 0
 
 
-def cmd_managed_engine_start(args: argparse.Namespace) -> int:
-    """Run the durable engine from the dispatch-selected interpreter only."""
-    from . import transport
-    from .engine.app import run_engine
-    from .engine.daemon import engine_endpoint
-
-    role, indexer = transport.plan_route()
-    if (
-        not _selected_interpreter_matches("AGENT_INDEX_ENGINE_MANAGED_PYTHON")
-        or _expected_installation_id()
-        or os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
-        or role != "host"
-        or not indexer
-    ):
-        print(
-            "agent-index: managed engine launch requires the dispatch-selected "
-            "interpreter and an effective host configuration in a supported "
-            "installation context.",
-            file=sys.stderr,
+def cmd_restart(_args: argparse.Namespace) -> int:
+    """Gracefully replace the active service, or start one if absent."""
+    return cmd_deploy(
+        argparse.Namespace(
+            health_timeout=60.0,
+            drain_timeout=300.0,
+            force=False,
+            recover=False,
+            json=False,
         )
-        return 2
-    host, port = engine_endpoint()
-    if getattr(args, "host", None):
-        host = str(args.host)
-    if getattr(args, "port", None) is not None:
-        port = int(args.port)
-    run_engine(host=host, port=port)
-    return 0
-
-
-def cmd_managed_engine_health(_args: argparse.Namespace) -> int:
-    """Probe engine readiness against generation, interpreter, and deps."""
-    from . import transport
-    from .engine.generation import current_engine_generation
-    from .index_config import IndexConfig
-    import httpx
-
-    role, indexer = transport.plan_route()
-    if role != "host" or not indexer:
-        return _emit(
-            {
-                "schema_version": 1,
-                "healthy": False,
-                "detail": "agent-index engine host configuration is inactive",
-            }
-        )
-    if _expected_installation_id() or os.environ.get("COPILOT_EXTENSIONS_CONTEXT"):
-        return _emit(
-            {
-                "schema_version": 1,
-                "healthy": False,
-                "detail": "agent-index engine health requires the host companion context",
-            }
-        )
-    if not _selected_interpreter_matches("AGENT_INDEX_ENGINE_MANAGED_PYTHON"):
-        return _emit(
-            {
-                "schema_version": 1,
-                "healthy": False,
-                "detail": "agent-index engine is not using the dispatch-selected interpreter",
-            }
-        )
-    config = IndexConfig()
-    profile = next(iter(config.model_profiles.values()))
-    try:
-        response = httpx.get(
-            f"{profile.engine_url.rstrip('/')}/health",
-            timeout=5.0,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise ValueError("engine health payload is not an object")
-    except (httpx.HTTPError, ValueError):
-        payload = {
-            "status": "unreachable",
-            "detail": f"agent-index engine is unreachable at {profile.engine_url}",
-        }
-    observed_generation = payload.get("generation")
-    if payload.get("status") == "unreachable":
-        detail = payload.get("detail") or "agent-index engine is unreachable"
-        return _emit({"schema_version": 1, "healthy": False, "detail": detail})
-    if observed_generation != current_engine_generation():
-        return _emit(
-            {
-                "schema_version": 1,
-                "healthy": False,
-                "detail": (
-                    "agent-index engine generation mismatch: "
-                    f"expected {current_engine_generation()}, got {observed_generation}"
-                ),
-            }
-        )
-    python_executable = payload.get("python_executable")
-    try:
-        interpreter_matches = isinstance(python_executable, str) and os.path.samefile(
-            python_executable, sys.executable
-        )
-    except OSError:
-        interpreter_matches = False
-    if not interpreter_matches:
-        return _emit(
-            {
-                "schema_version": 1,
-                "healthy": False,
-                "detail": "agent-index engine is running under a different interpreter",
-            }
-        )
-    if payload.get("gpu_deps_installed") is not True:
-        return _emit(
-            {
-                "schema_version": 1,
-                "healthy": False,
-                "detail": payload.get("detail")
-                or "agent-index engine dependencies are not installed",
-            }
-        )
-    device = str(config.device).strip().lower()
-    if device.startswith("cuda") and payload.get("cuda_available") is not True:
-        return _emit(
-            {
-                "schema_version": 1,
-                "healthy": False,
-                "detail": payload.get("detail")
-                or "agent-index engine CUDA is unavailable for the configured device",
-            }
-        )
-    return _emit(
-        {
-            "schema_version": 1,
-            "healthy": True,
-            "detail": (
-                f"agent-index engine generation {current_engine_generation()} "
-                "is reachable with healthy dependencies"
-            ),
-        }
     )
 
 
@@ -891,8 +737,8 @@ def _setup_multi(cfg, args, this: str, root, indexers: list[dict]) -> int:
         "repo": str(root) if root else None,
         "written": {"machine_config": str(role_path)},
         "service": {
-            "manager": "agent-dispatch" if role == "host" else None,
-            "state": "dispatch-managed" if role == "host" else "not-required",
+            "manager": "agent-index" if role == "host" else None,
+            "state": "self-supervised" if role == "host" else "not-required",
             "started_by_setup": False,
             "provisioned_by_setup": False,
         },
@@ -913,9 +759,8 @@ def _setup_multi(cfg, args, this: str, root, indexers: list[dict]) -> int:
         else:
             print("  routing endpoints: (unset) -- add endpoints to the repo's indexers list")
     else:
-        print("  host service: managed by an already-running agent-dispatch "
-              "supervisor; setup does not provision or start it. "
-              "The independent embedding engine is unchanged.")
+        print("  host service: self-supervised after install/start; setup does not "
+              "provision or start it. The independent embedding engine is unchanged.")
     print(f"  machine config: {role_path}")
     return 0
 
@@ -1031,8 +876,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
         "repo": str(root) if root else None,
         "written": written,
         "service": {
-            "manager": "agent-dispatch" if role == "host" else None,
-            "state": "dispatch-managed" if role == "host" else "not-required",
+            "manager": "agent-index" if role == "host" else None,
+            "state": "self-supervised" if role == "host" else "not-required",
             "started_by_setup": False,
             "provisioned_by_setup": False,
         },
@@ -1057,9 +902,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
         print(f"  repo config:    {written.get('repo_config')}")
     print(f"  machine config: {written['machine_config']}")
     if role == "host":
-        print("  host service: managed by an already-running agent-dispatch "
-              "supervisor; setup does not provision or start it. "
-              "The independent embedding engine is unchanged.")
+        print("  host service: self-supervised after install/start; setup does not "
+              "provision or start it. The independent embedding engine is unchanged.")
     else:
         print("  next: use the lightweight client CLI; no local host service is installed.")
         if ssh and endpoint:
@@ -1745,23 +1589,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_start = sub.add_parser("start", help="run the local service shell")
     add_start_args(p_start)
     p_start.set_defaults(func=cmd_start)
-    p_restart = sub.add_parser("restart", help="report dispatch-owned host lifecycle")
-    p_restart.set_defaults(func=cmd_start)
+    p_restart = sub.add_parser(
+        "restart", help="gracefully replace the active local service"
+    )
+    p_restart.set_defaults(func=cmd_restart)
     p_serve = sub.add_parser("serve", help="alias for start")
     add_start_args(p_serve)
     p_serve.set_defaults(func=cmd_start)
-    p_managed = sub.add_parser("__managed-start", help=argparse.SUPPRESS)
-    add_start_args(p_managed)
-    p_managed.set_defaults(func=cmd_managed_start)
-    p_managed_engine = sub.add_parser(
-        "__managed-engine-start", help=argparse.SUPPRESS
-    )
-    add_start_args(p_managed_engine)
-    p_managed_engine.set_defaults(func=cmd_managed_engine_start)
-    p_managed_engine_health = sub.add_parser(
-        "__managed-engine-health", help=argparse.SUPPRESS
-    )
-    p_managed_engine_health.set_defaults(func=cmd_managed_engine_health)
     p_cell_start = sub.add_parser("__cell-start", help=argparse.SUPPRESS)
     add_start_args(p_cell_start)
     p_cell_start.set_defaults(func=cmd_start)
@@ -1785,7 +1619,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_deploy.add_argument("--force", action="store_true")
     p_deploy.add_argument("--recover", action="store_true")
     p_deploy.add_argument("--json", action="store_true")
-    p_deploy.set_defaults(func=cmd_start)
+    p_deploy.set_defaults(func=cmd_deploy)
 
     p_index = sub.add_parser("index", help="populate or refresh the durable index")
     p_index.add_argument("--source", help="source name to index instead of configured defaults")

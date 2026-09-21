@@ -1632,13 +1632,16 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
         environment[CELL.LOCK_TOKEN_ENV] = lock_token
         environment[CELL.LOCK_ROOT_ENV] = str(plugin_root)
         environment[CELL.CELL_START_TOKEN_ENV] = lock_token
-        with pytest.raises(CELL.CellError, match="managed by an already-running"):
-            CELL._run_cell_deploy(
-                command_launcher,
-                environment,
-                recover=True,
-            )
-    assert not capture.exists()
+        CELL._run_cell_deploy(
+            command_launcher,
+            environment,
+            recover=True,
+        )
+    first_capture = json.loads(capture.read_text(encoding="utf-8"))
+    assert "--recover" in first_capture["argv"]
+    assert first_capture["environment"][CELL.LOCK_TOKEN_ENV] == environment[CELL.LOCK_TOKEN_ENV]
+    assert first_capture["environment"][CELL.CELL_START_TOKEN_ENV] == environment[CELL.CELL_START_TOKEN_ENV]
+    assert first_capture["environment"][CELL.TRANSACTION_TOKEN_ENV] == environment[CELL.TRANSACTION_TOKEN_ENV]
     assert service_launcher.is_file()
 
     with CELL._installation_lock(plugin_root) as lock_token:
@@ -1648,14 +1651,13 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
         environment[CELL.TRANSACTION_TOKEN_ENV] = "f" * 64
         with pytest.raises(
             CELL.CellError,
-            match="managed by an already-running",
+            match="reentry ownership does not match",
         ):
             CELL._run_cell_deploy(
                 command_launcher,
                 environment,
                 recover=True,
             )
-    assert not capture.exists()
 
 
 def test_windows_launcher_source_is_bom_safe_for_unicode_paths(
@@ -3556,14 +3558,6 @@ def test_runtime_dependency_profile_never_installs_host_store(
         lambda *_args, **_kwargs: interpreter,
     )
 
-    if role == "host":
-        with pytest.raises(CELL.CellError, match="dispatch-managed"):
-            CELL._build_runtime(
-                payload, slot, marketplace_id="example--1234",
-                runtime_version=runtime_version, role=role,
-            )
-        assert commands == []
-        return
     result = CELL._build_runtime(
         payload,
         slot,
@@ -3755,15 +3749,6 @@ def test_same_payload_version_uses_distinct_immutable_profile_slot(
         lambda *_args: {"status": "ready", "runtimeVersion": target_runtime},
     )
 
-    if target_role == "host":
-        with pytest.raises(CELL.CellError, match="dispatch-managed"):
-            CELL._provision_locked(
-                PLUGIN, PLUGIN, context, "example--1234", tmp_path,
-                payload_version, validated, "lock-token",
-            )
-        assert observed == {}
-        assert sentinel.read_text(encoding="utf-8") == prior_role
-        return
     result = CELL._provision_locked(
         PLUGIN,
         PLUGIN,
@@ -4154,26 +4139,6 @@ def _authorize_private_cell_start(
     ):
         monkeypatch.delenv(name, raising=False)
     return token
-
-
-def test_public_start_and_serve_are_rejected_for_namespaced_runtime(
-    monkeypatch,
-    tmp_path: Path,
-    capsys,
-) -> None:
-    monkeypatch.setenv(
-        "AGENT_INDEX_INSTALLATION_ID",
-        "example--1234/agent-index",
-    )
-    monkeypatch.setattr(
-        agent_main,
-        "serve",
-        lambda *_args, **_kwargs: pytest.fail("public namespaced start ran"),
-    )
-    args = SimpleNamespace(host=None, port=None, passive=False)
-
-    assert agent_main.cmd_start(args) == 2
-    assert "managed by agent-dispatch" in capsys.readouterr().err
 
 
 def test_private_cell_start_requires_host_and_live_lifecycle_lock(

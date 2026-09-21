@@ -104,10 +104,6 @@ if ($Action -notin @(
 
 # Status and dependency-light cell-slot actions do not enter the self-stage
 # block that creates and reaps legacy staging directories.
-if ($Action -in @('start', 'ensure', 'register-tasks')) {
-    Write-Host '[agent-index] Host service lifecycle is managed by an already-running agent-dispatch supervisor; this installer cannot launch or register it.'
-    exit $(if ($Action -eq 'ensure') { 0 } else { 2 })
-}
 $cellSlotAction = $Action -in @(
     'cell-provision',
     'cell-recover',
@@ -2205,12 +2201,14 @@ function Invoke-Uninstall {
 switch ($Action) {
     'install' {
         Install-Runtime
-        Write-Skip 'Host service is dispatch-managed; independent embedding engine unchanged'
+        Invoke-ServiceCutover
+        Write-Skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
     }
     'update' {
         Invoke-DowngradeGuard
         Install-Runtime
-        Write-Skip 'Host service is dispatch-managed; independent embedding engine unchanged'
+        Invoke-ServiceCutover
+        Write-Skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
     }
     'ensure' { Ensure-Running }  # user-mode auto-run safety net (sessionStart hook) -- start if not already healthy
     'register-tasks' { Invoke-RegisterTasks }  # OPT-IN advanced tier (scheduled tasks) -- the sole action that may (opt-in) self-elevate that ONE step
@@ -2223,6 +2221,7 @@ switch ($Action) {
     'stamp' { Invoke-Stamp }
     'provision' {
         Install-Runtime
-        Write-Skip 'Only the lightweight client runtime was provisioned; host service is dispatch-managed'
+        Invoke-ServiceCutover
+        Write-Skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
     }
 }

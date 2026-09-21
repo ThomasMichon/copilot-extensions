@@ -400,18 +400,6 @@ function Get-ManagementPython {
     return $null
 }
 
-if ($Command -ceq '__dispatch-companion-mode') {
-    [ordered]@{
-        schema_version = 1
-        supported = (
-            $ActualMode -ceq 'legacy' -and
-            $DesiredMode -ceq 'legacy'
-        )
-        mode = $ActualMode
-    } | ConvertTo-Json -Compress
-    exit 0
-}
-
 if (
     $ActualMode -ceq 'namespaced' -and
     $Command -ceq 'engine' -and
@@ -423,14 +411,6 @@ if (
         'start the heavy embedding engine.'
     )
     exit 2
-}
-
-if ($Command -in @('start', 'serve', 'restart', 'deploy', '__managed-start', '__cell-start')) {
-    [Console]::Error.WriteLine(
-        '[agent-index] host service lifecycle is managed by an already-running ' +
-        'agent-dispatch supervisor; this command cannot provision or launch it.'
-    )
-    exit 126
 }
 
 function Get-ConfiguredRole {
@@ -720,11 +700,6 @@ function Select-SnapshotInstaller {
 
 function Invoke-RuntimeProvision([string]$SetupRole) {
     if ($ActualMode -ceq 'namespaced') {
-        $provisionRole = if ($SetupRole) { $SetupRole } else { Get-ConfiguredRole }
-        if ($provisionRole -eq 'host') {
-            [Console]::Error.WriteLine('[agent-index] host service is dispatch-managed; namespaced host provisioning is unavailable.')
-            return 126
-        }
         if (
             $ResolutionStatus -cne 'ready' -or
             $ResolutionReason -cne 'namespaced-active'
