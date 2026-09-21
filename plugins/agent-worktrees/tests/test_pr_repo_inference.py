@@ -136,6 +136,43 @@ class TestInferActiveRepoSlug:
         assert m._infer_active_repo_slug(self._config()) is None
 
 
+# _infer_active_github_slug -- GitHub-only variant (#3032 follow-up) ---------
+# --------------------------------------------------------------------------
+class TestInferActiveGithubSlug:
+    def _config(self):
+        cfg_obj = MagicMock()
+        cfg_obj.default_repo = MagicMock()
+        return cfg_obj
+
+    def test_github_remote_resolves(self, monkeypatch):
+        monkeypatch.setattr(
+            m, "_resolve_repo_remote",
+            lambda config, repo: "https://github.com/example-user/example-repo.git")
+        assert (
+            m._infer_active_github_slug(self._config())
+            == "example-user/example-repo"
+        )
+
+    def test_ado_remote_is_none(self, monkeypatch):
+        # The reported bug: a provider-generic slug like "Developer/example-repo"
+        # must never reach GitHub account resolution, which would treat
+        # "Developer" as a bogus GitHub owner.
+        monkeypatch.setattr(
+            m, "_resolve_repo_remote",
+            lambda config, repo: "https://your-org.visualstudio.com/Developer/_git/example-repo")
+        assert m._infer_active_github_slug(self._config()) is None
+
+    def test_none_when_remote_empty(self, monkeypatch):
+        monkeypatch.setattr(m, "_resolve_repo_remote", lambda config, repo: "")
+        assert m._infer_active_github_slug(self._config()) is None
+
+    def test_none_when_resolve_raises(self, monkeypatch):
+        def _boom(config, repo):
+            raise OSError("anchor missing")
+        monkeypatch.setattr(m, "_resolve_repo_remote", _boom)
+        assert m._infer_active_github_slug(self._config()) is None
+
+
 # --------------------------------------------------------------------------
 # Dispatcher wiring
 # --------------------------------------------------------------------------

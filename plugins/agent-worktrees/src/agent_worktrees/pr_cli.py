@@ -101,6 +101,27 @@ def _infer_active_repo_slug(config: cfg.Config) -> str | None:
     return git_ops.slug_from_url(remote)
 
 
+def _infer_active_github_slug(config: cfg.Config) -> str | None:
+    """Like :func:`_infer_active_repo_slug`, but ``None`` unless the active
+    project's remote is actually a github.com remote.
+
+    GitHub account resolution (``repos account-for``/``repos gh``) is
+    GitHub-only: handing it a non-GitHub provider slug (e.g. an Azure DevOps
+    ``Project/repo``) would treat ``Project`` as a bogus GitHub owner and can
+    print/mint an identity for the wrong account (#3032 follow-up). Use this
+    instead of the provider-generic inference for those two commands.
+    """
+    from . import repos
+
+    try:
+        remote = _core()._resolve_repo_remote(config, config.default_repo)
+    except Exception:
+        return None
+    if not repos.github_owner(remote):
+        return None
+    return git_ops.slug_from_url(remote)
+
+
 def _tracked_pr_head_evidence(
     config: cfg.Config,
     repo: str,
