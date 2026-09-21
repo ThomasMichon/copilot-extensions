@@ -353,25 +353,59 @@ mechanism CLI mode binds through.
       launch (not for ordinary ACP dispatch, which never needs it) is
       additive, reuses existing infrastructure end to end, and needs no new
       persistence mechanism.
-- [ ] **The actual venue CLI-mode launch verb (`agent-codespaces`/
-      `agent-containers`), not yet started.** Concrete shape, following
-      Phase 3's local `_launch_cli_mode_session` pattern
-      (`plugins/agent-bridge/src/agent_bridge/__main__.py`): reserve the
-      worktree (unchanged), establish/reuse a persistent SSH connection to
-      the venue carrying **both** the credential-relay forward and the new
-      daemon-port forward above, run `agent-worktrees embody --worktree-id
-      <id> --json --verify-timeout N --ensure-mux [--driver] [--seed]`
-      **on the venue** (over that connection, not locally), then return once
-      `embody` reports the mux session exists -- mirroring the local verb's
-      contract exactly, just dispatched remotely. Preflight (already
-      documented, not yet enforced in code): `copilot` present, `tmux`
-      installable (`ensure_mux_available`, already built), `agent-worktrees`
-      **fully** installed (not just lean tools) so `embody`'s
-      `launch-command.sh`/hooks exist. Validate the way Phase 3 did: a real,
-      disposable clean-room venue (a CodeSpace or Docker container), a real
-      `copilot` process actually reachable end-to-end (register, list,
-      `send`, observe via `tmux capture-pane`/venue SSH, teardown) -- not
-      only unit tests with fakes.
+- [x] **Prerequisite fix (2026-09-20), unblocks the item below:
+      `connection_owner.enabled` flipped to default-on, on-demand,
+      idle-shutdown** (PR #3108). While designing the launch verb, found the
+      Connection Owner daemon + ssh/dispatch defer wiring (dotfiles#1333/
+      #1345) were both fully built and working -- but `enabled` stayed
+      default-off indefinitely, a finished feature left permanently opt-in
+      rather than graduated (operator flagged this: "no wonder things kept
+      breaking", plausibly contributing to #580's relay-flap instability).
+      Fixed: default `enabled=True`; a tenant now spins the daemon up
+      **on-demand** (`ensure_owner_running`, detached subprocess) instead of
+      requiring it already running; the reconcile loop exits cleanly on its
+      own after `idle_shutdown_after` (default 300s) with no held CodeSpace,
+      rather than being forced to stay resident forever. This is the on-
+      demand-but-not-forced-forever ownership model CLI-mode's own
+      persistent daemon-port forward (below) needs to build on.
+- [ ] **The actual venue CLI-mode launch verb (`agent-codespaces copilot
+      <name>` / `agent-containers copilot <name>`), not yet started --
+      naming confirmed by operator.** Concrete shape, following Phase 3's
+      local `_launch_cli_mode_session` pattern
+      (`plugins/agent-bridge/src/agent_bridge/__main__.py`), now that
+      Connection Owner is the correct on-demand tenancy model to build on:
+      reserve the worktree (unchanged) -> place a Connection Owner **tenant
+      hold** for this CLI-mode session (`connection_owner.hold(name,
+      f"cli-mode:{worktree_id}")`), which spins the Owner up on-demand if
+      needed and gets both the existing credential-relay forward AND (needs
+      building) a new daemon-port forward riding the same owned connection
+      -> run `agent-worktrees embody --worktree-id <id> --json
+      --verify-timeout N --ensure-mux [--driver] [--seed]` **on the venue**
+      over that connection -> return once `embody` reports the mux session
+      exists, mirroring the local verb's contract exactly.
+      **New design question this surfaces, not yet resolved:** a Connection
+      Owner tenant hold needs periodic heartbeat renewal (TTL-based) to
+      outlive the one-shot launch command that placed it -- who renews it
+      for the CLI-mode session's entire (potentially multi-day) lifetime?
+      The natural renewer is agent-bridge's own daemon, which already
+      heartbeat-tracks the session's `live_sessions` row: it should call
+      into agent-codespaces'/agent-containers' Connection Owner
+      hold/heartbeat for any `live_sessions` row with a populated `venue`,
+      on the same cadence, and let it lapse (TTL expiry, Owner drops the
+      forward, then idles out) once the row goes stale/deregisters. This is
+      new cross-plugin choreography (agent-bridge daemon -> agent-codespaces
+      connection_owner), not yet designed in detail -- worth resolving
+      before writing the launch verb itself, not after.
+      Preflight (already documented, not yet enforced in code): `copilot`
+      present, `tmux` installable (`ensure_mux_available`, already built),
+      `agent-worktrees` **fully** installed (not just lean tools) so
+      `embody`'s `launch-command.sh`/hooks exist. Validate the way Phase 3
+      did: a real, disposable clean-room venue (a CodeSpace or Docker
+      container), a real `copilot` process actually reachable end-to-end
+      (register, list, `send`, observe via `tmux capture-pane`/venue SSH,
+      teardown, and specifically: confirm the daemon-port forward survives
+      well past the launch command's own exit) -- not only unit tests with
+      fakes.
 - [x] **New finding (2026-09-20): `live_sessions` needs a reattach-shaped
       field for remote CLI-mode sessions.** Today's schema (`machine`,
       `cwd`, `worktree_id`, `pid`, ...) has no venue identity or mux-session
@@ -467,6 +501,52 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-09-20 — Fixed a real, separate bug found while designing the launch verb: Connection Owner stuck opt-in
+
+Naming discussion (`agent-codespaces copilot <name>` / `agent-containers
+copilot <name>` -- confirmed good names, used going forward) led into
+designing how the daemon-port reverse-forward from the grounded design
+(below) would actually stay alive for a launch verb's whole session, not
+just its one-shot dispatch. Tracing `agent-codespaces ssh`'s own relay
+forward lifecycle surfaced that it tears its forward down when the
+dispatching command exits -- fine for an attached human `ssh`, wrong for a
+detached CLI-mode launch that returns immediately. Found `connection_owner.py`
+already exists to solve exactly this (a ref-counted, per-machine Owner that
+keeps a relay forward alive independent of any one dispatch) -- but its own
+docstrings said the daemon + defer wiring were both a "later increment,"
+still deploy-gated default-off.
+
+Operator reaction on hearing this ("the connection owner isn't supposed to
+be opt-in, it was already intended to have shipped as the default mechanism
+-- no wonder things have kept breaking") reframed this as a real, separate
+bug worth fixing now, not a design detail to work around. Checked: no
+tracked issue existed for it specifically (searched `gh issue list`);
+`#580` (open) is the relay-flap symptom this was designed to fix, still
+unresolved. Confirmed via `ask_user` to fix it now, as its own PR, before
+building the launch verb on top of it.
+
+Landed as PR #3108: `ConnectionOwnerConfig.enabled` default -> `True`
+(explicit `enabled: false` still opts out); new `idle_shutdown_after`
+(default 300s) makes the reconcile loop exit cleanly on its own once idle,
+rather than being forced to run forever; new `ensure_owner_running()` makes
+`should_defer_to_owner()` spin the daemon up on-demand (detached subprocess,
+`agent_procutil.windowless_daemon_kwargs`) instead of only deferring to an
+already-running one. `install.ps1`/`install.sh`'s existing scheduled-
+task/systemd wiring needed no changes -- both already treat a clean idle-exit
+as success, not a crash to restart-loop. 11 new/updated tests; full
+`agent-codespaces` suite: 1182 passed, 11 failed, all 11 confirmed
+pre-existing via `git stash` bisection (tracked in #639, unrelated live-
+machine-state test isolation).
+
+This directly unblocks the launch verb: CLI-mode's own daemon-port forward
+needs exactly this on-demand-but-not-forced-forever tenancy model, not a
+new mechanism. Surfaced a new open design question in the process (who
+renews a Connection Owner tenant hold for a CLI-mode session's whole
+lifetime, since the one-shot launch command that places it can't) --
+recorded in the Plan checklist above rather than guessed at; agent-bridge's
+own daemon (already heartbeat-tracking `live_sessions`) is the likely
+answer, needing new cross-plugin choreography not yet designed.
 
 ### 2026-09-20 — Grounded the reverse-forward + launch-verb design; stopping short of building it this session
 
