@@ -352,7 +352,11 @@ function cmdRetryCutover(args) {
 async function cmdSyncWorktree(args) {
   const cwd = args.cwd || process.cwd();
   const result = await attemptWorktreeSync(cwd);
-  if (args.json) return emit(result, args);
+  if (args.json) {
+    emit(result, args);
+    if (!result.synced) process.exit(1);
+    return;
+  }
   if (result.synced) {
     process.stdout.write("Worktree synced onto the latest default branch.\n");
     return;
@@ -360,7 +364,11 @@ async function cmdSyncWorktree(args) {
   process.stdout.write(
     `Worktree sync ${result.attempted ? "failed" : "was skipped"}: ${result.reason}\n`,
   );
-  if (!result.attempted) process.exit(1);
+  // Nonzero for EVERY non-synced outcome (attempted-and-failed AND
+  // skipped), not just the "attempted" case -- a caller using this command
+  // as a gate (e.g. "only proceed once synced") must see a real failure
+  // exit status regardless of why the sync did not happen.
+  process.exit(1);
 }
 
 async function main() {

@@ -352,17 +352,21 @@ async function autoForceHandoff(sid, cwd) {
   }
   let result;
   try {
-    // Best-effort, kicked off concurrently WITH triggerHandoff below (not
-    // sequenced after it) rather than awaited by the critical capture path:
-    // a slow/unreachable remote must never delay or defeat the force-tier
-    // guarantee. Starting it here -- before triggerHandoff's own network
-    // calls and pickup wait -- gives the sync a real chance to finish (or
-    // at least progress) before a live monitor could claim the signal and
-    // launch a successor, rather than only starting once triggerHandoff has
-    // already returned (a round-11 review finding: sequencing the sync
-    // strictly after the live trigger let a fast monitor launch the
-    // successor onto a still-syncing, possibly still-mid-rebase worktree).
-    // Its outcome is only ever logged, never folded back into the
+    // Started here (still fire-and-forget, still un-awaited by the capture
+    // path above) so the sync happens regardless of mode -- a worktree
+    // sync benefits a manual-only handoff too (a human resuming it later
+    // still wants the latest code), not just an auto-mode live pickup.
+    // triggerHandoff's beforeArmPickup hook below awaits this SAME promise
+    // (not a second sync attempt) strictly between the baton being durably
+    // stored and the live pickup signal being armed -- but ONLY in auto
+    // mode, since that is the only mode where a live monitor could launch a
+    // successor before this settles (a round-11 fix merely started the sync
+    // concurrently with the trigger, which a round-12 review finding showed
+    // was insufficient: a fast monitor could still launch a successor
+    // before the sync had even begun). In manual-only mode, triggerHandoff
+    // never calls beforeArmPickup, so this promise simply keeps running in
+    // the background and logs its own outcome, exactly as before. Its
+    // outcome is only ever logged, never folded back into the
     // already-stored baton (there is no update path for a handoff that has
     // already been triggered).
     const syncPromise = attemptWorktreeSync(cwd)
@@ -370,27 +374,28 @@ async function autoForceHandoff(sid, cwd) {
         if (syncResult.synced) {
           session.log(
             "[Context Handoff] Force-tier: worktree synced onto the latest " +
-            "default branch after the handoff above was already captured.",
+            "default branch.",
             { level: "info" },
           );
         } else {
           session.log(
             `[Context Handoff] Force-tier: worktree sync ` +
-            `${syncResult.attempted ? "failed" : "was skipped"} after the ` +
-            `handoff above was already captured (${syncResult.reason}). The ` +
-            "successor should sync onto the latest default branch itself.",
+            `${syncResult.attempted ? "failed" : "was skipped"} ` +
+            `(${syncResult.reason}). The successor should sync onto the ` +
+            "latest default branch itself.",
             { level: "warning" },
           );
         }
+        return syncResult;
       })
       .catch(() => {});
-    void syncPromise;
     result = await triggerHandoff({
       promptText: markdown,
       sid,
       cwd,
       title: "Force-threshold auto-handoff",
       mode: handoffConfig.mode,
+      beforeArmPickup: () => syncPromise,
     });
   } catch (error) {
     session.log(
@@ -535,11 +540,13 @@ const session = await joinSession({
             "     unfamiliar, untracked, or possibly sensitive, or you are",
             "     unsure it is safe to commit, skip the sync entirely and",
             "     note in the brief that the worktree may be behind the",
-            "     default branch. Otherwise commit local WIP, then run",
-            "     `agent-worktrees git sync` or equivalent -- see the",
-            "     context-handoff skill's 'Sync before triggering' section;",
-            "     note any conflict in the brief rather than blocking on it.",
-            "     ALWAYS call",
+            "     default branch. Otherwise commit local WIP, then run the",
+            "     payload-local `handoff-cli.mjs sync-worktree` command (NOT",
+            "     a bare `agent-worktrees git sync`) -- see the",
+            "     context-handoff skill's 'Sync before triggering' section",
+            "     for the exact invocation; it shares the same lock and",
+            "     rebase guard as the force-tier path. Note any conflict in",
+            "     the brief rather than blocking on it. ALWAYS call",
             "     generate_handoff_prompt again after the sync (even if it",
             "     looked like a no-op) so the Git Status you compose from is",
             "     current -- a WIP commit or a failed sync attempt both change",
@@ -928,10 +935,12 @@ const session = await joinSession({
             "anything looks unfamiliar, untracked, or possibly sensitive, or " +
             "you are unsure it is safe to commit, skip the sync entirely and " +
             "note in the brief that the worktree may be behind the default " +
-            "branch), then run `agent-worktrees git sync` or equivalent -- " +
-            "see the context-handoff skill's 'Sync before triggering' " +
-            "section; note any conflict in the brief rather than blocking " +
-            "on it); (2) call " +
+            "branch), then run the payload-local `handoff-cli.mjs " +
+            "sync-worktree` command (NOT a bare `agent-worktrees git " +
+            "sync`) -- see the context-handoff skill's 'Sync before " +
+            "triggering' section for the exact invocation; it shares the " +
+            "same lock and rebase guard as the force-tier path; note any " +
+            "conflict in the brief rather than blocking on it); (2) call " +
             "generate_handoff_prompt to collect session facts; (3) compose " +
             "continuation markdown per the context-handoff skill -- use its " +
             "compact effort-backed shape when a valid open active effort exists, " +

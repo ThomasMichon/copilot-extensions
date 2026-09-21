@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { join, dirname } from "node:path";
 import {
   mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, unlinkSync,
+  utimesSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -25,6 +26,7 @@ import {
   logHandoffPromptReceived,
   manualFallbackInstructions,
   normalizeHandoffTitle,
+  plainGitSync,
   resolveRuntimePython,
   retryStoredHandoffCutover,
   resolveSystemCli,
@@ -1216,12 +1218,59 @@ test("attemptWorktreeSync attempts a sync on a clean tree and reports failure ho
   try {
     const result = await attemptWorktreeSync(dir);
     // A clean tree means the (never-commits) safety gate passes and a real
-    // sync attempt is made; this environment has no reachable
-    // agent-worktrees catalog entry, so it should fail honestly rather than
-    // silently report success.
+    // sync attempt is made. resolveSystemCliDescriptor resolves against the
+    // real on-disk sibling agent-worktrees plugin in this monorepo
+    // checkout, so it genuinely invokes agent-worktrees here -- which fails
+    // honestly (this throwaway repo isn't an adopted agent-worktrees
+    // project) rather than silently reporting success. A payload-only
+    // installation without that sibling instead falls back to plainGitSync
+    // (tested directly, below).
     assert.equal(result.attempted, true);
     assert.equal(result.synced, false);
     assert.match(result.reason, /sync failed|unavailable/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("plainGitSync actually syncs when a real origin remote is configured", async () => {
+  // Real regression this guards: a payload-only context-handoff install (no
+  // sibling agent-worktrees payload) must still get a working sync, not
+  // just an honest failure -- exercises the fallback's full fetch+rebase
+  // path against a real local "remote". Tested directly (not via
+  // attemptWorktreeSync): resolveSystemCliDescriptor resolves against the
+  // real on-disk sibling agent-worktrees plugin in this monorepo checkout,
+  // so the fallback can't be reached end-to-end here without genuinely
+  // uninstalling that sibling.
+  const origin = initGitRepo();
+  const clone = mkdtempSync(join(tmpdir(), "context-handoff-sync-clone-"));
+  try {
+    execFileSync("git", ["clone", "-q", origin, clone]);
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: clone });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: clone });
+    // Advance the "remote" (origin) by one commit the clone doesn't have yet.
+    writeFileSync(join(origin, "file.txt"), "one\ntwo\n");
+    execFileSync("git", ["add", "."], { cwd: origin });
+    execFileSync("git", ["commit", "-q", "-m", "second"], { cwd: origin });
+    const result = await plainGitSync(clone);
+    assert.equal(result.attempted, true);
+    assert.equal(result.synced, true, JSON.stringify(result));
+    assert.equal(
+      readFileSync(join(clone, "file.txt"), "utf-8").replace(/\r/g, "").trim(), "one\ntwo",
+    );
+  } finally {
+    rmSync(origin, { recursive: true, force: true });
+    rmSync(clone, { recursive: true, force: true });
+  }
+});
+
+test("plainGitSync fails honestly when no origin remote exists to determine a default branch from", async () => {
+  const dir = initGitRepo();
+  try {
+    const result = await plainGitSync(dir);
+    assert.equal(result.attempted, true);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /default branch/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1332,6 +1381,35 @@ test("attemptWorktreeSync skips when another sync attempt already holds the work
     } finally {
       unlinkSync(lockPath);
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attemptWorktreeSync reclaims a stale worktree lock left by a crashed process", async () => {
+  // Real regression this guards: if the process is killed after acquiring
+  // the lock (openSync succeeds) but before the finally block runs (e.g.
+  // mid-fetch), the lock file would otherwise remain forever, permanently
+  // skipping every future sync for this worktree. An old-enough lock file
+  // must be treated as abandoned and reclaimed rather than honored forever.
+  const dir = initGitRepo();
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, "");
+    // Back-date the lock well past the staleness threshold (5 minutes).
+    const staleTime = new Date(Date.now() - 10 * 60 * 1000);
+    utimesSync(lockPath, staleTime, staleTime);
+    const result = await attemptWorktreeSync(dir);
+    // Reclaimed and proceeded past the lock -- this throwaway repo isn't an
+    // adopted agent-worktrees project, so the actual sync attempt fails
+    // honestly for that reason, proving only that the lock did NOT block
+    // this attempt.
+    assert.equal(result.attempted, true);
+    assert.notEqual(result.reason, "another sync attempt for this worktree is already in progress; automatic sync was skipped");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

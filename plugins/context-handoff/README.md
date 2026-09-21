@@ -16,7 +16,7 @@ This plugin ships four cooperating payload pieces:
 | **continuity guidance hook** | Declarative `sessionStart` hook | Writes the full owner-marked continuity contract to the exact session folder and emits only `{}` |
 | **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard/**force** thresholds (55% / 70% / 79% by default) with optional repository overrides, delivered on the next idle -- the automatic nudges, the force tier's auto-draft/store/trigger + mutating-tool-call denial, and `trigger_handoff`'s live-cutover signaling are all opt-in (`mode: auto` in `.context-handoff/config.yaml`; the default, `manual-only`, always still stores/seeds a handoff on request, see § Thresholds); provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
 | **context-handoff skill** | Skill | Owns the `/handoff` workflow: compose the continuation prompt from the extension's structured facts and the agent's live context, decide when to store it, and decide whether to ask or trigger |
-| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, and a safe `retry-cutover` remediation for a superseded session. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
+| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, a safe `retry-cutover` remediation for a superseded session, and a lock/rebase-safe `sync-worktree` (shared with the force-tier path). Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
 
 ## The boundary
 
@@ -351,6 +351,7 @@ CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 node "$CH" facts --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" check-heads --json --cwd "$PWD"
 node "$CH" retry-cutover --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" sync-worktree --json --cwd "$PWD"
 node "$CH" save --title "<topic>" --prompt-file "<handoff.md>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" trigger --title "<topic>" --prompt-file "<handoff.md>" \
@@ -380,6 +381,7 @@ if (-not (Test-Path -LiteralPath $ch -PathType Leaf)) { throw 'context-handoff p
 node $ch facts --json --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch check-heads --json --cwd $PWD
 node $ch retry-cutover --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch sync-worktree --json --cwd $PWD
 node $ch save --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --handoff-token '<HANDOFF_TOKEN>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD

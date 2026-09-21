@@ -186,11 +186,13 @@ When the worktree is a git checkout with a remote default branch:
    ```bash
    node "$CH" sync-worktree --json --cwd "$PWD"
    ```
-   (`$ch`/PowerShell equivalent). A `"synced": true` result means the sync
-   completed cleanly; anything else (`"attempted": false` for a skipped
-   rebase/lock/dirty-tree case, or `"attempted": true, "synced": false` for
-   a real failure) carries a `"reason"` string -- note it in the brief
-   rather than blocking on it, same as step 3 below.
+   (`$ch`/PowerShell equivalent; exits nonzero for every non-`"synced":
+   true` outcome -- that is expected and NOT itself a reason to stop; read
+   the JSON `reason` and continue). A `"synced": true` result means the
+   sync completed cleanly; anything else (`"attempted": false` for a
+   skipped rebase/lock/dirty-tree case, or `"attempted": true, "synced":
+   false` for a real failure) carries a `"reason"` string -- note it in the
+   brief rather than blocking on it, same as step 3 below.
 3. Either way, if the sync did not complete cleanly (conflict, abort, or
    step 1 skipped it), do **not** block the handoff on resolving it there --
    note the conflict/skip and the branch's un-synced state plainly in the
