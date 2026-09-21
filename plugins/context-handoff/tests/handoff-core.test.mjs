@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import {
   mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, unlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 import {
   HANDOFF_META_PREFIX,
@@ -146,6 +147,25 @@ test("manual fallback instructions distinguish an in-flight spawn from silence",
   assert.match(text, /expected in-progress state, not a failure/);
   assert.doesNotMatch(text, /No control system acknowledged the request/);
   assert.match(text, new RegExp(seed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("automaticCutoverDisabled takes priority over a stale spawnInFlight marker", () => {
+  // Copilot review finding on PR #3041: a disabled-mode caller never
+  // requested a spawn, but the pickup probe can still observe a stale or
+  // unrelated spawnInFlight marker -- claiming "the automatic cutover
+  // should complete" in that case would contradict the disabled-mode
+  // truth. automaticCutoverDisabled must win regardless of spawnInFlight.
+  const seed =
+    "Task: Continue | Resume: /consume-handoff to take over | " +
+    "Recovery: context-handoff file:handoff-1";
+  const text = manualFallbackInstructions(
+    { storage: "file", id: "handoff-1" },
+    seed,
+    { spawnInFlight: true, automaticCutoverDisabled: true },
+  );
+  assert.match(text, /Automatic cutover is disabled/);
+  assert.doesNotMatch(text, /already been.*spawned and is starting up/s);
+  assert.doesNotMatch(text, /automatic cutover should complete/);
 });
 
 test("runtime invocation isolates imports and forces UTF-8", () => {
@@ -732,6 +752,7 @@ test("triggerHandoff stores, signals, waits, and skips manual fallback when pick
     sid: "predecessor-1",
     cwd: "C:\\repo",
     title: "Parser follow-up",
+    mode: "auto",
     store: ({ promptText, sid, cwd, title }) => {
       calls.push(["store", promptText, sid, cwd, title]);
       return stored;
@@ -794,6 +815,7 @@ test("triggerHandoff logs the predecessor pid in the handoff_requested activity"
     sid: "predecessor-1",
     cwd: "C:\\repo",
     title: "Parser follow-up",
+    mode: "auto",
     execute: (bin, argv, opts) => {
       execCalls.push({ bin, argv, opts });
       return "";
@@ -834,6 +856,7 @@ test("triggerHandoff always returns the final seed and manual fallback when noth
     sid: "predecessor-1",
     cwd: "C:\\repo",
     title: "Parser follow-up",
+    mode: "auto",
     store: () => ({
       storage: "file",
       id: "handoff-predecessor-1",
@@ -867,6 +890,7 @@ test("triggerHandoff exits early and reports progress once a spawn is merely in 
     sid: "predecessor-1",
     cwd: "C:\\repo",
     title: "Parser follow-up",
+    mode: "auto",
     store: () => ({
       storage: "file",
       id: "handoff-predecessor-1",
@@ -906,6 +930,96 @@ test("triggerHandoff exits early and reports progress once a spawn is merely in 
   assert.match(result.manualInstructions, /already been.*spawned and is starting up/s);
   assert.match(result.manualInstructions, /expected in-progress state, not a failure/);
   assert.doesNotMatch(result.manualInstructions, /No control system acknowledged the request/);
+});
+
+test("triggerHandoff under the default (manual-only) mode never wires up automatic pickup", async () => {
+  const calls = [];
+  const result = await triggerHandoff({
+    promptText: "stored markdown",
+    sid: "predecessor-1",
+    cwd: "C:\\repo",
+    title: "Parser follow-up",
+    // mode omitted deliberately -- proves the safe default gates this, not
+    // an explicitly-passed value.
+    store: () => ({
+      storage: "file",
+      id: "handoff-predecessor-1",
+      path: "C:\\state\\handoff-predecessor-1.json",
+      metadata: { worktree: "wt-example", title: "Parser follow-up" },
+    }),
+    writeSessionState: ({ seed }) => ({ ok: true, path: "C:\\state\\handoff-request.json", seed }),
+    noteHandoff: (...args) => {
+      calls.push(["note-handoff", ...args]);
+    },
+    logActivity: (...args) => {
+      calls.push(["activity", ...args]);
+      return { logged: true };
+    },
+    requestBridge: (...args) => {
+      calls.push(["bridge", ...args]);
+      return { attempted: true, accepted: true, response: { queued: true } };
+    },
+    readPickupSignals: () => {
+      calls.push(["signals"]);
+      return {
+        pickedUp: false,
+        spawnInFlight: false,
+        via: [],
+        sessionState: { path: "C:\\state\\handoff-request.json", consumed: false },
+        worktree: { pickedUp: false },
+        dispatch: { consumed: false },
+      };
+    },
+    sleepFn: async () => {
+      calls.push(["sleep"]);
+    },
+    waitMs: 120000,
+  });
+  assert.equal(result.ok, true);
+  // Neither live-cutover trigger point was ever invoked -- not the activity
+  // event agent-worktrees' resident monitor primarily watches for, not the
+  // agent-bridge ping, and -- critically -- not `noteHandoff` either: it
+  // shells to `agent-worktrees note-handoff`, which calls `open_handoff()`
+  // and creates a `pending_handoffs` entry the monitor can independently
+  // discover and claim via its OWN session-state-file fallback path, with
+  // no activity event required at all (the High-severity gap a Copilot
+  // review caught on PR #3041 -- gating only the activity event/bridge
+  // ping left this second path wide open). Only a single pickup-status
+  // check, no polling loop, no sleep.
+  assert.deepEqual(calls.map(([name]) => name), ["signals"]);
+  assert.equal(result.worktreeSignal.noted, false);
+  assert.equal(result.worktreeSignal.activity.logged, false);
+  assert.equal(result.bridge.attempted, false);
+  assert.match(
+    result.manualInstructions,
+    /Automatic cutover is disabled.*mode.*is not `auto`/s,
+  );
+});
+
+test("storeHandoff never notes the worktree record itself (save_handoff_prompt must never arm pickup)", () => {
+  // Root-cause fix for the same High-severity gap: `storeHandoff()` backs
+  // BOTH `save_handoff_prompt` (documented as never arming pickup) and
+  // `trigger_handoff`. It used to call `noteHandoffInRecord()` internally
+  // regardless of caller or mode, so even `save_handoff_prompt` alone --
+  // with no trigger_handoff call at all -- created a `pending_handoffs`
+  // entry agent-worktrees' resident monitor could discover and claim.
+  // Structural check (storeHandoff has no dependency-injection seam for
+  // its internal helpers): its source must never reference
+  // `noteHandoffInRecord` -- only `triggerHandoff()` may call it, and only
+  // when `mode: auto` is configured.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const storeHandoffBody = source.slice(
+    source.indexOf("export function storeHandoff("),
+    source.indexOf("export function buildSeedForStored("),
+  );
+  assert.ok(storeHandoffBody.length > 0, "could not locate storeHandoff's body");
+  assert.doesNotMatch(storeHandoffBody, /noteHandoffInRecord/);
 });
 
 test("triggerHandoff reports when an explicit stored baton cannot be recovered", async () => {

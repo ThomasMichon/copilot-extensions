@@ -119,7 +119,7 @@ function requireSid(command, args) {
 function requireManualHandoffsEnabled(command, cwd) {
   const config = loadContextHandoffConfig(cwd);
   if (manualHandoffEnabled(config.mode)) {
-    return;
+    return config;
   }
   process.stderr.write(
     `handoff-cli ${command}: context handoff is disabled for this repository ` +
@@ -176,7 +176,7 @@ function cmdSave(args) {
 async function cmdTrigger(args) {
   const sid = requireSid("trigger", args);
   const cwd = args.cwd || process.cwd();
-  requireManualHandoffsEnabled("trigger", cwd);
+  const config = requireManualHandoffsEnabled("trigger", cwd);
   const promptText = readPrompt(args);
   if (!promptText && !args["handoff-token"]) {
     process.stderr.write(
@@ -190,6 +190,7 @@ async function cmdTrigger(args) {
     cwd,
     title: normalizeHandoffTitle(args.title),
     preferTask: !args["no-task"],
+    mode: config.mode,
     handoffToken: args["handoff-token"] || null,
   });
   if (!result.ok) {
@@ -201,9 +202,11 @@ async function cmdTrigger(args) {
   if (args.json) return emit(result, args);
 
   const pickup = result.pickup || { via: [], waitedMs: 0 };
-  const header = pickup.pickedUp
-    ? `Handoff request signaled (${result.stored.storage}: ${result.stored.id}); pickup acknowledged via ${pickup.via.join(", ")} after ${(pickup.waitedMs / 1000).toFixed(1)}s.`
-    : `Handoff request signaled (${result.stored.storage}: ${result.stored.id}); no pickup signal arrived within ${(pickup.waitedMs / 1000).toFixed(1)}s.`;
+  const header = result.automaticCutoverDisabled
+    ? `Handoff stored (automatic cutover disabled) (${result.stored.storage}: ${result.stored.id}); no live-cutover signal was sent (mode is not \`auto\`).`
+    : pickup.pickedUp
+      ? `Handoff request signaled (${result.stored.storage}: ${result.stored.id}); pickup acknowledged via ${pickup.via.join(", ")} after ${(pickup.waitedMs / 1000).toFixed(1)}s.`
+      : `Handoff request signaled (${result.stored.storage}: ${result.stored.id}); no pickup signal arrived within ${(pickup.waitedMs / 1000).toFixed(1)}s.`;
   process.stdout.write(
     `${header}\n\n` +
     (

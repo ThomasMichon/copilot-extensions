@@ -109,7 +109,7 @@ test("discovers config from a nested directory in a git worktree", () => {
 
     assert.equal(findRepositoryRoot(nested), root);
     const loaded = loadContextHandoffConfig(nested, { homeDir: home });
-    assert.equal(loaded.mode, "auto");
+    assert.equal(loaded.mode, "manual-only");
     assert.deepEqual(
       loaded.thresholds,
       { softPercent: 65, hardPercent: 75, forcePercent: 79 },
@@ -127,7 +127,7 @@ test("invalid repository config warns and uses defaults", () => {
     );
 
     const loaded = loadContextHandoffConfig(root, { homeDir: home });
-    assert.equal(loaded.mode, "auto");
+    assert.equal(loaded.mode, "manual-only");
     assert.deepEqual(
       loaded.thresholds,
       { softPercent: 55, hardPercent: 70, forcePercent: 79 },

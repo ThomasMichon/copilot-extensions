@@ -72,15 +72,18 @@ export const HANDOFF_MECHANISM_AWARENESS =
   "This worktree has a context-handoff mechanism available from turn one, " +
   "whether or not this session began from a handoff. Context-window pressure " +
   "is never a reason to truncate diligence, rush a task, or leave work " +
-  "unfinished -- it is only a reason to hand off. As usage climbs, the " +
-  "extension nudges toward preparing a handoff and, if ignored, forces one " +
-  "before auto-compaction destroys the conversation. Invoke the " +
-  "context-handoff skill for the full mechanics: generating and storing a " +
-  "continuation baton, triggering pickup, and resuming one left by a " +
-  "predecessor. A worktree may chain many handoffs in succession until the " +
-  "overall objective is done -- each successor should expect to hand off " +
-  "again rather than treat its own context window as the objective's " +
-  "boundary.";
+  "unfinished -- it is only a reason to hand off. The default mode " +
+  "(`manual-only`) never auto-nudges or auto-forces a handoff: proactively " +
+  "call `trigger_handoff` yourself once work remains and context is " +
+  "tightening. If `.context-handoff/config.yaml` opts a repo into " +
+  "`mode: auto`, the extension additionally nudges toward preparing a " +
+  "handoff as usage climbs and forces one before auto-compaction destroys " +
+  "the conversation. Invoke the context-handoff skill for the full " +
+  "mechanics: generating and storing a continuation baton, triggering " +
+  "pickup, and resuming one left by a predecessor. A worktree may chain " +
+  "many handoffs in succession until the overall objective is done -- each " +
+  "successor should expect to hand off again rather than treat its own " +
+  "context window as the objective's boundary.";
 
 export function recoveryLocatorFor(kind, id) {
   if (kind !== "task" && kind !== "file") {

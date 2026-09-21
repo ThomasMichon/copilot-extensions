@@ -14,7 +14,7 @@ This plugin ships four cooperating payload pieces:
 | Piece | Type | Role |
 |-------|------|------|
 | **continuity guidance hook** | Declarative `sessionStart` hook | Writes the full owner-marked continuity contract to the exact session folder and emits only `{}` |
-| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard/**force** thresholds (55% / 70% / 79% by default) with optional repository overrides, delivered on the next idle; the force tier auto-drafts/stores/triggers a handoff itself and denies further mutating tool calls (see § Thresholds); provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
+| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard/**force** thresholds (55% / 70% / 79% by default) with optional repository overrides, delivered on the next idle -- the automatic nudges, the force tier's auto-draft/store/trigger + mutating-tool-call denial, and `trigger_handoff`'s live-cutover signaling are all opt-in (`mode: auto` in `.context-handoff/config.yaml`; the default, `manual-only`, always still stores/seeds a handoff on request, see § Thresholds); provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
 | **context-handoff skill** | Skill | Owns the `/handoff` workflow: compose the continuation prompt from the extension's structured facts and the agent's live context, decide when to store it, and decide whether to ask or trigger |
 | **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, and a safe `retry-cutover` remediation for a superseded session. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
 
@@ -22,12 +22,15 @@ This plugin ships four cooperating payload pieces:
 
 `context-handoff` owns **continuity policy and baton storage**:
 
-1. detect context pressure,
+1. detect context pressure (opt-in automatic nudging; always available on
+   request),
 2. help the agent compose the right brief,
 3. store that brief durably,
 4. expose a short recovery seed,
-5. signal that pickup is requested,
-6. report whether anything seems to have picked the request up.
+5. signal that pickup is requested (opt-in: `mode: auto` only -- see
+   § Thresholds),
+6. report whether anything seems to have picked the request up (same
+   opt-in scope as 5).
 
 It does **not** own:
 
@@ -141,38 +144,56 @@ performs process management.
 - For **turn-end / follow-up** handoffs, call it only after the user says yes,
   unless autopilot or prior pre-authorization applies.
 
-Its contract is:
+It always:
 
-1. drop the composed handoff markdown in the current session's session-state
+1. drops the composed handoff markdown in the current session's session-state
    folder,
-2. refresh worktree-visible pending-handoff state when `agent-worktrees` is
-   available,
-3. reuse the existing `agent-dispatch` task-backed storage path when available,
+2. durably stores it (`agent-dispatch` task-backed storage when available,
+   otherwise a worktree-state file).
+
+**Only when `.context-handoff/config.yaml`'s `mode` is `auto`** (the default
+is `manual-only`) does it additionally:
+
+3. note it in the worktree's own record via `agent-worktrees note-handoff`
+   (this creates a `pending_handoffs` entry agent-worktrees' resident
+   monitor can discover and claim on its own -- a live-cutover trigger
+   point, not merely advisory, so it is gated identically to the two
+   below), refresh worktree-visible PENDING-HANDOFF state -- the signal
+   agent-worktrees' resident status-monitor watches for -- when
+   `agent-worktrees` is available,
 4. best-effort ping `agent-bridge` if present,
 5. wait up to 30 seconds for the CUTOVER to start -- not for the successor to
    fully finish cold-starting and consume the handoff, which legitimately
-   takes longer (40-90+ seconds) and isn't worth blocking on,
-6. check whether the session-state marker was consumed, the worktree recorded
-   a successor, the dispatch task moved out of `proposed` / `queued`, or (the
-   earlier, cheaper signal) the resident status-monitor has already logged a
-   `handoff_cutover_spawn` for this token,
-7. if nothing at all happened, print manual continuation instructions; if a
-   spawn is merely in flight, print a distinct "already under way" note
-   instead of implying failure,
+   takes longer (40-90+ seconds) and isn't worth blocking on.
+
+Regardless of mode, it always:
+
+6. check once whether the session-state marker was consumed, the worktree
+   recorded a successor, the dispatch task moved out of `proposed` /
+   `queued`, or (the earlier, cheaper signal) the resident status-monitor
+   has already logged a `handoff_cutover_spawn` for this token -- under
+   `manual-only` this is a single check with no polling wait (steps 3-5 are
+   the only ones actually skipped),
+7. print manual continuation instructions -- distinctly worded when
+   automatic cutover is simply disabled by `mode` versus when it was
+   attempted and nothing happened, or a distinct "already under way" note if
+   a spawn is merely in flight,
 8. always end by printing the final short handoff prompt/seed.
 
 That final seed is the "if your download doesn't start, click here" fallback:
 it gives a human or control system enough to continue even if none of the
-signaling paths responded during the grace window.
+signaling paths responded during the grace window, or automatic cutover was
+never wired up at all under the default mode.
 
 A real successor's Copilot cold-start (loading MCP servers/skills before it
 can even run its own `sessionStart` hook) routinely takes 40-90+ seconds --
 much longer than the 30-second wait, and full pickup was the only signal
-`trigger_handoff` used to check. `trigger_handoff` now treats the resident
-status-monitor's `handoff_cutover_spawn` activity marker -- which fires much
-sooner, as soon as the cutover itself starts -- as an earlier, distinct
-"spawn acknowledged" signal, so the predecessor reports real progress within
-the original 30-second window instead of a false "nothing happened".
+`trigger_handoff` used to check. Under `mode: auto`, `trigger_handoff` treats
+the resident status-monitor's `handoff_cutover_spawn` activity marker --
+which fires much sooner, as soon as the cutover itself starts -- as an
+earlier, distinct "spawn acknowledged" signal, so the predecessor reports
+real progress within the original 30-second window instead of a false
+"nothing happened".
 
 ## Storage
 
@@ -401,7 +422,7 @@ predecessor and successor ids.
 |-----------|----------|
 | 55% of window | Soft reminder: compose/store a baton at the next clean boundary and trigger directly if work still remains |
 | 70% of window | Urgent reminder: preserve the baton now and trigger directly; compaction remains at ~80% |
-| 79% of window | **Force tier:** the extension does it *for* the agent -- auto-drafts a handoff from whatever session facts are available, stores and triggers it via the same path `save_handoff_prompt`/`trigger_handoff` use, and denies further mutating tool calls (read-only inspection still allowed) for the rest of the session. This is the last chance to capture state before the runtime's own auto-compaction (~80%) destroys it -- it does not wait for the agent to act. Lifted only by a successful compaction (the operator may then keep working in the same session instead of switching to the handed-off one); at most one auto-handoff per session |
+| 79% of window | **Force tier** (only when `mode: auto`; a no-op under the default `manual-only`): the extension does it *for* the agent -- auto-drafts a handoff from whatever session facts are available, stores and triggers it via the same path `save_handoff_prompt`/`trigger_handoff` use, and denies further mutating tool calls (read-only inspection still allowed) for the rest of the session. This is the last chance to capture state before the runtime's own auto-compaction (~80%) destroys it -- it does not wait for the agent to act. Lifted only by a successful compaction (the operator may then keep working in the same session instead of switching to the handed-off one); at most one auto-handoff per session |
 
 An owning repository may override these defaults in `.context-handoff/config.yaml`,
 and a user may set lower-priority personal defaults in
@@ -416,10 +437,18 @@ thresholds:
   force_percent: 78
 ```
 
-`mode: auto` preserves today's behavior. `mode: manual-only` suppresses all
-pressure-driven nudges and the force-tier auto-trigger but leaves explicit
-manual tools available. `mode: off` disables both automatic behavior and the
-extension/CLI handoff entry points for that repo.
+**The default mode is `manual-only`, not `auto`** -- automatic nudges, the
+force-tier auto-trigger, and `trigger_handoff`'s live-cutover wiring (the
+`handoff_requested` activity event agent-worktrees' resident status-monitor
+watches for, and the agent-bridge ping) are all opt-in: a repo (or a user,
+via the home-directory layer) must explicitly set `mode: auto` in
+`.context-handoff/config.yaml` to enable them. `save_handoff_prompt`,
+`trigger_handoff`, and `consume_handoff` all keep working under
+`manual-only` -- `trigger_handoff` still stores/seeds the handoff and prints
+the manual pickup instructions, it just never wires up automatic pickup.
+`mode: off` disables both automatic behavior and the extension/CLI handoff
+entry points for that repo entirely (only the last-resort manual file write
+remains reachable, since it depends on nothing this plugin owns).
 
 Each threshold tier may use either `<tier>_percent` or `<tier>_tokens`. Mixed
 configs are allowed per tier; percent tiers resolve against the live session

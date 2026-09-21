@@ -121,10 +121,12 @@ def test_bash_emits_owned_bounded_continuity_guidance() -> None:
     assert "trigger_handoff" in context
     assert "do not ask first" in context
     assert "ending the turn with proposed follow-ups" in context
-    assert "only signals pickup and never performs process management" in context
+    assert "always stores/seeds; never performs process management" in context
+    assert "Live signaling needs" in context
+    assert "mode: auto" in context
+    assert "manual-only" in context
     assert "Consuming or producing a handoff is setup or progress, never completion" in context
     assert "one slice of the larger effort" in context
-    assert "Bounded delegates remain within their assigned scope" in context
     assert "The session owning the objective stops only" in context
     assert "Use the `context-handoff` skill" in context
     # Fresh-session awareness (Goal 2/3): a session did not need to begin
@@ -168,7 +170,7 @@ def test_aggregate_mode_is_owned_compact_and_cross_platform() -> None:
     assert "handoff is progress, never completion" in context
     assert "trigger_handoff" in context
     assert "Near token pressure" in context
-    assert "Only the turn-end follow-up path asks" in context
+    assert "Turn-end follow-ups ask before" in context
     assert "one slice" in context
     assert "Use the `context-handoff` skill" in context
     assert len(context.encode("utf-8")) <= 700

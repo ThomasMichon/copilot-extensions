@@ -321,6 +321,7 @@ async function autoForceHandoff(sid, cwd) {
       sid,
       cwd,
       title: "Force-threshold auto-handoff",
+      mode: handoffConfig.mode,
     });
   } catch (error) {
     session.log(
@@ -645,18 +646,27 @@ const session = await joinSession({
         "handoffs with work still left to do, which should trigger immediately " +
         "without asking. The tool may either reuse the current " +
         "session's most recently saved handoff or store fresh markdown passed as " +
-        "`prompt_text` / `prompt`. It then: (1) drops the full handoff markdown " +
-        "in this session's session-state folder; (2) refreshes worktree-visible " +
-        "pending-handoff state when agent-worktrees is available; (3) reuses the " +
-        "existing agent-dispatch task path when available; (4) best-effort pings " +
-        "agent-bridge if present; (5) waits up to 30 seconds for the CUTOVER " +
-        "to start (a status-monitor `handoff_cutover_spawn` acknowledgement) " +
-        "-- not for the successor to fully finish cold-starting and consume " +
-        "the handoff, which legitimately takes longer and is not worth " +
-        "blocking on; (6) reports whether a cutover is already under way, " +
-        "already fully picked up, or neither; (7) prints manual fallback " +
-        "guidance only when truly nothing happened; and " +
-        "(8) ALWAYS ends with the final short handoff prompt/seed. " +
+        "`prompt_text` / `prompt`. It always: (1) drops the full handoff " +
+        "markdown in this session's session-state folder; (2) durably stores " +
+        "it (agent-dispatch task or worktree-state file). ONLY when " +
+        "`.context-handoff/config.yaml`'s `mode` is `auto` (the default is " +
+        "`manual-only`) does it additionally: (3) note it in the worktree's " +
+        "own record (creates a pending-handoff entry agent-worktrees' " +
+        "resident monitor can discover and claim on its own -- gated " +
+        "identically to the two triggers below, not merely advisory), and " +
+        "refresh worktree-visible PENDING-HANDOFF state when agent-worktrees " +
+        "is available; (4) best-effort ping agent-bridge if present; (5) wait " +
+        "up to 30 seconds for the CUTOVER to start (a status-monitor " +
+        "`handoff_cutover_spawn` acknowledgement) -- not for the successor to " +
+        "fully finish cold-starting and consume the handoff, which " +
+        "legitimately takes longer and is not worth blocking on. Regardless " +
+        "of mode, it always: (6) checks once whether a cutover is already " +
+        "under way, already fully picked up, or neither (under `manual-only` " +
+        "this is a single check, not a polling wait -- steps 3-5 are the " +
+        "only ones actually skipped); and (7) prints manual fallback " +
+        "guidance -- distinctly worded when automatic cutover is simply " +
+        "disabled by mode versus when it was attempted and nothing happened " +
+        "-- and (8) ALWAYS ends with the final short handoff prompt/seed. " +
         "It NEVER checks panes or PIDs, spawns or retires sessions, or " +
         "performs any cutover itself.",
       skipPermission: true,
@@ -714,6 +724,7 @@ const session = await joinSession({
           title,
           handoffToken:
             (args?.handoff_token ?? state.pendingHandoff?.token ?? "").toString().trim() || null,
+          mode: handoffConfig.mode,
         });
         if (!result?.ok) {
           return (
@@ -741,6 +752,25 @@ const session = await joinSession({
                 : `agent-bridge ping did not confirm pickup${result.bridge.error ? ` (${result.bridge.error})` : ""}.`
             )
           : "agent-bridge was not pinged.";
+        if (result.automaticCutoverDisabled) {
+          return (
+            `Handoff stored (automatic cutover disabled) for ${result.stored.storage} ` +
+            `baton ${result.stored.id}. None of the live-cutover triggers ran ` +
+            "-- not the worktree-record note, not the `handoff_requested` " +
+            "activity event agent-worktrees' resident monitor watches for, " +
+            "and not an agent-bridge ping -- because `.context-handoff/" +
+            "config.yaml`'s `mode` is not `auto`. No successor pane will be " +
+            "spawned automatically.\n\n" +
+            `${result.manualInstructions
+              || "A manually-launched successor already appears to have " +
+                "picked this up. Keep the same seed available in case a " +
+                "human or tool still needs to resume it manually.\n"}\n\n` +
+            "Final short handoff prompt/seed:\n\n" +
+            "```text\n" +
+            `${result.seed}\n` +
+            "```"
+          );
+        }
         return (
           `Handoff request signaled for ${result.stored.storage} baton ` +
           `${result.stored.id}. ${pickupLine}\n\n` +
@@ -764,10 +794,12 @@ const session = await joinSession({
       name: "handoff-continue",
       description:
         "Generate a handoff for THIS session, store it, and trigger the " +
-        "pending-handoff signal flow. This is the explicit human yes-path: it " +
-        "does NOT spawn or retire sessions, but it does arm the baton for any " +
-        "human or control system watching the worktree, dispatch task, or " +
-        "session-state marker.",
+        "pending-handoff signal flow (only wired up automatically when " +
+        "mode: auto is configured -- see the context-handoff skill's Mode " +
+        "gate). This is the explicit human yes-path: it does NOT spawn or " +
+        "retire sessions, but it does arm the baton for any human or " +
+        "control system watching the worktree, dispatch task, or " +
+        "session-state marker when automatic mode is enabled.",
       handler: async (ctx) => {
         void ctx;
         if (!manualHandoffEnabled(handoffConfig.mode)) {
@@ -783,11 +815,14 @@ const session = await joinSession({
             "compact effort-backed shape when a valid open active effort exists, " +
             "otherwise the full standalone shape; (3) call trigger_handoff with " +
             "that markdown as `prompt_text` and a short specific `title`. " +
-            "trigger_handoff stores or refreshes the baton, signals pending " +
-            "handoff state across the available systems, waits briefly for a " +
-            "pickup, and always ends with the final short handoff prompt/seed. " +
-            "Do NOT claim the baton auto-loads on restart; if no control system " +
-            "picks it up, follow the manual instructions it printed.",
+            "trigger_handoff always stores/refreshes the baton and ends with " +
+            "the final short handoff prompt/seed; it only signals pending " +
+            "handoff state across the available systems and waits briefly for " +
+            "a pickup when `.context-handoff/config.yaml`'s `mode` is `auto` " +
+            "(the default, `manual-only`, skips that live-cutover signaling " +
+            "entirely). Do NOT claim the baton auto-loads on restart; if no " +
+            "control system picks it up (or automatic mode is disabled), " +
+            "follow the manual instructions it printed.",
           displayPrompt: "Trigger handoff pickup (/handoff-continue)",
         });
       },
