@@ -990,9 +990,26 @@ honestly rather than guessing at the full answer.
   passing `pinned_commits`, so a scaffolded scheduler would silently drop
   pin enforcement even with `requireImmutablePin: true` set (wired
   `resolve_pinned_commits()` through, gated on the same consent flag).
-  `customizing-copilot`'s full suite: 228 passed, 8 skipped (22 new tests
-  total). `check-module-size`/`check-version-bump`/`check-version-
-  consistency`/`check-docs-consistency` all pass. Bumped to `0.1.0-dev89`.
+  A **third** review round caught a genuine TOCTOU race across all of the
+  above: the clean check and `rev-parse HEAD` were two separate
+  subprocesses with no shared lock (fixed by reading `HEAD` before *and*
+  after the clean check and requiring agreement), `git status --porcelain`
+  even with `--ignored` still respects a local `status.showUntrackedFiles`
+  config that could hide a new file (fixed with
+  `--untracked-files=all`), and -- most substantively -- pins were resolved
+  *before* `run_sync_pass`'s own `refresh`/lock, in both the CLI and the
+  scheduler template, so a refresh or concurrent update could change a
+  payload after its commit was captured while the stale-but-well-formed SHA
+  still passed the pin conjunct. Closed by changing `run_sync_pass()`'s
+  contract: it now takes a `resolve_pins` callback (in addition to the
+  simpler precomputed `pinned_commits` for tests/resolver-free callers) and
+  calls it itself, after `refresh` and inside its own held lock, immediately
+  before the locked sync -- both the CLI and the scheduler template now
+  pass `resolve_pinned_commits` as that callback rather than precomputing
+  a map. `customizing-copilot`'s full suite: 232 passed, 8 skipped (31 new
+  tests total across all three rounds). `check-module-size`/
+  `check-version-bump`/`check-version-consistency`/`check-docs-consistency`
+  all pass. Bumped to `0.1.0-dev90`.
 - **Issue #3132 is half closed, not fully.** What remains genuinely open:
   an externally-installed marketplace plugin -- the common adopter case --
   still cannot be pinned at all. Closing that needs either an install-time

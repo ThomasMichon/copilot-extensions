@@ -233,6 +233,64 @@ def test_refresh_callback_runs_before_the_pass(tmp_path: Path) -> None:
     assert calls == ["refreshed"]
 
 
+def test_resolve_pins_runs_after_refresh_and_inside_the_lock(
+    tmp_path: Path,
+) -> None:
+    # resolve_pins must be called AFTER refresh and INSIDE the held lock --
+    # resolving any earlier would leave a window where a refresh changes
+    # the payload after its commit was captured, letting a stale-but-
+    # well-formed SHA pass bypass_decision's pin conjunct even though it no
+    # longer describes what this pass renders.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    root = projections.validate_repository_root(repo)
+    _plugin, source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+    calls: list[str] = []
+
+    def resolve_pins(sources):
+        calls.append("resolved")
+        # The repository lock must already be held when this runs -- a
+        # second acquisition attempt must fail.
+        second = projections.repository_sync_lock(root)
+        try:
+            second.__enter__()
+            calls.append("lock_was_free")
+        except (BlockingIOError, OSError):
+            calls.append("lock_was_held")
+        else:
+            second.__exit__(None, None, None)
+        return {"policy@copilot-extensions": "a" * 40}
+
+    outcome = worker.run_sync_pass(
+        repo,
+        [source],
+        trusted_marketplaces=["copilot-extensions"],
+        resolve_pins=resolve_pins,
+        refresh=lambda: calls.append("refreshed"),
+    )
+
+    assert calls == ["refreshed", "resolved", "lock_was_held"]
+    assert outcome.bypass_eligible
+
+
+def test_resolve_pins_takes_precedence_over_pinned_commits(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+
+    outcome = worker.run_sync_pass(
+        repo,
+        [source],
+        trusted_marketplaces=["copilot-extensions"],
+        pinned_commits={},  # would reject if actually used
+        resolve_pins=lambda sources: {"policy@copilot-extensions": "a" * 40},
+    )
+
+    assert outcome.bypass_eligible
+
+
 # ---- regression coverage for the review findings on PR #3139 ----------------
 
 

@@ -245,7 +245,22 @@ adopters sync externally-installed marketplace plugins, which
 `resolve_pinned_commits()` cannot pin -- enforcing it unconditionally would
 silently disable the bypass path entirely for that common case. A repo
 opts in explicitly only once it understands today's tradeoff (only
-self-hosted/directory-marketplace sources can ever be pinned).
+self-hosted/directory-marketplace sources can ever be pinned). When
+enabled, the CLI passes `resolve_pinned_commits` to `run_sync_pass()` as
+`resolve_pins` (a callback), never a precomputed map: `run_sync_pass` calls
+it after `refresh` and inside its own held lock, immediately before the
+locked sync -- resolving pins any earlier would leave a window where a
+refresh or a concurrent update changes a payload after its commit was
+captured, letting a stale-but-well-formed SHA pass the pin conjunct even
+though it no longer describes what that pass actually renders.
+`resolve_pinned_commits()` itself pins only a clean checkout:
+`_plugin_commit()` rejects any modified, untracked, or ignored file inside
+the payload (forcing full untracked enumeration regardless of a
+`status.showUntrackedFiles` config), re-reads `HEAD` before and after that
+check and requires them to agree, and runs every git subprocess with
+`GIT_*` environment variables stripped so an inherited `GIT_DIR`/
+`GIT_WORK_TREE` override can never redirect the probe at an unrelated
+repository.
 
 ### Troubleshooting-category coverage registry
 

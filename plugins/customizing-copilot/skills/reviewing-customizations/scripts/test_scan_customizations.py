@@ -2911,6 +2911,42 @@ def test_plugin_commit_empty_with_an_ignored_file(tmp_path: Path):
 
 
 @pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_plugin_commit_detects_untracked_file_despite_local_config(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    _clean_git_checkout(repo)
+    _run_git(repo, "config", "status.showUntrackedFiles", "no")
+    (repo / "extra.json").write_text("{}", encoding="utf-8")
+
+    # `status.showUntrackedFiles=no` would otherwise hide a genuinely new,
+    # uncommitted payload file from even the default untracked reporting --
+    # --untracked-files=all must force full enumeration regardless.
+    assert scan._plugin_commit(repo) == ""
+
+
+def test_plugin_commit_empty_when_head_moves_during_the_check(
+    tmp_path: Path, monkeypatch
+):
+    # The clean check and rev-parse are two separate subprocesses with no
+    # shared lock -- if HEAD moves between the "before" and "after" reads
+    # (a concurrent commit/checkout), the payload's provenance is no longer
+    # certain and must not be pinned.
+    repo = tmp_path / "repo"
+    calls = {"n": 0}
+
+    def fake_head(_git, _footprint):
+        calls["n"] += 1
+        return "a" * 40 if calls["n"] == 1 else "b" * 40
+
+    monkeypatch.setattr(scan, "_git_head", fake_head)
+    monkeypatch.setattr(scan, "_payload_is_clean", lambda _git, _footprint: True)
+    monkeypatch.setattr(scan.shutil, "which", lambda _name: "git")
+
+    assert scan._plugin_commit(repo) == ""
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
 def test_assemble_never_pins_an_installed_root_footprint(tmp_path: Path):
     # A plain installed-plugins footprint is a copied external payload with
     # no source-commit provenance of its own -- even when the installed

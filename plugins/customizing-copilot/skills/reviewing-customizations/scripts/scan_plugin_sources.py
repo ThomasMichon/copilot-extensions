@@ -222,22 +222,27 @@ def _payload_is_clean(git: str, footprint: Path) -> bool:
     ``footprint`` actually matches that commit. A dirty or untracked file
     within the payload would otherwise still receive a valid-looking pin,
     letting the bypass path publish content that was never present at the
-    pinned commit. ``git status --porcelain --ignored`` scoped to
-    ``footprint`` (via ``-C`` + a ``.`` pathspec) reports staged/unstaged
-    modifications, untracked files, **and** ignored files -- plain
-    ``--porcelain`` alone omits ignored entries, and an ignored-but-still-
-    read file (the projection scanner does not consult ``.gitignore``) is
-    exactly as unproven against ``HEAD`` as an untracked one. Any output at
-    all means the payload is not a faithful checkout of ``HEAD`` -- this
-    deliberately over-rejects (e.g. a stray `__pycache__`/build-cache
-    directory inside the payload also blocks pinning) rather than trying to
-    distinguish "harmless" ignored content from real payload drift.
+    pinned commit. ``git status --porcelain --ignored --untracked-files=all``
+    scoped to ``footprint`` (via ``-C`` + a ``.`` pathspec) reports
+    staged/unstaged modifications, untracked files, **and** ignored files --
+    plain ``--porcelain`` alone omits ignored entries, and
+    ``--untracked-files=all`` is required too: a caller's (or the ambient
+    environment's) ``status.showUntrackedFiles=no`` config would otherwise
+    silently hide a genuinely new, uncommitted payload file from even the
+    default untracked reporting. An ignored-but-still-read file (the
+    projection scanner does not consult ``.gitignore``) is exactly as
+    unproven against ``HEAD`` as an untracked one. Any output at all means
+    the payload is not a faithful checkout of ``HEAD`` -- this deliberately
+    over-rejects (e.g. a stray `__pycache__`/build-cache directory inside
+    the payload also blocks pinning) rather than trying to distinguish
+    "harmless" ignored content from real payload drift.
     """
     try:
         result = subprocess.run(
             [
                 git, "-C", str(footprint),
-                "status", "--porcelain", "--ignored", "--", ".",
+                "status", "--porcelain", "--ignored", "--untracked-files=all",
+                "--", ".",
             ],
             capture_output=True,
             text=True,
@@ -248,6 +253,25 @@ def _payload_is_clean(git: str, footprint: Path) -> bool:
     except (OSError, subprocess.SubprocessError):
         return False
     return result.returncode == 0 and not result.stdout.strip()
+
+
+def _git_head(git: str, footprint: Path) -> str:
+    """Return ``footprint``'s current ``HEAD`` commit SHA, or ``""``."""
+    try:
+        result = subprocess.run(
+            [git, "-C", str(footprint), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=_git_isolated_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    sha = result.stdout.strip()
+    return sha if _GIT_COMMIT_SHA.fullmatch(sha) else ""
 
 
 def _plugin_commit(footprint: Path) -> str:
@@ -277,27 +301,28 @@ def _plugin_commit(footprint: Path) -> str:
     under some unrelated enclosing git checkout; `assemble_enabled_plugins`
     and `_sources_from_raw_dir` enforce this by construction (see their own
     call sites) rather than this function guessing at the caller's intent.
+
+    **HEAD is read before *and* after the cleanliness check**, and both
+    reads must agree: the clean check and a single ``rev-parse`` are two
+    separate subprocesses with no shared lock, so a payload modified in the
+    gap between them could otherwise still report a stale, no-longer-
+    accurate ``HEAD`` as clean. Reading ``HEAD`` again immediately after
+    and requiring it to be unchanged catches any concurrent commit/checkout
+    that moved it during the probe -- it does not eliminate every possible
+    race against a payload change (no purely read-only, unlocked probe
+    can), but it closes the specific, easily-observable window between this
+    function's own two subprocess calls.
     """
     git = shutil.which("git")
     if git is None:
         return ""
+    head_before = _git_head(git, footprint)
+    if not head_before:
+        return ""
     if not _payload_is_clean(git, footprint):
         return ""
-    try:
-        result = subprocess.run(
-            [git, "-C", str(footprint), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-            env=_git_isolated_env(),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    if result.returncode != 0:
-        return ""
-    sha = result.stdout.strip()
-    return sha if _GIT_COMMIT_SHA.fullmatch(sha) else ""
+    head_after = _git_head(git, footprint)
+    return head_after if head_after and head_after == head_before else ""
 
 
 def resolve_pinned_commits(sources: list[PluginSource]) -> dict[str, str]:
