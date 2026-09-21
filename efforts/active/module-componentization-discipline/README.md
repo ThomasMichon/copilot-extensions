@@ -531,5 +531,7 @@ the Phase 0 runbook, picked up as capacity allows.
   tools/check-module-size.py --refresh-baseline` lowered
   `tools/module-size-baseline.json`'s ceiling for `agent_worktrees/__main__.py`
   from 26,303 to 25,306. The required install/version guards still pass after
-  the slice. This pass takes the next patch-dev bump: `agent-worktrees`
-  `1.5.5-dev202` and marketplace `metadata.version` `1.7.7-dev174`.
+  the slice. Follow-up review fixes advanced the same PR's version once more to
+  stay ahead of newer `main`, so the final bump for this pass is
+  `agent-worktrees` `1.5.5-dev203` and marketplace `metadata.version`
+  `1.7.7-dev175`.
