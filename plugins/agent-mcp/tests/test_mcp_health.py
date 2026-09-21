@@ -41,6 +41,38 @@ def test_sweep_counts_stale_schema_cache_entries(tmp_path):
     assert result.files_scanned == 1
 
 
+def test_sweep_ignores_non_timestamped_lines_quoting_a_signal(tmp_path):
+    # Regression test: a Copilot CLI process log can itself contain the
+    # session's OWN captured tool-call output/conversation text (e.g. an
+    # agent session grepping or discussing these exact log patterns, as this
+    # investigation's own session did) -- those lines quote/escape a copy of
+    # a genuine warning inside indented JSON and never start with a bare
+    # timestamp. They must not be double-counted as real signal hits.
+    now = datetime.now(timezone.utc)
+    log = tmp_path / "process-1.log"
+    log.write_text(
+        '          "content": "Skipping invalid MCP tool cache entry x.json: '
+        'Unsupported MCP tool cache schema version: 1\\n"\n',
+        encoding="utf-8",
+    )
+
+    result = mcp_health.sweep(tmp_path, since_hours=None)
+
+    assert result.signal_counts.get("stale_schema_cache_entry", 0) == 0
+
+    # A genuine, bare-timestamped line right after it must still count.
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write(
+            _log_line(
+                now,
+                "Skipping invalid MCP tool cache entry /x/y.json: "
+                "Unsupported MCP tool cache schema version: 1",
+            )
+        )
+    result2 = mcp_health.sweep(tmp_path, since_hours=None)
+    assert result2.signal_counts.get("stale_schema_cache_entry") == 1
+
+
 def test_sweep_counts_cache_hydration_timeout(tmp_path):
     now = datetime.now(timezone.utc)
     log = tmp_path / "process-1.log"
