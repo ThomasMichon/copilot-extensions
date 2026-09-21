@@ -1337,6 +1337,31 @@ test("plainGitSync actually syncs when a real origin remote is configured", asyn
   }
 });
 
+test("plainGitSync disables rebase.autoStash so a residual dirty-tree race fails instead of silently stashing", () => {
+  // Real regression this guards: the dirty-tree recheck immediately before
+  // this rebase narrows but cannot fully close the TOCTOU (a file could
+  // still become dirty in the instant between that check and this exec) --
+  // a repository or user `rebase.autoStash=true` config would otherwise let
+  // git silently stash/pop that content instead of failing, contrary to
+  // the whole clean-tree safety gate's intent. Structural check (the
+  // autostash-vs-dirty-at-exact-exec-instant race isn't reliably
+  // forceable in a fast unit test): the rebase invocation must pass
+  // --no-autostash.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const plainGitSyncBody = source.slice(
+    source.indexOf("export async function plainGitSync("),
+    source.indexOf("// sync exec. Split out"),
+  );
+  assert.ok(plainGitSyncBody.length > 0, "could not locate plainGitSync's body");
+  assert.match(plainGitSyncBody, /"rebase", "--no-autostash"/);
+});
+
 test("plainGitSync never rebases a detached HEAD checkout", async () => {
   // Real regression this guards: agent-worktrees' own managed sync
   // explicitly skips a detached worktree, but `git rebase origin/<branch>`
@@ -1643,13 +1668,15 @@ test("withWorktreeSyncLock's release only removes the lock when its content stil
   }
 });
 
-test("acquireLock returns an ownership token, and release compares it before unlinking (not path-only ownership)", () => {
+test("acquireLock returns an ownership token, and releaseLock atomically claims the path before comparing it", () => {
   // Structural check (no DI seam for the internal fs calls, and reliably
-  // forcing the real suspended-holder timing scenario in a fast unit test
-  // isn't practical): acquireLock must return a token alongside the fd,
-  // and withWorktreeSyncLock's release must read the lock file back and
-  // compare it to that token before unlinking, rather than unlinking by
-  // path alone.
+  // forcing the real suspended-holder/concurrent-reclaimer timing scenarios
+  // isn't practical in a fast unit test): acquireLock must return a token
+  // alongside the fd, and releaseLock must claim the lock path via
+  // renameSync (atomic single-winner semantics, same as acquireLock's own
+  // reclaim step) BEFORE reading/comparing its content -- a separate
+  // read-then-unlink is itself a TOCTOU another invocation's reclaim could
+  // land inside.
   const source = readFileSync(
     join(
       dirname(fileURLToPath(import.meta.url)),
@@ -1662,11 +1689,16 @@ test("acquireLock returns an ownership token, and release compares it before unl
     source.indexOf("async function withWorktreeSyncLock("),
   );
   assert.match(acquireBody, /token/);
-  const lockBody = source.slice(
-    source.indexOf("async function withWorktreeSyncLock("),
+  const releaseBody = source.slice(
+    source.indexOf("function releaseLock("),
     source.indexOf("// Async-only twin of resolveRuntimePython"),
   );
-  assert.match(lockBody, /readFileSync\(lockPath.*===\s*lock\.token/);
+  assert.ok(releaseBody.length > 0, "could not locate releaseLock's body");
+  const claimIndex = releaseBody.indexOf("renameSync(lockPath, claimedPath)");
+  const readIndex = releaseBody.indexOf("readFileSync(claimedPath");
+  assert.ok(claimIndex >= 0, "expected releaseLock to claim the path via renameSync");
+  assert.ok(readIndex >= 0, "expected releaseLock to read the claimed content");
+  assert.ok(claimIndex < readIndex, "expected the atomic claim (rename) to happen BEFORE the content read");
 });
 
 test("acquireLock treats a failed stat on lock contention as contention, not as reclaimable", () => {
