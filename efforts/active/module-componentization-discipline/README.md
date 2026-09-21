@@ -58,7 +58,7 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees __main__.py` session-binding slice)
+### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees __main__.py` worktree-operations slice)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
 — re-run before starting a phase, this list moves; it already has once per
@@ -67,15 +67,15 @@ table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 16,108 | +15,108 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Sixth dedicated slice landed: the session binding/inspection hook surface now lives in `session_binding_cli.py` + `session_inspection_cli.py`; the highest-risk remainder is still the launch core (`copilot`, especially `resolve`'s picker/remux/handoff planner), with worktree-operations (`list` / `claims` / `follow-ups` / `create` / `run` / `sync`) now the clearest next lower-risk seam |
+| 13,669 | +12,669 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Seventh dedicated slice landed: the worktree-operations block now lives in `list_cli.py`, `claims_cli.py`, `follow_ups_cli.py`, and `worktree_ops_cli.py`. The largest remaining seam is now even more clearly the launch/session-control core (`copilot`, especially `resolve`'s picker/remux/handoff planner), which has been deferred by three fresh passes and now wants a dedicated design pass rather than another blind extraction attempt |
 | 9,267 | +8,267 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression); it drifted again while this slice was in flight, so the baseline was manually widened (9191 → 9267) to restore a green full-tree guard pending its own future split |
 | 9,169 | +8,169 | `libs/installation-context/installation_context.py` (+17 vendored copies) | Split the **canonical** copy only; `sync-installation-context.py` propagates to every vendored copy |
 | 6,873 | +5,873 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
-| 6,810 | +5,810 | `plugins/agent-bridge/src/agent_bridge/session_manager.py` | |
-| 5,855 | +4,855 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | |
+| 6,751 | +5,751 | `plugins/agent-bridge/src/agent_bridge/session_manager.py` | |
+| 5,872 | +4,872 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | |
 | 5,161 | +4,161 | `plugins/agent-index/scripts/cell-runtime.py` | |
-| 4,970 | +3,970 | `plugins/agent-dispatch/src/agent_dispatch/__main__.py` | Already partially split (`producers_cli.py` et al. extracted) — still a strong model for how far a CLI-registration split can continue |
-| 4,675 | +3,675 | `plugins/agent-codespaces/src/agent_codespaces/__main__.py` | CLI registration surface |
+| 4,886 | +3,886 | `plugins/agent-dispatch/src/agent_dispatch/__main__.py` | Already partially split (`producers_cli.py` et al. extracted) — still a strong model for how far a CLI-registration split can continue |
+| 4,692 | +3,692 | `plugins/agent-codespaces/src/agent_codespaces/__main__.py` | CLI registration surface |
 | 4,508 | +3,508 | `plugins/agent-dispatch/src/agent_dispatch/queue.py` | The original motivating case for the cap itself |
 | 3,512 | +2,512 | `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` | |
 | 2,940 | +1,940 | `plugins/agent-bridge/src/agent_bridge/agent_registry.py` | |
@@ -88,19 +88,19 @@ table):
 | 2,195 | +1,195 | `plugins/agent-worktrees/src/agent_worktrees/reconcile.py` | |
 | 2,124 | +1,124 | `plugins/agent-worktrees/src/agent_worktrees/session_projection.py` | |
 
-**Suggested next pick (Phase 2, next slice):** continue the dedicated
-`plugins/agent-worktrees/src/agent_worktrees/__main__.py` campaign while the
-cohesive seams are fresh, but keep the same risk ordering. The **session
-binding/inspection** sub-surface is now extracted; what remains of the
-launch/session-control core is the truly sensitive part: `copilot`, and
-especially `resolve`, which still interleaves picker UI, cross-machine
-handoff, remux/restore, worktree creation, and launch-plan emission in one
-giant nested flow. Reassess that seam again only with fresh context and room
-to stop. If it still resists a clean pure move, pivot to the lower-risk
-worktree-operations block (`list` / `claims` / `follow-ups` / `create` /
-`run` / `sync`) or the still-large production module
-`plugins/agent-worktrees/src/agent_worktrees/pr_ops.py` instead of forcing the
-launch core.
+**Suggested next pick (Phase 2, next slice):** the remaining `agent-worktrees`
+`__main__.py` work is no longer "find another obvious lower-risk seam" — this
+slice just consumed that seam. What remains is the live launch/session-control
+core: `cmd_copilot`, and especially `cmd_resolve`'s nested picker/remux/
+handoff/create-or-resume/launch-plan flow. Treat that as a **dedicated design
+pass**, not another blind extraction: first define the state-carrying
+abstractions that would let its picker, restore/remux, and launch-planning
+sub-flows move independently without changing behavior. If that design budget
+isn't available, pivot entirely to a different large production module
+(`plugins/agent-worktrees/src/agent_worktrees/tracking.py`,
+`plugins/agent-worktrees/src/agent_worktrees/pr_ops.py`, or the canonical
+`libs/installation-context/installation_context.py`) rather than taking a
+third/fourth "maybe it will untangle itself" swing at `resolve`.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
 margin of their own ceiling (most likely to tip over next from unrelated
@@ -240,6 +240,14 @@ Verbatim from the operator:
               the status family. Remaining seams: the
               session/handoff/reap/reclaim/remux/restart lifecycle, then the
               install/update/register/uninstall/profile/picker surface.
+            - `agent-worktrees/__main__.py` fourth through seventh slices
+              landed: the lifecycle/install/picker, update/runtime-reconcile,
+              session-binding/inspection, and worktree-operations families now
+              live in their own sibling modules. The remaining seam is no
+              longer "whatever safe block is left" -- it is the launch core
+              itself (`cmd_copilot`, especially `cmd_resolve`), and it now
+              merits a dedicated design pass rather than another blind
+              mechanical slice.
       - [ ] The vendored-copy canonical
             `libs/installation-context/installation_context.py` (9,169,
             +14 copies) — validate `sync-installation-context.py --check`
@@ -795,3 +803,47 @@ the Phase 0 runbook, picked up as capacity allows.
   Version bump for this slice after rebasing over #3157: `agent-worktrees`
   `1.5.5-dev211` and
   marketplace `metadata.version` `1.7.7-dev181`.
+
+### 2026-09-21 — Phase 2 continued: `agent-worktrees/__main__.py` worktree-operations slice
+- Took the exact lower-risk seam the prior entry queued instead of re-litigating
+  `cmd_copilot`/`cmd_resolve` for a third time. Extracted the worktree-operations
+  block out of `plugins/agent-worktrees/src/agent_worktrees/__main__.py` while
+  preserving `__main__` as the composition root and monkeypatch surface:
+  `list_cli.py` now owns `list` plus its cache/stream/read helpers,
+  `claims_cli.py` owns the claim-ledger/readiness surface, `follow_ups_cli.py`
+  owns the itemized follow-up ledger, and `worktree_ops_cli.py` owns
+  `create` / `run` / `remove-system` / `sync` plus their shared owner-claim
+  helpers and picker-local `sync_one` / `finalize_one` adapters. `build_parser()`
+  now delegates those parser stubs, and `agent_worktrees.__main__` re-exports
+  the moved handlers/helpers/constants back onto the legacy surface so existing
+  direct imports and monkeypatch seams keep landing exactly where the tests
+  expect.
+- Net result: `plugins/agent-worktrees/src/agent_worktrees/__main__.py`
+  dropped from **16,108** lines at the start of this slice to **13,669**
+  after the final baseline refresh (**29,173 → 13,669** across the
+  seven-slice campaign so far). The new modules land at **508** lines
+  (`list_cli.py`), **835** (`claims_cli.py`), **271** (`follow_ups_cli.py`),
+  and **775** (`worktree_ops_cli.py`), all under the 1,000-line cap.
+- Validation stayed at the same stricter componentization bar. `ruff check
+  --select F,E9` passed on `__main__.py` and all four new modules. The full
+  `python tools/run-plugin-tests.py agent-worktrees` run again stopped in the
+  same pre-existing `tests/test_doctor.py` failures (**551 passed, 10 failed,
+  1 skipped**) already independently confirmed on untouched `HEAD`, so per the
+  runbook I followed with a broad extracted-area sweep covering the moved list /
+  claims / follow-ups / create / run / sync surfaces and their preserved seams
+  (**374 passed, 4678 deselected**). The other required guards all passed after
+  the slice: `python tools/check-module-size.py --refresh-baseline`, plain
+  `python tools/check-module-size.py`, `python tools/check-install-contract.py`,
+  and `python tools/check-version-consistency.py`. Read-only dogfooding also
+  passed for `list --json`, `claims --json`, `follow-ups --json`, and
+  `create` / `run` / `sync --help`.
+- Remaining backlog is now even sharper than the prior entry: the extracted
+  "safer alternative" is gone. The still-deferred large seam is the live
+  launch/session-control core itself -- `cmd_copilot`, and especially
+  `cmd_resolve`'s intertwined picker/remux/handoff/create-or-resume/launch-plan
+  flow. Three fresh assessments have now reached the same conclusion: it wants
+  a dedicated design pass (likely splitting its picker, restore/remux, and
+  launch-planning sub-flows behind an explicit shared state object), not
+  another blind slice. Version bump for this slice:
+  `agent-worktrees` `1.5.5-dev212` and marketplace `metadata.version`
+  `1.7.7-dev182`.
