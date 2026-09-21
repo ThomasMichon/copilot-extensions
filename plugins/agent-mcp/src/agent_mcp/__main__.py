@@ -655,5 +655,19 @@ def main(argv: list[str] | None = None) -> int:
     return args.func(args)
 
 
+def console_entry() -> None:
+    """Entry point for both the ``python -m agent_mcp`` guard below and the
+    installed ``agent-mcp`` console script (`pyproject.toml`'s
+    ``[project.scripts]``) -- the generated script wrapper calls this
+    directly, bypassing the ``__main__`` guard, so routing both through here
+    is required for the shutdown-crash workaround to cover the installed
+    command too (including ``agent-mcp bridge --config ...``, the MCP-server
+    subprocess Copilot CLI itself spawns and communicates with over stdio).
+    """
+    from ._shutdown_exit import run_and_exit
+
+    run_and_exit(main)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    console_entry()
