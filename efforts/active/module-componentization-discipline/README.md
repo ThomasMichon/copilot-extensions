@@ -67,7 +67,7 @@ table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 13,668 | +12,668 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Seventh dedicated slice landed: the worktree-operations block now lives in `list_cli.py`, `claims_cli.py`, `follow_ups_cli.py`, and `worktree_ops_cli.py`. The largest remaining seam is now even more clearly the launch/session-control core (`copilot`, especially `resolve`'s picker/remux/handoff planner), which has been deferred by three fresh passes and now wants a dedicated design pass rather than another blind extraction attempt |
+| 13,669 | +12,669 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Seventh dedicated slice landed: the worktree-operations block now lives in `list_cli.py`, `claims_cli.py`, `follow_ups_cli.py`, and `worktree_ops_cli.py`. The largest remaining seam is now even more clearly the launch/session-control core (`copilot`, especially `resolve`'s picker/remux/handoff planner), which has been deferred by three fresh passes and now wants a dedicated design pass rather than another blind extraction attempt |
 | 9,267 | +8,267 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression); it drifted again while this slice was in flight, so the baseline was manually widened (9191 → 9267) to restore a green full-tree guard pending its own future split |
 | 9,169 | +8,169 | `libs/installation-context/installation_context.py` (+17 vendored copies) | Split the **canonical** copy only; `sync-installation-context.py` propagates to every vendored copy |
 | 6,873 | +5,873 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
@@ -819,8 +819,8 @@ the Phase 0 runbook, picked up as capacity allows.
   direct imports and monkeypatch seams keep landing exactly where the tests
   expect.
 - Net result: `plugins/agent-worktrees/src/agent_worktrees/__main__.py`
-  dropped from **16,108** lines at the start of this slice to **13,668**
-  after the final baseline refresh (**29,173 → 13,668** across the
+  dropped from **16,108** lines at the start of this slice to **13,669**
+  after the final baseline refresh (**29,173 → 13,669** across the
   seven-slice campaign so far). The new modules land at **508** lines
   (`list_cli.py`), **835** (`claims_cli.py`), **271** (`follow_ups_cli.py`),
   and **775** (`worktree_ops_cli.py`), all under the 1,000-line cap.
