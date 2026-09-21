@@ -215,6 +215,51 @@ export function runCli(bin, args, opts = {}) {
   });
 }
 
+function describeSyncError(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// Best-effort worktree sync for the fully-automated force-tier path (Phase 7:
+// a successor inherits the SAME on-disk worktree, so an un-synced predecessor
+// hands the same already-fixed-upstream bugs to its own successor). This path
+// has NO agent judgment in the loop, so it is deliberately more conservative
+// than the agent-guided skill flow: it NEVER commits anything. If the tree is
+// dirty, syncing is skipped entirely rather than risking an unsupervised
+// commit of unrelated edits or untracked secrets (the same risk an agent-guided
+// blanket commit could hit, but here there is no agent to scope it). Only a
+// worktree that is already clean gets synced.
+export function attemptWorktreeSync(cwd) {
+  let status;
+  try {
+    status = execFileSync("git", ["status", "--porcelain"], {
+      cwd, encoding: "utf-8", timeout: 5000,
+    });
+  } catch (error) {
+    return {
+      attempted: false,
+      synced: false,
+      reason: `not a git checkout or git unavailable: ${describeSyncError(error)}`,
+    };
+  }
+  if (status.trim()) {
+    return {
+      attempted: false,
+      synced: false,
+      reason: "worktree has uncommitted changes; automatic sync never commits, so it was skipped",
+    };
+  }
+  try {
+    runCli("agent-worktrees", ["git", "sync"], { cwd, timeout: 20000 });
+    return { attempted: true, synced: true, reason: null };
+  } catch (error) {
+    return {
+      attempted: true,
+      synced: false,
+      reason: `sync failed or agent-worktrees unavailable: ${describeSyncError(error)}`,
+    };
+  }
+}
+
 // True if an agent-dispatch coordinator answers a health probe.
 export function agentDispatchAvailable() {
   try {
