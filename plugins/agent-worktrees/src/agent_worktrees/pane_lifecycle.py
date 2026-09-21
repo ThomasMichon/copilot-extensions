@@ -287,6 +287,20 @@ def pane_create(
         "error": None,
     }
     if not foregrounded:
+        # A confirmed-launched successor that can't be foregrounded is not a
+        # completed cutover -- the operator's console tab never actually
+        # shows it, the same "invisible orphan" failure mode the
+        # prompt_received=False branch above already guards against. Retire
+        # it and its process tree with the identical choreography, rather
+        # than leaving a live, un-doctored Copilot running that could later
+        # register or be duplicated by a retry.
+        process_tree = sessions._mux_pane_process_tree(
+            new_pane, mux=mux, session_name=resolved_session,
+        )
+        cleanup = sessions._retire_failed_successor(
+            new_pane, process_tree, mux=mux, mux_session=resolved_session,
+        )
+        payload["cleanup"] = cleanup
         payload["error"] = "pane launch confirmed, but mux_focus_pane could not foreground it"
     return payload
 

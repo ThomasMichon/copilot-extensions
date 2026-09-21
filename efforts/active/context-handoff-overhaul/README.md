@@ -1362,3 +1362,25 @@ gate land._
   check-the-handoff diagnostic skill) are substantial standalone efforts in
   their own right, each tracked by its own gitea issue above -- left open
   for follow-up sessions rather than rushed in one pass.
+
+### 2026-09-20 — Fourth pane-lifecycle finding: cleanup gap on foreground failure
+
+- Found while independently auditing the merged `pane_lifecycle.pane_create()`
+  work for an unrelated question ("is the cutover only valid once the
+  successor is genuinely the operator's current pane") that turned out to
+  already be exactly what this effort's `mux_focus_pane` work (#2842/#2890/
+  #2896) had built. One residual gap surfaced by that audit: `pane_create`
+  retires the successor's process tree when its launch receipt never arrives
+  (`prompt_received=False`), but did **not** do the same when the launch was
+  confirmed yet `mux_focus_pane` still failed to foreground it
+  (`foregrounded=False`) -- a live successor process was left running,
+  orphaned off a pane the operator's console tab never actually switched to.
+- Filed as [#3118](https://github.com/ThomasMichon/copilot-extensions/issues/3118)
+  and fixed in the same change: the `foregrounded=False` branch now mirrors
+  the existing `prompt_received=False` cleanup (`sessions._mux_pane_process_tree`
+  + `sessions._retire_failed_successor`), surfacing the cleanup result on the
+  payload the same way. New regression test in `test_pane_lifecycle.py`
+  (`test_pane_create_retires_successor_when_foreground_fails`); full
+  `agent-worktrees` suite passes aside from a pre-existing, unrelated
+  `test_doctor.py` failure batch (confirmed failing identically on
+  unmodified `main`, out of scope for this change).
