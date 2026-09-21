@@ -28,12 +28,11 @@
 // prior explicit authorization already covers them.
 
 import {
-  appendFileSync,
   existsSync,
   writeFileSync,
 } from "node:fs";
 import { join, basename } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import {
@@ -72,67 +71,19 @@ import {
   formatConfiguredThreshold,
   formatContextUsage,
 } from "./thresholds.mjs";
+import { createEmergencyLog, installEmergencyDiagnostics } from "./crash-diagnostics.mjs";
 
 // --- Emergency crash diagnostics ---------------------------------------
 // This extension has been observed, on at least one machine, to reach the
 // harness's "ready" state (successful tool registration over the joinSession
-// IPC channel) and then terminate with exit code 1 and NO captured stderr --
-// aperture-labs#7347. Whatever Node would normally print for an uncaught
-// exception or a rejected top-level `await joinSession(...)` is not
-// surviving into the harness's own log capture. These handlers write a
-// synchronous, durable diagnostic line the instant anything goes wrong, so
-// the next crash leaves an actual error message/stack behind instead of a
-// bare exit code -- and the presence/absence of an "exit" line pinpoints
-// whether Node itself decided to terminate (uncaught exception, rejected
-// top-level await, natural event-loop drain) or something external
-// force-killed the process before Node's own exit handling could run (no
-// "exit" line would ever be written in that case, since SIGKILL and an
-// external process-tree kill bypass it entirely).
-//
-// Deliberately minimal and self-contained: no repo-relative paths (the
-// crash may happen before cwd/config resolve), synchronous I/O only (must
-// survive a process already mid-shutdown), and every catch swallows its own
-// failure so diagnostic logging can never itself become a new crash cause.
-const CRASH_LOG = join(tmpdir(), "context-handoff-extension-crash.log");
-function emergencyLog(label, detail) {
-  try {
-    appendFileSync(
-      CRASH_LOG,
-      `${new Date().toISOString()} pid=${process.pid} ${label}: ${detail}\n`,
-      { encoding: "utf-8" },
-    );
-  } catch {
-    // Diagnostic logging must never become a second crash cause.
-  }
-}
-process.on("uncaughtException", (err) => {
-  emergencyLog("uncaughtException", err && err.stack ? err.stack : String(err));
-  // Registering this listener suppresses Node's default auto-exit-on-uncaught
-  // behavior; without an explicit exit here the process would otherwise limp
-  // on in a corrupted state instead of terminating the way it already does
-  // today. Preserve the previously observed exit code exactly -- this patch
-  // adds visibility, not a behavior change.
-  process.exit(1);
-});
-process.on("unhandledRejection", (reason) => {
-  emergencyLog(
-    "unhandledRejection",
-    reason instanceof Error ? reason.stack : String(reason),
-  );
-  process.exit(1);
-});
-process.on("exit", (code) => {
-  emergencyLog("exit", `code=${code}`);
-});
-for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
-  process.on(signal, () => {
-    emergencyLog("signal", signal);
-    // As above: registering a signal listener suppresses Node's default
-    // terminate-on-signal behavior. Re-exit explicitly so a legitimate
-    // shutdown request still actually shuts the process down.
-    process.exit(0);
-  });
-}
+// IPC channel) and then terminate with exit code 1 and NO captured stderr.
+// See crash-diagnostics.mjs (an isolated, @github/copilot-sdk-free module,
+// so it can be exercised directly by subprocess tests -- see
+// tests/crash-diagnostics.test.mjs) for the full rationale and the
+// uninstall-capable implementation. Not retained here: no need to ever
+// uninstall these handlers for the life of this process.
+const emergencyLog = createEmergencyLog();
+installEmergencyDiagnostics(emergencyLog);
 
 // --- State ---
 // This used to be a synchronous `loadContextHandoffConfig(process.cwd())`

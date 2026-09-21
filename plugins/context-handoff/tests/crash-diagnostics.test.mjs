@@ -1,0 +1,119 @@
+// Subprocess tests for crash-diagnostics.mjs: exercises the real
+// process.on('uncaughtException'/'unhandledRejection'/'exit'/'SIGTERM'/
+// 'SIGINT'/'SIGHUP') lifecycle handlers and asserts both the durable log
+// content and the actual process exit status. Each scenario runs in its own
+// child process (tests/fixtures/crash-diagnostics-harness.mjs) -- never in
+// the shared `node --test` runner process, since these handlers call
+// process.exit() by design.
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const harness = join(here, "fixtures", "crash-diagnostics-harness.mjs");
+
+async function withCrashLog(fn) {
+  const dir = mkdtempSync(join(tmpdir(), "context-handoff-crash-diag-"));
+  const logPath = join(dir, "crash.log");
+  try {
+    await fn(logPath);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function readLogSafe(logPath) {
+  try {
+    return readFileSync(logPath, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
+test("clean exit logs only the exit event, no failure entries", async () => {
+  await withCrashLog(async (logPath) => {
+    const result = spawnSync(process.execPath, [harness, "clean-exit", logPath], {
+      encoding: "utf-8",
+    });
+    assert.equal(result.status, 0);
+    const log = readLogSafe(logPath);
+    assert.match(log, /\bexit: code=0\b/);
+    assert.doesNotMatch(log, /uncaughtException|unhandledRejection|\bsignal\b/);
+  });
+});
+
+test("an uncaught exception is logged with its stack, then exits 1", async () => {
+  await withCrashLog(async (logPath) => {
+    const result = spawnSync(process.execPath, [harness, "uncaught-exception", logPath], {
+      encoding: "utf-8",
+    });
+    assert.equal(result.status, 1);
+    const log = readLogSafe(logPath);
+    assert.match(log, /uncaughtException: Error: boom-uncaught/);
+    // The stack trace is multi-line; confirm more than just the message
+    // survived (i.e. `err.stack`, not `String(err)`, was actually logged).
+    assert.match(log, /at /);
+    assert.match(log, /\bexit: code=1\b/);
+  });
+});
+
+test("an unhandled rejection is logged with its stack, then exits 1", async () => {
+  await withCrashLog(async (logPath) => {
+    const result = spawnSync(process.execPath, [harness, "unhandled-rejection", logPath], {
+      encoding: "utf-8",
+    });
+    assert.equal(result.status, 1);
+    const log = readLogSafe(logPath);
+    assert.match(log, /unhandledRejection: Error: boom-rejected/);
+    assert.match(log, /at /);
+    assert.match(log, /\bexit: code=1\b/);
+  });
+});
+
+// Windows does not deliver a real POSIX signal to a JS handler when the
+// signal is sent via `(child)process.kill()`: Node's own Windows emulation
+// causes SIGTERM/SIGINT/SIGHUP sent this way to terminate the target
+// process unconditionally, bypassing any registered `process.on(signal)`
+// listener entirely (confirmed empirically against this repo's actual
+// Node/Windows runtime -- a self-directed `process.kill(pid, "SIGTERM")`
+// exits before either the handler or a competing timeout ever logs
+// anything). A real interactive Ctrl+C is a different code path and *does*
+// reach the handler, but that is not something a subprocess test can send.
+// So this assertion is POSIX-only; the extension's own comments already
+// document SIGTERM as inert on Windows for the same reason.
+test(
+  "SIGTERM is logged with the conventional 128+signum exit status",
+  { skip: process.platform === "win32" },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      const child = spawn(process.execPath, [harness, "wait-for-signal", logPath], {
+        stdio: ["ignore", "pipe", "inherit"],
+      });
+      await new Promise((resolve, reject) => {
+        let buffered = "";
+        child.stdout.on("data", (chunk) => {
+          buffered += chunk;
+          if (buffered.includes("READY\n")) resolve();
+        });
+        child.on("error", reject);
+      });
+      child.kill("SIGTERM");
+      const [code, signal] = await new Promise((resolve) => {
+        child.on("exit", (exitCode, exitSignal) => resolve([exitCode, exitSignal]));
+      });
+      // Node reports a signal-terminated child as (code=null, signal="SIGTERM")
+      // only when the OS itself killed it without running JS. Here the
+      // handler calls process.exit(143) explicitly, so Node instead reports
+      // a normal numeric exit code with signal=null.
+      assert.equal(signal, null);
+      assert.equal(code, 143);
+      const log = readLogSafe(logPath);
+      assert.match(log, /\bsignal: SIGTERM\b/);
+      assert.match(log, /\bexit: code=143\b/);
+    });
+  },
+);

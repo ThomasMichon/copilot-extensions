@@ -331,6 +331,44 @@ being a real contributor, not only a given plugin's own synchronous work.
 Compare against a sibling plugin's rate over the same window before
 attributing a change in rate to a specific fix.
 
+### Post-readiness crash diagnostics
+
+The launch log above records only a terminal disposition and exit code --
+if the extension reaches `ready` and then crashes with no further harness
+output (observed and diagnosed on at least one host, with no root cause
+identified yet), the launch log alone cannot say *why*. `extension.mjs` registers `process.on('uncaughtException'
+/'unhandledRejection'/'exit'/'SIGTERM'/'SIGINT'/'SIGHUP')` handlers (added
+directly above the `--- State ---` section) that write a synchronous,
+durable diagnostic line to
+`<os.tmpdir()>/context-handoff-extension-crash.log` (e.g.
+`/tmp/context-handoff-extension-crash.log` on Linux/macOS,
+`%TEMP%\context-handoff-extension-crash.log` on Windows) the instant
+anything goes wrong, plus a `joinSession-resolved` marker immediately after
+`joinSession()` succeeds. Read this file after a suspected crash to get
+the actual stack trace (or confirm its absence, which is itself
+diagnostic -- see below).
+
+This file is:
+
+- **Append-only and unmanaged.** Nothing in this plugin rotates, caps, or
+  deletes it; it grows across every crash on the host until an operator
+  clears it manually. It is intentionally OS-temp-scoped (not under
+  `~/.copilot/`) so a crash occurring before the extension can resolve its
+  own config/session directories still has somewhere durable to write.
+- **Diagnostic by omission as much as by content.** If the process
+  terminates and this file gained **no** new `exit` line for that launch,
+  something external force-killed the process before Node's own exit
+  handling could run (SIGKILL, an out-of-process kill of the whole tree) --
+  registering a handler for a given event does not help when the process
+  never gets to run any JS again. If an `exit` line *is* present, the
+  process died through ordinary Node lifecycle (an uncaught exception, a
+  rejected top-level `await joinSession(...)`, or a natural event-loop
+  drain), and the accompanying `uncaughtException`/`unhandledRejection`
+  line (if any) carries the actual stack.
+- **Not itself instrumented for retention.** No log-rotation, size cap, or
+  scheduled cleanup exists yet; treat it as a manually-cleared scratch file
+  until/unless that becomes worth adding.
+
 ## Payload-local CLI fallback
 
 When the extension does not resolve or fails to load, the plugin's payload
