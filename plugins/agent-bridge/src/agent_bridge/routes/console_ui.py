@@ -320,8 +320,9 @@ async function sendMain() {
   if (!sel || sel.kind !== "main") return;
   const task = $("#mainprompt").value.trim(); if (!task) return;
   const venue = $("#mainvenue").value;
-  // A venue hint is a machine-readable directive the orchestrator contract
-  // honors; the main session still runs venue-select to confirm it is viable.
+  // An optional venue hint; the main session still does the real venue
+  // resolution (agent-worktrees related resolve + odsp-web-harness / dispatching-work)
+  // and may explain if the hinted venue isn't viable.
   const body = venue ? ("[venue: " + venue + "] " + task) : task;
   $("#mainprompt").value = "";
   try {
