@@ -6860,32 +6860,6 @@ def _sweep_launcher_shells_on_exit() -> None:
         pass
 
 
-def _sweep_orphans_on_exit() -> None:
-    """Best-effort idle-gated orphan-mux sweep at the *session-end* boundary
-    (#713/#2149).
-
-    agent-worktrees runs **no persistent monitor process**. Orphaned mux+Copilot
-    sessions of finalized/gone worktrees are reaped on a cadence at the two
-    natural lifecycle boundaries instead: on picker *launch* (the sweep in
-    :func:`_run_new_picker`) and here, when a session *ends*. Both reuse the same
-    idle-gated predicate in :func:`reap_orphan_mux_sessions` -- an attached,
-    system-owned, still-active, or recently-busy session is always spared, so a
-    worktree finalized-from-inside while its Copilot is still working is never
-    killed. This closes the "reaped only when you next open the picker" gap
-    without a daemon or scheduled task. Never raises.
-    """
-    try:
-        payload = reap_orphan_mux_sessions()
-        reaped = payload.get("reaped") or []
-        if reaped:
-            output.ok(f"Reaped {len(reaped)} idle orphan mux session(s): {', '.join(reaped)}")
-    except Exception:
-        pass
-    _sweep_managed_on_exit()
-    _sweep_launcher_shells_on_exit()
-    _sweep_finished_sessions_on_cadence()
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # status
 # ═══════════════════════════════════════════════════════════════════════════

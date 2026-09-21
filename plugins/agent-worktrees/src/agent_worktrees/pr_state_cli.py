@@ -261,7 +261,8 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
     }
     from . import pr_contract as pc
 
-    live = result.get("live") if isinstance(result.get("live"), dict) else {}
+    live_block = result.get("live")
+    live = live_block if isinstance(live_block, dict) else {}
     if result.get("state") == "merged" or live.get("merge_state") == "merged":
         state = pc.PR_STATE_MERGED
     elif live.get("conflict"):
@@ -310,7 +311,7 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
     print(f"  provider: {result.get('provider')}")
     if result.get("repo"):
         print(f"  repo:     {result.get('repo')}")
-    if isinstance(live, dict):
+    if isinstance(live_block, dict):
         verdict = live.get("verdict") or "(none)"
         print("  live:")
         print(f"    verdict:     {verdict}")
