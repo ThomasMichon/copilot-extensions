@@ -296,9 +296,41 @@ class WorktreeStatusCache:
             entry = self._entries.get(key)
             fresh = entry is not None and (now - entry[1]) < self._ttl
             if fresh and not force:
-                bundle, computed_at, _ = entry
-                self._entries[key] = (bundle, computed_at, now)
-                return bundle
+                bundle, computed_at, demanded_at = entry
+                # Defense in depth against a stale/tampered entry that
+                # somehow predates a compute()-side identity guard (a
+                # warm-restored SQLite row is never re-validated on load --
+                # see `_warm_restore` -- and an older compute() build could
+                # have persisted a bundle before this check existed): a
+                # fresh-cache hit must still describe the exact key it's
+                # keyed under, or this cache would keep serving the wrong
+                # worktree's facts under this key indefinitely, never
+                # recomputing until the next TTL expiry/force-refresh
+                # happens to coincide with the corruption being noticed.
+                # A bundle shape without these keys at all (this cache is
+                # generic -- see its own tests) is never treated as a
+                # mismatch, only one that actively disagrees.
+                bundle_project = bundle.get("project")
+                bundle_worktree_id = bundle.get("worktree_id")
+                identity_ok = (
+                    bundle_project is None or bundle_project == project
+                ) and (bundle_worktree_id is None or bundle_worktree_id == worktree_id)
+                if identity_ok:
+                    self._entries[key] = (bundle, computed_at, now)
+                    return bundle
+                self._entries.pop(key, None)
+                # Delete the durable row while still holding the lock --
+                # this is an infrequent, exceptional path (not the hot
+                # cache-hit path this cache otherwise deliberately avoids
+                # blocking on SQLite for), same as `sweep_due`'s own
+                # identical eviction. Conditioned on the exact `demanded_at`
+                # just evicted: a concurrent recompute (the sweep, or a
+                # successor monitor mid-cutover) could publish a fresh,
+                # correct row for this same key between the pop above and
+                # this delete if it ran unsynchronized -- an unconditional,
+                # out-of-lock delete would remove that newer row instead of
+                # the stale one this call actually means to prune.
+                self._delete_row(project, worktree_id, if_demanded_at=demanded_at)
         # Compute outside the lock: a single-worktree bundle is real work
         # (~5 git calls) and must never hold the cache lock for its duration
         # -- callers for OTHER worktrees must not wait on it. Concurrent

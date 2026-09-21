@@ -32,6 +32,7 @@ def test_mux_only_is_active_source_mux():
     assert v.mux_live is True and v.mux_clients == 1
     assert v.live_session_ids == [] and v.bare is False
     assert v.source == "mux"
+    assert v.probes_ok is True
 
 
 def test_bare_lock_only_is_active_source_lock():
@@ -47,6 +48,7 @@ def test_bare_lock_only_is_active_source_lock():
     assert v.live_session_ids == ["sid-1"]
     assert v.bare is True
     assert v.source == "lock"
+    assert v.probes_ok is True
 
 
 def test_both_signals():
@@ -58,6 +60,7 @@ def test_both_signals():
     assert v.active is True and v.source == "both"
     assert v.mux_live is True and v.live_session_ids == ["sid-1"]
     assert v.bare is False
+    assert v.probes_ok is True
 
 
 def test_nothing_live_is_inactive():
@@ -67,6 +70,7 @@ def test_nothing_live_is_inactive():
         v = sessions.verify_worktree_active(_rec())
     assert v.active is False and v.source == "none"
     assert v.mux_live is False and v.live_session_ids == []
+    assert v.probes_ok is True
 
 
 def test_dedupes_and_sorts_session_ids():
@@ -78,6 +82,7 @@ def test_dedupes_and_sorts_session_ids():
         v = sessions.verify_worktree_active(_rec())
     assert v.live_session_ids == ["sid-1", "sid-2"]
     assert v.bare is True  # at least one bare binding present
+    assert v.probes_ok is True
 
 
 def test_degrades_when_reclaim_raises():
@@ -89,6 +94,7 @@ def test_degrades_when_reclaim_raises():
         v = sessions.verify_worktree_active(_rec())
     assert v.active is True and v.mux_live is True
     assert v.live_session_ids == [] and v.source == "mux"
+    assert v.probes_ok is False  # Copilot review finding: the reclaim probe raised
 
 
 def test_degrades_when_mux_raises():
@@ -99,3 +105,4 @@ def test_degrades_when_mux_raises():
         v = sessions.verify_worktree_active(_rec())
     assert v.active is True and v.mux_live is False
     assert v.source == "lock" and v.bare is True
+    assert v.probes_ok is False  # Copilot review finding: the mux probe raised

@@ -135,10 +135,19 @@ transport — a **second daemon instance** on its own rendezvous fields, not a
 shared one with `classify`, since the two have unrelated request shapes and
 independent linger/TTL tuning needs).
 
-**Key:** `"<project>|<worktree_id>"` — coalesces concurrent requests for the
-*same* worktree, but never batches unrelated worktrees into one compute call
-(unlike classify's per-project batch key) — a render loop asking about
-worktree A must never wait on, or receive, worktree B's compute.
+**Key:** `worktree_status_daemon.coalescing_key(project, worktree_id)` —
+length-prefixes `project` (`"<len(project)>:<project>:<worktree_id>"`) so the
+split point is unambiguous regardless of either component's own content.
+Coalesces concurrent requests for the *same* worktree, but never batches
+unrelated worktrees into one compute call (unlike classify's per-project
+batch key) — a render loop asking about worktree A must never wait on, or
+receive, worktree B's compute. (A plain `"<project>|<worktree_id>"` was the
+original design and an early implementation, but round 9's review caught
+that it is not injective — neither component is restricted to reject `|`,
+so two different `(project, worktree_id)` pairs could collide onto the
+identical key. A future cross-venv consumer building its own client against
+this wire contract must reproduce the same length-prefixed encoding, not
+the pipe-delimited shape.)
 
 **Payload:** `{"project": "<name>", "worktree_id": "<id>"}` — the daemon-side
 `compute` callback resolves the record itself from `payload` (never trusts a
@@ -935,5 +944,208 @@ issues plus the same PR-metadata staleness pattern:
 Added 2 new regression tests
 (`test_liveness_fact_is_unconfirmed_when_verify_worktree_active_degrades`,
 `test_in_process_runtime_has_active_demand_counts_a_live_subscriber`).
+
+### 2026-09-21 — Ninth review round: 3 more real bugs, 1 test-coverage gap
+Pushed round 8's fixes (guards+lint transiently failed on an unrelated
+`agent-index`/payload-invocation test race, confirmed flaky by a clean
+re-run of the same commit -- no code change needed). The next review
+caught 3 further genuine issues plus one test-coverage gap in round 8's
+own fix:
+
+1. **The coalescing key was not injective.** `cmd_worktree_status_bundle`
+   built its `CoalescingServer` key as a plain `f"{project}|{worktree_id}"`
+   -- but `_is_safe_identity_token` never restricted `|` (only `/`, `\`,
+   `..`, NUL matter for the *filesystem* path each component later builds),
+   so `("a", "b|c")` and `("a|b", "c")` collided onto the identical key,
+   letting two different worktrees' concurrent requests join the same
+   in-flight computation and each receive the *other's* bundle. Fixed by
+   adding `worktree_status_daemon.coalescing_key(project, worktree_id)`,
+   which length-prefixes `project` so the split point is unambiguous
+   regardless of either component's content, with no new character
+   restriction needed.
+2. **`status_via_daemon` (the no-boot helper) sent no `client_id`.** Unlike
+   `status_with_boot`, it never registered a subscriber, so round 8's own
+   `has_active_demand()` fix couldn't see a request in flight through this
+   path either -- the same drop-in-flight-result race round 8 fixed for
+   the booting path. Fixed by carrying a per-call `client_id` and releasing
+   it in a `finally`, matching `status_with_boot` exactly.
+3. **The liveness fact still discarded last-known hints on a degraded
+   (not raised) probe.** Round 8 added `LiveVerdict.probes_ok` and gated
+   `confirmed` on it, but still serialized the degraded/partial verdict
+   itself as the fact's `value` -- since `verify_worktree_active` is
+   fail-open, that branch (not the `except`) is what actually reaches the
+   transient-failure case, so the record's own last-known `mux_live`/
+   `bound_live` hints were never used even though the bundle contract
+   requires retaining them here. Fixed by branching on `probes_ok`: only a
+   fully-probed verdict is serialized as-is, a degraded one falls back to
+   the same last-known-hints helper the `except` branch already used.
+4. Added the missing `probes_ok` assertions round 8's own new field
+   should have carried into every existing `test_verify_worktree_active.py`
+   case (healthy paths assert `True`; the two probe-exception cases assert
+   `False`) -- closing the gap where a regression could silently report
+   `probes_ok=True` on a degraded probe without any test catching it.
+
+Added 3 new regression tests
+(`test_coalescing_key_is_injective_despite_a_pipe_in_either_component`,
+`test_status_via_daemon_registers_and_releases_a_client_id`) plus updated
+`test_liveness_fact_is_unconfirmed_when_verify_worktree_active_degrades` to
+assert the last-known-hints fallback (not the degraded verdict) is what's
+actually serialized.
+
+### 2026-09-21 — Tenth review round: 2 more real issues, 1 stale carryover, PR metadata drift
+Pushed round 9's fixes. The next review caught 2 genuine issues (1 real
+bug, 1 stale doc), 1 confirmed stale-carryover re-flag, and the recurring
+PR-metadata drift:
+
+1. **A loaded record's own identity was never checked against the
+   requested id.** `_worktree_status_compute` calls
+   `tracking.load_record_by_id(worktree_id, ...)`, which resolves purely by
+   *filename* (`{worktree_id}.yaml`, already path-traversal-validated) --
+   it never checks that the loaded YAML's own `worktree_id` field actually
+   matches. A tampered or concurrently-replaced `wt1.yaml` declaring `wt2`
+   would produce a bundle labeled `wt1` but assembled from `wt2`'s facts,
+   and cache that mixed result under `wt1`'s key. Fixed by rejecting an
+   identity mismatch (raising `ValueError`, same as a missing record)
+   before assembling any facts.
+2. **The effort README's own design section still documented the
+   pipe-delimited key round 9 replaced.** Left as-is, a future cross-venv
+   consumer building its own client against this documented wire contract
+   could recreate the exact collision round 9 fixed. Updated the design
+   section to describe `coalescing_key()`'s length-prefixed encoding
+   instead.
+3. A re-flag that the `test_verify_worktree_active.py` cases don't assert
+   `probes_ok` was stale -- round 9 already added that assertion to every
+   case (5 healthy-path `True`s, 2 degraded-probe `False`s); verified
+   directly against the current file. Same stale-carryover pattern
+   observed in rounds 3 and 7.
+4. Updated the PR description's version reference again
+   (`1.5.5-dev202` -> `dev204`).
+
+Added 1 new regression test
+(`test_rejects_a_record_whose_stored_identity_does_not_match_the_filename`).
+
+### 2026-09-21 — Merge race, PR follow-up split, and eleventh review round
+PR #3102 was merged at round 8's state while rounds 9-10's fixes were still
+in flight (a genuine race between the operator's merge and this session's
+next push) -- rounds 9-10's real fixes were recovered from the pre-merge
+branch tip and re-derived cleanly onto the merged `main` as a follow-up,
+**PR #3147**. That PR's own first review round caught 3 further issues,
+2 of them genuine (the third a mechanical artifact of the recovery
+process, not a design defect):
+
+1. **The recovery process regressed unrelated marketplace/baseline
+   entries.** Reconstructing the rounds-9/10 diff against an older
+   snapshot of `main` (taken before the merge) carried forward stale
+   version numbers and module-size ceilings for entirely unrelated plugins
+   (agent-bridge, agent-codespaces, agent-containers, agent-dispatch,
+   agent-index, ai-attribution, context-handoff, customizing-copilot, and
+   `agent-worktrees/__main__.py`'s own since-refactored ceiling) that had
+   moved forward on `main` in the meantime. Fixed by re-deriving those two
+   files fresh from the current `origin/main` and only reapplying
+   `agent-worktrees`'s own required version bump on top -- not by hand-
+   editing the stale values.
+2. **The identity-mismatch guard added in round 10 was bypassed by its own
+   caller.** `_worktree_status_compute` rejects a loaded record whose
+   `worktree_id` doesn't match the requested id -- but
+   `cmd_worktree_status_bundle` substitutes `worktree_id =
+   record.worktree_id` *before* calling it, so the check becomes a
+   tautology (both sides are the same substituted value). A `wt1.yaml`
+   declaring the real, existing identity `wt2` would silently serve `wt2`'s
+   facts for a `wt1` request. Fixed by validating the loaded record's
+   identity against the actual requested filename (`yaml_path.stem`) in
+   the CLI command itself, before any substitution, returning a JSON error
+   (consistent with this function's other early-exit checks) rather than
+   relying on a guard several calls downstream that this call site itself
+   defeats.
+
+Updated the existing tampered-record-id regression test (it previously
+asserted a raised `ValueError`, which was really testing the old,
+bypassable path -- now asserts the earlier JSON-error rejection) and added
+a new regression test proving the *safe, real* mismatched-identity bypass
+(`wt1.yaml` declaring `wt2`) is caught too, not just an unsafe/traversal
+id the old path-validation guard already rejected.
+
+### 2026-09-21 — Twelfth review round: 1 more real bug, 2 stale carryovers
+Pushed round 11's fixes. The next review re-flagged the marketplace/
+baseline regression and the CLI-substitution bypass -- both confirmed
+already fixed by round 11 (verified directly against the pushed diff: both
+files are clean vs `origin/main` except the intended version bump; the
+`yaml_path.stem` check is present in `session_tracking_cli.py`) -- stale
+carryovers, same pattern as rounds 3, 7, and 10. The review's fourth
+finding was genuine:
+
+1. **A fresh-cache hit never re-validated the bundle's own identity
+   against its key.** Even with the CLI-level and `compute()`-level
+   identity guards in place, `WorktreeStatusCache.get_or_refresh`'s
+   fresh-cache-hit path returns whatever is stored under the requested
+   `(project, worktree_id)` key unconditionally -- it never checks that
+   the bundle's own `project`/`worktree_id` fields actually agree with it.
+   A warm-restored SQLite row is never re-validated on load (`_warm_restore`
+   only checks it parses as a JSON object), and any bundle persisted by an
+   older `compute()` build (before its own identity guard existed) would
+   keep being served under the wrong key indefinitely -- never
+   recomputing until the next TTL expiry or force-refresh happened to
+   coincide with the corruption being noticed. Fixed by treating a cached
+   bundle that actively disagrees with its own key (when it carries
+   `project`/`worktree_id` fields at all -- this cache is otherwise
+   generic, per its own tests) as a miss: evict it (both in-memory and the
+   durable row) and fall through to a real recompute.
+
+Added 1 new regression test
+(`test_a_cached_bundle_disagreeing_with_its_own_key_forces_a_recompute`).
+
+### 2026-09-21 — Thirteenth review round: 1 more real bug, 3 stale carryovers
+Pushed round 12's fix. The review re-flagged the marketplace/baseline
+regression, the CLI-substitution bypass, and the cache-identity gap --
+all three confirmed already fixed (rounds 11-12; verified directly against
+the current diff/files each time) -- the same stale-carryover pattern as
+rounds 3, 7, 10, and 12. One genuine issue in round 12's own fix:
+
+1. **The mismatch-eviction delete was unconditional, racing a concurrent
+   recompute.** `get_or_refresh`'s new mismatch-eviction path called
+   `self._delete_row(project, worktree_id)` with no condition -- if a
+   concurrent recompute (the sweep, or a successor monitor mid-cutover)
+   published a fresh, correct row for the same key between the in-memory
+   eviction and this delete actually running, the delete would remove
+   that newer row instead of the stale one it meant to prune. This cache
+   already has exactly this race-safety mechanism (`_delete_row`'s
+   `if_demanded_at` parameter, added for `sweep_due`'s own identical race
+   in an earlier round) -- round 12 just didn't reuse it. Fixed by
+   capturing the evicted entry's own sampled `demanded_at` and passing it
+   through.
+
+Added 1 new regression test
+(`test_mismatch_eviction_deletes_conditioned_on_the_evicted_demanded_at`),
+verifying `get_or_refresh` actually passes the conditional guard rather
+than an unconditional delete.
+
+### 2026-09-21 — Fourteenth review round: 2 more real issues, 4 stale carryovers
+Pushed round 13's fix. The review re-flagged the marketplace/baseline
+regression, the CLI-substitution bypass, the cache-identity gap, and the
+delete's own unconditional-vs-conditional framing -- all four confirmed
+already fixed (rounds 11-13; verified directly). Two genuine issues:
+
+1. **Round 13's conditional delete ran outside the cache lock, itself
+   introducing a different race.** `_persist`/`_delete_row` are only
+   safe to call while holding `self._lock` -- that's what serializes them
+   against `close()`'s own teardown of `self._conn`/`self._closed` (see
+   `_persist`'s established call site, always inside the lock). Round 13
+   moved the eviction's delete to run *after* releasing the lock,
+   reasoning it was I/O like `compute()` -- but `compute()` is the slow,
+   expensive git/session work this cache exists to keep off the lock;
+   `_delete_row` is the same cheap, already-lock-synchronized operation
+   `sweep_due` already runs *inside* the lock for the identical reason.
+   Fixed by moving the delete back inside the lock, matching `sweep_due`'s
+   own pattern exactly.
+2. **PR title/description scope had drifted from the actual diff.** The
+   title/description still said "rounds 9-10" after four more rounds (11-
+   14) of real fixes landed on top -- reconciled both to describe the
+   PR's actual rounds 9-13 scope (this round's own fixes are documented
+   here, in the journal, rather than retroactively renumbering the title
+   again for round 14 itself).
+3. Also caught: the marketplace catalog's `metadata.version` field had
+   drifted behind agent-worktrees' own plugin-entry version across rounds
+   12-13 (bumped the plugin entry each time but not the catalog-level
+   field) -- bumped it to match.
 
 

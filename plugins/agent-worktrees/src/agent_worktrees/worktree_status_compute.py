@@ -53,6 +53,18 @@ def compute(project: str, worktree_id: str) -> dict:
     record = tracking.load_record_by_id(worktree_id, tracking_path=tracking_path)
     if record is None:
         raise ValueError(f"no tracked worktree {worktree_id!r} in project {project!r}")
+    if record.worktree_id != worktree_id:
+        # `load_record_by_id` resolves the file by its *filename* (already
+        # path-traversal-validated by the caller), but never checks that the
+        # YAML's own `worktree_id` field actually matches -- a tampered or
+        # concurrently-replaced record could declare a different identity
+        # entirely. Without this check the bundle would be labeled
+        # `worktree_id` yet assembled from (and cached under) a different
+        # worktree's facts.
+        raise ValueError(
+            f"tracked record for {worktree_id!r} declares a different "
+            f"identity {record.worktree_id!r} -- refusing to serve it"
+        )
 
     facts: dict[str, dict] = {}
 
@@ -91,21 +103,35 @@ def compute(project: str, worktree_id: str) -> dict:
     except Exception:
         facts["lineage"] = _worktree_status_fact(None, confirmed=False, observed_at=time.time())
 
-    try:
-        verdict = sessions.verify_worktree_active(record)
-        facts["liveness"] = _worktree_status_fact(
-            dataclasses.asdict(verdict), confirmed=verdict.probes_ok, observed_at=time.time()
-        )
-    except Exception:
-        # Same "retain the last-known value" contract as git_state above:
+    def _liveness_last_known() -> dict | None:
         # `WorktreeRecord` persists cached `mux_live`/`bound_live` hints
         # (see `tracking.stamp_mux_live`/`stamp_bound_live`) even though the
-        # authoritative `verify_worktree_active` probe failed this pass.
-        last_known = None
+        # authoritative `verify_worktree_active` probe failed/degraded this
+        # pass.
         if record.mux_live is not None or record.bound_live is not None:
-            last_known = {"mux_live": record.mux_live, "bound_live": record.bound_live}
+            return {"mux_live": record.mux_live, "bound_live": record.bound_live}
+        return None
+
+    try:
+        verdict = sessions.verify_worktree_active(record)
+        if verdict.probes_ok:
+            facts["liveness"] = _worktree_status_fact(
+                dataclasses.asdict(verdict), confirmed=True, observed_at=time.time()
+            )
+        else:
+            # `verify_worktree_active` is itself fail-open: a degraded mux/
+            # reclaim probe returns `LiveVerdict(probes_ok=False)` rather
+            # than raising, so this branch -- not the `except` below -- is
+            # what actually reaches the transient-failure case. Retain the
+            # record's own last-known hints per the same contract as
+            # git_state above, rather than serializing the partial/default
+            # verdict as if it were a real observation.
+            facts["liveness"] = _worktree_status_fact(
+                _liveness_last_known(), confirmed=False, observed_at=time.time()
+            )
+    except Exception:
         facts["liveness"] = _worktree_status_fact(
-            last_known, confirmed=False, observed_at=time.time()
+            _liveness_last_known(), confirmed=False, observed_at=time.time()
         )
 
     try:

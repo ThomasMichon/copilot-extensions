@@ -79,6 +79,35 @@ class TestWorktreeStatusComputeIsolated:
         assert bundle["facts"]["disposition"]["value"]["resume_count"] == 2
         assert bundle["facts"]["lineage"]["confirmed"] is True
 
+    def test_rejects_a_record_whose_stored_identity_does_not_match_the_filename(
+        self, monkeypatch, tmp_path
+    ):
+        """Copilot review finding: `load_record_by_id` resolves the record
+        purely by filename (already path-traversal-validated), but never
+        checks that the loaded YAML's own `worktree_id` field actually
+        matches -- a tampered or concurrently-replaced `wt1.yaml` declaring
+        `wt2` would otherwise produce a bundle labeled `wt1` but assembled
+        from (and cached under) `wt2`'s facts."""
+        from agent_worktrees import __main__ as m
+
+        project = "iso-proj"
+        tracking_dir = tmp_path / project / "worktrees"
+        tracking_dir.mkdir(parents=True)
+        wt_path = tmp_path / "wt1"
+        wt_path.mkdir()
+        mismatched = _rec(wt_path, worktree_id="wt2")  # declares a different id
+        tracking.save_record(mismatched, tracking_dir / "wt1.yaml")
+
+        monkeypatch.setattr(m.cfg, "project_dir", lambda name=None: tmp_path / (name or project))
+        _wire_common_internals(monkeypatch, m)
+
+        try:
+            m._worktree_status_compute(project, "wt1")
+            raised = False
+        except ValueError:
+            raised = True
+        assert raised
+
     def test_disposition_history_reads_the_explicit_project_not_an_ambient_one(
         self, monkeypatch, tmp_path
     ):
@@ -315,8 +344,12 @@ class TestWorktreeStatusComputeIsolated:
         and returns a default/partial `LiveVerdict` rather than raising, so
         the compute's own `try/except` around it never fires. Hard-coding
         `confirmed=True` for the liveness fact therefore let a degraded
-        probe look fully confirmed. `LiveVerdict.probes_ok` is the signal
-        that must gate this fact's `confirmed` marker instead."""
+        probe look fully confirmed. Also, serializing that degraded verdict
+        directly discarded the record's own last-known `mux_live`/
+        `bound_live` hints -- exactly the transient-failure case the
+        bundle contract says to retain them for. `LiveVerdict.probes_ok`
+        must gate both `confirmed` and whether the last-known hints are
+        used instead of the degraded verdict."""
         from agent_worktrees import __main__ as m
 
         project = "iso-proj"
@@ -324,7 +357,10 @@ class TestWorktreeStatusComputeIsolated:
         tracking_dir.mkdir(parents=True)
         wt_path = tmp_path / "wt1"
         wt_path.mkdir()
-        tracking.save_record(_rec(wt_path), tracking_dir / "wt1.yaml")
+        record = _rec(wt_path)
+        record.mux_live = True
+        record.bound_live = False
+        tracking.save_record(record, tracking_dir / "wt1.yaml")
 
         monkeypatch.setattr(m.cfg, "project_dir", lambda name=None: tmp_path / (name or project))
         _wire_common_internals(monkeypatch, m)
@@ -339,5 +375,8 @@ class TestWorktreeStatusComputeIsolated:
         bundle = m._worktree_status_compute(project, "wt1")
 
         assert bundle["facts"]["liveness"]["confirmed"] is False
-        assert bundle["facts"]["liveness"]["value"]["active"] is False
+        # Not the degraded verdict -- the record's own last-known hints.
+        assert bundle["facts"]["liveness"]["value"] == {
+            "mux_live": True, "bound_live": False,
+        }
 

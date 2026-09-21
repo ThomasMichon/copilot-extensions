@@ -72,6 +72,66 @@ def test_force_bypasses_a_fresh_cache_entry(tmp_path):
     assert len(calls) == 2
 
 
+def test_a_cached_bundle_disagreeing_with_its_own_key_forces_a_recompute(tmp_path):
+    """Copilot review finding: a fresh-cache hit previously returned
+    whatever was stored under the requested key without checking that the
+    bundle's own `project`/`worktree_id` fields actually agree with it. A
+    warm-restored SQLite row is never re-validated on load (`_warm_restore`
+    only checks it parses as a JSON object), and an older `compute()` build
+    could have persisted a mismatched bundle before its own identity guard
+    existed -- either way, this cache would keep serving the wrong
+    worktree's facts under this key indefinitely, never recomputing until
+    the next TTL expiry/force-refresh happened to coincide. Fixed by
+    treating a bundle that actively disagrees with its own key as a miss."""
+    cache = WorktreeStatusCache(tmp_path / "cache.sqlite3")
+    # Seed a mismatched entry directly (bypassing compute(), mirroring how
+    # a warm-restored or pre-fix row could have gotten here).
+    now = cache._now()
+    cache._entries[("proj", "wt1")] = (
+        {"project": "proj", "worktree_id": "wt2", "n": "stale"}, now, now,
+    )
+
+    calls = []
+
+    def compute():
+        calls.append(1)
+        return {"project": "proj", "worktree_id": "wt1", "n": "fresh"}
+
+    result = cache.get_or_refresh("proj", "wt1", force=False, compute=compute)
+    assert result == {"project": "proj", "worktree_id": "wt1", "n": "fresh"}
+    assert len(calls) == 1  # recomputed rather than serving the stale entry
+
+
+def test_mismatch_eviction_deletes_conditioned_on_the_evicted_demanded_at(tmp_path, monkeypatch):
+    """Copilot review finding: pruning the durable row for a mismatched
+    in-memory entry must not remove a row a concurrent recompute (the
+    sweep, or a successor monitor mid-cutover) already refreshed for the
+    same key between the in-memory eviction and the delete actually
+    running. Verifies `get_or_refresh` reuses the existing conditional
+    `if_demanded_at` guard (see `_delete_row`'s own race-safety tests) --
+    passing the evicted entry's exact sampled `demanded_at`, not an
+    unconditional delete."""
+    cache = WorktreeStatusCache(tmp_path / "cache.sqlite3")
+    stale_demanded_at = cache._now()
+    cache._entries[("proj", "wt1")] = (
+        {"project": "proj", "worktree_id": "wt2", "n": "stale"},
+        stale_demanded_at, stale_demanded_at,
+    )
+
+    calls = []
+    monkeypatch.setattr(
+        cache, "_delete_row",
+        lambda project, worktree_id, **kw: calls.append((project, worktree_id, kw)),
+    )
+
+    cache.get_or_refresh(
+        "proj", "wt1", force=False,
+        compute=lambda: {"project": "proj", "worktree_id": "wt1", "n": "fresh"},
+    )
+
+    assert calls == [("proj", "wt1", {"if_demanded_at": stale_demanded_at})]
+
+
 def test_ttl_expiry_triggers_recompute(tmp_path):
     calls = []
     clock = {"t": 1000.0}
