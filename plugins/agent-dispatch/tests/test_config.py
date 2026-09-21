@@ -247,6 +247,27 @@ def test_config_module_importable():
 # -- endpoint discovery (Phase 3 Stage A/B) ---------------------------------
 
 
+def test_connect_probe_normalizes_wildcard_bind_to_loopback():
+    # A wildcard/unspecified bind (0.0.0.0/::, permitted by
+    # check_bind_safety() when a token is configured) is not a dialable
+    # *destination* -- connecting to it directly fails regardless of whether
+    # anything is listening, so an endpoint advertised on 0.0.0.0 would
+    # otherwise be misclassified as stale by rendezvous.resolve() before any
+    # later health check even runs (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
+    import socket as socket_mod
+
+    listener = socket_mod.socket(socket_mod.AF_INET, socket_mod.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    try:
+        endpoint = rendezvous.Endpoint(transport="tcp", address=f"0.0.0.0:{port}")
+        assert rendezvous.connect_probe(endpoint, timeout=1.0) is True
+    finally:
+        listener.close()
+
+
 def test_client_url_discovers_local_endpoint(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
     monkeypatch.setattr("agent_dispatch.netinfo.is_wsl", lambda: False)
