@@ -8,6 +8,7 @@ Mirrors the resume verb's resolution order.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pytest
 
@@ -188,7 +189,14 @@ class TestHandoffCheck:
     ``agent-worktrees handoffs-check``, the ground-layer owner of the mux/pane
     primitives a CLI-hosted worktree's cutover depends on."""
 
+    @pytest.fixture(autouse=True)
+    def _no_explicit_context(self, monkeypatch):
+        """These tests exercise the legacy ambient-PATH fallback; the
+        same-cell path is covered separately below."""
+        monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+
     def test_no_agent_worktrees_on_path_fails_fast(self, monkeypatch):
+        monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
         monkeypatch.setattr(m.shutil, "which", lambda name: None)
         with pytest.raises(SystemExit):
             m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
@@ -384,4 +392,97 @@ class TestHandoffCheck:
         assert "no stalled predecessor retirements found" not in err
         assert "exited 1" in err
         assert "some underlying failure text" in err
+
+
+class TestHandoffCheckSameCell:
+    """Same-cell resolution (marketplace-scoped-installations, Phase 2
+    caller conversion): under an explicit installation-cell context,
+    ``handoff-check`` resolves ``agent-worktrees`` only through the
+    validated same-cell peer boundary, never an ambient ``PATH`` command.
+    Mirrors agent-logger's ``test_worktrees_peer.py`` pattern."""
+
+    @pytest.fixture
+    def owner(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+        cell = tmp_path / "marketplaces" / "test-cell"
+        root = cell / "plugins" / "agent-bridge"
+        root.mkdir(parents=True)
+        (cell / "plugins" / "agent-worktrees").mkdir()
+        own = {"cellRoot": str(cell), "pluginRoot": str(root)}
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
+        monkeypatch.setattr(m, "install_dir", lambda: root)
+        monkeypatch.setattr(m._peer_launch, "validate_owner", lambda *args: own)
+        monkeypatch.setattr(m.shutil, "which", lambda _: pytest.fail("ambient PATH selected"))
+        return own
+
+    def test_uses_native_same_cell_prefix(
+        self, owner: dict[str, str], monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        prefix = m._peer_launch.launch_prefix(
+            "agent-bridge", Path(owner["pluginRoot"]),
+            str(Path(owner["pluginRoot"]) / "install.json"), "agent-worktrees",
+        )
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return _FakeCompletedProcess(
+                m.json.dumps({"checked": 1, "found": 0, "executed": False, "findings": []})
+            )
+
+        monkeypatch.setattr(m.subprocess, "run", fake_run)
+
+        with pytest.raises(SystemExit):
+            m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
+
+        assert captured["argv"] == [
+            *prefix, "handoffs-check", "--json", "--worktree-id", "wt-1",
+        ]
+
+    def test_no_peer_installed_falls_back_to_legacy(
+        self, owner: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        (tmp_path / "marketplaces" / "test-cell" / "plugins" / "agent-worktrees").rmdir()
+        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return _FakeCompletedProcess(
+                m.json.dumps({"checked": 1, "found": 0, "executed": False, "findings": []})
+            )
+
+        monkeypatch.setattr(m.subprocess, "run", fake_run)
+
+        with pytest.raises(SystemExit):
+            m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
+
+        assert captured["argv"][0] == "/usr/bin/agent-worktrees"
+
+    def test_invalid_owner_context_falls_back_to_legacy(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A refused/invalid explicit context degrades to the legacy ambient
+        lookup for this best-effort diagnostic CLI, rather than failing
+        closed -- unlike agent-logger's protective tracked-worktree lookup,
+        this command has no protective set to guard."""
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "{")
+        monkeypatch.setattr(
+            m._peer_launch, "validate_owner",
+            lambda *a: (_ for _ in ()).throw(ValueError("bad receipt")),
+        )
+        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return _FakeCompletedProcess(
+                m.json.dumps({"checked": 1, "found": 0, "executed": False, "findings": []})
+            )
+
+        monkeypatch.setattr(m.subprocess, "run", fake_run)
+
+        with pytest.raises(SystemExit):
+            m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
+
+        assert captured["argv"][0] == "/usr/bin/agent-worktrees"
 

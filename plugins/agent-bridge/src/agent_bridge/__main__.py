@@ -17,6 +17,7 @@ import subprocess
 import sys
 import urllib.error
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agent_procutil import (
@@ -25,7 +26,13 @@ from agent_procutil import (
 )
 
 from . import __version__
-from .install_paths import effective_config_dir, scheduled_task_name, systemd_unit_name
+from . import _peer_launch
+from .install_paths import (
+    effective_config_dir,
+    install_dir,
+    scheduled_task_name,
+    systemd_unit_name,
+)
 from .parity_harness import (
     FAILED_ACP_HANDSHAKE_FAULT,
     CONTAINER_RECREATE_FAULT,
@@ -5440,6 +5447,35 @@ def _cmd_handoff_request(args: argparse.Namespace) -> None:
     )
 
 
+def _agent_worktrees_launch_prefix() -> list[str] | None:
+    """Resolve the exec prefix for ``agent-worktrees``, same-cell first.
+
+    Under an explicit installation-cell context (``COPILOT_EXTENSIONS_CONTEXT``
+    set), resolves only the validated same-cell peer boundary -- never an
+    ambient ``PATH`` command -- mirroring the pattern already established in
+    agent-logger's ``compact.py``/``origin.py`` same-cell lookups. Falls back
+    to the legacy ambient lookup when no explicit context is set, or when the
+    context/peer cannot be validated (fail open to the pre-Phase-4 behavior
+    this CLI has always had, not fail closed on a diagnostic command).
+    """
+    explicit_context = os.environ.get(_peer_launch.CONTEXT_ENV, "")
+    if explicit_context:
+        try:
+            own = _peer_launch.validate_owner(
+                "agent-bridge", install_dir(), explicit_context
+            )
+            peer_root = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+            if peer_root.exists() or peer_root.is_symlink():
+                return _peer_launch.launch_prefix(
+                    "agent-bridge", Path(own["pluginRoot"]), explicit_context,
+                    "agent-worktrees",
+                )
+        except (OSError, ValueError, ImportError):
+            pass
+    exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
+    return [exe] if exe else None
+
+
 def _cmd_handoff_check(args: argparse.Namespace) -> None:
     """Diagnose (and optionally finish) a stalled handoff-cutover retirement.
 
@@ -5452,11 +5488,11 @@ def _cmd_handoff_check(args: argparse.Namespace) -> None:
     primitives do. A future ACP-hosted equivalent belongs here too, once that
     path needs the same on-demand diagnostic.
     """
-    exe = shutil.which("agent-worktrees")
-    if not exe:
+    prefix = _agent_worktrees_launch_prefix()
+    if not prefix:
         print("[FAIL] agent-worktrees is not on PATH; cannot check handoffs.", file=sys.stderr)
         sys.exit(1)
-    argv = [exe, "handoffs-check", "--json"]
+    argv = [*prefix, "handoffs-check", "--json"]
     argv += ["--worktree-id", args.worktree_id] if args.worktree_id else ["--all"]
     if args.execute:
         argv.append("--execute")

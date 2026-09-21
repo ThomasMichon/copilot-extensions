@@ -179,6 +179,14 @@ prerequisite for making it blocking in Phase 6.
    [#1187](https://github.com/ThomasMichon/copilot-extensions/pull/1187):
    moved the six payload-owned agent-ssh self-wrappers to their own generated
    payload command and added cross-platform wrapper tests.
+1a. Completed: registered `agent-bridge` as a `peer-launch` OWNERS member (it
+   was previously only a PEERS target) and converted its
+   `handoff-check` -> `agent-worktrees handoffs-check` call to the validated
+   same-cell boundary, with the ambient-`PATH` lookup preserved as an
+   explicitly marked legacy-compatibility fallback. `agent_registry.py`'s
+   separate `_agent_worktrees_bin()` resolution (a different call site in the
+   same plugin, listed under "Known guard-invisible callers" below) is a
+   distinct, not-yet-converted caller.
 2. Clean stale descriptive and generated metadata references as the owning
    plugin slices land.
 3. Complete Phase 3 installation context and canonical launcher contracts.

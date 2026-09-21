@@ -114,7 +114,8 @@ def _vendored_consumers() -> dict[str, list[str]]:
             consumers.setdefault(lib.name, []).append(plugin.name)
     packaged_peers = [
         plugin for plugin in (
-            "agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger",
+            "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
+            "agent-logger", "agent-index", "agent-machines",
         )
         if (PLUGINS_DIR / plugin).is_dir()
     ]

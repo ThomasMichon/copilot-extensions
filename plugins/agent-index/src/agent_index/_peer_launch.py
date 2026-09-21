@@ -23,8 +23,8 @@ PEERS = {
     "agent-ssh": "agent_ssh",
 }
 OWNERS = {
-    "agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger",
-    "agent-index", "agent-machines",
+    "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
+    "agent-logger", "agent-index", "agent-machines",
 }
 
 
