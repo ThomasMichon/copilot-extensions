@@ -41,7 +41,9 @@ the only live-merged-PR evidence cited in Context is the RAW marker form
 (`source_attribution: true`) on a private downstream repo; no repo has ever
 actually published a real PR carrying the codename-form marker, and this
 effort's own Phase 4 defers that live proof until after this PR lands), but
-it requires an explicit `source_attribution: codename` opt-in, and in
+at the time this effort began it required an explicit
+`source_attribution: codename` opt-in (Phase 1, #3037, has since flipped
+this to the implicit default), and in
 practice **no repo had opted in**. `copilot-extensions` — the very repo the
 feature was built in — used to explicitly set `source_attribution: false`
 (removed in this effort's own Phase 3, #3092),
