@@ -58,7 +58,7 @@ reader can compare what changed and why.
 | 9 | routed | worktree-finality-and-obligations | accepted into Phase 7 | confirmed; Phase 3 action completed |
 | 10 | closed-obsolete | n/a | delivered upstream since the initial scan (2026-09-20); a different spawn-retry-loop issue remains open separately | corrected from `routed` -- the work landed |
 | 11 | residual | migration-intake | next componentization candidate, not a reusable cross-domain capability | confirmed unchanged |
-| 12 | routed (already covered) | native-construct-convergence | already covered by its own Phase C (#988) -- no action | corrected owner from the initial mis-routing guess (worktree-manager-control-plane) to the effort's own existing Phase C |
+| 12 | superseded | native-construct-convergence | already covered by its own Phase C (#988) -- no action | corrected owner from the initial mis-routing guess (worktree-manager-control-plane) to the effort's own existing Phase C |
 | 13 | closed-obsolete | n/a | effort is Done; the work landed since the initial scan | corrected from `residual` -- the work landed |
 | 14 | routed | account-aware-operations | accepted into new Phase 5 | corrected owner from initial "unclear" -- the deferred overlay is blocked specifically on caller-identity/network resolution, which account-aware-operations owns |
 | 15 | routed | review-automation-reliability | accepted into new Phase 11 | confirmed; Phase 3 action completed |
