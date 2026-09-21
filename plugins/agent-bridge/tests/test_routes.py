@@ -2161,6 +2161,95 @@ class TestWorktreeRoutes:
         resp = client.post("/api/v1/worktrees/does-not-exist-anywhere/resume")
         assert resp.status_code == 404
 
+    def test_resume_worktree_cache_blind_still_succeeds(self, client, app) -> None:
+        """(#6744) A worktree the fleet-wide discovery cache has never crawled
+        (cache empty/stale, never seeded via ``_seed_worktree``) must still
+        resume successfully via a targeted, live, single-worktree query --
+        the cache is only ever a performance shortcut for "does this exist,"
+        never the authority. Before the fix, ``_start_fresh_worktree_session``
+        only consulted ``cache.get_all()`` and 404'd here identically to a
+        genuinely-unknown worktree."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from agent_bridge.transport import SpawnTarget
+
+        from agent_bridge.routes import worktrees as wt_routes
+
+        wt_id = "anomalous-potato-wsl-20250101-193700-cacheblind"
+        self._register_agent(app, "test-agent")
+        # Deliberately do NOT seed the cache -- simulates a fresh daemon
+        # start, or a worktree created after the last crawl.
+        wt_routes.get_cache()._cache = {"test-agent": []}
+
+        app.state.resolver.resolve = MagicMock(
+            return_value=SpawnTarget(type="local")
+        )
+        mgr = app.state.session_manager
+        target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id)
+        fresh = Session("fresh-sess-cb", "quiet-mesa", target, "test-agent")
+        fresh.status = SessionStatus.IDLE
+        mgr.start_session = AsyncMock(return_value=fresh)
+
+        live_payload = (
+            '{"worktrees": [{"id": "%s", "path": "/wt/%s", '
+            '"branch": "worktree/%s", "status": "active"}]}'
+            % (wt_id, wt_id, wt_id)
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=live_payload),
+        ):
+            resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+
+        assert resp.status_code == 200
+        assert resp.json()["session_id"] == "fresh-sess-cb"
+        # The fresh session must be spawned using the *probed* entry's
+        # path/id, not an empty/incorrect cwd (review #3121) -- mirrors the
+        # cache-backed fresh-start assertion above.
+        spawned_target = mgr.start_session.call_args.args[0]
+        assert spawned_target.worktree_id == wt_id
+        assert spawned_target.cwd == f"/wt/{wt_id}"
+        assert mgr.start_session.call_args.kwargs["agent_name"] == "test-agent"
+
+    def test_resume_worktree_cache_blind_probe_rejects_missing_path(
+        self, client, app
+    ) -> None:
+        """(review #3121) A live probe match with no on-disk path (e.g. a
+        reaped/tombstoned record the probe shouldn't have matched at all)
+        must never be used to spawn a fresh session -- refuse (404), not
+        proceed with a stale/empty ``cwd``."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from agent_bridge.transport import SpawnTarget
+        from agent_bridge.routes import worktrees as wt_routes
+
+        wt_id = "anomalous-potato-wsl-20250101-193800-nopath"
+        self._register_agent(app, "test-agent")
+        wt_routes.get_cache()._cache = {"test-agent": []}
+
+        app.state.resolver.resolve = MagicMock(
+            return_value=SpawnTarget(type="local")
+        )
+        mgr = app.state.session_manager
+        mgr.start_session = AsyncMock(
+            side_effect=AssertionError(
+                "must not start a session for an entry with no path"
+            )
+        )
+
+        # No "path" key at all -- parses to the empty-string default.
+        live_payload = (
+            '{"worktrees": [{"id": "%s", "branch": "worktree/%s", '
+            '"status": "active"}]}' % (wt_id, wt_id)
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=live_payload),
+        ):
+            resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+
+        assert resp.status_code == 404
+
     def test_resume_worktree_fresh_start_failed_status_502(
         self, client, app
     ) -> None:
