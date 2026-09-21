@@ -328,13 +328,6 @@ because they provide tools or services.
       contract; return obsolete or unsafe candidates for explicit disposition.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
       extending this plan before implementation when necessary.
-- [ ] Unify installed-payload self-provisioning semantics, including Windows
-      stamp parity for self-provisioning/first-use stamps, across the
-      installer/payload-invocation contract.
-- [ ] Audit duplicated installer helpers across plugins and classify each as
-      engine-worthy (candidate for consolidation into a shared engine/helper)
-      or a permanent, deliberate per-plugin exception, before deciding which
-      to consolidate.
 - [ ] Keep examples synthetic and distribution-neutral.
 
 ## Validation Plan
@@ -381,6 +374,17 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 [`phase-6-lifecycle.md`](phase-6-lifecycle.md).
 
 ## Journal
+
+### 2026-09-20 — Removed two duplicate-ownership Phase 7 items (migration-intake correction)
+
+- `migration-intake`'s Phase 2 revalidation had routed two candidates into
+  this effort's Phase 7 as new backlog bullets: unified self-provisioning/
+  Windows-stamp semantics, and an installer-helper consolidation audit.
+  Both duplicated already-existing, more detailed Draft efforts'
+  own scope (`tiered-payload-provisioning`'s Windows `stamp` action;
+  `vendored-installer-engine`'s Phase 0 audit) -- removed both bullets here
+  to avoid a two-owner situation; see `migration-intake`'s own Journal for
+  the correction record.
 
 ### 2026-09-20 — agent-machines as a sixth owner; self_update.py's dtssh-mesh refresh converted
 

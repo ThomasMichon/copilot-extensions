@@ -163,6 +163,25 @@ retain only genuinely unclassified general-purpose work here.
 
 ## Journal
 
+### 2026-09-20 — Post-merge correction: 2 mis-routed candidates were duplicate ownership
+
+- Self-audit after merging the Phase 2 revalidation PR found candidates
+  **#17** and **#19** were routed into `marketplace-scoped-installations`'
+  Phase 7 as new backlog bullets, but each duplicates an already-existing,
+  more detailed **Draft** effort's own scope: `tiered-payload-provisioning`
+  (Windows `stamp` action) for #17, `vendored-installer-engine` (Phase 0
+  audit) for #19. Removed both duplicate Phase 7 bullets from
+  `marketplace-scoped-installations` and reclassified both candidates
+  `superseded` by their real (Draft, but pre-existing) owning efforts in
+  `ledger.md`.
+- The other 6 routed candidates (#3, #5, #9, #14, #15, #16) were checked
+  again and confirmed distinct from any existing Draft effort -- their
+  targets are already-Active domain efforts with no competing dedicated
+  plan for the same scope, so no further correction was needed there.
+- Lesson recorded in the ledger: a Draft effort is still a real owner, not
+  an absence of one -- check for a dedicated (even unactivated) effort
+  before routing a candidate into a large domain effort's generic backlog.
+
 ### 2026-09-20 — Phase 2 revalidation: 8 candidates routed, 4 stale, 4 stay residual
 
 - Revalidated all 19 raw candidates from the initial ledger pass against
