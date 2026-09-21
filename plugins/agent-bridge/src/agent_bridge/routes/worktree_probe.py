@@ -30,14 +30,81 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import TYPE_CHECKING
 
 from fastapi import Request
 
 from ..agent_registry import AgentConfig, AgentResolver
+from ..models import SessionStatus
 
 if TYPE_CHECKING:
     from .worktrees import _WorktreeEntry
+
+log = logging.getLogger("agent-bridge")
+
+
+def _local_host_child_alive(mgr: object, session_id: str) -> bool | None:
+    """Live LOCAL Session Host pid check (Phase 2, #6744); None = no record
+    or a remote/unverifiable boundary, so the caller falls back to status.
+
+    Reaches into ``mgr``'s "private" host-liveness helpers (``_host_index``,
+    ``_rec_host_alive``, ``_rec_child_alive``) rather than a public
+    SessionManager method -- mirrors this module's existing
+    module-qualified-reach-in pattern for ``_run_for_agent`` et al., and
+    keeps this Phase 2 addition out of ``session_manager.py``, whose
+    module-size ceiling has repeatedly tightened from unrelated concurrent
+    work during this same PR's review cycle.
+    """
+    rec = mgr._host_index.get(session_id) if mgr._host_index else None
+    if rec is None or getattr(rec, "boundary", "local") != "local":
+        return None
+    return mgr._rec_host_alive(rec) and mgr._rec_child_alive(rec)
+
+
+async def resolve_already_live(
+    mgr: object | None, worktree_id: str, session: object,
+) -> bool:
+    """True if ``session`` should be returned as-is (still live).
+
+    RUNNING/IDLE is never trusted blindly (Phase 2, #6744): when a live
+    local-host pid check confirms the Session Host child is actually dead,
+    settle the session (in-flight prompt task cancelled, stale client
+    cleared, host record reaped, STOPPED persisted -- via
+    ``mgr.settle_dead_local_session``, which owns that mutation since it
+    touches SessionManager-internal state, and rechecks liveness under its
+    own lock before actually settling) and return False so the caller falls
+    through to the normal resume path. Any other status, or an
+    inconclusive/confirmed-alive live check, returns True/False matching
+    the plain "was it live" question. If a concurrent resume already
+    reattached/replaced the session by the time the settle's own lock is
+    acquired, ``settle_dead_local_session`` is a safe no-op and this trusts
+    whatever ``session.status`` ends up being instead of forcing False.
+    """
+    if session.status not in (SessionStatus.RUNNING, SessionStatus.IDLE):
+        return False
+    if mgr is None or _local_host_child_alive(mgr, session.session_id) is not False:
+        return True
+    log.info(
+        "resume_worktree %s: %s reports %s but its local host child is "
+        "dead; reclassifying to stopped",
+        worktree_id, session.session_id, session.status.value,
+    )
+    await mgr.settle_dead_local_session(session)
+    return session.status in (SessionStatus.RUNNING, SessionStatus.IDLE)
+
+
+def reassign_worktree_ownership(
+    db: object | None, worktree_id: str, session_id: str,
+) -> None:
+    """Force-reassign the worktree-ownership reservation to ``session_id``
+    (review #3142): the reservation taken before resuming still names the
+    OLD session after a resume/reclassify falls back to a fresh one, so a
+    live-CLI registration would otherwise be checked against a stale
+    reference instead of the replacement that actually now owns it."""
+    import time
+    if db is not None:
+        db.reserve_worktree_ownership(worktree_id, session_id, now=time.time(), reclaim=True)
 
 
 async def owning_agent(

@@ -1402,6 +1402,98 @@ class TestWorktreeRoutes:
         assert data["session_id"] == "sess-live-1"
         assert data["acp_session_id"] == "acp-live-1"
 
+    def test_resume_worktree_local_host_alive_trusts_idle_status(
+        self, client, app,
+    ) -> None:
+        """(Phase 2, #6744) A local Session Host record whose pid is
+        genuinely alive confirms the RUNNING/IDLE status -- the same happy
+        path as the plain (no host record) case above, now with an explicit
+        live check instead of an implicit "no record, so trust it"."""
+        import os
+
+        from agent_bridge.session_host.host_index import HostRecord
+
+        wt_id = "anomalous-potato-wsl-20250101-170100-hostlive"
+        self._seed_worktree("test-agent", wt_id)
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        session = Session("sess-hostlive-1", "sunny-cove", target, "test-agent")
+        session.status = SessionStatus.IDLE
+        session.acp_session_id = "acp-hostlive-1"
+        mgr._sessions[session.session_id] = session
+        mgr._host_index.register(HostRecord(
+            session_id=session.session_id, port=1,
+            host_pid=os.getpid(), child_pid=os.getpid(), boundary="local",
+        ))
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+        assert resp.status_code == 200
+        assert resp.json()["session_id"] == "sess-hostlive-1"
+
+    def test_resume_worktree_reclassifies_dead_local_host_to_cold(
+        self, client, app,
+    ) -> None:
+        """(Phase 2, #6744) A session stuck at IDLE/RUNNING whose local
+        Session Host child is confirmed dead (pid 0 -- never alive) must
+        NOT be trusted as live -- it is reclassified to stopped and the
+        route falls through to the normal resume path (here: the stopped
+        session has no ACP id, so it starts a fresh session instead,
+        exactly like the existing no-prior-session fresh-start case)."""
+        from unittest.mock import AsyncMock, MagicMock
+        import time
+
+        from agent_bridge.session_host.host_index import HostRecord
+        from agent_bridge.transport import SpawnTarget as _SpawnTarget
+
+        wt_id = "anomalous-potato-wsl-20250101-170200-deadhost"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+        app.state.resolver.resolve = MagicMock(
+            return_value=_SpawnTarget(type="local")
+        )
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        stale = Session("sess-deadhost-1", "faded-elm", target, "test-agent")
+        stale.status = SessionStatus.IDLE
+        # Deliberately no acp_session_id -- resume_session would refuse it
+        # anyway, so the reclassify-to-stopped path must go through the
+        # fresh-session fallback, not mgr.resume_session.
+        mgr._sessions[stale.session_id] = stale
+        mgr._db.create_session(
+            stale.session_id, stale.name, "test-agent", "/wt", "local",
+            SessionStatus.IDLE.value, time.time(),
+        )
+        mgr._host_index.register(HostRecord(
+            session_id=stale.session_id, port=1,
+            host_pid=0, child_pid=0, boundary="local",
+        ))
+
+        fresh_target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id)
+        fresh = Session("fresh-sess-deadhost", "brisk-tide", fresh_target, "test-agent")
+        fresh.status = SessionStatus.IDLE
+        mgr.start_session = AsyncMock(return_value=fresh)
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+        assert resp.status_code == 200
+        assert resp.json()["session_id"] == "fresh-sess-deadhost"
+        # The stale session's in-memory status was reclassified...
+        assert stale.status == SessionStatus.STOPPED
+        # ...and so was the persisted row (review #3142: asserting only the
+        # in-memory object wouldn't catch a regression dropping the DB write).
+        row = mgr._db.execute_read(
+            "SELECT status FROM sessions WHERE id=?", (stale.session_id,)
+        )
+        assert row[0]["status"] == SessionStatus.STOPPED.value
+        # The stale host record is reaped, not left to linger.
+        assert mgr._host_index.get(stale.session_id) is None
+        # The worktree-ownership reservation must follow the replacement
+        # session, not still name the reclassified-stale one (review #3142).
+        owner = mgr._db.get_worktree_ownership(wt_id)
+        assert owner is not None
+        assert owner["session_id"] == "fresh-sess-deadhost"
+
     def test_resume_worktree_falls_back_to_fresh_session(
         self, client, app,
     ) -> None:
