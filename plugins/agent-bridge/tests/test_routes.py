@@ -2681,6 +2681,8 @@ def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path, monkeypat
     needed) kept working. ``_resolve_local_binstub`` must resolve through
     :func:`shutil.which`, which performs the same PATHEXT-aware lookup a shell
     would, on every platform."""
+    import os
+    import stat
     from pathlib import Path
 
     from agent_bridge.routes.worktrees import _resolve_local_binstub
@@ -2689,10 +2691,13 @@ def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path, monkeypat
     bin_dir.mkdir(parents=True)
     shim = bin_dir / "aperture-labs.cmd"
     shim.write_text("@echo off\n")
+    # shutil.which requires the executable bit on POSIX (PATHEXT covers the
+    # Windows side); irrelevant on Windows, harmless to set everywhere.
+    shim.chmod(shim.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     resolved = _resolve_local_binstub("aperture-labs")
-    assert resolved.lower() == str(shim).lower()
+    assert os.path.normcase(resolved) == os.path.normcase(str(shim))
 
 
 def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
