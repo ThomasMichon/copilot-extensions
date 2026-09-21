@@ -256,6 +256,125 @@ def test_dispatch_attempt_policy_concludes_exact_acp_allocation(
     )
 
 
+def test_dispatch_attempt_policy_releases_own_stale_session_claim(
+    tmp_path, monkeypatch
+):
+    """Regression: a headless dispatch-created session that crashed/was
+    reaped before its own sessionEnd hook could run leaves a `session`-kind
+    resource claim wedged `active` forever (copilot-extensions#3179
+    follow-up) -- neither agent-bridge's own status nor the pid-lock/mux
+    backstop (`_session_is_live`, already confirmed dead by `_worker`'s
+    fixture) ever releases it; only a `sessionEnd` hook or this
+    dispatch-attempt conclusion does. Since agent-dispatch concluding its
+    own exactly-matched attempt IS the definitive "we are done" signal, the
+    claim must be released so the worktree can still be primed."""
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    record = tracking.load_record(record_path)
+    record.interface = "acp"
+    record.origin = "delegate"
+    record.dispatch_attempt = tracking.DispatchAttempt(
+        task_id="task-1",
+        reservation_key="dispatch-task:task-1:1",
+        attempt=1,
+        driver="dispatcher",
+        supervisor="supervisor-1",
+        creator_machine=record.machine,
+    )
+    session_ref = tracking.format_claim_ref(
+        record.machine, "demo", record.worktree_id, session="session-exact",
+    )
+    record.resources = [
+        tracking.ResourceClaim(
+            kind="session",
+            ref=session_ref,
+            created_at="2026-09-21T12:24:04",
+            state="active",
+            note="live Copilot session",
+        )
+    ]
+    tracking.save_record(record, record_path)
+    assert record.live_resources  # sanity: the fixture really is wedged
+
+    result = _conclude(
+        record_path,
+        repo,
+        policy=tc.DISPATCH_ATTEMPT_POLICY,
+        reservation_key="dispatch-task:task-1:1",
+    )
+
+    assert result["action"] == "primed"
+    record = tracking.load_record(record_path)
+    assert record.live_resources == []
+    released = next(c for c in record.resources if c.ref == session_ref)
+    assert released.state == "released"
+
+
+def test_dispatch_attempt_policy_does_not_release_claim_on_reservation_mismatch(
+    tmp_path, monkeypatch
+):
+    """No definitive reason to end the session -> the claim stays put. A
+    mismatched reservation means this call is not the attempt's own
+    authoritative conclusion, so it must not release anything."""
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    record = tracking.load_record(record_path)
+    record.interface = "acp"
+    record.dispatch_attempt = tracking.DispatchAttempt(
+        task_id="task-1",
+        reservation_key="dispatch-task:task-1:1",
+        attempt=1,
+        driver="dispatcher",
+        supervisor="supervisor-1",
+        creator_machine=record.machine,
+    )
+    session_ref = tracking.format_claim_ref(
+        record.machine, "demo", record.worktree_id, session="session-exact",
+    )
+    record.resources = [
+        tracking.ResourceClaim(
+            kind="session", ref=session_ref, state="active",
+        )
+    ]
+    tracking.save_record(record, record_path)
+
+    result = _conclude(
+        record_path,
+        repo,
+        policy=tc.DISPATCH_ATTEMPT_POLICY,
+        reservation_key="dispatch-task:task-1:2",
+    )
+
+    assert result["action"] == "skipped"
+    assert result["reason"] == "reservation-mismatch"
+    record = tracking.load_record(record_path)
+    assert record.live_resources  # untouched
+
+
+def test_disposable_cli_policy_does_not_release_session_claims(
+    tmp_path, monkeypatch
+):
+    """The self-release path is scoped to dispatch-attempt conclusions only
+    -- an ordinary disposable-cli sweep carries no such authoritative
+    per-attempt provenance to release someone else's session claim on."""
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    record = tracking.load_record(record_path)
+    session_ref = tracking.format_claim_ref(
+        record.machine, "demo", record.worktree_id, session="session-exact",
+    )
+    record.resources = [
+        tracking.ResourceClaim(
+            kind="session", ref=session_ref, state="active",
+        )
+    ]
+    tracking.save_record(record, record_path)
+
+    result = _conclude(record_path, repo, policy=tc.DISPOSABLE_CLI_POLICY)
+
+    assert result["action"] == "skipped"
+    assert result["reason"] == "outstanding-obligations"
+    record = tracking.load_record(record_path)
+    assert record.live_resources  # untouched
+
+
 def test_dispatch_attempt_policy_rejects_wrong_reservation(
     tmp_path, monkeypatch
 ):

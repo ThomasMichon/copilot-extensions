@@ -84,6 +84,71 @@ def _save_session_conclusion(
     }, not already
 
 
+def _dispatch_ownership_confirmed(
+    record: tracking.WorktreeRecord,
+    *,
+    reservation_key: str | None,
+    owner: str,
+) -> bool:
+    """Whether ``record``'s own ``dispatch_attempt`` provenance exactly
+    matches the caller's claimed reservation/owner identity -- the same
+    match the ``dispatch-attempt`` policy gate already requires before
+    priming. Reused right before releasing this worktree's own ``session``
+    claim(s) (see :func:`_release_dispatch_session_claims`) so that release
+    is never granted on provenance the two-phase lock's unlocked
+    git-inspection window could have let drift underneath -- defense in
+    depth; the policy gate's own earlier check already enforces this for
+    the ordinary path, this just avoids trusting a now-stale in-memory
+    ``record`` a second time.
+    """
+    allocation = record.dispatch_attempt
+    return (
+        allocation is not None
+        and reservation_key is not None
+        and allocation.reservation_key == reservation_key
+        and allocation.creator_machine.casefold() == record.machine.casefold()
+        and allocation.driver == owner
+    )
+
+
+def _release_dispatch_session_claims(
+    record: tracking.WorktreeRecord,
+) -> list[tracking.ResourceClaim]:
+    """Release every live ``session``-kind resource claim on ``record``.
+
+    Only called once the caller has confirmed (a) this is a
+    ``dispatch-attempt`` conclusion whose reservation/attribution exactly
+    matches the record's own ``dispatch_attempt``
+    (:func:`_dispatch_ownership_confirmed`), and (b) the backstop liveness
+    probe (:func:`_session_is_live`, itself built on the pid-lock/mux
+    check -- never a query to agent-bridge) already found no live process
+    for this worktree. Under those two conditions, agent-dispatch
+    concluding this attempt (complete, abandoned, or a spawn attempt that
+    definitively failed) IS the same kind of authoritative "we are done
+    with this session" signal an operator's explicit ``finalize`` or
+    handoff carries -- so its own outward ``session`` claim(s) may be
+    released rather than left wedged forever. A clean-exit ``sessionEnd``
+    hook is the *only other* release path for a ``session`` claim
+    (:func:`tracking.release_resource_claim`'s own docstring; the reclaim
+    sweep in :mod:`sweep` deliberately has no gone-verdict resolver for
+    ``session`` claims, by design -- an abnormal agent-bridge death alone
+    must never look like a reason to reap a worktree we never declared
+    done with, copilot-extensions#3179 follow-up), and that hook never
+    fires for a session that crashed or was reaped before it could run.
+
+    Mutates ``record`` in place (does not itself persist -- the caller
+    saves alongside its own conclusion write) and returns the claims
+    released, for observability.
+    """
+    released = [
+        claim for claim in record.resources
+        if claim.is_live and claim.kind == "session"
+    ]
+    for claim in released:
+        tracking.release_resource_claim(record, claim.ref, save=False)
+    return released
+
+
 def _preservation_reason(
     record: tracking.WorktreeRecord, *, policy: str
 ) -> str | None:
@@ -244,6 +309,12 @@ def conclude_disposable_worktree(
                 }
                 return result
 
+            if policy == DISPATCH_ATTEMPT_POLICY and _dispatch_ownership_confirmed(
+                record, reservation_key=reservation_key, owner=owner
+            ):
+                if _release_dispatch_session_claims(record):
+                    tracking.save_record(record, record_path)
+
             if reason := _preservation_reason(record, policy=policy):
                 result.update(action="skipped", reason=reason)
                 return result
@@ -377,6 +448,10 @@ def conclude_disposable_worktree(
             ):
                 result.update(action="skipped", reason="lifecycle-changed")
                 return result
+            if policy == DISPATCH_ATTEMPT_POLICY and _dispatch_ownership_confirmed(
+                record, reservation_key=reservation_key, owner=owner
+            ):
+                _release_dispatch_session_claims(record)
             if reason := _preservation_reason(record, policy=policy):
                 result.update(action="skipped", reason=reason)
                 return result
