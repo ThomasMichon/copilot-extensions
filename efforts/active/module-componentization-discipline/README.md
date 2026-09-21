@@ -899,3 +899,38 @@ the Phase 0 runbook, picked up as capacity allows.
   should re-rank those seams fresh rather than assuming the work still revolves
   around `resolve`. Version bump for this slice: `agent-worktrees`
   `1.5.5-dev216` and marketplace `metadata.version` `1.7.7-dev185`.
+
+### 2026-09-21 — Review follow-up: stale config cache after project relocation
+- PR #3178's last GitHub Copilot review round landed a real, medium-severity
+  finding (`resolve_cli.py:616`) only ~11 seconds before the PR auto-merged --
+  the same race the earlier stale-marketplace-purge follow-up hit -- so it
+  never reached that PR's `main` commit.
+- The bug: `_resolve_noninteractive_worktree` calls
+  `_relocate_active_project_for_worktree(worktree_id)` unconditionally, then
+  reloads config via `state.load_config()` -- but that reload is a no-op
+  whenever `state.config` is already cached from an earlier base-repo probe,
+  so a relocation to a *different* project's worktree still returns the
+  *original* project's config. Preflight, session environment, and the
+  emitted launch plan would then silently use the wrong project's repo
+  settings. The JSON-output sibling path a few lines above already handles
+  this correctly (`if _relocate_active_project_for_worktree(worktree_id):
+  state.config = None`); this path just didn't mirror it.
+- Fixed by mirroring that exact pattern: only clear `state.config` when
+  `_relocate_active_project_for_worktree` reports it actually relocated
+  something, then let the existing `load_config()` call re-populate it.
+  Confirmed via `Select-String` that none of the other four `resolve_*`
+  sibling modules from the prior slice call
+  `_relocate_active_project_for_worktree` at all, so this was the only call
+  site with the gap.
+- Validation: targeted `python tools/run-plugin-tests.py agent-worktrees -k
+  "resolve or relocate"` -- 242 passed, 18 skipped; `ruff check --select
+  F,E9` on the touched file; `check-module-size.py`,
+  `check-install-contract.py`, and `check-version-consistency.py` all clean.
+  Version bump: `agent-worktrees` `1.5.5-dev217`, marketplace
+  `metadata.version` `1.7.7-dev186`.
+- **Process note:** this is the second time a genuine, late-arriving Copilot
+  review finding has landed within seconds of an auto-merge and needed a
+  separate recovery PR. Worth treating as a pattern: after pushing a final
+  fix commit in response to review feedback, wait for one more full review
+  round to actually complete (or an explicit "no new findings" confirmation)
+  before self-merging, rather than merging as soon as checks go green.
