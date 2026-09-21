@@ -5236,13 +5236,22 @@ def _cmd_resume(args: argparse.Namespace) -> None:
     holds the worktree, taking it over would spawn a second controller on the
     same checkout, so the bridge refuses (409 ``live_cli_holds_worktree``).
     Stopping the live CLI first, then re-running with ``--force``, performs the
-    affirmative take-over.
+    affirmative take-over. ``--json`` returns the session id machine-readably
+    (the sole headless take-over primitive since ``create --reclaim`` is gone).
     """
     from .client import BridgeClientError
 
     client = _get_client()
     target = args.session_id
     reclaim = bool(getattr(args, "force", False))
+    as_json = bool(getattr(args, "json", False))
+
+    def _fail(message: str, *, reason: str = "") -> None:
+        if as_json:
+            _json_out({"error": message, **({"reason": reason} if reason else {})})
+        else:
+            print(f"[FAIL] {message}", file=sys.stderr)
+        sys.exit(1)
 
     # 1. Try the historical owned-ACP-session resume first. A worktree handle
     #    is not an owned session id, so this 404s and we fall through.
@@ -5253,15 +5262,14 @@ def _cmd_resume(args: argparse.Namespace) -> None:
                 request_timeout=_startup_request_timeout(resume=True),
             )
             status = result.get("status", "")
-            print(f"[OK] Session {target} resumed ({status})")
+            if as_json:
+                _json_out({"session_id": target, "status": status, "verb": "resumed"})
+            else:
+                print(f"[OK] Session {target} resumed ({status})")
             return
         except BridgeClientError as exc:
             if exc.status != 404:
-                print(
-                    f"[FAIL] Could not resume session {target}: {exc.detail}",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+                _fail(f"Could not resume session {target}: {exc.detail}")
             # 404 -> not an owned session; fall through to worktree resolution.
 
     # 2. Treat the target as a worktree handle: load it (dormant = a note) or
@@ -5280,40 +5288,40 @@ def _cmd_resume(args: argparse.Namespace) -> None:
             detail = exc.detail
             reason = detail.get("reason") if isinstance(detail, dict) else None
             if reason == "live_cli_holds_worktree":
-                holder = (
-                    detail.get("session_id")
-                    if isinstance(detail, dict)
-                    else None
-                )
-                print(
-                    f"[BREAK-GLASS] A live interactive CLI (session {holder}) "
-                    f"still holds worktree {target}.\n"
-                    "  Taking it over would run a second controller on the same "
-                    "checkout.\n"
-                    "  Stop that CLI first, then re-run with --force to take it "
-                    "over.",
-                    file=sys.stderr,
-                )
+                holder = detail.get("session_id") if isinstance(detail, dict) else None
+                if as_json:
+                    _json_out({
+                        "error": f"a live interactive CLI ({holder}) still holds "
+                        f"worktree {target}",
+                        "reason": reason, "session_id": holder,
+                    })
+                else:
+                    print(
+                        f"[BREAK-GLASS] A live interactive CLI (session {holder}) "
+                        f"still holds worktree {target}.\n"
+                        "  Taking it over would run a second controller on the same "
+                        "checkout.\n"
+                        "  Stop that CLI first, then re-run with --force to take it "
+                        "over.",
+                        file=sys.stderr,
+                    )
                 sys.exit(1)
-            print(f"[FAIL] Could not resume worktree {target}: {exc.detail}",
-                  file=sys.stderr)
-            sys.exit(1)
+            _fail(f"Could not resume worktree {target}: {exc.detail}", reason=reason or "")
         if exc.status == 404:
-            print(
-                f"[FAIL] {target} is neither a bridge-owned session nor a "
-                "recognized worktree. Pass a worktree handle (e.g. "
-                "'<machine>-<env>-<ts>-<id>') to load a dormant worktree.",
-                file=sys.stderr,
+            _fail(
+                f"{target} is neither a bridge-owned session nor a recognized "
+                "worktree. Pass a worktree handle (e.g. '<machine>-<env>-<ts>-"
+                "<id>') to load a dormant worktree."
             )
-            sys.exit(1)
-        print(f"[FAIL] Could not resume worktree {target}: {exc.detail}",
-              file=sys.stderr)
-        sys.exit(1)
+        _fail(f"Could not resume worktree {target}: {exc.detail}")
 
     status = result.get("status", "")
     sid = result.get("session_id", "") or target
     verb = "took over" if reclaim else "loaded"
-    print(f"[OK] Worktree {target} {verb} as owned session {sid} ({status})")
+    if as_json:
+        _json_out({"session_id": sid, "status": status, "verb": verb, "worktree_id": target})
+    else:
+        print(f"[OK] Worktree {target} {verb} as owned session {sid} ({status})")
 
 
 def _cmd_handoff(args: argparse.Namespace) -> None:
@@ -6737,6 +6745,10 @@ def build_parser() -> argparse.ArgumentParser:
             "Break-glass take-over: adopt the worktree even if a live "
             "interactive CLI holds it (stop that CLI first)"
         ),
+    )
+    resume_p.add_argument(
+        "--json", action="store_true",
+        help="JSON output mode (headless callers, e.g. agent-dispatch)",
     )
     resume_p.set_defaults(func=_cmd_resume)
 

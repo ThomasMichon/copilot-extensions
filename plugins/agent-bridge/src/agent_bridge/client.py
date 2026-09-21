@@ -1030,10 +1030,11 @@ class BridgeClient:
         is set, the server enforces the session-lifecycle head guard: a create
         into a worktree whose ground-layer head is active or whose numbered
         handoff is pending is refused (409 ``worktree_head_active`` /
-        ``worktree_head_pending``) with no break-glass override of its own
-        (agent-bridge-cold-resume Phase 3) -- resolve the incumbent (reuse /
-        handoff / sunset) or take over via ``resume_worktree(reclaim=True)``,
-        then create.
+        ``worktree_head_pending``) with no break-glass of its own
+        (agent-bridge-cold-resume Phase 3). ``resume_worktree(reclaim=True)``
+        already resumes-or-creates that worktree's owned session and claims
+        the head -- use the session id it returns directly; a subsequent
+        ``create`` with the same ``worktree_id`` just hits this guard again.
 
         ``env`` sets per-session environment overrides merged onto the resolved
         agent's declared env and applied to the spawned Copilot CLI -- e.g. BYOK

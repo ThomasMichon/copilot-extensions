@@ -279,14 +279,17 @@ def spawn_worker(
     :func:`agent_dispatch.embody.parse_fleet_body_session` /
     :func:`agent_dispatch.embody.local_body_verdict`).
 
-    ``reclaim`` is agent-bridge's session-lifecycle head-guard break-glass
-    (``agent-bridge create --reclaim``): a create into ``worktree_id`` whose
-    ground-layer head is still active or whose numbered handoff is pending is
-    normally refused 409 by agent-bridge; ``reclaim=True`` takes it over in
-    place instead. agent-dispatch is the party that judges *staleness* (e.g.
-    an unclaimed handoff task past a bounded reconciliation window); it never
-    implements the actual in-place replacement itself -- that is agent-bridge's
-    job, headed or headless, on agent-dispatch's behalf.
+    ``reclaim`` is agent-dispatch's own judgment that ``worktree_id`` is stale
+    and safe to take over (e.g. an unclaimed handoff task past a bounded
+    reconciliation window) -- it never implements the in-place replacement
+    itself; that is agent-bridge's job. Since agent-bridge's own break-glass
+    take-over lives solely on ``resume ... --force`` now (``create --reclaim``
+    was removed, agent-bridge-cold-resume Phase 3: a create into an occupied
+    worktree has no bypass of its own), this delegates to
+    :func:`bridge_reclaim.resume_worktree_and_send`: force-resume
+    ``worktree_id`` (creating a fresh owned session if none exists, or taking
+    over a live holder), then ``send`` it the seed -- the two-call equivalent
+    of the old single ``create --reclaim`` invocation.
 
     ``--caller`` (copilot-extensions#2202): without an explicit caller, `create`
     derives one from the *current process's own* worktree context -- meaningless
@@ -330,6 +333,15 @@ def spawn_worker(
             json_output=json_output,
             timeout=timeout,
         )
+    if reclaim:
+        if not worktree_id:
+            raise ValueError("reclaim=True requires worktree_id")
+        from . import bridge_reclaim
+
+        return bridge_reclaim.resume_worktree_and_send(
+            worktree_id, prompt, exe=exe, wait=wait,
+            json_output=json_output, timeout=timeout,
+        )
     cmd = [*exe]
     if json_output:
         cmd.append("--json")
@@ -338,8 +350,6 @@ def spawn_worker(
         cmd += ["--target-dir", target_dir]
     if worktree_id:
         cmd += ["--worktree-id", worktree_id]
-    if reclaim:
-        cmd.append("--reclaim")
     cmd += [agent, prompt]
     cmd += ["--caller", f"agent-dispatch:{worker_id}"]
     if not wait:
@@ -348,6 +358,8 @@ def spawn_worker(
         cmd, check=False, capture_output=True, text=True, timeout=timeout,
         **no_window_kwargs(),
     )
+
+
 
 
 def spawn_or_resume_worker(

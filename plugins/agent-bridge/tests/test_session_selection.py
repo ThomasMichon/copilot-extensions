@@ -260,6 +260,16 @@ def test_create_reclaim_removed_no_such_param(fixed_caller, monkeypatch):
         )
 
 
+def test_create_parser_rejects_reclaim_flag():
+    # Parser-level regression guard: a re-added `create --reclaim` (e.g. a
+    # careless revert) must fail argparse itself, not just the private
+    # `_start_agent_session` helper -- this is what `build_parser()` actually
+    # wires to the CLI's `create` subcommand.
+    parser = m.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["create", "task-worker", "--worktree-id", "wt-review", "--reclaim"])
+
+
 def test_create_refuse_on_conflict_raises(fixed_caller):
     client = FakeClient(sessions=[], conflict_sid="s9")
     with pytest.raises(m._AgentSessionConflict) as ei:

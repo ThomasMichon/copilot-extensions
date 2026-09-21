@@ -3,7 +3,8 @@ contract (``plugins/context-handoff/extensions/context-handoff/cutover-seed.mjs`
 
 The coordinator's handoff-fallback launch (:mod:`agent_dispatch.coordinator`)
 hands a real Copilot process's **first interactive turn** to
-``agent-bridge create --reclaim``, exactly the way a live handoff hands one to
+``agent-bridge resume <worktree> --force`` (then ``send``), exactly the way a
+live handoff hands one to
 ``agent-worktrees handoff-cutover``. That seed's shape -- short, ASCII, a task
 lead, a `/consume-handoff` pointer, and an opaque recovery locator -- is a
 stable, already-tested cross-language contract; this module deliberately

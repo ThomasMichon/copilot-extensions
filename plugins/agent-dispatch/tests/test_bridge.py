@@ -258,15 +258,21 @@ def test_spawn_worker_wait_omits_no_wait(monkeypatch):
     assert result.returncode == 0
 
 
-def test_spawn_worker_reclaim_appends_flag(monkeypatch):
-    """``reclaim=True`` threads ``--reclaim`` onto the ``create`` invocation --
-    agent-bridge's session-lifecycle head-guard break-glass, so a coordinator-
-    judged-stale worktree occupant (e.g. an unclaimed handoff past its
-    reconciliation window) is replaced in place instead of refused 409."""
-    calls = {}
+def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch):
+    """``reclaim=True`` (#6744 Phase 3, since ``create --reclaim`` was removed
+    from agent-bridge) resolves via ``resume <worktree_id> --force`` (the sole
+    take-over primitive left) followed by ``send`` -- not a ``create``
+    invocation at all -- so a coordinator-judged-stale worktree occupant (e.g.
+    an unclaimed handoff past its reconciliation window) is replaced in place
+    instead of refused 409."""
+    calls = []
 
     def fake_run(cmd, **kwargs):
-        calls["cmd"] = cmd
+        calls.append(cmd)
+        if cmd[1:4] == ["--json", "resume", "wt-1"]:
+            return subprocess.CompletedProcess(
+                cmd, 0, '{"session_id": "resumed-9"}', "",
+            )
         return subprocess.CompletedProcess(cmd, 0, "ok", "")
 
     monkeypatch.setattr(
@@ -274,11 +280,23 @@ def test_spawn_worker_reclaim_appends_flag(monkeypatch):
     )
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
 
-    bridge.spawn_worker(
+    result = bridge.spawn_worker(
         "task42", agent="task-worker", worker_id="w1",
         worktree_id="wt-1", reclaim=True, wait=False,
     )
-    assert "--reclaim" in calls["cmd"]
+    assert result.returncode == 0
+    assert len(calls) == 2
+    assert calls[0] == ["/usr/bin/agent-bridge", "--json", "resume", "wt-1", "--force"]
+    assert calls[1][:4] == ["/usr/bin/agent-bridge", "send", "resumed-9", "--prompt-file"]
+    assert "--no-wait" in calls[1]
+
+
+def test_spawn_worker_reclaim_requires_worktree_id(monkeypatch):
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    with pytest.raises(ValueError):
+        bridge.spawn_worker("task42", worker_id="w1", reclaim=True)
 
 
 def test_spawn_worker_omits_reclaim_by_default(monkeypatch):
@@ -297,6 +315,7 @@ def test_spawn_worker_omits_reclaim_by_default(monkeypatch):
         "task42", agent="task-worker", worker_id="w1", worktree_id="wt-1",
     )
     assert "--reclaim" not in calls["cmd"]
+    assert "create" in calls["cmd"]
 
 
 def test_stop_worker_reaps_owned_session_host(monkeypatch):
