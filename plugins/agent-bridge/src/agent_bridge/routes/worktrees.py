@@ -1572,9 +1572,8 @@ async def restart_worktree_copilot(
     had_session = bool(data.get("had_session", False))
 
     # Invalidate-on-take-over (#2906): demote the live registration (fenced
-    # to expected_holder) and drop queued inbox messages so reclaim isn't
-    # blocked by the ownership guard (#2879). Only when had_session is
-    # true -- a no-op is never proof a bare claimant was terminated.
+    # to expected_holder), only when had_session -- a no-op is never proof
+    # a bare claimant was terminated.
     if ok and had_session:
         db = getattr(request.app.state, "db", None)
         if db is not None:
@@ -1588,10 +1587,10 @@ async def restart_worktree_copilot(
                         worktree_id, n,
                     )
             except Exception:
-                log.warning(
-                    "restart_worktree %s: live-session invalidation failed",
-                    worktree_id, exc_info=True,
-                )
+                # CLI stopped, but its registration may still be 'live' --
+                # report failure so a caller never forces past that row.
+                log.warning("restart_worktree %s: invalidation failed", worktree_id, exc_info=True)
+                ok = False
 
     return {
         "worktree_id": data.get("worktree_id", worktree_id),

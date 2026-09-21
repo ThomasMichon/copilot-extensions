@@ -2232,6 +2232,44 @@ class TestWorktreeRoutes:
         assert db.list_pending_live_messages("cli-live") == []
         assert db.list_fresh_live_sessions(wt_id, now=now) == []
 
+    def test_restart_reports_failure_when_invalidation_raises(
+        self, client, app,
+    ) -> None:
+        """The CLI was actually stopped (ok:true, had_session:true), but if
+        the server-side live-session invalidation itself raises, the
+        response must report failure (ok:false) rather than silently
+        swallow it -- a caller trusting ok:true would force-resume past a
+        registration that is still 'live'."""
+        import time
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "anomalous-potato-wsl-20250101-193310-invalidatefail"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        db = app.state.db
+        now = time.time()
+        db.register_live_session(
+            "cli-live", machine="test-agent", cwd=None, worktree_id=wt_id,
+            repo=None, branch=None, pid=None, role=None, now=now,
+        )
+        db.expire_live_sessions_for_worktree = lambda *a, **k: (_ for _ in ()).throw(
+            RuntimeError("db write failed")
+        )
+
+        payload = (
+            '{"worktree_id": "%s", "had_session": true, '
+            '"method": "graceful", "ok": true}' % wt_id
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ):
+            resp = client.post(f"/api/v1/worktrees/{wt_id}/restart")
+
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is False
+
     def test_restart_failure_keeps_live_session(
         self, client, app,
     ) -> None:
