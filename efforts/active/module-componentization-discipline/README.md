@@ -58,7 +58,7 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees __main__.py` update/runtime-reconcile slice)
+### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees __main__.py` session-binding slice)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
 — re-run before starting a phase, this list moves; it already has once per
@@ -67,7 +67,7 @@ table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 17,175 | +16,175 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Fifth dedicated slice landed: the update/runtime-reconcile surface now lives in `update_cli.py` + `update_runtime.py`; the remaining highest-sensitivity seam is now the launch/session-control core (`copilot`, `resolve`, session hook/binding/recovery/lineage, `note-handoff`, `bind-nudge`), with worktree-operations routing as the next lower-risk fallback if that core still proves too entangled |
+| 16,108 | +15,108 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Sixth dedicated slice landed: the session binding/inspection hook surface now lives in `session_binding_cli.py` + `session_inspection_cli.py`; the highest-risk remainder is still the launch core (`copilot`, especially `resolve`'s picker/remux/handoff planner), with worktree-operations (`list` / `claims` / `follow-ups` / `create` / `run` / `sync`) now the clearest next lower-risk seam |
 | 9,267 | +8,267 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression); it drifted again while this slice was in flight, so the baseline was manually widened (9191 → 9267) to restore a green full-tree guard pending its own future split |
 | 9,169 | +8,169 | `libs/installation-context/installation_context.py` (+17 vendored copies) | Split the **canonical** copy only; `sync-installation-context.py` propagates to every vendored copy |
 | 6,873 | +5,873 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
@@ -90,16 +90,17 @@ table):
 
 **Suggested next pick (Phase 2, next slice):** continue the dedicated
 `plugins/agent-worktrees/src/agent_worktrees/__main__.py` campaign while the
-cohesive seams are fresh, but treat the remaining **launch/session-control
-core** as a risk-first design pass rather than a forced extraction:
-`copilot`, `resolve`, session hook/binding/recovery/lineage, and the
-`note-handoff` / `bind-nudge` path now dominate the remaining blob and are
-exactly the live session-binding surface the fleet runs through. If that seam
-still resists a clean pure move once traced carefully, pivot to the lower-risk
+cohesive seams are fresh, but keep the same risk ordering. The **session
+binding/inspection** sub-surface is now extracted; what remains of the
+launch/session-control core is the truly sensitive part: `copilot`, and
+especially `resolve`, which still interleaves picker UI, cross-machine
+handoff, remux/restore, worktree creation, and launch-plan emission in one
+giant nested flow. Reassess that seam again only with fresh context and room
+to stop. If it still resists a clean pure move, pivot to the lower-risk
 worktree-operations block (`list` / `claims` / `follow-ups` / `create` /
 `run` / `sync`) or the still-large production module
 `plugins/agent-worktrees/src/agent_worktrees/pr_ops.py` instead of forcing the
-session core.
+launch core.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
 margin of their own ceiling (most likely to tip over next from unrelated
@@ -736,3 +737,61 @@ the Phase 0 runbook, picked up as capacity allows.
   `tests/test_doctor.py` failures (**551 passed, 10 failed, 1 skipped**).
 - Version bump for the follow-up PR: `agent-worktrees` `1.5.5-dev208` and
   marketplace `metadata.version` `1.7.7-dev180`.
+
+### 2026-09-21 — Phase 2 continued: `agent-worktrees/__main__.py` session-binding slice
+- Re-ran the explicit risk assessment on the remaining launch/session-control
+  area before editing. The verdict split in two: the **session binding /
+  inspection hook surface** turned out to be safely movable because its shared
+  state is already explicit (`args`, session ids, worktree ids, tracking YAML,
+  session-state paths) and the moved handlers can reach the existing helpers
+  through the same thin `__main__` compatibility surface prior slices use.
+  But `cmd_copilot`/`cmd_resolve` did **not** become a clean seam under the
+  same inspection. `resolve` still spans roughly 2.7k lines of nested picker,
+  remote-machine, restore/remux, create-or-resume, and launch-plan code in one
+  function-shaped blob; forcing that move in the same slice would still be a
+  risky edit to the live launch path rather than a clean mechanical extract.
+- Landed the safe half as a pure structural split. The session hook/binding
+  family now lives in `session_binding_cli.py` (`register-session`,
+  `deregister-session`, `bind-session`, `bind-nudge`, `note-handoff`, plus the
+  shared binding/nudge/title helpers) and `session_inspection_cli.py`
+  (`session-lifecycle`, `session-binding`, `session-recovery`,
+  `session-lineage`). `build_parser()` now delegates those parser
+  registrations, and `agent_worktrees.__main__` re-exports the moved command
+  functions plus the compatibility helpers/tests still reach directly
+  (`_activate_session_binding`, `_bind_nudge_should_fire`,
+  `_bind_nudge_decision`, `_capture_session_title`), preserving the old
+  monkeypatch/import surface while leaving `__main__` as the composition root.
+- Net result: `plugins/agent-worktrees/src/agent_worktrees/__main__.py`
+  dropped from **17,175** lines at the start of this slice to **16,108**
+  after rebasing onto upstream's bound-agent follow-up
+  (#3157; that PR added 13 lines to the same file while this slice was in
+  flight), so the structural split still nets a **1,067-line** reduction for
+  this pass (**29,173 → 16,108** across the
+  six-slice campaign so far). The new modules land at **946** lines
+  (`session_binding_cli.py`) and **162** lines (`session_inspection_cli.py`),
+  both under the 1,000-line cap, and
+  `python tools/check-module-size.py --refresh-baseline` lowered
+  `tools/module-size-baseline.json`'s ceiling for `__main__.py` accordingly.
+- Validation matched the effort's stricter bar. `ruff check --select F,E9`
+  passed on `__main__.py`, `session_binding_cli.py`, and
+  `session_inspection_cli.py`. The first full
+  `python tools/run-plugin-tests.py agent-worktrees` pass surfaced five real
+  extraction regressions, all on preserved private test seams
+  (`_capture_session_title` and `_bind_nudge_should_fire` no longer exposed on
+  `agent_worktrees.__main__`); re-exported them and re-ran. The targeted
+  extracted-area sweep then passed (**339 passed, 4710 deselected**), and the
+  full plugin suite again reproduced only the same independently-confirmed
+  pre-existing `tests/test_doctor.py` failures (**551 passed, 10 failed,
+  1 skipped**) that already existed on untouched `HEAD`. The other required
+  guards also pass after the slice: plain `python tools/check-module-size.py`,
+  `python tools/check-install-contract.py`, and
+  `python tools/check-version-consistency.py`.
+- Remaining backlog for the next slice is now more explicit. The still-deferred
+  high-risk seam is the **launch core**, not the already-extracted session
+  binding hooks: `cmd_copilot`, and especially `cmd_resolve`'s nested planner
+  and picker flow. If that still feels too entangled under fresh inspection,
+  take the lower-risk worktree-operations block next (`list`, `claims`,
+  `follow-ups`, `create`, `run`, `sync`) rather than forcing the launch path.
+  Version bump for this slice after rebasing over #3157: `agent-worktrees`
+  `1.5.5-dev211` and
+  marketplace `metadata.version` `1.7.7-dev181`.
