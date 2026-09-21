@@ -56,9 +56,12 @@ _PAGE = r"""<!doctype html>
               word-break: break-all; }
   .pill { display: inline-block; padding: 0 .4rem; border-radius: 999px;
           font-size: .72rem; border: 1px solid #8884; }
-  .s-ready, .s-live, .s-active { background: #2a83; }
+  .s-ready, .s-live, .s-active, .s-running { background: #2a83; }
   .s-starting, .s-idle { background: #fa03; }
-  .s-stopped, .s-unreachable, .s-failed { background: #f443; }
+  .s-stopped, .s-unreachable, .s-failed, .s-err, .s-stale { background: #f443; }
+  .rm { float: right; margin-left: .35rem; border: 0; background: transparent; color: inherit;
+        opacity: .45; cursor: pointer; font-size: .95rem; line-height: 1; padding: 0 .2rem; }
+  .rm:hover { opacity: 1; color: #f66; }
   #stage { display: flex; flex-direction: column; min-height: 0; }
   #tabs { display: flex; gap: .25rem; padding: .4rem .5rem; border-bottom: 1px solid #8884;
           align-items: center; flex-wrap: wrap; }
@@ -176,13 +179,38 @@ function itemHtml(id, title, sub, statusClass, statusText, selKey) {
     <div>${esc(title)} <span class="pill s-${esc(statusClass)}">${esc(statusText)}</span></div>
     <div class="id">${esc(sub)}</div></div>`;
 }
+function fmtAge(sec){
+  if(sec==null||isNaN(sec))return"";
+  sec=Math.max(0,Math.floor(sec));
+  if(sec<60)return sec+"s";
+  if(sec<3600)return Math.floor(sec/60)+"m";
+  return Math.floor(sec/3600)+"h";
+}
 function renderLive(list) {
-  $("#live").innerHTML = list.map(s => itemHtml(
-    s.session_id, s.repo || s.cwd || "main session",
-    (s.branch ? s.branch + " " : "") + (s.role ? s.role + " " : "") + (s.session_id||"").slice(0,8),
-    (s.liveness || s.status || "").toLowerCase(), s.turn_state || s.status || "live",
-    "main:" + s.session_id
-  )).join("") || `<div class="muted" style="padding:.35rem">No main session registered yet.</div>`;
+  const now = Date.now()/1000;
+  $("#live").innerHTML = list.map(s => {
+    const age = (s.updated_at!=null) ? (now - s.updated_at) : null;
+    const stale = (age!=null) && age > 90;            // no heartbeat for 90s => likely dead
+    const label = stale ? "stale" : (s.turn_state || s.status || "live");
+    const cls = stale ? "err" : (s.turn_state || s.status || "live").toLowerCase();
+    const selKey = "main:" + s.session_id;
+    const on = sel && sel.key === selKey ? " sel" : "";
+    const title = s.repo || s.cwd || "main session";
+    const sub = (s.role ? s.role + " " : "") + (s.session_id||"").slice(0,8)
+      + ((age!=null) ? (" \u00b7 " + fmtAge(age) + " ago") : "");
+    const rmTitle = "Deregister from the console (a live process may re-register)";
+    return `<div class="item${on}" data-key="${esc(selKey)}">
+      <div>${esc(title)} <span class="pill s-${esc(cls)}">${esc(label)}</span>
+        <button class="rm" data-rm="${esc(s.session_id)}" title="${rmTitle}">\u00d7</button></div>
+      <div class="id">${esc(sub)}</div></div>`;
+  }).join("") || `<div class="muted" style="padding:.35rem">No main session registered yet.</div>`;
+}
+async function removeLive(sid){
+  const msg = "Remove this session from the console list?\n\nThis only deregisters it. "
+    + "If its process is alive it re-registers in seconds (so it is live, not a ghost).";
+  if(!confirm(msg))return;
+  try{ await api("/api/v1/live-sessions/"+encodeURIComponent(sid),{method:"DELETE"}); setTimeout(refresh, 300); }
+  catch(e){ setStatus(e.message, true); }
 }
 function renderNative(target, list, kind) {
   $(target).innerHTML = list.map(e => itemHtml(
@@ -203,6 +231,8 @@ function renderWorktrees(list) {
 
 // ---- selection ----
 document.addEventListener("click", (e) => {
+  const rm = e.target.closest("[data-rm]");
+  if (rm) { e.stopPropagation(); removeLive(rm.dataset.rm); return; }
   const it = e.target.closest(".item[data-key]");
   if (!it) return;
   const key = it.dataset.key;
