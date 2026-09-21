@@ -3087,6 +3087,18 @@ class TestSystemWorktreeKind:
         raw = (tmp_path / "wt-unbound.yaml").read_text(encoding="utf-8")
         assert "bound_agent" not in raw
 
+    def test_create_new_record_bound_agent_whitespace_normalizes_to_none(
+        self, tmp_path: Path,
+    ):
+        """A whitespace-only --agent value must not persist as a binding."""
+        rec = create_new_record(
+            "wt-blank", "worktree/wt-blank", "/tmp/wt-blank", "test-repo",
+            "test", "wsl", tmp_path, bound_agent="   ",
+        )
+        assert rec.bound_agent is None
+        raw = (tmp_path / "wt-blank.yaml").read_text(encoding="utf-8")
+        assert "bound_agent" not in raw
+
 
 # ---------------------------------------------------------------------------
 # #2668 -- two-axis taxonomy (interface x origin) + Picker visibility

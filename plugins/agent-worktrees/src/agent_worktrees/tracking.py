@@ -4406,6 +4406,7 @@ def create_new_record(
     normalized_parent_session = parent_session or None
     normalized_caller_worktree = caller_worktree or None
     normalized_owner_ref = owner_ref or None
+    normalized_bound_agent = (bound_agent or "").strip() or None
     try:
         controllers, controller_revision = _derive_initial_controller_relations(
             machine=machine,
@@ -4447,7 +4448,7 @@ def create_new_record(
         pair_kind=pair_kind or None,
         codename=codename or None,
         codename_source=codename_source or None,
-        bound_agent=bound_agent or None,
+        bound_agent=normalized_bound_agent,
     )
     _mark_controller_projection_dirty(
         record,
