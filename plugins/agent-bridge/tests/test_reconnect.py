@@ -112,6 +112,48 @@ def test_sustained_outage_is_framed_as_resumable(capsys):
     assert all(word not in err.lower() for word in ("died", "stale", "gone"))
 
 
+def test_main_reports_uncaught_bridge_client_error_cleanly(monkeypatch, capsys):
+    """Regression (#3179): a command handler that does not wrap every internal
+    client call in its own try/except (e.g. `create`, whose only local guards
+    are for a 404 pre-check and an agent-session conflict) used to let a
+    ``BridgeClientError`` escape as a raw, unhandled Python traceback -- which
+    a caller shelling out to this CLI (agent-dispatch's headless spawn) could
+    not distinguish from a genuine, permanent failure. ``main`` now frames any
+    such escape as a clean one-line error with a nonzero exit, never a
+    traceback."""
+    from agent_bridge.client import BridgeClientError
+
+    def _raises_client_error(_args):
+        raise BridgeClientError(503, "agent-bridge is draining for a redeploy")
+
+    class _Args:
+        func = staticmethod(_raises_client_error)
+        project = None
+
+    monkeypatch.setattr(m, "build_parser", lambda: _FakeParser(_Args()))
+    monkeypatch.setattr(m, "_guard_project_scope", lambda parser, args: None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        m.main([])
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "[FAIL]" in err
+    assert "HTTP 503" in err
+    assert "Traceback" not in err
+
+
+class _FakeParser:
+    def __init__(self, args):
+        self._args = args
+
+    def parse_args(self, argv):
+        return self._args
+
+    def print_help(self):
+        pass
+
+
 class _RecordingRenderer(_Renderer):
     def render_event(self, etype, data):
         return data.get("text", "")

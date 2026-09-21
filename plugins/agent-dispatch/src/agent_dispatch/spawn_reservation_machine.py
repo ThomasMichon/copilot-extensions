@@ -152,6 +152,19 @@ SPAWN_TRANSITIONS: tuple[SpawnTransition, ...] = (
         implemented_by="TaskQueue.retire_spawn (exact absence proof, failed disposition)",
     ),
     SpawnTransition(
+        name="force_fail_handle_less_release",
+        from_states=frozenset({SpawnState.RELEASING}),
+        to_state=SpawnState.FAILED,
+        recovery_mode=RecoveryMode.SELF_REPAIR,
+        implemented_by=(
+            "TaskQueue.fail_spawn(force=True) (explicit, audited operator "
+            "override for a releasing reservation with no recorded "
+            "session_handle -- one automatic release_requested_bodies() "
+            "cleanup can never resolve, since retire_spawn's exact-absence "
+            "proof has nothing to check; copilot-extensions#3179)"
+        ),
+    ),
+    SpawnTransition(
         name="rearm",
         from_states=frozenset({SpawnState.FAILED}),
         to_state=SpawnState.REARMED,

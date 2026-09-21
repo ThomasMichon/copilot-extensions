@@ -217,7 +217,7 @@ def _cmd_reservations(args: argparse.Namespace) -> int:
             rows = c.list_reservations(task_id=args.task, state=args.state, limit=args.limit)
             return _emit(rows)
         if args.reservations_command == "fail":
-            return _emit(c.fail_spawn(args.key, detail=args.detail))
+            return _emit(c.fail_spawn(args.key, detail=args.detail, force=args.force))
         if args.reservations_command == "defer":
             return _emit(c.defer_spawn(args.key, detail=args.detail))
         if args.reservations_command == "settle":
@@ -383,6 +383,18 @@ def register_reservations_command(subparsers: Any) -> None:
     )
     rp.add_argument("key")
     rp.add_argument("--detail")
+    rp.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "explicit operator override for a 'releasing' reservation with no "
+            "recorded session_handle (nothing an automatic exact-absence proof "
+            "could ever confirm, so it would otherwise sit 'releasing' forever "
+            "-- copilot-extensions#3179). Refused if the reservation still "
+            "carries a handle: that one goes through the ordinary "
+            "liveness-checked release path instead."
+        ),
+    )
     rp.set_defaults(func=_cmd_reservations)
     rp = res_sub.add_parser(
         "defer",

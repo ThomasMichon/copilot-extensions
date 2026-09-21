@@ -71,6 +71,10 @@ class ReservationDetailBody(BaseModel):
     claim_token: str | None = None
 
 
+class FailSpawnBody(ReservationDetailBody):
+    force: bool = False
+
+
 class RequestSpawnReleaseBody(BaseModel):
     detail: str | None = None
     disposition: str = "failed"
@@ -269,7 +273,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/fail")
-    def fail_spawn(key: str, body: ReservationDetailBody) -> dict:
+    def fail_spawn(key: str, body: FailSpawnBody) -> dict:
         result = _reservation_guard(
             lambda: queue.fail_spawn(
                 key,
@@ -277,6 +281,7 @@ def register_spawn_routes(
                 conclusion_state=body.conclusion_state,
                 conclusion_detail=body.conclusion_detail,
                 claim_token=body.claim_token,
+                force=body.force,
             )
         )
         bus.publish({"type": "spawn.failed", "reservation": result})
