@@ -151,8 +151,24 @@ def test_list_calls_scoped_to_this_machine():
     client = FakeClient(queued=[])
     loop, _ = _loop(client)
     loop.tick()
-    assert client.calls[0] == {"status": "claimed,started", "target_machine": "book2"}
-    assert client.calls[1] == {"status": "queued", "target_machine": "book2"}
+    assert client.calls[0] == {
+        "status": "claimed,started",
+        "target_machine": "book2",
+        "repo": None,
+    }
+    assert client.calls[1] == {
+        "status": "queued",
+        "target_machine": "book2",
+        "repo": None,
+    }
+
+
+def test_satellite_repo_scopes_the_discovery_queries():
+    client = FakeClient(queued=[])
+    loop, _ = _loop(client, repo="aperture-labs")
+    loop.tick()
+    assert client.calls[0]["repo"] == "aperture-labs"
+    assert client.calls[1]["repo"] == "aperture-labs"
 
 
 def test_requires_machine():

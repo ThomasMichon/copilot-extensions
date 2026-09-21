@@ -221,29 +221,33 @@ class FederationRunner:
         unset): work-intake needs the shared coordinator's task queue, which
         is a separate concern from the awareness-plane directory this
         runner's rendezvous already talks to (and which may itself be a
-        *different* backend, e.g. Dev Tunnels)."""
-        if self._work_intake is None:
-            url = config.shared_url()
-            if not url:
-                return
-            from .client import DispatchClient
-            from .satellite_work_intake import SatelliteWorkIntake
+        *different* backend, e.g. Dev Tunnels).
 
-            client = DispatchClient(url, token=config.shared_token())
-            self._work_intake = SatelliteWorkIntake(
-                client,
-                machine=self._machine or self._instance,
-                project=config.satellite_project(),
-                max_concurrent=config.satellite_max_concurrent(),
-                clock=self._clock,
-            )
+        Everything past the shared-URL check -- building the client, building
+        the work-intake object, and ticking it -- is one guarded block: a
+        transient coordinator/spawn error must never disrupt this tick's
+        presence half, nor kill the caller's loop (mirrors `run`'s own "a
+        transient error must not kill the loop" contract), and that guarantee
+        has to cover *construction* failures (e.g. a malformed shared
+        endpoint) exactly as much as a failure inside `tick()` itself."""
         try:
+            if self._work_intake is None:
+                url = config.shared_url()
+                if not url:
+                    return
+                from .client import DispatchClient
+                from .satellite_work_intake import SatelliteWorkIntake
+
+                client = DispatchClient(url, token=config.shared_token())
+                self._work_intake = SatelliteWorkIntake(
+                    client,
+                    machine=self._machine or self._instance,
+                    project=config.satellite_project(),
+                    max_concurrent=config.satellite_max_concurrent(),
+                    clock=self._clock,
+                )
             self._work_intake.tick()
         except Exception:
-            # A transient coordinator/spawn error must not disrupt this
-            # tick's presence half, nor kill the caller's loop -- the next
-            # tick re-attempts (mirrors `run`'s own "a transient error must
-            # not kill the loop" contract).
             pass
 
     def _register(self) -> None:

@@ -104,7 +104,7 @@ class SatelliteWorkIntake:
             worker_id=self._worker_id,
             project=self._project,
             repo=self._repo,
-            route="--shared",
+            route=" --shared",
         )
 
     def tick(self) -> dict:
@@ -118,7 +118,9 @@ class SatelliteWorkIntake:
         self._reap_expired_triggers(now)
         try:
             active = self._client.list(
-                status=_ACTIVE_STATUSES, target_machine=self._machine
+                status=_ACTIVE_STATUSES,
+                target_machine=self._machine,
+                repo=self._repo,
             )
         except Exception:
             # Can't confirm current occupancy -- degrade to "assume full" so
@@ -130,7 +132,7 @@ class SatelliteWorkIntake:
             return {"spawned": [], "skipped_at_capacity": True}
         try:
             queued = self._client.list(
-                status="queued", target_machine=self._machine
+                status="queued", target_machine=self._machine, repo=self._repo
             )
         except Exception:
             return {"spawned": [], "skipped_at_capacity": False, "error": "list_failed"}

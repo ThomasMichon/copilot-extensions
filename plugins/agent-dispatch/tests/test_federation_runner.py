@@ -188,6 +188,32 @@ def test_satellite_work_intake_failure_does_not_disrupt_presence(monkeypatch, di
     assert [s["instance"] for s in sats] == ["sat-1"]
 
 
+def test_satellite_work_intake_construction_failure_does_not_disrupt_presence(
+    monkeypatch, directory
+):
+    # A failure while BUILDING the client/work-intake object (e.g. a
+    # malformed shared endpoint) must be caught just as much as a failure
+    # inside an already-built object's tick() -- both are covered by the
+    # same guarded block in `_attempt_work_intake`.
+    from agent_dispatch import client as client_mod
+
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
+    monkeypatch.setattr(config, "shared_url", lambda: "https://gw.example/dispatch")
+
+    def boom(url, **kw):
+        raise RuntimeError("malformed shared endpoint")
+
+    monkeypatch.setattr(client_mod, "DispatchClient", boom)
+
+    runner = FederationRunner(directory, "sat-1", role="satellite")
+    runner.tick()  # must not raise
+    sats = directory.discover_peers(role="satellite")
+    assert [s["instance"] for s in sats] == ["sat-1"]
+    # Construction never completed -- retried fresh on the next tick rather
+    # than caching a half-built/None state.
+    assert runner._work_intake is None
+
+
 # -- lease-eligible roles ----------------------------------------------------
 
 
