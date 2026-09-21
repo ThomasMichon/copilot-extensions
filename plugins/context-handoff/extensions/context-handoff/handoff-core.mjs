@@ -226,8 +226,21 @@ export function runCli(bin, args, opts = {}) {
   });
 }
 
+// Mirrors agent-worktrees' own URL-userinfo/auth-header redaction
+// (`repos.py`'s `_redact`) -- a fetch/rebase failure's stderr can include
+// the remote URL verbatim, and a URL with embedded credentials
+// (`https://user:pass@host/...`) or a bearer/basic auth header would
+// otherwise leak through this error text into the extension log and CLI
+// output.
+export function redactGitDiagnostics(text) {
+  return text
+    .replace(/(https?:\/\/)[^/@\s]+@/gi, "$1<redacted>@")
+    .replace(/(Authorization:\s*(?:Basic|Bearer)\s+)\S+/gi, "$1<redacted>");
+}
+
 function describeSyncError(error) {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return redactGitDiagnostics(message);
 }
 
 // Mirrors agent-worktrees' own `repository_identity_env()`
@@ -422,9 +435,10 @@ async function acquireLock(lockPath) {
     if (error?.code !== "EEXIST") throw error;
     let holderPid = null;
     let holderStartTime = null;
+    let observedContent = null;
     try {
-      const content = readFileSync(lockPath, "utf-8");
-      const match = content.match(/^(\d+)-(\d+|unknown)-/);
+      observedContent = readFileSync(lockPath, "utf-8");
+      const match = observedContent.match(/^(\d+)-(\d+|unknown)-/);
       if (match) {
         holderPid = Number(match[1]);
         holderStartTime = match[2] === "unknown" ? null : Number(match[2]);
@@ -487,6 +501,19 @@ async function acquireLock(lockPath) {
     // (an earlier approach) let a second reclaimer delete the FIRST
     // reclaimer's fresh lock and acquire its own, letting both run
     // concurrently and defeating the whole point of the lock.
+    //
+    // The rename alone is not sufficient, though: it only guarantees ONE
+    // winner among contenders racing on the SAME (still-stale) source --
+    // it says nothing about WHAT was actually at that path when this
+    // contender's rename ran. Two contenders can both read the same stale
+    // lock and both decide "reclaimable" before either acts; if contender A
+    // wins its rename+recreate first, contender B's rename (reached later)
+    // would then claim A's brand-new ACTIVE lock instead of the original
+    // stale one, and B would proceed to acquire concurrently with A. Verify
+    // the claimed content still matches what this decision was based on
+    // before proceeding -- a mismatch means someone else already won and
+    // replaced it, so this contender must restore it (no-clobber) and
+    // report contention rather than destroying an active lock.
     const graveyardPath = `${lockPath}.stale-${process.pid}-${Date.now()}`;
     try {
       renameSync(lockPath, graveyardPath);
@@ -494,6 +521,27 @@ async function acquireLock(lockPath) {
       // Lost the race to reclaim (someone else's rename won first, or the
       // lock is already gone/held again) -- this is genuine contention,
       // not something to retry past.
+      throw error;
+    }
+    let claimedContent;
+    try {
+      claimedContent = readFileSync(graveyardPath, "utf-8");
+    } catch {
+      claimedContent = null;
+    }
+    // Only verify when the initial read actually succeeded -- if it didn't
+    // (a rare transient failure, distinct from "couldn't parse"), there is
+    // no real baseline to compare against, and the age-based fallback
+    // decision above already accounted for that case on its own terms.
+    if (observedContent !== null && claimedContent !== observedContent) {
+      // Claimed something OTHER than the stale lock this decision was
+      // based on -- restore it (linkSync: no-clobber, same technique
+      // releaseLock uses) rather than destroying whatever is actually
+      // there now, then report contention.
+      try {
+        linkSync(graveyardPath, lockPath);
+      } catch { /* destination already re-occupied by yet another actor */ }
+      try { unlinkSync(graveyardPath); } catch { /* already gone */ }
       throw error;
     }
     try { unlinkSync(graveyardPath); } catch { /* best-effort cleanup */ }
@@ -714,17 +762,35 @@ export async function plainGitSync(cwd) {
   // default branch" caller expects and could leave commits unreachable
   // once HEAD moves again. `symbolic-ref -q` exits nonzero (throws here)
   // exactly when HEAD is detached, with no output parsing needed.
+  let currentBranch;
   try {
-    await execFileAsync(
-      "git", ["symbolic-ref", "-q", "HEAD"],
+    const { stdout } = await execFileAsync(
+      "git", ["symbolic-ref", "-q", "--short", "HEAD"],
       { cwd, encoding: "utf-8", timeout: 5000, env },
     );
+    currentBranch = stdout.trim();
   } catch {
     return {
       attempted: false,
       synced: false,
       reason: "worktree HEAD is detached; the plain-git sync fallback never rebases a detached checkout",
     };
+  }
+  // Resolve the CONFIGURED remote for the current branch (a review finding:
+  // hardcoding "origin" silently fails to sync a checkout whose tracking
+  // remote is named differently, e.g. "upstream") -- falls back to
+  // "origin" only when no tracking remote is configured, matching the
+  // managed path's own `RepoConfig.remote` default.
+  let remote = "origin";
+  try {
+    const { stdout } = await execFileAsync(
+      "git", ["config", `branch.${currentBranch}.remote`],
+      { cwd, encoding: "utf-8", timeout: 5000, env },
+    );
+    const configured = stdout.trim();
+    if (configured) remote = configured;
+  } catch {
+    // No configured tracking remote -- "origin" default stands.
   }
   let defaultBranch;
   try {
@@ -737,7 +803,7 @@ export async function plainGitSync(cwd) {
     // and matches the authoritative resolver's own ordering
     // (agent-worktrees' `status_bar_cli.py`'s `_resolve_remote_default_branch`).
     const { stdout } = await execFileAsync(
-      "git", ["ls-remote", "--symref", "origin", "HEAD"],
+      "git", ["ls-remote", "--symref", remote, "HEAD"],
       { cwd, encoding: "utf-8", timeout, env },
     );
     const match = stdout.match(/^ref:\s*refs\/heads\/(\S+)\s+HEAD/m);
@@ -749,11 +815,11 @@ export async function plainGitSync(cwd) {
     try {
       // The `ls-remote --symref` query above failed outright (network
       // issue, or a remote that doesn't answer symref queries) -- try
-      // `git remote show origin` next: it ALSO asks the remote directly
+      // `git remote show <remote>` next: it ALSO asks the remote directly
       // (still authoritative, not a local cache), so prefer it over the
       // possibly-stale `origin/HEAD` symref below.
       const { stdout } = await execFileAsync(
-        "git", ["remote", "show", "origin"],
+        "git", ["remote", "show", remote],
         { cwd, encoding: "utf-8", timeout, env },
       );
       const match = stdout.match(/HEAD branch:\s*(\S+)/);
@@ -777,7 +843,7 @@ export async function plainGitSync(cwd) {
   }
   try {
     await execFileAsync(
-      "git", ["fetch", "origin", defaultBranch],
+      "git", ["fetch", remote, defaultBranch],
       { cwd, encoding: "utf-8", timeout, env },
     );
     // Recheck immediately before the rebase exec -- this fallback is
@@ -814,7 +880,7 @@ export async function plainGitSync(cwd) {
       // contrary to the whole clean-tree safety gate's intent. Explicitly
       // disabling it makes a race fail loudly instead of moving unreviewed
       // local content.
-      "git", ["rebase", "--no-autostash", `origin/${defaultBranch}`],
+      "git", ["rebase", "--no-autostash", `${remote}/${defaultBranch}`],
       { cwd, encoding: "utf-8", timeout, env },
     );
     return { attempted: true, synced: true, reason: null };
