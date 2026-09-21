@@ -91,3 +91,34 @@ domain effort's generic backlog phase, first check whether a smaller,
 dedicated (possibly still-Draft) effort already exists for that exact
 scope -- a Draft effort is still a real owner, not an absence of one.
 
+## Phase 3 publication (2026-09-20)
+
+Publishes a public tracker entry for each remaining `routed` candidate whose
+owning domain effort is `Active` with an existing umbrella issue -- the
+Phase 3 acceptance gate the Intake Contract requires before publication.
+`account-aware-operations` (#14) and `review-automation-reliability` (#15)
+are still `Draft` effort status with no umbrella issue, so no public issue
+was created for either; both stay `routed` with publication pending until
+their owning effort activates.
+
+| # | Disposition | Owner | Tracker outcome | What changed vs. prior pass |
+|---|-------------|-------|------------------|-------------------------------|
+| 5 | routed | agent-machines-declarative-control-plane | published [#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115) | Phase 3 publication completed |
+| 9 | routed | worktree-finality-and-obligations | published [#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113) | Phase 3 publication completed |
+| 14 | routed | account-aware-operations | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per Intake Contract §3 until the effort activates |
+| 15 | routed | review-automation-reliability | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per Intake Contract §3 until the effort activates |
+| 16 | routed | worktree-finality-and-obligations | published [#3114](https://github.com/ThomasMichon/copilot-extensions/issues/3114) | Phase 3 publication completed |
+| 3 | routed | worktree-manager-control-plane | superseded by already-landed implementation, [#3102](https://github.com/ThomasMichon/copilot-extensions/pull/3102) | no separate public issue needed; the scope was already delivered under a different effort before this candidate's routing was checked for an existing implementation |
+
+*(Phase 3 publication, 2026-09-20: of the 6 routed candidates not already
+resolved by an earlier ledger pass, 3 were published as new public issues
+under their Active owning effort's umbrella issue (#5 -> #1418, #9 and #16 ->
+#1312), 1 was found already delivered by an in-flight PR under a different
+effort and needed no new issue (#3), and 2 remain `routed`-but-unpublished
+because their owning effort is still `Draft` with no umbrella issue to
+attach a sub-issue to (#14, #15) -- publishing under a Draft effort would
+create a tracker entry with no accepting umbrella, so this pass leaves them
+pending rather than force-publishing. Each published issue's body is a
+self-contained, repository-neutral restatement of the routed Plan bullet
+with no reference to this ledger's originating session context.)*
+

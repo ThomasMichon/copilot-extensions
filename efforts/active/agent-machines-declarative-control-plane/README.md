@@ -150,6 +150,8 @@ fleet, topology, or operating environment.
 - [ ] Non-Windows (systemd/launchd) scheduler parity for the self-update
   resource: define and apply an equivalent unattended self-update scheduling
   mechanism on POSIX hosts, matching the Windows Scheduled Task tier model.
+  Tracked in
+  [#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115).
 - [ ] Keep examples synthetic and repository-neutral.
 
 ## Validation Plan

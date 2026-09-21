@@ -404,7 +404,11 @@ realized in `main`; unchecked items are the remaining delta.
       manager/engine-backed, cached worktree-status view (e.g. the
       agent-dispatch Tasks-pane's Worktree Status card) over the `--json`
       engine boundary so external consumers stop polling `agent-worktrees`
-      directly per render.
+      directly per render. Already delivered by the
+      `agent-worktrees-external-status-accelerator` effort/PR
+      [#3102](https://github.com/ThomasMichon/copilot-extensions/pull/3102);
+      no separate public issue was created since the implementation preceded
+      this candidate's routing.
 - [ ] Keep configuration examples synthetic and repository-neutral.
 
 ## Validation Plan
