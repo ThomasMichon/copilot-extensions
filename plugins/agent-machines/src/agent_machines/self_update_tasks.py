@@ -12,9 +12,10 @@ drift reconciliation) never branch on platform themselves.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from .self_update_state import TIER_SPECS, tier_status
@@ -87,8 +88,23 @@ def runtime_root(home: Path | None = None) -> Path:
     return base / ".agent-machines"
 
 
-def task_runtime_python() -> str:
-    return sys.executable
+def task_binstub_path(home: Path | None = None) -> str:
+    if sys.platform == "win32":
+        raw_home = home if home is not None else Path.home()
+        base = PureWindowsPath(str(raw_home))
+    else:
+        base = home if home is not None else Path.home()
+    command = "agent-machines.cmd" if sys.platform == "win32" else "agent-machines"
+    return str(base / ".local" / "bin" / command)
+
+
+def _task_command_parts(
+    tier: str, *, machine: str | None = None, home: Path | None = None
+) -> list[str]:
+    parts = [task_binstub_path(home), "self-update", "run", "--tier", tier]
+    if machine:
+        parts.extend(["--machine", machine])
+    return parts
 
 
 def task_description(tier: str) -> str:
@@ -99,13 +115,18 @@ def task_description(tier: str) -> str:
     raise ValueError(f"unknown self-update tier: {tier}")
 
 
-def task_action_arguments(tier: str, *, machine: str | None = None) -> str:
-    parts = [
-        f'--headless "{task_runtime_python()}" -m agent_machines self-update run --tier {tier}'
-    ]
-    if machine:
-        parts.extend(["--machine", machine])
-    return " ".join(parts)
+def task_action_arguments(
+    tier: str, *, machine: str | None = None, home: Path | None = None
+) -> str:
+    if sys.platform == "win32":
+        command = subprocess.list2cmdline(
+            _task_command_parts(tier, machine=machine, home=home)
+        )
+        return f"--headless cmd.exe /c {command}"
+    command = " ".join(
+        _systemd_quote(part) for part in _task_command_parts(tier, machine=machine, home=home)
+    )
+    return f"--headless {command}"
 
 
 def task_working_directory(home: Path | None = None) -> str:
@@ -163,8 +184,9 @@ def task_definition_matches(
         execute == "conhost.exe"
         and (snapshot.logon_type or "") == "Interactive"
         and (snapshot.description or "") == task_description(tier)
-        and _normalize_windows_text(task_runtime_python()) in arguments
-        and "-m agent_machines self-update run" in arguments
+        and "cmd.exe /c" in arguments
+        and _normalize_windows_text(task_binstub_path(home)) in arguments
+        and "self-update run" in arguments
         and f"--tier {tier}" in arguments
         and (
             (not machine and "--machine " not in arguments)
@@ -301,7 +323,7 @@ def register_scheduled_task(
 if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {{
   throw 'ScheduledTasks cmdlets are unavailable'
 }}
-$taskArgs = {_ps_literal(task_action_arguments(tier, machine=machine))}
+$taskArgs = {_ps_literal(task_action_arguments(tier, machine=machine, home=home))}
 $action = New-ScheduledTaskAction `
   -Execute 'conhost.exe' `
   -Argument $taskArgs `
@@ -424,10 +446,10 @@ def _systemd_quote(value: str) -> str:
     return f'"{escaped}"'
 
 
-def _linux_exec_start(tier: str, *, machine: str | None = None) -> str:
-    parts = [task_runtime_python(), "-m", "agent_machines", "self-update", "run", "--tier", tier]
-    if machine:
-        parts.extend(["--machine", machine])
+def _linux_exec_start(
+    tier: str, *, machine: str | None = None, home: Path | None = None
+) -> str:
+    parts = _task_command_parts(tier, machine=machine, home=home)
     return " ".join(_systemd_quote(part) for part in parts)
 
 
@@ -441,7 +463,7 @@ def render_linux_service_unit(
         "[Service]\n"
         "Type=oneshot\n"
         f"WorkingDirectory={task_working_directory(home)}\n"
-        f"ExecStart={_linux_exec_start(tier, machine=machine)}\n"
+        f"ExecStart={_linux_exec_start(tier, machine=machine, home=home)}\n"
     )
 
 
@@ -522,8 +544,11 @@ def query_systemd_timer(
         state=state,
         logon_type="systemd-user",
         description=task_description(tier),
-        execute=task_runtime_python(),
-        arguments=_linux_exec_start(tier, machine=machine),
+        execute=task_binstub_path(home),
+        arguments=" ".join(
+            _systemd_quote(part)
+            for part in _task_command_parts(tier, machine=machine, home=home)[1:]
+        ),
         working_directory=task_working_directory(home),
         trigger_kind=spec.schedule_kind,
         trigger_value=spec.schedule_value,

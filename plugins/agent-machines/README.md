@@ -273,8 +273,10 @@ logical surface (`settings`, `permissions`, `trustedFolders`) or module name.
 Module stdout is shown by default in dry-runs, hidden during apply unless
 requested. `self-update install` resolves the declarative `self-update`
 resources first and only attempts Scheduled Task registration for tiers whose
-resolved state is `present`; `restore --apply` reconciles the same task
-presence declaratively, including removing tasks that have since been opted out.
+resolved state is `present`; the registered task/timer invokes the stable
+`agent-machines` binstub so runtime slot cutovers do not strand it on an old
+interpreter. `restore --apply` reconciles the same task presence
+declaratively, including removing tasks that have since been opted out.
 `--verbose`, and always present in `--json`.
 
 ## Playwright CLI provisioning
