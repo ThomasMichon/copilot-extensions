@@ -6,7 +6,7 @@
 // the shared `node --test` runner process, since these handlers call
 // process.exit() by design.
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,6 +60,33 @@ test("an uncaught exception is logged with its stack, then exits 1", async () =>
     assert.match(log, /\bexit: code=1\b/);
   });
 });
+
+// A predictable path in a shared os.tmpdir() means another local user could
+// have pre-created an ordinary, world-readable regular file there before
+// this process ever runs. O_NOFOLLOW alone does not protect against this
+// (it only rejects a symlink), and O_CREAT's mode argument has no effect
+// once the file already exists -- appending straight into it would leak
+// sensitive stack traces at whatever permissions that pre-existing file
+// happened to carry. Not meaningful on Windows (no POSIX uid/mode model).
+test(
+  "a pre-existing world-readable file at the log path is never written to",
+  { skip: process.platform === "win32" },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      writeFileSync(logPath, "not ours\n", { mode: 0o644 });
+      const before = statSync(logPath);
+      const result = spawnSync(process.execPath, [harness, "uncaught-exception", logPath], {
+        encoding: "utf-8",
+      });
+      // The crash-log write is refused, but the process's own crash
+      // handling (log-then-exit) is otherwise unaffected.
+      assert.equal(result.status, 1);
+      const after = statSync(logPath);
+      assert.equal(readFileSync(logPath, "utf-8"), "not ours\n");
+      assert.equal(after.mode, before.mode);
+    });
+  },
+);
 
 test("an unhandled rejection is logged with its stack, then exits 1", async () => {
   await withCrashLog(async (logPath) => {

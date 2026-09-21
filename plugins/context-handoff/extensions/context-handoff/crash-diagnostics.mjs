@@ -20,7 +20,7 @@
 // `exit` line is ever written in that case, since SIGKILL and an external
 // process-tree kill bypass it entirely).
 
-import { constants as fsConstants, openSync, writeSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, openSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -43,11 +43,30 @@ const OPEN_FLAGS =
   (fsConstants.O_NOFOLLOW ?? 0);
 
 /**
+ * True only if the already-opened `fd` is a regular file, owned by this
+ * process's user, with no group/other permission bits set. Guards against a
+ * different local user pre-creating an ordinary (non-symlink) file at this
+ * predictable path with permissive mode before this process ever runs --
+ * `O_NOFOLLOW` alone does not protect against that, since it only rejects a
+ * *symlink*, and `O_CREAT`'s mode argument has no effect when the file
+ * already existed.
+ */
+function isPrivateRegularFile(fd) {
+  const stats = fstatSync(fd);
+  return (
+    stats.isFile() &&
+    stats.uid === process.getuid() &&
+    (stats.mode & 0o077) === 0
+  );
+}
+
+/**
  * Builds an `emergencyLog(label, detail)` function bound to `logPath`
  * (default: `DEFAULT_CRASH_LOG`). Opens one private (0600), append-mode file
  * descriptor lazily on first use and reuses it -- synchronous I/O only (must
  * survive a process already mid-shutdown), and every failure (a pre-existing
- * symlink tripping `O_NOFOLLOW`, a permissions error, a full disk, ...) is
+ * symlink tripping `O_NOFOLLOW`, an untrusted pre-existing file failing the
+ * ownership/mode check below, a permissions error, a full disk, ...) is
  * swallowed so diagnostic logging can never itself become a new crash cause.
  */
 export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
@@ -57,7 +76,26 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
     try {
       if (fd === undefined && !openFailed) {
         try {
-          fd = openSync(logPath, OPEN_FLAGS, 0o600);
+          const candidate = openSync(logPath, OPEN_FLAGS, 0o600);
+          // The `0o600` mode above applies only when O_CREAT actually
+          // creates the file. O_NOFOLLOW alone only rejects a symlink at
+          // this path -- it does nothing about another local user having
+          // pre-created an ordinary, world-readable (or -writable) regular
+          // file here first: a predictable path in a shared os.tmpdir()
+          // makes that trivial to set up before this process ever runs, and
+          // this open() call would then happily append sensitive stack
+          // traces into that untrusted, already-permissioned file. Refuse to
+          // use a pre-existing file that this user does not own or that
+          // grants group/other any access, rather than trying to tighten it
+          // in place (which would itself require already trusting it enough
+          // to touch). Not meaningful on Windows (no POSIX uid/mode model,
+          // and no `process.getuid`) -- skip there.
+          if (process.platform === "win32" || isPrivateRegularFile(candidate)) {
+            fd = candidate;
+          } else {
+            closeSync(candidate);
+            openFailed = true;
+          }
         } catch {
           openFailed = true;
         }
