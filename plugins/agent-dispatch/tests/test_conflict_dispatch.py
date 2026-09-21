@@ -112,7 +112,10 @@ def test_build_dispatch_reuses_conflict_resolution_recipe():
     assert "--label" in argv and "projection-conflict" in argv
     assert "--dedup-key" in argv
     assert "--repo" in argv and "owner/my-consumer-repo" in argv
-    assert "--async" in argv
+    # No --spawn is passed (a label-supervisor claims and spawns later), so
+    # a bare --async would be inert -- it must not be present.
+    assert "--async" not in argv
+    assert "--spawn" not in argv
 
     prompt_index = argv.index("--prompt") + 1
     prompt = argv[prompt_index]

@@ -10,7 +10,9 @@ an agentic reconciler to take the PR the last mile).
 
 This module is the small, pure seam any such producer uses to describe its
 stuck PR and build the ``agent-dispatch create`` invocation: a domain-scoped
-dedup key, a compact JSON descriptor, and the argv for an async dispatch call.
+dedup key, a compact JSON descriptor, and the ``agent-dispatch create`` argv
+that enqueues the task without spawning a worker (no ``--spawn``, matching
+the private prior art: a label-supervisor claims and spawns it later).
 It builds on top of -- rather than duplicating -- this plugin's own generic
 ``conflict-resolution`` loop recipe (:mod:`agent_dispatch.recipes`), reusing its
 title/goal/done-criteria rendering and shared safety clauses (suspend/resume,
@@ -197,7 +199,6 @@ def build_dispatch(
         json.dumps(descriptor, separators=(",", ":"), sort_keys=True),
         "--repo",
         repo,
-        "--async",
     ]
     if target_machine:
         argv += ["--target-machine", target_machine]
