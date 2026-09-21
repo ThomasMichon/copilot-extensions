@@ -33,12 +33,14 @@ actions are derived views rather than separately maintained inventories.
 
 - **Topology:** schema-first host with independently reviewable resource modules.
 - **Host (owns PRs):** schema host.
-- **Delegates:** the package-discovery owner implements #1418; module owners
-  implement only their declared resource type.
+- **Delegates:** the package-discovery owner implemented #1418 (closed);
+  module owners implement only their declared resource type.
 - **Handoff:** each module contributes validation, plan/apply behavior, and
   observable status to the shared control plane.
-- **Public coordination token:** #1418 for relationship-aware package discovery;
-  later slices use their own dedicated issues.
+- **Public coordination token:** #1418 (closed; historical) for the
+  already-delivered relationship-aware package discovery slice; later slices
+  use their own dedicated issues, and this effort currently has no live
+  umbrella/coordination token for new work until one is opened.
 
 ## Context
 

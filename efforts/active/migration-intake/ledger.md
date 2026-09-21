@@ -94,21 +94,25 @@ scope -- a Draft effort is still a real owner, not an absence of one.
 ## Phase 3 publication (2026-09-20)
 
 Publishes a public tracker entry for each remaining `routed` candidate whose
-owning domain effort is `Active` with an existing umbrella issue -- the
-Phase 3 acceptance gate the Intake Contract requires before publication.
-`account-aware-operations` (#14) and `review-automation-reliability` (#15)
-are still `Draft` effort status with no umbrella issue, so no public issue
-was created for either; both stay `routed` with publication pending until
-their owning effort is both `Active` *and* has an umbrella issue -- effort
-activation alone is not sufficient, since an activated effort could still
+owning domain effort is `Active` with an existing live umbrella issue. The
+Intake Contract's Phase 3 itself only requires domain-plan acceptance plus
+owner/novelty/portability criteria -- it does not name an umbrella issue as a
+requirement. This pass applies a stricter, additional policy on top of that
+contract: publish under a live umbrella when one exists, and otherwise treat
+the candidate as accepted-into-the-plan but not yet tracker-published, rather
+than publish a parentless issue. `account-aware-operations` (#14) and
+`review-automation-reliability` (#15) are still `Draft` effort status with no
+umbrella issue, so no public issue was created for either; both stay `routed`
+with publication pending until their owning effort is both `Active` *and* has
+an umbrella issue -- effort activation alone is not sufficient, since an activated effort could still
 lack an umbrella to attach a sub-issue to.
 
 | # | Disposition | Owner | Tracker outcome | What changed vs. prior pass |
 |---|-------------|-------|------------------|-------------------------------|
-| 5 | routed | agent-machines-declarative-control-plane | standalone issue [#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115), not yet formally accepted -- the effort's own umbrella (#1418) and all sub-issues are closed | Phase 3 publication incomplete: no active umbrella currently exists to accept it; fail-closed per Intake Contract §3 until one does |
+| 5 | routed | agent-machines-declarative-control-plane | standalone issue [#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115), not yet formally accepted -- the effort's own umbrella (#1418) and all sub-issues are closed | Phase 3 publication incomplete: no active umbrella currently exists to accept it; fail-closed per this pass's umbrella policy (applying the Intake Contract §3 fail-closed principle) until one does |
 | 9 | routed | worktree-finality-and-obligations | published [#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113) | Phase 3 publication completed |
-| 14 | routed | account-aware-operations | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per Intake Contract §3 until the effort is both `Active` and has an umbrella issue |
-| 15 | routed | review-automation-reliability | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per Intake Contract §3 until the effort is both `Active` and has an umbrella issue |
+| 14 | routed | account-aware-operations | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per this pass's umbrella policy until the effort is both `Active` and has an umbrella issue |
+| 15 | routed | review-automation-reliability | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per this pass's umbrella policy until the effort is both `Active` and has an umbrella issue |
 | 16 | routed | worktree-finality-and-obligations | published [#3114](https://github.com/ThomasMichon/copilot-extensions/issues/3114) | Phase 3 publication completed |
 | 3 | routed | worktree-manager-control-plane | in flight under existing PR [#3102](https://github.com/ThomasMichon/copilot-extensions/pull/3102) (not yet merged) | stays `routed`, not `superseded`, until #3102 actually merges; no separate public issue needed unless it does not land, since it already covers this exact scope |
 

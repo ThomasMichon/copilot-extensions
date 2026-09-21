@@ -204,11 +204,12 @@ retain only genuinely unclassified general-purpose work here.
   (`review-automation-reliability`) unpublished (no public issue created for
   either, unlike #5 which does have one): both owning efforts are
   still `Draft` status with no umbrella issue, so there is no accepting
-  parent to attach a sub-issue to. Fail-closed per the Intake Contract's
-  ownership rule rather than publishing a standalone issue with no umbrella
-  -- the pending condition requires the owning effort to become both
-  `Active` *and* gain an umbrella issue; activation alone would not be
-  sufficient.
+  parent to attach a sub-issue to. This pass's own umbrella policy (see
+  `ledger.md`'s Phase 3 section header) fails closed the same way the Intake
+  Contract's ownership rule does, rather than publishing a standalone issue
+  with no umbrella -- the pending condition requires the owning effort to
+  become both `Active` *and* gain an umbrella issue; activation alone would
+  not be sufficient.
 - Appended a dated "Phase 3 publication" section to `ledger.md` recording the
   per-candidate outcome, alongside (not overwriting) the prior passes.
 
