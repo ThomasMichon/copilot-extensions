@@ -2194,6 +2194,161 @@ class TestPRFinalizeAndPush:
         assert publishes["count"] == 0
         assert frozen_pr.attribution_mode == "false"
 
+    def test_frozen_codename_marker_survives_config_flipping_to_false(
+        self, pr_repo, monkeypatch,
+    ):
+        # Validation Plan (round-26/27 findings): the REVERSE direction of
+        # the test above -- a PR frozen under "codename" (built-in
+        # provenance, so it publishes) must KEEP publishing on later
+        # pushes even after the repo's live config changes to "false".
+        # attribution_explicit must also stay frozen (False, an implicit
+        # decision), never re-derived from the live config.
+        import dataclasses
+
+        config, wid, _wt_path, _ = pr_repo
+        repo = config.repos["ext"]
+
+        def _config_with(source_attribution):
+            return dataclasses.replace(
+                config,
+                repos={
+                    "ext": dataclasses.replace(
+                        repo,
+                        pr=dataclasses.replace(
+                            repo.pr, source_attribution=source_attribution,
+                        ),
+                    )
+                },
+            )
+
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        record.codename = "steady-anchor"
+        record.codename_source = "built-in"
+        pr = tracking.PRRecord(
+            state="open", branch="feature/x", provider="gitea",
+            repo="example/project", number=42,
+        )
+        assert pr.attribution_mode == ""  # genuinely legacy/unset
+        record.prs = [pr]
+        tracking.save_record(record)
+        publishes: list[str] = []
+
+        class FakeProvider:
+            def publish_source_marker(
+                self, repo, number, marker, *, api_base="", token=None
+            ):
+                publishes.append(marker)
+                return ""
+
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider",
+            lambda name: FakeProvider(),
+        )
+
+        # First touch under a LIVE "codename" (implicit) config -- freezes
+        # to codename mode, publishes the marker.
+        error = pr_ops.refresh_source_attribution(
+            wid, _config_with("codename"), record, pr, "deadbeef" * 5,
+        )
+        assert error == ""
+        assert len(publishes) == 1
+        assert "steady-anchor" in publishes[0]
+        reloaded = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        frozen_pr = reloaded.active_pr()
+        assert frozen_pr is not None
+        assert frozen_pr.attribution_mode == "codename"
+        assert frozen_pr.attribution_explicit is False
+
+        # Second touch (a NEW head) after the live config flips to False.
+        # The ORIGINAL frozen "codename" pair must still govern -- the
+        # marker keeps publishing, not suppressed by the newer config.
+        error2 = pr_ops.refresh_source_attribution(
+            wid, _config_with(False), reloaded, frozen_pr, "cafebabe" * 5,
+        )
+        assert error2 == ""
+        assert len(publishes) == 2
+        assert "steady-anchor" in publishes[1]
+        assert frozen_pr.attribution_mode == "codename"
+        assert frozen_pr.attribution_explicit is False
+
+    def test_explicit_config_addition_does_not_unsuppress_a_frozen_custom_source(
+        self, pr_repo, monkeypatch,
+    ):
+        # Validation Plan (round-27 finding): a PR opened under an
+        # IMPLICIT "codename" default against a "custom"-sourced record is
+        # correctly suppressed at open (round-22 gate: an implicit default
+        # never publishes a custom-vocabulary codename). Adding an
+        # EXPLICIT `source_attribution: codename` to the repo's config
+        # afterward must NOT retroactively unsuppress it -- `PRRecord.
+        # attribution_explicit` was frozen False at open time and is never
+        # re-derived from the live, now-True `source_attribution_configured`.
+        import dataclasses
+
+        config, wid, _wt_path, _ = pr_repo
+        repo = config.repos["ext"]
+
+        def _config_with(*, configured: bool):
+            return dataclasses.replace(
+                config,
+                repos={
+                    "ext": dataclasses.replace(
+                        repo,
+                        pr=dataclasses.replace(
+                            repo.pr,
+                            source_attribution="codename",
+                            source_attribution_configured=configured,
+                        ),
+                    )
+                },
+            )
+
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        record.codename = "quiet-harbor"
+        record.codename_source = "custom"  # unreviewed custom vocabulary
+        pr = tracking.PRRecord(
+            state="open", branch="feature/x", provider="gitea",
+            repo="example/project", number=42,
+        )
+        record.prs = [pr]
+        tracking.save_record(record)
+        publishes: list[str] = []
+
+        class FakeProvider:
+            def publish_source_marker(
+                self, repo, number, marker, *, api_base="", token=None
+            ):
+                publishes.append(marker)
+                return ""
+
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider",
+            lambda name: FakeProvider(),
+        )
+
+        # First touch: implicit codename default (not configured) against
+        # a custom-sourced codename -- suppressed, freezes explicit=False.
+        error = pr_ops.refresh_source_attribution(
+            wid, _config_with(configured=False), record, pr, "deadbeef" * 5,
+        )
+        assert error == ""
+        assert publishes == []
+        reloaded = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        frozen_pr = reloaded.active_pr()
+        assert frozen_pr is not None
+        assert frozen_pr.attribution_mode == "codename"
+        assert frozen_pr.attribution_explicit is False
+
+        # Second touch (a NEW head): the repo now EXPLICITLY sets
+        # source_attribution: codename. The frozen attribution_explicit
+        # must stay False -- the marker stays suppressed.
+        error2 = pr_ops.refresh_source_attribution(
+            wid, _config_with(configured=True), reloaded, frozen_pr,
+            "cafebabe" * 5,
+        )
+        assert error2 == ""
+        assert publishes == []
+        assert frozen_pr.attribution_explicit is False
+
     def test_finish_auto_open_rerun_always_invokes_refresh_regardless_of_live_config(
         self, pr_repo, monkeypatch,
     ):

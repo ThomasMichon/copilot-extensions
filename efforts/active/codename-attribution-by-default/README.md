@@ -900,16 +900,30 @@ these decisions directly and assumes this design is understood.
   record.
 
 ### Phase 4 — Live validation
-- [ ] Open a real PR in this repo after Phase 3's config change and confirm
+- [x] Open a real PR in this repo after Phase 3's config change and confirm
   it now carries the `<!-- agent-worktrees:source codename=... -->` marker
-  (this effort's own landing PR is a natural candidate).
+  (this effort's own landing PR is a natural candidate). **Confirmed:** PR
+  #3107, opened from a worktree created fresh after Phase 3 merged and the
+  runtime redeployed, carries `<!-- agent-worktrees:source
+  codename=patient-beacon -->` in its body -- verified via the raw GitHub
+  API `.body` field, not the rendered view. (An earlier worktree created
+  mid-Phase-2, before that redeploy, had a `codename` assigned with no
+  `codename_source` at all -- a legacy-record gap the effort's own
+  fail-closed design correctly refused to publish, not a bug.)
 - [ ] Confirm the private downstream repo's next merged PR still carries
   the full raw marker unchanged (regression check, not a new test — just
-  observe the next real merge).
+  observe the next real merge). **Left open, transferred to a tracked
+  issue in the driver's own private tracker:** the downstream target
+  repo is private/out of this public record's scope by design (see
+  Context) -- this `copilot-extensions` repo itself is public; it
+  requires the driver's own observation against their own private repo's
+  next real merge, not something a session working only in
+  `copilot-extensions`
+  can check or resolve directly here.
 
 ## Validation Plan
 
-- [ ] Unit (round-15 finding: allocation-time, not publish-time; scoped
+- [x] Unit (round-15 finding: allocation-time, not publish-time; scoped
   round-22): a **PR-active** (`pr.enabled: true`) repo with a custom
   `codename.wordlist_path` configured AND an absent/default
   `source_attribution` fails a **new codename allocation** closed (a
@@ -919,13 +933,13 @@ these decisions directly and assumes this design is understood.
   flip could introduce. This test must NOT touch an existing
   `WorktreeRecord`'s publish path — see the next bullet and the
   `codename_source: "built-in"` bullet below for that.
-- [ ] Unit (round-22 finding): the IDENTICAL custom-wordlist/omitted-
+- [x] Unit (round-22 finding): the IDENTICAL custom-wordlist/omitted-
   `source_attribution` config, but with `pr.enabled` false/unset, allocates
   a **new** codename successfully with no validation error — proving the
   allocation-time gate is scoped to PR-active repos only and does not
   regress ordinary local-only (`codename.wordlist_path` for Picker
   ergonomics, no PR features in use) `create` usage.
-- [ ] Unit (round-21 finding): the SAME allocation-time policy violation,
+- [x] Unit (round-21 finding): the SAME allocation-time policy violation,
   exercised through the **normal `create` path**
   (`_create_worktree_core`), not just the paired-knowledge path — a
   `create` against a repo with a custom wordlist and omitted
@@ -936,7 +950,7 @@ these decisions directly and assumes this design is understood.
   `_create_worktree_core`'s own call site) — a regression in
   `_create_worktree_core`'s own preflight wiring must fail this test even
   if the shared helper itself is correct.
-- [ ] Unit: a repo with a custom `codename.wordlist_path` configured AND an
+- [x] Unit: a repo with a custom `codename.wordlist_path` configured AND an
   EXPLICIT `source_attribution: codename` (`source_attribution_configured`
   is `True`) publishes normally — including for a pre-existing
   `WorktreeRecord` whose codename was assigned before this effort shipped
@@ -944,7 +958,7 @@ these decisions directly and assumes this design is understood.
   publish-time helper reads `source_attribution_configured`, not just
   `attribution == "codename"`, to grant this explicit-opt-in exception
   (round-22 finding: the two are otherwise indistinguishable at runtime).
-- [ ] Unit (legacy-record gap, round-8 finding, sharpened round-22): a
+- [x] Unit (legacy-record gap, round-8 finding, sharpened round-22): a
   `WorktreeRecord` with `codename_source: "custom"`, in a repo whose
   CURRENT config has no custom wordlist configured (the config changed
   after assignment) AND whose `source_attribution` is the IMPLICIT
@@ -953,22 +967,22 @@ these decisions directly and assumes this design is understood.
   to prove the helper actually branches on `source_attribution_configured`
   rather than coincidentally passing both by always requiring
   `codename_source: "built-in"`.
-- [ ] Unit: a `WorktreeRecord` with `codename_source: "built-in"` publishes
+- [x] Unit: a `WorktreeRecord` with `codename_source: "built-in"` publishes
   normally under an IMPLICIT `codename` default, regardless of the repo's
   current wordlist config.
-- [ ] Unit: an existing `WorktreeRecord` with no `codename_source` recorded
+- [x] Unit: an existing `WorktreeRecord` with no `codename_source` recorded
   (predates this effort) is permanently treated as `"custom"` (fails
   closed) — never auto-promoted to `"built-in"` by any automated pass,
   regardless of the owning repo's current wordlist config (round-10
   finding: no config-inferred backfill).
-- [ ] Unit (round-26 finding, extended round-27): open a PR under one
+- [x] Unit (round-26 finding, extended round-27): open a PR under one
   `source_attribution` value (e.g. `false`), change the repo's config to
   a DIFFERENT value (e.g. `codename`), then push again — the marker
   published/refreshed on that second push still reflects the ORIGINAL,
   frozen `PRRecord.attribution_mode`, not the new live config. Cover both
   directions (an added marker on a config that used to publish nothing,
   and vice versa).
-- [ ] Unit (round-32 finding, corrects the round-26 entry's "falls back
+- [x] Unit (round-32 finding, corrects the round-26 entry's "falls back
   to live-config unchanged" framing): a legacy `PRRecord` with no stored
   `attribution_mode`/`attribution_explicit` (predates these fields) is
   lazily frozen on its FIRST `refresh_source_attribution`/
@@ -978,7 +992,7 @@ these decisions directly and assumes this design is understood.
   still uses the value frozen at the FIRST touch, not the newly-changed
   config, proving the lazy migration itself does not reopen the
   retroactive-change window.
-- [ ] Unit (round-27 finding): open a PR under an IMPLICIT `codename`
+- [x] Unit (round-27 finding): open a PR under an IMPLICIT `codename`
   default against a `"custom"`-sourced (or unknown-provenance) record —
   correctly suppressed at open per the round-22 gate — then add an
   EXPLICIT `source_attribution: codename` to the repo's config and push
@@ -986,7 +1000,7 @@ these decisions directly and assumes this design is understood.
   `attribution_explicit` (not just `attribution_mode`) is frozen at
   creation time and never re-derived from live
   `source_attribution_configured`.
-- [ ] Unit (round-27 finding): attach a PR via manual `set-pr` (a path
+- [x] Unit (round-27 finding): attach a PR via manual `set-pr` (a path
   that never calls `_open_via_provider` at all) against a repo/record
   combination that would be suppressed under the implicit default, then
   run `push-changes` (which invokes `refresh_source_attribution`) —
@@ -995,13 +1009,13 @@ these decisions directly and assumes this design is understood.
   (not left empty/falling back to live config), proving the freeze
   helper is wired into every `PRRecord` creation site, not only the
   auto-open path.
-- [ ] Round-trip (round-28 finding): stamp a `PRRecord` with a known
+- [x] Round-trip (round-28 finding): stamp a `PRRecord` with a known
   `attribution_mode`/`attribution_explicit` pair, `save_record` it,
   `load_record` it back, assert both fields are unchanged — proving
   `_pr_to_yaml_dict` actually emits them (not just `_parse_pr_mapping`
   parsing them) and a legacy record with neither field present still
   round-trips to empty/`False`, not a crash.
-- [ ] Round-trip (round-34 finding): stamp a `PRRecord` with
+- [x] Round-trip (round-34 finding): stamp a `PRRecord` with
   `attribution_mode="codename"`/`attribution_explicit=False` (an
   IMPLICIT codename decision — explicitness legitimately `False`),
   `save_record`/`load_record` it back — assert `attribution_explicit`
@@ -1010,7 +1024,7 @@ these decisions directly and assumes this design is understood.
   own value is falsy (which would strand `attribution_mode` without its
   partner and silently re-trigger the lazy-backfill freeze on next
   load).
-- [ ] Unit (round-34 finding, matcher corrected round-36): a `create_pr`
+- [x] Unit (round-34 finding, matcher corrected round-36): a `create_pr`
   flow saves a `PRRecord` with `number=None`/a set `branch`/an assigned
   `pr_id`; a concurrent process observes the provider assigning that PR
   a `number` and stamps the frozen attribution pair (bumping
@@ -1020,7 +1034,7 @@ these decisions directly and assumes this design is understood.
   (not append a duplicate), proving the identity rule matches across the
   `number=None` → provider-assigned-`number` transition via the shared
   `pr_id`.
-- [ ] Unit (round-35 finding, matcher corrected round-36): a stale
+- [x] Unit (round-35 finding, matcher corrected round-36): a stale
   in-memory snapshot holds an entry with `pr_id` set, `number=7`,
   `branch="feature-x"`; a concurrent manual `set-pr` correction changes
   the ON-DISK entry's `number` to `8` while its `branch` stays
@@ -1028,13 +1042,13 @@ these decisions directly and assumes this design is understood.
   attribution pair — the stale save must still MERGE onto the
   renumbered entry (matched via `pr_id`), proving a `number` correction
   alone never causes a false non-match.
-- [ ] Unit (round-35 finding): TWO independent, freshly-created blank
+- [x] Unit (round-35 finding): TWO independent, freshly-created blank
   `PRRecord`s (both `number=None`/`branch=""`/no `pr_id` yet assigned) —
   saving a stale snapshot of one must NOT merge onto the other merely
   because they share the same empty `branch`/absent `number`/absent
   `pr_id`, proving entries with no established identity at all are
   never treated as a match.
-- [ ] Unit (round-36 finding): a stale in-memory snapshot holds a
+- [x] Unit (round-36 finding): a stale in-memory snapshot holds a
   post-migration entry with a real `pr_id` set, `number=7`,
   `branch="feature-x"`; a concurrent manual `set-pr` correction changes
   the ON-DISK entry's `branch` to `"feature-y"` AND its `number` to `8`
@@ -1043,13 +1057,13 @@ these decisions directly and assumes this design is understood.
   entry (matched via `pr_id`, not `branch`/`number`), proving `pr_id` —
   not `branch` — is the identity that survives a branch rename (the
   gap round-35's "branch is primary" rule left open).
-- [ ] Unit (round-36 finding, mechanism corrected round-37): saving a
+- [x] Unit (round-36 finding, mechanism corrected round-37): saving a
   `WorktreeRecord` whose on-disk `PRRecord` has no `pr_id` stamps a
   non-empty `pr_id` onto that entry, INLINE as part of
   `_save_record_unlocked`'s existing locked write (not a separate
   migration pass) — and a SECOND save afterward is idempotent: it does
   not overwrite the already-assigned `pr_id` with a new random value.
-- [ ] Unit (round-37 finding): a legacy `PRRecord` (no `attribution_mode`
+- [x] Unit (round-37 finding): a legacy `PRRecord` (no `attribution_mode`
   stored) is touched by `refresh_source_attribution` while the repo's
   LIVE `source_attribution` is `False` — assert the pair is frozen to
   the false state on THAT touch (not left unmigrated because the
@@ -1058,14 +1072,14 @@ these decisions directly and assumes this design is understood.
   suppressed on the second touch, proving the freeze runs before the
   live-config early return rather than being deferred until whichever
   later touch happens to occur under a truthy config.
-- [ ] Unit (round-38 finding): a `PRRecord` frozen at `attribution_mode:
+- [x] Unit (round-38 finding): a `PRRecord` frozen at `attribution_mode:
   "true"` has an open PR; the repo's `source_attribution` changes to
   `False`; a create-pr re-run on the already-open PR (the
   `_finish_auto_open` path) still calls `refresh_source_attribution`
   and republishes/keeps the marker per the ORIGINAL frozen `"true"`
   state — proving the caller gate no longer skips the call just because
   live `want_attribution` is currently falsy.
-- [ ] Unit (round-38 finding): a stale in-memory `record.prs` entry has
+- [x] Unit (round-38 finding): a stale in-memory `record.prs` entry has
   NO `pr_id` (a legacy snapshot predating this feature) but a set
   `branch`; a concurrent save backfills a fresh `pr_id` onto the
   corresponding ON-DISK `current.prs` entry (same `branch`) and stamps
@@ -1076,29 +1090,29 @@ these decisions directly and assumes this design is understood.
   object (now `pr_id`-bearing) must not re-append either, proving the
   reconciliation is not just a one-time accident of matching but leaves
   the caller's own copy migrated.
-- [ ] Unit (round-34 finding): a `WorktreeRecord` with an unbackfilled
+- [x] Unit (round-34 finding): a `WorktreeRecord` with an unbackfilled
   (missing/unknown) `codename_source`, in a repo with
   `source_attribution: True` (the raw-marker mode) — the PR still
   publishes the full raw marker exactly as it always has, proving the
   round-32 provenance fail-closed rule is scoped to codename markers
   only and does not regress the independent raw-marker path.
-- [ ] Unit (round-30 finding): a hand-edited/malformed
+- [x] Unit (round-30 finding): a hand-edited/malformed
   `attribution_explicit: "false"` (a truthy string, not the boolean
   `false`) does NOT authorize publication — `_parse_pr_mapping` must
   reject it to the safe empty-legacy-sentinel fallback, not coerce it
   truthy.
-- [ ] Unit (round-30 finding, corrected round-33): an unrecognized
+- [x] Unit (round-30 finding, corrected round-33): an unrecognized
   `attribution_mode` value (not one of `""`/`"false"`/`"true"`/
   `"codename"`) is migrated via the same one-time lazy-backfill freeze as
   a missing value (never perpetually re-derived from live config), not
   read as an authorized mode.
-- [ ] Unit (round-30 finding, corrected round-33): a `PRRecord` with only
+- [x] Unit (round-30 finding, corrected round-33): a `PRRecord` with only
   ONE of `attribution_mode`/`attribution_explicit` set (the other
   absent/empty) is migrated the same one-time lazy-backfill way for BOTH
   fields together — a partial pair never authorizes publication using
   just the one field that is present, nor is it perpetually re-derived
   from live config.
-- [ ] Unit (round-30 finding, corrected round-32): stamp a `PRRecord`
+- [x] Unit (round-30 finding, corrected round-32): stamp a `PRRecord`
   entry's frozen `attribution_mode`/`attribution_explicit` pair under the
   record lock (bumping that entry's `pr_revision`), then `save_record` a
   STALE in-memory `WorktreeRecord` snapshot captured before that stamp —
@@ -1107,21 +1121,21 @@ these decisions directly and assumes this design is understood.
   identity, from the current on-disk record by that entry's
   `pr_revision`, the same way it already merges `codename`/
   `codename_source` (round-11) and `profile_assignment_revision`.
-- [ ] Unit (round-32 finding): a `WorktreeRecord` with TWO parallel `prs`
+- [x] Unit (round-32 finding): a `WorktreeRecord` with TWO parallel `prs`
   entries — stamp the frozen attribution pair on entry B (bumping ONLY
   B's `pr_revision`) while a stale in-memory snapshot holds BOTH entries
   unfrozen, then `save_record` the stale snapshot — entry B's freeze
   survives even though the snapshot's `.pr` (active-PR) property
   resolves to entry A, proving the merge protects the full `prs` list by
   identity, not just the single active-PR accessor.
-- [ ] Round-trip (round-31 finding): bump a `WorktreeRecord`'s
+- [x] Round-trip (round-31 finding): bump a `WorktreeRecord`'s
   `pr_revision` and `save_record` it, then `load_record` the same file
   back into a FRESH object (a different Python object, not a mutated
   reference) — assert `pr_revision` survives as the same non-zero value,
   proving the counter has explicit YAML load/save wiring and does not
   reload as `0`, which would silently defeat the round-30 stale-writer
   merge guard in any process other than the one that stamped it.
-- [ ] Unit (round-31 finding): call `create_pr` with an explicit
+- [x] Unit (round-31 finding): call `create_pr` with an explicit
   `attribution=False` override against a repo whose config would
   otherwise publish a `"codename"` marker — assert the stamped `PRRecord`
   records `attribution_mode="false"`/`attribution_explicit=True` (not the
@@ -1130,78 +1144,78 @@ these decisions directly and assumes this design is understood.
   further override — the marker stays suppressed, proving a one-shot
   per-call override freezes exactly like a config-derived decision
   rather than reverting on the very next push.
-- [ ] Unit (round-31 finding): call `create_pr` with an explicit
+- [x] Unit (round-31 finding): call `create_pr` with an explicit
   `attribution="codename"` override (post-widening) against a repo whose
   config default is `False`/unconfigured — assert the stamped pair
   records `attribution_mode="codename"`/`attribution_explicit=True`,
   proving the override's own value is stamped verbatim rather than
   coerced to only `True`/`False`.
-- [ ] Round-trip (round-9 finding): assign a codename with a known
+- [x] Round-trip (round-9 finding): assign a codename with a known
   `codename_source`, `save_record` it, `load_record` it back, assert
   `codename_source` is unchanged — proving the manual YAML
   serialize/deserialize wiring actually persists the field (a dataclass
   field alone is not sufficient given `WorktreeRecord`'s hand-rolled YAML
   round-trip).
-- [ ] Unit (round-9 finding): each of the three codename-assignment call
+- [x] Unit (round-9 finding): each of the three codename-assignment call
   sites — normal `create`, paired knowledge-repo `create`, and lazy
   backfill (`ensure_codename`) — sets `codename_source` correctly from
   that call's own config read; a regression in any ONE site (e.g. the
   knowledge-repo path alone) is caught, not just the aggregate behavior.
-- [ ] Unit (round-11 finding): a repo with `codename.wordlist_path` set to
+- [x] Unit (round-11 finding): a repo with `codename.wordlist_path` set to
   a path that does not exist (or is malformed) is still classified
   `codename_source: "custom"` — proving classification reads the raw
   config value, not `wordlist_for_repo`'s fail-soft-to-built-in resolved
   `Wordlist`.
-- [ ] Unit (round-13 finding): a repo config with `wordlist_path` set to a
+- [x] Unit (round-13 finding): a repo config with `wordlist_path` set to a
   non-string value (e.g. `[]`, a number, a mapping) still classifies
   `codename_source: "custom"` — proving classification consults
   `wordlist_path_configured` (set whenever the raw key is present,
   regardless of its value's validity), not `wordlist_path`'s own
   post-parse truthiness (which `parse_codename` silently coerces to
   empty for any non-string value).
-- [ ] Unit (round-12 finding): a `WorktreeRecord` with an unrecognized
+- [x] Unit (round-12 finding): a `WorktreeRecord` with an unrecognized
   stored `codename_source` value (neither `"built-in"` nor `"custom"` —
   e.g. hand-edited YAML, a typo, a future value) fails closed exactly
   like `"custom"` — proving publish-time gating checks
   `codename_source == "built-in"`, never the inverted
   `codename_source != "custom"` shape.
-- [ ] Unit (round-12 finding): two concurrent `ensure_codename` calls race
+- [x] Unit (round-12 finding): two concurrent `ensure_codename` calls race
   on the same record; the call that loses the race (finds
   `current.codename` already set) still returns a record whose
   `codename_source` matches what the winning call actually set — proving
   the losing branch copies `current.codename_source`, not just
   `current.codename`.
-- [ ] Unit (round-26 finding): `resume` and `status --write`, each
+- [x] Unit (round-26 finding): `resume` and `status --write`, each
   independently, against a PR-active repo with a custom wordlist and
   omitted `source_attribution`, run on a record with no codename yet —
   each fails with the policy error rather than silently allocating a
   `codename_source: "built-in"` codename, proving the gate centralized
   inside `ensure_codename` itself protects EVERY caller, not just
   `create`/paired-knowledge/`create-pr`.
-- [ ] Unit (round-10 finding): a paired knowledge-repo create against a
+- [x] Unit (round-10 finding): a paired knowledge-repo create against a
   knowledge project with a custom wordlist and an omitted
   `source_attribution` fails the whole create with the policy validation
   error — `_carve_paired_knowledge`'s config-load exception handling must
   NOT swallow this into a silent `knowledge_wordlist = None` / built-in
   fallback that would let the create proceed anyway.
-- [ ] Unit (round-11 finding): the same paired knowledge-repo policy
+- [x] Unit (round-11 finding): the same paired knowledge-repo policy
   violation propagates past the `create` command's OUTER
   `except Exception` around the whole `_carve_paired_knowledge(...)` call
   too (not just the inner handler) — the whole `create` command fails,
   it is not caught, logged as non-fatal, and reduced to `pair_stamp =
   None` the way an ordinary/incidental pairing failure correctly is.
-- [ ] Unit (round-12 finding): the preflight check rejects a `create`
+- [x] Unit (round-12 finding): the preflight check rejects a `create`
   command for a paired-knowledge policy violation BEFORE any
   harness-side worktree, branch, or tracking record is created — proving
   the failure is transactional for the preflight-detected case (no
   orphaned partial state when the check catches the violation), not just
   a late re-raise after the harness side already exists.
-- [ ] Unit (round-13 finding): the preflight check is revalidated a
+- [x] Unit (round-13 finding): the preflight check is revalidated a
   second time immediately before the first harness-side side effect (not
   just once at the top of `create`) — proving the residual TOCTOU window
   is minimized to the documented narrow case, not left at the width of
   the entire `create` command.
-- [ ] Unit (round-14 finding): simulate the residual TOCTOU race directly
+- [x] Unit (round-14 finding): simulate the residual TOCTOU race directly
   (the knowledge project's config becomes policy-violating only AFTER the
   second preflight check passes, then `_carve_paired_knowledge` re-raises)
   — assert the `create` command fails, no automatic rollback of the
@@ -1209,7 +1223,7 @@ these decisions directly and assumes this design is understood.
   surfaced error message names the exact orphaned worktree path and branch
   so an operator can remove it manually — proving the documented residual
   behavior is real and observable, not merely asserted in prose.
-- [ ] Unit (round-16 finding, preflight added round-22): `create-pr`
+- [x] Unit (round-16 finding, preflight added round-22): `create-pr`
   against a PR-active custom-wordlist repo with an omitted
   `source_attribution`, run on a worktree record with no codename yet —
   asserts the whole `create-pr` command fails with the policy error
@@ -1226,7 +1240,7 @@ these decisions directly and assumes this design is understood.
   case proving every OTHER exception from `ensure_codename` (e.g. a lock
   `TimeoutError`) still degrades to skip-the-marker, unaffected by this
   fix.
-- [ ] Unit (round-11 finding): a save from a stale in-memory
+- [x] Unit (round-11 finding): a save from a stale in-memory
   `WorktreeRecord` (loaded before a concurrent lazy-backfill assigned a
   codename under the record lock) does not erase the `codename`/
   `codename_source` the concurrent writer set — proving
@@ -1234,14 +1248,14 @@ these decisions directly and assumes this design is understood.
   logic now also covers these two fields, not just the fields it already
   protected (handoff reservations, lifecycle/session-backend/
   execution-leg state).
-- [ ] Unit: `_parse_pr` with an absent `source_attribution` key (both
+- [x] Unit: `_parse_pr` with an absent `source_attribution` key (both
   "`pr:` block present, key omitted" and "`pr:` block entirely absent")
   parses to `"codename"`, not `False`.
-- [ ] Unit: `_parse_pr` with an explicit `source_attribution: false` still
+- [x] Unit: `_parse_pr` with an explicit `source_attribution: false` still
   parses to `False` (opt-out remains available and unchanged).
-- [ ] Unit: `_parse_pr` with an explicit `source_attribution: true` still
+- [x] Unit: `_parse_pr` with an explicit `source_attribution: true` still
   parses to `True` (closed-circuit opt-in remains unchanged).
-- [ ] **Unit (round-22 finding): `_parse_pr` with an EXPLICIT
+- [x] **Unit (round-22 finding): `_parse_pr` with an EXPLICIT
   `source_attribution: codename` parses to `"codename"` AND
   `source_attribution_configured` is `True`** — this is the critical case
   the existing three bullets above miss entirely: an absent key ALSO
@@ -1258,11 +1272,11 @@ these decisions directly and assumes this design is understood.
   `source_attribution: codename` config successfully allocates a new
   codename (the allocation-time gate in Phase 1 does not block it, since
   the key is explicitly present, not omitted).
-- [ ] Regression: `source_attribution_configured` is `False` for every
+- [x] Regression: `source_attribution_configured` is `False` for every
   absent-key case above and `True` for every explicit case (`false`,
   `true`, AND `codename`, all three count as "configured"), proving the
   fields never drift.
-- [ ] **Integration (not just parser-level):** with `source_attribution`
+- [x] **Integration (not just parser-level):** with `source_attribution`
   entirely omitted from a repo's config, `create_pr` actually publishes a
   codename marker (`_open_via_provider`'s marker-writing path, not just
   `_parse_pr`'s returned value) — a change that only touched the parser
@@ -1272,7 +1286,7 @@ these decisions directly and assumes this design is understood.
   set (`tests/test_providers.py`) to also cover the key OMITTED entirely,
   asserting a marker IS published; keep the explicit-`false` case (marker
   never published) as the still-required opt-out regression.
-- [ ] **Integration, refresh path (round-17 finding):** the same
+- [x] **Integration, refresh path (round-17 finding):** the same
   omitted-`source_attribution` scenario, run through
   `refresh_source_attribution` (the later-push managed-comment path, a
   separate function from `_open_via_provider`) — asserts a marker IS
@@ -1281,15 +1295,15 @@ these decisions directly and assumes this design is understood.
   published on refresh, closing the exact gap the finding raised: an
   initial-path-only fix would leave the refresh path publishing a
   should-be-blocked codename on the PR's second and later pushes.
-- [ ] Unit: `audit_source_attribution_risk`'s finding text for an absent
+- [x] Unit: `audit_source_attribution_risk`'s finding text for an absent
   key says "codename," not "false," AND its remedy text no longer suggests
   migrating to `codename` (round-18 finding) — asserting only `true` or
   dropping the risky `head_pattern` token are offered as remedies for the
   absent-key case.
-- [ ] Full existing `test_config.py`/`test_pr_ops.py`/`test_providers.py`
+- [x] Full existing `test_config.py`/`test_pr_ops.py`/`test_providers.py`
   suite passes after the default-value test-fixture sweep (Phase 1's audit
   item) — no test silently still asserts the old default.
-- [ ] Live: this effort's own landing PR in this repo (opened after Phase
+- [x] Live: this effort's own landing PR in this repo (opened after Phase
   3's config change lands) carries a codename marker — the end-to-end
   proof the whole point of this effort actually works. **This validation
   target must NOT be the current worktree carrying this very plan
@@ -1303,10 +1317,18 @@ these decisions directly and assumes this design is understood.
   verified per-record `codename_source: "built-in"` edit on an existing
   worktree whose entire codename-assignment history has been checked
   against the owning repo's wordlist-config git history — never an
-  unverified existing record.
+  unverified existing record. **Confirmed:** PR #3107, opened from a
+  worktree created fresh after Phase 3 merged and the runtime
+  redeployed, carries `<!-- agent-worktrees:source codename=patient-beacon
+  -->` in its body, verified against the raw GitHub API `.body` field.
+  (A worktree created mid-Phase-2, before that redeploy, indeed had no
+  `codename_source` recorded and would have failed to publish, exactly
+  as this note predicted.)
 - [ ] Live (regression, observational): the next merge on the private
   downstream repo after this effort lands still carries the full raw
-  marker unchanged.
+  marker unchanged. **Left open, transferred to a tracked issue in the
+  driver's own private tracker:** same private/out-of-public-scope
+  reason as the matching Phase 4 item above.
 
 ## Proposal
 
