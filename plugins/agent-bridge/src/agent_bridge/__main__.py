@@ -6746,10 +6746,6 @@ def build_parser() -> argparse.ArgumentParser:
             "interactive CLI holds it (stop that CLI first)"
         ),
     )
-    resume_p.add_argument(
-        "--json", action="store_true",
-        help="JSON output mode (headless callers, e.g. agent-dispatch)",
-    )
     resume_p.set_defaults(func=_cmd_resume)
 
     handoff_p = sub.add_parser(

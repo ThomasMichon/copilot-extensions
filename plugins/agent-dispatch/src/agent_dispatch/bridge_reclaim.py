@@ -10,6 +10,17 @@ returns its session id machine-readably, but the resumed/created session has
 no prompt yet, so :func:`resume_worktree_and_send` follows up with
 ``send <session_id> --prompt-file -`` to deliver the seed -- mirroring
 ``bridge.resume_worker``'s own resume-then-send shape for a known session id.
+
+``resume --force`` *reuses* an existing session when one is already live for
+the worktree -- it only starts a fresh one when none exists. The old
+``create --reclaim`` path instead always requested a brand-new session
+(``force_new=True``), ignoring any existing one outright. If the reused
+session happens to be mid-turn, plain ``send`` refuses it busy (exit code
+``_SEND_BUSY_EXIT`` = 75, ``agent_bridge.__main__``) rather than force
+through -- ``send`` deliberately has no ``--force`` of its own (that
+belongs to ``create``). Since this whole path only runs when the caller has
+already judged the worktree safe to take over, a busy reuse is handled the
+same way: ``end --force`` the busy session, then retry ``send`` once.
 """
 
 from __future__ import annotations
@@ -19,6 +30,8 @@ import subprocess
 from collections.abc import Sequence
 
 from .procutil import no_window_kwargs
+
+_SEND_BUSY_EXIT = 75
 
 
 def resume_worktree_and_send(
@@ -65,6 +78,19 @@ def resume_worktree_and_send(
         send_cmd, input=prompt, check=False, capture_output=True, text=True,
         timeout=timeout, **no_window_kwargs(),
     )
+    if sent.returncode == _SEND_BUSY_EXIT:
+        # The reused session is mid-turn -- this path only runs when the
+        # caller already judged the worktree safe to take over, so end the
+        # busy turn (mirrors the old create --reclaim's force_new=True, which
+        # never deferred to an existing session at all) and retry once.
+        subprocess.run(  # noqa: S603
+            [*exe, "end", session_id, "--force"], check=False,
+            capture_output=True, text=True, timeout=timeout, **no_window_kwargs(),
+        )
+        sent = subprocess.run(  # noqa: S603
+            send_cmd, input=prompt, check=False, capture_output=True, text=True,
+            timeout=timeout, **no_window_kwargs(),
+        )
     if sent.returncode != 0 or not json_output:
         return sent
     return subprocess.CompletedProcess(
