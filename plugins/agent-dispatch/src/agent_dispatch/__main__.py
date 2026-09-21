@@ -745,9 +745,15 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     cfg = load_config()
     token = client_token()
     wildcard_v4 = ".".join(("0", "0", "0", "0"))
-    host = cfg.host if cfg.host not in (wildcard_v4, "", "::") else "127.0.0.1"
-    if cfg.host == "::":
+    host = cfg.host if cfg.host not in (wildcard_v4, "", "::", "[::]") else "127.0.0.1"
+    if cfg.host in ("::", "[::]"):
         host = "::1"
+    # Normalize a bracketed IPv6 wildcard to zdd routing's own canonical
+    # unbracketed form for the routing-table bind too -- same fix as
+    # server._publish_routing(), needed here since CutoverOrchestrator
+    # publishes to the same routing table (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
+    routing_bind = "::" if cfg.host == "[::]" else cfg.host
 
     def pick_free_port() -> int:
         family = _socket.AF_INET6 if ":" in host else _socket.AF_INET
@@ -835,15 +841,33 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
 
     routing_lock_path = routing_dir() / "serve-start.lock"
     routing_lock = SingleInstance(routing_lock_path)
-    if not routing_lock.acquire():
+    acquired = routing_lock.acquire()
+    if not acquired:
+        # A plain refusal here is unsafe for existing installer callers:
+        # install.sh/.ps1 treat any _cutover/deploy failure as permission to
+        # fall back to a hard service restart -- exactly the undrained-
+        # duplicate race this lock exists to prevent. A concurrent
+        # transition is normally short-lived (seconds), so retry with a
+        # bounded wait before surfacing a real failure, giving it genuine
+        # room to finish rather than immediately handing installers an
+        # excuse to restart out from under it (review follow-up on
+        # ThomasMichon/copilot-extensions#3066).
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            acquired = routing_lock.acquire()
+            if acquired:
+                break
+    if not acquired:
         holder_pid = read_holder_pid(routing_lock_path)
         holder_note = f" (held by pid {holder_pid})" if holder_pid else ""
         print(
             "agent-dispatch: another process is concurrently starting or "
             f"cutting over a coordinator on this host{holder_note}; refusing "
-            "to race it for the active route. Retry once it finishes, or -- "
-            "if that process is genuinely wedged, not just slow -- terminate "
-            "it externally first.",
+            "to race it for the active route after waiting 30s for it to "
+            "finish. Retry once it finishes, or -- if that process is "
+            "genuinely wedged, not just slow -- terminate it externally "
+            "first.",
             file=sys.stderr,
         )
         return 2
@@ -872,7 +896,7 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
 
         orch = CutoverOrchestrator(
             routing_dir(),
-            bind=cfg.host,
+            bind=routing_bind,
             version=__import__("agent_dispatch").__version__,
             spawn_passive=spawn_passive,
             health_check=health_check,
