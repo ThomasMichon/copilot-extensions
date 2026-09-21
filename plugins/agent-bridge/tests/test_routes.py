@@ -2813,6 +2813,68 @@ def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
     assert resolved == "/resolved/aperture-labs"
 
 
+def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
+    """agent-bridge-worktree-native-agents (Phase 3): a worktree's bound
+    charter borrows only its own launch shape (copilot_args/copilot_path/
+    mcp_servers/env) onto the venue-resolved target -- host/cwd/project
+    stay the venue's, never the charter's."""
+    from agent_bridge.routes.worktrees import _WorktreeEntry, _apply_bound_charter
+    from agent_bridge.transport import SpawnTarget
+
+    venue_target = SpawnTarget(
+        type="local", cwd="/wt/path", project="aperture-labs",
+        env={"BASE": "1"},
+    )
+    charter_config = MagicMock()
+    charter_config.copilot_path = "/opt/special/copilot"
+    charter_config.copilot_args = ["--agent", "board-sweep-worker"]
+    charter_config.mcp_servers = [{"name": "gitea"}]
+    charter_config.env = {"CHARTER": "1"}
+    resolver = MagicMock()
+    resolver.canonical_agent_name.return_value = "board-sweep-worker"
+    resolver.agents = {"board-sweep-worker": charter_config}
+    entry = _WorktreeEntry(
+        id="wt1", agent_name="lambda-core-wsl", machine="lambda-core",
+        path="/wt/path", branch="b", status="active",
+        bound_agent="board-sweep-worker",
+    )
+
+    result = _apply_bound_charter(venue_target, resolver, entry, "wt1")
+
+    assert result.copilot_path == "/opt/special/copilot"
+    assert result.copilot_args == ["--agent", "board-sweep-worker"]
+    assert result.mcp_servers == [{"name": "gitea"}]
+    assert result.env == {"BASE": "1", "CHARTER": "1"}
+    assert result.cwd == "/wt/path"
+    assert result.project == "aperture-labs"
+
+
+def test_apply_bound_charter_unresolvable_charter_degrades_to_venue_default() -> None:
+    """An unbound worktree, or a bound_agent that no longer resolves in the
+    registry, must never fail the spawn -- it just uses the venue default."""
+    from agent_bridge.routes.worktrees import _WorktreeEntry, _apply_bound_charter
+    from agent_bridge.transport import SpawnTarget
+
+    venue_target = SpawnTarget(type="local", cwd="/wt/path")
+    resolver = MagicMock()
+    resolver.canonical_agent_name.return_value = None
+
+    unbound = _WorktreeEntry(
+        id="wt1", agent_name="lambda-core-wsl", machine="lambda-core",
+        path="/wt/path", branch="b", status="active",
+    )
+    assert _apply_bound_charter(venue_target, resolver, unbound, "wt1") is venue_target
+
+    stale = _WorktreeEntry(
+        id="wt2", agent_name="lambda-core-wsl", machine="lambda-core",
+        path="/wt/path", branch="b", status="active",
+        bound_agent="retired-charter",
+    )
+    resolver.agents = {}
+    result = _apply_bound_charter(venue_target, resolver, stale, "wt2")
+    assert result is venue_target
+
+
 def test_crawl_agent_skips_classify_probe_once_cached_unsupported() -> None:
     """Follow-up (review): once an agent is known to reject --classify, a
     later classify=True crawl (periodic sweep) must not repeat the failed

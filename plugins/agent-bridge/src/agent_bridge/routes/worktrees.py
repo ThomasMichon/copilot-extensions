@@ -96,6 +96,11 @@ class _WorktreeEntry:
     # ``DESCRIPTOR_VERSION`` may treat it as authoritative. Absent on an
     # older runtime or when git classification wasn't run.
     closure: dict[str, Any] | None = None
+    # agent-bridge-worktree-native-agents: the charter (spawn profile name)
+    # bound to this worktree at create/embody time, surfaced from
+    # ``agent-worktrees list --json`` as ``bound_agent``. None = unbound
+    # (the venue's default agent drives, today's behavior).
+    bound_agent: str | None = None
 
     def interactive_cli_state(self) -> str:
         """Classify interactive-CLI ownership from mux liveness.
@@ -140,6 +145,7 @@ class _WorktreeEntry:
             "live_intent_at": self.live_intent_at,
             "live_intent_idle": self.live_intent_idle,
             "closure": self.closure,
+            "bound_agent": self.bound_agent,
         }
 
 
@@ -724,6 +730,7 @@ def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
             live_intent_idle=bool(w.get("live_intent_idle", False)),
             # Phase 5: raw/opaque passthrough, absent unless --classify ran.
             closure=w.get("closure") if isinstance(w.get("closure"), dict) else None,
+            bound_agent=w.get("bound_agent") or None,
         ))
     return entries
 
@@ -822,6 +829,39 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
             for name, worktrees in groups.items()
         },
     }
+
+
+def _apply_bound_charter(
+    target: Any, resolver: Any, entry: "_WorktreeEntry", worktree_id: str,
+) -> Any:
+    """Layer a worktree's bound charter onto its venue-resolved spawn target.
+
+    agent-bridge-worktree-native-agents: a charter (``bound_agent``) is a
+    spawn PROFILE, never a first-class fabric target -- the venue still
+    owns host/cwd/project resolution. Only the charter's own launch shape
+    (``copilot_args``, ``copilot_path``, ``mcp_servers``, and any charter
+    ``env`` layered over the venue's) is borrowed, when the charter name
+    resolves in the registry. An unresolvable charter degrades to the
+    venue default rather than failing the spawn.
+    """
+    if not entry.bound_agent:
+        return target
+    canonical = resolver.canonical_agent_name(entry.bound_agent)
+    charter = resolver.agents.get(canonical) if canonical else None
+    if charter is None:
+        log.warning(
+            "worktree %s: bound_agent %r not found in the agent registry; "
+            "using the venue's default spawn profile",
+            worktree_id, entry.bound_agent,
+        )
+        return target
+    return replace(
+        target,
+        copilot_path=charter.copilot_path or target.copilot_path,
+        copilot_args=list(charter.copilot_args) or target.copilot_args,
+        mcp_servers=list(charter.mcp_servers) or target.mcp_servers,
+        env={**target.env, **charter.env},
+    )
 
 
 def _latest_session_for_worktree(mgr: Any, worktree_id: str) -> Any:
@@ -933,6 +973,7 @@ async def _start_fresh_worktree_session(
                 "session: %s", worktree_id, owner_agent, exc,
             )
             return None
+        target = _apply_bound_charter(target, resolver, entry, worktree_id)
 
         # Scope the agent's spawn target to this worktree's directory + id (the
         # same augmentation a session roll / new-owned-chat applies), so the
