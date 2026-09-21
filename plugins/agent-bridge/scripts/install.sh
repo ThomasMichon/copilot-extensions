@@ -348,10 +348,31 @@ _is_venv_corruption() {
 # plugins hammer the shared interpreter at once during a full
 # `agent-worktrees update --force` sweep -- the backoff schedule gives the
 # race more room to clear.
+#
+# Building from a local source tree (every call here installs FROM
+# "$PLUGIN_DIR", the pristine payload copy under
+# ~/.copilot/installed-plugins/) leaves setuptools' own build/lib and
+# *.egg-info staging behind IN that tree -- pip's build isolation covers the
+# *environment* the build runs in, not where the legacy build_meta backend
+# writes its intermediate files, which is CWD-relative to the project root
+# being built. Left in place, that stale build/lib/ then silently SHADOWS
+# fresh src/ on a later install if setuptools' own incremental-build mtime
+# check decides nothing "changed" (observed live: a stale build/lib/
+# transport.py missing a since-added function crashed the deployed daemon in
+# a restart loop -- see aperture-labs#7281/#7279 sibling issue). Scrub it
+# after every successful install so the payload directory stays the pristine
+# clone it's supposed to be; a versioned runtime slot under
+# ~/.agent-bridge/versions/<ver>/ is the only place build output should end
+# up living.
+_scrub_payload_build_artifacts() {
+    rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info 2>/dev/null || true
+}
+
 _uv_pip_install_resilient() {
     local out delay
     if out="$(uv pip install "$@" 2>&1)"; then
         printf '%s\n' "$out"
+        _scrub_payload_build_artifacts
         return 0
     fi
     for delay in 3 6 10; do
@@ -362,6 +383,7 @@ _uv_pip_install_resilient() {
         sleep "$delay"
         if out="$(uv pip install "$@" 2>&1)"; then
             printf '%s\n' "$out"
+            _scrub_payload_build_artifacts
             return 0
         fi
     done
