@@ -10,7 +10,7 @@
       "declared_range": {
         "current": 16,
         "minimum": 1,
-        "previous_generation": 14,
+        "previous_generation": 15,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -21,6 +21,7 @@
           12,
           13,
           14,
+          15,
           16
         ],
         "runtimes": [
@@ -31,7 +32,8 @@
           "0.4.0-dev432",
           "0.4.0-dev435",
           "0.4.0-dev447",
-          "0.4.0-dev533"
+          "0.4.0-dev533",
+          "0.4.0-dev502"
         ]
       },
       "capability_versions": {
@@ -92,7 +94,7 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "605222df163dc6d3a1f61e13fa68ea7378238a7a22ab71608561599158cd87b6",
+          "sha256": "3079b9cb115ff98c67ee67176614c8cc7658127a405714bf7431b44f77baa60f",
           "role": "current health response",
           "generation": 16
         },
@@ -101,6 +103,12 @@
           "sha256": "46018939c30d93df30b435b9f456a19b631c36655133e3ada1d1d581f20469cc",
           "role": "previous HTTP generation health evidence",
           "generation": 13
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-15/health.json",
+          "sha256": "ac652b15a5d331e8497b766a05cef2062d7f4e287bfe4dedaa3ca23f41c9417f",
+          "role": "previous HTTP generation health evidence",
+          "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-12/health.json",
@@ -421,7 +429,7 @@
           "capture_method": "Validate and serialize representative session-create request and response models; re-attested for the generation-16 bump (#6744) alongside the StartSessionRequest.reclaim removal already captured in this file's prior generation-15 entry."
         }
       ],
-      "support_window": "The daemon declares HTTP generations 1 through 15 supported; evidence currently exercises generations 9 through 15.",
+      "support_window": "The daemon declares HTTP generations 1 through 16 supported; evidence currently exercises generations 9 through 16 (15 retained only via its own previous-generation health fixture, not the current generation).",
       "bridge_contract_rollback_window": "Retain the generation 11 fixture, the older generation 9 fixture, and a generation 10 prior-runtime fixture until the live and recoverable reference census permits retirement.",
       "mixed_version_scenarios": [
         "new-client_old-daemon",

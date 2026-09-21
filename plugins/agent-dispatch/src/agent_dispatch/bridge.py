@@ -282,14 +282,16 @@ def spawn_worker(
     ``reclaim`` is agent-dispatch's own judgment that ``worktree_id`` is stale
     and safe to take over (e.g. an unclaimed handoff task past a bounded
     reconciliation window) -- it never implements the in-place replacement
-    itself; that is agent-bridge's job. Since agent-bridge's own break-glass
-    take-over lives solely on ``resume ... --force`` now (``create --reclaim``
-    was removed, agent-bridge-cold-resume Phase 3: a create into an occupied
-    worktree has no bypass of its own), this delegates to
-    :func:`bridge_reclaim.resume_worktree_and_send`: force-resume
-    ``worktree_id`` (creating a fresh owned session if none exists, or taking
-    over a live holder), then ``send`` it the seed -- the two-call equivalent
-    of the old single ``create --reclaim`` invocation.
+    itself; that is agent-bridge's job. Since ``create --reclaim`` was removed
+    (agent-bridge-cold-resume Phase 3: a create into an occupied worktree has
+    no bypass of its own), this delegates to
+    :func:`bridge_reclaim.resume_worktree_and_send`: resume ``worktree_id``
+    (creating a fresh owned session if none exists, or reusing a live one),
+    then ``send`` it the seed -- the two-call equivalent of the old single
+    ``create --reclaim`` invocation. Deliberately never forces past a genuine
+    live interactive CLI holder (see that module's docstring) -- agent-dispatch
+    judged the *task* stale, never that a human's own attached session should
+    be torn out from under them.
 
     ``--caller`` (copilot-extensions#2202): without an explicit caller, `create`
     derives one from the *current process's own* worktree context -- meaningless

@@ -4,23 +4,39 @@
 Extracted out of ``bridge.py`` (at its 1000-line module-size cap) rather than
 inlined there. ``agent-bridge create --reclaim`` no longer exists: a create
 into an occupied ``worktree_id`` has no break-glass of its own now -- the
-sole take-over primitive is ``agent-bridge resume <worktree_id> --force``.
-That force-resumes (or freshly starts) the worktree's owned session and
-returns its session id machine-readably, but the resumed/created session has
-no prompt yet, so :func:`resume_worktree_and_send` follows up with
+closest primitive left is ``agent-bridge resume <worktree_id>``. That resumes
+(or freshly starts) the worktree's owned session and returns its session id
+machine-readably, but the resumed/created session has no prompt yet, so
+:func:`resume_worktree_and_send` follows up with
 ``send <session_id> --prompt-file -`` to deliver the seed -- mirroring
 ``bridge.resume_worker``'s own resume-then-send shape for a known session id.
 
-``resume --force`` *reuses* an existing session when one is already live for
-the worktree -- it only starts a fresh one when none exists. The old
+**Deliberately never passes ``--force``.** ``resume --force`` is the
+single-controller invariant's break-glass: it bypasses the
+``live_cli_holds_worktree`` guard outright, so calling it unconditionally
+from an unattended coordinator could spawn a second ACP controller
+alongside a still-live interactive CLI attached to the same checkout --
+exactly the race that guard exists to prevent. Plain ``resume`` (no
+``--force``) already reclaims a genuinely *stale* worktree correctly: its
+own liveness check (agent-bridge-cold-resume Phase 2) verifies a
+RUNNING/IDLE-looking record's actual process health and settles a dead one
+before resuming through, so the common "abandoned handoff" case this path
+exists for needs no override at all. A real live-CLI holder still refuses
+409 ``live_cli_holds_worktree`` -- correctly, since agent-dispatch judged
+only the *task* stale, never that a human's own attached session should be
+torn out from under them.
+
+``resume`` *reuses* an existing session when one is already live for the
+worktree -- it only starts a fresh one when none exists. The old
 ``create --reclaim`` path instead always requested a brand-new session
 (``force_new=True``), ignoring any existing one outright. If the reused
 session happens to be mid-turn, plain ``send`` refuses it busy (exit code
 ``_SEND_BUSY_EXIT`` = 75, ``agent_bridge.__main__``) rather than force
 through -- ``send`` deliberately has no ``--force`` of its own (that
 belongs to ``create``). Since this whole path only runs when the caller has
-already judged the worktree safe to take over, a busy reuse is handled the
-same way: ``end --force`` the busy session, then retry ``send`` once.
+already judged the *task* safe to take over, a busy reuse (an ACP-owned
+turn, not a rival interactive CLI) is handled the same way: ``end --force``
+the busy session, then retry ``send`` once.
 """
 
 from __future__ import annotations
@@ -43,15 +59,18 @@ def resume_worktree_and_send(
     json_output: bool,
     timeout: float | None,
 ) -> subprocess.CompletedProcess:
-    """Force-resume ``worktree_id`` via agent-bridge, then deliver ``prompt``.
+    """Resume ``worktree_id`` via agent-bridge (no ``--force``), then deliver
+    ``prompt``.
 
-    Returns the ``resume`` call's result directly on its own failure (a
-    connect/spawn error, or a malformed/absent ``session_id`` in its JSON);
+    Returns the ``resume`` call's result directly on its own failure --
+    including a 409 ``live_cli_holds_worktree`` refusal, which this
+    deliberately never overrides (see the module docstring) -- or a
+    connect/spawn error, or a malformed/absent ``session_id`` in its JSON;
     otherwise returns the ``send`` call's result -- reshaped to carry
     ``{"session_id": ...}`` on stdout when ``json_output`` is requested, since
     ``send`` itself has no reason to echo an id the caller already knows.
     """
-    resume_cmd = [*exe, "--json", "resume", worktree_id, "--force"]
+    resume_cmd = [*exe, "--json", "resume", worktree_id]
     resumed = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         resume_cmd, check=False, capture_output=True, text=True, timeout=timeout,
         **no_window_kwargs(),

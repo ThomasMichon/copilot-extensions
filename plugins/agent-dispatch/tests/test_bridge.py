@@ -260,10 +260,11 @@ def test_spawn_worker_wait_omits_no_wait(monkeypatch):
 
 def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch):
     """``reclaim=True`` (#6744 Phase 3, since ``create --reclaim`` was removed
-    from agent-bridge) resolves via ``resume <worktree_id> --force`` (the sole
-    take-over primitive left) followed by ``send`` -- not a ``create``
-    invocation at all -- so a coordinator-judged-stale worktree occupant (e.g.
-    an unclaimed handoff past its reconciliation window) is replaced in place
+    from agent-bridge) resolves via ``resume <worktree_id>`` (no ``--force`` --
+    see ``bridge_reclaim``'s own docstring on why this never bypasses the
+    live-CLI-holder guard) followed by ``send`` -- not a ``create`` invocation
+    at all -- so a coordinator-judged-stale worktree occupant (e.g. an
+    unclaimed handoff past its reconciliation window) is replaced in place
     instead of refused 409."""
     calls = []
 
@@ -286,7 +287,7 @@ def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch):
     )
     assert result.returncode == 0
     assert len(calls) == 2
-    assert calls[0] == ["/usr/bin/agent-bridge", "--json", "resume", "wt-1", "--force"]
+    assert calls[0] == ["/usr/bin/agent-bridge", "--json", "resume", "wt-1"]
     assert calls[1][:4] == ["/usr/bin/agent-bridge", "send", "resumed-9", "--prompt-file"]
     assert "--no-wait" in calls[1]
 
