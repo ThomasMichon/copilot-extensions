@@ -422,24 +422,37 @@ export async function processStartTimeMs(pid) {
 }
 
 // Writes this process's own identity token into an already-open,
-// freshly-exclusively-created lock fd: a synchronous PID-only placeholder
-// FIRST (so the file exists and is non-empty the INSTANT the exclusive
-// create succeeds, before any async work), then the full identity token
-// (which needs an async OS query -- processStartTimeMs, itself a
-// subprocess spawn on both platforms) via an in-place truncate+rewrite.
-// Round-31 finding: computing the full token BEFORE the exclusive create
-// meant the lock file did not exist at all for that query's entire
-// duration -- an outside observer (waitForWorktreeSyncToSettle) reading
-// "absent" during that window is indistinguishable from "no sync ever
-// started". A reader that observes the placeholder (unparseable as a
-// pid-startTime pair) is expected to treat it as "present but not yet the
-// final shape", never as proof of absence -- see
-// waitForWorktreeSyncToSettle's handling of unparseable content, which
-// this placeholder format deliberately cannot match. Shared by BOTH the
-// fresh-create path and the reclaim-success path below -- each is an
-// independent act of becoming the new holder and gets its own token.
+// freshly-exclusively-created lock fd: a synchronous placeholder FIRST (so
+// the file exists and is non-empty the INSTANT the exclusive create
+// succeeds, before any async work), then the full identity token (which
+// needs an async OS query -- processStartTimeMs, itself a subprocess spawn
+// on both platforms) via an in-place truncate+rewrite. Round-31 finding:
+// computing the full token BEFORE the exclusive create meant the lock file
+// did not exist at all for that query's entire duration -- an outside
+// observer (waitForWorktreeSyncToSettle) reading "absent" during that
+// window is indistinguishable from "no sync ever started".
+//
+// Round-32 finding: the placeholder must still be PARSEABLE as
+// `pid-startTime-` -- an unparseable placeholder (e.g. bare
+// `${pid}-pending`) falls into acquireLock's own age-only reclaim
+// fallback, so a process merely SUSPENDED here (not dead) for longer than
+// STALE_LOCK_MS could have its own in-progress lock reclaimed out from
+// under it, then still finish writing its "final" token on resume,
+// running concurrently with the replacement holder. Using
+// `${pid}-unknown-pending` instead is parseable (pid, but a deliberately
+// unknown start time) -- acquireLock's contention logic treats a live pid
+// with no recorded start time as having no basis for identity comparison
+// and fails closed (never reclaims), exactly the protection a
+// genuinely-alive-but-slow placeholder holder needs; a truly DEAD holder
+// (this process crashed before finishing) is still reclaimed immediately
+// via the ordinary `!isProcessAlive` check, unaffected by this format
+// change.
+//
+// Shared by BOTH the fresh-create path and the reclaim-success path
+// below -- each is an independent act of becoming the new holder and gets
+// its own token.
 async function writeLockToken(fd) {
-  writeFileSync(fd, `${process.pid}-pending`);
+  writeFileSync(fd, `${process.pid}-unknown-pending`);
   const ownStartTime = await processStartTimeMs(process.pid);
   const token = `${process.pid}-${ownStartTime ?? "unknown"}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   ftruncateSync(fd, 0);
@@ -452,11 +465,25 @@ async function acquireLock(lockPath) {
   // presence at a path -- see the release-time check in
   // withWorktreeSyncLock's finally block for why path-only ownership isn't
   // enough. See writeLockToken's own doc comment for the placeholder-first
-  // write sequence and the round-31 finding it closes.
+  // write sequence and the round-31/32 findings it closes.
   try {
     const fd = openSync(lockPath, "wx");
-    const token = await writeLockToken(fd);
-    return { fd, token };
+    try {
+      const token = await writeLockToken(fd);
+      return { fd, token };
+    } catch (writeError) {
+      // The exclusive create itself succeeded (this process now genuinely
+      // OWNS lockPath), but finishing its token initialization failed
+      // (round-32 finding) -- without cleanup here, `withWorktreeSyncLock`
+      // never reaches its own `finally` (this function never returns a
+      // `{fd, token}` to release), leaking the fd and leaving a
+      // permanently-stuck lock behind for every future sync attempt on
+      // this worktree. Close the fd and remove the lock this invocation
+      // itself just created before propagating the real error.
+      try { closeSync(fd); } catch { /* already closed */ }
+      try { unlinkSync(lockPath); } catch { /* best-effort */ }
+      throw writeError;
+    }
   } catch (error) {
     if (error?.code !== "EEXIST") throw error;
     let holderPid = null;
@@ -729,12 +756,27 @@ export async function waitForWorktreeSyncToSettle(cwd, { timeoutMs = 15000, poll
         // rebaseState.inProgress itself does elsewhere in this file --
         // fail closed (needsInspection: true) rather than assume clean.
         const rebaseState = await rebaseInProgress(cwd);
-        return {
-          waited: true,
-          settled: true,
-          reason: "holder-dead",
-          needsInspection: rebaseState.inProgress || rebaseState.error,
-        };
+        // Round-32 finding: that await gave another contender time to
+        // reclaim this EXACT dead lock and start a genuinely NEW, live
+        // sync -- re-read before trusting the "settled" conclusion this
+        // decision was based on. A mismatch means someone else has since
+        // acted on it; fall through to the poll loop instead of returning
+        // stale information, so the NEXT iteration re-evaluates the
+        // CURRENT state (which may immediately show live, correctly
+        // setting everObservedLive and waiting for it to clear).
+        let recheckContent = null;
+        try {
+          recheckContent = readFileSync(lockPath, "utf-8");
+        } catch { /* absent now -- also handled by falling through */ }
+        if (recheckContent === content) {
+          return {
+            waited: true,
+            settled: true,
+            reason: "holder-dead",
+            needsInspection: rebaseState.inProgress || rebaseState.error,
+          };
+        }
+        inconclusive = true;
       } else {
         // Present but UNPARSEABLE -- ALWAYS inconclusive (see doc
         // comment), never settled from this reading alone, regardless of

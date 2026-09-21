@@ -1,31 +1,34 @@
 #!/usr/bin/env bash
 # context-handoff-connection-race/scenario.sh -- Tier-P F1 repro rig for
-# github/copilot-agent-runtime#22266's confirmed half: a second extension
-# connection manually joining a LIVE session (via the runtime's own
-# extension_bootstrap.mjs, with a hand-set COPILOT_EXTENSION_PARENT_PID and
-# SESSION_ID) collides with the session's already-registered context-handoff
-# tool names and gets rejected by validate_external_tools.
+# github/copilot-agent-runtime#22266: a single session that discovers
+# `context-handoff` from TWO sources at once -- the marketplace-installed
+# plugin copy AND a second copy present as a project-level extension in the
+# working repo -- launches BOTH as real connections, and the second one hits
+# validate_external_tools' same-session tool-name clash
+# (generate_handoff_prompt/save_handoff_prompt/consume_handoff/trigger_handoff
+# already registered by another connection).
+#
+# This is the mechanism actually confirmed against a live machine (both
+# connections legitimately host-spawned by the SAME session, from two
+# discovery sources for one plugin id) -- NOT a manually-invoked standalone
+# extension_bootstrap.mjs process from outside the harness (that path was
+# tried first and failed here for an unrelated, informative reason: a
+# standalone-spawned process's stdio is not wired to any real host, so its
+# `connect` RPC just times out). Reproducing the SAME-SESSION double-discovery
+# needs no stdio trickery at all: it is the CLI's own normal extension-
+# discovery + launch flow, run against a deliberately-duplicated source.
 #
 # This is a REPRO rig, not a regression gate: a clean box is used specifically
 # so the mechanism can be shown to reproduce independent of the machine/session
-# state that first surfaced it (a Docker "fresh machine", same rationale as
-# every other Tier-P scenario in this rig). PASS here means the clash WAS
-# observed (the mechanism is confirmed, reproducibly); a miss is reported via
-# `jam` since it means either the bug is fixed upstream, or this container's
-# assumptions about the runtime's on-disk layout have drifted -- both are
-# actionable, neither is silently ignored.
+# state that first surfaced it. PASS here means the clash WAS observed; a miss
+# is reported via `jam` since it means either the guard changed upstream, or
+# this container's assumptions about the runtime's on-disk layout/log naming
+# have drifted -- both are actionable, neither is silently ignored.
 #
-# Mechanism (see copilot-agent-runtime#22266 and
-# src/runtime/src/protocol/sdk_connection_registry.rs's validate_external_tools):
-# extension_bootstrap.mjs only checks that its OS parent pid matches whatever
-# COPILOT_EXTENSION_PARENT_PID claims -- an env var the caller fully controls.
-# Anything that sets it to its own true parent pid, points COPILOT_SDK_PATH at
-# the real bundled SDK, and sets SESSION_ID to an already-live session can join
-# that session from OUTSIDE the harness's own supervised launch path.
-#
-# Name-free / public F1. Asserts on the clash OUTCOME (stderr text), not exact
-# CLI spelling or install paths (those are discovered, not hardcoded).
-# Env: CR_MARKETPLACE_REPO / CR_MARKETPLACE_NAME / CR_HOLD_SECONDS.
+# Name-free / public F1. Asserts on the clash OUTCOME (extension log text),
+# not exact CLI spelling or install paths (those are discovered, not
+# hardcoded).
+# Env: CR_MARKETPLACE_REPO / CR_MARKETPLACE_NAME.
 # MUST be LF.
 set -uo pipefail
 
@@ -34,16 +37,15 @@ source "${CR_LIB:-$_SELF_DIR/../../lib/clean-room-lib.sh}"
 
 MARKETPLACE_REPO="${CR_MARKETPLACE_REPO:-ThomasMichon/copilot-extensions}"
 MARKETPLACE_NAME="${CR_MARKETPLACE_NAME:-copilot-extensions}"
-HOLD_SECONDS="${CR_HOLD_SECONDS:-25}"
 PLUGIN="context-handoff"
 INSTALLED_ROOT="$HOME/.copilot/installed-plugins/$MARKETPLACE_NAME"
-SESSION_STATE_DIR="$HOME/.copilot/session-state"
+EXT_LOG_DIR="$HOME/.copilot/logs/extensions"
 
 : "${CR_SCENARIO_NAME:=context-handoff-connection-race}"
 export CR_SCENARIO_NAME
 cr_init
 cr_meta "plugin" "$PLUGIN"
-cr_meta "validates" "manual-join tool-name clash reproduces against a live session (copilot-agent-runtime#22266)"
+cr_meta "validates" "same-session double-discovery tool-name clash reproduces (copilot-agent-runtime#22266)"
 
 # =========================================================================
 phase 0 "environment (fresh machine)"
@@ -55,7 +57,7 @@ else
 fi
 
 # =========================================================================
-phase 1 "install $PLUGIN"
+phase 1 "install $PLUGIN (marketplace source)"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
@@ -65,114 +67,74 @@ cat > "$HOME/.copilot/settings.json" <<JSON
 JSON
 capture "marketplace-add" -- copilot plugin marketplace add "$MARKETPLACE_REPO" || true
 capture "install" -- copilot plugin install "$PLUGIN@$MARKETPLACE_NAME" || true
-EXT_PATH="$INSTALLED_ROOT/$PLUGIN/extensions/$PLUGIN/extension.mjs"
-if [ -f "$EXT_PATH" ]; then
-    pass "$PLUGIN payload present on disk ($EXT_PATH)"
+INSTALLED_EXT_DIR="$INSTALLED_ROOT/$PLUGIN/extensions/$PLUGIN"
+if [ -d "$INSTALLED_EXT_DIR" ]; then
+    pass "$PLUGIN payload present on disk ($INSTALLED_EXT_DIR)"
 else
     jam "npm-registry" "$PLUGIN payload NOT installed (see cr-logs/install.log)" "check marketplace source + node/npm feed"
 fi
 
 # =========================================================================
-phase 2 "start a real, long-lived session (context-handoff enabled) and capture its session id"
+phase 2 "duplicate the extension as a project-level source in the working repo"
+# The double-discovery condition: the SAME tool names, discoverable from a
+# SECOND source the session's own git root trusts. Copying the installed
+# payload verbatim (not hand-authoring a facsimile) keeps the tool names and
+# registration behavior byte-identical to production, so any clash is the
+# real one, not an artifact of a simplified fixture.
 mkdir -p "$HOME/ch-repro" && ( cd "$HOME/ch-repro" && git init -q \
     && git config user.email t@e && git config user.name t \
     && echo '# ch-repro' > README.md && git add -A && git commit -qm init )
+PROJECT_EXT_DIR="$HOME/ch-repro/.github/extensions/$PLUGIN"
+if [ -d "$INSTALLED_EXT_DIR" ]; then
+    mkdir -p "$(dirname "$PROJECT_EXT_DIR")"
+    cp -r "$INSTALLED_EXT_DIR" "$PROJECT_EXT_DIR"
+    pass "duplicated $PLUGIN's extension payload into $PROJECT_EXT_DIR (project-level source)"
+else
+    info "phase 2 skipped: no installed payload to duplicate (see phase 1 jam)"
+fi
+
+# =========================================================================
+phase 3 "run one session against BOTH sources; both extensions launch"
+mkdir -p "$EXT_LOG_DIR"
+BEFORE_LOGS="$CR_LOGDIR/ext-logs-before.txt"
+ls -1 "$EXT_LOG_DIR" 2>/dev/null > "$BEFORE_LOGS"
 
 PLUGIN_ARG=()
-[ -f "$EXT_PATH" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
+[ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
+( cd "$HOME/ch-repro" && capture "session" -- copilot -p "Reply with the single word: ready." \
+    --allow-all-tools "${PLUGIN_ARG[@]}" ) || true
+sleep 3   # let any launched extension subprocess finish writing its own log
 
-# Snapshot existing session-state dirs so the new one can be identified by
-# set difference rather than guessing "the newest" (which races a
-# concurrently-running unrelated session on a shared box).
-mkdir -p "$SESSION_STATE_DIR"
-BEFORE_SESSIONS="$CR_LOGDIR/sessions-before.txt"
-ls -1 "$SESSION_STATE_DIR" 2>/dev/null > "$BEFORE_SESSIONS"
-
-# A held-open session: the prompt asks the agent to sleep so the process
-# stays live for HOLD_SECONDS while phase 3/4 run concurrently against it.
-LIVE_LOG="$CR_LOGDIR/live-session.log"
-( cd "$HOME/ch-repro" && copilot -p "Run: sleep $HOLD_SECONDS" --allow-all-tools "${PLUGIN_ARG[@]}" \
-    > "$LIVE_LOG" 2>&1 ) &
-LIVE_PID=$!
-cr_meta "live_session_pid" "$LIVE_PID"
-
-# Wait for a new session-state directory to appear (bounded).
-SESSION_ID=""
-for _ in $(seq 1 40); do
-    NEW_DIR="$(comm -13 <(sort "$BEFORE_SESSIONS") <(ls -1 "$SESSION_STATE_DIR" 2>/dev/null | sort) | head -1)"
-    if [ -n "$NEW_DIR" ]; then SESSION_ID="$NEW_DIR"; break; fi
-    sleep 0.5
-done
-
-if [ -n "$SESSION_ID" ]; then
-    pass "live session started, session id captured: $SESSION_ID (pid $LIVE_PID)"
-    cr_meta "session_id" "$SESSION_ID"
+NEW_LOGS="$(comm -13 <(sort "$BEFORE_LOGS") <(ls -1 "$EXT_LOG_DIR" 2>/dev/null | sort) | grep -i "$PLUGIN" || true)"
+NEW_LOG_COUNT="$(printf '%s\n' "$NEW_LOGS" | grep -c . || true)"
+cr_meta "new_context_handoff_extension_logs" "$NEW_LOG_COUNT"
+if [ "$NEW_LOG_COUNT" -ge 2 ]; then
+    pass "session launched $NEW_LOG_COUNT separate $PLUGIN extension connections (installed + project source both discovered)"
+elif [ "$NEW_LOG_COUNT" -eq 1 ]; then
+    jam "single-discovery" "only 1 $PLUGIN extension connection was launched -- the duplicate source was not discovered as a distinct candidate" \
+        "check whether project-level extension discovery requires an explicit trust/add-dir step in this CLI version"
 else
-    jam "session-capture" "no new session-state directory appeared within 20s" \
-        "check cr-logs/live-session.log for a startup failure"
+    jam "no-launch" "no $PLUGIN extension logs appeared for this session at all" \
+        "check cr-logs/session.log for a plugin-load failure before extensions ever start"
 fi
 
 # =========================================================================
-phase 3 "resolve the runtime's bootstrap entrypoint + bundled SDK path"
-# The CLI extracts its versioned runtime payload to a per-platform cache dir
-# (~/.cache/copilot/pkg/<platform>/<version>/ on Linux, mirroring
-# %LOCALAPPDATA%\copilot\pkg\<platform>\<version>\ on Windows) -- NOT inside
-# the npm package itself, which only ships the launcher. Prefer the slot
-# whose version matches the currently-installed CLI so the manually-joined
-# connection speaks the exact same protocol revision as the live session.
-BOOTSTRAP_PATH=""
-SDK_PATH=""
-CLI_VERSION="$(copilot --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-CACHE_PKG_ROOT="$HOME/.cache/copilot/pkg"
-if [ -n "$CLI_VERSION" ] && [ -d "$CACHE_PKG_ROOT" ]; then
-    BOOTSTRAP_PATH="$(find "$CACHE_PKG_ROOT" -path "*/$CLI_VERSION/preloads/extension_bootstrap.mjs" 2>/dev/null | head -1)"
+phase 4 "assert the tool-name clash on the second (losing) connection"
+CLASH_FOUND=0
+if [ -n "$NEW_LOGS" ]; then
+    while IFS= read -r log_name; do
+        [ -n "$log_name" ] || continue
+        if grep -q "already registered by another connection" "$EXT_LOG_DIR/$log_name" 2>/dev/null; then
+            CLASH_FOUND=1
+            info "clash confirmed in $log_name"
+        fi
+    done <<< "$NEW_LOGS"
 fi
-# Fall back to whatever slot exists if the exact version isn't cached (e.g. an
-# auto-updated CLI left only a newer slot behind).
-if [ -z "$BOOTSTRAP_PATH" ] && [ -d "$CACHE_PKG_ROOT" ]; then
-    BOOTSTRAP_PATH="$(find "$CACHE_PKG_ROOT" -type f -name extension_bootstrap.mjs 2>/dev/null | sort | tail -1)"
-fi
-if [ -n "$BOOTSTRAP_PATH" ]; then
-    PKG_ROOT="$(dirname "$(dirname "$BOOTSTRAP_PATH")")"   # .../preloads/.. -> pkg root
-    [ -d "$PKG_ROOT/copilot-sdk" ] && SDK_PATH="$PKG_ROOT/copilot-sdk"
-fi
-
-if [ -n "$BOOTSTRAP_PATH" ] && [ -n "$SDK_PATH" ]; then
-    pass "resolved bootstrap ($BOOTSTRAP_PATH) and SDK path ($SDK_PATH)"
-    cr_meta "bootstrap_path" "$BOOTSTRAP_PATH"
-    cr_meta "sdk_path" "$SDK_PATH"
+if [ "$CLASH_FOUND" -eq 1 ]; then
+    pass "same-session double-discovery clash REPRODUCED: a second connection was rejected with 'already registered by another connection'"
 else
-    jam "layout-drift" "could not resolve extension_bootstrap.mjs and/or copilot-sdk under the npm global install" \
-        "the CLI package layout may have changed; update this scenario's discovery logic"
+    jam "no-repro" "no new $PLUGIN extension log contained the expected tool-name clash text" \
+        "either the guard/discovery order changed upstream (good news -- update/retire this scenario), or this container's log-naming assumption drifted; inspect cr-logs and $EXT_LOG_DIR directly"
 fi
-
-# =========================================================================
-phase 4 "manually join the live session with a second connection; assert the clash"
-if [ -n "$SESSION_ID" ] && [ -n "$BOOTSTRAP_PATH" ] && [ -n "$SDK_PATH" ] && [ -f "$EXT_PATH" ]; then
-    MANUAL_LOG="$CR_LOGDIR/manual-join.log"
-    # $$ is this shell's own pid -- the true OS parent of the node process we
-    # are about to spawn directly (not through the harness's own supervised
-    # launch path), which is exactly what extension_bootstrap.mjs's
-    # process.ppid check expects.
-    COPILOT_EXTENSION_PARENT_PID="$$" \
-    COPILOT_SDK_PATH="$SDK_PATH" \
-    EXTENSION_PATH="$EXT_PATH" \
-    SESSION_ID="$SESSION_ID" \
-        node "$BOOTSTRAP_PATH" > "$MANUAL_LOG" 2>&1
-    MANUAL_RC=$?
-    info "manual second connection exited rc=$MANUAL_RC (log: $MANUAL_LOG)"
-
-    if grep -q "already registered by another connection" "$MANUAL_LOG" 2>/dev/null; then
-        pass "manual-join clash REPRODUCED: validate_external_tools rejected the second connection (see $MANUAL_LOG)"
-    else
-        jam "no-repro" "manual second connection did NOT hit the expected tool-name clash (rc=$MANUAL_RC)" \
-            "either the guard changed upstream (good news -- update/retire this scenario), or a layout/timing assumption drifted; inspect $MANUAL_LOG"
-    fi
-else
-    info "phase 4 skipped: a precondition from phases 2/3 was not satisfied (see jams above)"
-fi
-
-# Best-effort cleanup of the held-open session.
-kill "${LIVE_PID:-0}" >/dev/null 2>&1 || true
 
 cr_finalize

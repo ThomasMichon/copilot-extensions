@@ -2529,3 +2529,53 @@ deepest round yet into the pickup-arm/successor-startup race family:
   pre-existing skips, unchanged) plus `cli-parity`/`cli-timeouts` still
   green; exhaustive suite 47/47 pass (174 total, no regressions). Bumped
   plugin.json/marketplace.json to `0.1.1-dev42`. All guards pass.
+
+### 2026-09-21 (cont.) -- PR #3167 round 32: parseable lock placeholder, cleanup on token-init failure, revalidate dead-holder lock after await
+
+Round 32 confirmed round 31's 4 fixes AND the round-29 "lock visibility can
+race with sync startup" finding all resolved (5 total, the most in a single
+round). It surfaced 3 new HIGH findings, all in the round-31 placeholder-
+first reorder itself -- each closes a gap left by that fix rather than
+undoing it:
+
+- **(HIGH) The placeholder was unparseable, so acquireLock's own age-only
+  reclaim fallback could reclaim it:** `${pid}-pending` did not match the
+  `pid-startTime-` shape, so a process merely SUSPENDED right after
+  writing it (before `processStartTimeMs` resolves) for longer than
+  `STALE_LOCK_MS` could have its own in-progress lock reclaimed out from
+  under it -- then still finish writing its "final" token on resume,
+  running concurrently with the replacement holder. Changed the
+  placeholder to `${pid}-unknown-pending`: parseable (a real pid,
+  deliberately unknown start time), which the EXISTING contention logic
+  already treats as "no basis for identity comparison -- fail closed,
+  never reclaim" for a confirmed-LIVE pid, regardless of age. A truly
+  DEAD placeholder-holder is still reclaimed immediately via the ordinary
+  liveness check, unaffected.
+- **(HIGH) A `writeLockToken` failure after a successful exclusive create
+  leaked the fd and left a permanently-stuck lock:** if any of
+  `writeLockToken`'s own steps failed post-create, `acquireLock` rejected
+  without ever returning `{fd, token}`, so `withWorktreeSyncLock` never
+  reached its own release `finally` -- the fd leaked and the lock file
+  (now with placeholder content, parseable-but-alive per the fix above)
+  blocked every future sync on that worktree, potentially permanently.
+  Wrapped the post-create `writeLockToken` call in its own try/catch that
+  closes the fd and removes the lock this invocation itself just created
+  before rethrowing the real error.
+- **(HIGH) The dead-holder branch's own `rebaseInProgress` await could go
+  stale:** after observing a dead holder, awaiting `rebaseInProgress`
+  gives another contender time to reclaim that SAME dead lock and start a
+  genuinely NEW, live sync -- returning `settled: true` from the now-stale
+  original reading would let a successor consume while the replacement
+  sync is actually running. Re-reads the lock content immediately after
+  that await and compares it against what the decision was originally
+  based on; a mismatch falls through to the poll loop instead of
+  returning, so the next iteration re-evaluates the CURRENT state
+  properly.
+- 4 new exhaustive-suite tests (a placeholder-format structural check; a
+  full behavioral test proving a fellow invocation's still-writing
+  placeholder is never reclaimed; a structural check for the
+  cleanup-on-failure branch; a structural check for the post-await
+  revalidation). `node --test`: fast suite 127 tests/125 pass (2
+  pre-existing skips, unchanged), exhaustive suite 51/51 pass (178 total,
+  no regressions). Bumped plugin.json/marketplace.json to `0.1.1-dev43`.
+  All guards pass.

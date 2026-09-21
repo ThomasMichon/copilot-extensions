@@ -955,6 +955,122 @@ test("attemptWorktreeSync never reclaims a lock recording a genuinely LIVE holde
   }
 });
 
+test("writeLockToken's placeholder is parseable (pid-unknown-pending) so a genuinely-alive-but-suspended writer's own in-progress lock is never reclaimed by age", () => {
+  // Real regression this guards (round 32): an EARLIER version of this
+  // placeholder was a bare `${pid}-pending` -- unparseable as a
+  // pid-startTime pair, which fell into acquireLock's own age-only
+  // reclaim fallback. A process suspended right after creating its
+  // placeholder (before writeLockToken's async start-time query
+  // resolves) for longer than STALE_LOCK_MS could have its own
+  // in-progress lock reclaimed out from under it, then still finish
+  // writing its "final" token on resume -- running concurrently with the
+  // replacement holder. `${pid}-unknown-pending` is parseable (a real
+  // pid, deliberately unknown start time), which acquireLock's own
+  // contention logic already treats as "no basis for identity comparison
+  // -- fail closed, never reclaim" for a confirmed-LIVE pid, regardless
+  // of age. Structural check: the placeholder format itself.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const body = source.slice(
+    source.indexOf("async function writeLockToken("),
+    source.indexOf("async function acquireLock("),
+  );
+  assert.ok(body.length > 0, "could not locate writeLockToken's body");
+  assert.match(body, /\$\{process\.pid\}-unknown-pending/);
+});
+
+test("acquireLock never reclaims a fellow invocation's still-writing placeholder (pid-unknown-pending), the same protection a foreign pid-unknown lock format already gets", async () => {
+  const dir = initGitRepo();
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    // This test process's own pid is unambiguously alive -- a stand-in
+    // for another invocation mid-way through writeLockToken (placeholder
+    // written, start-time query not yet resolved).
+    writeFileSync(lockPath, `${process.pid}-unknown-pending`);
+    const result = await attemptWorktreeSync(dir);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /already in progress/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("acquireLock cleans up (closes the fd, removes the lock) when writeLockToken fails after the exclusive create already succeeded", () => {
+  // Real regression this guards (round 32): the exclusive create can
+  // succeed (this invocation now genuinely OWNS lockPath) before
+  // writeLockToken's own async work fails for some reason -- without
+  // cleanup, withWorktreeSyncLock never reaches its own `finally` (this
+  // function never returns a {fd, token} to release), leaking the fd and
+  // leaving a permanently-stuck lock behind for every future sync
+  // attempt on this worktree. Structural check (forcing a real
+  // ftruncateSync/writeSync failure deterministically and cross-platform
+  // isn't reliable in a fast unit test): the openSync success path must
+  // wrap writeLockToken in its own try/catch that closes the fd and
+  // unlinks lockPath before rethrowing.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const body = source.slice(
+    source.indexOf("async function acquireLock("),
+    source.indexOf("// Resolves the shared per-worktree sync-lock path"),
+  );
+  assert.ok(body.length > 0, "could not locate acquireLock's body");
+  const openIndex = body.indexOf("openSync(lockPath, \"wx\")");
+  assert.ok(openIndex >= 0, "expected the fresh-create exclusive open");
+  const writeTokenIndex = body.indexOf("writeLockToken(fd)", openIndex);
+  assert.ok(writeTokenIndex >= 0, "expected writeLockToken to be called right after the exclusive create");
+  const cleanupCatchIndex = body.indexOf("catch (writeError)", writeTokenIndex);
+  assert.ok(cleanupCatchIndex >= 0, "expected a dedicated catch for writeLockToken failures");
+  const cleanupBranch = body.slice(cleanupCatchIndex, body.indexOf("throw writeError;", cleanupCatchIndex) + "throw writeError;".length);
+  assert.match(cleanupBranch, /closeSync\(fd\)/);
+  assert.match(cleanupBranch, /unlinkSync\(lockPath\)/);
+});
+
+test("waitForWorktreeSyncToSettle re-validates a dead-holder lock's content after the rebaseInProgress await, rather than trusting stale information", () => {
+  // Real regression this guards (round 32): after observing a dead
+  // holder, this path awaits rebaseInProgress() before returning settled
+  // -- during that await, another contender can reclaim the SAME dead
+  // lock and start a genuinely NEW, live sync. Returning settled: true
+  // from the ORIGINAL (now-stale) dead-holder reading would let a
+  // successor consume while the replacement sync is actually running.
+  // Structural check (the exact interleaving isn't reliably forceable in
+  // a fast unit test): the holder-dead branch must re-read lockPath AFTER
+  // the rebaseInProgress await and compare it against the content this
+  // decision was originally based on before returning settled.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const body = source.slice(
+    source.indexOf("export async function waitForWorktreeSyncToSettle("),
+    source.length,
+  );
+  assert.ok(body.length > 0, "could not locate waitForWorktreeSyncToSettle's body");
+  const rebaseCallIndex = body.indexOf("await rebaseInProgress(cwd)");
+  assert.ok(rebaseCallIndex >= 0, "expected the holder-dead branch to await rebaseInProgress");
+  const recheckIndex = body.indexOf("recheckContent", rebaseCallIndex);
+  assert.ok(recheckIndex >= 0, "expected a re-read of the lock AFTER the rebaseInProgress await");
+  const compareIndex = body.indexOf("recheckContent === content", recheckIndex);
+  assert.ok(compareIndex >= 0, "expected the re-read to be compared against the original content before trusting settled");
+});
+
 test("attemptWorktreeSync reclaims a lock immediately once its recorded pid has been reused by a different live process, regardless of age", async () => {
   // Real regression this guards (round 23): `process.kill(pid, 0)` alone
   // can only observe whether SOME process holds that pid right now -- it
