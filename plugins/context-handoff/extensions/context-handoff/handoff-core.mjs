@@ -31,6 +31,7 @@ import {
 } from "./cutover-seed.mjs";
 import { supersededHandoffIds } from "./handoff-tasks.mjs";
 import { AGENT_WORKTREES_QUERY_TIMEOUT_MS } from "./cli-timeouts.mjs";
+import { DEFAULT_HANDOFF_MODE, automaticHandoffEnabled } from "./mode.mjs";
 
 export const HANDOFF_META_PREFIX = "<!-- context-handoff:";
 export const HANDOFF_META_SUFFIX = "-->";
@@ -1723,10 +1724,20 @@ function pickupSignals(cwd, sid, stored, sessionStatePath, execute = runCli) {
 //   { storage: "agent-dispatch"|"file", id, taskId?, path?, metadata }
 // On failure returns a storage:null result with the resolver/write diagnostic.
 export function storeHandoff({ promptText, sid, cwd, title, preferTask = true }) {
+  // Deliberately does NOT touch the worktree's own record: `storeHandoff`
+  // backs BOTH `save_handoff_prompt` (documented as the "safe,
+  // non-committal" step that must never arm pickup) and `trigger_handoff`
+  // (the "arm pickup" step). Recording a handoff there creates a
+  // `pending_handoffs` entry agent-worktrees' resident monitor can
+  // discover and claim on its own -- a live-cutover trigger, not merely
+  // advisory history (Copilot review finding on PR #3041: this used to
+  // run unconditionally here, so even `save_handoff_prompt` -- and a
+  // manual-only-mode `trigger_handoff` -- could still get auto-launched by
+  // the monitor through this exact path). Only `triggerHandoff()` records
+  // it now, and only when `mode: auto` is configured.
   if (preferTask && agentDispatchAvailable()) {
     const task = dispatchHandoff(promptText, sid, cwd, title);
     if (task) {
-      noteHandoffInRecord(cwd, sid, task.id, title);
       return {
         storage: "agent-dispatch",
         id: task.id,
@@ -1744,7 +1755,6 @@ export function storeHandoff({ promptText, sid, cwd, title, preferTask = true })
       error: file?.error || "unknown file-store failure",
     };
   }
-  noteHandoffInRecord(cwd, sid, file.id, title);
   return { storage: "file", id: file.id, path: file.path, metadata: file.metadata };
 }
 
@@ -1756,10 +1766,37 @@ export function buildSeedForStored(stored) {
   return buildCutoverSeed(kind, stored.id, lead);
 }
 
-export function manualFallbackInstructions(stored, seed, { spawnInFlight = false } = {}) {
+export function manualFallbackInstructions(
+  stored,
+  seed,
+  { spawnInFlight = false, automaticCutoverDisabled = false } = {},
+) {
   const location = stored.storage === "agent-dispatch"
     ? `agent-dispatch task ${stored.id}`
     : `file handoff ${stored.id}`;
+  // automaticCutoverDisabled takes priority over spawnInFlight: mode being
+  // disabled means THIS call never requested an automatic spawn, but the
+  // pickup probe can still observe a stale/unrelated spawn-in-flight marker
+  // (e.g. a manual successor's own registration, or a leftover marker from
+  // an earlier auto-mode attempt) -- claiming "the automatic cutover should
+  // complete" in that case would directly contradict the disabled-mode
+  // truth (Copilot review finding on PR #3041).
+  if (automaticCutoverDisabled) {
+    return (
+      `Handoff stored as ${location}. Automatic cutover is disabled ` +
+      "(`.context-handoff/config.yaml`'s `mode` is not `auto`), so no " +
+      "successor pane was requested and none will be spawned automatically -- " +
+      "this is expected, not a failure. Open (or ask the operator to open) " +
+      "the successor session yourself, then run `/consume-handoff`. If that " +
+      "command is unavailable, use the context-handoff payload-local CLI and " +
+      "pass only the trailing `task:<id>` or `file:<id>` token to " +
+      "`consume --locator`.\n\n" +
+      "Copy only the following short handoff prompt/seed:\n\n" +
+      "```text\n" +
+      `${seed}\n` +
+      "```"
+    );
+  }
   if (spawnInFlight) {
     return (
       `Handoff stored as ${location}. A successor session has already been ` +
@@ -1810,6 +1847,14 @@ export async function triggerHandoff(
     // was already under way; now the loop exits the moment a spawn is
     // observed, so 30s comfortably covers that without needing to grow.
     waitMs = 30000,
+    // Live-cutover opt-in gate (`.context-handoff/config.yaml`'s `mode`):
+    // only "auto" ever emits the `handoff_requested` activity event
+    // agent-worktrees' resident status-monitor watches for, or pings
+    // agent-bridge -- the two things that can cause an automatic successor
+    // pane to spawn. Any other mode (the default, "manual-only") still
+    // stores/seeds the handoff normally; it just never wires up automatic
+    // pickup, so the operator/agent must consume it manually.
+    mode = DEFAULT_HANDOFF_MODE,
     execute = runCli,
     store = storeHandoff,
     writeSessionState = writeSessionStateHandoff,
@@ -1878,29 +1923,54 @@ export async function triggerHandoff(
     };
   }
 
-  if (!justStored) {
+  const autoEnabled = automaticHandoffEnabled(mode);
+  // `noteHandoff` (agent-worktrees `note-handoff`) calls `open_handoff()`,
+  // which creates a `pending_handoffs` entry agent-worktrees' resident
+  // monitor scans independently of the `handoff_requested` activity event
+  // below (a session-state-file fallback path lets it discover and claim a
+  // pending handoff with NO activity event at all) -- so this call is a
+  // live-cutover trigger point too, not merely advisory, and must be gated
+  // the same way (Copilot review finding on PR #3041: a "manual-only"
+  // handoff could otherwise still get auto-launched by the monitor through
+  // this exact path, defeating the entire opt-in gate). Now runs
+  // regardless of `justStored` -- `storeHandoff()` itself never notes it
+  // (see its own docstring), so this is the ONE place that ever does,
+  // whether the handoff was just stored fresh or recovered from a prior
+  // save.
+  if (autoEnabled) {
     noteHandoff(cwd, sid, stored.id, stored.metadata?.title || title);
   }
-  const activity = logActivity(
-    cwd,
-    sid,
-    stored.metadata?.worktree || null,
-    stored,
-    sessionState.path,
-    execute,
-  );
-  const bridge = requestBridge(
-    cwd, sid, stored, seed, execute,
-  );
+  // Only "auto" mode emits the `handoff_requested` activity event
+  // agent-worktrees' resident status-monitor watches for, or pings
+  // agent-bridge -- both are how an automatic successor pane gets spawned.
+  // Any other mode (the default, "manual-only") skips both: the handoff is
+  // still fully stored/seeded, but nothing wires up automatic pickup.
+  const activity = autoEnabled
+    ? logActivity(
+      cwd,
+      sid,
+      stored.metadata?.worktree || null,
+      stored,
+      sessionState.path,
+      execute,
+    )
+    : { logged: false, reason: "automatic-cutover-disabled" };
+  const bridge = autoEnabled
+    ? requestBridge(cwd, sid, stored, seed, execute)
+    : { attempted: false, accepted: false, reason: "automatic-cutover-disabled" };
 
   const start = Date.now();
   let status = readPickupSignals(cwd, sid, stored, sessionState.path, execute);
   // Exit as soon as EITHER full pickup is confirmed OR a spawn is merely in
   // flight -- the latter means the automatic cutover is already under way,
   // so there is nothing more useful to learn by continuing to block; report
-  // that progress instead of waiting out the full ceiling.
+  // that progress instead of waiting out the full ceiling. When automatic
+  // cutover is disabled, nothing will spawn during this window, so don't
+  // block on it -- check once (a manually-launched successor may already
+  // have consumed it) and move straight to manual instructions.
   while (
-    !status.pickedUp
+    autoEnabled
+    && !status.pickedUp
     && !status.spawnInFlight
     && (Date.now() - start) < waitMs
   ) {
@@ -1913,8 +1983,14 @@ export async function triggerHandoff(
     stored,
     seed,
     sessionState,
+    // Explicit, top-level flag so callers can branch on it directly instead
+    // of re-deriving it from nested activity/bridge reason strings -- a
+    // real, distinct outcome from "signaled but no pickup arrived" (Copilot
+    // extension review finding on PR #3041: caller-facing text must not say
+    // "signaled" when neither live-cutover trigger point ever ran).
+    automaticCutoverDisabled: !autoEnabled,
     worktreeSignal: {
-      noted: true,
+      noted: autoEnabled,
       activity,
     },
     bridge,
@@ -1924,6 +2000,9 @@ export async function triggerHandoff(
     },
     manualInstructions: status.pickedUp
       ? null
-      : manualFallbackInstructions(stored, seed, { spawnInFlight: status.spawnInFlight }),
+      : manualFallbackInstructions(stored, seed, {
+        spawnInFlight: status.spawnInFlight,
+        automaticCutoverDisabled: !autoEnabled,
+      }),
   };
 }

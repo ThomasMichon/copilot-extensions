@@ -1,7 +1,8 @@
-export const DEFAULT_HANDOFF_MODE = "auto";
+export const AUTO_HANDOFF_MODE = "auto";
+export const DEFAULT_HANDOFF_MODE = "manual-only";
 export const HANDOFF_MODES = Object.freeze([
+  AUTO_HANDOFF_MODE,
   DEFAULT_HANDOFF_MODE,
-  "manual-only",
   "off",
 ]);
 
@@ -15,7 +16,7 @@ export function validateHandoffMode(mode, source = "mode") {
 }
 
 export function automaticHandoffEnabled(mode = DEFAULT_HANDOFF_MODE) {
-  return validateHandoffMode(mode) === DEFAULT_HANDOFF_MODE;
+  return validateHandoffMode(mode) === AUTO_HANDOFF_MODE;
 }
 
 export function manualHandoffEnabled(mode = DEFAULT_HANDOFF_MODE) {

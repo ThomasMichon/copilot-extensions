@@ -400,6 +400,53 @@ Verbatim from the operator:
   session's worktree association (the durable per-session-start recording
   half of the two operator-described wishes). PR #2989.
 
+### Phase 7 -- Opt-in gate + reliability hardening (Challenge 5)
+> Added 2026-09-20 after the operator reported context-handoff was
+> "materially broken, seemingly everywhere" in live production use --
+> plugin load failures, Worktree Manager pickup failures, duplicate spawns,
+> stuck predecessors, and unreliable head tracking severe enough to warrant
+> shutting automatic behavior off until resolved. Tracked in the facility's
+> internal issue tracker (plugin load failures; durable logging +
+> cut-me-over/check-the-handoff diagnostic skill; successor fallback
+> discoverability; several deduplicated against already-open internal
+> items). A related internal item tracks the harness-vs-child-worktree
+> knowledge gap this phase's own work surfaced.
+- [x] **Opt-in gate.** `.context-handoff/config.yaml`'s `mode` default
+  flipped from `auto` to `manual-only`: automated nudges, the force-tier
+  auto-trigger, and `trigger_handoff`'s live-cutover wiring (the
+  `handoff_requested` activity event agent-worktrees' resident
+  status-monitor watches for, and the agent-bridge ping) all require
+  explicit `mode: auto` opt-in now. Manual handoffs (compose/save/consume)
+  keep working unconditionally under the new default -- only `mode: off`
+  blocks them. **PR #3041.**
+- [ ] Investigate why the `context-handoff` plugin frequently fails to load
+  in Copilot CLI sessions at all -- needs controlled experimentation with
+  the plugin's manifest/extension shape to isolate the rejection cause.
+- [ ] Fix Worktree Manager's `trigger_handoff` pickup reliability: cases
+  where a "successful" report corresponds to no actual live pane.
+- [ ] Harden the successor-side fallback so an agent with zero working
+  context-handoff tools can reliably discover and execute the manual
+  consume+resume flow without floundering -- builds on this effort's
+  already-merged PR #3016 instructions.md fallback; live agent reports
+  suggest it isn't sufficient on its own yet.
+- [ ] Confirm/close the duplicate-spawn gap (addressed by PR #3011) and the
+  predecessor-termination gap against the operator's exact symptom
+  description.
+- [ ] Build the dual-source head-session reconciliation + resume-time
+  conflict UX: agent-worktrees' sessionStart hook durably journals every
+  session it observes starting against a worktree; context-handoff's
+  sessionStart hook marks a new head when the worktree was open for a
+  pending handoff; on resume, agreement launches directly, disagreement
+  surfaces both candidates' session title/id/start/last-updated to the
+  operator (Worktree Manager dialog) or the calling agent (agent-bridge
+  CLI/API), rather than guessing.
+- [ ] Build durable handoff event logging plus a "cut me over" (execute a
+  real cutover to the live target pane from a stuck outgoing session) and
+  "check the handoff" (reconcile tracking, find the true head, cut over,
+  spawning a process if needed) diagnostic skill. instructions.md needs a
+  pointer to this troubleshooting guide too, since skills aren't reliably
+  loading in the exact failure class this phase exists to fix.
+
 ## Validation Plan
 
 - [ ] Force-tier: a live session artificially pushed past the force threshold
@@ -1259,3 +1306,46 @@ gate land._
   terminal-success `handoff_cutover_spawn` event gated the retry, not
   `_started`/`_failed`) was addressed before merge per the PR's own
   iteration -- verify on a future pass rather than assuming closed.
+
+### 2026-09-20 (later) -- Operator escalation: opt-in gate + Phase 7 opened
+
+- Operator reported context-handoff "materially broken, seemingly
+  everywhere" in real production use, with seven distinct live symptoms
+  (see Phase 7 above) and asked to (a) file each in the facility's internal
+  tracker, (b) drive more phases in this effort, and (c) immediately gate
+  the risky automatic behavior behind explicit opt-in. Filed three new
+  internal tracking items (plugin load failures; durable logging +
+  diagnostic skill; fallback discoverability); four others deduped against
+  already-open internal items.
+- Corrected mid-session by the operator: `agent-worktrees bind-session`
+  must never be run from *within* a related child-repo checkout (this
+  copilot-extensions worktree, worked from a separate harness repo's
+  session) -- only a harness worktree binds a session; a child worktree is
+  *claimed* via its own repo-scoped CLI (`copilot-extensions create`/
+  `push-changes`/`create-pr`) or `agent-worktrees related resolve <name>`.
+  Undone via `deregister-session`; filed an internal item tracking that
+  this distinction wasn't discoverable anywhere until asked. All
+  subsequent git operations in this session routed through
+  `agent-worktrees git sync` / `copilot-extensions create-pr` rather than
+  raw `git worktree add`/manual push.
+- **Shipped the opt-in gate (PR #3041, this phase's first item):**
+  `.context-handoff/config.yaml`'s `mode` default flipped from `auto` to
+  `manual-only`. Found and closed a real gap the existing mode config
+  didn't cover on its own: `triggerHandoff()` always emitted the
+  `handoff_requested` activity event (agent-worktrees' automatic-spawn
+  trigger) and pinged agent-bridge regardless of mode -- now both are
+  gated on a new `mode` parameter threaded through from all three call
+  sites (MCP tool, payload-local CLI, force-tier auto-trigger). Manual
+  compose/save/consume keeps working unconditionally under the new
+  default; corrected `HANDOFF_MECHANISM_AWARENESS`'s now-inaccurate
+  unconditional "the extension nudges...and forces one" claim in the same
+  pass, since the default flip made it false for the common case. Full
+  `node --test` suite: 110 tests, 108 passed (2 pre-existing skips),
+  including a new dedicated test proving manual-only never invokes either
+  live-cutover trigger point.
+- Remaining Phase 7 items (plugin-load investigation, Worktree Manager
+  pickup reliability, successor fallback hardening, dual-source head
+  reconciliation + resume conflict UX, durable event logging + cut-me-over/
+  check-the-handoff diagnostic skill) are substantial standalone efforts in
+  their own right, each tracked by its own gitea issue above -- left open
+  for follow-up sessions rather than rushed in one pass.
