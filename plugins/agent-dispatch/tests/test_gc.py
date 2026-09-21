@@ -163,7 +163,7 @@ def test_verdict_uses_local_bridge_when_machine_is_this_machine(monkeypatch):
     monkeypatch.setattr(tracking, "run_ssh_capture", ssh_forbidden)
     assert (
         tracking.liveness_verdict(
-            "wt", machine="tmichon-cloud1", owner_session_id="S1"
+            "wt", machine="cloud1", owner_session_id="S1"
         )
         == tracking.LIVE
     )
@@ -183,6 +183,67 @@ def test_verdict_still_uses_ssh_for_a_genuine_peer_machine(monkeypatch):
     assert (
         tracking.liveness_verdict("wt", machine="peer-box", owner_session_id="S1")
         == tracking.LIVE
+    )
+
+
+def test_verdict_satellite_uses_pushed_status_live(monkeypatch):
+    # A registered role=satellite owner opens no inbound listener -- resolve
+    # from its pushed directory status instead of ever touching SSH (see the
+    # `satellite-agent-exposure` effort's Design item D and the matching
+    # `resolve_live_session` branch this mirrors).
+    monkeypatch.setattr(tracking.remote_dispatch, "is_peer_machine", lambda _m: True)
+    monkeypatch.setattr(
+        tracking,
+        "_satellite_roster",
+        lambda: {"book2": {"status": {"wt": {"session_id": "S1"}}}},
+    )
+
+    def ssh_forbidden(*_a, **_k):
+        raise AssertionError("must not shell ssh for a registered satellite")
+
+    monkeypatch.setattr(tracking, "run_ssh_capture", ssh_forbidden)
+    monkeypatch.setattr(tracking, "run_background_capture", ssh_forbidden)
+    assert (
+        tracking.liveness_verdict("wt", machine="book2", owner_session_id="S1")
+        == tracking.LIVE
+    )
+
+
+def test_verdict_satellite_gone_when_different_session_or_worktree_absent(
+    monkeypatch,
+):
+    monkeypatch.setattr(tracking.remote_dispatch, "is_peer_machine", lambda _m: True)
+    monkeypatch.setattr(
+        tracking,
+        "_satellite_roster",
+        lambda: {"book2": {"status": {"wt": {"session_id": "S2"}}}},
+    )
+    assert (
+        tracking.liveness_verdict("wt", machine="book2", owner_session_id="S1")
+        == tracking.GONE
+    )
+
+    # The satellite is registered but this worktree isn't in its pushed
+    # status at all -- exactly like the SSH-back `{}` empty-registry answer.
+    monkeypatch.setattr(
+        tracking, "_satellite_roster", lambda: {"book2": {"status": {}}}
+    )
+    assert (
+        tracking.liveness_verdict("wt", machine="book2", owner_session_id="S1")
+        == tracking.GONE
+    )
+
+
+def test_verdict_satellite_unknown_when_owner_identity_not_captured(monkeypatch):
+    monkeypatch.setattr(tracking.remote_dispatch, "is_peer_machine", lambda _m: True)
+    monkeypatch.setattr(
+        tracking,
+        "_satellite_roster",
+        lambda: {"book2": {"status": {"wt": {"session_id": "S1"}}}},
+    )
+    assert (
+        tracking.liveness_verdict("wt", machine="book2", owner_session_id=None)
+        == tracking.UNKNOWN
     )
 
 
@@ -410,9 +471,9 @@ class TestReapOrphanedTargets:
         assert q.get(t.id).status == Status.PROPOSED
 
     def test_machine_match_is_case_insensitive(self, q):
-        self._pinned(q, "h7", wt="wt-gone", machine="Tmichon-Cloud1", now=100)
+        self._pinned(q, "h7", wt="wt-gone", machine="cloud1", now=100)
         counts = q.reap_orphaned_targets(
-            {"wt-live"}, machine="tmichon-cloud1", grace_secs=0, now=200)
+            {"wt-live"}, machine="cloud1", grace_secs=0, now=200)
         assert counts["reaped"] == 1
 
     def test_ignores_owned_held_tasks(self, q):
