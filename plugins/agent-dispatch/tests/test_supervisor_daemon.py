@@ -17,6 +17,8 @@ server is started.
 
 from __future__ import annotations
 
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -640,6 +642,41 @@ def test_companion_crash_tree_is_retired_before_restart():
     assert summary.revived == ["companion"]
 
 
+def test_crash_revival_not_suppressed_by_a_still_pending_health_probe():
+    """If the process exits while its health probe is still off-thread and
+    pending, the reconcile loop must not keep treating it as "healthy for
+    this tick, re-check next time" forever -- once the process has actually
+    exited, it must fall through to the normal crash-revival handling
+    instead of a still-pending probe permanently suppressing it."""
+    release = threading.Event()
+    controller = FakeCompanionController()
+    real_health = controller.health
+
+    def blocking_health(resolution):
+        release.wait(timeout=5)
+        return real_health(resolution)
+
+    controller.health = blocking_health  # type: ignore[method-assign]
+
+    client = FakeClient([_companion_reg()])
+    daemon = _daemon(
+        client, FakeLauncher(), companion_controller=controller, reconcile_call_budget=0.05
+    )
+    try:
+        daemon.reconcile_once()  # starts the unit
+        proc = controller.proc_for("companion")
+        # A health probe is submitted and stays pending (never released).
+        summary = daemon.reconcile_once()
+        assert summary.unhealthy == []
+        assert summary.revived == []
+        # The process exits while that same probe is still stuck.
+        proc.crash()
+        summary = daemon.reconcile_once()
+        assert summary.revived == ["companion"]
+    finally:
+        release.set()
+
+
 def test_reconcile_stops_removed_registration():
     client = FakeClient([_reg("a"), _reg("b")])
     launcher = FakeLauncher()
@@ -1062,6 +1099,679 @@ def test_serve_does_not_reconnect_without_factory():
     assert dead.closed is False
 
 
+# -- one stubborn companion cannot block the whole reconcile loop -----------
+#
+# reconcile_once()/_reconcile_managed() run every companion's health probe
+# and (for a launch/relaunch decision) prepare_managed()+validate() -- and
+# validate() can wait on the same interprocess managed-runtime lock a slow
+# concurrent materialize() build holds. Before this fix all three ran
+# synchronously on the single reconcile thread, so one companion stuck in
+# any of them (a hung probe subprocess, a contended lock) blocked noticing
+# or reviving every *other* unit for that entire duration. These prove the
+# fix: each call is routed through the runtime pool and polled with a
+# bounded wait, so a stuck check only ever delays its own rid's next
+# decision, never any other unit's, past a small configurable budget.
+
+
+class _BlockingCompanion:
+    """A companion controller whose health()/prepare_managed() block on a
+    controllable event, standing in for a hung probe subprocess."""
+
+    def __init__(self):
+        self.health_calls = 0
+        self.prepare_calls = 0
+        self.release = threading.Event()
+        self.fail_with: BaseException | None = None
+
+    def health(self, resolution):
+        self.health_calls += 1
+        self.release.wait(timeout=5)
+        if self.fail_with is not None:
+            raise self.fail_with
+        return True
+
+    def prepare_managed(self, snapshot):
+        self.prepare_calls += 1
+        self.release.wait(timeout=5)
+
+
+class _BlockingMaterializer:
+    """A managed-runtime materializer whose validate() blocks on a
+    controllable event, standing in for validate() waiting on the same
+    interprocess lock a slow concurrent materialize() build holds."""
+
+    def __init__(self):
+        self.validate_calls = 0
+        self.release = threading.Event()
+
+    def materialize(self, registration):
+        raise NotImplementedError
+
+    def validate(self, registration, runtimes):
+        self.validate_calls += 1
+        self.release.wait(timeout=5)
+
+
+class _NonBlockingCompanion:
+    """A companion controller whose prepare_managed() is instant, so a
+    validate()-focused test isolates validate()'s own blocking behavior."""
+
+    def __init__(self):
+        self.prepare_calls = 0
+
+    def prepare_managed(self, snapshot):
+        self.prepare_calls += 1
+
+
+class _FakeSnapshot:
+    def __init__(self, fingerprint="fp-1", registration=None, runtimes=()):
+        self.fingerprint = fingerprint
+        self._registration = registration or {}
+        self.runtimes = runtimes
+
+    def resolution(self):
+        return SimpleNamespace(registration=self._registration)
+
+
+def _poll_until(predicate, poll, *, timeout=2.0):
+    from time import monotonic, sleep as real_sleep
+
+    deadline = monotonic() + timeout
+    result = None
+    while monotonic() < deadline:
+        result = poll()
+        if predicate(result):
+            return result
+        real_sleep(0.01)
+    return result
+
+
+def test_poll_managed_health_never_blocks_past_the_budget_then_resolves():
+    from concurrent.futures import ThreadPoolExecutor
+    from time import monotonic
+
+    companion = _BlockingCompanion()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        runtime_executor=ThreadPoolExecutor(max_workers=2),
+        reconcile_call_budget=0.05,
+    )
+    snapshot = _FakeSnapshot()
+    try:
+        started = monotonic()
+        assert daemon._poll_managed_health("rid-1", snapshot, monotonic() + 0.05) is None
+        assert monotonic() - started < 2.0  # bounded by budget, not the 5s probe
+        # Still pending: must not resubmit a second concurrent probe.
+        assert daemon._poll_managed_health("rid-1", snapshot, monotonic() + 0.05) is None
+        assert companion.health_calls == 1
+        companion.release.set()
+        result = _poll_until(
+            lambda r: r is not None,
+            lambda: daemon._poll_managed_health("rid-1", snapshot, monotonic() + 0.05),
+        )
+        assert result is True
+    finally:
+        companion.release.set()
+        daemon._runtime_executor.shutdown(wait=False, cancel_futures=True)
+
+
+def test_poll_managed_health_drops_a_stale_probe_for_a_superseded_snapshot():
+    """A health probe started for one snapshot must never have its result
+    applied to a different (superseded) snapshot for the same rid -- e.g. an
+    old probe unblocking after a relaunch already happened for a new
+    fingerprint must not silently mark the *new* unit unhealthy/healthy
+    based on stale data."""
+    from concurrent.futures import ThreadPoolExecutor
+    from time import monotonic
+
+    companion = _BlockingCompanion()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        runtime_executor=ThreadPoolExecutor(max_workers=2),
+        reconcile_call_budget=0.05,
+    )
+    old_snapshot = _FakeSnapshot(fingerprint="fp-old")
+    new_snapshot = _FakeSnapshot(fingerprint="fp-new")
+    try:
+        assert daemon._poll_managed_health("rid-1", old_snapshot, monotonic() + 0.05) is None
+        assert _poll_until(lambda r: r != 0, lambda: companion.health_calls) == 1
+        # A newer snapshot for the same rid must start its OWN fresh probe,
+        # not wait on (or ever consume the result of) the abandoned old one.
+        assert daemon._poll_managed_health("rid-1", new_snapshot, monotonic() + 0.05) is None
+        assert _poll_until(lambda r: r != 1, lambda: companion.health_calls) == 2
+    finally:
+        companion.release.set()
+        daemon._runtime_executor.shutdown(wait=False, cancel_futures=True)
+
+
+def test_poll_unmanaged_health_never_blocks_past_the_budget_then_resolves():
+    from concurrent.futures import ThreadPoolExecutor
+    from time import monotonic
+
+    companion = _BlockingCompanion()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        runtime_executor=ThreadPoolExecutor(max_workers=2),
+        reconcile_call_budget=0.05,
+    )
+    try:
+        started = monotonic()
+        assert daemon._poll_unmanaged_health("rid-1", None, monotonic() + 0.05) is None
+        assert monotonic() - started < 2.0
+        assert daemon._poll_unmanaged_health("rid-1", None, monotonic() + 0.05) is None
+        assert companion.health_calls == 1
+        companion.release.set()
+        result = _poll_until(
+            lambda r: r is not None,
+            lambda: daemon._poll_unmanaged_health("rid-1", None, monotonic() + 0.05),
+        )
+        assert result is True
+    finally:
+        companion.release.set()
+        daemon._runtime_executor.shutdown(wait=False, cancel_futures=True)
+
+
+def test_poll_managed_validate_never_blocks_past_the_budget_then_resolves():
+    """The dangerous case: validate() waiting on a contended managed-runtime
+    lock must not stall reconciling any other companion past the budget."""
+    from concurrent.futures import ThreadPoolExecutor
+    from time import monotonic
+
+    companion = _NonBlockingCompanion()
+    materializer = _BlockingMaterializer()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        runtime_materializer=materializer,
+        runtime_executor=ThreadPoolExecutor(max_workers=2),
+        reconcile_call_budget=0.05,
+    )
+    snapshot = _FakeSnapshot()
+    try:
+        started = monotonic()
+        assert daemon._poll_managed_validate("rid-1", snapshot, monotonic() + 0.05) is None
+        assert monotonic() - started < 2.0
+        # Still pending: must not resubmit a second concurrent check.
+        assert daemon._poll_managed_validate("rid-1", snapshot, monotonic() + 0.05) is None
+        result = _poll_until(
+            lambda r: r != 0, lambda: materializer.validate_calls
+        )
+        assert result == 1
+        assert companion.prepare_calls == 1
+        materializer.release.set()
+        result = _poll_until(
+            lambda r: r is not None,
+            lambda: daemon._poll_managed_validate("rid-1", snapshot, monotonic() + 0.05),
+        )
+        assert result is True
+    finally:
+        materializer.release.set()
+        daemon._runtime_executor.shutdown(wait=False, cancel_futures=True)
+
+
+def test_poll_managed_validate_drops_a_stale_check_for_a_superseded_snapshot():
+    """A snapshot superseded mid-check (new fingerprint) must not be kept
+    waiting on the old, abandoned check -- a fresh one starts instead."""
+    from concurrent.futures import ThreadPoolExecutor
+    from time import monotonic
+
+    companion = _NonBlockingCompanion()
+    materializer = _BlockingMaterializer()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        runtime_materializer=materializer,
+        runtime_executor=ThreadPoolExecutor(max_workers=2),
+        reconcile_call_budget=0.05,
+    )
+    old_snapshot = _FakeSnapshot(fingerprint="fp-old")
+    new_snapshot = _FakeSnapshot(fingerprint="fp-new")
+    try:
+        assert daemon._poll_managed_validate("rid-1", old_snapshot, monotonic() + 0.05) is None
+        assert _poll_until(lambda r: r != 0, lambda: materializer.validate_calls) == 1
+        # A newer snapshot for the same rid must start its OWN fresh check,
+        # not wait on the abandoned one for the old fingerprint.
+        assert daemon._poll_managed_validate("rid-1", new_snapshot, monotonic() + 0.05) is None
+        assert _poll_until(lambda r: r != 1, lambda: materializer.validate_calls) == 2
+    finally:
+        materializer.release.set()
+        daemon._runtime_executor.shutdown(wait=False, cancel_futures=True)
+
+
+def test_reconcile_call_budget_is_shared_across_companions_in_one_pass():
+    """Two stuck companions in the same _reconcile_managed() call must not
+    each separately consume the full budget -- the total added delay across
+    both is bounded by one shared budget, never 2x it."""
+    from concurrent.futures import ThreadPoolExecutor
+    from time import monotonic
+
+    companion = _BlockingCompanion()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        runtime_executor=ThreadPoolExecutor(max_workers=4),
+        reconcile_call_budget=0.2,
+    )
+    snapshot = _FakeSnapshot()
+    try:
+        deadline = monotonic() + 0.2
+        started = monotonic()
+        assert daemon._poll_managed_health("rid-1", snapshot, deadline) is None
+        assert daemon._poll_managed_health("rid-2", snapshot, deadline) is None
+        assert daemon._poll_managed_health("rid-3", snapshot, deadline) is None
+        elapsed = monotonic() - started
+        # If each rid separately re-waited the full 0.2s budget this would be
+        # >= 0.6s; sharing one deadline keeps the whole pass close to 0.2s.
+        assert elapsed < 0.5
+    finally:
+        companion.release.set()
+        daemon._runtime_executor.shutdown(wait=False, cancel_futures=True)
+
+
+def test_launch_managed_skips_redundant_precondition_when_already_confirmed():
+    """A caller that already ran prepare_managed()/validate() successfully
+    this tick via _poll_managed_validate must not have _launch_managed()
+    silently re-run them synchronously -- that would defeat the whole point
+    of polling them off-thread first."""
+    companion = FakeCompanionController()
+    companion.prepare_calls = 0
+
+    def _prepare_managed(snapshot):
+        companion.prepare_calls += 1
+
+    companion.prepare_managed = _prepare_managed
+    materializer = _BlockingMaterializer()
+    materializer.release.set()  # never actually blocks in this test
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        runtime_materializer=materializer,
+    )
+    snapshot = _FakeSnapshot(registration={"id": "rid-1"})
+    from agent_dispatch.supervisor_daemon import ReconcileSummary
+
+    summary = ReconcileSummary()
+
+    daemon._launch_managed(snapshot, summary, bucket="started", precondition_confirmed=True)
+    assert materializer.validate_calls == 0
+    assert companion.prepare_calls == 0
+    assert "rid-1" in daemon._units
+
+    # The default (unconfirmed) behavior is unchanged -- still runs both.
+    daemon._units.clear()
+    daemon._launch_managed(
+        _FakeSnapshot(fingerprint="fp-2", registration={"id": "rid-1"}), summary, bucket="started"
+    )
+    assert materializer.validate_calls == 1
+    assert companion.prepare_calls == 1
+
+
+def test_reconcile_once_shares_one_deadline_across_managed_and_unmanaged_phases():
+    """A stuck managed-companion probe consuming (most of) the shared budget
+    must not let the unmanaged-companion crash-revival phase in the same
+    tick add a SECOND separate budget on top -- both phases must share the
+    exact same deadline value, computed once at the top of reconcile_once()."""
+    captured: dict[str, float] = {}
+    client = FakeClient([_companion_reg()])
+    controller = FakeCompanionController()
+    daemon = _daemon(
+        client, FakeLauncher(), companion_controller=controller, reconcile_call_budget=0.2
+    )
+    daemon.reconcile_once()  # starts the (unmanaged) companion unit
+
+    real_reconcile_managed = daemon._reconcile_managed
+
+    def spy_reconcile_managed(desired, summary, *, skip=None, deadline=None):
+        captured["managed"] = deadline
+        return real_reconcile_managed(desired, summary, skip=skip, deadline=deadline)
+
+    daemon._reconcile_managed = spy_reconcile_managed
+
+    real_poll_unmanaged_health = daemon._poll_unmanaged_health
+
+    def spy_poll_unmanaged_health(rid, resolution, deadline):
+        captured["unmanaged"] = deadline
+        return real_poll_unmanaged_health(rid, resolution, deadline)
+
+    daemon._poll_unmanaged_health = spy_poll_unmanaged_health
+
+    daemon.reconcile_once()
+    assert "managed" in captured and "unmanaged" in captured
+    assert captured["managed"] == captured["unmanaged"]
+
+
+def test_poll_managed_recovery_validate_never_blocks_past_the_budget_then_resolves():
+    """The _managed_uncertain recovery path's own validate() precondition
+    check must be bounded exactly like a launch/relaunch's validate() --
+    a stuck lock wait here must not stall reconciling any other companion,
+    and unlike _poll_managed_validate this path never calls
+    prepare_managed()."""
+    from concurrent.futures import ThreadPoolExecutor
+    from time import monotonic
+
+    companion = _NonBlockingCompanion()
+    materializer = _BlockingMaterializer()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        runtime_materializer=materializer,
+        runtime_executor=ThreadPoolExecutor(max_workers=2),
+        reconcile_call_budget=0.05,
+    )
+    snapshot = _FakeSnapshot()
+    try:
+        started = monotonic()
+        assert daemon._poll_managed_recovery_validate("rid-1", snapshot, monotonic() + 0.05) is None
+        assert monotonic() - started < 2.0
+        # Still pending: must not resubmit a second concurrent check.
+        assert daemon._poll_managed_recovery_validate("rid-1", snapshot, monotonic() + 0.05) is None
+        assert _poll_until(lambda r: r != 0, lambda: materializer.validate_calls) == 1
+        # Recovery never runs a configuration provider.
+        assert companion.prepare_calls == 0
+        materializer.release.set()
+        result = _poll_until(
+            lambda r: r is not None,
+            lambda: daemon._poll_managed_recovery_validate("rid-1", snapshot, monotonic() + 0.05),
+        )
+        assert result is True
+    finally:
+        materializer.release.set()
+        daemon._runtime_executor.shutdown(wait=False, cancel_futures=True)
+
+
+def test_poll_managed_recovery_validate_drops_a_stale_check_for_a_superseded_snapshot():
+    """A recovery-validate check started for one previous-snapshot fingerprint
+    must not be kept waiting on an abandoned check once a newer fingerprint
+    for the same rid supersedes it."""
+    from concurrent.futures import ThreadPoolExecutor
+    from time import monotonic
+
+    companion = _NonBlockingCompanion()
+    materializer = _BlockingMaterializer()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        runtime_materializer=materializer,
+        runtime_executor=ThreadPoolExecutor(max_workers=2),
+        reconcile_call_budget=0.05,
+    )
+    old_snapshot = _FakeSnapshot(fingerprint="fp-old")
+    new_snapshot = _FakeSnapshot(fingerprint="fp-new")
+    try:
+        assert daemon._poll_managed_recovery_validate("rid-1", old_snapshot, monotonic() + 0.05) is None
+        assert _poll_until(lambda r: r != 0, lambda: materializer.validate_calls) == 1
+        assert daemon._poll_managed_recovery_validate("rid-1", new_snapshot, monotonic() + 0.05) is None
+        assert _poll_until(lambda r: r != 1, lambda: materializer.validate_calls) == 2
+    finally:
+        materializer.release.set()
+        daemon._runtime_executor.shutdown(wait=False, cancel_futures=True)
+
+
+def test_a_failed_health_probe_is_not_cached_forever_and_allows_retry():
+    """An exception the outer reconcile handler catches (not just the
+    narrow CompanionError/CompanionIndeterminate/OSError set) must still
+    release this rid's tracking entry -- otherwise every later poll for the
+    same fingerprint just re-raises the same already-completed future's
+    exception forever, permanently blocking a retry."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    companion = _BlockingCompanion()
+    companion.fail_with = RuntimeError("boom")  # outside the narrow except set
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        runtime_executor=ThreadPoolExecutor(max_workers=2),
+        reconcile_call_budget=0.05,
+    )
+    snapshot = _FakeSnapshot()
+    try:
+        companion.release.set()  # resolve (raise) immediately
+        with pytest.raises(RuntimeError):
+            daemon._poll_managed_health("rid-1", snapshot, time.monotonic() + 0.05)
+        assert "rid-1" not in daemon._managed_health_futures
+        # A retry must start a genuinely fresh probe, not reuse/re-raise the
+        # old (already-failed) one.
+        companion.fail_with = None
+        result = _poll_until(
+            lambda r: r is not None,
+            lambda: daemon._poll_managed_health("rid-1", snapshot, time.monotonic() + 0.05),
+        )
+        assert result is True
+        assert companion.health_calls == 2
+    finally:
+        companion.release.set()
+        daemon._runtime_executor.shutdown(wait=False, cancel_futures=True)
+
+
+def test_abandoned_probes_are_still_drained_by_shutdown():
+    """A probe abandoned mid-flight (its snapshot superseded, so it is
+    dropped from the per-rid tracking dict) can't be cancelled -- it keeps
+    occupying a pool worker regardless. shutdown() must still wait for it
+    via the shared _probe_inflight set, not just whatever is still in the
+    per-rid dicts at that moment."""
+    import agent_dispatch.supervisor_daemon as supervisor_daemon_module
+    from concurrent.futures import ThreadPoolExecutor
+    from time import monotonic
+
+    companion = _BlockingCompanion()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        runtime_executor=ThreadPoolExecutor(max_workers=2),
+        reconcile_call_budget=0.05,
+    )
+    old_grace = supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS
+    supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = 0.3
+    try:
+        old_snapshot = _FakeSnapshot(fingerprint="fp-old")
+        new_snapshot = _FakeSnapshot(fingerprint="fp-new")
+        assert daemon._poll_managed_health("rid-1", old_snapshot, monotonic() + 0.05) is None
+        # Superseding the snapshot drops the old probe from the per-rid dict
+        # entirely, but it is still running (blocked) -- must remain tracked.
+        assert daemon._poll_managed_health("rid-1", new_snapshot, monotonic() + 0.05) is None
+        assert len(daemon._probe_inflight) == 2
+
+        def _unblock_soon():
+            time.sleep(0.05)
+            companion.release.set()
+
+        threading.Thread(target=_unblock_soon, daemon=True).start()
+        started = monotonic()
+        daemon.shutdown()
+        elapsed = monotonic() - started
+        assert elapsed < 2.0  # bounded -- never hangs on the abandoned probe
+        assert companion.health_calls == 2
+    finally:
+        supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = old_grace
+        companion.release.set()
+
+
+def test_shutdown_applies_the_grace_wait_once_not_per_future_category():
+    """materialize/cleanup futures and probe futures pending at the same
+    time must share ONE grace wait, not two sequential ones (which would let
+    shutdown take up to 2x _SHUTDOWN_GRACE_SECONDS)."""
+    import agent_dispatch.supervisor_daemon as supervisor_daemon_module
+    from concurrent.futures import Future, ThreadPoolExecutor
+    from time import monotonic
+
+    companion = _BlockingCompanion()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        runtime_executor=ThreadPoolExecutor(max_workers=2),
+        reconcile_call_budget=0.05,
+    )
+    old_grace = supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS
+    supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = 0.3
+    try:
+        snapshot = _FakeSnapshot()
+        # A never-resolving "materialize" future, standing in for one still
+        # genuinely in flight (never released -- shutdown must not wait the
+        # full grace for this AND then again the full grace for the probe).
+        never_resolves: Future = Future()
+        never_resolves.set_running_or_notify_cancel()
+        daemon._managed_runtime_inflight.add(never_resolves)
+        assert daemon._poll_managed_health("rid-1", snapshot, monotonic() + 0.05) is None
+
+        started = monotonic()
+        daemon.shutdown()
+        elapsed = monotonic() - started
+        # Two sequential 0.3s waits would take ~0.6s; one shared wait keeps
+        # it close to 0.3s.
+        assert elapsed < 0.5
+    finally:
+        supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = old_grace
+        companion.release.set()
+
+
+def test_shutdown_waits_briefly_for_a_pending_health_probe_before_exiting():
+    """shutdown() must give an in-flight health/validate probe a bounded
+    grace wait too -- not just materialize()/cleanup() -- since a probe left
+    fully untracked would otherwise keep the pool's worker thread alive
+    across interpreter exit (Python joins pool threads at exit) with no
+    grace bound at all. A probe that finishes within the (shrunk, for this
+    test) grace window must be waited for; shutdown must still return
+    promptly afterward either way."""
+    import agent_dispatch.supervisor_daemon as supervisor_daemon_module
+    from time import monotonic
+
+    companion = _BlockingCompanion()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        reconcile_call_budget=0.05,
+    )
+    old_grace = supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS
+    supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = 0.3
+    try:
+        snapshot = _FakeSnapshot()
+        assert daemon._poll_managed_health("rid-1", snapshot, monotonic() + 0.05) is None
+
+        def _unblock_soon():
+            time.sleep(0.05)
+            companion.release.set()
+
+        threading.Thread(target=_unblock_soon, daemon=True).start()
+        started = monotonic()
+        daemon.shutdown()
+        elapsed = monotonic() - started
+        assert elapsed < 2.0  # bounded -- never hangs on a stuck probe
+        assert companion.health_calls == 1
+    finally:
+        supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = old_grace
+        companion.release.set()
+
+
+def test_shutdown_returns_true_when_everything_drains_within_grace():
+    from time import monotonic
+
+    companion = _BlockingCompanion()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        reconcile_call_budget=0.05,
+    )
+    try:
+        snapshot = _FakeSnapshot()
+        assert daemon._poll_managed_health("rid-1", snapshot, monotonic() + 0.05) is None
+
+        def _unblock_soon():
+            time.sleep(0.05)
+            companion.release.set()
+
+        threading.Thread(target=_unblock_soon, daemon=True).start()
+        assert daemon.shutdown() is True
+    finally:
+        companion.release.set()
+
+
+def test_shutdown_returns_false_when_a_probe_is_still_stuck_past_the_grace():
+    """A genuinely stuck probe means shutdown() cannot claim a clean drain --
+    callers that can safely force-exit (see run()'s self-update-triggered
+    path) need this signal to know a plain return would otherwise leave a
+    live worker thread for Python's atexit join to wait on."""
+    import agent_dispatch.supervisor_daemon as supervisor_daemon_module
+    from time import monotonic
+
+    companion = _BlockingCompanion()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        reconcile_call_budget=0.05,
+    )
+    old_grace = supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS
+    supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = 0.1
+    try:
+        snapshot = _FakeSnapshot()
+        assert daemon._poll_managed_health("rid-1", snapshot, monotonic() + 0.05) is None
+        # Never released within the grace window -- stays genuinely stuck.
+        assert daemon.shutdown() is False
+    finally:
+        supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = old_grace
+        companion.release.set()
+
+
+def test_shutdown_is_idempotent_for_the_same_executor_and_does_not_re_wait():
+    """A second shutdown() call for the SAME (already grace-waited) owned
+    executor -- e.g. serve()'s finally re-calling it after
+    _maybe_self_update already did during the same handoff -- must reuse
+    the cached drain result rather than sitting through a second full
+    _SHUTDOWN_GRACE_SECONDS wait for a probe that is still stuck."""
+    import agent_dispatch.supervisor_daemon as supervisor_daemon_module
+    from time import monotonic
+
+    companion = _BlockingCompanion()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(),
+        companion_controller=companion,
+        reconcile_call_budget=0.05,
+    )
+    old_grace = supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS
+    supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = 0.2
+    try:
+        snapshot = _FakeSnapshot()
+        assert daemon._poll_managed_health("rid-1", snapshot, monotonic() + 0.05) is None
+        assert daemon.shutdown() is False  # first call: pays the one grace wait
+
+        started = monotonic()
+        assert daemon.shutdown() is False  # second call, same executor: cached
+        elapsed = monotonic() - started
+        assert elapsed < 0.05  # nowhere near a second 0.2s grace wait
+    finally:
+        supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = old_grace
+        companion.release.set()
+
+
+def test_crash_revival_clears_the_old_process_stale_health_future():
+    """A health probe in flight for a crashed process must not have its
+    (stale) result silently applied to the freshly-revived process on a
+    later tick -- the crash-revival path must clear the per-rid future
+    before starting the replacement, even though it bypasses _stop()."""
+    from concurrent.futures import Future
+
+    client = FakeClient([_companion_reg()])
+    controller = FakeCompanionController()
+    daemon = _daemon(client, FakeLauncher(), companion_controller=controller)
+    daemon.reconcile_once()
+
+    # Simulate a health probe left over from the still-live process, never
+    # resolved by the time it crashes.
+    stale = Future()
+    daemon._unmanaged_health_futures["companion"] = stale
+
+    controller.proc_for("companion").crash()
+    summary = daemon.reconcile_once()
+
+    assert summary.revived == ["companion"]
+    # The crash-revival path must not have left the stale future keyed to
+    # the new process -- either dropped entirely, or replaced by a fresh one
+    # for the new process, but never the same abandoned object.
+    assert daemon._unmanaged_health_futures.get("companion") is not stale
+
+
 # -- live self-update (#2259) -------------------------------------------------
 
 
@@ -1112,6 +1822,50 @@ def test_self_update_spawns_successor_and_hands_off():
     assert spawned == [(target, ["supervise", "serve", "--machine", "anomalous-potato"])]
     assert launcher.proc_for("a").terminated is True  # units wound down
     assert lock.released is True  # lease released before the spawn
+
+
+def test_self_update_force_exits_rather_than_wait_on_a_stuck_probe():
+    """If a probe/validate worker is still genuinely stuck past shutdown()'s
+    grace window at the point serve() is about to return the self-update
+    exit code, a plain return would let Python's atexit ThreadPoolExecutor
+    join delay this process's actual exit well past the point the successor
+    is already live. serve() must force-exit instead -- verified here by
+    monkeypatching os._exit so the test process itself survives."""
+    import agent_dispatch.supervisor_daemon as supervisor_daemon_module
+    from agent_dispatch.supervisor_daemon import SELF_UPDATE_EXIT_CODE
+
+    forced: list[int] = []
+    real_exit = supervisor_daemon_module.os._exit
+    supervisor_daemon_module.os._exit = forced.append  # type: ignore[assignment]
+
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    lock = FakeLock(granted=True)
+    target = object()
+    d = _daemon(
+        client, launcher, lock=lock,
+        self_update_enabled=True,
+        self_update_argv=["supervise", "serve"],
+        self_update_stale_target=lambda _root, _v: target,
+        self_update_spawn=lambda _t, _argv: None,
+    )
+    old_grace = supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS
+    supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = 0.05
+    release = threading.Event()
+    try:
+        # A probe left permanently stuck (never released before the grace
+        # window elapses) -- standing in for a health/validate call still
+        # waiting on a contended lock right as self-update triggers.
+        future = d._runtime_pool().submit(release.wait, 5)
+        d._probe_inflight.add(future)
+
+        rc = d.serve(once=False)
+        assert rc == SELF_UPDATE_EXIT_CODE
+        assert forced == [SELF_UPDATE_EXIT_CODE]
+    finally:
+        release.set()
+        supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = old_grace
+        supervisor_daemon_module.os._exit = real_exit
 
 
 def test_self_update_ordering_releases_lease_before_spawn():
@@ -1256,6 +2010,86 @@ def test_self_update_reclaims_lease_when_spawn_fails():
     assert rc == 0  # did not hand off -- stayed on this version
     # once for serve()'s initial election, once more for the post-failure reclaim
     assert len(acquire_calls) == 2
+
+
+def test_self_update_retires_rather_than_discards_an_undrained_executor_on_spawn_failure():
+    """If shutdown() (called before the spawn attempt) could not fully drain
+    a stuck probe, and the spawn itself then fails, the old executor must
+    not be silently discarded -- it stays tracked in
+    _retired_runtime_executors rather than orphaned, so a repeated-failure
+    loop never accumulates fully untracked live pools."""
+    import agent_dispatch.supervisor_daemon as supervisor_daemon_module
+
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    lock = FakeLock(granted=True)
+
+    def failing_spawn(_t, _argv):
+        raise OSError("no such file or directory")
+
+    d = _daemon(
+        client, launcher, lock=lock,
+        self_update_enabled=True,
+        self_update_argv=["supervise", "serve"],
+        self_update_stale_target=lambda _root, _v: object(),
+        self_update_spawn=failing_spawn,
+    )
+    original_executor = d._runtime_pool()
+    release = threading.Event()
+    stuck = d._runtime_pool().submit(release.wait, 5)
+    d._probe_inflight.add(stuck)
+    # Force shutdown() to report an undrained probe deterministically rather
+    # than race a real 5-second wait: patch _wait_futures to always report
+    # something still pending.
+    real_wait_futures = supervisor_daemon_module._wait_futures
+
+    def fake_wait_futures(pending, *, timeout):
+        return set(), set(pending)
+
+    supervisor_daemon_module._wait_futures = fake_wait_futures
+    try:
+        result = d._maybe_self_update()
+    finally:
+        supervisor_daemon_module._wait_futures = real_wait_futures
+        release.set()
+
+    assert result is False
+    assert d._retired_runtime_executors == [original_executor]
+
+
+def test_shutdown_drains_a_retired_executors_probe_even_with_no_current_executor():
+    """A future submitted to an executor that was later retired (see
+    _maybe_self_update's spawn-failure branch, which sets
+    self._runtime_executor to None) must still be waited on by a later
+    shutdown() call -- gating the whole drain on a *current* executor
+    existing would silently skip a genuinely still-running retired worker
+    and falsely report a clean drain."""
+    import agent_dispatch.supervisor_daemon as supervisor_daemon_module
+    from time import monotonic
+
+    d = _daemon(FakeClient([]), FakeLauncher())
+    old_grace = supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS
+    supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = 0.1
+    release = threading.Event()
+    try:
+        retired = d._runtime_pool()
+        stuck = retired.submit(release.wait, 5)
+        d._probe_inflight.add(stuck)
+        # Simulate the post-spawn-failure state: the executor is retired,
+        # and the daemon no longer has a *current* one referenced.
+        d._retired_runtime_executors.append(retired)
+        d._runtime_executor = None
+
+        started = monotonic()
+        result = d.shutdown()
+        elapsed = monotonic() - started
+
+        assert result is False  # the retired probe is still genuinely stuck
+        assert elapsed >= 0.08  # it was actually waited on, not skipped
+        assert d._retired_runtime_executors == []  # swept
+    finally:
+        release.set()
+        supervisor_daemon_module._SHUTDOWN_GRACE_SECONDS = old_grace
 
 
 def test_self_update_respects_poll_interval():
