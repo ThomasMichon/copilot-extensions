@@ -11,6 +11,12 @@ import pytest
 
 from agent_worktrees import __main__ as m
 
+# Captured at collection time, before any per-test fixture (including this
+# file's autouse "assume interactive" guard) can monkeypatch the module
+# attribute -- the two predicate tests below exercise this real
+# implementation directly rather than whatever the fixture has substituted.
+_REAL_IS_NONINTERACTIVE_INVOCATION = m._is_noninteractive_invocation
+
 
 def test_extract_project_flag_space():
     rest, proj = m._extract_project_flag(["--project", "foo", "list"])
@@ -1081,6 +1087,102 @@ def test_bare_non_headless_project_uses_install_trigger_without_manager(monkeypa
     rc = m.main([])
     assert rc == 0
     assert launched == {"project": "demo"}
+
+
+# ── non-interactive bare invocation must never open the Manager/Picker
+# (copilot-extensions#2670: a bare invocation with no attached terminal left
+# a resident agent_worktrees/worktree_manager process pair running for hours,
+# discoverable only via a process census) ─────────────────────────────────
+
+
+def test_bare_noninteractive_project_lists_not_launches(monkeypatch):
+    """A bare invocation with no attached terminal must never exec the
+    Manager or the bundled Picker, headless config or not."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
+    monkeypatch.setattr(m, "_is_headless_project", lambda: False)
+    monkeypatch.setattr(m, "_is_noninteractive_invocation", lambda: True)
+    monkeypatch.setattr(m.cfg, "project_name", lambda: "demo")
+    monkeypatch.setattr(
+        m, "_exec_worktree_manager",
+        lambda mgr, project: pytest.fail("non-interactive must not exec Manager"),
+    )
+    monkeypatch.setattr(
+        m, "cmd_launch",
+        lambda argv: pytest.fail("non-interactive must not launch bundled Picker"),
+    )
+    monkeypatch.setattr(
+        m, "_usable_worktree_manager", lambda: "/usr/bin/worktree-manager",
+    )
+
+    dispatched = {"v": None}
+
+    def fake_dispatch(argv):
+        dispatched["v"] = argv
+        return 0
+
+    monkeypatch.setattr(m, "cmd_worktree_dispatch", fake_dispatch)
+    rc = m.main([])
+    assert rc == 0
+    assert dispatched["v"] == ["list"]
+
+
+def test_bare_noninteractive_no_project_shows_help(monkeypatch):
+    """A bare invocation with no attached terminal and no resolvable project
+    falls back to the safe help path, never the Manager."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda proj: (None, None))
+    monkeypatch.setattr(m.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(m, "_is_noninteractive_invocation", lambda: True)
+    monkeypatch.setattr(
+        m, "_usable_worktree_manager", lambda: "/usr/bin/worktree-manager",
+    )
+    monkeypatch.setattr(
+        m, "_exec_worktree_manager",
+        lambda mgr, project: pytest.fail("non-interactive must not exec Manager"),
+    )
+
+    helped = {"v": False}
+    monkeypatch.setattr(
+        m, "cmd_help_unrouted", lambda: helped.__setitem__("v", True) or 0,
+    )
+    rc = m.main([])
+    assert rc == 0
+    assert helped["v"] is True
+
+
+def test_is_noninteractive_invocation_reflects_stdin_isatty(monkeypatch):
+    """Direct unit coverage of the guard's own predicate, independent of the
+    dispatch tests above (which stub it out) and of this file's autouse
+    fixture (which also stubs it out for every other test).
+
+    Replaces the ``sys.stdin`` module attribute wholesale rather than
+    mutating the real stdin object's own ``isatty`` method in place: the
+    latter was found to leak a broken/stuck stdin across unrelated later
+    tests that spawn real subprocesses inheriting the process's actual
+    stdin handle (a hang in ``test_installer_binstub.py``, confirmed absent
+    on the pre-change baseline via ``git stash``).
+    """
+    import sys as _sys
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(_sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    assert _REAL_IS_NONINTERACTIVE_INVOCATION() is False
+    monkeypatch.setattr(_sys, "stdin", SimpleNamespace(isatty=lambda: False))
+    assert _REAL_IS_NONINTERACTIVE_INVOCATION() is True
+
+
+def test_is_noninteractive_invocation_degrades_to_interactive_on_error(monkeypatch):
+    """Any error resolving isatty() is treated as interactive (fail toward
+    prior behavior), matching this module's other degrade-safe checks."""
+    import sys as _sys
+    from types import SimpleNamespace
+
+    def _boom():
+        raise OSError("no stdin")
+
+    monkeypatch.setattr(_sys, "stdin", SimpleNamespace(isatty=_boom))
+    assert _REAL_IS_NONINTERACTIVE_INVOCATION() is False
 
 
 # ── the binstub seam (Phase 6 / DQ7 / DQ8) ────────────────────────────

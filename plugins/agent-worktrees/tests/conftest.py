@@ -27,6 +27,23 @@ def _disable_resident_monitor_processes():
             os.environ[key] = prior
 
 
+@pytest.fixture(autouse=True)
+def _assume_interactive_terminal(monkeypatch):
+    """Default the non-interactive-bare-invocation guard to "interactive".
+
+    Under pytest's default output capture, ``sys.stdin.isatty()`` is False
+    (confirmed empirically), which would make every bare-invocation test
+    that exercises the launch/Manager seam spuriously hit
+    :func:`agent_worktrees.__main__.cmd_noninteractive_bare` instead of the
+    behavior it actually means to test. Default the guard closed here, the
+    same way this file already isolates the resident-monitor default above;
+    a test of the guard itself opts back in explicitly.
+    """
+    from agent_worktrees import __main__ as m
+
+    monkeypatch.setattr(m, "_is_noninteractive_invocation", lambda: False)
+
+
 # ---------------------------------------------------------------------------
 # Headless subprocess launches (Windows) -- keep the suite from flashing windows.
 #
