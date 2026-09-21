@@ -58,7 +58,7 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees __main__.py` lifecycle/install slice)
+### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees __main__.py` update/runtime-reconcile slice)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
 — re-run before starting a phase, this list moves; it already has once per
@@ -67,7 +67,7 @@ table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 18,939 | +17,939 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Fourth dedicated slice landed: the session/handoff/reap lifecycle now lives in `handoff_cli.py`, `reap_cli.py`, `reclaim_cli.py`, and `cleanup_gc_cli.py`, and the install/picker surface in `installation_cli.py` + `picker_profiles_cli.py`; the next obvious seam is now the update/reconcile payload-runtime flow, then the remaining launch/session-control core |
+| 17,175 | +16,175 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Fifth dedicated slice landed: the update/runtime-reconcile surface now lives in `update_cli.py` + `update_runtime.py`; the remaining highest-sensitivity seam is now the launch/session-control core (`copilot`, `resolve`, session hook/binding/recovery/lineage, `note-handoff`, `bind-nudge`), with worktree-operations routing as the next lower-risk fallback if that core still proves too entangled |
 | 9,267 | +8,267 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression); it drifted again while this slice was in flight, so the baseline was manually widened (9191 → 9267) to restore a green full-tree guard pending its own future split |
 | 9,169 | +8,169 | `libs/installation-context/installation_context.py` (+17 vendored copies) | Split the **canonical** copy only; `sync-installation-context.py` propagates to every vendored copy |
 | 6,873 | +5,873 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
@@ -90,14 +90,16 @@ table):
 
 **Suggested next pick (Phase 2, next slice):** continue the dedicated
 `plugins/agent-worktrees/src/agent_worktrees/__main__.py` campaign while the
-cohesive seams are fresh: the **update / reconcile / runtime-alignment flow**
-is now the cleanest remaining operator surface from this pass's priority list,
-followed by the remaining launch/session-control core (`copilot`, `resolve`,
-session hook / recovery registration, and the still-inline router glue). If
-that blast radius is too high for the moment, fall back to the clean-room fixtures
-(`tools/clean-room/scenarios/agent-index-installation-cells/scenario.py` /
-`.../progressive-context-disclosure-baseline/fixture.py`) or the still-large
-production module `plugins/agent-worktrees/src/agent_worktrees/pr_ops.py`.
+cohesive seams are fresh, but treat the remaining **launch/session-control
+core** as a risk-first design pass rather than a forced extraction:
+`copilot`, `resolve`, session hook/binding/recovery/lineage, and the
+`note-handoff` / `bind-nudge` path now dominate the remaining blob and are
+exactly the live session-binding surface the fleet runs through. If that seam
+still resists a clean pure move once traced carefully, pivot to the lower-risk
+worktree-operations block (`list` / `claims` / `follow-ups` / `create` /
+`run` / `sync`) or the still-large production module
+`plugins/agent-worktrees/src/agent_worktrees/pr_ops.py` instead of forcing the
+session core.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
 margin of their own ceiling (most likely to tip over next from unrelated
@@ -651,3 +653,66 @@ the Phase 0 runbook, picked up as capacity allows.
   stayed green with all six new modules below cap. This slice also needs the
   usual plugin version bump: `agent-worktrees` `1.5.5-dev206` and marketplace
   `metadata.version` `1.7.7-dev178`.
+
+### 2026-09-21 — Phase 2 continued: `agent-worktrees/__main__.py` update/runtime-reconcile slice
+- Took the next explicit priority named by the prior entry and kept the move
+  purely structural: extracted the **update / runtime-reconcile /
+  pre-launch-planning** surface out of
+  `plugins/agent-worktrees/src/agent_worktrees/__main__.py` while preserving
+  `__main__` as the composition root and monkeypatch surface. The split needed
+  one extra subdivision to stay honest to this effort's own guard: the
+  user-facing command surface and pre-launch/update planners now live in
+  `update_cli.py` (`update`, `pre-launch`, `reconcile-plugins`,
+  `uninstall-plugins`, plus their parser registration and compatibility
+  wrappers), while the payload/runtime inventory and reconcile helpers live in
+  `update_runtime.py` (`_registered_plugin_targets`,
+  `_update_registered_plugins`, `_reconcile_registered_runtimes`,
+  `_update_modules`, anchor self-heal/sync helpers, and payload/runtime
+  installer discovery). `build_parser()` now delegates those parser stubs to
+  `update_cli.py`, and `agent_worktrees.__main__` re-exports the moved helper
+  names, constants, and compatibility module attributes (`socket`, `svc`) back
+  onto the legacy surface so existing direct imports and monkeypatch seams keep
+  landing exactly where the test suite expects.
+- Net result: `plugins/agent-worktrees/src/agent_worktrees/__main__.py`
+  dropped from 18,939 lines at the start of this slice to **17,175**
+  (a 1,764-line reduction this pass; 29,173 → 17,175 across the five-slice
+  campaign so far). The new modules land at **898** lines
+  (`update_cli.py`) and **754** lines (`update_runtime.py`), both under the
+  1,000-line cap, and `python tools/check-module-size.py --refresh-baseline`
+  lowered `tools/module-size-baseline.json`'s grandfathered ceiling for
+  `__main__.py` to match the new post-slice size. The remaining
+  `__main__.py` backlog is now much sharper: the live launch/session-control
+  core (`copilot`, `resolve`, session register/deregister/lifecycle/binding/
+  recovery/lineage, `note-handoff`, `bind-nudge`) plus the worktree-operations
+  block and residual router/composition glue.
+- Validation stayed at the same stricter componentization bar. Ruff
+  (`--select F,E9`) passed on `__main__.py`, `update_cli.py`, and
+  `update_runtime.py`. The first full
+  `python tools/run-plugin-tests.py agent-worktrees` pass surfaced only
+  extraction-seam regressions introduced by the move itself: dropped
+  re-exports for `_resolve_repo_remote` / `_pr_flow_profile`, preserved
+  monkeypatch seams for `socket` / `svc`, the pre-launch planner still
+  consulting the old installed-plugin locator instead of the runtime
+  resolution helper the tests patch, and two payload-update edge cases around
+  retired-plugin purge context and update-vs-install error reporting. Fixed
+  each, then re-ran a broad targeted sweep over every touched area and its
+  preserved seams (**243 passed, 4805 deselected**). The final full plugin
+  run again reproduced only the same independently-confirmed pre-existing
+  `tests/test_doctor.py` failures (**551 passed, 10 failed, 1 skipped**) that
+  already existed on untouched `HEAD`, so the extraction itself is green apart
+  from that known unrelated suite issue. The other required guards also pass
+  after the slice: plain `python tools/check-module-size.py`,
+  `python tools/check-install-contract.py`, and
+  `python tools/check-version-consistency.py`.
+- Deliberately stopped short of the remaining launch/session-control core even
+  though it is now the top remaining seam. After tracing it, the risk call is
+  unchanged from the operator's warning: that surface still interleaves live
+  mux/session recovery, handoff lineage, status-updater re-seeding, session
+  projection/context emission, and explicit/implicit binding fallbacks in the
+  exact code path this fleet's sessions use to launch and bind themselves.
+  That is a valid next slice, but it wants a fresh-context pass with room to
+  stop if the shared mutable state still resists a clean pure move. This slice
+  therefore takes the clean update/runtime win and leaves the live session core
+  explicitly queued rather than forcing it. Version bump for this pass:
+  `agent-worktrees` `1.5.5-dev207` and marketplace `metadata.version`
+  `1.7.7-dev179`.
