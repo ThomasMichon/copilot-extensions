@@ -465,3 +465,21 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (19,))
             conn.commit()
             log.info("Schema migrated to version 19: live_sessions.venue")
+
+        if from_version < 20:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
+            if "background_recovery_enabled" not in cols:
+                conn.execute(
+                    "ALTER TABLE sessions ADD COLUMN "
+                    "background_recovery_enabled INTEGER NOT NULL DEFAULT 1"
+                )
+            conn.execute(
+                "UPDATE sessions SET background_recovery_enabled = "
+                "CASE WHEN status = 'stopped' THEN 0 ELSE 1 END"
+            )
+            conn.execute("UPDATE schema_version SET version=?", (20,))
+            conn.commit()
+            log.info(
+                "Schema migrated to version 20: sessions.background_recovery_enabled "
+                "(legacy stopped rows default dormant)"
+            )
