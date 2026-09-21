@@ -31,9 +31,10 @@ reading the table per-request: it retires an `active` that names a dead pid/port
 table that has **no `active` claim at all** -- the shape a clean shutdown
 (`clear_if_owner`) leaves behind when no successor ever publishes itself, which
 otherwise strands every consumer indefinitely. Both promotions require the
-candidate `previous` to have both a live listener *and* a live recorded pid,
-so an unrelated service that later reuses the same port is never
-mistaken for the real daemon.
+candidate `previous` to have both a live listener *and* a positive recorded
+pid confirmed alive, reducing (though not eliminating -- pid reuse races
+remain a residual, narrower risk) the chance an unrelated service that later
+reuses the same port gets mistaken for the real daemon.
 
 Key API: `Endpoint`, `read_active_endpoint`, `publish_active`,
 `clear_if_owner`, `reap_stale_active`, `routing_table_path`.

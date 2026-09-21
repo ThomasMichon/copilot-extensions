@@ -481,17 +481,24 @@ def _reap_stale_active_unlocked(
        coordinator.
 
     In both cases ``previous`` is promoted to ``active`` when it is itself
-    live -- confirmed by **both** a listener on its port **and** a live pid
-    (an unknown pid is treated as live, matching :func:`_pid_alive`'s
-    conservatism, so a promotion never regresses for a previous published
-    without one). This double-check matters: a listener alone could be a
-    different, later service that happens to reuse the same port after the
-    real previous daemon exited, which would otherwise get silently
-    advertised as the coordinator. Case 1 additionally clears the table
-    (readers fall back to the static config) when no live ``previous``
-    exists -- case 2 has nothing to clear beyond ``previous`` itself, so a
-    dead/absent ``previous`` there is simply left alone (no active claim
-    exists to retract).
+    live -- confirmed by **both** a listener on its port **and** a positive,
+    recorded pid confirmed alive (an absent/non-positive pid is *not* treated
+    as live for promotion purposes, even though :func:`_pid_alive` alone is
+    permissive about it -- that permissiveness is only correct for deciding
+    whether to *reap* an endpoint we already distrust, not for deciding
+    whether to *trust* one). This reduces, but does not eliminate, the risk
+    of misidentifying an unrelated service that later binds the same port:
+    a listener plus a live pid is still not a cryptographic identity check,
+    so a sufficiently adversarial pid-reuse race (an unrelated process
+    reusing the exact recorded pid *and* binding the exact recorded port
+    before this check runs) is not fully closed by this alone -- a stronger
+    signal (a process start-time comparison, or an authenticated handshake)
+    would be needed for that, and is a candidate follow-up rather than part
+    of this fix. Case 1 additionally clears the table (readers fall back to
+    the static config) when no live ``previous`` exists -- case 2 has
+    nothing to clear beyond ``previous`` itself, so a dead/absent
+    ``previous`` there is simply left alone (no active claim exists to
+    retract).
 
     A ``live-pid-but-no-listener`` active (a daemon mid-startup) is deliberately
     left alone, matching :func:`read_active_endpoint`'s conservatism: the pid is
