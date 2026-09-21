@@ -546,6 +546,20 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
             f"Could not resolve the owning project for: {args.worktree_id}"
         )
     record = tracking.load_record(yaml_path)
+    if record.worktree_id != yaml_path.stem:
+        # The YAML's own `worktree_id` field must match the file it was
+        # loaded from -- a tampered or concurrently-replaced record
+        # declaring a different identity would otherwise have this
+        # substitution silently launder it past `_worktree_status_compute`'s
+        # own mismatch guard: that check compares its `worktree_id`
+        # parameter against `record.worktree_id`, but this call site was
+        # about to pass `record.worktree_id` as both, making the check a
+        # tautology. Validate against the actual requested filename here,
+        # before any substitution happens.
+        return core._json_error(
+            f"tracked record at {yaml_path.name!r} declares a different "
+            f"identity {record.worktree_id!r} -- refusing to serve it"
+        )
     worktree_id = record.worktree_id
     force = bool(getattr(args, "force_refresh", False))
 
@@ -569,7 +583,7 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
         # Honor the resident-monitor opt-out (AGENT_WORKTREES_STATUS_
         # MONITOR=0), same as `_classify_records`'s own daemon fast path.
         ensure_monitor=core._ensure_status_monitor if core._status_monitor_enabled() else None,
-        key=f"{project}|{worktree_id}",
+        key=worktree_status_daemon.coalescing_key(project, worktree_id),
         payload=payload,
         fallback=_fallback,
     )

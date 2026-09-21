@@ -19,6 +19,20 @@ def _endpoint_dict(server) -> dict:
     return worktree_status_daemon.rendezvous_fields(server)
 
 
+def test_coalescing_key_is_injective_despite_a_pipe_in_either_component():
+    """Copilot review finding: a plain `f"{project}|{worktree_id}"` key is
+    not injective -- neither component rejects `|` (unlike `/`, `\\`, `..`,
+    NUL, which matter for the filesystem path each later builds), so
+    `("a", "b|c")` and `("a|b", "c")` would coalesce onto the identical key,
+    letting two different worktrees' concurrent requests join the same
+    in-flight computation and each receive the other's bundle."""
+    key1 = worktree_status_daemon.coalescing_key("a", "b|c")
+    key2 = worktree_status_daemon.coalescing_key("a|b", "c")
+    assert key1 != key2
+    # Same pair, same key -- still deterministic/idempotent.
+    assert worktree_status_daemon.coalescing_key("a", "b|c") == key1
+
+
 def test_rendezvous_fields_are_namespaced_and_parseable():
     server = worktree_status_daemon.start_server(lambda kind, payload: {"ok": True})
     server.start()
@@ -85,6 +99,39 @@ def test_status_via_daemon_uses_live_daemon_when_reachable():
             fallback=lambda: {"from": "fallback"},
         )
         assert result == {"worktree_id": "wt-a", "state": "CLEAN"}
+    finally:
+        server.close()
+
+
+def test_status_via_daemon_registers_and_releases_a_client_id():
+    """Copilot review finding: unlike `status_with_boot`, this no-boot
+    helper previously sent no `client_id`, so the server handler never
+    `touch()`ed a subscriber. During a cold/slow compute the cache has no
+    completed entry yet and `InProcessRuntime.has_active_demand()` sees no
+    live subscriber either, letting the monitor's empty-strike shutdown
+    close the runtime/cache while this request was still running."""
+    observed_counts = []
+
+    def _compute(kind, payload):
+        # The server subscribes the caller's client_id before dispatching
+        # to `compute` -- if this request never registers one, this count
+        # would already be back to 0 mid-handler.
+        observed_counts.append(server.subscriber_count())
+        return {"worktree_id": payload["worktree_id"], "state": "CLEAN"}
+
+    server = worktree_status_daemon.start_server(_compute)
+    server.start()
+    try:
+        lock_data = _endpoint_dict(server)
+        worktree_status_daemon.status_via_daemon(
+            lock_data,
+            key="proj|wt-a",
+            payload={"project": "proj", "worktree_id": "wt-a"},
+            fallback=lambda: {"from": "fallback"},
+        )
+        assert observed_counts == [1]
+        # Released afterward -- never left dangling.
+        assert server.subscriber_count() == 0
     finally:
         server.close()
 
