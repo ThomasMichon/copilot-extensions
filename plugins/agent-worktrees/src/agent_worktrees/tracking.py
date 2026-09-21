@@ -2347,7 +2347,7 @@ def load_record(path: Path) -> WorktreeRecord:
         owner_ref=(str(data["owner_ref"])
                    if data.get("owner_ref") else None),
         resources=resources_list,
-        bound_agent=(str(data["bound_agent"])
+        bound_agent=(str(data["bound_agent"]).strip() or None
                      if data.get("bound_agent") else None),
         follow_up=bool(data.get("follow_up", False)),
         follow_ups=follow_ups_list,
