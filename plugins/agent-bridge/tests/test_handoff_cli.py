@@ -487,7 +487,9 @@ class TestHandoffCheckSameCell:
         """A valid owner with no same-cell agent-worktrees peer is genuine
         absence -- reported the same as "no command found", never a reason
         to search ambient PATH for a foreign cell's binary (this command's
-        ``--execute`` mutates state)."""
+        ``--execute`` mutates state). The message names the scoped-cell
+        absence distinctly from an ambient-PATH miss so operators do not try
+        to repair PATH for a peer that is simply not installed in this cell."""
         (tmp_path / "marketplaces" / "test-cell" / "plugins" / "agent-worktrees").rmdir()
         monkeypatch.setattr(
             m.subprocess, "run", lambda *a, **k: pytest.fail("no launch should be attempted"),
@@ -497,7 +499,9 @@ class TestHandoffCheckSameCell:
             m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
 
         assert exc_info.value.code == 1
-        assert "agent-worktrees is not on PATH" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "not installed in this installation cell" in err
+        assert "not on PATH" not in err
 
     def test_invalid_owner_context_fails_closed_not_legacy_fallback(
         self, monkeypatch: pytest.MonkeyPatch, capsys,

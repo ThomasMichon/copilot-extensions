@@ -5520,7 +5520,17 @@ def _cmd_handoff_check(args: argparse.Namespace) -> None:
         print(f"[FAIL] {error}", file=sys.stderr)
         sys.exit(1)
     if not prefix:
-        print("[FAIL] agent-worktrees is not on PATH; cannot check handoffs.", file=sys.stderr)
+        if os.environ.get(_peer_launch.CONTEXT_ENV, ""):
+            print(
+                "[FAIL] agent-worktrees is not installed in this installation "
+                "cell; cannot check handoffs.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "[FAIL] agent-worktrees is not on PATH; cannot check handoffs.",
+                file=sys.stderr,
+            )
         sys.exit(1)
     argv = [*prefix, "handoffs-check", "--json"]
     argv += ["--worktree-id", args.worktree_id] if args.worktree_id else ["--all"]
