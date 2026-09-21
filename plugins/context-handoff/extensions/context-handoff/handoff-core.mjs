@@ -480,6 +480,25 @@ export async function attemptWorktreeSync(cwd) {
 export async function plainGitSync(cwd) {
   const env = sanitizedGitEnv();
   const timeout = 20000;
+  // `agent-worktrees`' own managed sync explicitly skips a detached
+  // worktree; this fallback must match that, not just mirror its conflict
+  // safety. `git rebase origin/<branch>` is valid while detached (it moves
+  // the detached HEAD, not any branch), which is not what a "sync onto the
+  // default branch" caller expects and could leave commits unreachable
+  // once HEAD moves again. `symbolic-ref -q` exits nonzero (throws here)
+  // exactly when HEAD is detached, with no output parsing needed.
+  try {
+    await execFileAsync(
+      "git", ["symbolic-ref", "-q", "HEAD"],
+      { cwd, encoding: "utf-8", timeout: 5000, env },
+    );
+  } catch {
+    return {
+      attempted: false,
+      synced: false,
+      reason: "worktree HEAD is detached; the plain-git sync fallback never rebases a detached checkout",
+    };
+  }
   let defaultBranch;
   try {
     // `origin/HEAD` is the standard local pointer to the remote's default

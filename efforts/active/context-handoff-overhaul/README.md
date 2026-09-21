@@ -1770,3 +1770,30 @@ findings, all fixed:
   `afterStore`/`beforeArmPickup`, a CLI exit-code assertion). `node --test`:
   142 tests, 140 pass (2 pre-existing skips), no regressions. All guards
   pass. No version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 14: plain-git fallback detached-HEAD guard
+
+Round 14 confirmed 4 of round 13's fixes resolved and surfaced 1 new HIGH
+finding:
+
+- **Plain-git fallback could rebase a detached worktree:**
+  `agent-worktrees`' own managed sync explicitly skips a detached worktree,
+  but `plainGitSync`'s `git rebase origin/<branch>` is itself perfectly
+  valid while HEAD is detached -- it just moves the detached HEAD, not any
+  branch, which is not what a "sync onto the default branch" caller
+  expects and can leave commits unreachable once HEAD moves again. Added a
+  `git symbolic-ref -q HEAD` guard (throws exactly when detached, no output
+  parsing needed) before the fetch/rebase, matching the managed path's own
+  precondition rather than just mirroring its conflict-safety contract.
+- Re-verified the review's other 8 "carried over" items against current
+  file/PR state -- all genuinely already resolved in earlier rounds (the
+  known re-flagging pattern for this repo's automated reviewer): the
+  shared `sync-worktree` entry point (round 11), the `handoffDedupKey`
+  content-hash fix (round 9), the README/instructions fallback mentions
+  (round 12), the aggregate guidance ordering (already correct since round
+  7), and the PR description's documentation-impact section and dev36
+  version reference (round 10's rewrite) -- no action needed.
+- 1 new test (detached-HEAD checkout: confirms `plainGitSync` skips with a
+  `"detached"` reason and HEAD is provably unchanged afterward). `node
+  --test`: 143 tests, 141 pass (2 pre-existing skips), no regressions. All
+  guards pass. No version bump needed (still `0.1.1-dev36`).

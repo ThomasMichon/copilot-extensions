@@ -1333,6 +1333,41 @@ test("plainGitSync actually syncs when a real origin remote is configured", asyn
   }
 });
 
+test("plainGitSync never rebases a detached HEAD checkout", async () => {
+  // Real regression this guards: agent-worktrees' own managed sync
+  // explicitly skips a detached worktree, but `git rebase origin/<branch>`
+  // is itself perfectly valid while detached -- it just moves the detached
+  // HEAD, not any branch, which is not what a "sync onto the default
+  // branch" caller expects and can leave commits unreachable once HEAD
+  // moves again. This fallback must match that skip, not just mirror the
+  // conflict-safety contract.
+  const origin = initGitRepo();
+  const clone = mkdtempSync(join(tmpdir(), "context-handoff-sync-clone-"));
+  try {
+    execFileSync("git", ["clone", "-q", origin, clone]);
+    const headBefore = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: clone, encoding: "utf-8",
+    }).trim();
+    execFileSync("git", ["checkout", "-q", "--detach", headBefore], { cwd: clone });
+    // Advance the "remote" so a real rebase, if attempted, would have
+    // something to move onto.
+    writeFileSync(join(origin, "file.txt"), "one\ntwo\n");
+    execFileSync("git", ["add", "."], { cwd: origin });
+    execFileSync("git", ["commit", "-q", "-m", "second"], { cwd: origin });
+    const result = await plainGitSync(clone);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /detached/);
+    assert.equal(
+      execFileSync("git", ["rev-parse", "HEAD"], { cwd: clone, encoding: "utf-8" }).trim(),
+      headBefore,
+    );
+  } finally {
+    rmSync(origin, { recursive: true, force: true });
+    rmSync(clone, { recursive: true, force: true });
+  }
+});
+
 test("plainGitSync fails honestly when no origin remote exists to determine a default branch from", async () => {
   const dir = initGitRepo();
   try {
