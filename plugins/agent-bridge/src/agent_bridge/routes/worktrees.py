@@ -848,6 +848,17 @@ def _apply_bound_charter(
         return target
     canonical = resolver.canonical_agent_name(entry.bound_agent)
     charter = resolver.agents.get(canonical) if canonical else None
+    if charter is not None and getattr(charter, "managed", False):
+        # Mirror AgentResolver._resolve_static's own managed guard: a
+        # managed=true entry is explicitly non-spawnable and must never be
+        # borrowed as a charter's launch shape, even though a worktree's
+        # bound_agent binding is independent of that resolve-time gate.
+        log.warning(
+            "worktree %s: bound_agent %r is managed (non-spawnable); "
+            "using the venue's default spawn profile",
+            worktree_id, entry.bound_agent,
+        )
+        charter = None
     if charter is None:
         log.warning(
             "worktree %s: bound_agent %r not found in the agent registry; "

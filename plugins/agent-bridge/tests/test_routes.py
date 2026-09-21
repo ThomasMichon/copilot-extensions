@@ -2826,6 +2826,7 @@ def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
         env={"BASE": "1"},
     )
     charter_config = MagicMock()
+    charter_config.managed = False
     charter_config.copilot_path = "/opt/special/copilot"
     charter_config.copilot_args = ["--agent", "board-sweep-worker"]
     charter_config.mcp_servers = [{"name": "gitea"}]
@@ -2872,6 +2873,29 @@ def test_apply_bound_charter_unresolvable_charter_degrades_to_venue_default() ->
     )
     resolver.agents = {}
     result = _apply_bound_charter(venue_target, resolver, stale, "wt2")
+    assert result is venue_target
+
+
+def test_apply_bound_charter_managed_charter_degrades_to_venue_default() -> None:
+    """A managed=true charter is explicitly non-spawnable (mirrors
+    AgentResolver._resolve_static's own guard) -- binding a worktree to one
+    must never smuggle its launch shape into a spawn anyway."""
+    from agent_bridge.routes.worktrees import _WorktreeEntry, _apply_bound_charter
+    from agent_bridge.transport import SpawnTarget
+
+    venue_target = SpawnTarget(type="local", cwd="/wt/path")
+    managed_charter = MagicMock()
+    managed_charter.managed = True
+    resolver = MagicMock()
+    resolver.canonical_agent_name.return_value = "intelligence-dampener-reviewer"
+    resolver.agents = {"intelligence-dampener-reviewer": managed_charter}
+    entry = _WorktreeEntry(
+        id="wt3", agent_name="lambda-core-wsl", machine="lambda-core",
+        path="/wt/path", branch="b", status="active",
+        bound_agent="intelligence-dampener-reviewer",
+    )
+
+    result = _apply_bound_charter(venue_target, resolver, entry, "wt3")
     assert result is venue_target
 
 
