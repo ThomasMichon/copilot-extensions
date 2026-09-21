@@ -38,7 +38,7 @@ dependencies = [
 agent-plugin-resolve = { path = "libs/plugin-resolve" }
 
 [project.scripts]
-worktree-manager = "worktree_manager.__main__:main"
+worktree-manager = "worktree_manager.__main__:console_entry"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
