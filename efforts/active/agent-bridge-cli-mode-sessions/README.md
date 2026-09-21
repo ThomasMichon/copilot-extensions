@@ -338,6 +338,40 @@ mechanism CLI mode binds through.
       the existing relay forward (reusing the same reverse-forward
       machinery, not inventing a second one) as part of venue-side CLI-mode
       launch prep.
+      **Grounded the exact mechanism to reuse (2026-09-20), not yet wired:**
+      the daemon's own live port is already resolvable via
+      `__main__.py`'s existing `_service_port()` (routing table > config >
+      default — the same resolver `agent-bridge`'s own CLI uses to find
+      itself). The forward-persistence machinery already exists too:
+      `reverse_forwards` (a plain list of `-R` spec strings, e.g.
+      `f"{port}:127.0.0.1:{port}"`) is threaded through
+      `CodeSpaceTransport`/`ContainerTransport` onto `ssh-manager`'s
+      `PersistentCarrier`/`ConnectionManager` -- the same standing,
+      multiplexed SSH connection that already keeps the credential-relay
+      forward alive independent of any one dispatch's lifetime. Adding the
+      daemon's own port to that same `reverse_forwards` list for a CLI-mode
+      launch (not for ordinary ACP dispatch, which never needs it) is
+      additive, reuses existing infrastructure end to end, and needs no new
+      persistence mechanism.
+- [ ] **The actual venue CLI-mode launch verb (`agent-codespaces`/
+      `agent-containers`), not yet started.** Concrete shape, following
+      Phase 3's local `_launch_cli_mode_session` pattern
+      (`plugins/agent-bridge/src/agent_bridge/__main__.py`): reserve the
+      worktree (unchanged), establish/reuse a persistent SSH connection to
+      the venue carrying **both** the credential-relay forward and the new
+      daemon-port forward above, run `agent-worktrees embody --worktree-id
+      <id> --json --verify-timeout N --ensure-mux [--driver] [--seed]`
+      **on the venue** (over that connection, not locally), then return once
+      `embody` reports the mux session exists -- mirroring the local verb's
+      contract exactly, just dispatched remotely. Preflight (already
+      documented, not yet enforced in code): `copilot` present, `tmux`
+      installable (`ensure_mux_available`, already built), `agent-worktrees`
+      **fully** installed (not just lean tools) so `embody`'s
+      `launch-command.sh`/hooks exist. Validate the way Phase 3 did: a real,
+      disposable clean-room venue (a CodeSpace or Docker container), a real
+      `copilot` process actually reachable end-to-end (register, list,
+      `send`, observe via `tmux capture-pane`/venue SSH, teardown) -- not
+      only unit tests with fakes.
 - [x] **New finding (2026-09-20): `live_sessions` needs a reattach-shaped
       field for remote CLI-mode sessions.** Today's schema (`machine`,
       `cwd`, `worktree_id`, `pid`, ...) has no venue identity or mux-session
@@ -433,6 +467,34 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-09-20 — Grounded the reverse-forward + launch-verb design; stopping short of building it this session
+
+Traced the exact mechanism the network-reachability finding needs, rather
+than leaving it as a to-do: the daemon's own live port is already resolvable
+via `__main__.py`'s existing `_service_port()` (routing table > config >
+default), and the forward-persistence machinery already exists --
+`reverse_forwards` is a plain list of `-R` spec strings threaded through
+`CodeSpaceTransport`/`ContainerTransport` onto `ssh-manager`'s
+`PersistentCarrier`, the same standing connection that already keeps the
+credential-relay forward alive independent of any one dispatch. Adding the
+daemon's port to that same list for a CLI-mode launch (never for ordinary
+ACP dispatch) needs no new persistence mechanism -- confirmed by reading
+`ssh-manager/carrier.py`/`manager.py` and the transport classes directly,
+not assumed.
+
+Deliberately stopping here rather than writing the actual venue launch verb
+(`agent-codespaces`/`agent-containers` cli-mode launch) in this same
+session: it's a real, separable deliverable -- SSH orchestration across two
+provider plugins, a preflight sequence, and (per this effort's own
+established bar, Phase 3's clean-room validation) a live test against a real
+disposable venue, not just unit tests with fakes. This session already ran
+two same-day self-corrections (the `host_index` misstep, the "no
+ContainerSpawner" claim) before landing four merged PRs (#2966 rebase,
+#3046, #3055, #3069); building the largest remaining piece under continued
+pressure risks a third correction instead of doing it right the first time
+with fresh context. Recorded the grounded design as the next checklist item
+so it can be executed directly rather than re-investigated.
 
 ### 2026-09-20 — Implemented `live_sessions.venue`: the reattach-descriptor half of the corrected Phase 4 plan
 
