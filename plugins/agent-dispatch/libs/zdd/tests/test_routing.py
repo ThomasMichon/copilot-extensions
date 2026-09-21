@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import threading
 from pathlib import Path
@@ -293,7 +294,7 @@ def test_reap_stale_active_promotes_live_previous_when_active_missing(
     try:
         table = {
             "previous": {
-                "bind": "127.0.0.1", "port": prev.port, "pid": 4242,
+                "bind": "127.0.0.1", "port": prev.port, "pid": os.getpid(),
                 "generation": 5,
             },
             "epoch": "x",
@@ -306,7 +307,40 @@ def test_reap_stale_active_promotes_live_previous_when_active_missing(
         assert result["reaped"] is False  # nothing dead was retired
         data = routing.read_table(cfg_dir)
         assert data["active"]["port"] == prev.port
-        assert data["active"]["pid"] == 4242
+        assert data["active"]["pid"] == os.getpid()
+    finally:
+        prev.close()
+
+
+def test_reap_stale_active_does_not_promote_when_previous_pid_confirmed_dead(
+    cfg_dir: Path,
+):
+    """A listener alone must not be trusted as "the previous daemon".
+
+    If the previous daemon actually exited and some unrelated service later
+    reuses its old port, a listener-only check would silently advertise that
+    unrelated service as the coordinator. A confirmed-dead recorded pid must
+    block promotion even though something is listening on the port.
+    """
+    prev = _Listener()
+    try:
+        table = {
+            "previous": {
+                "bind": "127.0.0.1", "port": prev.port, "pid": 999999,
+                "generation": 5,
+            },
+            "epoch": "x",
+        }
+        routing.routing_table_path(cfg_dir).write_text(json.dumps(table))
+
+        result = routing.reap_stale_active(
+            cfg_dir, service="agent-dispatch",
+            pid_alive=lambda _pid: False,
+        )
+
+        assert result["promoted_port"] is None
+        data = routing.read_table(cfg_dir)
+        assert "active" not in data
     finally:
         prev.close()
 

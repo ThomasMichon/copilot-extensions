@@ -24,8 +24,19 @@ long-lived process you must update, which re-introduces the very downtime it was
 meant to remove (and demands socket hand-off between proxy generations --
 hardest on Windows). A file has no process to update.
 
+A **watchdog counterpart**, `reap_stale_active`, complements the client-side
+self-heal above for a process that polls on its own schedule rather than only
+reading the table per-request: it retires an `active` that names a dead pid/port
+(promoting a live `previous`, or clearing the table), and separately heals a
+table that has **no `active` claim at all** -- the shape a clean shutdown
+(`clear_if_owner`) leaves behind when no successor ever publishes itself, which
+otherwise strands every consumer indefinitely. Both promotions require the
+candidate `previous` to have both a live listener *and* a live recorded pid,
+so an unrelated service that later reuses the same port is never
+mistaken for the real daemon.
+
 Key API: `Endpoint`, `read_active_endpoint`, `publish_active`,
-`clear_if_owner`, `routing_table_path`.
+`clear_if_owner`, `reap_stale_active`, `routing_table_path`.
 
 ### `zdd.cutover` -- the cutover orchestrator
 

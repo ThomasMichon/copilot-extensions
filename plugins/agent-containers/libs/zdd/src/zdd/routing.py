@@ -481,10 +481,17 @@ def _reap_stale_active_unlocked(
        coordinator.
 
     In both cases ``previous`` is promoted to ``active`` when it is itself
-    live; case 1 additionally clears the table (readers fall back to the
-    static config) when no live ``previous`` exists -- case 2 has nothing to
-    clear beyond ``previous`` itself, so a dead/absent ``previous`` there is
-    simply left alone (no active claim exists to retract).
+    live -- confirmed by **both** a listener on its port **and** a live pid
+    (an unknown pid is treated as live, matching :func:`_pid_alive`'s
+    conservatism, so a promotion never regresses for a previous published
+    without one). This double-check matters: a listener alone could be a
+    different, later service that happens to reuse the same port after the
+    real previous daemon exited, which would otherwise get silently
+    advertised as the coordinator. Case 1 additionally clears the table
+    (readers fall back to the static config) when no live ``previous``
+    exists -- case 2 has nothing to clear beyond ``previous`` itself, so a
+    dead/absent ``previous`` there is simply left alone (no active claim
+    exists to retract).
 
     A ``live-pid-but-no-listener`` active (a daemon mid-startup) is deliberately
     left alone, matching :func:`read_active_endpoint`'s conservatism: the pid is
@@ -512,7 +519,8 @@ def _reap_stale_active_unlocked(
             prev = (
                 Endpoint.from_dict(prev_raw) if isinstance(prev_raw, dict) else None
             )
-            if prev is not None and _listen(prev.client_host, prev.port):
+            if prev is not None and _listen(prev.client_host, prev.port) \
+                    and _alive(prev.pid):
                 _publish_active_unlocked(
                     config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
                     version=prev.version, demote_existing=False,
