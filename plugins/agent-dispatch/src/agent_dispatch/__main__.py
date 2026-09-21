@@ -816,14 +816,19 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     # seize the route, recreating the exact undrained-duplicate incident this
     # guard exists to prevent (review follow-up on
     # ThomasMichon/copilot-extensions#3066).
-    from .single_instance import SingleInstance
+    from .single_instance import SingleInstance, read_holder_pid
 
-    routing_lock = SingleInstance(routing_dir() / "serve-start.lock")
+    routing_lock_path = routing_dir() / "serve-start.lock"
+    routing_lock = SingleInstance(routing_lock_path)
     if not routing_lock.acquire():
+        holder_pid = read_holder_pid(routing_lock_path)
+        holder_note = f" (held by pid {holder_pid})" if holder_pid else ""
         print(
             "agent-dispatch: another process is concurrently starting or "
-            "cutting over a coordinator on this host; refusing to race it "
-            "for the active route. Retry once it finishes.",
+            f"cutting over a coordinator on this host{holder_note}; refusing "
+            "to race it for the active route. Retry once it finishes, or -- "
+            "if that process is genuinely wedged, not just slow -- terminate "
+            "it externally first.",
             file=sys.stderr,
         )
         return 2

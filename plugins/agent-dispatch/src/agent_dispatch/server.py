@@ -310,11 +310,20 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
         # lock through its own route transition), or it could publish over
         # that other transition and recreate the exact undrained duplicate
         # this whole guard exists to prevent.
-        start_lock = SingleInstance(routing_dir() / "serve-start.lock")
+        lock_path = routing_dir() / "serve-start.lock"
+        start_lock = SingleInstance(lock_path)
         if not start_lock.acquire():
+            from .single_instance import read_holder_pid
+
+            holder_pid = read_holder_pid(lock_path)
+            holder_note = f" (held by pid {holder_pid})" if holder_pid else ""
             raise CoordinatorAlreadyLiveError(
                 "another process is concurrently starting a coordinator on this "
-                "host; refusing to race it for the active route"
+                f"host{holder_note}; refusing to race it for the active route. "
+                "If that process is genuinely wedged (not just slow), it must "
+                "be terminated externally before a new start/deploy can "
+                "proceed -- this lock cannot recover a live-but-hung holder "
+                "itself."
             )
         if not force:
             try:
@@ -402,8 +411,21 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
 
             def _release_start_lock_when_ready() -> None:
                 while not _server_exited.is_set():
-                    if _self_health_responsive(self_url, timeout=0.5, token=cfg.token):
-                        break
+                    try:
+                        if _self_health_responsive(self_url, timeout=0.5, token=cfg.token):
+                            break
+                    except Exception:
+                        # _health_responsive() already narrows expected
+                        # connection-level failures to False; an unexpected
+                        # exception here must not kill this daemon thread --
+                        # server.run() would keep blocking with the lock
+                        # never released, failing every later serve/deploy
+                        # attempt (review follow-up on
+                        # ThomasMichon/copilot-extensions#3066).
+                        log.warning(
+                            "readiness probe raised unexpectedly; retrying",
+                            exc_info=True,
+                        )
                     time.sleep(0.05)
                 _lock.release()
 

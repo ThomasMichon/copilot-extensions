@@ -34,6 +34,18 @@ class SingleInstance:
         self.lock_path = Path(lock_path)
         self._fd: int | None = None
 
+    @property
+    def _owner_path(self) -> Path:
+        """An unlocked side-car recording the current holder's pid.
+
+        Windows' ``msvcrt.locking`` is *mandatory*, not merely advisory: it
+        blocks even a read of the locked byte range from another handle, so a
+        non-holder can't read the pid this class writes into ``lock_path``
+        itself while the lock is held. This side-car is a plain, never-locked
+        file another process can always read (see :func:`read_holder_pid`).
+        """
+        return self.lock_path.with_suffix(self.lock_path.suffix + ".owner")
+
     def acquire(self) -> bool:
         """Try to take the lock. Returns ``True`` if acquired, ``False`` if another
         live process already holds it. Idempotent for the holding instance."""
@@ -51,6 +63,10 @@ class SingleInstance:
             os.ftruncate(fd, 0)
             os.write(fd, str(os.getpid()).encode("ascii"))
             os.fsync(fd)
+        except OSError:
+            pass
+        try:
+            self._owner_path.write_text(str(os.getpid()), encoding="ascii")
         except OSError:
             pass
         return True
@@ -71,6 +87,10 @@ class SingleInstance:
             except OSError:
                 pass
             self._fd = None
+            try:
+                self._owner_path.unlink()
+            except OSError:
+                pass
 
     def __enter__(self) -> bool:
         return self.acquire()
@@ -91,6 +111,35 @@ def is_locked(lock_path: str | Path) -> bool:
         probe.release()
         return False
     return True
+
+
+def read_holder_pid(lock_path: str | Path) -> int | None:
+    """Best-effort: the pid the current lock holder recorded on ``acquire()``.
+
+    A genuinely stuck-but-alive lock holder (e.g. a coordinator wedged before
+    it ever answers ``/health``) cannot be recovered by this lock itself --
+    the OS only releases an advisory lock when its holding process actually
+    dies, so a live-but-hung holder legitimately keeps blocking every later
+    ``serve``/``deploy`` attempt (including ``--force``, which still must
+    acquire this same lock) until something terminates it. This does not
+    perform that termination -- it's out of scope for a lock primitive, and
+    the same class of problem this repo's watchdog/supervisor tooling already
+    handles externally -- but surfacing the recorded pid in a refusal message
+    gives an operator or that external tooling the concrete, actionable next
+    step instead of a dead end (review follow-up on
+    ThomasMichon/copilot-extensions#3066).
+
+    Reads the unlocked ``.owner`` side-car, not ``lock_path`` itself: Windows'
+    mandatory byte-range locking would otherwise block this read entirely
+    while another process holds the lock -- exactly the case this needs to
+    handle.
+    """
+    owner_path = Path(lock_path).with_suffix(Path(lock_path).suffix + ".owner")
+    try:
+        raw = owner_path.read_text(encoding="ascii").strip()
+        return int(raw) if raw else None
+    except (OSError, ValueError):
+        return None
 
 
 if os.name == "nt":  # pragma: no cover -- exercised on Windows only

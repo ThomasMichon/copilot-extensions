@@ -414,6 +414,87 @@ def test_serve_raises_when_start_lock_already_held(monkeypatch, tmp_path):
         holder.release()
 
 
+def test_serve_raises_when_start_lock_already_held_includes_holder_pid(
+    monkeypatch, tmp_path
+):
+    """The refusal message must surface the recorded holder pid -- a
+    genuinely wedged (not just slow) holder can only be recovered by
+    terminating it externally, and an operator or watchdog needs the pid to
+    act on that (review follow-up on ThomasMichon/copilot-extensions#3066)."""
+    import os as os_mod
+
+    import pytest
+
+    from agent_dispatch.single_instance import SingleInstance
+
+    run = tmp_path / "run"
+    routing = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing))
+    monkeypatch.setattr(server, "has_live_local_coordinator", lambda **_: False)
+    routing.mkdir(parents=True, exist_ok=True)
+    holder = SingleInstance(routing / "serve-start.lock")
+    assert holder.acquire()
+    try:
+        cfg = Config(host="127.0.0.1", port=0, db_path=str(tmp_path / "tasks.db"))
+        with pytest.raises(server.CoordinatorAlreadyLiveError) as exc_info:
+            server.serve(cfg)
+        assert str(os_mod.getpid()) in str(exc_info.value)
+    finally:
+        holder.release()
+
+
+def test_serve_readiness_poller_survives_unexpected_probe_exception(
+    monkeypatch, tmp_path
+):
+    """An unexpected exception from the readiness probe (``_health_responsive``
+    normally narrows expected failures to ``False``, but this guards the
+    unexpected case too) must not kill the poller thread -- otherwise
+    ``server.run()`` keeps blocking while the lock is never released, failing
+    every later serve/deploy attempt (review follow-up on
+    ThomasMichon/copilot-extensions#3066)."""
+    import threading as _threading
+
+    from agent_dispatch.single_instance import SingleInstance
+
+    run = tmp_path / "run"
+    routing = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing))
+    monkeypatch.setattr(server, "has_live_local_coordinator", lambda **_: False)
+
+    # Keep server.run() "running" (as uvicorn would while actually serving)
+    # until the test lets it finish, so _server_exited doesn't short-circuit
+    # the poller after just one exception.
+    release_run = _threading.Event()
+
+    def _fake_run(self, sockets=None):
+        release_run.wait(timeout=5.0)
+
+    monkeypatch.setattr(uvicorn.Server, "run", _fake_run)
+
+    calls: list[int] = []
+
+    def _flaky_health_responsive(url, *, timeout=None, token=None):
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("unexpected probe failure")
+        release_run.set()
+        return True
+
+    monkeypatch.setattr(
+        "agent_dispatch.config._health_responsive", _flaky_health_responsive
+    )
+
+    cfg = Config(host="127.0.0.1", port=0, db_path=str(tmp_path / "tasks.db"))
+    server.serve(cfg)  # must not raise, and must not hang
+
+    assert len(calls) >= 3
+    probe = SingleInstance(routing / "serve-start.lock")
+    assert probe.acquire(), "lock must be released once the probe recovers"
+    probe.release()
+
+
 def test_serve_force_bypasses_live_coordinator_guard(monkeypatch, tmp_path):
     run = tmp_path / "run"
     # Isolate routing_dir()/install_dir() too -- force=True skips the guard
