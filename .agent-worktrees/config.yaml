@@ -68,8 +68,16 @@ pr:
   provider: github
   auto_open: true
   # Hidden source markers carry raw machine/worktree/session identifiers.
-  # This public repo must never publish them; closed-circuit repos may opt in.
-  source_attribution: false
+  # This public repo must never publish the raw marker (source_attribution:
+  # true); closed-circuit repos may opt into that. This repo relies on the
+  # implicit "codename" default (codename-attribution-by-default) --
+  # source_attribution is deliberately OMITTED, not set explicitly to
+  # "codename": an explicit codename value sets
+  # source_attribution_configured=True, which (per the round-22 publish-time
+  # gate) would authorize ANY codename_source to publish, including an
+  # unknown/legacy one this repo has never manually verified. Omitting the
+  # key keeps every WorktreeRecord's own persisted codename_source
+  # authoritative and fail-closed, exactly as before this key was removed.
   strategy: detach
   # PR-flow legibility matrix (surfaced as reminders by the pr-* verbs) -->
   # classifies this repo as `pr-self-merge`.

@@ -864,7 +864,7 @@ these decisions directly and assumes this design is understood.
   the marketplace entry, and the catalog `metadata.version`).
 
 ### Phase 3 — Repo config rollout
-- [ ] **This repo (`copilot-extensions`): REMOVE the explicit
+- [x] **This repo (`copilot-extensions`): REMOVE the explicit
   `source_attribution: false` key entirely from `.agent-worktrees/config.yaml`
   — this is the chosen migration, not "remove or flip to codename" (round-26
   finding: the two are NOT policy-equivalent under this plan's gates).**
@@ -884,7 +884,7 @@ these decisions directly and assumes this design is understood.
   the codename mode this repo now relies on via the implicit default, and
   why removal (not explicit `codename`) is this repo's own migration
   choice.
-- [ ] Any other repo relying on the codename feature: re-evaluate its
+- [x] Any other repo relying on the codename feature: re-evaluate its
   `source_attribution` setting against the new default (a currently-absent
   key silently changes behavior; an explicit `false` becomes a genuine,
   stronger opt-out statement rather than "restating the old default" --
@@ -1439,3 +1439,29 @@ corrected this repo's own contributor/reviewer policy text
 distinguish the public-safe `codename` default from the still-flagged
 raw `true` mode, without asserting Phase 3's not-yet-landed config
 change.
+
+### 2026-09-21 — PR #3061 (Phase 2) merged after 3 review rounds; Phase 3 implemented
+
+PR #3061 (Phase 2) went through 3 review rounds. Round 1 caught a
+genuinely missed surface: the marketplace catalog's own top-level
+`metadata.version` (distinct from agent-worktrees's per-plugin version
+entry) required its own bump per this repo's versioning table, plus a
+wording nit (the custom-wordlist allocation gate only applies to a
+PR-active repo). A concurrent merge (#3062) also collided on the exact
+same `dev191` version string mid-cycle, caught by CI's `check-version-bump`
+job -- rebased and bumped past it (`dev192`), matching CONTRIBUTING.md's
+documented single-writer versioning note. Round 2 caught one real
+stale-docstring contradiction (`build_codename_marker` still said "no
+automated cross-machine lookup yet" after the module docstring, edited by
+this same PR, described the SSH scan). Round 3's only remaining item was
+a PR-description version-delta text mismatch (fixed via a description
+edit, no code change) -- merged clean.
+
+Phase 3 (repo config rollout) was then implemented directly in this
+worktree (reused, not re-created, per the sync-forward convention):
+removed the explicit `source_attribution: false` key from this repo's
+own `.agent-worktrees/config.yaml`, letting it resolve through the
+implicit `"codename"` default, and updated the adjacent comment to
+explain both the raw-marker risk and why removal (not an explicit
+`codename` key) is this repo's own migration choice -- confirmed via
+`attribution-audit` (no new finding) and the full test suite.
