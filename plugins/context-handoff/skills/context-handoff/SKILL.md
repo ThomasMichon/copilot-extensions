@@ -118,7 +118,8 @@ more work left to do:
    open active effort exists, otherwise the full standalone shape.
 3. **Call `save_handoff_prompt`.** This safely stores the baton and returns the
    short handoff seed.
-4. **Call `trigger_handoff` immediately.**
+4. **Sync the worktree** -- see "Sync before triggering" below.
+5. **Call `trigger_handoff` immediately.**
 
 Do **not** ask the user for confirmation first on this path. Running low on
 context while work remains is sufficient justification by itself.
@@ -133,10 +134,44 @@ listing a set of follow-up ideas or questions:
 3. **Call `save_handoff_prompt`.**
 4. **Replace the usual follow-up list** with one short, low-friction offer to
    continue via handoff.
-5. **Call `trigger_handoff` only after the user says yes.**
+5. **Sync the worktree** -- see "Sync before triggering" below.
+6. **Call `trigger_handoff` only after the user says yes.**
 
 Only this turn-end follow-up path is skippable via **autopilot** or prior
 explicit pre-authorization.
+
+## Sync before triggering: give the successor the latest code
+
+The successor inherits the **same on-disk worktree** the predecessor is
+sitting in -- not a fresh checkout. If that worktree's branch is behind the
+repo's default branch, the successor starts on stale plugin code and stale
+instructions, including any bugs already fixed upstream since this session
+began (a live example: a plugin-load reliability fix that shipped mid-session
+would only reach the successor if the worktree's tip actually contains it).
+A predecessor that hands off without syncing silently hands the same bug to
+its own successor.
+
+Before calling `trigger_handoff` (the final step of either flow above), when
+the worktree is a git checkout with a remote default branch:
+
+1. Commit any uncommitted local changes first (worktree-local WIP commits are
+   normal and expected here -- this is not "finish the work," just "don't
+   leave it uncommitted going into a rebase").
+2. Sync onto the latest default branch -- prefer `agent-worktrees git sync`
+   (fetch + rebase, conflict-safe: aborts and leaves the branch unchanged on
+   a real conflict) when that tool is available; otherwise `git fetch` +
+   `git rebase origin/<default-branch>` directly.
+3. If the sync hits a real conflict, do **not** block the handoff on
+   resolving it there -- note the conflict and the branch's un-synced state
+   plainly in the handoff brief instead, so the successor knows to resolve it
+   as its first action rather than silently inheriting stale code without
+   realizing it.
+
+This is a lightweight, mechanical step, not a reason to delay a
+context-pressure-driven handoff that needs to trigger immediately -- skip
+straight to noting the un-synced state in the brief if there is any doubt
+about whether it is safe to rebase right now (e.g. genuinely conflicting
+in-flight work you cannot lose).
 
 ## Efforts + handoffs
 
