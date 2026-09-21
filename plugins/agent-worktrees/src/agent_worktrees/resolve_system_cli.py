@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from . import git_ops, tracking
+from . import git_ops, sessions, tracking
 from . import config as cfg
 from .picker import ItemKind, MenuItem, pick
 
@@ -22,6 +22,14 @@ def _apply_tracking_override(*args, **kwargs):
 
 def _build_active_paths(*args, **kwargs):
     return _core()._build_active_paths(*args, **kwargs)
+
+
+def _age_str(*args, **kwargs):
+    return _core()._age_str(*args, **kwargs)
+
+
+def _normalize_path(*args, **kwargs):
+    return _core()._normalize_path(*args, **kwargs)
 
 
 def _run_machine_menu(*args, **kwargs):
@@ -226,43 +234,48 @@ def _system_update(config: cfg.Config) -> int | None:
         return None
 
     while True:
-        items: list[MenuItem] = [
+        update_items: list[MenuItem] = [
             MenuItem(
-                label=f"⬆ Update all eligible ({len(eligible)})",
-                subtitle="Fast-forward every clean, behind worktree",
+                label=f"⬆ Update all ({len(eligible)} eligible)",
                 kind=ItemKind.ACTION,
                 value="all",
             ),
             MenuItem(label="", kind=ItemKind.SEPARATOR),
         ]
+        index_map: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo]] = []
         for record, info in eligible:
-            behind = info.behind or 0
-            plural = "s" if behind != 1 else ""
-            items.append(
+            short_id = record.worktree_id[-4:] if len(record.worktree_id) > 4 else record.worktree_id
+            update_items.append(
                 MenuItem(
-                    label=f"🌳 {record.worktree_id[-4:]}  ({behind} commit{plural} behind)",
-                    subtitle=record.worktree_path,
+                    label=f"⬜ …{short_id}  ↓{info.behind}",
+                    subtitle=_age_str(record.started_at) + " old",
                     kind=ItemKind.NORMAL,
-                    value=record.worktree_id,
+                    value=len(index_map),
                 )
             )
-        items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
-        items.append(MenuItem(label="↩ Back", kind=ItemKind.ACTION, value="back"))
+            index_map.append((record, info))
+        update_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
+        update_items.append(MenuItem(label="↩ Back", kind=ItemKind.ACTION, value="back"))
 
         result = pick(
-            items,
-            title="⬆ Update stale worktrees",
+            update_items,
+            title=f"⬆ {config.repo_name.replace('-', ' ').title()} -- Update Worktrees",
             subtitle="Use ↑↓, Enter select, Esc back",
             default=0,
         )
         if result.selected < 0:
             return None
-        choice = items[result.selected].value
+        choice = update_items[result.selected].value
         if choice == "back":
             return None
 
-        targets = eligible if choice == "all" else [pair for pair in eligible if pair[0].worktree_id == choice]
+        if choice == "all":
+            targets = list(eligible)
+        else:
+            targets = [index_map[choice]]  # type: ignore[index]
+
         updated = 0
+        skipped = 0
         for record, _info in targets:
             ff = git_ops.fast_forward_worktree(
                 record.worktree_path,
@@ -272,27 +285,88 @@ def _system_update(config: cfg.Config) -> int | None:
             )
             if ff.updated:
                 updated += 1
+            else:
+                skipped += 1
 
-        if choice == "all":
-            _system_pause(f"Updated {updated} worktree(s).")
-        else:
-            _system_pause("Updated." if updated else "Already current.")
-        return None
+        done_paths = {record.worktree_path for record, _ in targets}
+        eligible = [
+            (record, info) for record, info in eligible if record.worktree_path not in done_paths
+        ]
+
+        msg = f"Fast-forwarded {updated} worktree{'s' if updated != 1 else ''}"
+        if skipped:
+            msg += f", skipped {skipped}"
+        if not eligible:
+            _system_pause(msg + ". All up to date.")
+            return None
+        _system_pause(msg + ".")
 
 
 def _system_status(config: cfg.Config) -> int | None:
-    """Simple picker-owned status snapshot."""
+    """Compact status view for the system menu."""
     repo = config.default_repo
     tracking_path = cfg.tracking_dir()
     records = tracking.list_records(tracking_path)
-    live = [
-        record
-        for record in records
-        if record.worktree_path and Path(record.worktree_path).exists()
-    ]
-    _system_pause(
-        f"{config.repo_name}: {len(live)} on-disk worktree(s), "
-        f"{len(records)} tracked total, default branch {repo.default_branch}."
+
+    if not records:
+        _system_pause("No tracked worktrees.")
+        return None
+
+    session_ctx = sessions.scan_sessions_fast(records)
+    active_paths = _build_active_paths(records, session_ctx)
+
+    status_items: list[MenuItem] = []
+    state_icons = {
+        "active": "🟢",
+        "unused": "⬜",
+        "completed": "✅",
+        "wip": "🌳",
+        "dirty": "🔴",
+        "gone": "💀",
+        "orphan": "❓",
+    }
+
+    for record in records:
+        info = git_ops.classify_worktree(
+            record.worktree_path,
+            record.branch,
+            fetch=True,
+            remote=repo.remote,
+            default_branch=repo.default_branch,
+            active_paths=active_paths,
+        )
+        info = _apply_tracking_override(record, info)
+        short_id = record.worktree_id[-4:]
+        icon = state_icons.get(info.state.value, "·")
+        age = _age_str(record.started_at)
+        state_str = info.state.value
+
+        label = f"{icon} …{short_id}  {state_str:<10} {age}"
+        norm = _normalize_path(record.worktree_path)
+        title = record.title if (record.title and record.title != "null") else None
+        if not title and norm in session_ctx.latest_summary:
+            title = session_ctx.latest_summary[norm]
+        if not title and info.title:
+            title = info.title
+        subtitle = " ".join(title.split()) if title else None
+
+        status_items.append(
+            MenuItem(
+                label=label,
+                subtitle=subtitle,
+                kind=ItemKind.DIMMED,
+                value=None,
+            )
+        )
+
+    status_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
+    status_items.append(MenuItem(label="↩ Back", kind=ItemKind.ACTION, value="back"))
+
+    pick(
+        status_items,
+        title=f"📊 {config.repo_name.replace('-', ' ').title()} -- Status",
+        subtitle="Esc or Enter to return",
+        default=len(status_items) - 1,
     )
     return None
 
@@ -331,7 +405,7 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
 
         items: list[MenuItem] = []
         for record in records:
-            live = record.worktree_path and record.worktree_path in active_paths
+            live = _normalize_path(record.worktree_path) in active_paths
             gone = not (record.worktree_path and Path(record.worktree_path).exists())
             owner = record.owner or "?"
             if live:
@@ -343,7 +417,7 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
             items.append(
                 MenuItem(
                     label=f"🛠 {owner} · {record.worktree_id}",
-                    subtitle=f"{tag} · {record.worktree_path}",
+                    subtitle=f"{tag} · {_age_str(record.started_at)} · {record.worktree_path}",
                     kind=ItemKind.DIMMED if live else ItemKind.NORMAL,
                     value=record.worktree_id,
                 )
@@ -366,7 +440,7 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
         selected = next((record for record in records if record.worktree_id == choice), None)
         if selected is None:
             continue
-        live = selected.worktree_path and selected.worktree_path in active_paths
+        live = _normalize_path(selected.worktree_path) in active_paths
         warn = (
             "  ⚠ has a LIVE session -- removing may disrupt a running daemon" if live else ""
         )

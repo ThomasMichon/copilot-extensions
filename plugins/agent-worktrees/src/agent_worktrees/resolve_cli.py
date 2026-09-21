@@ -423,7 +423,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def _resolve_json_mode(state: ResolveCommandState) -> int:
-    config = state.load_config()
+    try:
+        config = state.load_config()
+    except Exception as exc:
+        return _json_error(str(exc))
     try:
         _validate_profile_assignment_config(config)
     except profile_assignment.ProfileAssignmentError as exc:
@@ -505,7 +508,11 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     assert state.worktree_id is not None
     worktree_id = _resolve_worktree_id(state.worktree_id)
     if _relocate_active_project_for_worktree(worktree_id):
-        config = state.load_config()
+        state.config = None
+        try:
+            config = state.load_config()
+        except Exception as exc:
+            return _json_error(str(exc))
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return _json_error(f"Worktree not found: {worktree_id}")
