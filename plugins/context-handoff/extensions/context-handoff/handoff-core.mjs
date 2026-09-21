@@ -535,13 +535,10 @@ async function acquireLock(lockPath) {
     // decision above already accounted for that case on its own terms.
     if (observedContent !== null && claimedContent !== observedContent) {
       // Claimed something OTHER than the stale lock this decision was
-      // based on -- restore it (linkSync: no-clobber, same technique
-      // releaseLock uses) rather than destroying whatever is actually
-      // there now, then report contention.
-      try {
-        linkSync(graveyardPath, lockPath);
-      } catch { /* destination already re-occupied by yet another actor */ }
-      try { unlinkSync(graveyardPath); } catch { /* already gone */ }
+      // based on -- restore it (see restoreClaimedLock's own doc comment)
+      // rather than destroying whatever is actually there now, then
+      // report contention.
+      restoreClaimedLock(graveyardPath, lockPath);
       throw error;
     }
     try { unlinkSync(graveyardPath); } catch { /* best-effort cleanup */ }
@@ -606,6 +603,41 @@ async function withWorktreeSyncLock(cwd, fn) {
 // itself, so this invocation reaching its own release after being displaced
 // should no longer happen in normal operation. It remains as defense in
 // depth for the corrupt-lock fallback path.
+// Restores a claimed (renamed-away) lock's content back to its original
+// path via a no-clobber `linkSync` (never `renameSync`, which silently
+// overwrites an existing destination on POSIX and could clobber a fresh
+// lock a THIRD actor created at `lockPath` in the interim). Shared by
+// `acquireLock`'s reclaim-verification and `releaseLock`'s foreign-content
+// restore, which both hit this exact situation. Returns true if the
+// restore succeeded, false otherwise -- the caller decides in EITHER case
+// whether it is safe to remove `claimedPath` (only when the restore
+// succeeded, or the failure was the expected "already re-occupied" EEXIST
+// case; any OTHER `linkSync` failure -- permissions, an unsupported
+// filesystem, I/O -- must fail closed and preserve `claimedPath`, since it
+// is the only remaining copy of that content).
+function restoreClaimedLock(claimedPath, lockPath) {
+  try {
+    linkSync(claimedPath, lockPath);
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      // Expected/benign: someone else already re-acquired that path since
+      // the claim -- the claimed copy is now a redundant duplicate, safe
+      // to drop by the caller.
+      try { unlinkSync(claimedPath); } catch { /* already gone */ }
+    }
+    // Any OTHER failure: do NOT delete claimedPath here -- it is the only
+    // remaining copy of that content, and unlinking it regardless (the
+    // prior behavior) left `lockPath` empty with no recoverable trace,
+    // letting a third actor acquire while the original holder was still
+    // active. Fail closed by leaving the orphaned copy in place instead.
+    return false;
+  }
+  // linkSync succeeded: lockPath now has a second name for the SAME
+  // content via the hard link -- safe to drop the claimedPath name.
+  try { unlinkSync(claimedPath); } catch { /* already gone */ }
+  return true;
+}
+
 function releaseLock(lockPath, token) {
   const claimedPath = `${lockPath}.release-${process.pid}-${Date.now()}`;
   try {
@@ -630,36 +662,9 @@ function releaseLock(lockPath, token) {
   }
   // Claimed content that is NOT this invocation's own token -- this
   // invocation ran long enough that another one reclaimed the path as
-  // stale and is (or was) actively using it. Restore it via `linkSync`
-  // (NOT `renameSync`): rename silently overwrites an existing destination
-  // on POSIX, which would clobber a fresh lock a THIRD invocation created
-  // at `lockPath` in the interim since our claim -- exactly the
-  // un-serialized-concurrency outcome this whole lock exists to prevent.
-  // `linkSync` fails with EEXIST if the destination already exists, so it
-  // only ever restores into a genuinely empty slot.
-  try {
-    linkSync(claimedPath, lockPath);
-  } catch (error) {
-    if (error?.code === "EEXIST") {
-      // Expected/benign: someone else already re-acquired that path since
-      // our claim -- our copy is now a redundant duplicate, safe to drop.
-      try { unlinkSync(claimedPath); } catch { /* already gone */ }
-      return;
-    }
-    // An UNEXPECTED failure (permissions, an unsupported filesystem,
-    // transient I/O) -- NOT the expected "already occupied" case. Do NOT
-    // delete claimedPath here: this is the only remaining copy of the
-    // still-active replacement holder's lock content, and unlinking it
-    // regardless (the prior behavior) left `lockPath` empty with no
-    // recoverable trace, letting a third sync acquire while the original
-    // holder was still active. Fail closed by leaving the orphaned copy in
-    // place instead -- inspectable/recoverable, and does not itself enable
-    // any further concurrent acquisition.
-    return;
-  }
-  // linkSync succeeded: lockPath now has a second name for the SAME
-  // content via the hard link: safe to drop the claimedPath name.
-  try { unlinkSync(claimedPath); } catch { /* already gone */ }
+  // stale and is (or was) actively using it. Restore it (see
+  // restoreClaimedLock's own doc comment for why linkSync, not renameSync).
+  restoreClaimedLock(claimedPath, lockPath);
 }
 
 // Async-only twin of resolveRuntimePython's `resolve()` step, for a caller
