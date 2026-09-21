@@ -804,45 +804,18 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         except Exception:
             return False
 
-    recovery = breadcrumb.recover_stale_cutover(
-        routing_dir(), make_client, health_check=liveness_check
-    )
-    # #5195: recover_stale_cutover only heals the stranded *old* survivor. The
-    # matching backstop for a passive spawn_passive stood up that never got
-    # promoted (the orchestrator died before/without ever flipping to it) is
-    # reap_abandoned_passive -- but it must see the breadcrumb from BEFORE
-    # recover_stale_cutover rewrote it to a terminal state, so read it first.
-    _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(routing_dir())
-    passive_reap = _reap_abandoned_passive(_pre_recovery_breadcrumb)
-    if getattr(args, "recover", False):
-        recovery["passive_reap"] = passive_reap
-        _emit(recovery)
-        return 0
-    if recovery.get("recovered"):
-        print(f"[>] Recovered a prior aborted cutover: {recovery.get('reason')}", file=sys.stderr)
-    if passive_reap.get("reaped"):
-        print(
-            f"[>] Reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})",
-            file=sys.stderr,
-        )
-
-    orch = CutoverOrchestrator(
-        routing_dir(),
-        bind=cfg.host,
-        version=__import__("agent_dispatch").__version__,
-        spawn_passive=spawn_passive,
-        health_check=health_check,
-        make_client=make_client,
-        pick_free_port=pick_free_port,
-    )
     # Share the same routing-transition lock `serve()`'s non-passive guard
-    # uses (keyed by routing_dir(), the actual raced-over resource): without
-    # it, a cold-start `deploy`/`_cutover` and a direct non-passive `serve()`
-    # can each observe no live coordinator, then one publishes right after
-    # the other's flip -- and since cutover captured the prior `old` endpoint
-    # before spawning, it won't drain a direct `serve()` that raced in after,
-    # recreating the exact undrained-duplicate incident this guard exists to
-    # prevent (review follow-up on ThomasMichon/copilot-extensions#3066).
+    # uses (keyed by routing_dir(), the actual raced-over resource), held
+    # across the *entire* cutover lifecycle -- recovery/reap preamble through
+    # `orch.run()` -- not just the orchestrator call. `recover_stale_cutover`
+    # and `_reap_abandoned_passive` mutate breadcrumb/daemon state and treat
+    # any non-terminal breadcrumb as stale, so without the lock a second
+    # `deploy` could undrain or reap an in-progress cutover while the first
+    # orchestrator is still running; a direct non-passive `serve()` racing in
+    # anywhere in this window could equally observe no live coordinator and
+    # seize the route, recreating the exact undrained-duplicate incident this
+    # guard exists to prevent (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
     from .single_instance import SingleInstance
 
     routing_lock = SingleInstance(routing_dir() / "serve-start.lock")
@@ -855,6 +828,37 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         )
         return 2
     try:
+        recovery = breadcrumb.recover_stale_cutover(
+            routing_dir(), make_client, health_check=liveness_check
+        )
+        # #5195: recover_stale_cutover only heals the stranded *old* survivor. The
+        # matching backstop for a passive spawn_passive stood up that never got
+        # promoted (the orchestrator died before/without ever flipping to it) is
+        # reap_abandoned_passive -- but it must see the breadcrumb from BEFORE
+        # recover_stale_cutover rewrote it to a terminal state, so read it first.
+        _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(routing_dir())
+        passive_reap = _reap_abandoned_passive(_pre_recovery_breadcrumb)
+        if getattr(args, "recover", False):
+            recovery["passive_reap"] = passive_reap
+            _emit(recovery)
+            return 0
+        if recovery.get("recovered"):
+            print(f"[>] Recovered a prior aborted cutover: {recovery.get('reason')}", file=sys.stderr)
+        if passive_reap.get("reaped"):
+            print(
+                f"[>] Reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})",
+                file=sys.stderr,
+            )
+
+        orch = CutoverOrchestrator(
+            routing_dir(),
+            bind=cfg.host,
+            version=__import__("agent_dispatch").__version__,
+            spawn_passive=spawn_passive,
+            health_check=health_check,
+            make_client=make_client,
+            pick_free_port=pick_free_port,
+        )
         result = orch.run(
             health_timeout=args.health_timeout,
             drain_timeout=args.drain_timeout,

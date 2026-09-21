@@ -111,6 +111,66 @@ def test_cutover_serializes_against_concurrent_route_lock(tmp_path, monkeypatch)
     probe.release()
 
 
+def test_cutover_holds_lock_across_recovery_preamble(tmp_path, monkeypatch):
+    """The lock must cover ``recover_stale_cutover``/``_reap_abandoned_passive``
+    too, not just ``orch.run()`` -- those mutate breadcrumb/daemon state and
+    treat any non-terminal breadcrumb as stale, so a second `deploy` could
+    otherwise undrain or reap an in-progress cutover while the first
+    orchestrator is still running (review follow-up on
+    ThomasMichon/copilot-extensions#3066)."""
+    import zdd.breadcrumb as zdd_breadcrumb
+    import zdd.cutover as zdd_cutover
+
+    from agent_dispatch import __main__ as main_mod
+    from agent_dispatch.single_instance import SingleInstance
+
+    routing = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing))
+    monkeypatch.setattr("agent_dispatch.config.client_token", lambda: None)
+
+    seen: dict = {}
+
+    def _fake_recover(*_a, **_k):
+        contender = SingleInstance(routing / "serve-start.lock")
+        seen["acquired_during_recover"] = contender.acquire()
+        if seen["acquired_during_recover"]:
+            contender.release()
+        return {"recovered": False}
+
+    monkeypatch.setattr(zdd_breadcrumb, "recover_stale_cutover", _fake_recover)
+    monkeypatch.setattr(zdd_breadcrumb, "read_breadcrumb", lambda *a, **k: None)
+    monkeypatch.setattr(main_mod, "_reap_abandoned_passive", lambda *_a, **_k: {"reaped": False})
+    monkeypatch.setattr(main_mod, "_reap_superseded_coordinators", lambda *_a, **_k: None)
+
+    class _FakeResult:
+        ok = True
+        new_port = 1234
+        error = None
+        rolled_back = False
+        steps: list = []
+
+        def to_dict(self):
+            return {"ok": True}
+
+    class _FakeOrchestrator:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def run(self, **_kwargs):
+            return _FakeResult()
+
+    monkeypatch.setattr(zdd_cutover, "CutoverOrchestrator", _FakeOrchestrator)
+
+    parser = main_mod.build_parser()
+    ns = parser.parse_args(["deploy", "--json"])
+    exit_code = main_mod._cmd_cutover(ns)
+
+    assert exit_code == 0
+    assert seen["acquired_during_recover"] is False, (
+        "lock must already be held during the recovery preamble"
+    )
+
+
 def test_reap_abandoned_passive_delegates_to_reap_module(tmp_path, monkeypatch):
     """#5195: the CLI-level wrapper is a thin, correctly-anchored delegate to
     ``agent_dispatch.reap.reap_abandoned_passive_backstop``."""

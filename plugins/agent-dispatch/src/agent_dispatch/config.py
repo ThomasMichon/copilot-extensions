@@ -383,12 +383,20 @@ def _discovered_endpoint_health_responsive(
     if endpoint.transport != "tcp":
         return True
     host, port = endpoint.tcp_host_port
-    # ``endpoint.address`` (and ``host`` split from it) is a raw
-    # ``host:port`` pair -- an IPv6 literal such as ``::1`` needs bracketing
-    # (``http://[::1]:port``) or ``urllib`` misparses it, permanently
-    # misclassifying a live IPv6 incumbent as dead and letting the new
-    # non-passive serve guard start a duplicate (review follow-up on
+    # A wildcard/unspecified bind (``0.0.0.0``/``::``, permitted by
+    # ``check_bind_safety()`` when a token is configured) isn't a dialable
+    # destination -- normalize to the loopback equivalent first, same as
+    # ``server._loopback_probe_url()`` does for the routing-table path,
+    # else a live wildcard-bound incumbent found only through legacy
+    # discovery is misclassified as dead and the new non-passive serve
+    # guard starts a duplicate (review follow-up on
     # ThomasMichon/copilot-extensions#3066).
+    if host in ("0.0.0.0", ""):
+        host = "127.0.0.1"
+    elif host in ("::", "[::]"):
+        host = "::1"
+    # An IPv6 literal such as ``::1`` needs bracketing (``http://[::1]:port``)
+    # or ``urllib`` misparses it, with the same dead-misclassification result.
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
     return _health_responsive(f"http://{host}:{port}", token=token)

@@ -375,6 +375,29 @@ def test_discovered_endpoint_health_responsive_brackets_ipv6(monkeypatch):
     assert captured["url"] == "http://[::1]:1234"
 
 
+def test_discovered_endpoint_health_responsive_normalizes_wildcard(monkeypatch):
+    # check_bind_safety() explicitly permits a wildcard/unspecified bind when
+    # a token is configured, but neither is a dialable probe destination --
+    # normalize to loopback first, same as server._loopback_probe_url() does
+    # for the routing-table path (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
+    captured = {}
+
+    def _fake_health_responsive(url, **_k):
+        captured["url"] = url
+        return True
+
+    monkeypatch.setattr(config_mod, "_health_responsive", _fake_health_responsive)
+
+    endpoint = rendezvous.Endpoint(transport="tcp", address="0.0.0.0:1234")
+    assert config_mod._discovered_endpoint_health_responsive(endpoint) is True
+    assert captured["url"] == "http://127.0.0.1:1234"
+
+    endpoint = rendezvous.Endpoint(transport="tcp", address=":::1234")
+    assert config_mod._discovered_endpoint_health_responsive(endpoint) is True
+    assert captured["url"] == "http://[::1]:1234"
+
+
 def test_discovered_endpoint_health_responsive_true_for_non_tcp_transport(monkeypatch):
     # No plain-HTTP mapping exists for a unix socket / named pipe here -- trust
     # the existing connect-probe-verified liveness for those transports rather
