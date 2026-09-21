@@ -1362,6 +1362,39 @@ test("plainGitSync disables rebase.autoStash so a residual dirty-tree race fails
   assert.match(plainGitSyncBody, /"rebase", "--no-autostash"/);
 });
 
+test("plainGitSync disables repository hooks so a client-side pre-rebase guard cannot block or mutate it", async () => {
+  // Real regression this guards: mirrors agent-worktrees' own
+  // core.hooksPath convention for trusted, mechanical plumbing -- a repo's
+  // client-side pre-rebase hook must not be able to interfere with this
+  // unattended sync. Behavioral proof: a pre-rebase hook that would abort
+  // the rebase (and leave a marker file if it ran) must never fire.
+  const origin = initGitRepo();
+  const clone = mkdtempSync(join(tmpdir(), "context-handoff-sync-clone-"));
+  try {
+    execFileSync("git", ["clone", "-q", origin, clone]);
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: clone });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: clone });
+    writeFileSync(join(origin, "file.txt"), "one\ntwo\n");
+    execFileSync("git", ["add", "."], { cwd: origin });
+    execFileSync("git", ["commit", "-q", "-m", "second"], { cwd: origin });
+    const gitDirRaw = execFileSync("git", ["rev-parse", "--git-dir"], {
+      cwd: clone, encoding: "utf-8",
+    }).trim();
+    const hooksDir = join(clone, gitDirRaw, "hooks");
+    mkdirSync(hooksDir, { recursive: true });
+    const markerPath = join(hooksDir, "pre-rebase-ran.marker");
+    const hookPath = join(hooksDir, "pre-rebase");
+    writeFileSync(hookPath, `#!/bin/sh\ntouch "${markerPath.replace(/\\/g, "/")}"\nexit 1\n`);
+    try { execFileSync("chmod", ["+x", hookPath]); } catch { /* not needed on Windows */ }
+    const result = await plainGitSync(clone);
+    assert.equal(result.synced, true, JSON.stringify(result));
+    assert.equal(existsSync(markerPath), false, "the pre-rebase hook must never have run");
+  } finally {
+    rmSync(origin, { recursive: true, force: true });
+    rmSync(clone, { recursive: true, force: true });
+  }
+});
+
 test("plainGitSync never rebases a detached HEAD checkout", async () => {
   // Real regression this guards: agent-worktrees' own managed sync
   // explicitly skips a detached worktree, but `git rebase origin/<branch>`
@@ -1699,6 +1732,66 @@ test("acquireLock returns an ownership token, and releaseLock atomically claims 
   assert.ok(claimIndex >= 0, "expected releaseLock to claim the path via renameSync");
   assert.ok(readIndex >= 0, "expected releaseLock to read the claimed content");
   assert.ok(claimIndex < readIndex, "expected the atomic claim (rename) to happen BEFORE the content read");
+});
+
+test("releaseLock restores a foreign lock via linkSync (no-clobber), never renameSync (which silently overwrites)", () => {
+  // Real regression this guards: on POSIX, renameSync REPLACES an existing
+  // destination -- restoring a foreign claimed lock with renameSync could
+  // silently overwrite a FRESH lock a third invocation created at lockPath
+  // in the interim since this invocation's claim, defeating serialization
+  // entirely (the exact outcome this whole lock exists to prevent).
+  // linkSync fails with EEXIST if the destination already exists, so it
+  // only ever restores into a genuinely empty slot. Structural check (the
+  // exact concurrent timing isn't reliably forceable in a fast unit test).
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const releaseBody = source.slice(
+    source.indexOf("function releaseLock("),
+    source.indexOf("// Async-only twin of resolveRuntimePython"),
+  );
+  assert.ok(releaseBody.length > 0, "could not locate releaseLock's body");
+  assert.match(releaseBody, /linkSync\(claimedPath,\s*lockPath\)/);
+  assert.doesNotMatch(releaseBody, /renameSync\(claimedPath,\s*lockPath\)/);
+});
+
+test("attemptWorktreeSyncLocked disables rebase.autoStash and repo hooks for the delegated agent-worktrees sync too", () => {
+  // Real regression this guards: plainGitSync's own rebase passes
+  // --no-autostash directly, but the AGENT-WORKTREES-delegated path has no
+  // such flag of its own -- its `is_clean` check uses bare `git status
+  // --porcelain` and its rebase does not disable autostash, so content
+  // created in the runtime-resolution gap before the delegated exec could
+  // be silently stashed/rebased despite this file's own dirty recheck.
+  // Repo hooks (a client-side pre-rebase guard) must also not be able to
+  // block or mutate this unattended sync, matching agent-worktrees' own
+  // established core.hooksPath convention. Structural check: both delegated
+  // exec branches must pass env through withUnattendedSyncGitConfig.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const helperBody = source.slice(
+    source.indexOf("function withUnattendedSyncGitConfig("),
+    source.indexOf("function rebaseInProgress("),
+  );
+  assert.match(helperBody, /rebase\.autoStash/);
+  assert.match(helperBody, /core\.hooksPath/);
+  const lockedBody = source.slice(
+    source.indexOf("async function attemptWorktreeSyncLocked("),
+    source.indexOf("// True if an agent-dispatch coordinator"),
+  );
+  const callCount = (lockedBody.match(/withUnattendedSyncGitConfig\(/g) || []).length;
+  assert.ok(
+    callCount >= 2,
+    `expected withUnattendedSyncGitConfig to wrap env for both delegated exec branches, saw ${callCount} call(s)`,
+  );
 });
 
 test("acquireLock treats a failed stat on lock contention as contention, not as reclaimable", () => {

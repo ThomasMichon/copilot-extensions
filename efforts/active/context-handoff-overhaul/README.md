@@ -1913,3 +1913,43 @@ guidance ordering, finally cleared) and surfaced 2 new HIGH findings:
   invocation includes `--no-autostash`). `node --test`: 150 tests, 148 pass
   (2 pre-existing skips), no regressions. All guards pass. No version bump
   needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 19: no-clobber lock restore, unattended-sync git config parity
+
+Round 19 confirmed both of round 18's fixes resolved and surfaced 2 new
+HIGH findings plus 1 "previously missed" finding, all fixed:
+
+- **Lock restore could silently overwrite a newer lock:** round 18's
+  restore step (`renameSync(claimedPath, lockPath)`) assumed rename would
+  fail if the destination already existed -- but on POSIX, `renameSync`
+  REPLACES an existing destination unconditionally. If a third invocation
+  created a fresh lock at `lockPath` in the window since this invocation's
+  claim, the restore would silently clobber it, defeating serialization
+  entirely (the exact outcome the lock exists to prevent). Replaced with
+  `linkSync(claimedPath, lockPath)`, which fails with `EEXIST` if the
+  destination already exists, so the restore only ever lands in a
+  genuinely empty slot.
+- **Delegated agent-worktrees sync had no dirty recheck or autostash/hooks
+  protection of its own:** the only `worktreeIsDirty` check runs before the
+  runtime-resolution await; the delegated `agent-worktrees git sync`'s own
+  clean-tree probe uses bare `git status --porcelain` (not this file's
+  stricter check) and its rebase does not disable `rebase.autoStash`.
+  Content created in that gap could be silently stashed/rebased, bypassing
+  this path's own fail-closed safety. Added the same
+  recheck-immediately-before-exec pattern used elsewhere, plus a new
+  `withUnattendedSyncGitConfig()` env overlay (ephemeral
+  `rebase.autoStash=false` + `core.hooksPath=/dev/null` via the
+  `GIT_CONFIG_*` env protocol) applied to both the delegated exec and
+  `plainGitSync`'s own rebase (belt-and-braces alongside its existing
+  `--no-autostash` flag).
+- **(Previously missed) Plain-git fallback left repository hooks
+  enabled:** unlike agent-worktrees' own established `core.hooksPath`
+  convention for trusted mechanical plumbing, a client-side `pre-rebase`
+  hook could otherwise block or mutate this unattended sync. Covered by
+  the same `withUnattendedSyncGitConfig()` fix above.
+- 3 new tests (a real behavioral proof that a `pre-rebase` hook configured
+  to fail-and-mark never runs during `plainGitSync`; structural checks for
+  the no-clobber `linkSync` restore and the delegated-path git-config
+  parity). `node --test`: 153 tests, 151 pass (2 pre-existing skips), no
+  regressions. All guards pass. No version bump needed (still
+  `0.1.1-dev36`).
