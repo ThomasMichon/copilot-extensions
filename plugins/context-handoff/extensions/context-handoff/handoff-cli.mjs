@@ -24,6 +24,7 @@
 //   node handoff-cli.mjs facts --json                             # basic extension-free handoff facts
 //   node handoff-cli.mjs check-heads --json                       # audit pending-handoff head alignment
 //   node handoff-cli.mjs retry-cutover --json                     # refocus/live-retry a superseded session
+//   node handoff-cli.mjs sync-worktree --json                     # shared lock/rebase-safe worktree sync
 //   node handoff-cli.mjs help
 //
 // Options:
@@ -49,6 +50,7 @@ import {
   normalizeHandoffTitle,
   retryStoredHandoffCutover,
   triggerHandoff,
+  attemptWorktreeSync,
 } from "./handoff-core.mjs";
 import { manualHandoffEnabled } from "./mode.mjs";
 
@@ -102,6 +104,7 @@ const HELP = `handoff-cli -- invoke a context handoff from the CLI (extension-fr
   node handoff-cli.mjs facts --json                             emit basic extension-free facts
   node handoff-cli.mjs check-heads --json                       audit pending-handoff head alignment
   node handoff-cli.mjs retry-cutover --json                     refocus or respawn a stuck cutover
+  node handoff-cli.mjs sync-worktree --json                     shared lock/rebase-safe worktree sync
 
 Options: --prompt-file|--prompt|stdin, --title, --session-id ($COPILOT_AGENT_SESSION_ID),
          --cwd, --no-task, --handoff-token,
@@ -336,6 +339,30 @@ function cmdRetryCutover(args) {
   );
 }
 
+// One shared entry point for BOTH the fully-automated force-tier path
+// (autoForceHandoff, which calls attemptWorktreeSync directly) and the
+// agent-guided skill flow (SKILL.md's "Sync before triggering" step) --
+// review finding: without this, the skill flow invoked `agent-worktrees git
+// sync` directly, bypassing attemptWorktreeSync's lock, rebase check, and
+// sanitized environment entirely, so a force-tier sync and a skill-guided
+// sync could still race each other and rebase the same worktree
+// concurrently. The skill flow commits its own reviewed WIP itself (never
+// this command's job); by the time it calls this, the tree is expected to
+// already be clean, matching attemptWorktreeSync's own precondition.
+async function cmdSyncWorktree(args) {
+  const cwd = args.cwd || process.cwd();
+  const result = await attemptWorktreeSync(cwd);
+  if (args.json) return emit(result, args);
+  if (result.synced) {
+    process.stdout.write("Worktree synced onto the latest default branch.\n");
+    return;
+  }
+  process.stdout.write(
+    `Worktree sync ${result.attempted ? "failed" : "was skipped"}: ${result.reason}\n`,
+  );
+  if (!result.attempted) process.exit(1);
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
@@ -347,6 +374,7 @@ async function main() {
     case "facts": return cmdFacts(args);
     case "check-heads": return cmdCheckHeads(args);
     case "retry-cutover": return cmdRetryCutover(args);
+    case "sync-worktree": return await cmdSyncWorktree(args);
     case "help":
     case "-h":
     case "--help":

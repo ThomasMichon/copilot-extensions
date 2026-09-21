@@ -172,15 +172,25 @@ When the worktree is a git checkout with a remote default branch:
    otherwise unsure it is safe to commit, **skip this sync entirely** and
    note in the brief that the worktree may be behind the default branch and
    was left as-is -- never guess.
-2. Sync onto the latest default branch -- prefer the exact `argv[0]` from the
-   `git-collaboration` skill's agent-worktrees session command catalog
-   (never a bare `PATH` lookup): `<agent-worktrees catalog argv[0]> git sync` <!-- marketplace-isolation: allow cross-plugin-diagnostic-mention -->
-   when that catalog entry is available (fetch + rebase, conflict-safe:
-   aborts and leaves the branch unchanged on a real conflict). Otherwise fall
-   back to `git fetch` + `git rebase origin/<default-branch>` directly --
-   but if that rebase reports a conflict, immediately run `git rebase
-   --abort` (never leave a conflicted `rebase-merge` state for the
-   successor to inherit).
+2. **Sync using the shared, lock-aware entry point** -- `handoff-cli.mjs
+   sync-worktree` (resolve `$CH`/`$ch` exactly as the "CLI fallback" section
+   below does), not a bare `agent-worktrees git sync` <!-- marketplace-isolation: allow cross-plugin-diagnostic-mention --> or raw `git rebase`.
+   This is the SAME helper the fully-automated force-tier path uses
+   internally (`attemptWorktreeSync`): it takes a per-worktree lock so a
+   concurrent force-tier sync on this same worktree can't race a
+   skill-guided one, checks for an in-progress rebase before touching
+   anything (a paused rebase can report a clean tree, and the sync
+   helper's own failure path aborts any failed rebase -- never one this
+   session should cancel), and runs entirely under a sanitized Git
+   environment. Run:
+   ```bash
+   node "$CH" sync-worktree --json --cwd "$PWD"
+   ```
+   (`$ch`/PowerShell equivalent). A `"synced": true` result means the sync
+   completed cleanly; anything else (`"attempted": false` for a skipped
+   rebase/lock/dirty-tree case, or `"attempted": true, "synced": false` for
+   a real failure) carries a `"reason"` string -- note it in the brief
+   rather than blocking on it, same as step 3 below.
 3. Either way, if the sync did not complete cleanly (conflict, abort, or
    step 1 skipped it), do **not** block the handoff on resolving it there --
    note the conflict/skip and the branch's un-synced state plainly in the
