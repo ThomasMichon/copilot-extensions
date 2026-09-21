@@ -373,14 +373,53 @@ RESOLVED 2026-09-20, using the standard already-established discovery flow:**
       Phase 8/Phase 5: updated that effort's Runbook to point at this
       effort's landed daemon + documented contract.
 
+### Phase 7 — Ground-truth audit + telemetry ✅ DONE 2026-09-21
+- [x] `worktree-status-audit` CLI command (`worktree_status_audit.py`):
+      reads the durable cache's own SQLite snapshot read-only, samples a
+      random rotating subset (cached entries preferred -- real demand --
+      falling back to every actively-tracked worktree across every
+      registered project when the cache is cold/empty), and diffs each
+      sampled entry against a fresh, cache-bypassing recompute via
+      `worktree_status_compute.compute` -- the same ground truth a cache
+      miss itself would produce.
+- [x] Checks: git-state accuracy, liveness accuracy, cache-freshness
+      bounds (TTL + sweep interval + slack), identity consistency (a
+      cached or freshly-computed bundle's own `project`/`worktree_id`
+      fields must agree with the key it's served under), and daemon
+      liveness (lock file parses, its owner pid is actually alive, its
+      rendezvous fields resolve, and -- given a real worktree to probe
+      with -- it actually answers a real request through the daemon, not
+      just that stale rendezvous fields are still on disk).
+- [x] Appends one JSON telemetry line per run to a local log (default
+      `<runtime home>/worktree-status-audit.jsonl`, `--log-path`
+      override, `--no-log` to skip) -- a durable trail of the
+      accelerator's refresh cadence (`cache_age_seconds`/
+      `demand_age_seconds` per entry) and liveness over time, not just a
+      single point-in-time read.
+- [x] Exit code: nonzero when any mismatch, per-worktree error, or a
+      failed daemon probe was found -- scriptable by a scheduled task
+      (the operator's own hourly cadence, run via this session's
+      `manage_schedule` for now).
+- [x] Deployed and validated live 2026-09-21: `agent-worktrees update`
+      picked up **dev215** (PR #3147's merge, the version deployed at the
+      time -- not this PR's own, which bumps further as Phase 7 itself
+      lands) cleanly; `worktree-status-bundle` confirmed working
+      end-to-end against a real tracked worktree; `worktree-status-audit`
+      confirmed correctly reporting `responsive: false` while the
+      resident monitor was cold, then `responsive: true` and zero
+      mismatches once it came up -- closing this effort's own "a live
+      end-to-end check" Validation Plan item below.
+
 ## Validation Plan
 
-- [ ] Every phase's own unit tests pass (`plugins/agent-worktrees` suite).
-- [ ] A live end-to-end check: start `agent-worktrees status-monitor`,
+- [x] Every phase's own unit tests pass (`plugins/agent-worktrees` suite).
+- [x] A live end-to-end check: start `agent-worktrees status-monitor`,
       confirm the new rendezvous fields appear in the lock file, hit the
       daemon with a real worktree id via Phase 4's consumer, confirm a
       coalesced/cached response and a correct fallback when the monitor is
-      killed mid-session.
+      killed mid-session. (Performed 2026-09-21 via `agent-worktrees
+      update` + `worktree-status-bundle` + Phase 7's own audit tool --
+      see Phase 7's journal entry.)
 - [ ] Concurrent-request coalescing: N simultaneous callers for the same
       worktree id receive one compute's answer (mirroring `#2323`'s own
       `concurrent-callers-during-cold-boot` validation scenario), and a
@@ -1148,4 +1187,109 @@ already fixed (rounds 11-13; verified directly). Two genuine issues:
    12-13 (bumped the plugin entry each time but not the catalog-level
    field) -- bumped it to match.
 
+### 2026-09-21 — Deployment confirmed, Phase 7 (audit + telemetry) landed
+PR #3147 (rounds 9-14) merged. Ran `agent-worktrees update`: picked up
+dev215 cleanly (agent-bridge zero-downtime cutover, all other plugins
+updated alongside). `worktree-status-bundle` confirmed working
+end-to-end against a real tracked worktree (an unrelated harness project's
+own worktree) -- full bundle returned, all facts populated.
+
+Per the operator's request ("ensure it's deployed, audit its
+functionality... since everything should be relying on it, it needs to be
+accurate"), built Phase 7: `worktree-status-audit`, a new CLI command
+that periodically reads the durable cache's own snapshot and diffs a
+sample against a fresh, cache-bypassing ground-truth recompute --
+git-state accuracy, liveness accuracy, cache-freshness bounds, identity
+consistency, and daemon liveness (lock parses, owner pid alive,
+rendezvous resolves, and a real probe request actually answers). Appends
+one JSON line per run to a local telemetry log (refresh cadence +
+liveness trail over time, not just a point-in-time read); nonzero exit on
+any finding, meant to be scriptable by a scheduled task.
+
+Validated live: ran the new command against the real deployed runtime
+before the daemon had come back up post-update -- correctly reported
+`responsive: false` (a true finding, not a bug) -- then re-ran after
+`worktree-status-bundle`'s own `ensure_monitor` had booted it, correctly
+reporting `responsive: true` and zero mismatches against the one real
+cached entry. 34 new unit tests (cache-snapshot reading incl. a corrupt-
+row case, sampling incl. cache-vs-fallback preference and sample-size
+bounding, each diff/check function, the full `audit_one`/`run_audit`
+orchestration incl. a log-write-failure-never-raises case, daemon-
+liveness incl. a stale-lock and a real-probe-against-a-real-server case,
+and the CLI command's JSON output + exit-code contract).
+
+Scheduling: the operator's own `manage_schedule` runs this hourly for
+now (session-scoped -- stops when this session ends); the command itself
+is durable and independent of any particular scheduler, so a future OS-
+level task or `agent-dispatch schedule` job can drive it identically
+without any further code change.
+
+### 2026-09-21 — PR #3186 review round 1: a real cross-environment import bug
+CI's `worktree-manager (out-of-plugin)` job failed: `worktree_status_audit`
+imported `worktree_status_daemon` at module scope, and `__main__.py`
+imports `worktree_status_audit` eagerly for its CLI alias -- so any
+environment importing `agent_worktrees.__main__` now transitively required
+the vendored `work_coalescing_singleton` package at import time, including
+the standalone `worktree-manager` package's own test suite, which doesn't
+install it. `__main__.py` itself and `session_tracking_cli
+.cmd_worktree_status_bundle` both already import `worktree_status_daemon`
+lazily (inside the function, not at module scope) for exactly this reason
+-- this module just didn't follow that convention. Fixed by moving both
+the `worktree_status_daemon` import and its `SWEEP_INTERVAL_SECONDS`
+re-export into the two functions that actually need them
+(`check_daemon_liveness`, `_check_freshness`). Verified directly: a
+subprocess that blocks `work_coalescing_singleton` at the `builtins
+.__import__` level now imports both `worktree_status_audit` and
+`__main__` cleanly; added that exact scenario as a regression test
+(`test_module_imports_without_work_coalescing_singleton_installed`).
+
+### 2026-09-21 — PR #3186 review round 2: 4 more real issues
+Pushed round 1's fix. The next review caught 4 further genuine issues:
+
+1. **The read-only SQLite URI was not Windows-safe.** A plain
+   ``f"file:{db_path}?mode=ro"`` is not a valid file URI on Windows (a
+   bare drive letter/backslash path) and can also misparse a path with
+   spaces -- either could make the audit silently treat a genuinely
+   readable cache DB as unreadable, degrading to an empty snapshot.
+   Fixed by building the URI via `Path.as_uri()` (percent-encodes,
+   normalizes the drive letter/separators correctly on every platform).
+2. **`cache_age`/`demand_age` used direct dict indexing.** A malformed or
+   older-schema cache row missing `computed_at`/`demanded_at` would raise
+   `KeyError` here, violating the module's own "never raises past
+   run_audit" contract. Added a `_safe_age` helper that tolerates a
+   missing/non-numeric field.
+3. **The Phase 7 Validation-Plan checklist bullet's version reference was
+   ambiguous.** "Deployed and validated live... picked up dev215" could
+   read as describing *this PR's own* deployment (which bumps further as
+   Phase 7 lands), when it actually describes the already-merged PR
+   #3147's deployment, immediately before Phase 7's own work began.
+   Clarified in place.
+4. **`--json` was a dead argparse flag.** `action="store_true",
+   default=True` can never be `False` -- removed entirely; the command is
+   unconditionally JSON-out already, so the flag added nothing.
+5. Added the `# noqa: E402` marker `__main__.py`'s own convention already
+   uses for its other mid-file re-export imports (see
+   `worktree_identity`'s import), for consistency.
+
+### 2026-09-21 — PR #3186 review round 3: 2 more real issues, 4 stale carryovers
+Pushed round 2's fixes. The review re-flagged the SQLite-URI, unsafe-
+indexing, ambiguous-version, and dead-`--json`-flag findings from round
+2 -- all four confirmed already fixed (verified directly against the
+current file each time), same stale-carryover pattern seen throughout
+this effort. Two genuine issues:
+
+1. **`select_sample` could raise on a non-positive `--sample`.**
+   `random.sample` raises `ValueError` for a negative count -- a
+   misconfigured `--sample -1` would crash the CLI instead of degrading
+   to an empty sample, violating the module's own "never raises"
+   contract (which this round's finding correctly points out extends to
+   a caller-supplied argument, not just internal data shapes). Fixed by
+   clamping `sample_size` to `max(0, sample_size)`.
+2. **A specific downstream project name in the journal.** The prior
+   entry named a real internal project when describing which worktree
+   the live validation used -- replaced with a neutral placeholder, since
+   this repository is public.
+
+Added 1 new regression test
+(`test_select_sample_never_raises_on_a_non_positive_sample_size`).
 
