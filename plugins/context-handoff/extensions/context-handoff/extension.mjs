@@ -489,16 +489,23 @@ const session = await joinSession({
             "   prompt plus its exact HANDOFF_SEED/HANDOFF_TOKEN identifiers.",
             "3. Distinguish the trigger:",
             "   - If context pressure is the reason for the handoff and work",
-            "     remains, call trigger_handoff directly after saving. Do NOT ask",
-            "     for confirmation first; continuity is the point.",
+            "     remains: sync the worktree onto the latest default branch first",
+            "     (commit local WIP, then `agent-worktrees git sync` or",
+            "     equivalent -- see the context-handoff skill's 'Sync before",
+            "     triggering' section; note any conflict in the brief rather",
+            "     than blocking on it), then call trigger_handoff directly. Do",
+            "     NOT ask for confirmation first; continuity is the point.",
             "   - If you are otherwise done with the requested work and would end",
             "     the turn by listing follow-up ideas/questions, store the baton",
             "     and replace that list with one short offer to continue via",
-            "     handoff. Only after the user says yes should you call",
-            "     trigger_handoff, unless autopilot or prior authorization",
-            "     already covers that turn-end follow-up path.",
-            "Do NOT paste the handoff contents, commit anything, or claim the",
-            "handoff auto-loads on restart (it does not).",
+            "     handoff. Only after the user says yes should you sync the",
+            "     worktree and call trigger_handoff -- never sync or commit",
+            "     before the user has agreed, unless autopilot or prior",
+            "     authorization already covers that turn-end follow-up path.",
+            "Do NOT paste the handoff contents or claim the handoff auto-loads",
+            "on restart (it does not). The one exception to \"do not commit\" is",
+            "the deliberate WIP-commit-then-sync step above -- never commit for",
+            "any other reason as part of handling a handoff.",
           ].join("\n"),
           resultType: "success",
         };
@@ -842,11 +849,15 @@ const session = await joinSession({
         await session.send({
           prompt:
             "Perform a handoff now (the operator invoked /handoff-continue, " +
-            "which is explicit authorization). Steps: (1) call " +
-            "generate_handoff_prompt to collect session facts; (2) compose " +
+            "which is explicit authorization). Steps: (1) sync the worktree " +
+            "onto the latest default branch first (commit local WIP, then " +
+            "`agent-worktrees git sync` or equivalent -- see the " +
+            "context-handoff skill's 'Sync before triggering' section; note " +
+            "any conflict in the brief rather than blocking on it); (2) call " +
+            "generate_handoff_prompt to collect session facts; (3) compose " +
             "continuation markdown per the context-handoff skill -- use its " +
             "compact effort-backed shape when a valid open active effort exists, " +
-            "otherwise the full standalone shape; (3) call trigger_handoff with " +
+            "otherwise the full standalone shape; (4) call trigger_handoff with " +
             "that markdown as `prompt_text` and a short specific `title`. " +
             "trigger_handoff always stores/refreshes the baton and ends with " +
             "the final short handoff prompt/seed; it only signals pending " +
