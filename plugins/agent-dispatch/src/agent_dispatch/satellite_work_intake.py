@@ -50,6 +50,16 @@ DEFAULT_TRIGGER_TTL_S = 180.0
 #: (and every heartbeat behind it) indefinitely.
 DEFAULT_SPAWN_TIMEOUT_S = 30.0
 
+#: Default cap on spawn *attempts* triggered within a single :meth:`tick`
+#: call, independent of how much concurrency `max_concurrent` still allows.
+#: Each attempt runs synchronously and is individually bounded by
+#: `spawn_timeout`, but several in the same tick would sum against the
+#: federation directory's presence TTL (default 90s) and could starve
+#: heartbeats behind them even though no single attempt hangs forever.
+#: Default 1: at most one `spawn_timeout` of blocking per tick; any
+#: remaining capacity simply rolls forward to the next tick.
+DEFAULT_MAX_SPAWNS_PER_TICK = 1
+
 #: Task statuses counted as "already actively occupying a concurrency slot"
 #: for this machine, independent of this loop's own in-memory bookkeeping --
 #: the live, coordinator-authoritative half of the concurrency cap.
@@ -83,6 +93,7 @@ class SatelliteWorkIntake:
         max_concurrent: int = 1,
         trigger_ttl: float = DEFAULT_TRIGGER_TTL_S,
         spawn_timeout: float | None = DEFAULT_SPAWN_TIMEOUT_S,
+        max_spawns_per_tick: int = DEFAULT_MAX_SPAWNS_PER_TICK,
         spawn_fn: Callable[..., Any] | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -94,6 +105,7 @@ class SatelliteWorkIntake:
         self._project = project
         self._repo = repo
         self._max_concurrent = max(1, int(max_concurrent))
+        self._max_spawns_per_tick = max(1, int(max_spawns_per_tick))
         self._trigger_ttl = float(trigger_ttl)
         self._spawn_timeout = spawn_timeout
         self._spawn_fn = spawn_fn
@@ -151,8 +163,15 @@ class SatelliteWorkIntake:
         return spawn_fn(
             task.get("id"),
             worker_id=self._worker_id,
+            # Prefer the DISCOVERED task's own repo lane over this loop's
+            # (often unset -- discovering across every lane) `self._repo`
+            # filter: `spawn_embodied_worker`'s seed only adds a `--repo`
+            # claim scope when it receives a non-None repo, and without one
+            # the spawned session's first atomic claim is rejected outright
+            # (claim requires repo context or `--all-repos`) -- the task
+            # would be spawned but never actually claimed.
+            repo=self._repo or task.get("repo"),
             project=project,
-            repo=self._repo,
             route=" --shared",
             timeout=self._spawn_timeout,
         )
@@ -210,13 +229,26 @@ class SatelliteWorkIntake:
         # malformed/legacy row missing it rather than raising on `sorted()`.
         queued = sorted(queued, key=lambda t: t.get("created_at") or 0.0)
         spawned: list[str] = []
+        attempts = 0
         for task in queued:
             if capacity <= 0:
+                break
+            if attempts >= self._max_spawns_per_tick:
+                # Spawn attempts run synchronously, each individually
+                # bounded by `spawn_timeout` -- but summed across several
+                # in one tick they could still exceed the federation
+                # directory's presence TTL (default 90s) and starve
+                # heartbeats behind them, even though every single attempt
+                # is itself bounded. Cap attempts per tick (default 1) so
+                # the worst case per tick is one `spawn_timeout`, not
+                # `capacity * spawn_timeout`; remaining capacity rolls
+                # forward to the next tick.
                 break
             task_id = task.get("id")
             if not task_id or task_id in self._recent_triggers:
                 continue
             self._recent_triggers[task_id] = now
+            attempts += 1
             if not self._try_spawn(task):
                 # Failed to even launch (or launched but exited nonzero) --
                 # release the slot immediately rather than let a hard

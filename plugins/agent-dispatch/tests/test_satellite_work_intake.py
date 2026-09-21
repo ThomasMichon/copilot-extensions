@@ -64,12 +64,30 @@ def _loop(
 
 
 def test_spawns_for_each_queued_task_up_to_capacity():
+    # max_spawns_per_tick raised past the default of 1 -- this test is about
+    # the CAPACITY math, not the per-tick attempt cap (see
+    # test_spawn_attempts_capped_per_tick for that).
     client = FakeClient(queued=[{"id": "t1"}, {"id": "t2"}, {"id": "t3"}])
-    loop, spawned = _loop(client, max_concurrent=2)
+    loop, spawned = _loop(client, max_concurrent=2, max_spawns_per_tick=2)
     result = loop.tick()
     assert spawned == ["t1", "t2"]
     assert result["spawned"] == ["t1", "t2"]
     assert result["skipped_at_capacity"] is False
+
+
+def test_spawn_attempts_capped_per_tick():
+    # Spawn attempts run synchronously and are individually bounded by
+    # spawn_timeout, but several in the same tick could still sum past the
+    # federation directory's presence TTL and starve heartbeats -- default
+    # caps to exactly one attempt per tick regardless of remaining capacity.
+    client = FakeClient(queued=[{"id": "t1"}, {"id": "t2"}, {"id": "t3"}])
+    loop, spawned = _loop(client, max_concurrent=3)  # max_spawns_per_tick default 1
+    result = loop.tick()
+    assert spawned == ["t1"]
+    assert result["spawned"] == ["t1"]
+    # Remaining capacity rolls forward to the next tick.
+    result = loop.tick()
+    assert result["spawned"] == ["t2"]
 
 
 def test_no_capacity_when_already_at_active_cap():
@@ -179,7 +197,7 @@ def test_spawn_exception_releases_the_slot_immediately():
             raise RuntimeError("embody failed to launch")
         return FakeProc(0)
 
-    loop, _ = _loop(client, spawned=[], max_concurrent=1)
+    loop, _ = _loop(client, spawned=[], max_concurrent=1, max_spawns_per_tick=2)
     loop._spawn_fn = flaky_spawn
     result = loop.tick()
     # t1's spawn attempt raised and released its slot -- t2 gets the
@@ -196,7 +214,7 @@ def test_spawn_nonzero_returncode_counts_as_failure_not_success():
     def half_flaky_spawn(task_id, **_kw):
         return FakeProc(1) if task_id == "t1" else FakeProc(0)
 
-    loop, _ = _loop(client, max_concurrent=1)
+    loop, _ = _loop(client, max_concurrent=1, max_spawns_per_tick=2)
     loop._spawn_fn = half_flaky_spawn
     result = loop.tick()
     assert result["spawned"] == ["t2"]
@@ -348,6 +366,50 @@ def test_satellite_repo_scopes_the_discovery_queries():
     loop.tick()
     assert client.calls[0]["repo"] == "aperture-labs"
     assert client.calls[1]["repo"] == "aperture-labs"
+
+
+def test_spawn_uses_the_discovered_tasks_own_repo_when_unscoped():
+    # spawn_embodied_worker's seed only adds a --repo claim scope when it
+    # receives a non-None repo; without one the spawned session's first
+    # atomic claim is rejected outright (claim requires repo context or
+    # --all-repos). When this loop discovers across every lane (self._repo
+    # unset), the spawn must still carry the DISCOVERED task's own repo.
+    captured = []
+
+    def fake_spawn(task_id, **kw):
+        captured.append(kw["repo"])
+        return FakeProc(0)
+
+    client = FakeClient(queued=[{"id": "t1", "repo": "org/some-repo"}])
+    loop = SatelliteWorkIntake(
+        client,
+        machine="book2",
+        project="test-project",
+        spawn_fn=fake_spawn,
+        clock=FakeClock(),
+    )
+    loop.tick()
+    assert captured == ["org/some-repo"]
+
+
+def test_spawn_prefers_configured_repo_over_the_task_repo():
+    captured = []
+
+    def fake_spawn(task_id, **kw):
+        captured.append(kw["repo"])
+        return FakeProc(0)
+
+    client = FakeClient(queued=[{"id": "t1", "repo": "org/some-other-repo"}])
+    loop = SatelliteWorkIntake(
+        client,
+        machine="book2",
+        project="test-project",
+        repo="org/configured-repo",
+        spawn_fn=fake_spawn,
+        clock=FakeClock(),
+    )
+    loop.tick()
+    assert captured == ["org/configured-repo"]
 
 
 # -- project resolution -------------------------------------------------------
