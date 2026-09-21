@@ -48,7 +48,7 @@
   "plugins/agent-dispatch/src/agent_dispatch/registrar_registry.py": 1007,
   "plugins/agent-dispatch/src/agent_dispatch/repository_issue_loops.py": 1810,
   "plugins/agent-dispatch/src/agent_dispatch/supervisor.py": 3512,
-  "plugins/agent-dispatch/src/agent_dispatch/supervisor_daemon.py": 1709,
+  "plugins/agent-dispatch/src/agent_dispatch/supervisor_daemon.py": 2207,
   "plugins/agent-index/scripts/cell-runtime.py": 5161,
   "plugins/agent-index/scripts/installation-context/installation_context.py": 9169,
   "plugins/agent-index/scripts/resolve_effective_config.py": 1053,

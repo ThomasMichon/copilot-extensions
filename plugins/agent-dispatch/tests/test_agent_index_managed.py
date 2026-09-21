@@ -258,6 +258,7 @@ def test_configured_index_host_prepares_before_launch_and_freezes_bound_runtime(
     }
 
     h.executor.complete()
+    h.executor.defer = False  # materialize is done; let validate() run inline too
     assert h.processes == []
     assert h.builder.install_count == 1
     assert h.daemon.reconcile_once().started == [h.rid]
