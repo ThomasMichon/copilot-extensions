@@ -5452,28 +5452,37 @@ def _agent_worktrees_launch_prefix() -> list[str] | None:
 
     Under an explicit installation-cell context (``COPILOT_EXTENSIONS_CONTEXT``
     set), resolves only the validated same-cell peer boundary -- never an
-    ambient ``PATH`` command -- mirroring the pattern already established in
-    agent-logger's ``compact.py``/``origin.py`` same-cell lookups. Falls back
-    to the legacy ambient lookup when no explicit context is set, or when the
-    context/peer cannot be validated (fail open to the pre-Phase-4 behavior
-    this CLI has always had, not fail closed on a diagnostic command).
+    ambient ``PATH`` command. An owner/receipt/governance refusal propagates
+    as :class:`_peer_launch.ContextRefused` rather than degrading to the
+    legacy ambient lookup: this command's ``--execute`` mutates predecessor
+    state, so silently falling back to a foreign cell's ``agent-worktrees``
+    would be unsafe. Only a validated owner with no same-cell peer installed
+    is genuine absence (returns ``None``, same as "no command found") --
+    mirroring agent-logger's ``compact.py``/``origin.py`` same-cell lookups.
+    The legacy ambient lookup is used only when no explicit context is set
+    at all.
     """
     explicit_context = os.environ.get(_peer_launch.CONTEXT_ENV, "")
-    if explicit_context:
-        try:
-            own = _peer_launch.validate_owner(
-                "agent-bridge", install_dir(), explicit_context
-            )
-            peer_root = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
-            if peer_root.exists() or peer_root.is_symlink():
-                return _peer_launch.launch_prefix(
-                    "agent-bridge", Path(own["pluginRoot"]), explicit_context,
-                    "agent-worktrees",
-                )
-        except (OSError, ValueError, ImportError):
-            pass
-    exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
-    return [exe] if exe else None
+    if not explicit_context:
+        exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
+        return [exe] if exe else None
+    try:
+        own = _peer_launch.validate_owner("agent-bridge", install_dir(), explicit_context)
+    except (OSError, ValueError, ImportError) as error:
+        raise _peer_launch.ContextRefused(
+            f"agent-bridge installation context refused: {error}"
+        ) from error
+    peer_root = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+    if not peer_root.exists() and not peer_root.is_symlink():
+        return None
+    try:
+        return _peer_launch.launch_prefix(
+            "agent-bridge", Path(own["pluginRoot"]), explicit_context, "agent-worktrees",
+        )
+    except (OSError, ValueError, ImportError) as error:
+        raise _peer_launch.ContextRefused(
+            f"same-cell agent-worktrees resolution failed: {error}"
+        ) from error
 
 
 def _cmd_handoff_check(args: argparse.Namespace) -> None:
@@ -5488,7 +5497,11 @@ def _cmd_handoff_check(args: argparse.Namespace) -> None:
     primitives do. A future ACP-hosted equivalent belongs here too, once that
     path needs the same on-demand diagnostic.
     """
-    prefix = _agent_worktrees_launch_prefix()
+    try:
+        prefix = _agent_worktrees_launch_prefix()
+    except _peer_launch.ContextRefused as error:
+        print(f"[FAIL] {error}", file=sys.stderr)
+        sys.exit(1)
     if not prefix:
         print("[FAIL] agent-worktrees is not on PATH; cannot check handoffs.", file=sys.stderr)
         sys.exit(1)
@@ -5508,7 +5521,8 @@ def _cmd_handoff_check(args: argparse.Namespace) -> None:
     child_env.pop("AGENT_RT_PY", None)
     try:
         result = subprocess.run(
-            argv, capture_output=True, text=True, timeout=60, env=child_env
+            argv, capture_output=True, text=True, timeout=60, env=child_env,
+            **no_window_kwargs(),
         )
     except Exception as exc:
         print(f"[FAIL] could not run agent-worktrees handoffs-check: {exc}", file=sys.stderr)

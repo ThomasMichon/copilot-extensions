@@ -394,12 +394,19 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   implicit in the code -- nothing enforces disjointness).
 - Converted `agent-bridge`'s `handoff-check` command
   (`_cmd_handoff_check` -> `agent-worktrees handoffs-check`) to resolve the
-  same-cell peer boundary first, falling back to the marked
-  `# marketplace-isolation: allow legacy-compatibility` ambient lookup when
-  no explicit context is set or the peer/context cannot be validated --
-  matching agent-logger's established pattern, but folding every failure to
-  the legacy fallback (best-effort diagnostic CLI, not a protective set, so
-  no `ContextRefused` fail-loud path is needed here).
+  same-cell peer boundary first. The legacy ambient-`PATH` lookup (marked
+  `# marketplace-isolation: allow legacy-compatibility`) is used only when
+  no explicit context is set at all; once a context is set, an
+  owner/receipt/governance refusal propagates as `ContextRefused` and a
+  valid owner with no same-cell peer is genuine absence -- neither degrades
+  to ambient `PATH`, matching agent-logger's `compact.py`/`origin.py`
+  pattern. Copilot PR review caught that an earlier draft of this
+  conversion silently fell back to ambient `PATH` on any explicit-context
+  failure -- unsafe here since `--execute` mutates predecessor state, so a
+  silent fallback could operate on a foreign cell's `agent-worktrees` --
+  and a second finding that the same-cell subprocess spawn was missing
+  `no_window_kwargs()` (present on agent-logger's equivalent same-cell
+  call); both fixed before merge.
 - Found and fixed a **pre-existing gap** in `tools/check-version-bump.py`
   while touching it: its hardcoded `packaged_peers` list (which plugins must
   bump when `libs/peer-launch` changes) already omitted `agent-index` and

@@ -438,43 +438,54 @@ class TestHandoffCheckSameCell:
             *prefix, "handoffs-check", "--json", "--worktree-id", "wt-1",
         ]
 
-    def test_no_peer_installed_falls_back_to_legacy(
-        self, owner: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    def test_no_peer_installed_is_genuine_absence_not_legacy_fallback(
+        self, owner: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys,
     ) -> None:
+        """A valid owner with no same-cell agent-worktrees peer is genuine
+        absence -- reported the same as "no command found", never a reason
+        to search ambient PATH for a foreign cell's binary (this command's
+        ``--execute`` mutates state)."""
         (tmp_path / "marketplaces" / "test-cell" / "plugins" / "agent-worktrees").rmdir()
-        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
-        captured = {}
+        monkeypatch.setattr(
+            m.subprocess, "run", lambda *a, **k: pytest.fail("no launch should be attempted"),
+        )
 
-        def fake_run(argv, **kwargs):
-            captured["argv"] = argv
-            return _FakeCompletedProcess(
-                m.json.dumps({"checked": 1, "found": 0, "executed": False, "findings": []})
-            )
-
-        monkeypatch.setattr(m.subprocess, "run", fake_run)
-
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as exc_info:
             m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
 
-        assert captured["argv"][0] == "/usr/bin/agent-worktrees"
+        assert exc_info.value.code == 1
+        assert "agent-worktrees is not on PATH" in capsys.readouterr().err
 
-    def test_invalid_owner_context_falls_back_to_legacy(
-        self, monkeypatch: pytest.MonkeyPatch,
+    def test_invalid_owner_context_fails_closed_not_legacy_fallback(
+        self, monkeypatch: pytest.MonkeyPatch, capsys,
     ) -> None:
-        """A refused/invalid explicit context degrades to the legacy ambient
-        lookup for this best-effort diagnostic CLI, rather than failing
-        closed -- unlike agent-logger's protective tracked-worktree lookup,
-        this command has no protective set to guard."""
+        """An owner/receipt/governance refusal must propagate, never degrade
+        to the legacy ambient lookup: since ``--execute`` mutates predecessor
+        state, silently falling back could operate on another cell's
+        ``agent-worktrees``."""
         monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "{")
         monkeypatch.setattr(
             m._peer_launch, "validate_owner",
             lambda *a: (_ for _ in ()).throw(ValueError("bad receipt")),
         )
-        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
+        monkeypatch.setattr(m.shutil, "which", lambda _: pytest.fail("ambient PATH selected"))
+        monkeypatch.setattr(
+            m.subprocess, "run", lambda *a, **k: pytest.fail("no launch should be attempted"),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
+
+        assert exc_info.value.code == 1
+        assert "bad receipt" in capsys.readouterr().err
+
+    def test_same_cell_spawn_is_windowless(
+        self, owner: dict[str, str], monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         captured = {}
 
         def fake_run(argv, **kwargs):
-            captured["argv"] = argv
+            captured.update(kwargs)
             return _FakeCompletedProcess(
                 m.json.dumps({"checked": 1, "found": 0, "executed": False, "findings": []})
             )
@@ -484,5 +495,5 @@ class TestHandoffCheckSameCell:
         with pytest.raises(SystemExit):
             m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
 
-        assert captured["argv"][0] == "/usr/bin/agent-worktrees"
+        assert captured == {**captured, **m.no_window_kwargs()}
 
