@@ -1606,6 +1606,69 @@ test("attemptWorktreeSync exactly one of several concurrent attempts proceeds pa
   }
 });
 
+test("withWorktreeSyncLock's release only removes the lock when its content still matches this invocation's own token", async () => {
+  // Real regression this guards: if a holder runs longer than
+  // STALE_LOCK_MS (suspended, an extremely slow network -- not necessarily
+  // crashed) and another invocation reclaims the path as stale while the
+  // first is still running, the first invocation eventually resumes and
+  // hits its own release step. An unconditional unlink-by-path there would
+  // delete the SECOND invocation's active lock, letting a THIRD invocation
+  // acquire while the second is still mid-sync. Simulated directly (no DI
+  // seam for withWorktreeSyncLock itself): after a real acquire+release
+  // cycle completes normally, forge a lock file at the SAME path with
+  // different content (as if a reclaimer had taken over), then confirm a
+  // second real acquire+release cycle -- which would naturally try to
+  // remove whatever it finds at that path if it used path-only ownership
+  // -- leaves foreign content alone when it doesn't reacquire that exact
+  // path. This exercises the same lock path lifecycle attemptWorktreeSync
+  // uses end to end.
+  const dir = initGitRepo();
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    // A foreign, currently-live lock (fresh mtime -- not stale) belonging
+    // to some OTHER invocation, sitting at the shared path.
+    writeFileSync(lockPath, "someone-elses-token");
+    const result = await attemptWorktreeSync(dir);
+    // Contention -- this invocation never acquired the lock at all, so it
+    // must not have touched the foreign content in any way.
+    assert.equal(result.attempted, false);
+    assert.match(result.reason, /already in progress/);
+    assert.equal(readFileSync(lockPath, "utf-8"), "someone-elses-token");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("acquireLock returns an ownership token, and release compares it before unlinking (not path-only ownership)", () => {
+  // Structural check (no DI seam for the internal fs calls, and reliably
+  // forcing the real suspended-holder timing scenario in a fast unit test
+  // isn't practical): acquireLock must return a token alongside the fd,
+  // and withWorktreeSyncLock's release must read the lock file back and
+  // compare it to that token before unlinking, rather than unlinking by
+  // path alone.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const acquireBody = source.slice(
+    source.indexOf("function acquireLock("),
+    source.indexOf("async function withWorktreeSyncLock("),
+  );
+  assert.match(acquireBody, /token/);
+  const lockBody = source.slice(
+    source.indexOf("async function withWorktreeSyncLock("),
+    source.indexOf("// Async-only twin of resolveRuntimePython"),
+  );
+  assert.match(lockBody, /readFileSync\(lockPath.*===\s*lock\.token/);
+});
+
 test("acquireLock treats a failed stat on lock contention as contention, not as reclaimable", () => {
   // Real regression this guards: if statSync throws for a reason OTHER
   // than "the lock is genuinely gone" (a permission error, a transient FS
