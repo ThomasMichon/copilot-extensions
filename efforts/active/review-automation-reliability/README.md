@@ -139,10 +139,10 @@ on -- they do not require a vision change, only implementation fixes.
 
 ### Phase 6 - Never supersede another contributor's pull request
 
-Discovered live: the `odsp-web-harness-backlog` repository-issue-loop worker
-closed [gim-home/odsp-web-harness#200](https://github.com/gim-home/odsp-web-harness/pull/200)
+Discovered live: the `example-web-harness-backlog` repository-issue-loop worker
+closed [example-org/example-web-harness#200](https://github.com/example-org/example-web-harness/pull/200)
 (authored by a different contributor) and replaced it with its own competing
-[#203](https://github.com/gim-home/odsp-web-harness/pull/203), carrying the
+[#203](https://github.com/example-org/example-web-harness/pull/203), carrying the
 fixes forward under its own identity because the original branch could not be
 updated. This is a **vision extension**, not a below-altitude bug: the
 reviewer vision's non-goals already forbade editing a contributor's branch
@@ -150,10 +150,10 @@ without authorization, but did not name outright closure/replacement as an
 equally forbidden outcome. Landed as a non-goal addition in
 [`visions/plugins/agent-dispatch/reviewer/README.md`](../../../visions/plugins/agent-dispatch/reviewer/README.md)
 (2026-09-05 provenance entry) plus a sharpened, private per-repository
-`worker_guidance` clause (`odsp-web-harness-issue-loop.json`, dotfiles) adding
+`worker_guidance` clause (`example-web-harness-issue-loop.json`, dotfiles) adding
 the required fallback: leave review feedback, then **durably declare the
 dependency** rather than record a vague outcome -- apply a `blocked-on-external-pr`
-label to the issue (created on gim-home/odsp-web-harness) plus a comment
+label to the issue (created on example-org/example-web-harness) plus a comment
 naming the exact blocking PR and head SHA, and add that label to the loop's
 `exclude_labels` so a labeled issue is never re-queued while the block stands.
 This closes the original ask precisely: tagging + a durable label-based
@@ -2117,7 +2117,7 @@ slice's deferral reasons and produced a new declared design:
   above as below-altitude implementation gaps -- no vision change needed.
 - Separately, while reconciling this effort against the reviewer vision, found
   that the same backlog loop had -- in an earlier occurrence -- closed
-  gim-home/odsp-web-harness#200 (a different contributor's PR) and replaced it
+  example-org/example-web-harness#200 (a different contributor's PR) and replaced it
   with its own #203. The private `worker_guidance` already said "do not take
   over an existing pull request or branch" *before* the incident, so this was
   a compliance failure against clear prose, not an undocumented gap -- but the
