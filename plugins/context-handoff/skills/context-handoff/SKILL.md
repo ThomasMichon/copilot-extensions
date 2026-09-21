@@ -157,7 +157,7 @@ the worktree is a git checkout with a remote default branch:
 1. Commit any uncommitted local changes first (worktree-local WIP commits are
    normal and expected here -- this is not "finish the work," just "don't
    leave it uncommitted going into a rebase").
-2. Sync onto the latest default branch -- prefer `agent-worktrees git sync`
+2. Sync onto the latest default branch -- prefer `agent-worktrees git sync` <!-- marketplace-isolation: allow cross-plugin-diagnostic-mention -->
    (fetch + rebase, conflict-safe: aborts and leaves the branch unchanged on
    a real conflict) when that tool is available; otherwise `git fetch` +
    `git rebase origin/<default-branch>` directly.
