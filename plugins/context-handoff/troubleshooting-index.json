@@ -1,0 +1,12 @@
+{
+  "schema": "copilot-extensions.troubleshooting-index",
+  "version": 1,
+  "categories": [
+    {
+      "id": "tools-unavailable-fallback",
+      "summary": "A session is told to invoke context-handoff's tools (generate/save/trigger/consume_handoff) but they aren't present this session.",
+      "pointer": "`handoff-fallback.instructions.md`'s CLI fallback + find-it-yourself sections",
+      "markers": ["CLI fallback (tools unavailable)", "find it yourself, no tools required"]
+    }
+  ]
+}

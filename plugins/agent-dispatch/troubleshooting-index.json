@@ -1,0 +1,12 @@
+{
+  "schema": "copilot-extensions.troubleshooting-index",
+  "version": 1,
+  "categories": [
+    {
+      "id": "blocked-task-recovery",
+      "summary": "A dispatched task is live but structurally blocked (stuck, awaiting operator input, or dormant with no forward progress).",
+      "pointer": "`show`/`card show`/`events` to inspect; `release`/`yield`/`abandon`/`steer submit` to act",
+      "markers": ["structurally blocked", "agent-dispatch show <task-id>"]
+    }
+  ]
+}

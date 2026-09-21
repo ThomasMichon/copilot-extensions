@@ -9,6 +9,14 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "blocked-task-fallback",
+      "template": "instructions/blocked-task-fallback.instructions.md",
+      "destination": ".github/instructions/agent-dispatch/blocked-task-fallback.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }
