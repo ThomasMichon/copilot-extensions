@@ -499,8 +499,7 @@ def _resolve_local_binstub(project: str) -> str:
 
     ``asyncio.create_subprocess_exec`` never consults Windows' ``PATHEXT``
     the way a shell does, so an extensionless name can't resolve to the
-    installed ``.cmd``/``.ps1`` shim (``FileNotFoundError: [WinError 2]``;
-    see aperture-labs effort agent-bridge-worktree-native-agents).
+    installed ``.cmd``/``.ps1`` shim (``FileNotFoundError: [WinError 2]``).
     ``shutil.which`` does the same PATHEXT-aware lookup on every platform.
     """
     import shutil
