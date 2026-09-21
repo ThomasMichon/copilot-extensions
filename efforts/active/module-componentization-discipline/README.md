@@ -58,7 +58,7 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees __main__.py` worktree-operations slice)
+### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees __main__.py` resolve-design slice)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
 — re-run before starting a phase, this list moves; it already has once per
@@ -67,7 +67,7 @@ table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 13,669 | +12,669 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Seventh dedicated slice landed: the worktree-operations block now lives in `list_cli.py`, `claims_cli.py`, `follow_ups_cli.py`, and `worktree_ops_cli.py`. The largest remaining seam is now even more clearly the launch/session-control core (`copilot`, especially `resolve`'s picker/remux/handoff planner), which has been deferred by three fresh passes and now wants a dedicated design pass rather than another blind extraction attempt |
+| 11,300 | +10,300 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Eighth dedicated slice landed: the `resolve` planner now delegates through `resolve_cli.py`, `resolve_launch_cli.py`, `resolve_machine_cli.py`, `resolve_picker_cli.py`, and `resolve_system_cli.py` using explicit command/launch/picker state objects. The launch-planning knot is no longer the main blocker; what remains in `__main__` is the smaller TTY-facing `cmd_copilot` seam plus the still-large monitor / hook / status / history core |
 | 9,267 | +8,267 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression); it drifted again while this slice was in flight, so the baseline was manually widened (9191 → 9267) to restore a green full-tree guard pending its own future split |
 | 9,169 | +8,169 | `libs/installation-context/installation_context.py` (+17 vendored copies) | Split the **canonical** copy only; `sync-installation-context.py` propagates to every vendored copy |
 | 6,873 | +5,873 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
@@ -88,19 +88,17 @@ table):
 | 2,195 | +1,195 | `plugins/agent-worktrees/src/agent_worktrees/reconcile.py` | |
 | 2,124 | +1,124 | `plugins/agent-worktrees/src/agent_worktrees/session_projection.py` | |
 
-**Suggested next pick (Phase 2, next slice):** the remaining `agent-worktrees`
-`__main__.py` work is no longer "find another obvious lower-risk seam" — this
-slice just consumed that seam. What remains is the live launch/session-control
-core: `cmd_copilot`, and especially `cmd_resolve`'s nested picker/remux/
-handoff/create-or-resume/launch-plan flow. Treat that as a **dedicated design
-pass**, not another blind extraction: first define the state-carrying
-abstractions that would let its picker, restore/remux, and launch-planning
-sub-flows move independently without changing behavior. If that design budget
-isn't available, pivot entirely to a different large production module
+**Suggested next pick (Phase 2, next slice):** re-rank `agent-worktrees`
+`__main__.py` with `resolve` gone. The obvious remaining launch-surface seam is
+now just `cmd_copilot` (its TTY wrapper still lives in `__main__`), but the
+larger absolute weight may now be the resident-monitor / hook / status / history
+cluster. Take a fresh measurement-driven pass rather than assuming the next move
+is still the old `resolve` knot. If that does not yield a clean `__main__`
+sub-flow, pivot to another large production module
 (`plugins/agent-worktrees/src/agent_worktrees/tracking.py`,
 `plugins/agent-worktrees/src/agent_worktrees/pr_ops.py`, or the canonical
-`libs/installation-context/installation_context.py`) rather than taking a
-third/fourth "maybe it will untangle itself" swing at `resolve`.
+`libs/installation-context/installation_context.py`) instead of forcing a weak
+abstraction.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
 margin of their own ceiling (most likely to tip over next from unrelated
@@ -847,3 +845,57 @@ the Phase 0 runbook, picked up as capacity allows.
   another blind slice. Version bump for this slice:
   `agent-worktrees` `1.5.5-dev212` and marketplace `metadata.version`
   `1.7.7-dev182`.
+
+### 2026-09-21 — Phase 2 continued: `agent-worktrees/__main__.py` resolve design slice
+- Took the design-budget slice the prior three entries had explicitly deferred,
+  and kept the scope to **`cmd_resolve` only**. Instead of another mechanical
+  move, first mapped its real sub-flows and the state each closes over:
+  selector normalization / codename resolution, JSON-vs-interactive dispatch,
+  SSH machine/environment handoff planning, base/new/resume launch planning,
+  and the legacy picker + system-menu fallback. Then introduced small explicit
+  state carriers for those seams rather than letting the extracted modules keep
+  reaching through one giant closure: `ResolveCommandState` in `resolve_cli.py`
+  owns the top-level selector flags plus lazy config loading; `ResolveLaunchContext`
+  in `resolve_launch_cli.py` carries the shared config/args/profile/record/
+  preflight state for base/new/resume planning; and `ResolvePickerContext` in
+  `resolve_picker_cli.py` carries the config/args/tracking/platform state the
+  legacy ANSI picker loop and its system-menu sub-flows reuse.
+- Landed the split as five sibling modules, each named for the sub-flow it now
+  owns: `resolve_cli.py` (parser registration + `cmd_resolve` dispatch),
+  `resolve_launch_cli.py` (profile selection plus base/new/resume planners),
+  `resolve_machine_cli.py` (cross-machine / cross-environment SSH handoff
+  planning), `resolve_picker_cli.py` (legacy picker fallback, manager handoff,
+  machine sub-menu), and `resolve_system_cli.py` (the legacy picker's cleanup /
+  update / status / daemon-worktree system menu). `agent_worktrees.__main__`
+  remains the composition root and compatibility surface: `cmd_resolve` is now
+  a thin wrapper, `build_parser()` delegates the `resolve` parser stub to the
+  new module, and the moved helpers are re-exported back onto `__main__` so the
+  existing direct-import and monkeypatch seams the test suite depends on keep
+  landing in exactly the old place.
+- Net result: `plugins/agent-worktrees/src/agent_worktrees/__main__.py`
+  dropped from **13,669** lines at the start of this slice to **11,300**
+  after the baseline refresh (**29,173 → 11,300** across the
+  eight-slice campaign so far). The new modules land at **645** lines
+  (`resolve_cli.py`), **642** (`resolve_launch_cli.py`), **234**
+  (`resolve_machine_cli.py`), **578** (`resolve_picker_cli.py`), and **472**
+  (`resolve_system_cli.py`), all under the 1,000-line cap.
+- Validation matched the effort's stricter bar. `ruff check --select F,E9`
+  passed on `__main__.py`, the five new modules, and the one touched test
+  guard. The full `python tools/run-plugin-tests.py agent-worktrees` run again
+  reproduced only the same independently-confirmed pre-existing
+  `tests/test_doctor.py` failures (**551 passed, 10 failed, 1 skipped**) on its
+  second sub-suite stop, so per the runbook I followed with a broad targeted
+  resolve-area sweep reaching the moved planner/picker/profile/codename/cross-
+  machine surfaces (**559 passed, 19 skipped, 4486 deselected**). After the
+  split, `python tools/check-module-size.py --refresh-baseline`, plain
+  `python tools/check-module-size.py`, `python tools/check-install-contract.py`,
+  and `python tools/check-version-consistency.py` all pass, and read-only
+  dogfooding also passes for `agent-worktrees resolve --help` and
+  `agent-worktrees copilot --help`.
+- Remaining backlog changed shape materially. The high-risk `resolve` knot is
+  gone; what remains of the launch surface in `__main__` is primarily
+  `cmd_copilot` plus compatibility glue, while the heavier absolute line count
+  is now the resident-monitor / hook / status / history region. The next slice
+  should re-rank those seams fresh rather than assuming the work still revolves
+  around `resolve`. Version bump for this slice: `agent-worktrees`
+  `1.5.5-dev216` and marketplace `metadata.version` `1.7.7-dev185`.

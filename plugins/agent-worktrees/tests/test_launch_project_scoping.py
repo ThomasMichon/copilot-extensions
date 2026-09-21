@@ -22,10 +22,13 @@ from pathlib import Path
 _MAIN = (
     Path(__file__).resolve().parents[1] / "src" / "agent_worktrees" / "__main__.py"
 )
+_RESOLVE_LAUNCH = (
+    Path(__file__).resolve().parents[1] / "src" / "agent_worktrees" / "resolve_launch_cli.py"
+)
 
 
-def _source() -> str:
-    return _MAIN.read_text(encoding="utf-8")
+def _source(path: Path = _MAIN) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 def test_create_worktree_core_scopes_plan_project_to_repo_name():
@@ -48,7 +51,7 @@ def test_create_worktree_core_scopes_plan_project_to_repo_name():
 def test_resolve_resume_attaches_project_to_plan():
     """The resume-path plan must carry `project` too, so a resumed worktree's
     launcher can scope its downstream calls just like a newly-created one."""
-    src = _source()
+    src = _source(_RESOLVE_LAUNCH)
     resume_start = src.index("def _resolve_resume(")
     resume_end = src.index("\ndef _resolve_new(")
     resume_body = src[resume_start:resume_end]
