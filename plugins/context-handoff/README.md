@@ -95,8 +95,8 @@ intentionally does **not** emit a user-visible "Session started" breadcrumb.
 
 ### 1. Compose and store early
 
-When the session reaches a natural stopping point, or when the monitor nudges
-you because context pressure is rising:
+When the session reaches a natural stopping point and you are not yet ready to
+trigger (no pickup needed right now):
 
 1. call `generate_handoff_prompt`,
 2. compose the full markdown brief,
@@ -104,7 +104,10 @@ you because context pressure is rising:
 
 That is the routine, safe, non-committal step. It preserves the baton before
 context gets tighter, but it does **not** arm pickup or request that any
-external system create a successor.
+external system create a successor. **This sequence is not the
+context-pressure-driven trigger path** -- when context pressure is rising and
+you intend to trigger a handoff now, see section 2 below instead, which syncs
+*before* composing so the stored baton reflects the synced state.
 
 ### 2. Context-pressure-driven handoff: trigger directly
 
@@ -112,8 +115,9 @@ If the reason for the handoff is **context pressure** and the objective still
 has more work left to do, the agent should sync the worktree onto the latest
 default branch first (see "Sync before triggering" in the `context-handoff`
 skill -- never blanket-commits, and skips cleanly rather than blocking if
-anything looks unsafe), then call `trigger_handoff`. This path does **not**
-ask for confirmation first.
+anything looks unsafe), *then* compose/save the brief so it reflects the
+synced (or un-synced/conflicted) state, then call `trigger_handoff`. This
+path does **not** ask for confirmation first.
 
 ### 3. Turn-end follow-ups ask before triggering
 
@@ -123,7 +127,9 @@ listing follow-up ideas or questions, the flow is different:
 - **compose + save** the baton,
 - **ask the user** whether to continue via handoff,
 - only after a brief yes (for example, "sure"), **sync the worktree** (same
-  rule as above), then call `trigger_handoff`.
+  rule as above); if the sync changed anything relevant, **recompose and
+  re-save** the baton so it reflects the post-sync state, then call
+  `trigger_handoff`.
 
 Only this turn-end follow-up path is skipped by autopilot mode or prior user
 pre-authorization.

@@ -345,7 +345,13 @@ async function autoForceHandoff(sid, cwd) {
   // successor inherits this exact on-disk worktree, so an un-synced tip means
   // stale plugin/instruction code reaches it too. No agent judgment is in the
   // loop here, so this never commits anything -- see attemptWorktreeSync.
-  const syncResult = attemptWorktreeSync(cwd);
+  // Awaited (not fired synchronously): attemptWorktreeSync is fully async
+  // end to end, so this yields immediately to the event loop rather than
+  // blocking it for the length of the underlying git/CLI calls -- this
+  // function is itself invoked fire-and-forget (never awaited) from
+  // session.usage_info, so a synchronous call here would have frozen the SDK
+  // event loop for as long as the sync took.
+  const syncResult = await attemptWorktreeSync(cwd);
   let markdown;
   try {
     const { data } = collectHandoffData(sid);
@@ -516,11 +522,16 @@ const session = await joinSession({
             "     the turn by listing follow-up ideas/questions: call",
             "     save_handoff_prompt now (a not-yet-approved handoff has no",
             "     sync to reflect yet), replace that list with one short offer",
-            "     to continue via handoff, and only after the user says yes",
-            "     should you sync the worktree and then call trigger_handoff --",
-            "     never sync or commit before the user has agreed, unless",
-            "     autopilot or prior authorization already covers that turn-end",
-            "     follow-up path.",
+            "     to continue via handoff. Only after the user says yes: sync",
+            "     the worktree; if that sync changed anything relevant (branch",
+            "     moved, rebase conflicted and was left unresolved), call",
+            "     generate_handoff_prompt and save_handoff_prompt again so the",
+            "     stored baton reflects the post-sync state -- trigger_handoff",
+            "     otherwise reuses the pre-sync brief and silently omits the",
+            "     sync/conflict outcome. Then call trigger_handoff. Never sync",
+            "     or commit before the user has agreed, unless autopilot or",
+            "     prior authorization already covers that turn-end follow-up",
+            "     path.",
             "save_handoff_prompt stores the handoff — as an agent-dispatch task",
             "when a coordinator is reachable, else a one-time worktree-state",
             "file — and returns the short handoff prompt plus its exact",

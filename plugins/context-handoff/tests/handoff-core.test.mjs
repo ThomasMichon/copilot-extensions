@@ -1159,11 +1159,11 @@ function initGitRepo() {
   return dir;
 }
 
-test("attemptWorktreeSync skips (never commits) when the tree is dirty", () => {
+test("attemptWorktreeSync skips (never commits) when the tree is dirty", async () => {
   const dir = initGitRepo();
   try {
     writeFileSync(join(dir, "file.txt"), "one\nuncommitted\n");
-    const result = attemptWorktreeSync(dir);
+    const result = await attemptWorktreeSync(dir);
     assert.equal(result.attempted, false);
     assert.equal(result.synced, false);
     assert.match(result.reason, /uncommitted changes/);
@@ -1175,10 +1175,10 @@ test("attemptWorktreeSync skips (never commits) when the tree is dirty", () => {
   }
 });
 
-test("attemptWorktreeSync reports not-a-git-checkout for a plain directory", () => {
+test("attemptWorktreeSync reports not-a-git-checkout for a plain directory", async () => {
   const dir = mkdtempSync(join(tmpdir(), "context-handoff-nosync-"));
   try {
-    const result = attemptWorktreeSync(dir);
+    const result = await attemptWorktreeSync(dir);
     assert.equal(result.attempted, false);
     assert.equal(result.synced, false);
     assert.match(result.reason, /not a git checkout|git unavailable/);
@@ -1187,10 +1187,10 @@ test("attemptWorktreeSync reports not-a-git-checkout for a plain directory", () 
   }
 });
 
-test("attemptWorktreeSync attempts a sync on a clean tree and reports failure honestly when agent-worktrees is unavailable", () => {
+test("attemptWorktreeSync attempts a sync on a clean tree and reports failure honestly when agent-worktrees is unavailable", async () => {
   const dir = initGitRepo();
   try {
-    const result = attemptWorktreeSync(dir);
+    const result = await attemptWorktreeSync(dir);
     // A clean tree means the (never-commits) safety gate passes and a real
     // sync attempt is made; this environment has no reachable
     // agent-worktrees catalog entry, so it should fail honestly rather than
@@ -1200,6 +1200,29 @@ test("attemptWorktreeSync attempts a sync on a clean tree and reports failure ho
     assert.match(result.reason, /sync failed|unavailable/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attemptWorktreeSync never blocks the event loop -- it returns a pending Promise, not a synchronous result", () => {
+  // Real regression this guards: attemptWorktreeSync is invoked synchronously
+  // at the top of autoForceHandoff, before that function's first await, from
+  // a fire-and-forget call site (session.usage_info never awaits
+  // autoForceHandoff). If attemptWorktreeSync itself performed any
+  // synchronous (execFileSync-style) child-process work before its own first
+  // await, that work would run immediately and freeze the SDK event loop
+  // regardless of the caller's fire-and-forget intent. Asserting it returns
+  // a Promise synchronously (rather than the finished result) proves control
+  // returns to the event loop immediately.
+  const dir = initGitRepo();
+  try {
+    const pending = attemptWorktreeSync(dir);
+    assert.ok(pending instanceof Promise);
+    // Clean up after the promise settles so the fixture removal below doesn't
+    // race a still-running child process against this same directory.
+    return pending.finally(() => rmSync(dir, { recursive: true, force: true }));
+  } catch (error) {
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
   }
 });
 
