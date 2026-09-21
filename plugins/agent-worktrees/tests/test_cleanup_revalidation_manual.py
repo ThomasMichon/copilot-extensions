@@ -34,6 +34,40 @@ def test_cmd_cleanup_dirty_after_scan_refused(capsys, monkeypatch, tmp_path):
     assert harness.classify_calls == 2
 
 
+def test_cmd_cleanup_skips_unconcluded_dispatch_attempt_worktree(
+    capsys, monkeypatch, tmp_path
+):
+    """Live incident: a headless dispatch task's spawn-reservation worktree
+    was auto-cleaned by routine `cleanup` while a task was still retrying it
+    -- indistinguishable from an ordinary "unused, clean, no active session"
+    worktree since only `terminal_conclusion.conclude_disposable_worktree`
+    (never called yet here) flips `kind` to a MANAGED_KINDS value. A
+    dispatch-created, not-yet-concluded worktree must be excluded from this
+    routine sweep entirely, exactly like a system/bridge worktree already is.
+    """
+    harness = CleanupHarness(monkeypatch, tmp_path)
+    rec = make_record(
+        tmp_path,
+        status="active",
+        dispatch_attempt=tracking.DispatchAttempt(
+            task_id="task-1",
+            reservation_key="dispatch-task:task-1:1",
+            attempt=1,
+            driver="agent-dispatch",
+            supervisor="declared:repo:owner:repo-workers",
+            creator_machine="m",
+        ),
+    )
+    harness.seed(rec)
+    # An unused/clean classification would ordinarily be a same-scan-safe
+    # candidate; the dispatch-attempt exclusion must apply before any
+    # classification is even considered.
+    harness.set_classifier(info(S.UNUSED), info(S.UNUSED))
+    assert harness.run_batch() == 0
+    assert harness.reaped == []
+    assert harness.classify_calls == 0
+
+
 def test_cmd_cleanup_active_session_after_scan_refused(capsys, monkeypatch, tmp_path):
     harness = CleanupHarness(monkeypatch, tmp_path)
     rec = make_record(tmp_path, status="finalized")

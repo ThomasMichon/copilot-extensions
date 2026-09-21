@@ -44,6 +44,7 @@ def make_record(
     path_name: str | None = None,
     started_at: str | None = None,
     last_resumed_at: str | None = None,
+    dispatch_attempt: tracking.DispatchAttempt | None = None,
 ) -> tracking.WorktreeRecord:
     worktree_path = root / (path_name or wt_id)
     if exists:
@@ -64,6 +65,7 @@ def make_record(
         sessions=[],
         prs=[],
         kind="session",
+        dispatch_attempt=dispatch_attempt,
     )
 
 
