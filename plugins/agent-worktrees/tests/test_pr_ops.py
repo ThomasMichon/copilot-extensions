@@ -1315,6 +1315,35 @@ class TestSetPRAndStatus:
         assert res["success"] is False
         assert "No tracking record" in res["error"]
 
+    def test_set_pr_backfills_pr_id_before_branch_correction_no_duplicate(
+        self, pr_repo,
+    ):
+        # PR #3037 review finding: a legacy (no-pr_id) on-disk entry whose
+        # branch/number is corrected by a manual `set_pr` call must have
+        # its `pr_id` backfilled and PERSISTED in its own save BEFORE that
+        # correction is applied -- otherwise `_save_record_unlocked`'s
+        # merge can't recognize the renamed in-memory entry as the same
+        # as the pre-rename on-disk one (both blank `pr_id`, but now
+        # different branch values), and duplicate-appends the stale copy.
+        _config, wid, _wt_path, _ = pr_repo
+        yaml_path = cfg.tracking_dir() / f"{wid}.yaml"
+        record = tracking.load_record(yaml_path)
+        legacy_pr = tracking.PRRecord(
+            branch="legacy/original-branch", number=1, state="open",
+        )
+        assert not legacy_pr.pr_id
+        record.prs.append(legacy_pr)
+        tracking.save_record(record)
+
+        res = pr_ops.set_pr(wid, branch="legacy/corrected-branch", number=1)
+
+        assert res["success"] is True
+        persisted = tracking.load_record(yaml_path)
+        assert len(persisted.prs) == 1
+        only_pr = persisted.prs[0]
+        assert only_pr.pr_id
+        assert only_pr.branch == "legacy/corrected-branch"
+
 
 # ---------------------------------------------------------------------------
 # PR-aware finalize + push-changes (#586)

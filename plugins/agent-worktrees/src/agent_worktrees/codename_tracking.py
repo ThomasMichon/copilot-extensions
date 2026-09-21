@@ -20,7 +20,7 @@ from . import tracking
 from .codename import DEFAULT_WORDLIST, Wordlist, assign_codename, load_wordlist_or_default
 
 
-class CodenameAttributionPolicyError(Exception):
+class CodenameAttributionPolicyError(RuntimeError):
     """Raised when a PR-active repo with a custom ``codename.wordlist_path``
     attempts to allocate a NEW codename under an unconfigured/implicit
     ``pr.source_attribution`` (effort codename-attribution-by-default).

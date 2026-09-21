@@ -982,6 +982,43 @@ class TestSaveLoadRoundTrip:
 # Session registry â three-state semantics
 # ---------------------------------------------------------------------------
 
+class TestEnsurePrId:
+    """PR #3037 review finding: `ensure_pr_id` backfills a legacy entry's
+    `pr_id` with no other side effect (distinct from
+    `stamp_frozen_attribution`, which also touches attribution fields)."""
+
+    def test_assigns_id_when_missing_and_returns_true(self):
+        from agent_worktrees.tracking import PRRecord, ensure_pr_id
+
+        pr = PRRecord(branch="feature/x", number=1)
+        assert not pr.pr_id
+
+        assigned = ensure_pr_id(pr)
+
+        assert assigned is True
+        assert pr.pr_id
+
+    def test_no_op_when_already_present_and_returns_false(self):
+        from agent_worktrees.tracking import PRRecord, ensure_pr_id
+
+        pr = PRRecord(branch="feature/x", number=1, pr_id="existing-id")
+
+        assigned = ensure_pr_id(pr)
+
+        assert assigned is False
+        assert pr.pr_id == "existing-id"
+
+    def test_does_not_touch_attribution_fields(self):
+        from agent_worktrees.tracking import PRRecord, ensure_pr_id
+
+        pr = PRRecord(branch="feature/x", number=1)
+
+        ensure_pr_id(pr)
+
+        assert pr.attribution_mode == ""
+        assert pr.attribution_explicit is False
+
+
 class TestPrAttributionMerge:
     """codename-attribution-by-default (rounds 26-39): the per-entry PR
     merge in `_save_record_unlocked` protecting the frozen attribution

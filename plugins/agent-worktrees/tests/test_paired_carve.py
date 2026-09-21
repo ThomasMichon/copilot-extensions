@@ -39,6 +39,26 @@ def _common_patches(monkeypatch, tmp_path):
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda a, b: False)
     monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda p: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
+    # codename-attribution-by-default (PR #3037 review finding): the
+    # allocation-policy second revalidation reloads config fresh -- tests
+    # in this module don't register a real project on disk, so give the
+    # reload a benign default (no custom wordlist, PR inactive) rather
+    # than letting it fail into the conservative-deny fallback for every
+    # test that doesn't explicitly opt into the policy scenario.
+    # TestCarvePairedKnowledgeAttributionPolicy's own `_setup` overrides
+    # this with a scenario-specific config afterward.
+    from agent_worktrees.codename_config import CodenameConfig
+    monkeypatch.setattr(
+        m.cfg, "load_config",
+        lambda project=None: types.SimpleNamespace(
+            default_repo=types.SimpleNamespace(
+                codename=CodenameConfig(),
+                pr=types.SimpleNamespace(
+                    enabled=False, source_attribution_configured=False,
+                ),
+            )
+        ),
+    )
 
 
 class TestCarvePairedKnowledge:

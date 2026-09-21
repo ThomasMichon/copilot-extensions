@@ -1986,7 +1986,20 @@ def _carve_paired_knowledge(
                 fresh_knowledge_config
             )
         except Exception:
-            fresh_policy_kwargs = knowledge_policy_kwargs
+            # PR #3037 review finding: a reload failure here must NEVER
+            # silently fall back to the pre-lock snapshot -- if config
+            # changed from an explicit opt-in to an unconfigured custom
+            # wordlist in the interval, reusing the (permissive) stale
+            # snapshot would still authorize an allocation the fresh state
+            # would have blocked. Degrade to the conservative,
+            # ALWAYS-non-authorizing state instead (never the reverse):
+            # unconditionally forces `check_allocation_policy` to raise,
+            # so a transient reload failure fails the operation closed
+            # rather than silently authorizing it.
+            fresh_policy_kwargs = {
+                "codename_source": "custom", "pr_enabled": True,
+                "source_attribution_configured": False,
+            }
         try:
             codename_tracking.check_allocation_policy(**fresh_policy_kwargs)
         except codename_tracking.CodenameAttributionPolicyError as exc:
@@ -2357,11 +2370,14 @@ def _create_worktree_core(
             )
             fresh_wordlist_config = fresh_config
         except Exception:
-            fresh_codename_source = new_codename_source
-            fresh_pr_enabled = bool(getattr(repo.pr, "enabled", False))
-            fresh_sac = bool(
-                getattr(repo.pr, "source_attribution_configured", False)
-            )
+            # PR #3037 review finding: never fall back to the pre-lock
+            # snapshot on a reload failure -- degrade to the
+            # conservative, ALWAYS-non-authorizing state instead (see the
+            # matching fix in _carve_paired_knowledge for the full
+            # rationale).
+            fresh_codename_source = "custom"
+            fresh_pr_enabled = True
+            fresh_sac = False
             fresh_wordlist_config = config
         codename_tracking.check_allocation_policy(
             pr_enabled=fresh_pr_enabled,

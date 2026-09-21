@@ -1832,6 +1832,13 @@ def _set_pr_locked(
                     pr, attribution=False, explicit=False,
                 )
 
+    # PR #3037 review finding: backfill and PERSIST this entry's pr_id
+    # BEFORE applying any branch/number correction below (see
+    # tracking.ensure_pr_id's docstring for why this must be its own save,
+    # not folded into the final one below).
+    if tracking.ensure_pr_id(pr):
+        tracking.save_record(record)
+
     identity_changed = (
         (number is not None and number != pr.number)
         or (provider is not None and provider != pr.provider)

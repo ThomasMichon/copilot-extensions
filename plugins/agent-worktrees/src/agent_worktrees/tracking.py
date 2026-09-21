@@ -441,6 +441,30 @@ def attribution_from_frozen_mode(pr: PRRecord) -> object:
     return pr.attribution_mode == "true"
 
 
+def ensure_pr_id(pr: PRRecord) -> bool:
+    """Assign ``pr_id`` if this entry doesn't already have one -- no other
+    side effect (never touches ``attribution_mode``/``attribution_explicit``/
+    ``pr_revision``, unlike :func:`stamp_frozen_attribution`). Returns
+    whether an id was actually assigned.
+
+    A PR #3037 review finding: a caller (manual ``set-pr``) that mutates
+    an EXISTING legacy entry's ``branch``/``number`` must backfill and
+    PERSIST this entry's ``pr_id`` in a separate save BEFORE applying that
+    mutation -- if the id were assigned only as part of the same save that
+    also renames the branch, `_save_record_unlocked`'s merge would load
+    "current" (on-disk, pre-rename, ALSO still pr_id-less) and diff it
+    against this in-memory copy (post-rename, pr_id-less too, if assigned
+    only afterward): both sides genuinely blank but with DIFFERENT branch
+    values, so the identity fallback would treat them as two unrelated
+    entries and duplicate-append the stale on-disk one. Stamping and
+    persisting the id FIRST, before any rename, closes that window.
+    """
+    if pr.pr_id:
+        return False
+    pr.pr_id = secrets.token_hex(16)
+    return True
+
+
 def stamp_frozen_attribution(
     pr: PRRecord, *, attribution: object, explicit: bool,
     assign_pr_id: bool = True,
