@@ -1233,6 +1233,59 @@ def test_http_releasing_requires_proof_gated_retire(api):
     assert retired.json()["state"] == SpawnState.FAILED
 
 
+def test_http_fail_force_recovers_handle_less_releasing(api):
+    """Route-level companion to
+    ``test_force_fail_recovers_a_handle_less_releasing_reservation``: the
+    ``/fail`` route accepts ``force`` and, for a handle-less ``releasing``
+    reservation, transitions it to ``failed`` -- the CLI-reachable path an
+    operator actually drives (copilot-extensions#3179)."""
+    task_id = _create_task(api)
+    reservation = api.post(
+        "/spawn-reservations",
+        json={"task_id": task_id},
+    ).json()["reservation"]
+    api.post(
+        f"/spawn-reservations/{reservation['key']}/release",
+        json={"disposition": "failed"},
+    )
+
+    without_force = api.post(
+        f"/spawn-reservations/{reservation['key']}/fail",
+        json={"force": False},
+    )
+    assert without_force.status_code == 409
+
+    forced = api.post(
+        f"/spawn-reservations/{reservation['key']}/fail",
+        json={"force": True},
+    )
+    assert forced.status_code == 200
+    assert forced.json()["state"] == SpawnState.FAILED
+
+
+def test_http_fail_force_refuses_a_releasing_reservation_with_a_handle(api):
+    task_id = _create_task(api)
+    reservation = api.post(
+        "/spawn-reservations",
+        json={"task_id": task_id},
+    ).json()["reservation"]
+    api.post(
+        f"/spawn-reservations/{reservation['key']}/spawned",
+        json={"session_handle": "local-body:sid-1", "worktree": "w"},
+    )
+    api.post(
+        f"/spawn-reservations/{reservation['key']}/release",
+        json={"disposition": "failed"},
+    )
+
+    forced = api.post(
+        f"/spawn-reservations/{reservation['key']}/fail",
+        json={"force": True},
+    )
+    assert forced.status_code == 409
+    assert "session_handle" in forced.json()["detail"]
+
+
 def test_http_defer(api):
     """The `/defer` route mirrors `/fail`'s shape but lands `deferred`, not
     `failed` -- a carried session confirmed live/busy (#2056) is a legitimate
