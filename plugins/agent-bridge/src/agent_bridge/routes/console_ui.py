@@ -89,10 +89,14 @@ _PAGE = r"""<!doctype html>
 </header>
 <main>
   <div id="side">
-    <h2>Main instance</h2>
+    <h2>Main session</h2>
     <div id="live"></div>
     <h2>Codespaces</h2>
-    <div id="native"></div>
+    <div id="cat-codespace"></div>
+    <h2>Containers</h2>
+    <div id="cat-container"></div>
+    <h2>Worktrees</h2>
+    <div id="cat-worktree"></div>
   </div>
   <div id="stage">
     <div id="tabs">
@@ -147,12 +151,16 @@ async function api(path, opts) {
 // ---- sidebar listing ----
 async function refresh() {
   try {
-    const [live, native] = await Promise.all([
+    const [live, native, worktrees] = await Promise.all([
       api("/api/v1/live-sessions").catch(() => ({ live_sessions: [] })),
       api("/api/v1/native-executions").catch(() => ({ executions: [] })),
+      api("/api/v1/worktrees").catch(() => ({ worktrees: [] })),
     ]);
     renderLive(live.live_sessions || []);
-    renderNative(native.executions || []);
+    const execs = native.executions || [];
+    renderNative("#cat-codespace", execs.filter(e => (e.provider || "codespace") === "codespace"), "codespace");
+    renderNative("#cat-container", execs.filter(e => e.provider === "container"), "container");
+    renderWorktrees(worktrees.worktrees || worktrees.list || []);
     setStatus("Updated " + new Date().toLocaleTimeString());
   } catch (e) { setStatus(e.message, true); }
 }
@@ -164,19 +172,27 @@ function itemHtml(id, title, sub, statusClass, statusText, selKey) {
 }
 function renderLive(list) {
   $("#live").innerHTML = list.map(s => itemHtml(
-    s.session_id, s.repo || s.cwd || "main CLI",
-    (s.branch ? s.branch + " " : "") + (s.session_id||"").slice(0,8),
+    s.session_id, s.repo || s.cwd || "main session",
+    (s.branch ? s.branch + " " : "") + (s.role ? s.role + " " : "") + (s.session_id||"").slice(0,8),
     (s.liveness || s.status || "").toLowerCase(), s.turn_state || s.status || "live",
     "main:" + s.session_id
-  )).join("") || `<div class="muted" style="padding:.35rem">No live main session registered.</div>`;
+  )).join("") || `<div class="muted" style="padding:.35rem">No main session registered yet.</div>`;
 }
-function renderNative(list) {
-  $("#native").innerHTML = list.map(e => itemHtml(
-    e.executionId, e.codespace || e.target || "codespace",
+function renderNative(target, list, kind) {
+  $(target).innerHTML = list.map(e => itemHtml(
+    e.executionId, e.codespace || (e.target||"").split(":")[1] || kind,
     (e.sessionId||"").slice(0,8) + " g:" + (e.generation||"").slice(0,6),
     (e.state||"").toLowerCase(), e.state || "?",
     "native:" + e.executionId
-  )).join("") || `<div class="muted" style="padding:.35rem">No codespace native sessions.</div>`;
+  )).join("") || `<div class="muted" style="padding:.35rem">No ${kind} sessions.</div>`;
+}
+function renderWorktrees(list) {
+  $("#cat-worktree").innerHTML = (Array.isArray(list) ? list : []).map(w => itemHtml(
+    w.worktree_id || w.id, w.repo || w.worktree_id || w.id || "worktree",
+    (w.branch ? w.branch + " " : "") + String(w.worktree_id || w.id || "").slice(0,16),
+    (w.status || "").toLowerCase(), w.status || "-",
+    "worktree:" + (w.worktree_id || w.id)
+  )).join("") || `<div class="muted" style="padding:.35rem">No worktrees.</div>`;
 }
 
 // ---- selection ----
@@ -186,7 +202,16 @@ document.addEventListener("click", (e) => {
   const key = it.dataset.key;
   if (key.startsWith("native:")) selectNative(key.slice(7));
   else if (key.startsWith("main:")) selectMain(key.slice(5));
+  else if (key.startsWith("worktree:")) selectWorktree(key.slice(9));
 });
+
+function selectWorktree(id) {
+  sel = { kind: "worktree", key: "worktree:" + id, id };
+  $("#sel-label").textContent = "worktree " + id;
+  showView("main");
+  const log = $("#mainlog");
+  log.textContent = "Worktree " + id + "\n(Local worktree — drive it by tasking the main session.)\n";
+}
 
 function showView(which) {
   $("#view-term").classList.toggle("show", which === "term");

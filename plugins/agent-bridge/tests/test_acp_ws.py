@@ -87,6 +87,11 @@ class TestStatusUi:
             assert "/api/v1/native-executions/" in resp.text
             assert "/api/v1/live-sessions" in resp.text
             assert "native.v1" in resp.text
+            # Left nav is categorized by space type (Codespaces / Containers /
+            # Worktrees) plus the main session.
+            for cat in ("cat-codespace", "cat-container", "cat-worktree"):
+                assert cat in resp.text
+            assert "/api/v1/worktrees" in resp.text
 
 
 # ---------------------------------------------------------------------------
