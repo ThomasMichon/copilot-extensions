@@ -17,7 +17,7 @@
 
 import {
   writeFileSync, readFileSync, existsSync, mkdirSync, renameSync, unlinkSync,
-  openSync, closeSync, statSync, readdirSync, linkSync,
+  openSync, closeSync, statSync, readdirSync, linkSync, ftruncateSync, writeSync,
 } from "node:fs";
 import { join, basename, dirname, resolve } from "node:path";
 import { execFileSync, execFile } from "node:child_process";
@@ -421,18 +421,41 @@ export async function processStartTimeMs(pid) {
   }
 }
 
+// Writes this process's own identity token into an already-open,
+// freshly-exclusively-created lock fd: a synchronous PID-only placeholder
+// FIRST (so the file exists and is non-empty the INSTANT the exclusive
+// create succeeds, before any async work), then the full identity token
+// (which needs an async OS query -- processStartTimeMs, itself a
+// subprocess spawn on both platforms) via an in-place truncate+rewrite.
+// Round-31 finding: computing the full token BEFORE the exclusive create
+// meant the lock file did not exist at all for that query's entire
+// duration -- an outside observer (waitForWorktreeSyncToSettle) reading
+// "absent" during that window is indistinguishable from "no sync ever
+// started". A reader that observes the placeholder (unparseable as a
+// pid-startTime pair) is expected to treat it as "present but not yet the
+// final shape", never as proof of absence -- see
+// waitForWorktreeSyncToSettle's handling of unparseable content, which
+// this placeholder format deliberately cannot match. Shared by BOTH the
+// fresh-create path and the reclaim-success path below -- each is an
+// independent act of becoming the new holder and gets its own token.
+async function writeLockToken(fd) {
+  writeFileSync(fd, `${process.pid}-pending`);
+  const ownStartTime = await processStartTimeMs(process.pid);
+  const token = `${process.pid}-${ownStartTime ?? "unknown"}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  ftruncateSync(fd, 0);
+  writeSync(fd, token, 0);
+  return token;
+}
+
 async function acquireLock(lockPath) {
   // Ownership token written into the lock file's content, not just its
   // presence at a path -- see the release-time check in
   // withWorktreeSyncLock's finally block for why path-only ownership isn't
-  // enough. Leads with this process's own pid and its OS-reported start
-  // time (both parsed back out below for identity comparison), followed by
-  // a random suffix for uniqueness.
-  const ownStartTime = await processStartTimeMs(process.pid);
-  const token = `${process.pid}-${ownStartTime ?? "unknown"}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  // enough. See writeLockToken's own doc comment for the placeholder-first
+  // write sequence and the round-31 finding it closes.
   try {
     const fd = openSync(lockPath, "wx");
-    writeFileSync(fd, token);
+    const token = await writeLockToken(fd);
     return { fd, token };
   } catch (error) {
     if (error?.code !== "EEXIST") throw error;
@@ -561,9 +584,12 @@ async function acquireLock(lockPath) {
     }
     try { unlinkSync(graveyardPath); } catch { /* best-effort cleanup */ }
     // Only the single winning reclaimer reaches here, so this create is
-    // guaranteed fresh -- no residual race with another reclaimer.
+    // guaranteed fresh -- no residual race with another reclaimer. Uses
+    // the SAME placeholder-first token write as the fresh-create path
+    // above (writeLockToken) -- this is an independent act of becoming
+    // the new holder, with its own freshly-computed token.
     const fd = openSync(lockPath, "wx");
-    writeFileSync(fd, token);
+    const token = await writeLockToken(fd);
     return { fd, token };
   }
 }
@@ -650,6 +676,18 @@ async function withWorktreeSyncLock(cwd, fn) {
 // an inconclusive reading (never counted as "absent") rather than treated
 // as evidence of settlement, so a genuinely-still-active lock this
 // process merely failed to read once cannot be mistaken for "done".
+// Present-but-unparseable content is treated the SAME way -- ALWAYS
+// inconclusive, never settled, regardless of any grace window -- since
+// the lock briefly holds non-final content between its own exclusive
+// create and its full identity token being written (see acquireLock's
+// placeholder-write comment); only a genuinely ABSENT lock (ENOENT) can
+// ever be trusted quickly.
+// A confirmed-dead holder only proves no process currently holds the
+// lock -- it does NOT prove the worktree itself is consistent (a process
+// can crash mid-rebase and leave .git/rebase-merge or a half-applied
+// conflict behind), so that case additionally checks for an in-progress
+// rebase and reports it via `needsInspection` rather than implying the
+// tree is trustworthy.
 export async function waitForWorktreeSyncToSettle(cwd, { timeoutMs = 15000, pollMs = 500, startGraceMs = 0 } = {}) {
   let lockPath;
   try {
@@ -668,50 +706,59 @@ export async function waitForWorktreeSyncToSettle(cwd, { timeoutMs = 15000, poll
     try {
       content = readFileSync(lockPath, "utf-8");
     } catch (error) {
-      if (error?.code === "ENOENT") {
-        // Genuinely absent -- content stays null, handled below exactly
-        // like before.
+      if (error?.code !== "ENOENT") {
+        // Any read failure OTHER than "genuinely does not exist"
+        // (permissions, a sharing violation, transient I/O) proves
+        // NOTHING about whether a sync is in flight -- treating it the
+        // same as "absent" could conclude settled while an active lock
+        // is actually still there, just unreadable to THIS read attempt.
+        inconclusive = true;
+      }
+      // ENOENT: content stays null, meaning genuinely absent (below).
+    }
+    if (!inconclusive && content !== null) {
+      const match = content.match(/^(\d+)-(\d+|unknown)-/);
+      const holderPid = match ? Number(match[1]) : null;
+      if (holderPid !== null && isProcessAlive(holderPid)) {
+        everObservedLive = true;
+        // Fall through to poll again -- waiting for it to clear.
+      } else if (holderPid !== null) {
+        // Present, parseable, confirmed dead -- see this function's own
+        // doc comment for why that alone is not proof of a consistent
+        // worktree. Treat an inability to even ask git the same way as
+        // rebaseState.inProgress itself does elsewhere in this file --
+        // fail closed (needsInspection: true) rather than assume clean.
+        const rebaseState = await rebaseInProgress(cwd);
+        return {
+          waited: true,
+          settled: true,
+          reason: "holder-dead",
+          needsInspection: rebaseState.inProgress || rebaseState.error,
+        };
       } else {
-        // Any OTHER read failure (permissions, a sharing violation,
-        // transient I/O) proves NOTHING about whether a sync is in
-        // flight -- treating it the same as "absent" could conclude
-        // settled while an active lock is actually still there, just
-        // unreadable to THIS read attempt. Skip this reading entirely
-        // (neither absent nor live) rather than trusting it either way;
-        // the overall timeout still bounds how long this can persist.
+        // Present but UNPARSEABLE -- ALWAYS inconclusive (see doc
+        // comment), never settled from this reading alone, regardless of
+        // any grace window already elapsed.
         inconclusive = true;
       }
     }
-    if (!inconclusive) {
-      const match = content !== null ? content.match(/^(\d+)-(\d+|unknown)-/) : null;
-      const holderPid = match ? Number(match[1]) : null;
-      const liveNow = holderPid !== null && isProcessAlive(holderPid);
-      if (liveNow) {
-        everObservedLive = true;
-      } else if (everObservedLive) {
+    if (!inconclusive && content === null) {
+      if (everObservedLive) {
         // Was genuinely observed live at least once, and is now
-        // absent/unparseable/dead -- this really is settled (released or
-        // reclaimed since we last saw it in flight), not a startup artifact.
-        return {
-          waited: true,
-          settled: true,
-          reason: content === null ? "lock-absent-after-live" : (holderPid === null ? "lock-unparseable-after-live" : "holder-dead"),
-        };
+        // genuinely absent -- this really is settled (released cleanly
+        // since we last saw it in flight), not a startup artifact.
+        return { waited: true, settled: true, reason: "lock-absent-after-live" };
       } else if (Date.now() >= startGraceDeadline) {
-        // Never once observed live, and the startup grace window (zero by
-        // default) has fully elapsed -- genuinely nothing in flight (never
-        // started, or a dead/unparseable lock that predates this wait
-        // entirely).
-        return {
-          waited: true,
-          settled: true,
-          reason: content === null ? "lock-absent" : (holderPid === null ? "lock-unparseable" : "holder-dead"),
-        };
+        // Never once observed live, and the startup grace window (zero
+        // by default) has fully elapsed -- genuinely nothing in flight
+        // (never started, or genuinely absent from before this wait
+        // began).
+        return { waited: true, settled: true, reason: "lock-absent" };
       }
     }
     // Still within an opted-in startup grace window with no live evidence
-    // yet, an inconclusive read this iteration, or observed live and
-    // still waiting for it to clear -- keep polling.
+    // yet, an inconclusive/unparseable/read-error reading this iteration,
+    // or observed live and still waiting for it to clear -- keep polling.
     if (Date.now() >= deadline) {
       return { waited: true, settled: false, reason: "timeout" };
     }

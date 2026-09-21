@@ -343,11 +343,19 @@ const FORCE_TIER_SYNC_ARM_TIMEOUT_MS = 15000;
 // synchronously, right before calling this. That certainty is what
 // justifies giving waitForWorktreeSyncToSettle's own startup race (the
 // lock file does not exist for the first few async steps of a genuinely
-// in-flight sync) a short grace period there (see its own doc comment).
-// consume_handoff has no such certainty and must not adopt the same
-// grace -- it would only slow down the overwhelmingly common case where
-// no sync is in flight at all.
+// in-flight sync) a full grace period there (see its own doc comment).
 const FORCE_TIER_SYNC_START_GRACE_MS = 2000;
+
+// consume_handoff has no certainty a sync is in flight at all, and must
+// stay fast in the overwhelmingly common case where nothing is -- but a
+// residual startup race remains even after acquireLock's own
+// placeholder-write reorder (round 31): resolving the lock path itself
+// still spawns a `git rev-parse` subprocess before the lock file can
+// exist at that path at all. A small grace narrows that specific,
+// already-much-smaller residual window (round-31 finding: "use a durable
+// start marker or a bounded successor grace") without meaningfully
+// slowing the common case.
+const CONSUME_HANDOFF_START_GRACE_MS = 500;
 
 // Auto-draft, store, and trigger a handoff without agent involvement. Fire-
 // and-forget from the session.usage_info handler (below); reports its own
@@ -792,6 +800,7 @@ const session = await joinSession({
         // successor reads a momentarily-inconsistent tree.
         const settleResult = await waitForWorktreeSyncToSettle(cwd, {
           timeoutMs: FORCE_TIER_SYNC_ARM_TIMEOUT_MS,
+          startGraceMs: CONSUME_HANDOFF_START_GRACE_MS,
         });
         if (settleResult.waited && !settleResult.settled) {
           session.log(
@@ -799,6 +808,15 @@ const session = await joinSession({
             "sync still appears to be in progress after the wait window; " +
             "proceeding anyway -- verify the worktree yourself if anything " +
             "looks unexpectedly stale or mid-rebase.",
+            { level: "warning" },
+          );
+        } else if (settleResult.needsInspection) {
+          session.log(
+            "[Context Handoff] consume_handoff: the predecessor's worktree " +
+            "sync lock recorded a holder that is no longer running, AND an " +
+            "in-progress rebase was found -- the predecessor may have " +
+            "crashed mid-sync. Inspect the worktree before trusting it; a " +
+            "conflicted rebase may need `git rebase --abort` before continuing.",
             { level: "warning" },
           );
         }

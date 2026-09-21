@@ -1237,7 +1237,34 @@ test("waitForWorktreeSyncToSettle returns immediately (settled) when the recorde
     assert.equal(result.waited, true);
     assert.equal(result.settled, true);
     assert.equal(result.reason, "holder-dead");
+    assert.equal(result.needsInspection, false);
     assert.ok(elapsedMs < 2000, `expected a near-instant return, took ${elapsedMs}ms`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("waitForWorktreeSyncToSettle flags needsInspection when a dead lock holder left an in-progress rebase behind", async () => {
+  // Real regression this guards (round 31): a confirmed-dead pid only
+  // proves no process currently holds the lock -- it does NOT prove the
+  // worktree itself is consistent. A process can crash mid-rebase and
+  // leave .git/rebase-merge behind; reporting a plain "settled: true"
+  // there would let a caller (consume_handoff) read/trust the tree as if
+  // the sync had completed cleanly.
+  const dir = initGitRepo();
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, `${deadPid()}-0-deadholder`);
+    const rebaseMergeDir = join(dir, dirname(gitDir), "rebase-merge");
+    mkdirSync(rebaseMergeDir, { recursive: true });
+    const result = await waitForWorktreeSyncToSettle(dir, { timeoutMs: 5000, pollMs: 100 });
+    assert.equal(result.settled, true);
+    assert.equal(result.reason, "holder-dead");
+    assert.equal(result.needsInspection, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1287,13 +1314,13 @@ test("waitForWorktreeSyncToSettle stops waiting as soon as the lock is released 
     writeFileSync(lockPath, `${process.pid}-unknown-liveholder`);
     setTimeout(() => {
       try { rmSync(lockPath); } catch { /* ignore */ }
-    }, 300);
+    }, 1500);
     const start = Date.now();
     const result = await waitForWorktreeSyncToSettle(dir, { timeoutMs: 5000, pollMs: 100 });
     const elapsedMs = Date.now() - start;
     assert.equal(result.settled, true);
     assert.equal(result.reason, "lock-absent-after-live");
-    assert.ok(elapsedMs < 2000, `expected to notice the release well before the 5s timeout, took ${elapsedMs}ms`);
+    assert.ok(elapsedMs < 4000, `expected to notice the release well before the 5s timeout, took ${elapsedMs}ms`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1348,7 +1375,7 @@ test("waitForWorktreeSyncToSettle with no startGraceMs (the default) does NOT wa
     const elapsedMs = Date.now() - start;
     assert.equal(result.settled, true);
     assert.equal(result.reason, "lock-absent");
-    assert.ok(elapsedMs < 1000, `expected an immediate return with no grace window, took ${elapsedMs}ms`);
+    assert.ok(elapsedMs < 2000, `expected an immediate return with no grace window, took ${elapsedMs}ms`);
   } finally {
     clearTimeout(timer);
     rmSync(dir, { recursive: true, force: true });

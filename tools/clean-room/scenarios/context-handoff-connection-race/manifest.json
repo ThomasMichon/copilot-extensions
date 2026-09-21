@@ -1,0 +1,26 @@
+{
+  "name": "context-handoff-connection-race",
+  "description": "Tier-P F1 repro rig for github/copilot-agent-runtime#22266: forces a SECOND extension connection to join a LIVE session already running the installed context-handoff extension, using the runtime's own bootstrap entrypoint (extension_bootstrap.mjs) with a hand-set COPILOT_EXTENSION_PARENT_PID/SESSION_ID rather than the harness's own supervised launch path. Confirms the manual-join tool-name-clash mechanism (validate_external_tools rejecting a second connection under one session_id) reproduces reliably in a fresh clean-room box, independent of the specific machine/session state that first surfaced it. Report-only repro rig, not a regression gate: it asserts the clash IS observed (proving the mechanism), and flags loudly if it stops reproducing (either fixed upstream, or the container's layout diverged from assumptions).",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "none", "ado": "none" },
+  "validates": "context-handoff manual-join tool-name-clash (copilot-agent-runtime#22266)",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_HOLD_SECONDS": "the number of seconds the first (real, harness-launched) session is kept alive so the manual second connection has a live target to join; default 25"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/context-handoff",
+    "cr-logs/manual-join.log (stderr of the manually-launched second connection)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install context-handoff" },
+    { "n": 2, "title": "start a real, long-lived session (context-handoff enabled) and capture its session id" },
+    { "n": 3, "title": "resolve the runtime's bootstrap entrypoint + bundled SDK path" },
+    { "n": 4, "title": "manually join the live session with a second connection; assert the clash" }
+  ]
+}

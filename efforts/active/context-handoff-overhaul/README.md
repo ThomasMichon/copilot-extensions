@@ -2459,3 +2459,73 @@ inspection of both files. One new HIGH finding, fixed:
   127 tests/125 pass (2 pre-existing skips, unchanged), exhaustive suite
   46/46 pass (173 total, no regressions). Bumped
   plugin.json/marketplace.json to `0.1.1-dev41`. All guards pass.
+
+### 2026-09-21 (cont.) -- PR #3167 round 31: placeholder-first lock creation, fail-closed unparseable content, rebase-consistency check, CLI consume parity
+
+Round 31 surfaced 4 new findings (3 HIGH, 1 MEDIUM), all fixed -- the
+deepest round yet into the pickup-arm/successor-startup race family:
+
+- **(HIGH) Zero successor grace still permitted consumption before the
+  sync lock even opened:** `consume_handoff`'s `startGraceMs: 0` meant it
+  could read "lock-absent" during the genuine async gap between
+  `attemptWorktreeSync` dispatching and `acquireLock`'s own `openSync`
+  actually creating the file. Root-caused and fixed at the SOURCE rather
+  than tuning another grace window: `acquireLock` now writes a
+  synchronous PID-only placeholder into the lock file IMMEDIATELY upon a
+  successful exclusive create, BEFORE awaiting `processStartTimeMs` (a
+  subprocess spawn) -- the file exists and is non-empty the instant the
+  create succeeds, closing the gap this round's finding was really about.
+  Extracted this into a shared `writeLockToken(fd)` helper used by both
+  the fresh-create and reclaim-success paths (each an independent act of
+  becoming the new holder, each gets its own freshly-computed token).
+  One residual, smaller gap remains -- resolving the lock's PATH itself
+  still spawns a `git rev-parse` subprocess before any file can exist at
+  all -- deliberately not closed by reimplementing git's own path
+  resolution by hand (high risk, marginal gain given the much narrower
+  remaining window); `consume_handoff` instead got a small
+  `CONSUME_HANDOFF_START_GRACE_MS` (500ms) to cover exactly that residual
+  case without meaningfully slowing the common "nothing in flight" path.
+- **(HIGH) `handoff-cli.mjs`'s `cmdConsume` skipped the settling check
+  entirely:** the extension-free successor path (Bare-resumed sessions,
+  or an agent invoking the CLI directly) called the consume helpers with
+  no wait at all, unlike the extension handler's bounded check. Made
+  `cmdConsume` async, added the SAME `waitForWorktreeSyncToSettle` call
+  (mirroring `consume_handoff`'s reasoning and constants), and awaited it
+  from the command dispatcher.
+- **(HIGH) Present-but-unparseable lock content fails open:** with
+  `startGraceMs: 0`, a lock briefly showing non-final content (the
+  placeholder-write window above, or genuinely corrupt/legacy data) was
+  treated as settled immediately -- exactly the fail-open mistake this
+  whole lock epic keeps having to close. `waitForWorktreeSyncToSettle` now
+  treats present-but-unparseable content as ALWAYS inconclusive (never
+  settled), regardless of any grace window, bounded only by the overall
+  `timeoutMs` -- only a genuinely ABSENT lock (`ENOENT`) can ever be
+  trusted quickly.
+- **(MEDIUM) A confirmed-dead lock holder doesn't prove a consistent
+  worktree:** a process can crash mid-rebase and leave `.git/rebase-merge`
+  behind; reporting a plain `settled: true` from a dead-holder reading let
+  `consume_handoff` skip its own warning and trust a possibly-broken tree.
+  `waitForWorktreeSyncToSettle` now checks `rebaseInProgress` when
+  concluding via the dead-holder path and returns a new `needsInspection`
+  flag; both `consume_handoff` and the CLI's `cmdConsume` log a distinct
+  warning (mentioning `git rebase --abort`) when it's set.
+- The 2 round-29 findings still listed "Open" this round (schedule-trigger
+  scope, lock-visibility race) carried `null` line anchors -- re-confirmed
+  resolved by direct file inspection, same stale-carryover pattern noted
+  in round 30's entry.
+- **Fixed a self-inflicted bug during this round's own work:** the
+  placeholder-first reorder initially moved `token`'s declaration inside
+  the try block, making it unreachable from the reclaim-success path's
+  own final `return` -- caught immediately by the exhaustive suite (every
+  reclaim-path test failing) before this was ever pushed; fixed by
+  extracting the shared `writeLockToken` helper described above.
+- 3 new/changed exhaustive-suite tests (a `needsInspection` true/false
+  pair for the dead-holder+rebase case; the non-ENOENT fail-closed test
+  already added last round continues to pass unchanged) plus loosened
+  timing margins on 2 pre-existing timing-sensitive tests that proved
+  too tight under this session's own heavy concurrent test-suite load
+  (confirmed passing reliably in isolation both before and after -- not a
+  logic regression). `node --test`: fast suite 127 tests/125 pass (2
+  pre-existing skips, unchanged) plus `cli-parity`/`cli-timeouts` still
+  green; exhaustive suite 47/47 pass (174 total, no regressions). Bumped
+  plugin.json/marketplace.json to `0.1.1-dev42`. All guards pass.
