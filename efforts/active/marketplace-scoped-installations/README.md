@@ -406,16 +406,20 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   silent fallback could operate on a foreign cell's `agent-worktrees` --
   and a second finding that the same-cell subprocess spawn was missing
   `no_window_kwargs()` (present on agent-logger's equivalent same-cell
-  call); both fixed before merge. A follow-up review round caught a third,
-  more subtle bug: the owner-root passed to `validate_owner()` was
-  `install_dir()` (honoring `AGENT_BRIDGE_INSTALL_DIR`), which reflects
-  *this process's own runtime root* -- only guaranteed to equal the
-  required plugin root (`.../marketplaces/<cell>/plugins/agent-bridge`) for
-  a freshly-resolved `runtime-gate.sh` invocation, not e.g. a long-lived
-  daemon started from a service unit's static environment. Switched to
-  `AGENT_BRIDGE_PAYLOAD_ROOT` (the same-cell launcher's own rebound
-  variable, set on every peer-launch invocation), falling back to
-  `install_dir()` only when that variable is absent.
+  call); both fixed before merge. A follow-up review round raised a third
+  concern -- that `install_dir()` (honoring `AGENT_BRIDGE_INSTALL_DIR`)
+  might not equal the required plugin root for a long-lived daemon -- and a
+  fix switched to `AGENT_BRIDGE_PAYLOAD_ROOT` instead; a *subsequent* review
+  round caught that this "fix" was itself wrong: `AGENT_BRIDGE_PAYLOAD_ROOT`
+  is a different, replaceable path (the marketplace source payload
+  `runtime-gate` resolves *from*), while tracing `installation_context.py`'s
+  own `_activation_result` confirms `runtime-gate.sh`/`.ps1` set
+  `AGENT_BRIDGE_INSTALL_DIR` to the *validated* `runtimeRoot`, which equals
+  the plugin root exactly when namespaced/active
+  (`runtime_root = plugin_root if actual_mode == "namespaced" else
+  legacy_root`). Reverted to `install_dir()` and added a regression test
+  with a distinct (wrong) `AGENT_BRIDGE_PAYLOAD_ROOT` value to prove
+  resolution ignores it.
 - Found and fixed a **pre-existing gap** in `tools/check-version-bump.py`
   while touching it: its hardcoded `packaged_peers` list (which plugins must
   bump when `libs/peer-launch` changes) already omitted `agent-index` and

@@ -94,12 +94,12 @@ owner/receipt/governance failure raises `ContextRefused` rather than
 degrading to ambient `PATH` -- a silent fallback could otherwise retire a
 foreign cell's predecessor session. The legacy ambient lookup is used only
 when no explicit context is present at all. The owner root passed to
-`validate_owner()` is `AGENT_BRIDGE_PAYLOAD_ROOT` (the variable this same
-boundary rebinds on every peer-launch invocation), not `install_dir()`'s
-`AGENT_BRIDGE_INSTALL_DIR` -- the latter reflects this process's own
-runtime root, which only coincides with the required plugin root for a
-freshly-resolved `runtime-gate.sh` invocation, not e.g. a long-lived daemon
-started from a service unit's static environment.
+`validate_owner()` is `install_dir()`'s `AGENT_BRIDGE_INSTALL_DIR` --
+`runtime-gate.sh`/`.ps1` set that variable to the *validated* `runtimeRoot`
+before dispatching into this process, which equals the plugin root exactly
+when namespaced/active. `AGENT_BRIDGE_PAYLOAD_ROOT` is a different,
+replaceable path (the marketplace source payload `runtime-gate` resolves
+*from*, not the cell-namespaced plugin root) and must not be used here.
 
 ## Validation
 

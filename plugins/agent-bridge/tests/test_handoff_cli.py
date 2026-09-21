@@ -409,53 +409,22 @@ class TestHandoffCheckSameCell:
         (cell / "plugins" / "agent-worktrees").mkdir()
         own = {"cellRoot": str(cell), "pluginRoot": str(root)}
         monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
-        monkeypatch.setenv("AGENT_BRIDGE_PAYLOAD_ROOT", str(root))
-        # A daemon's runtime root need not equal the plugin root (e.g. a
-        # long-lived process started from a service unit's static
-        # environment); resolution must use AGENT_BRIDGE_PAYLOAD_ROOT, not
-        # install_dir(), so leave the latter pointed elsewhere and assert
-        # validate_owner is actually called with the payload root.
-        monkeypatch.setattr(m, "install_dir", lambda: tmp_path / "not-the-plugin-root")
+        # AGENT_BRIDGE_PAYLOAD_ROOT is a distinct, replaceable path (the
+        # marketplace source payload runtime-gate resolves *from*), never
+        # equal to the cell-namespaced plugin root in a real install --
+        # setting it here to something else proves resolution does not use
+        # it. install_dir() (AGENT_BRIDGE_INSTALL_DIR) is what runtime-gate
+        # actually sets to the validated plugin root.
+        monkeypatch.setenv("AGENT_BRIDGE_PAYLOAD_ROOT", str(tmp_path / "not-the-plugin-root"))
+        monkeypatch.setattr(m, "install_dir", lambda: root)
 
         def _validate_owner(owner_name: str, own_root: Path, raw_context: str) -> dict[str, str]:
-            assert own_root == root, (
-                f"expected AGENT_BRIDGE_PAYLOAD_ROOT ({root}), got {own_root}"
-            )
+            assert own_root == root, f"expected the plugin root ({root}), got {own_root}"
             return own
 
         monkeypatch.setattr(m._peer_launch, "validate_owner", _validate_owner)
         monkeypatch.setattr(m.shutil, "which", lambda _: pytest.fail("ambient PATH selected"))
         return own
-
-    def test_missing_payload_root_falls_back_to_install_dir(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """When AGENT_BRIDGE_PAYLOAD_ROOT is absent, resolution still uses
-        install_dir() (the prior behavior), not a hard failure."""
-        cell = tmp_path / "marketplaces" / "test-cell"
-        root = cell / "plugins" / "agent-bridge"
-        root.mkdir(parents=True)
-        (cell / "plugins" / "agent-worktrees").mkdir()
-        own = {"cellRoot": str(cell), "pluginRoot": str(root)}
-        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
-        monkeypatch.delenv("AGENT_BRIDGE_PAYLOAD_ROOT", raising=False)
-        monkeypatch.setattr(m, "install_dir", lambda: root)
-
-        def _validate_owner(owner_name: str, own_root: Path, raw_context: str) -> dict[str, str]:
-            assert own_root == root
-            return own
-
-        monkeypatch.setattr(m._peer_launch, "validate_owner", _validate_owner)
-        monkeypatch.setattr(m.shutil, "which", lambda _: pytest.fail("ambient PATH selected"))
-        monkeypatch.setattr(
-            m.subprocess, "run",
-            lambda *a, **k: _FakeCompletedProcess(
-                m.json.dumps({"checked": 1, "found": 0, "executed": False, "findings": []})
-            ),
-        )
-
-        with pytest.raises(SystemExit):
-            m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
 
     def test_uses_native_same_cell_prefix(
         self, owner: dict[str, str], monkeypatch: pytest.MonkeyPatch,

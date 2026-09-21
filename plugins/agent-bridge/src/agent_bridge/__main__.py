@@ -5449,17 +5449,16 @@ def _cmd_handoff_request(args: argparse.Namespace) -> None:
 
 def _agent_bridge_owner_root() -> Path:
     """The plugin-root ``validate_owner`` requires: ``.../marketplaces/<cell>/
-    plugins/agent-bridge``. ``AGENT_BRIDGE_PAYLOAD_ROOT`` is the same-cell
-    launcher's own rebound variable (set on every peer-launch invocation, see
-    ``_peer_launch.peer_environment``); ``AGENT_BRIDGE_INSTALL_DIR`` (what
-    :func:`install_dir` honors) instead reflects this process's own runtime
-    root, which is only guaranteed to equal the plugin root for a
-    freshly-resolved ``runtime-gate.sh`` invocation, not e.g. a long-lived
-    daemon started from a service unit's static environment. Falls back to
-    :func:`install_dir` when the payload-root variable is absent, preserving
-    prior behavior for that case."""
-    payload_root = os.environ.get("AGENT_BRIDGE_PAYLOAD_ROOT")
-    return Path(payload_root) if payload_root else install_dir()
+    plugins/agent-bridge``. ``AGENT_BRIDGE_INSTALL_DIR`` (what
+    :func:`install_dir` honors) is what ``runtime-gate.sh``/``.ps1`` set to
+    the *validated* ``runtimeRoot`` before dispatching into this process --
+    which equals the plugin root exactly when namespaced/active (see
+    ``installation_context.py``'s ``_activation_result``:
+    ``runtime_root = plugin_root if actual_mode == "namespaced" else
+    legacy_root``). ``AGENT_BRIDGE_PAYLOAD_ROOT`` is a different, replaceable
+    path (the marketplace source payload runtime-gate resolves *from*, not
+    the cell-namespaced plugin root) and must not be used here."""
+    return install_dir()
 
 
 def _agent_worktrees_launch_prefix() -> list[str] | None:
