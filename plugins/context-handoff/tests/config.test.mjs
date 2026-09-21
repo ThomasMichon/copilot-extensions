@@ -236,10 +236,11 @@ test("symlinked config directory is rejected", { skip: process.platform === "win
   });
 });
 
-// aperture-labs#7291: findRepositoryRootAsync / loadContextHandoffConfigAsync
-// are the non-blocking twins extension.mjs's load-time init uses (run
-// concurrently with joinSession() rather than blocking the event loop before
-// it). They must agree with the synchronous originals on every outcome.
+// findRepositoryRootAsync / loadContextHandoffConfigAsync are the
+// non-blocking twins extension.mjs's load-time init uses (fired
+// fire-and-forget alongside joinSession() rather than blocking the event
+// loop before it). They must agree with the synchronous originals on every
+// outcome.
 test("async findRepositoryRoot agrees with the synchronous original", async () => {
   await withRepositoryAsync(async (root) => {
     const nested = join(root, "src", "feature");

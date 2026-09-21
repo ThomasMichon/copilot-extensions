@@ -71,19 +71,25 @@ import {
 } from "./thresholds.mjs";
 
 // --- State ---
-// aperture-labs#7291: this used to be a synchronous
-// `loadContextHandoffConfig(process.cwd())` call at module top level, before
-// joinSession() -- a smaller, spawn-free instance of the same load-time-
-// blocking-I/O class that broke agent-bridge's readiness handshake (four
-// sequential execSync/execFileSync spawns there vs. a bounded directory walk
-// + up to two config-file reads here). `handoffConfig` starts as the safe,
-// zero-I/O default and is resolved via `handoffConfigPromise`, fired
-// fire-and-forget -- NEVER awaited on the path to joinSession()/readiness (a
-// slow filesystem must not hold extension registration hostage). Declared
-// `let` (not `const`) so every closure that reads `handoffConfig.mode`/
-// `.thresholds` -- all inside tool handlers or session event listeners, i.e.
-// only ever invoked after joinSession() has already resolved -- sees the
-// resolved value by the time it matters.
+// This used to be a synchronous `loadContextHandoffConfig(process.cwd())`
+// call at module top level, before joinSession() -- a smaller, spawn-free
+// instance of the same load-time-blocking-I/O class that broke
+// agent-bridge's readiness handshake (four sequential execSync/execFileSync
+// spawns there vs. a bounded directory walk + up to two config-file reads
+// here). `handoffConfig` starts as the safe, zero-I/O default and is
+// resolved via `handoffConfigPromise`, fired fire-and-forget -- NEVER
+// awaited on the path to joinSession()/readiness (a slow filesystem must not
+// hold extension registration hostage). Declared `let` (not `const`) so
+// every closure that reads `handoffConfig.mode`/`.thresholds` sees the
+// resolved value.
+//
+// Because the promise isn't awaited before readiness, every tool handler
+// and session-event listener that reads `handoffConfig.mode`/`.thresholds`
+// MUST `await handoffConfigPromise;` as its first act -- otherwise a call
+// arriving before the config resolves would silently act on the safe
+// default (`manual-only`) instead of a repository's real `mode: off`,
+// `mode: auto`, or custom thresholds. Awaiting an already-resolved promise
+// is a cheap microtask, so this costs nothing once config has loaded.
 let handoffConfig = defaultConfig();
 const handoffConfigPromise = loadContextHandoffConfigAsync(process.cwd()).then(
   (resolved) => {
@@ -376,17 +382,17 @@ async function autoForceHandoff(sid, cwd) {
 }
 
 // --- Extension ---
-// aperture-labs#7291 review: joinSession() must resolve on its own -- it is
-// NOT wrapped in Promise.all with handoffConfigPromise, or a slow filesystem
-// would delay readiness by the same I/O latency this change removes.
+// Review note: joinSession() must resolve on its own -- it is NOT wrapped
+// in Promise.all with handoffConfigPromise, or a slow filesystem would
+// delay readiness by the same I/O latency this change removes.
 const session = await joinSession({
-onPermissionRequest,
+  onPermissionRequest,
 
-tools: [
-  {
-    name: "generate_handoff_prompt",
-    description:
-      "Generate structured session facts for creating a continuation " +
+  tools: [
+    {
+      name: "generate_handoff_prompt",
+      description:
+        "Generate structured session facts for creating a continuation " +
         "prompt. Returns session metadata, files modified, git status, " +
         "and key tool invocations. Compose the compact effort-backed shape " +
         "when a valid open active effort exists; otherwise compose the full " +
@@ -414,6 +420,7 @@ tools: [
       },
       handler: async (args, invocation) => {
         ensureState(invocation);
+        await handoffConfigPromise;
         if (!manualHandoffEnabled(handoffConfig.mode)) {
           return handoffDisabledResult();
         }
@@ -543,6 +550,7 @@ tools: [
       },
       handler: async (args, invocation) => {
         ensureState(invocation);
+        await handoffConfigPromise;
         if (!manualHandoffEnabled(handoffConfig.mode)) {
           return handoffDisabledResult();
         }
@@ -627,6 +635,7 @@ tools: [
       },
       handler: async (args, invocation) => {
         ensureState(invocation);
+        await handoffConfigPromise;
         if (!manualHandoffEnabled(handoffConfig.mode)) {
           return {
             textResultForLlm: handoffDisabledResult(),
@@ -722,6 +731,7 @@ tools: [
       },
       handler: async (args, invocation) => {
         ensureState(invocation);
+        await handoffConfigPromise;
         if (!manualHandoffEnabled(handoffConfig.mode)) {
           return handoffDisabledResult();
         }
@@ -824,6 +834,7 @@ tools: [
         "session-state marker when automatic mode is enabled.",
       handler: async (ctx) => {
         void ctx;
+        await handoffConfigPromise;
         if (!manualHandoffEnabled(handoffConfig.mode)) {
           await session.log(handoffDisabledResult(), { level: "warning" });
           return;
@@ -856,6 +867,7 @@ tools: [
         "prompt into THIS session (foreground). Consumes the agent-dispatch " +
         "handoff task if present, else the newest matching worktree handoff file.",
       handler: async (ctx) => {
+        await handoffConfigPromise;
         if (!manualHandoffEnabled(handoffConfig.mode)) {
           await session.log(handoffDisabledResult(), { level: "warning" });
           return;
@@ -961,6 +973,7 @@ tools: [
         "Compatibility alias for /consume-handoff. Asks this session to invoke " +
         "the canonical stored-handoff consumer.",
       handler: async () => {
+        await handoffConfigPromise;
         if (!manualHandoffEnabled(handoffConfig.mode)) {
           await session.log(handoffDisabledResult(), { level: "warning" });
           return;
@@ -996,10 +1009,10 @@ state.cwd = state.cwd || process.cwd();
 state.turnCount = 0;
 // handoffConfig may not have resolved yet at this exact point (it is
 // deliberately not awaited before/alongside joinSession() -- see the
-// aperture-labs#7291 comment above `handoffConfigPromise`). Chain the
-// warning surface off the promise instead of reading `handoffConfig`
-// synchronously here, so it still reaches the user once config resolves
-// even if that happens a beat after readiness.
+// comment above `handoffConfigPromise`). Chain the warning surface off the
+// promise instead of reading `handoffConfig` synchronously here, so it
+// still reaches the user once config resolves even if that happens a beat
+// after readiness.
 handoffConfigPromise.then((resolved) => {
   if (resolved.warning) {
     session.log(`[Context Handoff] ${resolved.warning}`, { level: "warning" });
@@ -1163,7 +1176,7 @@ session.on("session.idle", () => {
 // The session.usage_info event fires with exact token counts after each
 // model interaction. This is the authoritative signal for context usage.
 
-session.on("session.usage_info", (event) => {
+session.on("session.usage_info", async (event) => {
   const d = event.data;
   state.currentTokens = d.currentTokens;
   state.tokenLimit = d.tokenLimit;
@@ -1173,6 +1186,7 @@ session.on("session.usage_info", (event) => {
   state.messagesLength = d.messagesLength;
   state.lastUtilization = d.tokenLimit > 0 ? d.currentTokens / d.tokenLimit : 0;
   const usage = formatContextUsage(d.currentTokens, d.tokenLimit);
+  await handoffConfigPromise;
   if (!automaticHandoffEnabled(handoffConfig.mode)) {
     persistState();
     return;

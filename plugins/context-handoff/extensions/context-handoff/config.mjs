@@ -46,8 +46,8 @@ async function existsAsync(path) {
 
 // Async twin of findRepositoryRoot, using non-blocking fs/promises calls.
 // Extension load-time initialization (extension.mjs, pre-joinSession()) uses
-// this variant exclusively -- the same class of bug as aperture-labs#7291
-// (agent-bridge's synchronous execSync chain blocking readiness), just a much
+// this variant exclusively -- the same class of bug documented for
+// agent-bridge's synchronous execSync chain blocking readiness, just a much
 // cheaper instance (bounded existsSync-style stats up the tree, no subprocess
 // spawns). The synchronous findRepositoryRoot above stays as-is for the CLI
 // (handoff-cli.mjs) and tests, where blocking a short-lived process is fine.
@@ -272,13 +272,13 @@ export function loadContextHandoffConfig(startDir, options = {}) {
 // Async twin of loadContextHandoffConfig -- identical logic and return shape,
 // but every fs call is a non-blocking fs/promises equivalent. This is the
 // variant extension.mjs's load-time initialization uses (see
-// findRepositoryRootAsync above): it runs concurrently with joinSession()
-// rather than blocking the event loop before it, per aperture-labs#7291's
-// finding that synchronous load-time I/O -- even a bounded, spawn-free one
-// like this directory walk -- gates the extension-readiness handshake. The
-// synchronous loadContextHandoffConfig above is unchanged and remains the
-// entry point for handoff-cli.mjs and existing tests, where blocking a
-// short-lived process is harmless.
+// findRepositoryRootAsync above): it is fired fire-and-forget alongside
+// joinSession() rather than blocking the event loop before it, per a
+// companion investigation's finding that synchronous load-time I/O -- even
+// a bounded, spawn-free one like this directory walk -- gates the
+// extension-readiness handshake. The synchronous loadContextHandoffConfig
+// above is unchanged and remains the entry point for handoff-cli.mjs and
+// existing tests, where blocking a short-lived process is harmless.
 export async function loadContextHandoffConfigAsync(startDir, options = {}) {
   const repositoryRoot = await findRepositoryRootAsync(startDir);
   const home = options.homeDir ?? homedir();

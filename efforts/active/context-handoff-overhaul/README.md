@@ -423,7 +423,7 @@ Verbatim from the operator:
   in Copilot CLI sessions at all -- needs controlled experimentation with
   the plugin's manifest/extension shape to isolate the rejection cause.
   **This plugin's own contribution addressed:** confirmed a shared root
-  cause with a parallel investigation (internal issue #7291) -- synchronous,
+  cause with a parallel investigation -- synchronous,
   blocking I/O at extension load time, before `joinSession()`, delaying the
   readiness handshake. `agent-bridge`'s dominant instance (blocking
   subprocess spawns) was fixed separately (PR #3098); this plugin's smaller,
@@ -1433,14 +1433,14 @@ gate land._
   `fs.existsSync` swallows errors and returns `false` rather than throwing,
   so this is a **latency** hypothesis, not an uncaught-exception hypothesis
   -- ruled out crash-on-permission-error as the mechanism.
-- **Confirmed by a parallel investigation, same session window:** internal
-  issue #7291 root-caused the dominant instance of this exact bug class in
-  `agent-bridge`'s `resolveMetadata()` -- four sequential, blocking
-  `execSync`/`execFileSync` subprocess spawns (up to ~29s combined) run
-  synchronously before `joinSession()`, freezing the event loop long enough
-  that the readiness handshake itself missed its window (fixed upstream in
-  copilot-extensions PR #3098: async, parallel, fire-and-forget from
-  load-time init). That investigation explicitly flagged this plugin's
+- **Confirmed by a parallel investigation, same session window:** a
+  companion investigation root-caused the dominant instance of this exact
+  bug class in `agent-bridge`'s `resolveMetadata()` -- four sequential,
+  blocking `execSync`/`execFileSync` subprocess spawns (up to ~29s combined)
+  run synchronously before `joinSession()`, freezing the event loop long
+  enough that the readiness handshake itself missed its window (fixed
+  upstream in copilot-extensions PR #3098: async, parallel, fire-and-forget
+  from load-time init). That investigation explicitly flagged this plugin's
   smaller `loadContextHandoffConfig()` directory walk as a secondary,
   lower-risk instance of the same class -- confirming the lead above
   without requiring the deeper live-session instrumentation originally
