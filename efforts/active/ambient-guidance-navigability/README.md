@@ -260,7 +260,7 @@ private paths).
       review-only until explicitly added to the allowlist) -- an
       untrustworthy source can be perfectly reproducible and still unsafe to
       auto-merge.
-- [ ] **Conflict-dispatch primitive**: a reusable helper (candidate home:
+- [x] **Conflict-dispatch primitive**: a reusable helper (candidate home:
       `agent-dispatch`, since dispatch itself is a copilot-extensions
       plugin) generalizing `config-reflect`'s `conflict_dispatch.py` pattern
       -- domain-scoped dedup key, compact descriptor, async `agent-dispatch
@@ -528,3 +528,39 @@ _Pending._
 - `customizing-copilot`'s full suite (175 passed, 6 skipped),
   `check-version-bump`, `check-version-consistency`, and
   `check-docs-consistency` all green.
+
+### 2026-09-20 (cont.) -- Phase 2 slice 2: the conflict-dispatch primitive
+- Landed `plugins/agent-dispatch/src/agent_dispatch/conflict_dispatch.py`:
+  the generalized "resolve the conflicts on this stuck PR" dispatch helper
+  the Plan calls for, home in `agent-dispatch` as suggested. Rather than
+  duplicating the private prior art's hand-authored goal text, it builds on
+  top of this plugin's own existing `conflict-resolution` loop recipe
+  (`agent_dispatch.recipes`) -- discovered mid-slice that the generic
+  recipe abstraction already covers the reusable dedup/PR-driving contract;
+  this primitive's real, non-duplicated contribution is layering the one
+  thing that recipe is deliberately policy-agnostic about: which named
+  reconciler sub-agent owns a domain's resolution *policy* (device-biased
+  config resolution vs. "never force-overwrite a hand-edited managed
+  projection", etc.).
+- Domain-scoped dedup key (`label:domain`), a compact JSON descriptor
+  (`kind`/`domain`/`repo`/`pr`/`branch`/`base`, optional `extra`), a
+  `descriptor_line`/`parse_descriptor_line` pair for the same observable
+  stdout-marker convention the prior art uses, and `build_dispatch` which
+  renders the shared recipe then appends the reconciler-delegation
+  instruction, returning both the descriptor and the exact
+  `agent-dispatch create` argv (title/`--prompt`/`--goal`/`--done-criteria`
+  matching `recipes kick`'s own field mapping, so a task built this way is
+  indistinguishable from one kicked directly).
+- 11 tests (`test_conflict_dispatch.py`): descriptor shape, marker
+  roundtrip (including rejecting another producer's `kind` sharing a log
+  stream), and `build_dispatch` proving it genuinely reuses the recipe's
+  shared safety clauses (not a hand-authored duplicate) while adding the
+  domain delegation.
+- `agent-dispatch`'s full suite (3059 passed across its sharded runner),
+  `check-version-bump`, `check-version-consistency`, `check-docs-consistency`
+  all green.
+- Still open in Phase 2: the worker script/scheduler wiring that actually
+  calls `projection_reflect`'s decision layer and this dispatch primitive,
+  the `projection-reconciler` agent template this primitive names but does
+  not yet define, the `setting-up-instruction-sync-worker` skill, and the
+  immutable-pin verification gap already flagged in slice 1.
