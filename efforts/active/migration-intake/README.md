@@ -163,19 +163,22 @@ retain only genuinely unclassified general-purpose work here.
 
 ## Journal
 
-### 2026-09-20 — Phase 3: published 3 issues, found 1 already delivered, 2 still blocked on Draft owners
+### 2026-09-20 — Phase 3: published 3 issues, found 1 addressed by an open PR, 2 still blocked on Draft owners
 
 - Worked through the 6 routed candidates left after the post-merge
   correction pass (#3, #5, #9, #14, #15, #16), checking each against Phase 3's
   "obtain acceptance from the chosen domain plan" step -- confirmed each
   target's Plan addition is already merged to `main`, i.e. already accepted.
 - Before publishing #3 (worktree-manager-control-plane's cached
-  worktree-status projection), found it already delivered by an in-flight PR
-  under a *different* effort
+  worktree-status projection), found it already addressed by an open,
+  not-yet-merged PR under a *different* effort
   ([#3102](https://github.com/ThomasMichon/copilot-extensions/pull/3102),
   `agent-worktrees-external-status-accelerator`) -- no new public issue
-  needed; annotated the domain Plan bullet with a pointer to that PR instead
-  of publishing a duplicate.
+  needed unless that PR does not land; annotated the domain Plan bullet with
+  a pointer to it, but kept the candidate `routed` (not `superseded`/
+  `closed-obsolete`) pending its merge, per Copilot review feedback on this
+  PR that flagged the original wording as prematurely treating open work as
+  delivered.
 - Published public issues for #5
   ([#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115),
   under `agent-machines-declarative-control-plane`'s umbrella #1418) and #9 /

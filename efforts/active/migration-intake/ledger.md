@@ -108,17 +108,18 @@ their owning effort activates.
 | 14 | routed | account-aware-operations | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per Intake Contract §3 until the effort activates |
 | 15 | routed | review-automation-reliability | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per Intake Contract §3 until the effort activates |
 | 16 | routed | worktree-finality-and-obligations | published [#3114](https://github.com/ThomasMichon/copilot-extensions/issues/3114) | Phase 3 publication completed |
-| 3 | routed | worktree-manager-control-plane | superseded by already-landed implementation, [#3102](https://github.com/ThomasMichon/copilot-extensions/pull/3102) | no separate public issue needed; the scope was already delivered under a different effort before this candidate's routing was checked for an existing implementation |
+| 3 | routed | worktree-manager-control-plane | in flight under existing PR [#3102](https://github.com/ThomasMichon/copilot-extensions/pull/3102) (not yet merged) | stays `routed`, not `superseded`, until #3102 actually merges; no separate public issue needed unless it does not land, since it already covers this exact scope |
 
 *(Phase 3 publication, 2026-09-20: of the 6 routed candidates not already
 resolved by an earlier ledger pass, 3 were published as new public issues
 under their Active owning effort's umbrella issue (#5 -> #1418, #9 and #16 ->
-#1312), 1 was found already delivered by an in-flight PR under a different
-effort and needed no new issue (#3), and 2 remain `routed`-but-unpublished
-because their owning effort is still `Draft` with no umbrella issue to
-attach a sub-issue to (#14, #15) -- publishing under a Draft effort would
-create a tracker entry with no accepting umbrella, so this pass leaves them
-pending rather than force-publishing. Each published issue's body is a
-self-contained, repository-neutral restatement of the routed Plan bullet
-with no reference to this ledger's originating session context.)*
+#1312), 1 was found already covered by an in-flight, not-yet-merged PR under
+a different effort and needed no new issue (#3, stays `routed` pending that
+PR's merge), and 2 remain `routed`-but-unpublished because their owning
+effort is still `Draft` with no umbrella issue to attach a sub-issue to
+(#14, #15) -- publishing under a Draft effort would create a tracker entry
+with no accepting umbrella, so this pass leaves them pending rather than
+force-publishing. Each published issue's body is a self-contained,
+repository-neutral restatement of the routed Plan bullet with no reference
+to this ledger's originating session context.)*
 
