@@ -190,11 +190,12 @@ def _reset_active_project():
 
     from agent_worktrees import config as _cfg
 
+    reset_active_project = _cfg.set_active_project
     _saved_handoff = os.environ.get("AGENT_WORKTREES_HANDOFF_TOKEN")
-    _cfg.set_active_project(None)
+    reset_active_project(None)
     os.environ.pop("AGENT_WORKTREES_HANDOFF_TOKEN", None)
     yield
-    _cfg.set_active_project(None)
+    reset_active_project(None)
     if _saved_handoff is None:
         os.environ.pop("AGENT_WORKTREES_HANDOFF_TOKEN", None)
     else:
