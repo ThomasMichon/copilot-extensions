@@ -52,7 +52,7 @@
       "health"
     ],
     "config_timeout_seconds": 45,
-    "health_timeout_seconds": 10,
-    "startup_timeout_seconds": 30
+    "health_timeout_seconds": 15,
+    "startup_timeout_seconds": 300
   }
 }

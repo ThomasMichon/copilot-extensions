@@ -160,13 +160,24 @@ def engine_command(home: Path | None = None) -> list[str]:
     ]
 
 
-def start(home: Path | None = None, *, wait_timeout: float = 90.0) -> str:
+def start(home: Path | None = None, *, wait_timeout: float | None = None) -> str:
     """Start the persistent engine daemon from the durable venv.
 
     Returns a short status string. Idempotent: a no-op when already healthy.
     Raises :class:`FileNotFoundError` if the durable engine venv is missing (the
     engine runtime hasn't been provisioned -- run the installer / provisioning).
+
+    ``wait_timeout`` defaults to a generous 300s: a cold process import of
+    torch + the embedding model (before uvicorn even starts listening) has
+    been observed to take upwards of two minutes on a CPU-only host, well
+    past what a short timeout tuned for a lightweight service would allow --
+    this is a one-time cost per process start, not a steady-state latency,
+    so a long ceiling here costs nothing once healthy. Overridable via
+    ``AGENT_INDEX_ENGINE_START_TIMEOUT`` for a host that needs longer still
+    (e.g. a slow disk or first-ever model download).
     """
+    if wait_timeout is None:
+        wait_timeout = float(os.environ.get("AGENT_INDEX_ENGINE_START_TIMEOUT", "300"))
     home = home or engine_home()
     host, port = engine_endpoint()
     if is_healthy(host, port):
