@@ -72,7 +72,7 @@
     {
       "name": "customizing-copilot",
       "description": "Customize, diagnose, and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, hoisting plugin agents around a delegation limitation, componentizing oversized modules, authoring <repo>-harness plugins, and setting up an instruction-projection sync worker - with the per-skill folder conventions and Agent Skills best practices; ships eleven focused skills",
-      "version": "0.1.0-dev80",
+      "version": "0.1.0-dev81",
       "source": "plugins/customizing-copilot"
     },
     {

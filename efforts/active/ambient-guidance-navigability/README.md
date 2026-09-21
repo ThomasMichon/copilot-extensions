@@ -18,7 +18,8 @@ visions:
 - **Umbrella issue:** [ThomasMichon/copilot-extensions#3033](https://github.com/ThomasMichon/copilot-extensions/issues/3033)
 - **Sub-issues:** [Phase 1 -- #3071](https://github.com/ThomasMichon/copilot-extensions/issues/3071),
   [Phase 2 -- #3082](https://github.com/ThomasMichon/copilot-extensions/issues/3082),
-  [Phase 3 -- #3120](https://github.com/ThomasMichon/copilot-extensions/issues/3120).
+  [Phase 3 -- #3120](https://github.com/ThomasMichon/copilot-extensions/issues/3120),
+  [Phase 2 immutable-pin resolver follow-up -- #3132](https://github.com/ThomasMichon/copilot-extensions/issues/3132).
 
 ## Guiding Intent
 
@@ -387,7 +388,11 @@ conflict-dispatch label there.
       depends on the immutable-pin verification gap `projection_reflect.py`
       explicitly tracks as unsolved (today's lock schema has no commit/
       release reference to recompute against) -- cannot be validated until
-      that gap closes in a follow-up slice.
+      that gap closes in a follow-up slice. **Narrowed 2026-09-20:**
+      `bypass_decision`'s pin conjunct is now built and proven (see the
+      Journal) -- what remains is solely the marketplace-source commit
+      resolver that would populate it for a real run; no further schema
+      work is needed once that resolver exists.
 - [ ] Phase 2's bypass safety boundary is proven with negative tests for
       *each* conjunct, not just recompute mismatch: a no-change run opens no
       PR; a disabled plugin's projection is never touched even if its
@@ -735,3 +740,50 @@ _Pending._
   named follow-up (immutable-pin verification). Left `Status: Active`
   rather than `Done`, since two Validation Plan items remain genuinely open
   pending that follow-up -- not a false completion claim.
+
+### 2026-09-20 (cont.) -- Immutable-pin gap: narrowed, not closed
+
+Investigated the two candidate designs the prior session's handoff left
+open (a lock-schema extension vs. a marketplace-source commit resolver)
+before touching any code, per the handoff's explicit caution against
+guessing.
+
+- **Rejected widening `_LOCK_ENTRY_KEYS`/the provenance marker.** That key
+  set is exact-match and enforced on *every already-rendered projection's
+  marker repo-wide* (`_parse_marker`'s `set(marker) != _MARKER_KEYS`
+  check). Adding a required `sourceCommit` key there would force a
+  disruptive full resync of every managed `.instructions.md` file in this
+  repo in one PR, just to carry a field nothing can populate yet (no
+  resolver exists) -- exactly the ad hoc, under-designed move the prior
+  Journal entry warned against. Confirmed via `scan_plugin_sources.py`:
+  `PluginSource`/`_plugin_version()` only ever carry a mutable version
+  string; the installed-payload footprint used for external marketplace
+  plugins is a plain file copy, not a git checkout, so there is nowhere to
+  read a commit SHA from today without building an actual resolver
+  (network calls to a marketplace's release API, or a install-time
+  manifest change) -- correctly still out of scope for this slice.
+- **Landed instead:** `projection_reflect.py` gained an **additive,
+  optional pin map** kept entirely outside the lock/marker schema --
+  `bypass_decision(..., pinned_commits: Mapping[str, str] | None = None)`.
+  `None` (the default) preserves prior behavior exactly (verified: all
+  pre-existing tests pass unchanged). When a caller supplies a
+  `"<plugin>@<marketplace>" -> commit SHA` map -- from *any* future
+  resolver, without this module caring which -- every changed source
+  missing a well-formed 40-hex pin (`is_valid_commit_pin`) is rejected,
+  closing the remaining verification gap the moment any resolver exists,
+  with zero schema migration and zero blast radius on already-rendered
+  content.
+- Added 5 new unit tests (`test_bypass_decision_ignores_pins_when_none_
+  provided`, `_requires_pin_for_changed_source_when_pins_supplied`,
+  `_rejects_malformed_pin`, `_eligible_with_valid_pin_supplied`, and
+  `test_is_valid_commit_pin_requires_full_hex_sha`) plus the two negative-
+  proof cases: an empty pin map rejects a changed source outright, and a
+  malformed pin value is never treated as valid. `customizing-copilot`'s
+  full suite (193 passed, 8 skipped) and `check-version-bump`/
+  `check-version-consistency`/`check-docs-consistency` all pass; bumped
+  `customizing-copilot` to `0.1.0-dev81` (plugin.json + marketplace.json).
+- **Still open, correctly transferred, not solved here:** building the
+  actual marketplace-source commit resolver that would populate
+  `pinned_commits` for a real sync worker. That remains its own follow-up
+  slice -- this change only makes the eventual resolver's integration a
+  parameter, not a schema migration.
