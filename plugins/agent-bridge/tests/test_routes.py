@@ -1548,6 +1548,39 @@ class TestWorktreeRoutes:
         assert data["acp_session_id"] == "acp-fresh-1"
         mgr.start_session.assert_awaited_once()
 
+    def test_reservation_race_409_names_the_live_holder_not_resuming_session(
+        self, client, app,
+    ) -> None:
+        """When ``reserve_worktree_ownership`` refuses (a live CLI raced the
+        reservation), the 409's session_id must be the ACTUAL live CLI
+        holder -- never the resuming session's own id. A reclaim caller
+        fences on this id to confirm a stopped holder is really gone before
+        forcing; the resuming session's id would trivially "match" every
+        time and silently defeat that safety check."""
+        wt_id = "anomalous-potato-wsl-20250101-190000-racedholder"
+        self._seed_worktree("test-agent", wt_id)
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        stopped = Session("sess-resuming-1", "quiet-marsh", target, "test-agent")
+        stopped.status = SessionStatus.STOPPED
+        mgr._sessions[stopped.session_id] = stopped
+
+        db = app.state.db
+        db.reserve_worktree_ownership = lambda *a, **k: False
+        db.register_live_session(
+            "cli-real-holder", machine="test-agent", cwd=None,
+            worktree_id=wt_id, repo=None, branch=None, pid=None, role=None,
+            now=time.time(),
+        )
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["reason"] == "live_cli_holds_worktree"
+        assert detail["session_id"] == "cli-real-holder"
+        assert detail["session_id"] != stopped.session_id
+
     def test_resume_worktree_does_not_bypass_provider_refresh_failure(
         self, client, app,
     ) -> None:

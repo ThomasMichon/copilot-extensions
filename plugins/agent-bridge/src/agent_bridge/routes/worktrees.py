@@ -27,6 +27,7 @@ from ..session_manager import (
     ProviderTargetRefreshError,
     SessionManager,
 )
+from .worktree_holders import chosen_holder_id as _chosen_holder_id
 from .worktree_probe import (
     owning_agent as _owning_agent,
     probe_archived_owner as _probe_archived_owner,
@@ -972,13 +973,12 @@ async def _start_fresh_worktree_session(
                     # A live CLI registered during discovery -- return the same
                     # structured 409 the top-of-resume guard uses (consumers map
                     # it to "represent read-only"), not a misleading 404.
-                    chosen = max(holders, key=lambda r: r.get("updated_at") or 0)
                     raise HTTPException(
                         status_code=409,
                         detail={
                             "reason": "live_cli_holds_worktree",
                             "worktree_id": worktree_id,
-                            "session_id": chosen["session_id"],
+                            "session_id": _chosen_holder_id(holders),
                         },
                     )
 
@@ -1069,18 +1069,18 @@ async def resume_worktree(
     if not reclaim and db is not None:
         holders = db.list_fresh_live_sessions(worktree_id, now=time.time())
         if holders:
-            chosen = max(holders, key=lambda r: r.get("updated_at") or 0)
+            chosen_id = _chosen_holder_id(holders)
             log.info(
                 "resume_worktree %s refused: fresh live CLI %s holds it "
                 "(represent read-only)",
-                worktree_id, chosen["session_id"],
+                worktree_id, chosen_id,
             )
             raise HTTPException(
                 status_code=409,
                 detail={
                     "reason": "live_cli_holds_worktree",
                     "worktree_id": worktree_id,
-                    "session_id": chosen["session_id"],
+                    "session_id": chosen_id,
                 },
             )
 
@@ -1103,27 +1103,27 @@ async def resume_worktree(
         )
 
     # Ownership reservation (#2912): take the per-worktree ACP-ownership
-    # reservation before resuming, so a live-CLI registration must respect it
-    # (registration and ownership cannot both win a worktree). Atomic against a
-    # concurrent register even across processes; ``reclaim`` force-takes it. A
-    # False result means a fresh live CLI claimed the worktree in the race
-    # window -- surface the same read-only 409 the top guard uses.
+    # reservation before resuming, so a live-CLI registration must respect
+    # it. Atomic across processes; ``reclaim`` force-takes it. A False
+    # result means a fresh live CLI raced it -- surface the top guard's 409.
     if db is not None:
         reserved = db.reserve_worktree_ownership(
             worktree_id, session.session_id, now=time.time(), reclaim=reclaim
         )
         if not reserved:
+            # session_id must be the live CLI holder, not the resuming session.
+            holders = db.list_fresh_live_sessions(worktree_id, now=time.time())
+            holder_id = _chosen_holder_id(holders)
             log.info(
-                "resume_worktree %s refused: a live CLI raced the ownership "
-                "reservation (represent read-only)",
-                worktree_id,
+                "resume_worktree %s refused: live CLI %s raced the reservation",
+                worktree_id, holder_id,
             )
             raise HTTPException(
                 status_code=409,
                 detail={
                     "reason": "live_cli_holds_worktree",
                     "worktree_id": worktree_id,
-                    "session_id": session.session_id,
+                    "session_id": holder_id,
                 },
             )
 
