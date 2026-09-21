@@ -171,8 +171,12 @@ the first). See `projection_reflect.py`'s own module docstring for the
 tracked, not-yet-solved gap (immutable upstream-commit pinning, vs. today's
 version-string-only lock) and
 `efforts/active/ambient-guidance-navigability`'s Journal for status on the
-remaining pieces (a scheduler wrapper, the conflict-dispatch primitive, and
-the `projection-reconciler` agent template this decision routes to).
+remaining pieces (a scheduler wrapper and the setup skill). A conflict a
+worker cannot bypass routes to `agent_dispatch.conflict_dispatch`'s
+generalized dispatch primitive, naming the
+[`projection-reconciler` agent template](references/projection-reconciler-agent-template.md)
+-- report-only on a hand-edited managed projection, re-derive-fresh on an
+ordinary git-level conflict, never a self-merge.
 
 ### Troubleshooting-category coverage registry
 
