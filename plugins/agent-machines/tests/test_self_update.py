@@ -287,6 +287,37 @@ def test_watchdog_starts_launcher_when_missing(monkeypatch):
     assert "started dtssh host launcher" in steps[0].detail
 
 
+def test_default_launcher_starter_does_not_pass_creationflags_to_conhost(monkeypatch, tmp_path):
+    # Regression: CREATE_NO_WINDOW applied to conhost.exe --headless itself
+    # (rather than to the ordinary child it hosts) breaks its own console
+    # allocation -- conhost then exits immediately without ever starting the
+    # pwsh launcher, so the watchdog silently times out forever. conhost's
+    # own `--headless` flag already keeps a window from appearing, so no
+    # extra Popen creationflags belong on this specific spawn.
+    monkeypatch.setattr(self_update.sys, "platform", "win32")
+    monkeypatch.setattr(self_update, "shutil_which", lambda _name: r"C:\pwsh\pwsh.exe")
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    captured: dict = {}
+
+    class _FakePopen:
+        def __init__(self, argv, **kwargs):
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(self_update.subprocess, "Popen", _FakePopen)
+    config = self_update.DtsshConfig(
+        config_path=tmp_path / "config.json",
+        install_root=tmp_path,
+        launcher_path=tmp_path / "dtssh-host-launcher.ps1",
+        alias="box-1",
+        port=2222,
+    )
+    result = self_update.default_launcher_starter(config)
+    assert result is True
+    assert "creationflags" not in captured["kwargs"]
+    assert captured["argv"][1] == "--headless"
+
+
 def test_refresh_dtssh_mesh_skips_when_agent_ssh_missing(monkeypatch):
     monkeypatch.setattr(self_update.shutil, "which", lambda _name: None)
     step = self_update.refresh_dtssh_mesh(runner=lambda *a, **k: (_ for _ in ()).throw(

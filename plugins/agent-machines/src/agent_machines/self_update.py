@@ -254,13 +254,20 @@ def default_launcher_starter(config: DtsshConfig) -> bool:
         argv.extend(["-Tunnel", config.tunnel])
     if config.user:
         argv.extend(["-User", config.user])
+    # No `**no_window_kwargs()` here: unlike an ordinary child, this argv's
+    # target IS conhost.exe itself, and CREATE_NO_WINDOW on conhost.exe --
+    # rather than on the process it hosts -- breaks its ability to allocate
+    # the headless console the pwsh launcher child needs. With that flag set,
+    # conhost.exe exits immediately (rc 0) without ever starting pwsh, so the
+    # launcher silently never comes up and every caller times out waiting for
+    # it. `--headless` already keeps the hosted console window from
+    # appearing, so no extra creation flag is needed on this parent.
     subprocess.Popen(  # noqa: S603 - argv list, detached child
         argv,
         cwd=str(config.install_root),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
-        **no_window_kwargs(),
     )
     return True
 
