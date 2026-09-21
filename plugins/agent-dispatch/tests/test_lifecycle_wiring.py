@@ -18,6 +18,7 @@ def _reset(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(server, "routing_dir", lambda: tmp_path)
     server._lifecycle_started = False
     server._wake_route_owned = False
+    server._last_missing_active_heal_attempt = 0.0
 
 
 def test_publish_sweeps_and_records_start_then_stop(tmp_path: Path, monkeypatch):
@@ -81,6 +82,117 @@ def test_wake_drain_does_not_promote_passive_on_routing_read_failure(
     ))
 
     assert server._owns_active_route() is False
+
+
+def test_wake_drain_never_treats_a_null_pid_active_as_owned_or_repairable(
+    tmp_path: Path, monkeypatch
+):
+    """An ``active`` dict with ``pid: None`` is neither "missing" nor "ours".
+
+    Only a genuinely absent/non-dict ``active`` is the shape
+    ``reap_stale_active`` can repair (a clean shutdown leaving only
+    ``previous``). An *active dict* whose recorded pid is ``None`` is a
+    different, unrepairable state -- self-healing it would be a no-op, and
+    treating it as eligible for the same branch risked falling through to the
+    stale cached ownership value instead of correctly deciding "not ours".
+    """
+    _reset(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        routing, "read_table",
+        lambda _path: {"active": {"bind": "127.0.0.1", "port": 9999, "pid": None}},
+    )
+    reap_calls = []
+    monkeypatch.setattr(
+        routing, "reap_stale_active",
+        lambda *a, **k: reap_calls.append(1) or {"reaped": False, "promoted_port": None},
+    )
+
+    assert server._owns_active_route() is False
+    assert reap_calls == []  # not the missing-active shape -- no self-heal attempt
+
+
+def test_wake_drain_self_heals_missing_active_by_promoting_live_previous(
+    tmp_path: Path, monkeypatch
+):
+    """A clean shutdown's ``previous``-only table must not strand wake delivery.
+
+    ``clear_if_owner`` demotes a shutting-down coordinator's own claim to
+    ``previous`` and leaves no ``active`` behind, trusting a successor to
+    publish itself. ``reap_stale_active`` otherwise runs only at a new
+    coordinator's startup or the start of a cutover -- neither of which
+    happens if the successor never starts. This confirmed-live bug stranded a
+    pending wake for 15+ minutes with
+    ``last_error: "bridge delivery unavailable"`` because no live process ever
+    re-checked route ownership. ``_owns_active_route`` must notice a missing
+    ``active`` and trigger the same promotion the wake-drain loop already
+    polls through, so any live coordinator self-heals without a human
+    manually restarting one.
+    """
+    _reset(monkeypatch, tmp_path)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9999, pid=os.getpid())
+    # Simulate our own clean shutdown leaving only `previous` (clear_if_owner's
+    # shape) -- no successor ever published an `active`.
+    assert routing.clear_if_owner(tmp_path, pid=os.getpid()) is True
+    data = routing.read_table(tmp_path)
+    assert "active" not in data and data["previous"]["pid"] == os.getpid()
+
+    # A real listener stands in for "previous is actually still alive" --
+    # reap_stale_active only promotes a previous it can confirm is listening.
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(1)
+    live_port = sock.getsockname()[1]
+    try:
+        table = routing.read_table(tmp_path)
+        table["previous"]["port"] = live_port
+        routing.routing_table_path(tmp_path).write_text(__import__("json").dumps(table))
+
+        assert server._owns_active_route() is True
+        healed = routing.read_table(tmp_path)
+        assert healed["active"]["pid"] == os.getpid()
+        assert healed["active"]["port"] == live_port
+    finally:
+        sock.close()
+
+
+def test_wake_drain_missing_active_self_heal_is_throttled(
+    tmp_path: Path, monkeypatch
+):
+    _reset(monkeypatch, tmp_path)
+    # A readable table with no `active` claim -- self-heal is only attempted
+    # (throttled) for this confirmed shape, not for a wholly absent/unreadable
+    # table (see test_wake_drain_retains_cache_only_for_unreadable_table).
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9999, pid=os.getpid())
+    routing.clear_if_owner(tmp_path, pid=os.getpid())
+    calls = []
+    monkeypatch.setattr(
+        routing, "reap_stale_active",
+        lambda *a, **k: calls.append(1) or {"reaped": False, "promoted_port": None},
+    )
+    assert server._owns_active_route() is False
+    assert server._owns_active_route() is False
+    assert len(calls) == 1  # second call within the throttle window is skipped
+
+
+def test_wake_drain_preserves_cache_only_for_unreadable_table(
+    tmp_path: Path, monkeypatch
+):
+    """A wholly absent/unreadable table is ambiguous, unlike a confirmed-empty one.
+
+    ``read_table`` returns ``None`` both for a file that never existed and for
+    a genuine I/O failure -- there is no way to tell "nothing has ever been
+    published" from "a transient read blip", so this must not reset the
+    cached ownership (unlike a *readable* table that positively confirms no
+    ``active`` claim).
+    """
+    _reset(monkeypatch, tmp_path)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9999, pid=os.getpid())
+    assert server._owns_active_route() is True
+    monkeypatch.setattr(routing, "read_table", lambda _path: None)
+
+    assert server._owns_active_route() is True
 
 
 def test_stop_emitted_even_after_demotion(tmp_path: Path, monkeypatch):

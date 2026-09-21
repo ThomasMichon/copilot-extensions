@@ -75,6 +75,10 @@ ROLLBACK = "rollback"
 #: A dead-port watchdog retired an advertised-but-dead endpoint (see
 #: ``zdd.routing.reap_stale_active``).
 WATCHDOG_REAP = "watchdog-reap"
+#: The same watchdog instead found no active claim at all (e.g. a clean
+#: shutdown via ``zdd.routing.clear_if_owner`` whose successor never
+#: published itself) and promoted a still-live ``previous`` to active.
+WATCHDOG_PROMOTE = "watchdog-promote"
 
 #: Every recognized action. An unrecognized action is still logged (fail-open),
 #: but callers should prefer a constant so the vocabulary stays uniform.
@@ -92,6 +96,7 @@ ACTIONS = frozenset(
         CUTOVER_RETIRE,
         ROLLBACK,
         WATCHDOG_REAP,
+        WATCHDOG_PROMOTE,
     }
 )
 
