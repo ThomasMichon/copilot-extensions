@@ -28,6 +28,7 @@ import base64
 import json
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 from . import config as cfg
@@ -37,7 +38,7 @@ from . import config as cfg
 DEFAULT_TIMEOUT = 15.0
 
 
-def _fleet_targets():
+def _fleet_targets(config):
     """Yield ``(machine_key, env_name, alias, shell, is_local)`` for every
     Copilot-enabled, ssh-ready machine x environment in ``machines.yaml``,
     plus the current machine's own environment (``is_local=True``, run
@@ -48,12 +49,14 @@ def _fleet_targets():
     ``alias`` (one row, ``env_name=""``) -- mirrors
     ``claimant.resolve_machine_ssh``'s own fallback, so a machine relying
     on that shape isn't silently omitted from the fleet (review #3134).
+
+    Takes an already-loaded ``config`` (rather than loading it itself) so a
+    genuine config/registry load failure propagates to ``run_fleet`` as a
+    reported error, instead of this generator silently yielding zero hosts
+    (review #3134) -- ``machines.yaml`` itself may still be missing/
+    malformed, which is a real, reportable condition, not swallowed here.
     """
-    try:
-        config = cfg.load_config()
-        entries = cfg.load_machines_yaml(config.default_repo.anchor)
-    except Exception:
-        return
+    entries = cfg.load_machines_yaml(config.default_repo.anchor)
     this_machine = config.machine
     this_platform = config.platform
     for key, entry in entries.items():
@@ -159,7 +162,7 @@ def run_fleet(argv: list[str]) -> int:
     parser.add_argument("--json", action="store_true", help="JSON output (default: human summary)")
     parser.add_argument(
         "--timeout", type=float, default=DEFAULT_TIMEOUT,
-        help=f"Per-host SSH connect timeout in seconds (default {DEFAULT_TIMEOUT})",
+        help=f"Per-host SSH connect timeout in seconds, > 0 (default {DEFAULT_TIMEOUT})",
     )
     parser.add_argument(
         "--tracking-status", default=None,
@@ -171,6 +174,19 @@ def run_fleet(argv: list[str]) -> int:
         help="Passed through to each host's own `list --json --all`",
     )
     args = parser.parse_args(argv)
+    # Fail fast on a bad --timeout (0/negative/NaN/inf) -- an uncaught one
+    # would otherwise surface much later as a confusing int()/subprocess
+    # error instead of a clear usage message (review #3134).
+    if not (args.timeout > 0) or args.timeout == float("inf"):
+        parser.error(f"--timeout must be a finite number > 0 (got {args.timeout!r})")
+
+    try:
+        config = cfg.load_config()
+    except Exception as exc:
+        # A genuinely broken config/registry is a reportable failure, not a
+        # silent "0 hosts" fleet result (review #3134).
+        print(f"agent-worktrees fleet: could not load config: {exc}", file=sys.stderr)
+        return 1
 
     try:
         project = cfg.project_name()
@@ -183,12 +199,18 @@ def run_fleet(argv: list[str]) -> int:
     if args.all:
         extra_args.append("--all")
 
+    try:
+        targets = list(_fleet_targets(config))
+    except Exception as exc:
+        print(f"agent-worktrees fleet: could not load machines.yaml: {exc}", file=sys.stderr)
+        return 1
+
     rows = [
         _probe_host(
             machine_key, env_name, alias, shell, is_local,
             project=project, extra_args=extra_args, timeout=args.timeout,
         )
-        for machine_key, env_name, alias, shell, is_local in _fleet_targets()
+        for machine_key, env_name, alias, shell, is_local in targets
     ]
 
     if args.json:

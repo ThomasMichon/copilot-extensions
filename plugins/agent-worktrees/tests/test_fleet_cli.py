@@ -15,6 +15,8 @@ from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from agent_worktrees import config as cfg
 from agent_worktrees import list_views_cli as fleet
 
@@ -149,3 +151,27 @@ def test_machine_level_alias_fallback_is_not_omitted(tmp_path):
     assert result["hosts"][0]["reachable"] is True
     assert calls[0][0] == "ssh"
     assert calls[0][-2] == "wheatley"
+
+
+def test_invalid_timeout_fails_fast_with_usage_error(tmp_path, capsys):
+    """A non-positive/NaN/inf --timeout must be rejected immediately with a
+    clear usage error, not surface later as a confusing int()/subprocess
+    failure mid-fan-out (review #3134)."""
+    config = _fake_config(tmp_path)
+    with patch.object(fleet.cfg, "load_config", return_value=config), \
+         patch.object(fleet.cfg, "load_machines_yaml", return_value={}):
+        for bad in ("0", "-5", "nan", "inf"):
+            with pytest.raises(SystemExit) as ei:
+                fleet.run_fleet(["--timeout", bad])
+            assert ei.value.code == 2
+    assert "--timeout must be" in capsys.readouterr().err
+
+
+def test_config_load_failure_is_reported_not_swallowed(capsys):
+    """A broken config must surface as a reported failure (exit 1), never a
+    silently-empty `{"hosts": []}` result (review #3134)."""
+    with patch.object(fleet.cfg, "load_config", side_effect=RuntimeError("boom")):
+        rc = fleet.run_fleet([])
+    assert rc == 1
+    assert "could not load config" in capsys.readouterr().err
+
