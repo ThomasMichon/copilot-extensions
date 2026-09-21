@@ -94,6 +94,122 @@ def test_renew_keeps_same_epoch(directory, clock):
     assert lease.epoch == 1
 
 
+class _FlakyDiscoverRendezvous:
+    """Wraps a real :class:`Rendezvous` but makes ``discover_coordinator``
+    raise on demand -- for testing a backend whose read path can fail
+    independently of its write path (register/heartbeat still delegate to
+    the wrapped rendezvous and work normally)."""
+
+    def __init__(self, inner: Rendezvous) -> None:
+        self._inner = inner
+        self.discover_should_fail = False
+
+    def register(self, *args, **kwargs):
+        return self._inner.register(*args, **kwargs)
+
+    def heartbeat(self, *args, **kwargs):
+        return self._inner.heartbeat(*args, **kwargs)
+
+    def deregister(self, *args, **kwargs):
+        return self._inner.deregister(*args, **kwargs)
+
+    def discover_peers(self, *args, **kwargs):
+        return self._inner.discover_peers(*args, **kwargs)
+
+    def discover_coordinator(self):
+        if self.discover_should_fail:
+            raise RuntimeError("enumeration currently unavailable")
+        return self._inner.discover_coordinator()
+
+
+def test_active_coordinator_keeps_heartbeating_through_a_discovery_only_outage(
+    directory, clock
+):
+    """Regression test: a backend whose *read* path (discover_coordinator) can
+    fail independently of its *write* path (register/heartbeat) -- the Dev
+    Tunnels backend's ``list`` vs. ``show``/``update`` split is the motivating
+    case -- must not let an already-active coordinator silently stop
+    heartbeating. If it did, its own entry would go stale past the lease TTL
+    and an otherwise-healthy standby would take over even though the real
+    coordinator is still alive and can still write.
+    """
+    flaky = _FlakyDiscoverRendezvous(directory)
+    lease = CoordinatorLease(flaky, "host-a")
+
+    # First tick: normal acquire (discovery working).
+    state = lease.tick()
+    assert state.is_active is True
+    assert state.epoch == 1
+
+    # Discovery breaks, but writes (register/heartbeat) still work.
+    flaky.discover_should_fail = True
+    clock.advance(5)
+    state = lease.tick()
+    assert state.is_active is True
+    assert state.epoch == 1  # renewed at the same epoch, not a takeover
+    assert lease.is_active is True
+
+    # The directory entry was actually heartbeated -- confirm via the
+    # underlying (non-flaky) directory directly.
+    coord = directory.discover_coordinator()
+    assert coord["instance"] == "host-a"
+    assert coord["epoch"] == 1
+
+    # A separate standby ticking against the SAME (healthy) directory must
+    # see the still-fresh coordinator and stand by -- no takeover occurred.
+    standby_lease = CoordinatorLease(directory, "host-b")
+    standby_state = standby_lease.tick()
+    assert standby_state.is_active is False
+    assert standby_state.role == ROLE_STANDBY
+
+
+def test_standby_does_not_promote_itself_on_a_discovery_failure(directory, clock):
+    """A lease that has never been active must propagate a discovery failure
+    rather than treat it as license to take over -- it cannot distinguish
+    'the real coordinator is gone' from 'my own enumeration is broken', and
+    guessing wrong would create a second coordinator."""
+    flaky = _FlakyDiscoverRendezvous(directory)
+    flaky.discover_should_fail = True
+    lease = CoordinatorLease(flaky, "host-b")
+
+    with pytest.raises(RuntimeError):
+        lease.tick()
+    assert lease.is_active is False
+    # No coordinator was ever registered by the standby.
+    assert directory.discover_coordinator() is None
+
+
+def test_active_coordinator_propagates_when_write_path_also_fails(directory, clock):
+    """If BOTH discovery and the write path are broken, the active instance
+    must still fail closed (propagate) -- it genuinely cannot assert itself,
+    so pretending otherwise would be worse than raising."""
+
+    class _AllBrokenRendezvous(_FlakyDiscoverRendezvous):
+        def __init__(self, inner):
+            super().__init__(inner)
+            self.writes_should_fail = False
+
+        def register(self, *args, **kwargs):
+            if self.writes_should_fail:
+                raise RuntimeError("writes are also broken")
+            return super().register(*args, **kwargs)
+
+        def heartbeat(self, *args, **kwargs):
+            if self.writes_should_fail:
+                raise RuntimeError("writes are also broken")
+            return super().heartbeat(*args, **kwargs)
+
+    broken = _AllBrokenRendezvous(directory)
+    lease = CoordinatorLease(broken, "host-a")
+    lease.tick()  # normal acquire while healthy
+
+    broken.discover_should_fail = True
+    broken.writes_should_fail = True
+    clock.advance(5)
+    with pytest.raises(RuntimeError):
+        lease.tick()
+
+
 def test_requires_instance(directory):
     with pytest.raises(ValueError):
         CoordinatorLease(directory, "")

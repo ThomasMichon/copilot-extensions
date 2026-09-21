@@ -93,6 +93,15 @@ class CoordinatorLease:
       The directory orders coordinators by ``(epoch, instance)``, so a simultaneous
       takeover resolves to a single winner deterministically -- the loser sees the
       winner and stands down. No same-epoch split-brain.
+
+    A :meth:`~Rendezvous.discover_coordinator` failure mid-``tick`` is handled
+    asymmetrically by current role, not simply propagated: an **already-active**
+    instance still attempts to **renew** (some backends' read and write paths can
+    fail independently -- e.g. Dev Tunnels' ``list`` vs. ``show``/``update`` -- and
+    silently dropping our own heartbeat over a read-only outage would hand a
+    healthy standby an undeserved takeover), while a **standby** always propagates
+    the failure rather than risk promoting itself without having actually
+    confirmed the real coordinator is gone.
     """
 
     def __init__(
@@ -148,7 +157,27 @@ class CoordinatorLease:
 
     def tick(self) -> LeaseState:
         """Advance the lease one step against the current directory state."""
-        coord = self._rv.discover_coordinator()
+        try:
+            coord = self._rv.discover_coordinator()
+        except Exception:
+            if self._active:
+                # We already believe we ARE the coordinator. A backend whose
+                # enumeration (read) path can fail independently of its
+                # write path -- e.g. the Dev Tunnels backend's `list`
+                # subcommand vs. its `show`/`update` subcommands -- must not
+                # silently drop our heartbeat just because discovery failed:
+                # that would let our own directory entry go stale and hand
+                # an otherwise-healthy standby a takeover it shouldn't get,
+                # even though we are still alive and can still write. Keep
+                # renewing at our current epoch; if that ALSO fails (the
+                # write path is broken too), propagate -- we then genuinely
+                # cannot assert ourselves, so fail-closed as before.
+                return self._renew()
+            # Not currently active: a standby must never promote itself
+            # merely because discovery failed -- that is exactly the
+            # split-brain risk this lease exists to prevent (it could not
+            # have confirmed the real coordinator is actually gone).
+            raise
         if coord is not None:
             self._observe(int(coord["epoch"]))
             if coord["instance"] == self._instance:
