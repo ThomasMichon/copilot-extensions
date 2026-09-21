@@ -589,6 +589,56 @@ def test_retire_requires_exact_absence_and_uses_release_disposition(q):
     assert retired_settled.state == SpawnState.SETTLED
 
 
+def test_force_fail_recovers_a_handle_less_releasing_reservation(q):
+    """Regression (copilot-extensions#3179): a reservation that entered
+    ``releasing`` with no recorded session_handle at all (e.g. a headless
+    spawn's create call raised before any session id could be captured) has
+    nothing an automatic exact-absence proof could ever confirm, so it sits
+    ``releasing`` forever without a recovery lever. ``fail_spawn(force=True)``
+    is the explicit, audited operator override that clears it."""
+    task = q.create("orphaned-create")
+    reservation, _ = q.reserve_spawn(task.id)
+    # No record_spawn call -- this reservation never captured a session
+    # handle, mirroring a create call that failed before returning one.
+    released = q.request_spawn_release(reservation.key, disposition="failed")
+    assert released.state == SpawnState.RELEASING
+    assert not released.session_handle
+
+    forced = q.fail_spawn(released.key, detail="stuck, no handle", force=True)
+    assert forced.state == SpawnState.FAILED
+
+
+def test_force_fail_refuses_a_releasing_reservation_with_a_handle(q):
+    """A releasing reservation that DID capture a handle must still go
+    through the liveness-checked release path (or an operator's own
+    ``reservations settle``) -- --force never bypasses a real, checkable
+    handle, since doing so could mask a still-live orphaned worker."""
+    task = q.create("live-handle")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(reservation.key, session_handle="local-body:sid-1")
+    released = q.request_spawn_release(reservation.key, disposition="failed")
+    assert released.state == SpawnState.RELEASING
+    assert released.session_handle == "local-body:sid-1"
+
+    with pytest.raises(TaskError, match="session_handle"):
+        q.fail_spawn(released.key, detail="should not force", force=True)
+
+    current = q.get_reservation(released.key)
+    assert current.state == SpawnState.RELEASING
+
+
+def test_force_fail_without_force_still_rejects_releasing(q):
+    task = q.create("orphaned-create")
+    reservation, _ = q.reserve_spawn(task.id)
+    released = q.request_spawn_release(reservation.key, disposition="failed")
+
+    with pytest.raises(TaskError):
+        q.fail_spawn(released.key, detail="no force flag")
+
+    current = q.get_reservation(released.key)
+    assert current.state == SpawnState.RELEASING
+
+
 def test_claimed_cleanup_prevents_successor_worktree_reuse(q):
     old = q.create("old", exclusive_key="stable:resource")
     old_reservation, _ = q.reserve_spawn(old.id)
@@ -1341,10 +1391,10 @@ def test_cli_release_pending_transition_is_rejected(
         def __exit__(self, *_exc):
             return False
 
-        def fail_spawn(self, key, *, detail=None):
+        def fail_spawn(self, key, *, detail=None, force=False):
             from dataclasses import asdict
 
-            return asdict(q.fail_spawn(key, detail=detail))
+            return asdict(q.fail_spawn(key, detail=detail, force=force))
 
         def settle_spawn(self, key, *, detail=None):
             from dataclasses import asdict

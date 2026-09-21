@@ -605,6 +605,7 @@ class SpawnReservationMixin:
         conclusion_state: str | None = None,
         conclusion_detail: str | None = None,
         claim_token: str | None = None,
+        force: bool = False,
         now: float | None = None,
     ) -> SpawnReservation:
         """Mark a reservation ``failed`` (spawn failed or lost), releasing the
@@ -613,12 +614,44 @@ class SpawnReservationMixin:
         Repeating the call on an already-failed row is an idempotent metadata
         update, allowing allocation cleanup to remain inspectable after body
         release.
+
+        ``force`` is an explicit, audited operator override for a
+        ``releasing`` reservation that automatic cleanup
+        (``release_requested_bodies``) can never resolve on its own: one with
+        no recorded ``session_handle`` at all has nothing whose absence the
+        exact-absence proof (:meth:`retire_spawn`) could ever confirm, so it
+        would otherwise sit ``releasing`` forever (copilot-extensions#3179 --
+        e.g. a headless spawn whose create call raised before any session id
+        could be captured, orphaning the reservation with no recovery
+        handle). Only a **handle-less** ``releasing`` row is eligible: one
+        that did capture a handle still must go through the ordinary
+        liveness-checked release path (or ``reservations settle``/an
+        automatic retire), since forcing it here could mask a still-live
+        orphaned worker.
         """
+        allowed_from = (SpawnState.ACTIVE - frozenset({SpawnState.RELEASING})) | frozenset(
+            {SpawnState.FAILED}
+        )
+        if force:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT state, session_handle FROM spawn_reservations WHERE key = ?",
+                    (key,),
+                ).fetchone()
+            if row is not None and row["state"] == SpawnState.RELEASING:
+                if row["session_handle"]:
+                    raise TaskError(
+                        f"reservation {key} is 'releasing' with a recorded "
+                        f"session_handle {row['session_handle']!r} -- --force "
+                        "only overrides a releasing reservation with no handle "
+                        "to verify absence of; let automatic cleanup or "
+                        "`reservations settle` resolve this one instead"
+                    )
+                allowed_from = allowed_from | frozenset({SpawnState.RELEASING})
         return self._update_reservation(
             key,
             to_state=SpawnState.FAILED,
-            allowed_from=(SpawnState.ACTIVE - frozenset({SpawnState.RELEASING}))
-            | frozenset({SpawnState.FAILED}),
+            allowed_from=allowed_from,
             detail=detail,
             conclusion_state=conclusion_state,
             conclusion_detail=conclusion_detail,

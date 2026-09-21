@@ -834,6 +834,7 @@ class DispatchClient(RegistrationClientMixin):
         conclusion_state: str | None = None,
         conclusion_detail: str | None = None,
         claim_token: str | None = None,
+        force: bool = False,
     ) -> dict:
         return self._unwrap(
             self._http.post(
@@ -843,6 +844,7 @@ class DispatchClient(RegistrationClientMixin):
                     "conclusion_state": conclusion_state,
                     "conclusion_detail": conclusion_detail,
                     "claim_token": claim_token,
+                    "force": force,
                 },
             )
         )

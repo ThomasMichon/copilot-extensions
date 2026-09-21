@@ -43,6 +43,21 @@ def _not_found(detail: str = "Session not found") -> urllib.error.HTTPError:
     )
 
 
+def _draining(
+    detail: str = (
+        "agent-bridge is draining for a redeploy and is not "
+        "accepting a new session; retry shortly."
+    ),
+) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        "http://127.0.0.1/api/v1/sessions",
+        503,
+        "Service Unavailable",
+        {},
+        io.BytesIO(json.dumps({"detail": detail}).encode()),
+    )
+
+
 class TestConnectGrace:
     def test_default_covers_a_sustained_restart(self) -> None:
         client = BridgeClient("http://127.0.0.1:0", "tok")
@@ -570,6 +585,104 @@ class TestSessionNotFoundGrace:
                 client._request("GET", "/api/v1/agents/missing")
 
         reresolve.assert_not_called()
+
+
+class TestDrainGrace:
+    """A 503 "draining" from a retiring daemon mid-cutover (#3179) is a normal,
+    bounded, self-resolving condition -- follow the routing table to the
+    successor and retry within the connect grace, exactly like the
+    session-404-settle case above, instead of raising immediately."""
+
+    def test_follows_new_endpoint_after_drain_503(self) -> None:
+        old_base = "http://127.0.0.1:57585"
+        new_base = "http://127.0.0.1:47000"
+        client = BridgeClient(
+            old_base,
+            "tok",
+            connect_grace=0.0,
+            reresolve=lambda: new_base,
+        )
+        seen: list[str] = []
+
+        def by_port(req, timeout=None):
+            seen.append(req.full_url)
+            if req.full_url.startswith(old_base):
+                raise _draining()
+            return _FakeResp({"session_id": "s1"})
+
+        with patch("agent_bridge.client.urllib.request.urlopen", side_effect=by_port):
+            result = client._request("POST", "/api/v1/sessions", {"agent": "local"})
+
+        assert result == {"session_id": "s1"}
+        assert seen == [
+            f"{old_base}/api/v1/sessions",
+            f"{new_base}/api/v1/sessions",
+        ]
+
+    def test_waits_for_routing_flip_after_drain_503(self) -> None:
+        old_base = "http://127.0.0.1:57585"
+        new_base = "http://127.0.0.1:47000"
+        endpoints = iter((old_base, new_base))
+        client = BridgeClient(
+            old_base,
+            "tok",
+            connect_grace=2.0,
+            reresolve=lambda: next(endpoints),
+        )
+        seen: list[str] = []
+
+        def by_port(req, timeout=None):
+            seen.append(req.full_url)
+            if req.full_url.startswith(old_base):
+                raise _draining()
+            return _FakeResp({"session_id": "s1"})
+
+        with (
+            patch("agent_bridge.client.urllib.request.urlopen", side_effect=by_port),
+            patch("time.sleep"),
+        ):
+            result = client._request("POST", "/api/v1/sessions", {"agent": "local"})
+
+        assert result == {"session_id": "s1"}
+        assert seen == [
+            f"{old_base}/api/v1/sessions",
+            f"{old_base}/api/v1/sessions",
+            f"{new_base}/api/v1/sessions",
+        ]
+
+    def test_sustained_drain_is_reported_cleanly_after_grace(self) -> None:
+        # Both endpoints keep draining (e.g. the successor hasn't opened its
+        # gate yet) -- a bounded BridgeClientError, never an infinite loop or
+        # an unhandled traceback escaping the caller.
+        client = BridgeClient(
+            "http://127.0.0.1:57585",
+            "tok",
+            connect_grace=0.0,
+            reresolve=lambda: "http://127.0.0.1:57585",
+        )
+
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            side_effect=_draining(),
+        ):
+            with pytest.raises(BridgeClientError) as exc_info:
+                client._request("POST", "/api/v1/sessions", {"agent": "local"})
+
+        assert exc_info.value.status == 503
+
+    def test_no_reresolver_still_bounded_by_grace(self) -> None:
+        # No reresolver at all -- must not loop forever; falls through to a
+        # clean BridgeClientError once the connect grace elapses.
+        client = BridgeClient(
+            "http://127.0.0.1:57585", "tok", connect_grace=0.0,
+        )
+
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            side_effect=_draining(),
+        ):
+            with pytest.raises(BridgeClientError):
+                client._request("POST", "/api/v1/sessions", {"agent": "local"})
 
 
 class TestRefreshEndpoint:
