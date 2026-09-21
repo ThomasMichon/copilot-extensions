@@ -38,6 +38,32 @@ def test_satellite_gate_closed_values(monkeypatch, value):
     assert config.satellite_gate_open() is False
 
 
+def test_satellite_max_concurrent_default(monkeypatch):
+    monkeypatch.delenv("AGENT_DISPATCH_SATELLITE_MAX_CONCURRENT", raising=False)
+    assert config.satellite_max_concurrent() == 1
+
+
+def test_satellite_max_concurrent_override(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_MAX_CONCURRENT", "5")
+    assert config.satellite_max_concurrent() == 5
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "not-a-number", ""])
+def test_satellite_max_concurrent_degrades_on_bad_values(monkeypatch, value):
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_MAX_CONCURRENT", value)
+    assert config.satellite_max_concurrent() == 1
+
+
+def test_satellite_project_unset(monkeypatch):
+    monkeypatch.delenv("AGENT_DISPATCH_SATELLITE_PROJECT", raising=False)
+    assert config.satellite_project() is None
+
+
+def test_satellite_project_set(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_PROJECT", "aperture-labs")
+    assert config.satellite_project() == "aperture-labs"
+
+
 # -- tracking: the status snapshot --------------------------------------------
 
 

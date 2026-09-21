@@ -683,3 +683,36 @@ def satellite_gate_open() -> bool:
     say explicitly, never something a typo or an unset var accidentally does."""
     raw = (os.environ.get("AGENT_DISPATCH_SATELLITE_GATE") or "").strip().lower()
     return raw in _SATELLITE_GATE_OPEN_VALUES
+
+
+#: Default cap on concurrently self-spawned local worktrees a satellite's
+#: work-intake loop will maintain (see the ``satellite-agent-exposure``
+#: effort's Phase 3 design). Deliberately small: a satellite is a field
+#: machine, not a fleet coordinator, and an unbounded claim loop could
+#: otherwise drain the whole queue into local spawns on one drain cycle.
+_SATELLITE_MAX_CONCURRENT_DEFAULT = 1
+
+
+def satellite_max_concurrent() -> int:
+    """The concurrency cap for satellite work-intake
+    (``AGENT_DISPATCH_SATELLITE_MAX_CONCURRENT``). Degrades to the safe
+    default on unset/non-positive/unparseable values -- a misconfiguration
+    must never silently raise the cap."""
+    raw = os.environ.get("AGENT_DISPATCH_SATELLITE_MAX_CONCURRENT")
+    if raw:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return _SATELLITE_MAX_CONCURRENT_DEFAULT
+
+
+def satellite_project() -> str | None:
+    """The ``agent-worktrees`` project a satellite embodies claimed work into
+    (``AGENT_DISPATCH_SATELLITE_PROJECT``), or ``None`` to let
+    ``embody.spawn_embodied_worker`` fall back to its own CWD-based
+    discovery. Explicit is safer for a satellite's work-intake loop, which
+    runs from a daemon/service context with no meaningful CWD of its own."""
+    return os.environ.get("AGENT_DISPATCH_SATELLITE_PROJECT") or None

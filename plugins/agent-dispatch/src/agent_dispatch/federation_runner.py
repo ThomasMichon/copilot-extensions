@@ -31,6 +31,7 @@ from .satellites import ROLE_SATELLITE
 
 if TYPE_CHECKING:
     from .federation import Rendezvous
+    from .satellite_work_intake import SatelliteWorkIntake
 
 
 # -- rendezvous factories ----------------------------------------------------
@@ -123,6 +124,7 @@ class FederationRunner:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lease: CoordinatorLease | None = None
+        self._work_intake: SatelliteWorkIntake | None = None
         if role in config.FEDERATION_LEASE_ROLES:
             lease_kwargs = {} if lease_ttl is None else {"lease_ttl": lease_ttl}
             self._lease = CoordinatorLease(
@@ -186,6 +188,12 @@ class FederationRunner:
             except Exception:
                 # Entry expired between beats -> re-assert it.
                 self._register()
+        if self._role == ROLE_SATELLITE:
+            # Work-intake (Phase 3): only ever attempted once presence is
+            # asserted for this tick, and only for the satellite role -- a
+            # transient failure here must never disrupt the presence half
+            # above (see `_attempt_work_intake`'s own try/except).
+            self._attempt_work_intake()
         return {
             "instance": self._instance,
             "role": self._role,
@@ -204,6 +212,39 @@ class FederationRunner:
 
         worktrees, status = satellite_status_snapshot()
         return {"worktrees": worktrees, "status": status}
+
+    def _attempt_work_intake(self) -> None:
+        """Discover + trigger a bounded number of local spawns for this
+        machine's own queued work (Phase 3 -- see
+        :mod:`agent_dispatch.satellite_work_intake`). A no-op, not an error,
+        when no shared coordinator is configured (``AGENT_DISPATCH_SHARED_URL``
+        unset): work-intake needs the shared coordinator's task queue, which
+        is a separate concern from the awareness-plane directory this
+        runner's rendezvous already talks to (and which may itself be a
+        *different* backend, e.g. Dev Tunnels)."""
+        if self._work_intake is None:
+            url = config.shared_url()
+            if not url:
+                return
+            from .client import DispatchClient
+            from .satellite_work_intake import SatelliteWorkIntake
+
+            client = DispatchClient(url, token=config.shared_token())
+            self._work_intake = SatelliteWorkIntake(
+                client,
+                machine=self._machine or self._instance,
+                project=config.satellite_project(),
+                max_concurrent=config.satellite_max_concurrent(),
+                clock=self._clock,
+            )
+        try:
+            self._work_intake.tick()
+        except Exception:
+            # A transient coordinator/spawn error must not disrupt this
+            # tick's presence half, nor kill the caller's loop -- the next
+            # tick re-attempts (mirrors `run`'s own "a transient error must
+            # not kill the loop" contract).
+            pass
 
     def _register(self) -> None:
         self._rv.register(

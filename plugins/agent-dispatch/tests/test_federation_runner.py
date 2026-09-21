@@ -105,6 +105,89 @@ def test_satellite_registers_with_role(monkeypatch, directory):
     assert [s["instance"] for s in sats] == ["sat-1"]
 
 
+# -- Phase 3 work-intake wiring -----------------------------------------------
+
+
+def test_satellite_skips_work_intake_without_shared_url(monkeypatch, directory):
+    # No AGENT_DISPATCH_SHARED_URL configured -- work-intake needs the shared
+    # coordinator's task queue, so this must stay a quiet no-op (not an
+    # error), and no work-intake object should even be constructed.
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
+    monkeypatch.setattr(config, "shared_url", lambda: None)
+    runner = FederationRunner(directory, "sat-1", role="satellite")
+    runner.tick()
+    assert runner._work_intake is None
+
+
+def test_satellite_attempts_work_intake_when_shared_url_configured(
+    monkeypatch, directory
+):
+    from agent_dispatch import client as client_mod
+    from agent_dispatch import satellite_work_intake as swi_mod
+
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
+    monkeypatch.setattr(config, "shared_url", lambda: "https://gw.example/dispatch")
+    monkeypatch.setattr(config, "shared_token", lambda: "tok")
+    monkeypatch.setattr(config, "satellite_max_concurrent", lambda: 3)
+    monkeypatch.setattr(config, "satellite_project", lambda: "aperture-labs")
+
+    built_clients = []
+    monkeypatch.setattr(
+        client_mod, "DispatchClient", lambda url, **kw: built_clients.append((url, kw)) or object()
+    )
+
+    tick_calls = []
+
+    class FakeWorkIntake:
+        def __init__(self, client, **kwargs):
+            self.client = client
+            self.kwargs = kwargs
+
+        def tick(self):
+            tick_calls.append(self.kwargs)
+            return {"spawned": []}
+
+    monkeypatch.setattr(swi_mod, "SatelliteWorkIntake", FakeWorkIntake)
+
+    runner = FederationRunner(directory, "sat-1", role="satellite", machine="book2")
+    runner.tick()
+    assert built_clients == [("https://gw.example/dispatch", {"token": "tok"})]
+    assert len(tick_calls) == 1
+    assert tick_calls[0]["machine"] == "book2"
+    assert tick_calls[0]["project"] == "aperture-labs"
+    assert tick_calls[0]["max_concurrent"] == 3
+
+    # Reuses the same work-intake instance on the next tick rather than
+    # rebuilding it (one DispatchClient/SatelliteWorkIntake per runner
+    # lifetime, not one per tick).
+    runner.tick()
+    assert len(built_clients) == 1
+    assert len(tick_calls) == 2
+
+
+def test_satellite_work_intake_failure_does_not_disrupt_presence(monkeypatch, directory):
+    from agent_dispatch import client as client_mod
+    from agent_dispatch import satellite_work_intake as swi_mod
+
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
+    monkeypatch.setattr(config, "shared_url", lambda: "https://gw.example/dispatch")
+    monkeypatch.setattr(client_mod, "DispatchClient", lambda url, **kw: object())
+
+    class BoomWorkIntake:
+        def __init__(self, client, **kwargs):
+            pass
+
+        def tick(self):
+            raise RuntimeError("coordinator unreachable")
+
+    monkeypatch.setattr(swi_mod, "SatelliteWorkIntake", BoomWorkIntake)
+
+    runner = FederationRunner(directory, "sat-1", role="satellite")
+    runner.tick()  # must not raise
+    sats = directory.discover_peers(role="satellite")
+    assert [s["instance"] for s in sats] == ["sat-1"]
+
+
 # -- lease-eligible roles ----------------------------------------------------
 
 
