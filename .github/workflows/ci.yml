@@ -15,12 +15,23 @@ name: CI
 #                      suite runs via the manual `full` workflow below.
 #   * full           - workflow_dispatch only: every plugin's full suite,
 #                      including agent-worktrees, no tight timeout.
+#   * context-handoff-exhaustive - workflow_dispatch/weekly schedule only: the
+#                      real-git/child-process/lock-race matrix under
+#                      plugins/context-handoff/tests/exhaustive/, excluded from
+#                      the fast lane's *.test.mjs glob by directory depth.
 
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    # context-handoff's exhaustive lock/process-race suite (real git repos,
+    # real child processes, timing-sensitive) is deliberately excluded from
+    # the fast PR/push lane -- see the context-handoff-exhaustive job below.
+    # Weekly is enough to catch a genuine regression without adding to every
+    # PR's budget.
+    - cron: "0 6 * * 1"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -425,3 +436,23 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Full suite - ${{ matrix.plugin }}
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+
+  context-handoff-exhaustive:
+    name: context-handoff (exhaustive lock/process matrix)
+    # Deliberately kept OUT of the required PR/push lane: this suite spins up
+    # real git repos and real child processes and exercises timing-sensitive
+    # lock-reclaim races (see plugins/context-handoff/tests/exhaustive/), so
+    # it is both slower and less deterministic than the fast contract suite
+    # the `checks` job's "JS unit tests" step already runs on every PR. Runs
+    # on workflow_dispatch (on demand) and the weekly schedule above; never
+    # blocks a PR merge.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Exhaustive lock/process-race suite
+        run: node --test plugins/context-handoff/tests/exhaustive/*.test.mjs
