@@ -275,7 +275,7 @@ class ConnectionManager:
         )
 
         if self._platform.supports_control_master:
-            proc = await self._start_control_master(config, socket, port_forwards)
+            proc = await self._connect_with_retry(config, socket, port_forwards)
         else:
             # Direct mode -- no persistent master process
             proc = None
@@ -302,6 +302,42 @@ class ConnectionManager:
             socket,
         )
         return info
+
+    async def _connect_with_retry(
+        self,
+        config: SSHConfig,
+        socket: Path,
+        port_forwards: list[str],
+        *,
+        attempts: int = 3,
+    ) -> asyncio.subprocess.Process:
+        """Start the ControlMaster, retrying transient connection failures.
+
+        A CodeSpace connects through the Azure dev-tunnel service
+        (``*.tunnels.api.visualstudio.com``). That tunnel is intermittently
+        reset mid-handshake ("An existing connection was forcibly closed by the
+        remote host"), which surfaces here as a ``ConnectionError`` from the
+        ControlMaster failing to establish. Native hosting hard-depends on this
+        connection (``relay: required``), so a single transient reset otherwise
+        fails the whole native start closed. Retrying with backoff rides through
+        the blip -- the tunnel typically succeeds within a couple of attempts.
+        """
+        delay = 2.0
+        for attempt in range(1, attempts + 1):
+            try:
+                return await self._start_control_master(config, socket, port_forwards)
+            except ConnectionError as exc:
+                if attempt >= attempts:
+                    raise
+                log.warning(
+                    "SSH connect to %s failed (attempt %d/%d); retrying in %.0fs: %s",
+                    config.ssh_target, attempt, attempts, delay, exc,
+                )
+                await asyncio.sleep(delay)
+                delay *= 2
+        # Unreachable: the loop either returns on success or raises on the final
+        # attempt above.
+        raise ConnectionError(f"ControlMaster failed to establish for {config.ssh_target}")
 
     async def _start_control_master(
         self,

@@ -1424,15 +1424,24 @@ async def _provision_relay_helpers(manager, name: str) -> bool:
         cfg = load_merged_config(include_cwd=False)
         ado_host = getattr(cfg.credentials, "ado_host", None)
         command = build_provision_command(ado_host=ado_host)
-        result = await manager.exec_command(name, command, timeout=30.0)
-        if result.exit_code == 0 and not getattr(result, "timed_out", False):
-            log.debug("Relay helpers provisioned on %s", name)
-            return True
-        else:
+        # Retry a transient SSH/tunnel failure (exit 255 / forcibly-closed
+        # dev-tunnel) rather than gating a required-relay launch closed on the
+        # first blip. The underlying ControlMaster also self-retries on connect.
+        delay = 2.0
+        for attempt in range(1, 4):
+            result = await manager.exec_command(name, command, timeout=30.0)
+            if result.exit_code == 0 and not getattr(result, "timed_out", False):
+                log.debug("Relay helpers provisioned on %s", name)
+                return True
+            transient = result.exit_code == 255 and attempt < 3
             log.warning(
-                "Relay helper provisioning on %s exited %s: %s",
-                name, result.exit_code, result.stderr.strip(),
+                "Relay helper provisioning on %s exited %s (attempt %d/3): %s",
+                name, result.exit_code, attempt, result.stderr.strip(),
             )
+            if not transient:
+                break
+            await asyncio.sleep(delay)
+            delay *= 2
     except Exception as exc:
         log.warning("Relay helper provisioning on %s failed: %s", name, exc)
     return False
