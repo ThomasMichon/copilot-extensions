@@ -434,6 +434,66 @@ def test_reap_stale_also_goes_through_backoff():
     assert len(calls) == 1
 
 
+def test_discover_coordinator_bypasses_backoff_cache_and_raises(cli):
+    # Prime a real coordinator entry, and put discover_peers into an active
+    # backoff window (so a naive shared cache would answer discover_coordinator
+    # from a stale/empty snapshot instead of the real state).
+    rv = DevTunnelRendezvous(runner=cli)
+    rv.register("coord-1", role="coordinator", epoch=3)
+
+    calls = []
+
+    def flaky_list_runner(args):
+        calls.append(args)
+        if args[0] == "list":
+            return subprocess.CompletedProcess(["devtunnel"], 1, "", "not logged in")
+        return cli(args)
+
+    flaky_rv = DevTunnelRendezvous(runner=flaky_list_runner)
+    # Drive discover_peers into backoff first.
+    with pytest.raises(DevTunnelError):
+        flaky_rv.discover_peers()
+    calls.clear()
+    # discover_coordinator must NOT answer from that backoff state -- it must
+    # attempt its own live call (which also fails here) and raise, never
+    # silently returning None (which would look like "no coordinator" and
+    # license CoordinatorLease to take over).
+    with pytest.raises(DevTunnelError):
+        flaky_rv.discover_coordinator()
+    assert len(calls) == 1
+    assert calls[0][0] == "list"
+
+
+def test_lease_does_not_take_over_when_coordinator_discovery_is_unreachable(cli):
+    """Regression test for the split-brain risk a reviewer flagged: a standby
+    whose OWN enumeration is failing must never conclude "no coordinator" and
+    take over while a real coordinator is live and healthy elsewhere."""
+    from agent_dispatch.lease import CoordinatorLease
+
+    # The real, healthy coordinator registers normally.
+    healthy_rv = DevTunnelRendezvous(runner=cli)
+    healthy_rv.register("coord-1", role="coordinator", epoch=1)
+
+    # A standby whose "list" calls fail (e.g. its own lapsed dtssh login) but
+    # whose show/create/update calls still succeed against the same directory
+    # -- the narrow case where enumeration and writes are not equally broken.
+    def flaky_list_runner(args):
+        if args[0] == "list":
+            return subprocess.CompletedProcess(["devtunnel"], 1, "", "not logged in")
+        return cli(args)
+
+    standby_rv = DevTunnelRendezvous(runner=flaky_list_runner)
+    lease = CoordinatorLease(standby_rv, "standby-1")
+
+    with pytest.raises(DevTunnelError):
+        lease.tick()
+    assert lease.is_active is False
+    # The real coordinator's entry must be untouched -- no second coordinator
+    # was ever registered.
+    coordinators = healthy_rv.discover_peers(role="coordinator")
+    assert [c["instance"] for c in coordinators] == ["coord-1"]
+
+
 # -- factory / config wiring -----------------------------------------------------
 
 

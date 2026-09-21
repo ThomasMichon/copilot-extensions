@@ -32,12 +32,20 @@ backend. A stale tunnel is not deleted here (that would race a
 still-registering peer); ``reap_stale`` is an explicit opt-in for a caller
 that wants to garbage-collect old entries.
 
-**Enumeration backs off on repeated failure:** ``discover_peers`` /
-``discover_coordinator`` / ``reap_stale`` all read through
+**Enumeration backs off on repeated failure -- for the awareness plane only:**
+``discover_peers`` and ``reap_stale`` read through
 :meth:`DevTunnelRendezvous._list_tunnels`, which doubles a backoff delay on
 each consecutive ``devtunnel list`` failure (a lapsed ``dtssh login`` being
 the common case) up to a cap, serving the last successfully enumerated
 snapshot while backed off rather than re-invoking the CLI every federation
+tick. ``discover_coordinator`` -- the **claim-plane** read
+:class:`~agent_dispatch.lease.CoordinatorLease` decides takeover on --
+deliberately bypasses this cache and always attempts (and can raise on) a
+live enumeration: serving a stale "no coordinator" answer during backoff
+would let a standby that merely can't currently list tunnels take over
+anyway (registration is a separate call, unaffected by list backoff),
+producing two simultaneous coordinators. See
+:meth:`DevTunnelRendezvous.discover_coordinator`'s docstring.
 tick.
 """
 
@@ -433,6 +441,34 @@ class DevTunnelRendezvous:
 
     def discover_peers(self, *, role: str | None = None) -> list[dict]:
         tunnels = self._list_tunnels()
+        return self._decode_live(tunnels, role=role)
+
+    def discover_coordinator(self) -> dict | None:
+        """The claim-plane read -- **never** served from the enumeration
+        backoff cache.
+
+        Unlike :meth:`discover_peers` (awareness only), this feeds
+        :class:`~agent_dispatch.lease.CoordinatorLease`, which takes
+        ``discover_coordinator() is None`` as license to take over the role.
+        A backed-off node's *own* enumeration outage says nothing about
+        whether the real coordinator is actually gone -- serving a stale/
+        cached "no coordinator" answer here would let a standby that merely
+        can't currently list tunnels register itself as coordinator anyway
+        (registration is a separate, unbatched call), producing two
+        simultaneous coordinators the directory would never have allowed a
+        live enumeration to see. So this method always attempts a live
+        enumeration and raises :class:`DevTunnelError` on failure -- the
+        lease's ``tick()`` then aborts that cycle (fail-closed) exactly as it
+        did before backoff existed, rather than resolving a transport failure
+        into a takeover decision.
+        """
+        tunnels = self._list_tunnels(bypass_cache=True)
+        coordinators = self._decode_live(tunnels, role="coordinator")
+        if not coordinators:
+            return None
+        return max(coordinators, key=lambda e: (e["epoch"], e["instance"]))
+
+    def _decode_live(self, tunnels: list[dict], *, role: str | None = None) -> list[dict]:
         entries = []
         for tunnel in tunnels:
             entry = self._decode(tunnel)
@@ -442,21 +478,18 @@ class DevTunnelRendezvous:
             entries = [e for e in entries if e["role"] == role]
         return sorted(entries, key=lambda e: e["instance"])
 
-    def discover_coordinator(self) -> dict | None:
-        coordinators = self.discover_peers(role="coordinator")
-        if not coordinators:
-            return None
-        return max(coordinators, key=lambda e: (e["epoch"], e["instance"]))
-
     # -- enumeration backoff -------------------------------------------------
 
-    def _list_tunnels(self) -> list[dict]:
+    def _list_tunnels(self, *, bypass_cache: bool = False) -> list[dict]:
         """``devtunnel list --all-labels <label>``, backed off on repeated
-        failure.
+        failure -- except for a claim-plane caller (``bypass_cache=True``,
+        used only by :meth:`discover_coordinator`), which must never accept a
+        stale answer (see that method's docstring).
 
         A federation tick calls this every interval; a persistent enumeration
         failure (most commonly a lapsed ``dtssh login``) must not re-invoke
-        the CLI at that same rate indefinitely. While backed off, this serves
+        the CLI at that same rate indefinitely **for presence-only reads**.
+        While backed off, :meth:`discover_peers` and :meth:`reap_stale` serve
         the last successfully enumerated snapshot (degrading to an already-
         known, possibly-stale awareness picture) instead of hammering the
         management API; the backoff clears -- and a fresh enumeration is
@@ -465,7 +498,7 @@ class DevTunnelRendezvous:
         at least once rather than the backoff silently swallowing it forever.
         """
         now = self._clock()
-        if now < self._enum_backoff_until:
+        if not bypass_cache and now < self._enum_backoff_until:
             return self._enum_cache
         try:
             result = self._call(["list", "--all-labels", self._label])
