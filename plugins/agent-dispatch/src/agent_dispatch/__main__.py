@@ -155,8 +155,17 @@ def _cmd_federation_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_federation_status(args: argparse.Namespace) -> int:
+    """Discovered coordinator + peers, plus a ``self`` role/instance/gate_state
+    section (see :func:`agent_dispatch.federation_runner.satellite_self_status`)."""
+    from .federation_runner import satellite_self_status
+
     rv = _federation_rendezvous(args)
-    return _emit({"coordinator": rv.discover_coordinator(), "peers": rv.discover_peers()})
+    role = getattr(args, "role", None) or _config.federation_role()
+    instance = getattr(args, "instance", None) or _config.federation_instance()
+    self_info = satellite_self_status(role, instance)
+    return _emit(
+        {"coordinator": rv.discover_coordinator(), "peers": rv.discover_peers(), "self": self_info}
+    )
 
 
 def _cmd_installer_readiness(args: argparse.Namespace) -> int:
@@ -4606,9 +4615,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="run a single tick and exit (print the resulting state)",
     )
     sp.set_defaults(func=_cmd_federation_run)
-    sp = fed_sub.add_parser("status", help="print the discovered coordinator + live peers")
+    sp = fed_sub.add_parser(
+        "status", help="coordinator + peers, plus this node's own role/gate state"
+    )
     sp.add_argument("--url", help="rendezvous coordinator URL (default: the hosted coordinator)")
     sp.add_argument("--token", help="bearer token for --url")
+    sp.add_argument(
+        "--role", choices=sorted(_config.FEDERATION_ROLES), help="this node's role, for self.gate_state"
+    )
+    sp.add_argument("--instance", help="this node's directory id, for self.instance")
     sp.set_defaults(func=_cmd_federation_status)
 
     p = sub.add_parser("health", help="check coordinator health")

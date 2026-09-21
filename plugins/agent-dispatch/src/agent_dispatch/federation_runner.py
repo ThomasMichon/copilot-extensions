@@ -393,6 +393,17 @@ class FederationRunner:
                 self._registered = False
 
 
+def satellite_self_status(role: str | None, instance: str | None) -> dict:
+    """This node's own role/instance/gate-state, for the CLI's ``federation
+    status self`` section -- distinct from the peer-visible directory entry,
+    since a gate-closed satellite never registers at all (see the
+    satellite-agent-exposure effort's Phase 2)."""
+    info: dict = {"role": role, "instance": instance}
+    if role == ROLE_SATELLITE:
+        info["gate_state"] = "open" if config.satellite_gate_open() else "closed"
+    return info
+
+
 def runner_from_config(rendezvous: Rendezvous | None = None) -> FederationRunner | None:
     """Build a :class:`FederationRunner` from the environment, or ``None`` when
     federation is not enabled (no valid ``AGENT_DISPATCH_FEDERATION_ROLE``).
