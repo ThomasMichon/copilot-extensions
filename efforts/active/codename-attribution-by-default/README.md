@@ -913,11 +913,12 @@ these decisions directly and assumes this design is understood.
 - [ ] Confirm the private downstream repo's next merged PR still carries
   the full raw marker unchanged (regression check, not a new test — just
   observe the next real merge). **Left open, transferred to a tracked
-  issue in the driver's own private tracker:** this repo is
-  private/downstream and out of this public record's scope by design
-  (see Context); it requires the driver's own observation against their
-  own private repo's next real merge, not something a session working
-  only in `copilot-extensions`
+  issue in the driver's own private tracker:** the downstream target
+  repo is private/out of this public record's scope by design (see
+  Context) -- this `copilot-extensions` repo itself is public; it
+  requires the driver's own observation against their own private repo's
+  next real merge, not something a session working only in
+  `copilot-extensions`
   can check or resolve directly here.
 
 ## Validation Plan
