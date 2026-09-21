@@ -206,7 +206,7 @@ def test_spawn_nonzero_returncode_counts_as_failure_not_success():
 
 def test_list_calls_scoped_to_this_machine_and_capped_active_limit():
     client = FakeClient(queued=[])
-    loop, _ = _loop(client)
+    loop, _ = _loop(client, max_concurrent=3)
     loop.tick()
     assert client.calls[0] == {
         "status": "claimed,started",
@@ -218,6 +218,7 @@ def test_list_calls_scoped_to_this_machine_and_capped_active_limit():
         "status": "queued",
         "target_machine": "book2",
         "repo": None,
+        "limit": 3,
     }
 
 
@@ -226,6 +227,75 @@ def test_active_list_limit_covers_a_cap_above_the_endpoint_default():
     loop, _ = _loop(client, max_concurrent=500)
     loop.tick()
     assert client.calls[0]["limit"] == 500
+
+
+def test_queued_list_limit_matches_remaining_capacity_above_endpoint_default():
+    client = FakeClient(active=[], queued=[])
+    loop, _ = _loop(client, max_concurrent=250)
+    loop.tick()
+    assert client.calls[1]["limit"] == 250
+
+
+# -- spawn timeout -------------------------------------------------------
+
+
+def test_spawn_timeout_passed_through_to_spawn_fn():
+    captured = []
+
+    def fake_spawn(task_id, **kw):
+        captured.append(kw.get("timeout"))
+        return FakeProc(0)
+
+    client = FakeClient(queued=[{"id": "t1"}])
+    loop = SatelliteWorkIntake(
+        client,
+        machine="book2",
+        project="test-project",
+        spawn_timeout=15.0,
+        spawn_fn=fake_spawn,
+        clock=FakeClock(),
+    )
+    loop.tick()
+    assert captured == [15.0]
+
+
+def test_spawn_timeout_defaults_to_a_bounded_value():
+    from agent_dispatch.satellite_work_intake import DEFAULT_SPAWN_TIMEOUT_S
+
+    captured = []
+
+    def fake_spawn(task_id, **kw):
+        captured.append(kw.get("timeout"))
+        return FakeProc(0)
+
+    client = FakeClient(queued=[{"id": "t1"}])
+    loop = SatelliteWorkIntake(
+        client, machine="book2", project="test-project",
+        spawn_fn=fake_spawn, clock=FakeClock(),
+    )
+    loop.tick()
+    assert captured == [DEFAULT_SPAWN_TIMEOUT_S]
+
+
+def test_spawn_timeout_expiry_releases_the_slot():
+    # A hung `agent-worktrees embody` process is exactly what the bounded
+    # timeout guards against -- subprocess.run raises TimeoutExpired, which
+    # `_try_spawn` must treat like any other launch failure.
+    client = FakeClient(queued=[{"id": "t1"}])
+
+    def hanging_spawn(task_id, **kw):
+        raise TimeoutError("embody did not return within the bound")
+
+    loop = SatelliteWorkIntake(
+        client,
+        machine="book2",
+        project="test-project",
+        spawn_fn=hanging_spawn,
+        clock=FakeClock(),
+    )
+    result = loop.tick()
+    assert result["spawned"] == []
+    assert "t1" not in loop._recent_triggers
 
 
 def test_satellite_repo_scopes_the_discovery_queries():

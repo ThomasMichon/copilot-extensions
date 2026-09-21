@@ -723,3 +723,29 @@ def satellite_project() -> str | None:
     CWD fallback there would risk embodying the wrong project rather than
     surfacing the misconfiguration."""
     return os.environ.get("AGENT_DISPATCH_SATELLITE_PROJECT") or None
+
+
+#: Default bound (seconds) on one satellite work-intake spawn attempt
+#: (``agent-worktrees embody``). This loop's spawn call runs synchronously
+#: inside the same federation tick that also asserts this node's presence
+#: (register/heartbeat) -- an unbounded launch could otherwise hang that
+#: tick indefinitely and starve heartbeats behind it. Long enough for a
+#: normal embody invocation (process spawn + initial mux/session bring-up,
+#: not the task itself, which runs detached) to complete.
+_SATELLITE_SPAWN_TIMEOUT_DEFAULT = 30.0
+
+
+def satellite_spawn_timeout() -> float:
+    """The bound (seconds) on one satellite work-intake spawn attempt
+    (``AGENT_DISPATCH_SATELLITE_SPAWN_TIMEOUT``). Degrades to the safe
+    default on unset/non-positive/unparseable values -- a misconfiguration
+    must never silently make a hung launch block heartbeats indefinitely."""
+    raw = os.environ.get("AGENT_DISPATCH_SATELLITE_SPAWN_TIMEOUT")
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return _SATELLITE_SPAWN_TIMEOUT_DEFAULT

@@ -44,6 +44,12 @@ class _TaskLister(Protocol):
 #: concurrency slot.
 DEFAULT_TRIGGER_TTL_S = 180.0
 
+#: Default bound (seconds) on one spawn attempt (``agent-worktrees embody``).
+#: This loop's spawn call runs synchronously inside the same tick that also
+#: asserts this node's presence -- an unbounded launch could hang that tick
+#: (and every heartbeat behind it) indefinitely.
+DEFAULT_SPAWN_TIMEOUT_S = 30.0
+
 #: Task statuses counted as "already actively occupying a concurrency slot"
 #: for this machine, independent of this loop's own in-memory bookkeeping --
 #: the live, coordinator-authoritative half of the concurrency cap.
@@ -69,6 +75,7 @@ class SatelliteWorkIntake:
         repo: str | None = None,
         max_concurrent: int = 1,
         trigger_ttl: float = DEFAULT_TRIGGER_TTL_S,
+        spawn_timeout: float | None = DEFAULT_SPAWN_TIMEOUT_S,
         spawn_fn: Callable[..., Any] | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -81,6 +88,7 @@ class SatelliteWorkIntake:
         self._repo = repo
         self._max_concurrent = max(1, int(max_concurrent))
         self._trigger_ttl = float(trigger_ttl)
+        self._spawn_timeout = spawn_timeout
         self._spawn_fn = spawn_fn
         self._clock = clock
         #: task_id -> the tick timestamp a spawn was last triggered for it.
@@ -139,6 +147,7 @@ class SatelliteWorkIntake:
             project=project,
             repo=self._repo,
             route=" --shared",
+            timeout=self._spawn_timeout,
         )
 
     def tick(self) -> dict:
@@ -173,7 +182,10 @@ class SatelliteWorkIntake:
             return {"spawned": [], "skipped_at_capacity": True}
         try:
             queued = self._client.list(
-                status="queued", target_machine=self._machine, repo=self._repo
+                status="queued",
+                target_machine=self._machine,
+                repo=self._repo,
+                limit=capacity,
             )
         except Exception:
             return {"spawned": [], "skipped_at_capacity": False, "error": "list_failed"}

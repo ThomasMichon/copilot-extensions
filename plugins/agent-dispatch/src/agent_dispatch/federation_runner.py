@@ -244,6 +244,7 @@ class FederationRunner:
                     machine=self._machine or self._instance,
                     project=config.satellite_project(),
                     max_concurrent=config.satellite_max_concurrent(),
+                    spawn_timeout=config.satellite_spawn_timeout(),
                     clock=self._clock,
                 )
             self._work_intake.tick()
