@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -197,6 +197,7 @@ CREATE TABLE IF NOT EXISTS live_sessions (
     last_activity_at REAL,
     latest_progress TEXT,
     cli_mode INTEGER NOT NULL DEFAULT 0,
+    venue TEXT,
     registered_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );

@@ -443,3 +443,25 @@ class _SchemaMixin:
                 "Schema migrated to version 18: cli_mode_reservations table + "
                 "live_sessions.cli_mode"
             )
+
+        if from_version < 19:
+            # v18 -> v19: add `venue` to live_sessions (agent-bridge-cli-mode-
+            # sessions, Phase 4 prep). A CLI-mode session launched inside a
+            # remote venue (CodeSpace/container) has no dialable local port and
+            # no host_index entry (it self-registers, like any attended
+            # session) -- but nothing today records *which* venue it lives in
+            # or what to attach to. NULL for the ordinary local case; a JSON
+            # object (`{"kind","target","mux_session_name"}`) for a
+            # venue-launched CLI-mode session. Additive only -- no existing
+            # row's meaning changes. See visions/remote-interactive-sessions.
+            cols = [
+                r[1]
+                for r in conn.execute(
+                    "PRAGMA table_info(live_sessions)"
+                ).fetchall()
+            ]
+            if "venue" not in cols:
+                conn.execute("ALTER TABLE live_sessions ADD COLUMN venue TEXT")
+            conn.execute("UPDATE schema_version SET version=?", (19,))
+            conn.commit()
+            log.info("Schema migrated to version 19: live_sessions.venue")

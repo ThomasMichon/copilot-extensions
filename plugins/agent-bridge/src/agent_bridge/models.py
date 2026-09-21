@@ -529,6 +529,25 @@ class SessionListResponse(BaseModel):
 # -- Live interactive-session registry (extension-backed) --------------------
 
 
+class LiveSessionVenue(BaseModel):
+    """Where a remote-venue CLI-mode session lives and how to reattach to it.
+
+    Absent (``None``) for the ordinary local case. Populated by a venue's own
+    CLI-mode launch verb (agent-bridge-cli-mode-sessions Phase 4) -- never
+    inferred or guessed by the bridge itself.
+    """
+
+    #: Venue provider boundary, matching ``session_host``'s existing
+    #: ``boundary`` vocabulary: "codespace" | "container". Local sessions
+    #: carry no venue at all rather than a "local" kind here.
+    kind: str
+    #: The venue's own name/identifier (CodeSpace name, container name).
+    target: str
+    #: The multiplexer session name to attach to on that venue
+    #: (``embody``'s own ``wt-<worktree_id>`` convention).
+    mux_session_name: str
+
+
 class RegisterLiveSessionRequest(BaseModel):
     """Registration payload from the bundled agent-bridge extension."""
 
@@ -541,6 +560,7 @@ class RegisterLiveSessionRequest(BaseModel):
     pid: int | None = None
     role: str | None = None
     driven_by: str | None = None
+    venue: LiveSessionVenue | None = None
 
 
 class LiveSessionInfo(BaseModel):
@@ -572,6 +592,9 @@ class LiveSessionInfo(BaseModel):
     #: registration. Never set by the caller; the bridge derives it at
     #: registration time from ``cli_mode_reservations``.
     cli_mode: bool = False
+    #: Where this session lives and how to reattach, for a remote-venue
+    #: CLI-mode session (Phase 4); ``None`` for the ordinary local case.
+    venue: LiveSessionVenue | None = None
     registered_at: float
     updated_at: float
 
