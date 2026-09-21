@@ -1047,4 +1047,7 @@ Use `setup|inspect|status|doctor|disable|enable` for lifecycle controls.
 steer, release, or abandon a blocked dispatch task explicitly. During host
 migration, disable the old declaration, release or hand off its emitter lease,
 then transfer declaration placement/producer authority before enabling the new
-host. See the plugin README and `docs/repository-issue-loop.md`.
+host. See the plugin README and `docs/repository-issue-loop.md`. Adopting a
+new declaration from scratch? Start with
+`docs/repository-issue-loop-adoption.md` (schema reference, worker identity
+library, worked example) instead.

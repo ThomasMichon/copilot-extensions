@@ -758,7 +758,10 @@ failure, staleness, active occurrence, forge-visible reservations, pool state,
 and local kill switch. Forge discovery or credential failures are explicit
 health failures, not indistinguishable from an empty eligible set. See
 [`docs/repository-issue-loop.md`](docs/repository-issue-loop.md) for the worker
-contract, migration sequence, and provider boundary.
+contract, migration sequence, and provider boundary, and
+[`docs/repository-issue-loop-adoption.md`](docs/repository-issue-loop-adoption.md)
+for the declaration schema reference, the available worker identities, and a
+worked example for standing up a new declaration from scratch.
 
 
 ### Reactive webhook producer (`agent-dispatch webhook`)

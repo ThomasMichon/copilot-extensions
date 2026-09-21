@@ -159,13 +159,18 @@ and the parent agent-dispatch vision:
 
 ### Phase 5 - Turnkey colleague adoption
 
-- [ ] Write the adoption path for a colleague unfamiliar with the runtime:
+- [x] Write the adoption path for a colleague unfamiliar with the runtime:
   declaration schema reference, the library of available worker identities,
   and a worked example end-to-end (a new repository, its declaration, its
-  selected identity).
+  selected identity). Landed
+  `plugins/agent-dispatch/docs/repository-issue-loop-adoption.md`, linked
+  from the README, the SKILL, and `repository-issue-loop.md`.
 - [ ] Identify and remove any remaining step in that path that requires
   reading engine source rather than the declaration schema and an identity's
-  own documentation.
+  own documentation. One known gap remains and is named explicitly in the
+  new doc's closing section: diagnosing a genuinely novel `doctor` failure
+  not already covered by the Operations list still benefits from engine
+  source. Left open rather than closed by assertion.
 
 ## Validation Plan
 
@@ -787,6 +792,39 @@ state instead.
   batching, reservation, and settlement are all live-proved against a real
   Azure DevOps project, and the TeamProject-scoping bug that would have
   undermined every future declaration is fixed.
+
+### 2026-09-20 (cont. 2) - Phase 5: wrote the turnkey colleague adoption path
+
+- Picked up Phase 5 (the remaining unstarted phase) next. Surveyed the
+  existing docs surface first: `repository-issue-loop.md` is a thorough
+  internal-behavior reference (reservation protocol, forge adapters, host
+  migration) but reads as engine-adjacent, not a colleague's from-scratch
+  path; the SKILL only carries a brief pointer; and there was no single
+  place enumerating the declaration schema's full field/type/default table,
+  nor the available worker identity library, nor a worked example.
+- Wrote `plugins/agent-dispatch/docs/repository-issue-loop-adoption.md`:
+  a full schema reference table (every top-level field plus the `forge`,
+  `reservation`, and `pool` sub-mappings, with type/required/default
+  columns cross-checked directly against `validate_config`'s actual
+  validation logic, not remembered from the earlier phases), the worker
+  identity resolution order and today's built-in library (currently just
+  `repository-issue-loop-default`, with guidance on authoring a repo-local
+  one), and a complete worked YAML example for a new GitHub-backed
+  repository plus the one-line diff for an Azure DevOps-backed one. Linked
+  from the plugin README, `repository-issue-loop.md`'s own header, and
+  (already) the SKILL's existing gotchas section.
+- **Named the one known remaining gap explicitly rather than asserting the
+  second Phase 5 bullet closed by omission**: diagnosing a genuinely novel
+  `doctor` failure not already covered by the Operations command list still
+  benefits from reading engine source today. Left that bullet unchecked and
+  the doc's own closing section says so, with an explicit instruction to
+  fold any newly-discovered failure-mode resolution into the doc itself
+  rather than normalizing "read the source" as the fallback.
+- Left the Validation Plan's "a colleague can stand up a new loop... without
+  reading engine source" item unchecked deliberately -- that is an external,
+  real-colleague validation this session cannot self-assert; it needs an
+  actual colleague (or a clean-room-style dry run by someone who did not
+  write the engine) trying the doc as written.
 
 
 
