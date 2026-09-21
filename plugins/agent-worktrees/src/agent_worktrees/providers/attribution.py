@@ -1,18 +1,21 @@
 """Optional source-worktree attribution markers for PR bodies/comments.
 
-When a closed-circuit repo opts in with ``pr.source_attribution: true``, a PR
-opened by agent-worktrees carries an initial hidden HTML-comment marker naming
-the **source worktree** (+ machine / session / head SHA). Later pushed heads are
-published as dedicated marker comments so mutable metadata never replaces the
-authored PR description. Consumers use the newest marker across both surfaces.
-The feature is off by default because hidden PR metadata is still public and raw
-machine, worktree, and session identifiers are inappropriate for public repos.
+By default (codename-attribution-by-default), a PR opened by agent-worktrees
+carries a public-safe marker naming **only** the worktree's assigned codename
+(see the third mode below) -- no machine, worktree-id, session, or head SHA.
+When a closed-circuit repo instead opts in with ``pr.source_attribution:
+true``, the marker carries the raw **source worktree** (+ machine / session /
+head SHA) -- this must stay off for a public repo, since hidden PR metadata
+is still public and raw machine/worktree/session identifiers are
+inappropriate there. Later pushed heads are published as dedicated marker
+comments so mutable metadata never replaces the authored PR description.
+Consumers use the newest marker across both surfaces.
 
 The marker is a single HTML comment, invisible in rendered Markdown:
 
     <!-- agent-worktrees:source worktree=<id> machine=<m> session=<sid> head=<sha> -->
 
-A third mode, ``pr.source_attribution: codename`` (effort
+The default third mode, ``pr.source_attribution: codename`` (effort
 ``pr-attribution-codenames`` Phase 4), is for a public repo that still wants
 author-side traceability: it emits :func:`build_codename_marker` instead --
 **only** the worktree's assigned codename, no machine/worktree-id/session/
