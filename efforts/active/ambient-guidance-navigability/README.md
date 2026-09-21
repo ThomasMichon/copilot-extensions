@@ -191,9 +191,16 @@ private paths).
 - [ ] **Deterministic sync tool**: a script (extends
       `manage-instruction-projections.py` or a sibling) that, given a
       consumer repo, does: refresh installed plugin payloads for every
-      enabled plugin, `sync`, `scan --from-settings` for drift, and -- only
-      if the result changed anything -- produces a branch + PR carrying a
-      dedicated stamp label (e.g. `projection-reflect`). **Managed-file
+      enabled plugin, `sync`, `scan --from-settings` for drift. **The
+      "did anything change" condition is `changed or lock_updated`, not
+      `changed` alone**: `sync` can report an empty `changed` list with a
+      lock-only update, and `scan --from-settings` can emit findings with no
+      file change at all -- treating either as a no-op silently drops lock
+      drift or reports success while hiding a real finding. A non-empty
+      `scan` finding that isn't a plain drift-to-fix routes the same way as
+      a blocking `sync` finding (see conflict routing below), never as a
+      silent pass. Only when there is truly nothing to report does the
+      worker skip opening a PR. **Managed-file
       conflict routing**: `sync` already returns blocking findings (not a
       git-merge conflict) when it detects a locally hand-edited managed
       projection or an ownership/lock validation failure, leaving `changed`
@@ -206,21 +213,30 @@ private paths).
       recompute-verification target (it already carries `template`,
       `pluginVersion`, `templateBytes`/`templateSha256`, and
       `renderedBytes`/`renderedSha256` per destination) -- no new manifest
-      format is needed; a reviewer independently re-runs `sync` against the
-      same installed-plugin state and requires a byte-exact match against
-      **both** the PR's lock-entry diff **and** the actual generated
-      instruction files it declares (hash each managed destination file on
-      disk and confirm it matches its own lock entry's `renderedSha256`, not
-      just that the lock entries match each other) -- a producer that left
-      lock hashes untouched while altering a managed file's real content
-      must fail this check, and any managed path present in the diff but
-      absent from the lock (or vice versa) must fail it too. This is
-      strictly stronger verification than `config-reflect` can offer (there
-      is no live, unrepeatable device state here -- the source is
-      already-reviewed, already-merged upstream content, so the render is
-      100% reproducible). **Byte-exact match proves reproducibility, not
-      trust**: `discover_enabled_sources` resolves every repository-enabled
-      marketplace, including third-party
+      format is needed. **Reproducibility requires an immutable pinned
+      source, not "whatever's currently installed"**: an installed payload
+      on a worker/reviewer machine can itself have moved on since the PR was
+      opened, so a version + hash alone does not guarantee the reviewer can
+      recompute the *same* bytes later. The PR must carry (or the lock
+      schema must gain) the exact immutable upstream reference each changed
+      projection was rendered from (a commit SHA or release digest in the
+      trusted source's own history, not just a mutable version string), and
+      verification must fetch/recompute from *that exact pinned artifact* --
+      never from "the reviewer's own current install state" -- requiring a
+      byte-exact match against **both** the PR's lock-entry diff **and** the
+      actual generated instruction files it declares (hash each managed
+      destination file on disk and confirm it matches its own lock entry's
+      `renderedSha256`, not just that the lock entries match each other) --
+      a producer that left lock hashes untouched while altering a managed
+      file's real content must fail this check, and any managed path
+      present in the diff but absent from the lock (or vice versa) must
+      fail it too. This is strictly stronger verification than
+      `config-reflect` can offer (there is no live, unrepeatable device
+      state here -- the source is already-reviewed, already-merged upstream
+      content pinned to an immutable reference, so the render is 100%
+      reproducible from that reference). **Byte-exact match proves
+      reproducibility, not trust**: `discover_enabled_sources` resolves
+      every repository-enabled marketplace, including third-party
       ones this repo did not author. The bypass must additionally restrict
       itself to an explicit **trusted-source allowlist** (defaulting to this
       repo's own marketplace only; any other marketplace/plugin source is
@@ -326,10 +342,12 @@ conflict-dispatch label there.
 - [ ] Confirm the launch-script-ownership question specifically now produces
       a correct "this belongs to copilot-extensions, resolve via `related
       resolve`" answer rather than a false positive.
-- [ ] Confirm Phase 5's scheduled worker actually produces a clean
+- [ ] Phase 5's own acceptance (that its scheduled worker produces a clean
       auto-merged PR at least once, and that a deliberately-forced conflict
-      (e.g. a hand-edit to a managed projection) correctly routes to the
-      reconciler rather than silently overwriting or silently blocking.
+      correctly routes to its reconciler rather than silently overwriting or
+      blocking) is **that downstream companion effort's own validation
+      item**, not this repo's -- this repo cannot verify a private repo's
+      runtime behavior, and this Plan does not gate on it.
 
 ## Validation Plan
 
