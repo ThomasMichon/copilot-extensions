@@ -560,13 +560,28 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     try:
         serve(cfg, passive=passive, force=force)
     except CoordinatorAlreadyLiveError as exc:
-        print(
-            f"agent-dispatch: {exc} (ThomasMichon/copilot-extensions#3066). Use "
-            "`agent-dispatch deploy` for a graceful, zero-downtime cutover onto "
-            "new code, or pass --force if you intend a deliberate, unmanaged "
-            "manual restart.",
-            file=sys.stderr,
-        )
+        if force:
+            # --force already bypasses the liveness rejection; reaching this
+            # from a forced start means the shared start-lock itself is held
+            # by a concurrent starter or transition (or, per the exception's
+            # own message, a genuinely wedged holder) -- telling the operator
+            # to pass --force again is not actionable, since it was already
+            # passed and never bypasses this lock (review follow-up on
+            # ThomasMichon/copilot-extensions#3066).
+            print(
+                f"agent-dispatch: {exc} (ThomasMichon/copilot-extensions#3066). "
+                "--force does not bypass this lock -- retry once the other "
+                "process finishes, or terminate it if it's genuinely wedged.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"agent-dispatch: {exc} (ThomasMichon/copilot-extensions#3066). Use "
+                "`agent-dispatch deploy` for a graceful, zero-downtime cutover onto "
+                "new code, or pass --force if you intend a deliberate, unmanaged "
+                "manual restart.",
+                file=sys.stderr,
+            )
         return 2
     return 0
 

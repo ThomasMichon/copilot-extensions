@@ -1587,6 +1587,40 @@ def test_cmd_serve_force_bypasses_live_coordinator_guard(monkeypatch, tmp_path):
     assert kwargs.get("passive") is False
 
 
+def test_cmd_serve_force_refusal_message_does_not_suggest_force_again(
+    monkeypatch, tmp_path, capsys
+):
+    """When serve() itself raises CoordinatorAlreadyLiveError for a forced
+    start (the shared start-lock is held by a concurrent starter/transition,
+    not the liveness check --force already bypasses), the CLI must not tell
+    the operator to pass --force again -- it was already passed and never
+    bypasses this lock (review follow-up on
+    ThomasMichon/copilot-extensions#3066)."""
+    import argparse
+
+    from agent_dispatch import __main__, runtime_version, server
+
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda **_: False)
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path / "runtime")
+
+    def _fake_serve(*_a, **_k):
+        raise server.CoordinatorAlreadyLiveError(
+            "another process is concurrently starting a coordinator on this host"
+        )
+
+    monkeypatch.setattr(server, "serve", _fake_serve)
+    args = argparse.Namespace(
+        host="127.0.0.1", port=None, db=None, token=None, passive=False, force=True,
+    )
+
+    rc = __main__._cmd_serve(args)
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "#3066" in err
+    assert "pass --force" not in err
+
+
 def test_cmd_serve_passive_bypasses_live_coordinator_guard(monkeypatch, tmp_path):
     # A passive cutover instance is intentionally spawned while the old
     # coordinator is still live -- the orchestrator, not this guard, owns
