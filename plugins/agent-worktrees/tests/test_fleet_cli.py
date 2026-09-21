@@ -102,6 +102,22 @@ def test_offline_host_degrades_to_partial_result(tmp_path):
     assert by_machine["lambda-core"]["reachable"] is True
     assert by_machine["borealis"]["reachable"] is False
     assert "error" in by_machine["borealis"]
+    # Schema stability (review #3134): `worktrees` is always present, even
+    # for an unreachable row, so a consumer never special-cases a missing key.
+    assert by_machine["borealis"]["worktrees"] == []
+
+
+def test_ssh_login_banner_noise_does_not_break_parsing():
+    """Login-banner/MOTD noise surrounding the JSON payload (common over a
+    real SSH session) must not make a reachable host look unreachable --
+    mirrors claimant.py's/codename_reverse_lookup.py's own boundary-scan
+    tolerance (review #3134)."""
+    noisy = (
+        "Welcome to Ubuntu 24.04\nLast login: Mon Jan  1\n"
+        '{"worktrees": [{"id": "a"}]}\n'
+    )
+    result = fleet._parse_list_payload(noisy)
+    assert result == [{"id": "a"}]
 
 
 def test_local_environment_runs_locally_not_over_ssh(tmp_path):

@@ -104,9 +104,23 @@ def _local_binstub(project: str) -> str:
 def _parse_list_payload(raw: str) -> list | None:
     """Extract the ``worktrees`` array from a ``list --json`` payload
     (enveloped ``{"worktrees": [...]}`` or a flat list), or None on any
-    parse/shape failure."""
+    parse/shape failure.
+
+    Tolerates surrounding shell/login-banner noise by scanning for the
+    JSON object/array boundaries first -- mirrors ``claimant.py``'s
+    ``_parse_alive`` / ``codename_reverse_lookup.py``'s ``_parse_lookup``,
+    which every other cross-machine SSH probe in this plugin already
+    relies on (review #3134): an SSH session's MOTD/profile output would
+    otherwise make a perfectly reachable host look unreachable.
+    """
+    if not raw:
+        return None
+    start = min((i for i in (raw.find("{"), raw.find("[")) if i >= 0), default=-1)
+    end = max(raw.rfind("}"), raw.rfind("]"))
+    if start < 0 or end <= start:
+        return None
     try:
-        data = json.loads(raw)
+        data = json.loads(raw[start:end + 1])
     except (ValueError, TypeError):
         return None
     worktrees = data.get("worktrees") if isinstance(data, dict) else data
@@ -120,8 +134,15 @@ def _probe_host(
     """Run ``list --json`` on one host (locally or over SSH), returning a
     fleet row. Every failure mode (unreachable, timeout, unparseable
     output) degrades to ``reachable: false`` with an ``error`` message --
-    never raises, so one bad host never aborts the whole fleet call."""
-    row: dict = {"machine": machine_key, "env": env_name, "reachable": False}
+    never raises, so one bad host never aborts the whole fleet call.
+
+    ``worktrees`` is always present (``[]`` when unreachable) so a
+    consumer never has to special-case a missing key alongside
+    ``reachable: false`` (review #3134)."""
+    row: dict = {
+        "machine": machine_key, "env": env_name,
+        "reachable": False, "worktrees": [],
+    }
     try:
         if is_local:
             cmd = [_local_binstub(project), "list", "--json", *extra_args]
