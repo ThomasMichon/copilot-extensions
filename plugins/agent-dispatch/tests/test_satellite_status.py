@@ -64,6 +64,28 @@ def test_satellite_project_set(monkeypatch):
     assert config.satellite_project() == "aperture-labs"
 
 
+def test_satellite_spawn_timeout_default(monkeypatch):
+    monkeypatch.delenv("AGENT_DISPATCH_SATELLITE_SPAWN_TIMEOUT", raising=False)
+    assert config.satellite_spawn_timeout() == 30.0
+
+
+def test_satellite_spawn_timeout_override(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_SPAWN_TIMEOUT", "45")
+    assert config.satellite_spawn_timeout() == 45.0
+
+
+@pytest.mark.parametrize(
+    "value", ["0", "-1", "not-a-number", "", "inf", "Infinity", "1e400", "nan"]
+)
+def test_satellite_spawn_timeout_degrades_on_bad_values(monkeypatch, value):
+    # inf/1e400 (an overflowing literal) both satisfy a plain `value > 0`
+    # check -- a hung `embody` launch must never be allowed an unbounded
+    # timeout via a misconfiguration. nan fails `> 0` outright but is
+    # included for completeness (never finite-and-positive).
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_SPAWN_TIMEOUT", value)
+    assert config.satellite_spawn_timeout() == 30.0
+
+
 # -- tracking: the status snapshot --------------------------------------------
 
 

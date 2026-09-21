@@ -236,6 +236,26 @@ def test_queued_list_limit_matches_remaining_capacity_above_endpoint_default():
     assert client.calls[1]["limit"] == 250
 
 
+def test_queued_list_limit_padded_past_recently_triggered_count():
+    # If the first `capacity` rows the coordinator would otherwise return
+    # are all already in `_recent_triggers` (still awaiting confirmation),
+    # a request sized to exactly `capacity` could come back entirely
+    # client-side-suppressed and leave a slot idle even though a newer
+    # eligible task exists further down the queue -- the request must be
+    # padded past the in-flight count so those newer rows are still in
+    # the returned page.
+    client = FakeClient(queued=[{"id": "t1"}])
+    loop, _ = _loop(client, max_concurrent=3)
+    loop.tick()  # triggers t1; recent_triggers now has 1 entry
+
+    client._active = []
+    client._queued = [{"id": "t1"}, {"id": "t2"}]
+    loop.tick()
+    # capacity = 3 - active(0) - recent_triggers(1, t1 still pending) = 2
+    # limit must be padded past the 1 in-flight entry so t2 is reachable.
+    assert client.calls[-1]["limit"] == 2 + 1
+
+
 # -- spawn timeout -------------------------------------------------------
 
 

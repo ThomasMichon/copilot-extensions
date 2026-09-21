@@ -47,6 +47,7 @@ lone dev box or against a designated coordinator host on a shared network:
 
 from __future__ import annotations
 
+import math
 import os
 import socket
 import urllib.error
@@ -738,13 +739,15 @@ _SATELLITE_SPAWN_TIMEOUT_DEFAULT = 30.0
 def satellite_spawn_timeout() -> float:
     """The bound (seconds) on one satellite work-intake spawn attempt
     (``AGENT_DISPATCH_SATELLITE_SPAWN_TIMEOUT``). Degrades to the safe
-    default on unset/non-positive/unparseable values -- a misconfiguration
-    must never silently make a hung launch block heartbeats indefinitely."""
+    default on unset/non-positive/non-finite/unparseable values -- a
+    misconfiguration (including ``inf``/an overflowing literal, both of
+    which satisfy a plain ``value > 0`` check) must never silently make a
+    hung launch block heartbeats indefinitely."""
     raw = os.environ.get("AGENT_DISPATCH_SATELLITE_SPAWN_TIMEOUT")
     if raw:
         try:
             value = float(raw)
-            if value > 0:
+            if value > 0 and math.isfinite(value):
                 return value
         except ValueError:
             pass

@@ -185,7 +185,13 @@ class SatelliteWorkIntake:
                 status="queued",
                 target_machine=self._machine,
                 repo=self._repo,
-                limit=capacity,
+                # Pad the request past `capacity`: any row already in
+                # `_recent_triggers` is filtered out client-side below, so a
+                # request sized to EXACTLY `capacity` could come back
+                # entirely suppressed (every returned row already
+                # in-flight) and leave open slots idle even though other,
+                # newer eligible tasks exist further down the queue.
+                limit=capacity + len(self._recent_triggers),
             )
         except Exception:
             return {"spawned": [], "skipped_at_capacity": False, "error": "list_failed"}
