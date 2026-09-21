@@ -222,6 +222,13 @@ def embodiment_overlay(session: dict[str, Any] | None) -> dict[str, Any] | None:
     return overlay or None
 
 
+#: Session lifecycle states that still *occupy* a worktree (resumable) but are
+#: not currently doing live work -- a satellite must not advertise these as an
+#: active/embodied worktree (a stopped session is retired-but-resumable, not
+#: "the agent is here right now").
+_TERMINAL_SESSION_STATUSES = frozenset({"stopped", "ended", "failed"})
+
+
 def satellite_status_snapshot(
     *, timeout: float = 3.0
 ) -> tuple[list[str], dict[str, dict[str, Any]]]:
@@ -232,16 +239,30 @@ def satellite_status_snapshot(
     Reads **only this machine's own** local headless sessions via
     :func:`list_local_body_sessions` (the same local ``agent-bridge --json
     sessions`` call the embodiment overlay already uses) -- no SSH, no new
-    outbound reach, and nothing opened for anyone to reach *in*. A session
-    missing a resolvable ``worktree_id`` or whose overlay is empty is skipped;
-    an unreachable/absent ``agent-bridge`` degrades to ``([], {})`` exactly
-    like the rest of this module's best-effort tracking.
+    outbound reach, and nothing opened for anyone to reach *in*.
+
+    Two things the raw session list requires filtering for before it's fit to
+    publish as "what's live right now": it can carry **resumable-but-stopped**
+    sessions (``status`` in :data:`_TERMINAL_SESSION_STATUSES`) alongside truly
+    active ones -- those are skipped, not advertised as active worktrees. And a
+    worktree can appear **more than once** after a session roll (a retired
+    predecessor plus its successor); since the bridge's list is newest-first,
+    only the *first* row seen per ``worktree_id`` is kept so an older row can
+    never silently overwrite the newer one's status. A session missing a
+    resolvable ``worktree_id`` or whose overlay is empty is also skipped; an
+    unreachable/absent ``agent-bridge`` degrades to ``([], {})`` exactly like
+    the rest of this module's best-effort tracking.
     """
     worktrees: list[str] = []
     status: dict[str, dict[str, Any]] = {}
     for session in list_local_body_sessions(timeout=timeout):
         worktree_id = session.get("worktree_id")
         if not isinstance(worktree_id, str) or not worktree_id:
+            continue
+        if worktree_id in status:
+            continue
+        session_status = str(session.get("status") or "").lower()
+        if session_status in _TERMINAL_SESSION_STATUSES:
             continue
         overlay = embodiment_overlay(session)
         if overlay is None:

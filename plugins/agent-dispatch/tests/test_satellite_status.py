@@ -93,6 +93,42 @@ def test_satellite_status_snapshot_includes_minimal_overlay(monkeypatch):
     assert status["wt-a"] == {"worktree_id": "wt-a"}
 
 
+@pytest.mark.parametrize("terminal_status", ["stopped", "ended", "failed"])
+def test_satellite_status_snapshot_excludes_terminal_sessions(monkeypatch, terminal_status):
+    # A resumable-but-stopped (or ended/failed) session occupies the worktree
+    # but is not doing live work right now -- must not be advertised as active.
+    sessions = [{"worktree_id": "wt-a", "status": terminal_status}]
+    monkeypatch.setattr(tracking, "list_local_body_sessions", lambda **_: sessions)
+    worktrees, status = tracking.satellite_status_snapshot()
+    assert worktrees == []
+    assert status == {}
+
+
+def test_satellite_status_snapshot_deduplicates_by_worktree_keeping_first_row(monkeypatch):
+    # The bridge's session list is newest-first; a worktree can appear more
+    # than once after a session roll (retired predecessor + successor). Only
+    # the first (newest) row must be kept -- an older row must never
+    # overwrite it.
+    sessions = [
+        {
+            "worktree_id": "wt-a",
+            "session_id": "sess-new",
+            "status": "running",
+            "liveness": "active",
+        },
+        {
+            "worktree_id": "wt-a",
+            "session_id": "sess-old",
+            "status": "running",
+            "liveness": "idle",
+        },
+    ]
+    monkeypatch.setattr(tracking, "list_local_body_sessions", lambda **_: sessions)
+    worktrees, status = tracking.satellite_status_snapshot()
+    assert worktrees == ["wt-a"]
+    assert status["wt-a"]["session_id"] == "sess-new"
+
+
 # -- federation_runner: gate + status wiring ----------------------------------
 
 
