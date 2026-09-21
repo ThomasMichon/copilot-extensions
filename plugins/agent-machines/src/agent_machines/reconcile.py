@@ -25,6 +25,8 @@ from typing import Any
 
 from agent_procutil import no_window_kwargs
 
+from . import fleet_update as _fleet_update
+from . import fleet_update_state as _fleet_update_state
 from . import modules as _modules
 from . import resources as _resources
 from . import self_update as _self_update
@@ -477,6 +479,13 @@ def plan(
             observed = _self_update_state.observed_plan_fields(res.id)
             entry["observed"] = observed
             entry["summary"] = _self_update.format_plan_summary(
+                entry["summary"],
+                observed,
+            )
+        if res.type == "fleet-update":
+            observed = _fleet_update_state.observed_plan_fields(res.id)
+            entry["observed"] = observed
+            entry["summary"] = _fleet_update.format_plan_summary(
                 entry["summary"],
                 observed,
             )
