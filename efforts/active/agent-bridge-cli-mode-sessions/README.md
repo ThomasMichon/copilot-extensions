@@ -205,6 +205,22 @@ mechanism CLI mode binds through.
       session type, lifecycle, or protocol was introduced. All existing
       reattach/observation/messaging routes are unchanged and apply
       identically regardless of `cli_mode`.
+- [ ] **Course correction (2026-09-20), reopens this phase's discovery
+      design:** promote a claimed CLI-mode reservation into a real
+      `host_index` registration instead of only flipping
+      `live_sessions.cli_mode`. See the vision's 2026-09-20 Provenance entry
+      and this effort's matching journal entry for the reasoning: a Session
+      Host's *survival* and *ACP transport* duties are already covered, for a
+      CLI-mode session, by the multiplexer and the already-loaded CLI
+      extension — no host process needs spawning — but its *discoverability*
+      duty (durable, restart-surviving `host_index` lookup, not a bespoke
+      side-table) was never actually unified, and that's the one piece worth
+      fixing before Phase 4 builds a second venue on top of the un-unified
+      version. Concretely: extend `HostRecord`/`host_index.py`
+      (`plugins/agent-bridge/src/agent_bridge/session_host/host_index.py`)
+      with a CLI-mode record shape (`mode: "cli"`, a mux-reattach descriptor
+      instead of a dialable `port`) and a mux-liveness check (no `host_pid`
+      to poll), then have the reservation-claim path register through it.
 
 ### Phase 3 — Opt-in local launch surface
 
@@ -372,6 +388,49 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-09-20 — Course correction: no Session Host process for CLI mode, but unify discovery through `host_index`
+
+Operator challenge, after last session's Phase 4 rebase: "agent-bridge should
+use the Session Host model for every live bridge... always project a
+session-host into the target ... pair the spawned copilot process with a
+session-host instance" -- prompted by noticing Phase 2/3's CLI-mode
+correlation (a bespoke `cli_mode_reservations` table + a boolean flag on
+`live_sessions`) never actually used `host_index`, the daemon's real durable
+discovery map every ACP-mode session relies on for reattach.
+
+Explored the strong reading first ("always spawn a real Session Host, even
+locally, even for CLI mode") and rejected it: a Session Host exists to give a
+**headless** `copilot --acp` child two things it cannot provide itself --
+survival across daemon restart/reconnect, and an ACP transport surface so the
+daemon can drive a child with no human attached. A CLI-mode session already
+has both, from different owners: the multiplexer (tmux/psmux) already keeps
+the process alive across detach/reattach -- that's a mux's entire purpose --
+and the CLI extension, already loaded inside a real interactive `copilot`
+process, already registers and participates with the daemon directly (proven
+by Phase 1's send-admission fix and the existing inbox-polling mechanics).
+Wrapping that in a spawned Session Host would be a second, redundant
+lifecycle manager for a process two other owners already keep alive and
+already speak for -- exactly the "second host type" the vision's own
+non-goals rule out.
+
+The actual gap is narrower and was already implicit in the operator's
+observation: Session Host's *third* job -- durable discoverability via
+`host_index` -- is the one thing CLI mode never got, because Phase 2
+solved worktree correlation with its own bespoke table instead. Corrected the
+vision's "Session Host CLI mode" concept accordingly (see its 2026-09-20
+Provenance entry): no host process spawned, but a claimed reservation
+promotes into a real `host_index` registration -- a second, honest
+`HostRecord` shape (`mode: "cli"`, a mux-reattach descriptor instead of a
+dialable port; mux-liveness instead of `host_pid` polling) in the *same*
+index, not a parallel one. This reopens part of already-merged Phase 2 (see
+its new checklist item) before Phase 4 builds a second venue on top of the
+un-unified version -- worth doing now rather than compounding the divergence
+across three venues.
+
+Not yet implemented: this session recorded the corrected design in the
+vision + effort plan; the `HostRecord`/`host_index.py` extension and the
+reservation-claim-to-registration promotion are the next concrete work.
 
 ### 2026-09-20 — Gate `ensure_mux_available` behind explicit opt-in (`--ensure-mux`)
 
