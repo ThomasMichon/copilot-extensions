@@ -82,6 +82,40 @@ def test_list_local_body_sessions_degrades_when_passive_probe_detaches(monkeypat
     assert tracking.list_local_body_sessions() == []
 
 
+def test_list_local_body_sessions_default_ensures_daemon(monkeypatch):
+    monkeypatch.setattr(
+        tracking, "agent_bridge_launch_prefix", lambda: ["python", "-m", "agent_bridge"]
+    )
+    captured = {}
+
+    def fake_run_capture(argv, *, timeout, env=None):
+        captured["env"] = env
+        return types.SimpleNamespace(returncode=0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(tracking, "_run_capture", fake_run_capture)
+    tracking.list_local_body_sessions()
+    # Default behavior is unchanged: no special env override, so the
+    # subprocess inherits ambient environment (including whatever ensures
+    # the daemon per agent-bridge's own default).
+    assert captured["env"] is None
+
+
+def test_list_local_body_sessions_ensure_daemon_false_disables_boot(monkeypatch):
+    monkeypatch.setattr(
+        tracking, "agent_bridge_launch_prefix", lambda: ["python", "-m", "agent_bridge"]
+    )
+    captured = {}
+
+    def fake_run_capture(argv, *, timeout, env=None):
+        captured["env"] = env
+        return types.SimpleNamespace(returncode=0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(tracking, "_run_capture", fake_run_capture)
+    tracking.list_local_body_sessions(ensure_daemon=False)
+    assert captured["env"] is not None
+    assert captured["env"].get("AGENT_BRIDGE_NO_ENSURE") == "1"
+
+
 def test_enrich_local_body_tasks_ignores_nonlocal_handles(monkeypatch):
     monkeypatch.setattr(
         tracking,
@@ -100,7 +134,7 @@ def test_enrich_local_body_tasks_ignores_nonlocal_handles(monkeypatch):
 def test_resolve_live_session_shells_bridge_json_resolve(monkeypatch):
     captured = {}
 
-    def fake_run(cmd, *, timeout):
+    def fake_run(cmd, *, timeout, env=None):
         captured["cmd"] = cmd
         captured["timeout"] = timeout
         return types.SimpleNamespace(

@@ -139,12 +139,12 @@ def _bridge_resolve_argv(worktree: str, *, machine: str | None) -> list[str] | N
 
 
 def _run_capture(
-    argv: list[str], *, timeout: float
+    argv: list[str], *, timeout: float, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a passive probe without allocating a headed Windows console."""
     if os.path.basename(argv[0]).casefold() in {"ssh", "ssh.exe"}:
         return run_ssh_capture(argv, timeout=timeout)
-    return run_background_capture(argv, timeout=timeout)
+    return run_background_capture(argv, timeout=timeout, env=env)
 
 
 def resolve_live_session(
@@ -195,12 +195,28 @@ def resolve_live_session(
     return data
 
 
-def list_local_body_sessions(*, timeout: float = 3.0) -> list[dict[str, Any]]:
-    """List local headless sessions; observation failures degrade to no rows."""
+def list_local_body_sessions(
+    *, timeout: float = 3.0, ensure_daemon: bool = True
+) -> list[dict[str, Any]]:
+    """List local headless sessions; observation failures degrade to no rows.
+
+    ``ensure_daemon`` (default ``True``, preserving prior behavior): the
+    underlying ``agent-bridge --json sessions`` CLI command boots the local
+    daemon on demand if it isn't already running (its own ``_get_client()``
+    default). Pass ``ensure_daemon=False`` for a genuinely passive,
+    unattended probe (e.g. a periodic background tick) that must never start
+    a daemon merely by checking whether anything is running -- this sets
+    ``AGENT_BRIDGE_NO_ENSURE=1`` for the subprocess only, degrading cleanly
+    to no rows when the daemon isn't already up rather than booting one.
+    """
     prefix = agent_bridge_launch_prefix()
     if prefix is None:
         return []
-    proc = _run_capture([*prefix, "--json", "sessions"], timeout=timeout)
+    env = None
+    if not ensure_daemon:
+        env = dict(os.environ)
+        env["AGENT_BRIDGE_NO_ENSURE"] = "1"
+    proc = _run_capture([*prefix, "--json", "sessions"], timeout=timeout, env=env)
     if proc is None:
         return []
     if proc.returncode != 0 or not proc.stdout.strip():
@@ -240,6 +256,11 @@ def satellite_status_snapshot(
     :func:`list_local_body_sessions` (the same local ``agent-bridge --json
     sessions`` call the embodiment overlay already uses) -- no SSH, no new
     outbound reach, and nothing opened for anyone to reach *in*.
+    ``ensure_daemon=False``: a periodic federation tick is a passive
+    background probe, not an interactive request for accurate status, so it
+    must never *boot* a local agent-bridge daemon merely to check whether
+    anything is running -- it degrades to ``([], {})`` when the daemon isn't
+    already up, exactly as if ``agent-bridge`` itself were absent.
 
     Two things the raw session list requires filtering for before it's fit to
     publish as "what's live right now": it can carry **resumable-but-stopped**
@@ -256,7 +277,7 @@ def satellite_status_snapshot(
     worktrees: list[str] = []
     status: dict[str, dict[str, Any]] = {}
     seen: set[str] = set()
-    for session in list_local_body_sessions(timeout=timeout):
+    for session in list_local_body_sessions(timeout=timeout, ensure_daemon=False):
         worktree_id = session.get("worktree_id")
         if not isinstance(worktree_id, str) or not worktree_id:
             continue

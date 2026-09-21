@@ -48,6 +48,23 @@ def test_satellite_status_snapshot_empty_when_no_sessions(monkeypatch):
     assert status == {}
 
 
+def test_satellite_status_snapshot_never_boots_the_agent_bridge_daemon(monkeypatch):
+    # A periodic federation tick is a passive background probe, not an
+    # interactive status request -- it must call list_local_body_sessions
+    # with ensure_daemon=False so a down daemon degrades to no rows instead
+    # of being booted as a side effect of merely checking.
+    calls = []
+
+    def fake_list(**kwargs):
+        calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(tracking, "list_local_body_sessions", fake_list)
+    tracking.satellite_status_snapshot()
+    assert len(calls) == 1
+    assert calls[0].get("ensure_daemon") is False
+
+
 def test_satellite_status_snapshot_maps_sessions(monkeypatch):
     sessions = [
         {
