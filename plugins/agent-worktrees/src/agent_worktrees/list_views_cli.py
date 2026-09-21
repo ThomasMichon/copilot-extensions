@@ -43,6 +43,11 @@ def _fleet_targets():
     plus the current machine's own environment (``is_local=True``, run
     locally via the binstub rather than over a loopback SSH hop -- not
     literally in-process).
+
+    A machine with no per-environment alias falls back to its top-level
+    ``alias`` (one row, ``env_name=""``) -- mirrors
+    ``claimant.resolve_machine_ssh``'s own fallback, so a machine relying
+    on that shape isn't silently omitted from the fleet (review #3134).
     """
     try:
         config = cfg.load_config()
@@ -54,6 +59,7 @@ def _fleet_targets():
     for key, entry in entries.items():
         if not getattr(entry, "copilot", True) or not entry.ssh_ready:
             continue
+        yielded = False
         for env in entry.ssh_environments:
             if not env.alias:
                 continue
@@ -61,6 +67,10 @@ def _fleet_targets():
             shell = env.shell or ("pwsh" if env_name.lower() == "windows" else "bash")
             is_local = key == this_machine and env_name.lower() == this_platform.lower()
             yield key, env_name, env.alias, shell, is_local
+            yielded = True
+        if not yielded and entry.alias:
+            is_local = key == this_machine
+            yield key, "", entry.alias, "bash", is_local
 
 
 def _remote_list_cmd(shell: str, project: str, extra_args: list[str]) -> str:

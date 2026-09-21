@@ -19,15 +19,16 @@ from agent_worktrees import config as cfg
 from agent_worktrees import list_views_cli as fleet
 
 
-def _entry(key, *, envs, ssh_ready=True, copilot=True):
+def _entry(key, *, envs, ssh_ready=True, copilot=True, alias=""):
     return cfg.MachineEntry(
         key=key,
         display_name=key,
         environment=envs[0][0] if envs else "",
         ssh_ready=ssh_ready,
         copilot=copilot,
+        alias=alias,
         ssh_environments=[
-            cfg.SSHEnvironment(name=name, alias=alias) for name, alias in envs
+            cfg.SSHEnvironment(name=name, alias=alias_) for name, alias_ in envs
         ],
     )
 
@@ -101,9 +102,10 @@ def test_offline_host_degrades_to_partial_result(tmp_path):
     assert "error" in by_machine["borealis"]
 
 
-def test_local_environment_runs_in_process_not_over_ssh(tmp_path):
-    """The current machine's own environment is run directly (no ssh hop),
-    matching the machine/platform this test pretends to be."""
+def test_local_environment_runs_locally_not_over_ssh(tmp_path):
+    """The current machine's own environment is run directly via the local
+    binstub (still a subprocess, not an ssh hop), matching the machine/
+    platform this test pretends to be."""
     entries = {
         "lambda-core": _entry("lambda-core", envs=[
             ("windows", "lambda-core"), ("wsl", "lambda-core-wsl"),
@@ -124,3 +126,26 @@ def test_local_environment_runs_in_process_not_over_ssh(tmp_path):
     local_calls = [c for c in calls if c[0] != "ssh"]
     assert len(ssh_calls) == 1
     assert len(local_calls) == 1
+
+
+def test_machine_level_alias_fallback_is_not_omitted(tmp_path):
+    """A machine with no per-environment alias (only a top-level `alias`)
+    must still get a fleet row -- mirrors `claimant.resolve_machine_ssh`'s
+    own fallback (review #3134)."""
+    entries = {
+        "wheatley": _entry("wheatley", envs=[], alias="wheatley"),
+    }
+    config = _fake_config(tmp_path, machine="lambda-core", platform="wsl")
+    calls = []
+
+    def _fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0, stdout='{"worktrees": []}', stderr="")
+
+    result = _run_json(["--json"], entries, config, run_side_effect=_fake_run)
+
+    assert len(result["hosts"]) == 1
+    assert result["hosts"][0]["machine"] == "wheatley"
+    assert result["hosts"][0]["reachable"] is True
+    assert calls[0][0] == "ssh"
+    assert calls[0][-2] == "wheatley"
