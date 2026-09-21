@@ -214,21 +214,31 @@ def _git_isolated_env() -> dict[str, str]:
 
 
 def _payload_is_clean(git: str, footprint: Path) -> bool:
-    """Whether ``footprint`` has no local modifications or untracked files.
+    """Whether ``footprint`` has no local modifications, untracked, or
+    ignored files.
 
     ``git rev-parse HEAD`` alone only proves the *containing repository's*
     current commit -- it says nothing about whether the payload on disk at
     ``footprint`` actually matches that commit. A dirty or untracked file
     within the payload would otherwise still receive a valid-looking pin,
     letting the bypass path publish content that was never present at the
-    pinned commit. ``git status --porcelain`` scoped to ``footprint`` (via
-    ``-C`` + a ``.`` pathspec) reports both staged/unstaged modifications
-    and untracked files; any output at all means the payload is not a
-    faithful checkout of ``HEAD``.
+    pinned commit. ``git status --porcelain --ignored`` scoped to
+    ``footprint`` (via ``-C`` + a ``.`` pathspec) reports staged/unstaged
+    modifications, untracked files, **and** ignored files -- plain
+    ``--porcelain`` alone omits ignored entries, and an ignored-but-still-
+    read file (the projection scanner does not consult ``.gitignore``) is
+    exactly as unproven against ``HEAD`` as an untracked one. Any output at
+    all means the payload is not a faithful checkout of ``HEAD`` -- this
+    deliberately over-rejects (e.g. a stray `__pycache__`/build-cache
+    directory inside the payload also blocks pinning) rather than trying to
+    distinguish "harmless" ignored content from real payload drift.
     """
     try:
         result = subprocess.run(
-            [git, "-C", str(footprint), "status", "--porcelain", "--", "."],
+            [
+                git, "-C", str(footprint),
+                "status", "--porcelain", "--ignored", "--", ".",
+            ],
             capture_output=True,
             text=True,
             timeout=5,
@@ -246,20 +256,27 @@ def _plugin_commit(footprint: Path) -> str:
     Only resolvable when ``footprint`` lives inside a real git working tree
     -- this repo's own directory-marketplace plugins, or an
     ``agent-worktrees-repo`` checkout, are the two cases that qualify today
-    -- **and** that payload has no local modifications or untracked files
-    (see :func:`_payload_is_clean`): a dirty checkout cannot be pinned,
-    since the commit it would report no longer describes what is actually
-    on disk. Returns ``""`` -- never raises -- for every other case: git is
-    unavailable, the footprint is not inside a git working tree, the
-    payload is dirty, or any command fails for any reason. Every git
-    subprocess runs with `GIT_*` environment variables stripped (see
+    -- **and** that payload has no local modifications, untracked, or
+    ignored files (see :func:`_payload_is_clean`): a dirty checkout cannot
+    be pinned, since the commit it would report no longer describes what is
+    actually on disk. Returns ``""`` -- never raises -- for every other
+    case: git is unavailable, the footprint is not inside a git working
+    tree, the payload is dirty, or any command fails for any reason. Every
+    git subprocess runs with `GIT_*` environment variables stripped (see
     :func:`_git_isolated_env`) so an inherited `GIT_DIR`/`GIT_WORK_TREE`
     override can never redirect this probe at an unrelated repository.
     Deliberately never attempts to resolve a commit for a plain
     installed-plugins payload copy (no local git history to read there) --
     that remains a genuinely unsolved case (see
     ``efforts/active/ambient-guidance-navigability``'s Journal), not
-    something to guess at.
+    something to guess at. **Callers must only invoke this against a
+    directory-marketplace footprint** (a plugin this reviewing repo, or an
+    ``agent-worktrees-repo``, owns as its own local checkout) -- an
+    installed-plugins footprint is a copied external payload with no
+    source-commit provenance of its own, even when it happens to live
+    under some unrelated enclosing git checkout; `assemble_enabled_plugins`
+    and `_sources_from_raw_dir` enforce this by construction (see their own
+    call sites) rather than this function guessing at the caller's intent.
     """
     git = shutil.which("git")
     if git is None:
@@ -539,6 +556,14 @@ def assemble_enabled_plugins(
         )
 
         footprint = _directory_marketplace_plugin(mkt, name, declaration, base)
+        # Only a directory-marketplace footprint is this repo's own local
+        # git checkout -- an installed_root footprint (the `else` branch
+        # below) is a copied external payload with no source-commit
+        # provenance of its own, even when it happens to live under some
+        # unrelated enclosing git checkout. _plugin_commit() must never run
+        # against it: doing so could return that enclosing repository's
+        # HEAD and let requireImmutablePin accept the wrong identity.
+        is_directory_marketplace = footprint is not None
         if footprint is not None:
             try:
                 controlled = (
@@ -566,7 +591,7 @@ def assemble_enabled_plugins(
                 controlled=controlled,
                 source=source_url,
                 version=_plugin_version(footprint),
-                commit=_plugin_commit(footprint),
+                commit=_plugin_commit(footprint) if is_directory_marketplace else "",
             )
         )
     return out
@@ -586,7 +611,12 @@ def _sources_from_raw_dir(root: Path) -> list[PluginSource]:
                 controlled=False,
                 source=_plugin_repo_url(plugin_dir),
                 version=_plugin_version(plugin_dir),
-                commit=_plugin_commit(plugin_dir),
+                # This converts a raw *installed-plugins* tree -- a copied
+                # external payload with no source-commit provenance of its
+                # own -- into external sources; never call _plugin_commit()
+                # here (it could accidentally return an enclosing checkout's
+                # HEAD and mark a copied payload as pinned).
+                commit="",
             )
         )
     return out

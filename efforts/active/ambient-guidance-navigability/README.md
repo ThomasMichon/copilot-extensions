@@ -974,10 +974,25 @@ honestly rather than guessing at the full answer.
   `setting-up-instruction-sync-worker/SKILL.md` (including its consent-
   schema example and scheduler-config description, which still described
   hand-rolling `sync`/`scan`/`bypass_decision` rather than calling
-  `run_sync_pass()` -- fixed alongside). `customizing-copilot`'s full
-  suite: 222 passed, 8 skipped. `check-module-size`/`check-version-bump`/
-  `check-version-consistency`/`check-docs-consistency` all pass. Bumped to
-  `0.1.0-dev87`.
+  `run_sync_pass()` -- fixed alongside). Two review rounds on PR #3159
+  caught real gaps in the resolver itself, fixed in the same PR: a dirty
+  or untracked payload could still receive a valid-looking pin (added
+  `_payload_is_clean`, extended to `--ignored` files in round 2 since
+  plain `--porcelain` omits them and the projection scanner does not
+  consult `.gitignore`); the git subprocess inherited the ambient
+  environment, so a caller-set `GIT_DIR`/`GIT_WORK_TREE` could redirect
+  the probe at an unrelated repository (added `_git_isolated_env`); an
+  installed-plugins footprint (a copied external payload) could still get
+  pinned if it happened to sit under an unrelated enclosing git checkout
+  (scoped `_plugin_commit` calls to the directory-marketplace branch only,
+  in both `assemble_enabled_plugins` and `_sources_from_raw_dir`); and the
+  scaffolder template called `run_sync_pass()` without ever resolving or
+  passing `pinned_commits`, so a scaffolded scheduler would silently drop
+  pin enforcement even with `requireImmutablePin: true` set (wired
+  `resolve_pinned_commits()` through, gated on the same consent flag).
+  `customizing-copilot`'s full suite: 228 passed, 8 skipped (22 new tests
+  total). `check-module-size`/`check-version-bump`/`check-version-
+  consistency`/`check-docs-consistency` all pass. Bumped to `0.1.0-dev89`.
 - **Issue #3132 is half closed, not fully.** What remains genuinely open:
   an externally-installed marketplace plugin -- the common adopter case --
   still cannot be pinned at all. Closing that needs either an install-time

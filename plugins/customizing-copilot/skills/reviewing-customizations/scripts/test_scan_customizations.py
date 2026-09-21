@@ -2894,6 +2894,60 @@ def test_plugin_commit_ignores_ambient_git_dir_override(
     assert sha == expected
 
 
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_plugin_commit_empty_with_an_ignored_file(tmp_path: Path):
+    repo = tmp_path / "repo"
+    _clean_git_checkout(repo)
+    (repo / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+    _run_git(repo, "add", "-A")
+    _run_git(repo, "commit", "-q", "-m", "add gitignore")
+    (repo / "ignored.txt").write_text("stray content\n", encoding="utf-8")
+
+    # An ignored file inside the payload is exactly as unproven against
+    # HEAD as an untracked one -- the projection scanner does not consult
+    # .gitignore, so plain `git status --porcelain` (which omits ignored
+    # entries) would wrongly report this payload as clean.
+    assert scan._plugin_commit(repo) == ""
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_assemble_never_pins_an_installed_root_footprint(tmp_path: Path):
+    # A plain installed-plugins footprint is a copied external payload with
+    # no source-commit provenance of its own -- even when the installed
+    # root happens to live inside an unrelated git checkout (as it does
+    # here), assemble_enabled_plugins must never call _plugin_commit()
+    # against it.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    installed = tmp_path / "installed"
+    _clean_git_checkout(installed)
+    _installed_plugin(installed, "some-market", "cap")
+    _run_git(installed, "add", "-A")
+    _run_git(installed, "commit", "-q", "-m", "add plugin payload")
+    _settings(repo, {"cap@some-market": True}, {})
+
+    sources = scan.assemble_enabled_plugins(
+        repo, installed_root=installed, home=tmp_path / "home"
+    )
+
+    assert len(sources) == 1
+    assert sources[0].commit == ""
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_sources_from_raw_dir_never_pins_a_copied_payload(tmp_path: Path):
+    installed = tmp_path / "installed"
+    _clean_git_checkout(installed)
+    _installed_plugin(installed, "some-market", "cap")
+    _run_git(installed, "add", "-A")
+    _run_git(installed, "commit", "-q", "-m", "add plugin payload")
+
+    sources = scan._sources_from_raw_dir(installed)
+
+    assert len(sources) == 1
+    assert sources[0].commit == ""
+
+
 def test_plugin_commit_empty_outside_a_git_checkout(tmp_path: Path):
     plain = tmp_path / "plain"
     plain.mkdir()
