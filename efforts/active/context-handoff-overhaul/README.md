@@ -2017,3 +2017,42 @@ convergence:
   correctly follows the new name). `node --test`: 155 tests, 153 pass (2
   pre-existing skips), no regressions. All guards pass. No version bump
   needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 22: pid-reuse ceiling, releaseLock error handling, remove the stale-cache fallback entirely
+
+Round 22 surfaced 3 new findings, all fixed:
+
+- **(HIGH) A crashed holder's reused pid would permanently disable sync for
+  a worktree:** round 20's liveness-gated reclaim closed the "reclaim a
+  merely-slow live holder" problem, but `process.kill(pid, 0)` can only
+  observe whether SOME process holds that pid right now -- it cannot tell
+  whether the ORIGINAL holder crashed and the OS later reused its pid for
+  an unrelated live process. Without a bound, that reused pid would look
+  permanently "alive" and this worktree could never self-heal again. Added
+  `ABSOLUTE_STALE_LOCK_MS` (24h, deliberately far longer than the everyday
+  `STALE_LOCK_MS` fallback) as a hard ceiling that overrides even a
+  "confirmed alive" verdict -- a bounded, rare-but-real safety net
+  specifically for pid reuse, not a normal reclaim path.
+- **(HIGH) `releaseLock`'s restore step treated every `linkSync` failure as
+  benign:** swallowing any error (not just the expected `EEXIST`) and
+  unconditionally deleting the claimed copy meant an unexpected failure
+  (permissions, an unsupported filesystem, transient I/O) would still
+  destroy the only remaining copy of a still-active replacement holder's
+  lock content, leaving the path empty for a third invocation to acquire
+  into. Now branches explicitly on `error?.code === "EEXIST"` (the
+  expected "already re-acquired" case, safe to drop) versus any other
+  failure (fails closed -- leaves the orphaned copy in place rather than
+  guessing).
+- **(MEDIUM) The local `origin/HEAD` cache fallback was itself removed:**
+  round 21 still fell back to the possibly-stale local cache if BOTH direct
+  remote queries (`ls-remote --symref`, `remote show origin`) failed
+  outright. Removed that fallback entirely -- if neither authoritative
+  network query succeeds, `plainGitSync` now reports `synced: false`
+  ("could not confirm the remote's default branch") rather than ever
+  guessing from a value that cannot be confirmed current.
+- 4 new tests (an old-but-genuinely-reused-pid-standin lock is reclaimed
+  once past the absolute ceiling; a structural check that only `EEXIST` is
+  treated as benign in `releaseLock`'s restore catch; a real unreachable-
+  remote scenario proving the cache fallback is never consulted). `node
+  --test`: 158 tests, 156 pass (2 pre-existing skips), no regressions. All
+  guards pass. No version bump needed (still `0.1.1-dev36`).

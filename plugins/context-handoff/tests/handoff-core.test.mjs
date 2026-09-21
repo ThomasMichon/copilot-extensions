@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { join, dirname } from "node:path";
 import {
   mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, unlinkSync,
-  existsSync,
+  existsSync, utimesSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -1480,6 +1480,35 @@ test("plainGitSync queries the remote directly for its default branch, not a sta
   }
 });
 
+test("plainGitSync reports unsynced rather than trusting a possibly-stale local cache when both direct remote queries fail", async () => {
+  // Real regression this guards: falling back to the local `origin/HEAD`
+  // cache when the remote is unreachable can silently sync onto the WRONG
+  // branch (it may still name the remote's OLD default after a rename)
+  // while still reporting success. Breaks the origin remote AFTER cloning
+  // (so the clone's local origin/HEAD cache still exists and would
+  // otherwise resolve to a real branch name) and confirms the sync
+  // correctly refuses to guess from it, reporting unsynced instead.
+  const origin = initGitRepo();
+  const clone = mkdtempSync(join(tmpdir(), "context-handoff-sync-clone-"));
+  try {
+    execFileSync("git", ["clone", "-q", origin, clone]);
+    const cachedDefault = execFileSync(
+      "git", ["rev-parse", "--abbrev-ref", "origin/HEAD"], { cwd: clone, encoding: "utf-8" },
+    ).trim();
+    assert.notEqual(cachedDefault, "", "test fixture did not have a cached origin/HEAD to begin with");
+    // Point origin at a nonexistent path -- both ls-remote and
+    // `remote show origin` will now fail outright.
+    execFileSync("git", ["remote", "set-url", "origin", join(tmpdir(), "context-handoff-nonexistent-remote")], { cwd: clone });
+    const result = await plainGitSync(clone);
+    assert.equal(result.attempted, true);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /could not confirm the remote's default branch/);
+  } finally {
+    rmSync(origin, { recursive: true, force: true });
+    rmSync(clone, { recursive: true, force: true });
+  }
+});
+
 test("plainGitSync rechecks for an in-progress rebase immediately before its own rebase exec, and never aborts it", async () => {
   // Real regression this guards: the remote-discovery + fetch awaits before
   // the rebase exec are exactly the kind of gap another process could start
@@ -1802,6 +1831,39 @@ test("releaseLock restores a foreign lock via linkSync (no-clobber), never renam
   assert.doesNotMatch(releaseBody, /renameSync\(claimedPath,\s*lockPath\)/);
 });
 
+test("releaseLock only treats EEXIST as benign contention; other linkSync failures fail closed without deleting the claimed copy", () => {
+  // Real regression this guards: treating EVERY linkSync failure as "the
+  // destination already exists" and unconditionally deleting claimedPath
+  // regardless meant an unexpected failure (permissions, an unsupported
+  // filesystem, transient I/O) would still destroy the only remaining copy
+  // of a still-active replacement holder's lock content, leaving lockPath
+  // empty for a third invocation to acquire into. Structural check: the
+  // catch block must branch on error.code === "EEXIST" specifically, and
+  // the non-EEXIST branch must not delete claimedPath.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const releaseBody = source.slice(
+    source.indexOf("function releaseLock("),
+    source.indexOf("// Async-only twin of resolveRuntimePython"),
+  );
+  assert.ok(releaseBody.length > 0, "could not locate releaseLock's body");
+  const catchIndex = releaseBody.indexOf("} catch (error) {");
+  assert.ok(catchIndex >= 0, "expected releaseLock's linkSync catch to inspect the error");
+  assert.match(releaseBody.slice(catchIndex), /error\?\.code === "EEXIST"/);
+  const unexpectedFailureIndex = releaseBody.indexOf("An UNEXPECTED failure");
+  assert.ok(unexpectedFailureIndex >= 0, "expected a distinct non-EEXIST branch");
+  const unexpectedBranch = releaseBody.slice(
+    unexpectedFailureIndex,
+    releaseBody.indexOf("return;", unexpectedFailureIndex) + "return;".length,
+  );
+  assert.doesNotMatch(unexpectedBranch, /unlinkSync\(claimedPath\)/);
+});
+
 test("attemptWorktreeSyncLocked disables rebase.autoStash and repo hooks for the delegated agent-worktrees sync too", () => {
   // Real regression this guards: plainGitSync's own rebase passes
   // --no-autostash directly, but the AGENT-WORKTREES-delegated path has no
@@ -1858,6 +1920,33 @@ test("attemptWorktreeSync never reclaims a lock recording a genuinely LIVE holde
     assert.equal(result.attempted, false);
     assert.equal(result.synced, false);
     assert.match(result.reason, /already in progress/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attemptWorktreeSync reclaims even a lock recording a technically-alive pid once it exceeds the absolute ceiling (pid-reuse safety net)", async () => {
+  // Real regression this guards: `process.kill(pid, 0)` can only observe
+  // whether SOME process holds that pid right now -- it cannot tell
+  // whether the ORIGINAL holder crashed and the OS later reused its pid
+  // for a completely unrelated process. Without an absolute ceiling, that
+  // reused pid would look permanently "alive" and this worktree could
+  // never sync again. This test process's own pid is alive (a stand-in for
+  // "reused pid, unrelated live process"), but the lock is backdated well
+  // past the absolute ceiling, so it must still be reclaimed.
+  const dir = initGitRepo();
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, `${process.pid}-0-reused-pid-standin`);
+    const ancientTime = new Date(Date.now() - 25 * 60 * 60 * 1000); // 25h > 24h ceiling
+    utimesSync(lockPath, ancientTime, ancientTime);
+    const result = await attemptWorktreeSync(dir);
+    assert.equal(result.attempted, true);
+    assert.notEqual(result.reason, "another sync attempt for this worktree is already in progress; automatic sync was skipped");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

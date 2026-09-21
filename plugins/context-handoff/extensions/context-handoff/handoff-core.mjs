@@ -344,6 +344,18 @@ async function rebaseInProgress(cwd) {
 // dead process can never resume and race on release.
 const STALE_LOCK_MS = 60 * 60 * 1000;
 
+// ABSOLUTE_STALE_LOCK_MS: a hard ceiling that overrides even a "confirmed
+// alive" verdict. `process.kill(pid, 0)` can only observe whether SOME
+// process holds that pid RIGHT NOW -- it cannot tell whether that pid was
+// reused by a completely unrelated process after the original (crashed)
+// holder exited. Without this, a crashed holder whose pid gets recycled by
+// the OS would look permanently "alive" and sync would never self-heal for
+// this worktree again. Deliberately far longer than STALE_LOCK_MS: this is
+// the rare-but-bounded safety net for pid reuse specifically, not the
+// everyday reclaim path, so it must never fire for a merely slow-but-real
+// holder.
+const ABSOLUTE_STALE_LOCK_MS = 24 * 60 * 60 * 1000;
+
 // True if `pid` is still running. `process.kill(pid, 0)` sends no signal
 // (POSIX) / merely checks accessibility (Windows via Node's libuv layer) --
 // it only tests existence. Fails OPEN (reports alive) on any inability to
@@ -381,12 +393,20 @@ function acquireLock(lockPath) {
       // Couldn't read the existing lock's content at all -- fall through
       // to the age-only fallback below rather than guessing a pid.
     }
-    if (holderPid !== null) {
-      // Liveness is the primary signal: a live holder is NEVER reclaimed,
-      // no matter how long it has been running -- only a confirmed-dead
-      // one (this holder's own recorded pid no longer exists) is.
-      if (isProcessAlive(holderPid)) throw error;
-    } else {
+    if (holderPid !== null && isProcessAlive(holderPid)) {
+      // Liveness is the primary signal: a live holder is NEVER reclaimed on
+      // age alone, no matter how long it has been running -- EXCEPT the
+      // absolute ceiling below, which exists specifically for pid reuse
+      // (a crashed holder's pid recycled by an unrelated live process),
+      // not as a normal reclaim path.
+      let ageMs;
+      try {
+        ageMs = Date.now() - statSync(lockPath).mtimeMs;
+      } catch {
+        throw error;
+      }
+      if (ageMs <= ABSOLUTE_STALE_LOCK_MS) throw error;
+    } else if (holderPid === null) {
       // No parseable pid (a corrupt/legacy lock, or it vanished before this
       // read) -- fall back to the age-only heuristic as a last resort so a
       // genuinely unreadable abandoned lock can still self-heal eventually.
@@ -496,29 +516,50 @@ function releaseLock(lockPath, token) {
     // touch.
     return;
   }
+  let content;
   try {
-    if (readFileSync(claimedPath, "utf-8") === token) {
-      unlinkSync(claimedPath);
+    content = readFileSync(claimedPath, "utf-8");
+  } catch {
+    // Unexpected: we just renamed it into existence ourselves. Fail closed
+    // -- leave the orphaned claimedPath rather than guessing.
+    return;
+  }
+  if (content === token) {
+    try { unlinkSync(claimedPath); } catch { /* already gone */ }
+    return;
+  }
+  // Claimed content that is NOT this invocation's own token -- this
+  // invocation ran long enough that another one reclaimed the path as
+  // stale and is (or was) actively using it. Restore it via `linkSync`
+  // (NOT `renameSync`): rename silently overwrites an existing destination
+  // on POSIX, which would clobber a fresh lock a THIRD invocation created
+  // at `lockPath` in the interim since our claim -- exactly the
+  // un-serialized-concurrency outcome this whole lock exists to prevent.
+  // `linkSync` fails with EEXIST if the destination already exists, so it
+  // only ever restores into a genuinely empty slot.
+  try {
+    linkSync(claimedPath, lockPath);
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      // Expected/benign: someone else already re-acquired that path since
+      // our claim -- our copy is now a redundant duplicate, safe to drop.
+      try { unlinkSync(claimedPath); } catch { /* already gone */ }
       return;
     }
-    // Claimed content that is NOT this invocation's own token -- this
-    // invocation ran long enough that another one reclaimed the path as
-    // stale and is (or was) actively using it. Restore it via `linkSync`
-    // (NOT `renameSync`): rename silently overwrites an existing
-    // destination on POSIX, which would clobber a fresh lock a THIRD
-    // invocation created at `lockPath` in the interim since our claim --
-    // exactly the un-serialized-concurrency outcome this whole lock exists
-    // to prevent. `linkSync` fails with EEXIST if the destination already
-    // exists, so it only ever restores into a genuinely empty slot.
-    try {
-      linkSync(claimedPath, lockPath);
-    } catch {
-      // Destination already occupied by a newer lock -- leave it alone;
-      // our claimed copy is cleaned up below either way.
-    }
-  } finally {
-    try { unlinkSync(claimedPath); } catch { /* already gone */ }
+    // An UNEXPECTED failure (permissions, an unsupported filesystem,
+    // transient I/O) -- NOT the expected "already occupied" case. Do NOT
+    // delete claimedPath here: this is the only remaining copy of the
+    // still-active replacement holder's lock content, and unlinking it
+    // regardless (the prior behavior) left `lockPath` empty with no
+    // recoverable trace, letting a third sync acquire while the original
+    // holder was still active. Fail closed by leaving the orphaned copy in
+    // place instead -- inspectable/recoverable, and does not itself enable
+    // any further concurrent acquisition.
+    return;
   }
+  // linkSync succeeded: lockPath now has a second name for the SAME
+  // content via the hard link: safe to drop the claimedPath name.
+  try { unlinkSync(claimedPath); } catch { /* already gone */ }
 }
 
 // Async-only twin of resolveRuntimePython's `resolve()` step, for a caller
@@ -654,24 +695,11 @@ export async function plainGitSync(cwd) {
   }
   if (!defaultBranch) {
     try {
-      // The remote query above failed outright (network issue, or a
-      // remote that doesn't answer symref queries) -- fall back to the
-      // local `origin/HEAD` pointer, set by `git clone`/`git remote
-      // set-head`, before trying `git remote show origin` as a last resort.
-      const { stdout } = await execFileAsync(
-        "git", ["rev-parse", "--abbrev-ref", "origin/HEAD"],
-        { cwd, encoding: "utf-8", timeout: 5000, env },
-      );
-      defaultBranch = stdout.trim().replace(/^origin\//, "");
-    } catch {
-      defaultBranch = null;
-    }
-  }
-  if (!defaultBranch) {
-    try {
-      // `origin/HEAD` may never have been set locally (e.g. a shallow or
-      // hand-built checkout) -- `git remote show origin` asks the remote
-      // directly for its HEAD branch as a last resort before giving up.
+      // The `ls-remote --symref` query above failed outright (network
+      // issue, or a remote that doesn't answer symref queries) -- try
+      // `git remote show origin` next: it ALSO asks the remote directly
+      // (still authoritative, not a local cache), so prefer it over the
+      // possibly-stale `origin/HEAD` symref below.
       const { stdout } = await execFileAsync(
         "git", ["remote", "show", "origin"],
         { cwd, encoding: "utf-8", timeout, env },
@@ -683,10 +711,16 @@ export async function plainGitSync(cwd) {
     }
   }
   if (!defaultBranch) {
+    // Both direct remote queries failed outright (e.g. genuinely
+    // unreachable network) -- a review finding: falling back to the local
+    // `origin/HEAD` cache here can silently sync onto the WRONG branch (it
+    // may still name the remote's OLD default after a rename) while still
+    // reporting success. Report unsynced instead of guessing from a value
+    // that cannot be confirmed authoritative.
     return {
       attempted: true,
       synced: false,
-      reason: "could not determine the remote's default branch for a plain-git sync",
+      reason: "could not confirm the remote's default branch (both direct remote queries failed); the plain-git sync fallback does not guess from a possibly-stale local cache",
     };
   }
   try {
