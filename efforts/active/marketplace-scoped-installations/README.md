@@ -375,6 +375,36 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-20 — agent-logger's `state-root` sibling-launch caller converted (#3095)
+
+- Converted `agent-logger`'s `origin.py::_bound_knowledge_repo_cached` (its
+  `agent-worktrees state-root --json` probe, used to resolve a bound
+  knowledge repo for an arbitrary session's origin repo) from unconditional
+  `shutil.which("agent-worktrees")` ambient-PATH resolution to the validated
+  same-cell peer boundary under an explicit installation context, mirroring
+  the pattern `compact.py::tracked_worktree_paths` already established in
+  this same plugin. `agent-logger` was already an `OWNERS` member and its
+  `_peer_launch.py` vendor copy already existed from an earlier slice, so
+  this conversion needed no new plumbing -- only the caller itself.
+  Legacy ambient-PATH fallback (marked
+  `# marketplace-isolation: allow legacy-compatibility`) is preserved for
+  the no-context case. Copilot PR review caught one real gap before merge
+  (the legacy fallback branch didn't apply `no_window_kwargs()`, unlike the
+  new same-cell path beside it) -- fixed before merge.
+- `check-marketplace-isolation.py`'s `path-sibling-launch` count dropped
+  from 44 to 43 (710 -> 709 total findings), confirming the guard tracks
+  this class of conversion; the guard stays report-only (Phase 6's last
+  checkbox) -- 709 findings remain across 16 plugins, dominated by
+  `unqualified-runtime-root` (441) and `fixed-service-identity` (144),
+  neither of which fits the `peer_launch`/OWNERS caller-conversion pattern
+  this and the prior three merged PRs used. Turning that guard blocking
+  remains a large, multi-session migration, not a near-term boundary.
+- `harness-knowledge/assemble_plugins.py`'s `shutil.which("agent-worktrees")`
+  finding remains not viable (no Python runtime; see prior session's note).
+  `agent-worktrees` itself and `customizing-copilot`'s
+  `scan_plugin_sources.py` are not `OWNERS` members and would need that
+  plumbing added first, not just a caller conversion.
+
 ### 2026-09-20 — Removed two duplicate-ownership Phase 7 items (migration-intake correction)
 
 - `migration-intake`'s Phase 2 revalidation had routed two candidates into
