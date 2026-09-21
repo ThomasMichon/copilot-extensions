@@ -160,7 +160,7 @@ def test_create_preflight_failure_has_zero_mutations_and_no_traceback(
     json_output,
 ):
     config = _config(tmp_path)
-    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(m.state_root_mod, "resolve_config_root", _unsafe_root)
     _forbid_create_mutations(monkeypatch)
 
@@ -184,7 +184,7 @@ def test_system_create_skips_unsafe_launch_preflight_and_emits_path_only(
     json_output,
 ):
     config = _config(tmp_path)
-    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(
         m,
         "_preflight_launch",
@@ -220,7 +220,7 @@ def test_resolve_json_new_preflight_failure_has_zero_mutations(
     capfd,
 ):
     config = _config(tmp_path)
-    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(m.state_root_mod, "resolve_config_root", _unsafe_root)
     _forbid_create_mutations(monkeypatch)
     args = m.build_parser().parse_args(["resolve", "--json", "--new"])
@@ -234,6 +234,91 @@ def test_resolve_json_new_preflight_failure_has_zero_mutations(
     assert json.loads(captured.out)["error"] == "machine-local config root is unsafe"
 
 
+def test_resolve_json_new_codename_policy_error_is_a_clean_json_error(
+    tmp_path,
+    monkeypatch,
+    capfd,
+):
+    """PR #3037 review finding: `CodenameAttributionPolicyError` must reach
+    `resolve --json --new`'s caller as a clean JSON error, not a raw
+    traceback -- that CLI path's error handling only caught `RuntimeError`,
+    which the new exception did not originally subclass.
+    """
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    config = cfg.Config(
+        srcroot=str(tmp_path),
+        machine="test",
+        platform="windows" if __import__("os").name == "nt" else "linux",
+        repo_name="demo",
+        repos={
+            "demo": cfg.RepoConfig(
+                anchor=str(anchor),
+                worktree_root=str(tmp_path / "worktrees"),
+                pr=cfg.PRConfig(enabled=True, source_attribution_configured=False),
+                codename=cfg.CodenameConfig(
+                    wordlist_path=str(tmp_path / "custom-wordlist.json"),
+                    wordlist_path_configured=True,
+                ),
+            )
+        },
+    )
+    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(
+        m,
+        "_create_worktree_core",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            m.codename_tracking.CodenameAttributionPolicyError(
+                "PR-active repo 'demo' has a custom codename wordlist "
+                "configured but pr.source_attribution is not explicit"
+            )
+        ),
+    )
+    args = m.build_parser().parse_args(["resolve", "--json", "--new"])
+
+    rc = m.cmd_resolve(args)
+
+    captured = capfd.readouterr()
+    assert rc == 1
+    assert "Traceback" not in captured.out + captured.err
+    assert "custom codename wordlist" in json.loads(captured.out)["error"]
+
+
+def test_resolve_plain_new_codename_policy_error_is_a_clean_cli_error(
+    tmp_path,
+    monkeypatch,
+    capfd,
+):
+    """Round-6 review finding: the non-JSON `resolve --new` route calls
+    `_resolve_new` (-> `_create_worktree_core`) without catching
+    `CodenameAttributionPolicyError`, and `main()`'s own top-level dispatch
+    only normalized `FileNotFoundError`/`ValueError`/
+    `BinstubOwnershipError` -- a real policy rejection from a plain,
+    interactive invocation could terminate with a raw traceback instead of
+    a clean CLI error.
+    """
+    config = _config(tmp_path)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(
+        m,
+        "_resolve_new",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            m.codename_tracking.CodenameAttributionPolicyError(
+                "PR-active repo 'demo' has a custom codename wordlist "
+                "configured but pr.source_attribution is not explicit"
+            )
+        ),
+    )
+    args = m.build_parser().parse_args(["resolve", "--new", "--no-mux"])
+
+    rc = m.cmd_resolve(args)
+
+    captured = capfd.readouterr()
+    assert rc == 1
+    assert "Traceback" not in captured.out + captured.err
+    assert "custom codename wordlist" in captured.err
+
+
 def test_resolve_json_resume_preflight_failure_precedes_tracking_mutation(
     tmp_path,
     monkeypatch,
@@ -244,7 +329,7 @@ def test_resolve_json_resume_preflight_failure_precedes_tracking_mutation(
     tracking_dir.mkdir()
     (tracking_dir / "wt-1.yaml").write_text("placeholder\n", encoding="utf-8")
     record = SimpleNamespace(worktree_path=str(tmp_path / "worktrees" / "wt-1"))
-    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_dir)
     monkeypatch.setattr(m, "_resolve_worktree_id", lambda _value: "wt-1")
     monkeypatch.setattr(m.tracking, "load_record", lambda _path: record)

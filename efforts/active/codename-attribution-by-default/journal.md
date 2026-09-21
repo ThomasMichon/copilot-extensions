@@ -905,3 +905,36 @@ Part of the [codename-attribution-by-default effort](README.md).
 - One permanently-stale carryover persists (the documentation-impact
   statement finding, `#discussion_r4057190221`, unchanged at anchor
   `f2b538c47` for fourteen rounds straight — not re-edited again).
+
+### 2026-09-20 — Plan-review round 38 fixes
+
+- Confirmed: both round-37 findings (inline `pr_id` backfill, freeze-
+  before-guard ordering) verified correct — this round's review lists
+  them under "Resolved since last review."
+- Two new genuine findings, plus two "previously missed" findings in
+  unchanged code the reviewer newly surfaced:
+  1. **Inline `pr_id` backfill can still duplicate a legacy entry:**
+     backfilling `current.prs` (on-disk) with a fresh `pr_id` doesn't
+     help a stale in-memory `record.prs` snapshot that has NO `pr_id` of
+     its own — requiring both sides to already share one forces an
+     append instead of a match, and a second stale save could repeat the
+     duplication. Fixed: added an explicit legacy-reconciliation step —
+     a `pr_id`-less in-memory entry falls back to the round-35
+     branch/number rule to find its on-disk counterpart, and the
+     resolved `pr_id` is written back onto the in-memory entry too, so a
+     later save from the same object no longer needs the fallback.
+  2. **The frozen-attribution CALLER GATE also branches on live config:**
+     `_finish_auto_open`'s re-run path only calls
+     `refresh_source_attribution` `if want_attribution` (live), so a PR
+     frozen under `"true"` whose config later flips to `false` never
+     even reaches the frozen-pair logic round-37 fixed inside the
+     function. Fixed: drop the gate — always invoke
+     `refresh_source_attribution` when a record exists; the function's
+     own frozen-pair check (not the caller's live snapshot) decides.
+  3. Rewrote the acceptance-test items that still required matching via
+     `branch`/`number` (a contradiction with `pr_id` being the sole
+     identity per round-36/37) to exercise `pr_id` instead, and added a
+     dedicated legacy-reconciliation regression test.
+- One permanently-stale carryover persists (the documentation-impact
+  statement finding, `#discussion_r4057190221`, unchanged at anchor
+  `f2b538c47` for fifteen rounds straight — not re-edited again).

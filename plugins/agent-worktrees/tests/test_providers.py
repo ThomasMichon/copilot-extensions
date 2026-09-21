@@ -266,6 +266,50 @@ class TestAttribution:
         assert attribution.parse_marker("no marker here") is None
 
 
+class TestMayPublishCodename:
+    """codename-attribution-by-default: the shared publish-time gating
+    helper both codename-marker publish call sites use (rounds 8/14/17/22/
+    32/34)."""
+
+    def test_built_in_publishes_regardless_of_explicit_opt_in(self):
+        assert attribution.may_publish_codename(
+            codename_source="built-in", source_attribution_configured=False,
+        ) is True
+        assert attribution.may_publish_codename(
+            codename_source="built-in", source_attribution_configured=True,
+        ) is True
+
+    def test_custom_requires_explicit_opt_in(self):
+        assert attribution.may_publish_codename(
+            codename_source="custom", source_attribution_configured=False,
+        ) is False
+        assert attribution.may_publish_codename(
+            codename_source="custom", source_attribution_configured=True,
+        ) is True
+
+    def test_missing_codename_source_never_publishes(self):
+        # round-32 finding: explicit opt-in only bypasses the built-in/
+        # custom ALLOCATION distinction, never provenance itself -- a
+        # legacy record with no codename_source at all must never publish,
+        # explicit opt-in or not.
+        assert attribution.may_publish_codename(
+            codename_source=None, source_attribution_configured=False,
+        ) is False
+        assert attribution.may_publish_codename(
+            codename_source=None, source_attribution_configured=True,
+        ) is False
+
+    def test_unrecognized_codename_source_never_publishes(self):
+        # round-12 finding: checked as `== "built-in"`, never the inverted
+        # `!= "custom"` shape -- an unrecognized/malformed stored value
+        # (a typo, a future value, hand-edited YAML) must fail closed
+        # exactly like "custom" would, not be silently treated as safe.
+        assert attribution.may_publish_codename(
+            codename_source="not-a-real-value",
+            source_attribution_configured=True,
+        ) is False
+
+
 class TestValidateEffectiveHead:
     """pr-attribution-codenames Phase 5: branch-name leak class."""
 
@@ -494,6 +538,21 @@ class TestAuditSourceAttributionRisk:
         )
         assert len(findings) == 1
         assert "absent" in findings[0]
+
+    def test_absent_key_message_reflects_codename_default(self):
+        # Round-5 review finding: codename-attribution-by-default flipped
+        # the runtime default from False to "codename" -- the omitted-key
+        # message must describe THAT default, and its remedy must match
+        # the "codename" branch's (not tell the repo to "migrate to
+        # source_attribution: true (if...) or codename", a no-op since it
+        # is effectively already in codename mode).
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=None, head_pattern="{machine}/{slug}",
+        )
+        assert len(findings) == 1
+        assert "defaults to false" not in findings[0]
+        assert "codename" in findings[0]
+        assert "migrate to source_attribution: true or codename" not in findings[0]
 
     def test_worktree_id_token_is_never_flagged(self):
         # {worktree_id} is not part of pr_head_name's actual rendering
@@ -1809,6 +1868,10 @@ class TestCreatePRAutoOpen:
         config, wid, _wt, _ = pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.codename = "harbor-lattice"
+        # codename-attribution-by-default: may_publish_codename requires a
+        # known codename_source before publishing -- this test is about
+        # marker content/format, not provenance, so stamp a safe "built-in".
+        rec.codename_source = "built-in"
         tracking.save_record(rec)
         config = self._enable_open(config, source_attribution="codename")
         monkeypatch.setenv("EXT_TOKEN", "tok")
@@ -1824,6 +1887,80 @@ class TestCreatePRAutoOpen:
         assert wid not in body
         for raw_field in ("worktree=", "machine=", "session=", "head="):
             assert raw_field not in body
+
+    def test_bare_config_default_publishes_codename_marker_end_to_end(
+        self, pr_repo, monkeypatch,
+    ):
+        """Round-18 acceptance criterion: widening ``create_pr``'s/
+        ``_finish_auto_open``'s/``_push_existing_feature``'s ``attribution``
+        parameter typing (``bool | None`` -> ``SourceAttribution | None``)
+        must not accompany a silent runtime behavior change. Unlike the
+        sibling test above (which sets ``source_attribution="codename"``
+        explicitly through ``_enable_open``), this test never touches
+        ``source_attribution`` anywhere -- no CLI ``attribution=`` override,
+        no explicit config key -- relying entirely on ``PRConfig``'s own
+        bare dataclass default (now "codename") to prove the string value
+        actually propagates through the widened parameter chain and
+        produces a real published marker, not just a type-checker-only
+        change."""
+        import dataclasses
+        from agent_worktrees import providers
+        config, wid, _wt, _ = pr_repo
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.codename = "amber-thicket"
+        # codename-attribution-by-default: may_publish_codename requires a
+        # known codename_source before publishing.
+        rec.codename_source = "built-in"
+        tracking.save_record(rec)
+        # Enable auto-open/token wiring only -- deliberately do NOT pass
+        # source_attribution, so PRConfig's bare dataclass default applies.
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(
+            repo.pr, auto_open=True, api_base="https://h/gitea",
+            token_env="EXT_TOKEN", labels=("auto-merge",),
+        )
+        config = dataclasses.replace(
+            config, repos={"ext": dataclasses.replace(repo, pr=pr)}
+        )
+        assert config.repos["ext"].pr.source_attribution == "codename"
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake)
+
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert res["success"] is True
+        body = fake.captured["scope"].body
+        fields = attribution.parse_marker(body)
+        assert fields == {"codename": "amber-thicket"}
+
+    def test_initial_publish_codename_mode_provenance_gating_blocks_custom(
+        self, pr_repo, monkeypatch,
+    ):
+        """The initial create-pr publish must apply the SAME provenance
+        gating as the refresh path (round-17 finding): a `codename_source:
+        "custom"` record under the IMPLICIT default must not publish. The
+        `test_codename_mode_embeds_only_the_codename` test above already
+        covers the `codename_source: "built-in"` publishing case
+        end-to-end; `TestMayPublishCodename` covers the remaining
+        (explicit-opt-in / missing / unrecognized codename_source) cases
+        in isolation on the shared helper directly."""
+        from agent_worktrees import providers
+        config, wid, _wt, _ = pr_repo
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.codename = "harbor-lattice"
+        rec.codename_source = "custom"
+        tracking.save_record(rec)
+        config = self._enable_open(config, source_attribution="codename")
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake)
+
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert res["success"] is True
+        body = fake.captured["scope"].body
+        assert attribution.parse_marker(body) is None
 
     def test_codename_mode_backfills_a_missing_codename(
         self, pr_repo, monkeypatch,
@@ -2259,17 +2396,92 @@ class _StatefulFakeProvider:
         )
 
 
+class TestCreatePRCodenameAttributionPolicyPreflight:
+    """codename-attribution-by-default (round-22 finding): create_pr must
+    preflight the allocation-time policy BEFORE any squash/push, for a
+    record that will need to lazy-backfill a codename under an effective
+    "codename" attribution."""
+
+    def _custom_wordlist_config(
+        self, config, tmp_path, *, source_attribution_configured: bool,
+    ):
+        import dataclasses
+        from agent_worktrees.codename_config import CodenameConfig
+        repo = config.repos["ext"]
+        wordlist_file = tmp_path / "custom-words.yaml"
+        wordlist_file.write_text("- alpha\n- bravo\n- charlie\n")
+        pr = dataclasses.replace(
+            repo.pr, enabled=True,
+            source_attribution_configured=source_attribution_configured,
+        )
+        codename_cfg = CodenameConfig(
+            wordlist_path=str(wordlist_file), wordlist_path_configured=True,
+        )
+        return dataclasses.replace(
+            config,
+            repos={"ext": dataclasses.replace(repo, pr=pr, codename=codename_cfg)},
+        )
+
+    def test_preflight_blocks_before_any_push(self, pr_repo, tmp_path):
+        config, wid, wt_path, _ = pr_repo
+        config = self._custom_wordlist_config(
+            config, tmp_path, source_attribution_configured=False,
+        )
+        head_before = _g("rev-parse", "worktree/" + wid, cwd=wt_path)
+
+        from agent_worktrees import codename_tracking
+        try:
+            pr_ops.create_pr(wid, config, title="Add feature")
+        except codename_tracking.CodenameAttributionPolicyError:
+            pass
+        else:
+            raise AssertionError("expected CodenameAttributionPolicyError")
+
+        # No side effect happened: the worktree branch is unchanged and no
+        # PR entry was recorded.
+        head_after = _g("rev-parse", "worktree/" + wid, cwd=wt_path)
+        assert head_after == head_before
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.prs == []
+
+    def test_explicit_opt_in_bypasses_preflight(self, pr_repo, tmp_path, monkeypatch):
+        config, wid, wt_path, _ = pr_repo
+        config = self._custom_wordlist_config(
+            config, tmp_path, source_attribution_configured=True,
+        )
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+        assert res["success"] is True
+
+    def test_pr_inactive_repo_never_preflighted(self, pr_repo, tmp_path):
+        # round-22 finding: the gate only applies to PR-active repos --
+        # this fixture's config already has pr.enabled True via pr_repo, so
+        # simulate the inactive case directly against check_allocation_policy
+        # instead (create_pr itself requires pr.enabled to proceed at all).
+        from agent_worktrees import codename_tracking
+        codename_tracking.check_allocation_policy(
+            pr_enabled=False, codename_source="custom",
+            source_attribution_configured=False,
+        )
+
+
 class TestCreatePRReconcile:
     """create-pr must reconcile the active PR against the provider before
     deciding to reuse its branch -- an externally-merged PR (whose local state
     is stale ``open``) must not be reused/force-pushed (#1163)."""
 
-    def _enable_open(self, config):
+    def _enable_open(self, config, *, source_attribution=False):
+        # codename-attribution-by-default: this class tests reconciliation,
+        # not attribution -- pin source_attribution off (matching
+        # TestCreatePRAutoOpen's own pattern) so the new implicit
+        # "codename" default doesn't route these calls through
+        # refresh_source_attribution, which _StatefulFakeProvider doesn't
+        # implement (no publish_source_marker).
         import dataclasses
         repo = config.repos["ext"]
         pr = dataclasses.replace(
             repo.pr, auto_open=True, api_base="https://h/gitea",
             token_env="EXT_TOKEN", labels=("auto-merge",),
+            source_attribution=source_attribution,
         )
         return dataclasses.replace(
             config, repos={"ext": dataclasses.replace(repo, pr=pr)}
@@ -2525,6 +2737,15 @@ class TestRerunAutoOpen:
         assert len(rec.prs) == 2
         assert rec.prs[0].number == n1 and rec.prs[0].state == "merged"
         assert rec.prs[1].number == r2["number"] and rec.prs[1].state == "open"
+        # codename-attribution-by-default: _push_existing_feature's own
+        # fresh-target construction (the legacy on-feature-branch re-run
+        # path this test exercises) must ALSO stamp the frozen pair + pr_id
+        # -- not just create_pr's own fresh construction.
+        assert rec.prs[1].attribution_mode == "codename"
+        assert rec.prs[1].attribution_explicit is False
+        assert rec.prs[1].pr_id
+        assert rec.prs[1].pr_id != rec.prs[0].pr_id
+        assert rec.prs[1].pr_revision == 1
 
 
 # ---------------------------------------------------------------------------

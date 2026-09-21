@@ -1838,6 +1838,52 @@ def _unsupported_hosted_launch(
     return ""
 
 
+def _paired_knowledge_allocation_preflight(config: cfg.Config) -> None:
+    """Preflight the paired-knowledge codename-allocation policy with NO
+    side effect (round-6 review finding).
+
+    Mirrors the same is-this-a-bound-worktree-class-stateless-harness
+    resolution `_carve_paired_knowledge` performs, purely to decide
+    whether that function's eventual allocation would be policy-blocked
+    -- so `_create_worktree_core` can call this BEFORE it creates the
+    harness's own worktree/branch/record, closing the gap where a
+    paired-knowledge policy violation only surfaced after those harness
+    side effects already existed (with no rollback).
+
+    Raises :class:`codename_tracking.CodenameAttributionPolicyError` on a
+    genuine policy violation. Any OTHER failure (state-root resolution,
+    config load, an unregistered knowledge repo) is swallowed -- this is
+    advisory-only pre-validation; `_carve_paired_knowledge`'s own
+    preflight and second (lock-held) revalidation remain the actual
+    fail-closed gate for the allocation itself.
+    """
+    if os.environ.get("AGENT_WORKTREES_NO_PAIR"):
+        return
+    try:
+        res = state_root_mod.resolve_state_root(config)
+    except Exception:
+        return
+    if not (res.requires_external and res.bound and res.path):
+        return
+
+    from . import repos as repos_mod
+
+    entry = repos_mod.find_repo(res.repo)
+    is_worktree_class = bool(entry) and repos_mod.normalize_class(entry.repo_class) in (
+        "worktree", "knowledge",
+    )
+    if not is_worktree_class:
+        return
+    try:
+        knowledge_config = cfg.load_config(project=res.repo)
+        knowledge_policy_kwargs = codename_tracking.allocation_policy_kwargs_for_repo(
+            knowledge_config
+        )
+    except Exception:
+        return
+    codename_tracking.check_allocation_policy(**knowledge_policy_kwargs)
+
+
 def _carve_paired_knowledge(
     config: cfg.Config,
     *,
@@ -1933,12 +1979,86 @@ def _carve_paired_knowledge(
     # no tracking record. Assignment + the eventual record-write share one
     # allocation lock (see codename_tracking.py) so a concurrent carve can
     # never pick the same candidate.
+    #
+    # codename-attribution-by-default (round-10/11 findings): the
+    # allocation-policy check below is deliberately OUTSIDE this
+    # config-load try/except -- an earlier design had it inside, where a
+    # bare `except Exception` swallowed the policy violation into a silent
+    # `knowledge_wordlist = None` fallback, letting this path allocate a
+    # codename (with codename_source="built-in") for exactly the
+    # custom-wordlist/unconfigured-source_attribution repo the policy
+    # exists to block. A config-load failure degrades ONLY the wordlist
+    # resolution (matching this function's existing fail-safe posture);
+    # it never silently authorizes an otherwise-blocked allocation.
     try:
         knowledge_config = cfg.load_config(project=knowledge_name)
         knowledge_wordlist = codename_tracking.wordlist_for_repo(knowledge_config)
+        knowledge_policy_kwargs = codename_tracking.allocation_policy_kwargs_for_repo(
+            knowledge_config
+        )
     except Exception:
         knowledge_wordlist = None
+        knowledge_policy_kwargs = {
+            "codename_source": "built-in", "pr_enabled": False,
+            "source_attribution_configured": False,
+        }
+
+    # Preflight (round-12/13 finding): validate BEFORE any side effect this
+    # function performs (worktree, branch, or record) -- the `create` flow
+    # already persisted the HARNESS worktree/branch/record before calling
+    # this function, so failing here does not roll those back (no rollback
+    # protocol is implemented; see the second revalidation below for the
+    # orphan-naming backstop).
+    codename_tracking.check_allocation_policy(**knowledge_policy_kwargs)
+
     with codename_tracking.allocation_lock(knowledge_tracking_path):
+        # Second revalidation (round-13/14 finding, sharpened by a PR
+        # #3037 review finding) immediately before the first side effect
+        # below -- RECOMPUTES the policy kwargs from a freshly-loaded
+        # config, never reuses the pre-lock snapshot above: a config
+        # change landing in the window between the preflight and this
+        # point must be observed here, or the "shrinks the TOCTOU window"
+        # claim is hollow (the earlier code re-checked the SAME stale
+        # values, which can never disagree with themselves). If hit, the
+        # harness worktree/branch created by the caller before this
+        # function ran is now orphaned (no automatic rollback) -- name it
+        # explicitly so the operator can remove it.
+        try:
+            fresh_knowledge_config = cfg.load_config(project=knowledge_name)
+            fresh_policy_kwargs = codename_tracking.allocation_policy_kwargs_for_repo(
+                fresh_knowledge_config
+            )
+            knowledge_wordlist = codename_tracking.wordlist_for_repo(
+                fresh_knowledge_config
+            )
+        except Exception:
+            # PR #3037 review finding: a reload failure here must NEVER
+            # silently fall back to the pre-lock snapshot -- if config
+            # changed from an explicit opt-in to an unconfigured custom
+            # wordlist in the interval, reusing the (permissive) stale
+            # snapshot would still authorize an allocation the fresh state
+            # would have blocked. Degrade to the conservative,
+            # ALWAYS-non-authorizing state instead (never the reverse):
+            # unconditionally forces `check_allocation_policy` to raise,
+            # so a transient reload failure fails the operation closed
+            # rather than silently authorizing it.
+            fresh_policy_kwargs = {
+                "codename_source": "custom", "pr_enabled": True,
+                "source_attribution_configured": False,
+            }
+        try:
+            codename_tracking.check_allocation_policy(**fresh_policy_kwargs)
+        except codename_tracking.CodenameAttributionPolicyError as exc:
+            harness_worktree_path = str(
+                Path(config.default_repo.worktree_root) / harness_id
+            )
+            raise codename_tracking.CodenameAttributionPolicyError(
+                f"{exc} A harness worktree/branch was already created "
+                "before this policy violation was detected and is left in "
+                f"place (no automatic rollback): worktree="
+                f"{harness_worktree_path!r} branch={f'worktree/{harness_id}'!r}. "
+                "Remove it manually with `git worktree remove` if unwanted."
+            ) from exc
         knowledge_codename = codename_tracking.assign_new_codename(
             knowledge_tracking_path, knowledge_wordlist
         )
@@ -1968,6 +2088,7 @@ def _carve_paired_knowledge(
             pair_ref=harness_ref,
             pair_kind="worktree",
             codename=knowledge_codename,
+            codename_source=fresh_policy_kwargs["codename_source"],
         )
     # Best-effort permissions + trust for the knowledge worktree.
     try:
@@ -2227,6 +2348,19 @@ def _create_worktree_core(
         if launch_preflight.error:
             raise LaunchPreflightError(launch_preflight.error)
 
+    # Round-6 review finding: preflight the PAIRED-KNOWLEDGE allocation
+    # policy here, BEFORE any side effect below (owner claim, harness git
+    # worktree/branch, tracking record) -- the ONLY preflight this policy
+    # previously had lived inside `_carve_paired_knowledge`, which
+    # `_create_worktree_core` calls AFTER the harness worktree/branch/
+    # record already exist, so a violation there still left those harness
+    # side effects behind (and without the orphan-path context the later
+    # revalidation adds). This mirrors the harness's own preflight-then-
+    # revalidate-under-lock shape immediately below; `_carve_paired_
+    # knowledge`'s own preflight/revalidation stay in place as defense in
+    # depth for the narrower TOCTOU window between here and its own carve.
+    _paired_knowledge_allocation_preflight(config)
+
     # Ensure root exists
     Path(repo.worktree_root).mkdir(parents=True, exist_ok=True)
 
@@ -2256,11 +2390,61 @@ def _create_worktree_core(
     # allocation lock, as an earlier revision did) is a real cross-process
     # deadlock hazard against a concurrent backfill of that same owner
     # worktree's own codename.
+    #
+    # codename-attribution-by-default (round-21 finding): preflight the
+    # allocation-time policy BEFORE any create side effect below (owner
+    # claim journal, git worktree/branch, tracking record) -- a distinct,
+    # more severe gap than the paired-knowledge path since this is the
+    # ordinary `create` path every worktree goes through.
+    new_codename_source = codename_tracking.classify_codename_source(
+        getattr(repo, "codename", None)
+    )
+    codename_tracking.check_allocation_policy(
+        pr_enabled=bool(getattr(repo.pr, "enabled", False)),
+        codename_source=new_codename_source,
+        source_attribution_configured=bool(
+            getattr(repo.pr, "source_attribution_configured", False)
+        ),
+    )
     tracking_path = cfg.tracking_dir()
     tracking_path.mkdir(parents=True, exist_ok=True)
     with codename_tracking.allocation_lock(tracking_path):
+        # Second revalidation (round-13/14 finding, sharpened by a PR
+        # #3037 review finding) immediately before the first side effect
+        # below -- RECOMPUTES from a freshly-loaded config, never reuses
+        # the pre-lock `repo`/`new_codename_source` snapshot above: a
+        # config change landing in the window between the preflight and
+        # this point must be observed here, or re-checking the SAME
+        # stale values (which can never disagree with themselves) makes
+        # the claimed TOCTOU-window shrink hollow.
+        try:
+            fresh_config = cfg.load_config(project=config.repo_name)
+            fresh_repo = fresh_config.default_repo
+            fresh_codename_source = codename_tracking.classify_codename_source(
+                getattr(fresh_repo, "codename", None)
+            )
+            fresh_pr_enabled = bool(getattr(fresh_repo.pr, "enabled", False))
+            fresh_sac = bool(
+                getattr(fresh_repo.pr, "source_attribution_configured", False)
+            )
+            fresh_wordlist_config = fresh_config
+        except Exception:
+            # PR #3037 review finding: never fall back to the pre-lock
+            # snapshot on a reload failure -- degrade to the
+            # conservative, ALWAYS-non-authorizing state instead (see the
+            # matching fix in _carve_paired_knowledge for the full
+            # rationale).
+            fresh_codename_source = "custom"
+            fresh_pr_enabled = True
+            fresh_sac = False
+            fresh_wordlist_config = config
+        codename_tracking.check_allocation_policy(
+            pr_enabled=fresh_pr_enabled,
+            codename_source=fresh_codename_source,
+            source_attribution_configured=fresh_sac,
+        )
         new_codename = codename_tracking.assign_new_codename(
-            tracking_path, codename_tracking.wordlist_for_repo(config)
+            tracking_path, codename_tracking.wordlist_for_repo(fresh_wordlist_config)
         )
 
         # Creator ownership is established before the resource exists, and
@@ -2303,6 +2487,7 @@ def _create_worktree_core(
                 interface=interface,
                 origin=origin,
                 codename=new_codename,
+                codename_source=fresh_codename_source,
                 dispatch_attempt=(
                     tracking.DispatchAttempt(
                         task_id=str(dispatch_attempt["task_id"]),
@@ -2363,6 +2548,14 @@ def _create_worktree_core(
                 plat=plat,
                 plat_short=plat_short,
             )
+        except codename_tracking.CodenameAttributionPolicyError:
+            # codename-attribution-by-default (round-10/11 finding): this is
+            # NOT an ordinary pairing glitch -- it is the paired-knowledge
+            # allocation policy correctly refusing to leak a custom
+            # vocabulary term. Re-raise (abort `create` outright) rather
+            # than degrading to a logged warning and a silent `pair_stamp =
+            # None`, which would defeat the policy entirely.
+            raise
         except Exception as exc:  # pragma: no cover - defensive
             print(f"paired-knowledge carve failed (non-fatal): {exc}", file=sys.stderr)
             pair_stamp = None
@@ -4542,7 +4735,15 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         if use_new:
             config = cfg.load_config()
             profile = _resolve_profile(config, args)
-            return _resolve_new(config, args, profile=profile)
+            try:
+                return _resolve_new(config, args, profile=profile)
+            except codename_tracking.CodenameAttributionPolicyError as exc:
+                # Round-6 review finding: the plain (non-JSON) `resolve
+                # --new` route calls `_create_worktree_core` (via
+                # `_resolve_new`) without catching this policy error --
+                # report it as a normal CLI error, not a traceback.
+                output.err(str(exc))
+                return 1
 
         # --machine <remote> flag: skip picker entirely, emit SSH handoff
         requested_machine = getattr(args, "machine", None)
@@ -6117,10 +6318,20 @@ def _resolve_resume(
     # skipped rather than crashing inside `ensure_codename`'s own attribute
     # access.
     if hasattr(fresh, "codename") and not fresh.codename:
-        fresh = codename_tracking.ensure_codename(
-            fresh, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config)
-        )
+        try:
+            fresh = codename_tracking.ensure_codename(
+                fresh, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config),
+                **codename_tracking.allocation_policy_kwargs_for_repo(config),
+            )
+        except codename_tracking.CodenameAttributionPolicyError as exc:
+            # Round-5 review finding: surface this the same way the
+            # profile-assignment error above does -- a clean, JSON-safe
+            # `_emit_plan` error envelope, never a raw traceback.
+            output.err(str(exc))
+            _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+            return 3
         record.codename = fresh.codename
+        record.codename_source = fresh.codename_source
 
     activity.log_event(
         "worktree_resumed",
@@ -6884,21 +7095,29 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 msg = f"Could not read --body-file '{body_file}': {e}"
                 return _json_error(msg) if use_json else (output.err(msg) or 1)
 
-        result = pr_ops.create_pr(
-            worktree_id,
-            config,
-            title=args.title,
-            branch=args.branch,
-            target_repo=getattr(args, "repo", None),
-            new=getattr(args, "new", False),
-            body=body,
-            open_pr=(False if getattr(args, "no_open", False) else None),
-            hold=getattr(args, "hold", False),
-            draft=getattr(args, "draft", False),
-            attribution=(False if getattr(args, "no_attribution", False) else None),
-            dry_run=args.dry_run,
-            confirm_fork=getattr(args, "confirm_fork", False),
-        )
+        try:
+            result = pr_ops.create_pr(
+                worktree_id,
+                config,
+                title=args.title,
+                branch=args.branch,
+                target_repo=getattr(args, "repo", None),
+                new=getattr(args, "new", False),
+                body=body,
+                open_pr=(False if getattr(args, "no_open", False) else None),
+                hold=getattr(args, "hold", False),
+                draft=getattr(args, "draft", False),
+                attribution=(False if getattr(args, "no_attribution", False) else None),
+                dry_run=args.dry_run,
+                confirm_fork=getattr(args, "confirm_fork", False),
+            )
+        except codename_tracking.CodenameAttributionPolicyError as e:
+            # Round-5 review finding: this preflight raises before
+            # `create_pr` can build a result dict -- serialize it as a
+            # normal nonzero error (fail-closed behavior preserved) rather
+            # than letting a raw traceback escape the CLI boundary.
+            msg = str(e)
+            return _json_error(msg) if use_json else (output.err(msg) or 1)
 
         _reminder = _pr_reminder_for(
             config,
@@ -7034,6 +7253,7 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
         branch=args.branch,
         select_number=getattr(args, "pr", None),
         select_branch=getattr(args, "select_branch", None),
+        config=config,
     )
     if (
         result.get("success")
@@ -7431,9 +7651,18 @@ def _cmd_status_write(
     # lock via `create_new_record`'s own `save_record`).
     peek = tracking.load_record(yaml_path)
     if not peek.codename:
-        codename_tracking.ensure_codename(
-            peek, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config)
-        )
+        try:
+            codename_tracking.ensure_codename(
+                peek, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config),
+                **codename_tracking.allocation_policy_kwargs_for_repo(config),
+            )
+        except codename_tracking.CodenameAttributionPolicyError as e:
+            # Round-5 review finding: this backfill can raise a policy
+            # rejection -- report it cleanly instead of a raw traceback
+            # (this command has no --json envelope of its own to
+            # preserve, but a plain traceback is still a defect).
+            output.err(str(e))
+            return 1
     # Foreground verb (#4547): the whole load -> set_disposition -> save is a
     # critical RMW held under the blocking record lock, so a concurrent Picker
     # best-effort sweep skips rather than clobbering the disposition overlay.
@@ -28841,7 +29070,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         try:
             return handler(args)
-        except (FileNotFoundError, ValueError, inst.BinstubOwnershipError) as e:
+        except (
+            FileNotFoundError, ValueError, inst.BinstubOwnershipError,
+            codename_tracking.CodenameAttributionPolicyError,
+        ) as e:
             output.err(str(e))
             return 1
         except KeyboardInterrupt:

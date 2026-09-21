@@ -221,24 +221,27 @@ class PRConfig:
     labels: tuple[str, ...] = ()
     auto_open: bool = False        # opt-in: open the PR via the provider after push
     # Embed source-worktree provenance in a hidden PR-body marker:
-    # - False (default) -- no marker. Correct default for a public repo with
-    #   no author-side traceability need.
+    # - "codename" (default, effort codename-attribution-by-default) -- a
+    #   public-safe marker carrying ONLY the worktree's assigned codename
+    #   (see `agent_worktrees.codename`) -- no machine, worktree id,
+    #   session, or timestamp. Lets an author trace a stalled PR back to
+    #   its worktree without publishing anything that decodes on its own.
+    #   A repo with a custom `codename.wordlist_path` configured is
+    #   excluded from this implicit default at ALLOCATION time (see
+    #   `codename_tracking`/`CodenameAttributionPolicyError`) -- it must
+    #   set this key explicitly before a new codename may be assigned.
+    # - False -- no marker at all. The fully anonymous opt-out.
     # - True -- the full raw marker (worktree id, machine, session, head).
     #   Closed-circuit systems only; never a public repo.
-    # - "codename" -- a public-safe marker carrying ONLY the worktree's
-    #   assigned codename (see `agent_worktrees.codename`) -- no machine,
-    #   worktree id, session, or timestamp. For a public repo that still
-    #   wants an author to trace a stalled PR back to its worktree, without
-    #   publishing anything that decodes on its own (effort
-    #   pr-attribution-codenames Phase 4).
-    source_attribution: SourceAttribution = False
+    source_attribution: SourceAttribution = "codename"
     # Whether ``pr.source_attribution`` was an explicit key in the merged
     # raw config, versus omitted entirely (both parse ``source_attribution``
-    # above to ``False``, indistinguishable from each other on that field
-    # alone). The migration audit (Phase 5,
+    # above to the same ``"codename"`` value, indistinguishable from each
+    # other on that field alone). The migration audit (Phase 5,
     # `providers.attribution.audit_source_attribution_risk`) needs this
-    # distinction to report "absent (defaults to false)" accurately rather
-    # than always describing an omitted key as an explicit `false`.
+    # distinction to report "absent (defaults to 'codename')" accurately
+    # rather than always describing an omitted key as an explicit
+    # `codename`.
     source_attribution_configured: bool = False
     # Markdown headings whose sections must contain visible text before
     # create-pr may auto-open a PR. Empty keeps the generic default permissive.
@@ -1755,7 +1758,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         token_command=str(raw.get("token_command", "")),
         labels=labels,
         auto_open=bool(raw.get("auto_open", False)),
-        source_attribution=_source_attribution(raw.get("source_attribution", False)),
+        source_attribution=_source_attribution(raw.get("source_attribution", "codename")),
         source_attribution_configured=("source_attribution" in raw),
         required_body_sections=_str_tuple(raw.get("required_body_sections", ())),
         automerge_label=str(raw.get("automerge_label", "")).strip(),

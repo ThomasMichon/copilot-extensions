@@ -218,10 +218,11 @@ def audit_attribution_risk(config: Config) -> list[str]:
     configured ``pr.head_pattern`` for the branch-name leak class.
 
     Config-only: it does not run ``create-pr`` or touch git. A repo is at
-    risk when ``pr.source_attribution`` is not exactly ``true`` -- ``false``
-    **or omitted entirely** (the key defaults to ``false``, so an absent key
-    is just as much at risk as an explicit one) -- and its configured
-    ``head_pattern`` embeds ``{machine}`` (in any ``str.format``
+    risk when ``pr.source_attribution`` is not exactly ``true`` -- ``false``,
+    ``"codename"``, **or omitted entirely** (codename-attribution-by-default
+    flipped the runtime default to ``"codename"``, so an absent key is just
+    as much at risk as one explicitly set to ``codename``) -- and its
+    configured ``head_pattern`` embeds ``{machine}`` (in any ``str.format``
     conversion/format-spec variant), which could carry a private identifier
     into a published branch name. ``{worktree_id}`` is deliberately never
     flagged: it is not part of ``pr_head_name``'s actual rendering contract
@@ -474,7 +475,7 @@ def create_pr(
     open_pr: bool | None = None,
     hold: bool = False,
     draft: bool = False,
-    attribution: bool | None = None,
+    attribution: SourceAttribution | None = None,
     dry_run: bool = False,
     confirm_fork: bool = False,
 ) -> dict:
@@ -556,6 +557,32 @@ def create_pr(
             record = tracking.load_record(yaml_path)
         except Exception:
             record = None
+
+    # Round-22 finding: preflight the same allocation-time policy
+    # `_open_via_provider`'s lazy backfill would otherwise only catch too
+    # late (after the squash/force-push and PR-record save, per that
+    # function's own docstring). Fail create_pr outright, before any side
+    # effect, when this record will need to lazy-backfill a codename (no
+    # codename yet) under an effective "codename" attribution -- the exact
+    # scenario the policy exists to block. A residual TOCTOU window between
+    # this preflight and the actual backfill is accepted (matching this
+    # plan's established narrowed-transactionality posture elsewhere); the
+    # already-documented re-raise inside `_open_via_provider` is the
+    # defense-in-depth backstop for that window, not a duplicate of this
+    # preflight.
+    if record is not None and not record.codename:
+        _want_attribution = (
+            prcfg.source_attribution if attribution is None else attribution
+        )
+        if _want_attribution == "codename":
+            from . import codename_tracking
+            codename_tracking.check_allocation_policy(
+                pr_enabled=prcfg.enabled,
+                codename_source=codename_tracking.classify_codename_source(
+                    repo.codename
+                ),
+                source_attribution_configured=prcfg.source_attribution_configured,
+            )
 
     # Gate the write on the *normalized* value -- a whitespace-only `title`
     # is truthy and must not overwrite an existing, genuinely curated
@@ -870,6 +897,20 @@ def create_pr(
                 provider=prcfg.provider, repo=default_pr_repo,
                 opened_at=tracking._now_iso(),
             )
+            # codename-attribution-by-default: freeze this PR's attribution
+            # decision ONCE, at this fresh-construction site -- the
+            # EFFECTIVE (caller-override-or-config) value, stamped verbatim,
+            # never re-derived from live config again for this PR's life.
+            _want_attribution = (
+                prcfg.source_attribution if attribution is None else attribution
+            )
+            tracking.stamp_frozen_attribution(
+                target_pr, attribution=_want_attribution,
+                explicit=(
+                    attribution is not None
+                    or prcfg.source_attribution_configured
+                ),
+            )
             record.prs.append(target_pr)
         tracking.save_record(record)
 
@@ -1108,17 +1149,39 @@ def _open_via_provider(
             # acquired in time). This whole path is opening a PR -- a
             # codename-backfill failure must degrade to "no marker on this
             # PR" (the pre-existing skip behavior), never crash the
-            # provider-open flow and abort the PR entirely.
+            # provider-open flow and abort the PR entirely. A
+            # `CodenameAttributionPolicyError` is the one exception NEVER
+            # swallowed here (round-16 finding) -- re-raise it so `create_pr`
+            # aborts outright rather than silently publishing no marker for
+            # exactly the custom-wordlist/unconfigured-`source_attribution`
+            # repo this policy exists to block. `create_pr` itself runs the
+            # matching PREFLIGHT (round-22 finding) before any squash/push,
+            # so this re-raise is a defense-in-depth backstop for the
+            # narrow TOCTOU window between that preflight and this actual
+            # backfill, not the primary enforcement mechanism.
+            prcfg = config.default_repo.pr
             try:
                 codename_tracking.ensure_codename(
                     record, cfg.tracking_dir(),
                     codename_tracking.wordlist_for_repo(config),
+                    codename_source=codename_tracking.classify_codename_source(
+                        config.default_repo.codename
+                    ),
+                    pr_enabled=prcfg.enabled,
+                    source_attribution_configured=prcfg.source_attribution_configured,
                 )
+            except codename_tracking.CodenameAttributionPolicyError:
+                raise
             except Exception:
                 pass
             codename = record.codename
         marker_published = bool(
-            isinstance(codename, str) and codename_mod.is_valid_handle(codename)
+            isinstance(codename, str)
+            and codename_mod.is_valid_handle(codename)
+            and attr.may_publish_codename(
+                codename_source=(record.codename_source if record else None),
+                source_attribution_configured=target_pr.attribution_explicit,
+            )
         )
         full_body = (
             attr.append_marker(body or "", attr.build_codename_marker(codename))
@@ -1196,16 +1259,43 @@ def refresh_source_attribution(
     head_sha: str,
 ) -> str:
     """Publish the pushed head as a dedicated managed attribution comment."""
-    if not config.default_repo.pr.source_attribution:
-        return ""
-    if target_pr is None or target_pr.number is None or not target_pr.repo:
+    if target_pr is None:
+        return "active PR has no provider repo/number"
+    prcfg = config.default_repo.pr
+    # codename-attribution-by-default (round-32 finding, corrected round-37,
+    # sharpened by a PR #3037 review finding): a legacy PRRecord predating
+    # the frozen attribution_mode/attribution_explicit fields is lazily
+    # frozen on this, its FIRST post-migration touch -- computed from
+    # whatever config is live AT THIS SINGLE MOMENT, persisted immediately.
+    # This runs BEFORE any decision that depends on live config OR on this
+    # PR's own metadata completeness (including the number/repo validation
+    # below) -- a legacy PR with missing provider metadata (e.g. before
+    # `set-pr` has supplied it) must still be frozen on this touch; gating
+    # the freeze on that validation would let it stay unmigrated until
+    # metadata arrives, at which point THAT later touch (not the true
+    # first one) would be frozen instead, silently adopting whatever
+    # policy is live by then. The number/repo check below gates
+    # PUBLICATION only, never the freeze itself.
+    if not target_pr.attribution_mode:
+        tracking.stamp_frozen_attribution(
+            target_pr, attribution=prcfg.source_attribution,
+            explicit=prcfg.source_attribution_configured,
+            # This entry is an EXISTING on-disk record touched outside the
+            # record lock -- assign_pr_id=False defers pr_id minting
+            # entirely to _save_record_unlocked's own inline, lock-
+            # serialized backfill, so two concurrent legacy-freeze calls
+            # for the same PR can never mint two different random ids
+            # (fix-PR-#3037-review finding).
+            assign_pr_id=False,
+        )
+        tracking.save_record(record)
+    if target_pr.number is None or not target_pr.repo:
         return "active PR has no provider repo/number"
     if target_pr.attribution_head == head_sha:
         return ""
     from . import providers
     from .providers import attribution
 
-    prcfg = config.default_repo.pr
     provider_name = target_pr.provider or prcfg.provider
     if provider_name != prcfg.provider:
         return (
@@ -1216,7 +1306,10 @@ def refresh_source_attribution(
     if record.sessions:
         live = [item for item in record.sessions if not item.ended_at]
         session = (live[-1] if live else record.sessions[-1]).session_id
-    if prcfg.source_attribution == "codename":
+    # From here on, every publish decision uses the FROZEN pair, never live
+    # `prcfg.source_attribution`/`source_attribution_configured` -- the live
+    # config was consulted only once, above, at the freeze moment.
+    if target_pr.attribution_mode == "codename":
         # Public-safe mode -- see `_open_via_provider`'s matching branch for
         # the same "skip, never downgrade to the raw marker" rule, and for
         # why the codename is validated (not just checked for presence)
@@ -1226,8 +1319,13 @@ def refresh_source_attribution(
             record.codename
         ):
             return ""
+        if not attribution.may_publish_codename(
+            codename_source=record.codename_source,
+            source_attribution_configured=target_pr.attribution_explicit,
+        ):
+            return ""
         marker = attribution.build_codename_marker(record.codename)
-    elif prcfg.source_attribution is True:
+    elif target_pr.attribution_mode == "true":
         marker = attribution.build_marker(
             worktree_id,
             machine=record.machine,
@@ -1235,9 +1333,9 @@ def refresh_source_attribution(
             head=head_sha,
         )
     else:
-        # Neither exact mode -- config parsing should never produce this,
-        # but never publish the raw marker for anything other than an
-        # explicit `True`.
+        # "false" (or an unrecognized value migrated to the empty sentinel
+        # above) -- never publish the raw marker for anything other than a
+        # frozen "true".
         return ""
     try:
         provider = providers.get_provider(provider_name)
@@ -1356,7 +1454,7 @@ def _finish_auto_open(
     head_sha: str,
     open_pr: bool | None,
     draft: bool,
-    attribution: bool | None,
+    attribution: SourceAttribution | None,
 ) -> None:
     """Open the PR (when pending) or surface an already-open PR's number/url.
 
@@ -1373,9 +1471,31 @@ def _finish_auto_open(
     if not want_open or target_pr is None:
         return
     if target_pr.number is None:
-        want_attribution = (
-            prcfg.source_attribution if attribution is None else attribution
-        )
+        # codename-attribution-by-default (fix-PR-#3037-review finding):
+        # use the FROZEN pair for the initial-open decision too, not a
+        # live-recomputed value -- a PR frozen on an earlier
+        # create-pr --no-open/--no-attribution run (never yet opened, so
+        # number is still None) must open under its ORIGINAL frozen
+        # policy even if live config has since changed. Lazily freeze an
+        # empty legacy pair (a target_pr that somehow reached this point
+        # unstamped) before opening, from whatever is live right now --
+        # the same one-time freeze-on-first-touch pattern
+        # refresh_source_attribution uses.
+        if not target_pr.attribution_mode:
+            _want_attribution = (
+                prcfg.source_attribution if attribution is None else attribution
+            )
+            tracking.stamp_frozen_attribution(
+                target_pr, attribution=_want_attribution,
+                explicit=(
+                    attribution is not None
+                    or prcfg.source_attribution_configured
+                ),
+                assign_pr_id=False,
+            )
+            if record is not None:
+                tracking.save_record(record)
+        want_attribution = tracking.attribution_from_frozen_mode(target_pr)
         _open_via_provider(
             result, config, record, target_pr, title, body, worktree_id,
             head_sha, draft=draft, attribution=want_attribution,
@@ -1393,10 +1513,17 @@ def _finish_auto_open(
     # re-run's ``--draft`` request masquerade as "opened as a DRAFT". Un-drafting
     # an already-open PR is pr-ready's job, not create-pr's.
     result["draft"] = False
-    want_attribution = (
-        prcfg.source_attribution if attribution is None else attribution
-    )
-    if want_attribution and record is not None:
+    # codename-attribution-by-default (round-38 finding): always invoke
+    # refresh_source_attribution when a record exists -- never gate the
+    # call itself on a LIVE `want_attribution` snapshot. A PR frozen under
+    # `attribution_mode="true"` whose repo's live `source_attribution`
+    # later changes to `false` must still keep publishing per its ORIGINAL
+    # frozen state; gating this call on live config would skip it entirely
+    # and never give the frozen-pair logic INSIDE refresh_source_attribution
+    # a chance to run. This is cheap when there's nothing to do:
+    # refresh_source_attribution already short-circuits immediately once
+    # `target_pr.attribution_head == head_sha` (no new push to react to).
+    if record is not None:
         error = refresh_source_attribution(
             worktree_id,
             config,
@@ -1602,6 +1729,7 @@ def set_pr(
     branch: str | None = None,
     select_number: int | None = None,
     select_branch: str | None = None,
+    config: Config | None = None,
 ) -> dict:
     """Record PR metadata (URL/number/state/provider) on a worktree record.
 
@@ -1633,6 +1761,7 @@ def set_pr(
             base, yaml_path, url=url, number=number, state=state,
             provider=provider, branch=branch,
             select_number=select_number, select_branch=select_branch,
+            config=config,
         )
 
 
@@ -1647,6 +1776,7 @@ def _set_pr_locked(
     branch: str | None,
     select_number: int | None,
     select_branch: str | None,
+    config: Config | None = None,
 ) -> dict:
     """The load -> mutate -> save body of :func:`set_pr`, run under the record
     lock. Split out so the lock scope is exactly the RMW window."""
@@ -1675,6 +1805,40 @@ def _set_pr_locked(
         if pr is None:
             pr = PRRecord()
             record.prs.append(pr)
+            # codename-attribution-by-default: freeze this PR's attribution
+            # decision ONCE, at this fresh-construction site -- manual
+            # set-pr has no per-call override, so the effective value is
+            # simply whatever is live in config AT THIS MOMENT (best-effort:
+            # a config-load failure degrades to the safe "false" sentinel,
+            # never crashes this RMW). Use the CALLER's already-resolved
+            # config when supplied (a PR #3037 review finding: `cmd_set_pr`
+            # resolves config honoring `--config`/project context, but this
+            # freeze previously re-loaded AMBIENT config with neither --
+            # from a neutral CWD, or when `--config` targets a different
+            # project, the PR would be frozen under the wrong repo's
+            # policy) -- only fall back to an ambient load for a caller
+            # that genuinely has none to offer (e.g. a bare unit test of
+            # this function).
+            try:
+                prcfg_for_stamp = (
+                    config.default_repo.pr if config is not None
+                    else cfg.load_config().default_repo.pr
+                )
+                tracking.stamp_frozen_attribution(
+                    pr, attribution=prcfg_for_stamp.source_attribution,
+                    explicit=prcfg_for_stamp.source_attribution_configured,
+                )
+            except Exception:
+                tracking.stamp_frozen_attribution(
+                    pr, attribution=False, explicit=False,
+                )
+
+    # PR #3037 review finding: backfill and PERSIST this entry's pr_id
+    # BEFORE applying any branch/number correction below (see
+    # tracking.ensure_pr_id's docstring for why this must be its own save,
+    # not folded into the final one below).
+    if tracking.ensure_pr_id(pr):
+        tracking.save_record(record)
 
     identity_changed = (
         (number is not None and number != pr.number)
@@ -2046,7 +2210,7 @@ def _push_existing_feature(
     body: str | None,
     open_pr: bool | None,
     draft: bool,
-    attribution: bool | None,
+    attribution: SourceAttribution | None,
     pr_head: str = "",
 ) -> dict:
     """Re-run helper: push an already-created feature branch and record state.
@@ -2090,6 +2254,20 @@ def _push_existing_feature(
             target = PRRecord(
                 branch=feature_branch, provider=prcfg.provider,
                 repo=record.repo or "", opened_at=tracking._now_iso(),
+            )
+            # codename-attribution-by-default: freeze this PR's attribution
+            # decision ONCE, at this fresh-construction site -- same
+            # effective-value/explicitness rule as create_pr's own fresh
+            # construction.
+            _want_attribution = (
+                prcfg.source_attribution if attribution is None else attribution
+            )
+            tracking.stamp_frozen_attribution(
+                target, attribution=_want_attribution,
+                explicit=(
+                    attribution is not None
+                    or prcfg.source_attribution_configured
+                ),
             )
             record.prs.append(target)
         # target is always non-terminal here (a live match or a fresh record).

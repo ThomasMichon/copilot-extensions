@@ -9,8 +9,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agent_worktrees.codename import DEFAULT_WORDLIST, Wordlist
+from agent_worktrees.codename_config import CodenameConfig
 from agent_worktrees.codename_tracking import (
+    CodenameAttributionPolicyError,
+    allocation_policy_kwargs_for_repo,
     assign_new_codename,
+    check_allocation_policy,
+    classify_codename_source,
     ensure_codename,
     existing_codenames,
     find_record_by_codename,
@@ -29,6 +34,92 @@ def _make_config(wordlist_path: str = ""):
             codename=SimpleNamespace(wordlist_path=wordlist_path)
         )
     )
+
+
+class TestClassifyCodenameSource:
+    def test_no_custom_wordlist_classifies_built_in(self) -> None:
+        assert classify_codename_source(CodenameConfig()) == "built-in"
+
+    def test_custom_wordlist_classifies_custom(self) -> None:
+        cfg = CodenameConfig(
+            wordlist_path="config/codenames.yaml", wordlist_path_configured=True,
+        )
+        assert classify_codename_source(cfg) == "custom"
+
+    def test_malformed_value_still_classifies_custom(self) -> None:
+        # round-13 finding: a malformed wordlist_path normalizes to the
+        # empty string, indistinguishable from "no custom wordlist" by
+        # wordlist_path alone -- classification must use
+        # wordlist_path_configured, not wordlist_path's own truthiness.
+        cfg = CodenameConfig(wordlist_path="", wordlist_path_configured=True)
+        assert classify_codename_source(cfg) == "custom"
+
+    def test_none_codename_config_classifies_built_in(self) -> None:
+        assert classify_codename_source(None) == "built-in"
+
+
+class TestCheckAllocationPolicy:
+    def test_pr_active_custom_wordlist_unconfigured_raises(self) -> None:
+        try:
+            check_allocation_policy(
+                pr_enabled=True, codename_source="custom",
+                source_attribution_configured=False,
+            )
+        except CodenameAttributionPolicyError:
+            pass
+        else:
+            raise AssertionError("expected CodenameAttributionPolicyError")
+
+    def test_pr_active_custom_wordlist_explicitly_configured_ok(self) -> None:
+        check_allocation_policy(
+            pr_enabled=True, codename_source="custom",
+            source_attribution_configured=True,
+        )
+
+    def test_pr_active_built_in_wordlist_unconfigured_ok(self) -> None:
+        check_allocation_policy(
+            pr_enabled=True, codename_source="built-in",
+            source_attribution_configured=False,
+        )
+
+    def test_pr_inactive_custom_wordlist_unconfigured_ok(self) -> None:
+        # round-22 finding: the gate is scoped to PR-active repos only --
+        # ordinary local-only Picker usage never regresses.
+        check_allocation_policy(
+            pr_enabled=False, codename_source="custom",
+            source_attribution_configured=False,
+        )
+
+
+class TestAllocationPolicyKwargsForRepo:
+    def test_full_config_resolves_all_three(self) -> None:
+        config = SimpleNamespace(
+            default_repo=SimpleNamespace(
+                codename=CodenameConfig(
+                    wordlist_path="config/codenames.yaml",
+                    wordlist_path_configured=True,
+                ),
+                pr=SimpleNamespace(
+                    enabled=True, source_attribution_configured=True,
+                ),
+            )
+        )
+        assert allocation_policy_kwargs_for_repo(config) == {
+            "codename_source": "custom",
+            "pr_enabled": True,
+            "source_attribution_configured": True,
+        }
+
+    def test_incomplete_config_degrades_to_safe_defaults(self) -> None:
+        # Mirrors wordlist_for_repo's own fail-soft posture: a minimal
+        # test stand-in missing default_repo/codename/pr entirely must
+        # never raise here, just resolve to the safe "no PR mode,
+        # built-in wordlist" defaults.
+        assert allocation_policy_kwargs_for_repo(object()) == {
+            "codename_source": "built-in",
+            "pr_enabled": False,
+            "source_attribution_configured": False,
+        }
 
 
 class TestWordlistForRepo:
@@ -99,6 +190,89 @@ class TestEnsureCodename:
         reloaded = load_record_by_id("wt-a", tracking_path=tmp_path)
         assert reloaded is not None
         assert reloaded.codename == result.codename
+
+    def test_backfill_stamps_codename_source(self, tmp_path: Path) -> None:
+        rec = create_new_record(
+            "wt-a", "worktree/wt-a", "/tmp/wt-a", "repo", "machine", "wsl", tmp_path,
+        )
+        result = ensure_codename(rec, tmp_path, codename_source="custom")
+        assert result.codename_source == "custom"
+        reloaded = load_record_by_id("wt-a", tracking_path=tmp_path)
+        assert reloaded is not None
+        assert reloaded.codename_source == "custom"
+
+    def test_concurrent_writer_provenance_is_copied_not_dropped(
+        self, tmp_path: Path,
+    ) -> None:
+        # round-12 finding: when ensure_codename discovers a concurrent
+        # writer already assigned a codename, it must copy BOTH the
+        # codename AND its codename_source -- not just the codename,
+        # silently dropping the provenance a concurrent writer already
+        # recorded.
+        rec = create_new_record(
+            "wt-a", "worktree/wt-a", "/tmp/wt-a", "repo", "machine", "wsl", tmp_path,
+        )
+        # Simulate the concurrent writer: assign directly on-disk with a
+        # KNOWN codename_source, bypassing this call's own in-memory `rec`.
+        winner = ensure_codename(
+            create_new_record(
+                "wt-b", "worktree/wt-b", "/tmp/wt-b", "repo", "machine", "wsl",
+                tmp_path,
+            ),
+            tmp_path, codename_source="custom",
+        )
+        from agent_worktrees import tracking as tracking_mod
+        on_disk = tracking_mod.load_record(tmp_path / "wt-a.yaml")
+        on_disk.codename = winner.codename
+        on_disk.codename_source = "custom"
+        tracking_mod.save_record(on_disk)
+
+        # The losing caller's in-memory `rec` never saw the winner's write.
+        result = ensure_codename(rec, tmp_path, codename_source="built-in")
+        assert result.codename == winner.codename
+        assert result.codename_source == "custom"
+
+    def test_new_allocation_enforces_policy(self, tmp_path: Path) -> None:
+        rec = create_new_record(
+            "wt-a", "worktree/wt-a", "/tmp/wt-a", "repo", "machine", "wsl", tmp_path,
+        )
+        try:
+            ensure_codename(
+                rec, tmp_path, codename_source="custom", pr_enabled=True,
+                source_attribution_configured=False,
+            )
+        except CodenameAttributionPolicyError:
+            pass
+        else:
+            raise AssertionError("expected CodenameAttributionPolicyError")
+        # The record must NOT have been allocated a codename by the failed
+        # attempt.
+        assert load_record_by_id("wt-a", tracking_path=tmp_path).codename is None
+
+    def test_concurrent_writer_already_assigned_branch_never_reraises_policy(
+        self, tmp_path: Path,
+    ) -> None:
+        # The policy check must run ONLY on the actual-new-allocation
+        # branch, never on the "a concurrent writer already assigned one"
+        # branch -- an already-decided codename is never re-validated.
+        create_new_record(
+            "wt-a", "worktree/wt-a", "/tmp/wt-a", "repo", "machine", "wsl",
+            tmp_path, codename="already-assigned",
+        )
+        from agent_worktrees import tracking as tracking_mod
+        on_disk = tracking_mod.load_record(tmp_path / "wt-a.yaml")
+        on_disk.codename_source = "custom"
+        tracking_mod.save_record(on_disk)
+        # A fresh in-memory copy with no codename yet (simulating a stale
+        # caller that hasn't seen the assignment).
+        stale_copy = tracking_mod.load_record(tmp_path / "wt-a.yaml")
+        stale_copy.codename = None
+        result = ensure_codename(
+            stale_copy, tmp_path, codename_source="custom", pr_enabled=True,
+            source_attribution_configured=False,
+        )
+        assert result.codename == "already-assigned"
+        assert result.codename_source == "custom"
 
     def test_does_not_resurrect_a_reaped_record(self, tmp_path: Path) -> None:
         # If the record vanished (e.g. reaped by retire_record) between the
