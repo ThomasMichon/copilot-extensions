@@ -65,8 +65,8 @@ class _SchemaMixin:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {col_type}")
                 added.append(col)
         if "background_recovery_enabled" in added:
-            # The v19 migration's stopped-row backfill only runs when
-            # from_version < 19; a DB already stamped 19 but missing this
+            # The v20 migration's stopped-row backfill only runs when
+            # from_version < 20; a DB already stamped 20 but missing this
             # column (reaching this safety net instead) would otherwise keep
             # the blanket `DEFAULT 1`, silently re-enabling background
             # recovery for existing dormant `stopped` rows.

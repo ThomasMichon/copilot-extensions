@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from .models import SessionStatus
@@ -85,11 +86,19 @@ class _RecoveryDormancyMixin:
         ``apply_backoff=False`` (an unavailable CodeSpace venue, #2378/#2379):
         still counts toward escalation/idle-dormancy but skips arming the
         retry-delay clock -- a cheap read-only check, not a connection
-        attempt, must keep polling every pass.
+        attempt, must keep polling every pass -- and skips the authoritative-
+        check escalation below, which would otherwise contact the provider and
+        defeat the whole point of a no-wake availability check.
+
+        Bails without acting if a concurrent explicit stop already persisted
+        dormancy for this session (review of #3058) -- an authoritative
+        recovery call below must not run against a session stop just ended.
         """
+        if not session.background_recovery_enabled:
+            return
         failures = self._disconnected_reattach_failures.get(rec.session_id, 0) + 1
         self._disconnected_reattach_failures[rec.session_id] = failures
-        if failures % _DISCONNECTED_REATTACH_ESCALATE_AFTER == 0:
+        if apply_backoff and failures % _DISCONNECTED_REATTACH_ESCALATE_AFTER == 0:
             log.warning(
                 "Session %s failed reattach %d times; forcing an authoritative "
                 "liveness check", rec.session_id, failures,
@@ -140,6 +149,15 @@ class _RecoveryDormancyMixin:
         reattach_ok: bool | None = None
         availability_failure = False
         async with session._lifecycle_lock:
+            # Recheck after acquiring the lock: a concurrent explicit stop
+            # (or terminal transition) may have landed while this waited for
+            # the lock, and must not be followed by a fresh attach attempt
+            # (review of #3058).
+            if (
+                not session.background_recovery_enabled
+                or session.status in {SessionStatus.FAILED, SessionStatus.ENDED}
+            ):
+                return False
             is_codespace = getattr(rec, "boundary", "local") == "codespace"
             if is_codespace and not await self._codespace_host_available(
                 rec, session, codespace_availability,
@@ -159,7 +177,11 @@ class _RecoveryDormancyMixin:
             self._remote_recovery_skipped.discard(rec.session_id)
             self._clear_disconnected_reattach_retry_state(rec.session_id)
             return True
+        # Timestamp the failure after the attempt (which can await for
+        # seconds/minutes), not with the pre-loop `now` -- otherwise a slow
+        # attempt schedules `retry_at` in the past and the next heartbeat
+        # retries immediately, defeating the backoff (review of #3058).
         await self._note_disconnected_reattach_failure(
-            rec, session, now=now, apply_backoff=not availability_failure,
+            rec, session, now=time.time(), apply_backoff=not availability_failure,
         )
         return False

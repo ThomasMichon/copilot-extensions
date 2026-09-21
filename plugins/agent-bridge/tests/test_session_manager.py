@@ -2662,6 +2662,124 @@ async def test_recover_disconnected_hosts_feeds_codespace_unavailable_into_backo
     assert session.background_recovery_enabled is False
 
 
+@pytest.mark.asyncio
+async def test_stop_persists_status_and_dormancy_atomically(
+    tmp_db, tmp_path,
+) -> None:
+    """Status and the dormancy gate must land in one write (review of #3058)
+    -- two separate writes could leave a row 'stopped' but still recovery-
+    enabled if the daemon were interrupted between them."""
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    target = SpawnTarget(type="local", cwd=str(tmp_path))
+    session = Session("session-1", "agent", target)
+    session.status = SessionStatus.IDLE
+    session.acp_session_id = "acp-1"
+    manager._sessions[session.session_id] = session
+    now = time.time()
+    tmp_db.create_session(
+        session_id=session.session_id, name=session.name,
+        agent_name=session.agent_name, caller_id=session.caller_id,
+        target_dir=target.cwd, target_type=target.type,
+        status=SessionStatus.IDLE.value, now=now, target_json=target.to_json(),
+    )
+    tmp_db.update_session_acp_id(session.session_id, session.acp_session_id)
+
+    await manager.stop_session(session.session_id)
+
+    row = tmp_db.get_session(session.session_id)
+    assert row["status"] == SessionStatus.STOPPED.value
+    assert row["background_recovery_enabled"] == 0
+
+
+@pytest.mark.asyncio
+async def test_codespace_unavailable_never_escalates_to_authoritative_check(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    """An unavailable-venue failure (apply_backoff=False) must never trigger
+    the authoritative-check escalation (review of #3058) -- that would
+    contact the provider and defeat the whole point of a no-wake check."""
+    import agent_bridge.session_manager as sm
+    from agent_bridge.session_manager import _DISCONNECTED_REATTACH_ESCALATE_AFTER
+
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.IDLE
+    session.acp_session_id = "acp-1"
+    session.client = None
+    manager._sessions[session.session_id] = session
+    rec = SimpleNamespace(
+        session_id=session.session_id,
+        protocol_version=1,
+        host_version="test",
+        host_pid=123,
+        child_pid=456,
+        created_at=1000.0,
+        resume_on_reattach=False,
+        boundary="codespace",
+    )
+    manager._host_index.register(
+        HostRecord(
+            session_id=session.session_id,
+            port=49555,
+            host_pid=123,
+            child_pid=456,
+        )
+    )
+    now = 1000.0
+    monkeypatch.setattr(sm.time, "time", lambda: now)
+    monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
+    authoritative_check = AsyncMock(return_value=0)
+    monkeypatch.setattr(manager, "_recover_remote_host_records", authoritative_check)
+    monkeypatch.setattr(
+        manager, "_codespace_host_available", AsyncMock(return_value=False),
+    )
+
+    for _ in range(_DISCONNECTED_REATTACH_ESCALATE_AFTER):
+        assert await manager.recover_disconnected_hosts() == 0
+
+    authoritative_check.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prompt_admission_arms_recovery_for_stopped_session(
+    tmp_db, tmp_path,
+) -> None:
+    """Prompt admission for a STOPPED session about to be kicked must arm
+    ``background_recovery_enabled`` immediately (review of #3058) -- not wait
+    for the later async ``_kick_pending_drain()``/``resume_session()`` call,
+    so an explicit stop racing right after admission cannot leave the
+    session dormant despite a queued prompt already committed to running."""
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    target = SpawnTarget(type="local", cwd=str(tmp_path))
+    session = Session("session-1", "agent", target)
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "acp-1"
+    session.background_recovery_enabled = False
+    manager._sessions[session.session_id] = session
+    now = time.time()
+    tmp_db.create_session(
+        session_id=session.session_id, name=session.name,
+        agent_name=session.agent_name, caller_id=session.caller_id,
+        target_dir=target.cwd, target_type=target.type,
+        status=SessionStatus.STOPPED.value, now=now, target_json=target.to_json(),
+    )
+    tmp_db.update_session_background_recovery(session.session_id, False)
+    # Simulate a queue that already outlived the stop (queue_nonempty=True is
+    # what makes a fresh submit to a STOPPED session take the queue+kick path
+    # rather than submit_prompt's own immediate auto-resume).
+    tmp_db.enqueue_prompt(session.session_id, "earlier", now)
+
+    result, kick_session = await manager._submit_or_queue_prompt_locked(
+        session, "hello",
+    )
+
+    assert result["queued"] is True
+    assert kick_session is session
+    assert session.background_recovery_enabled is True
+    assert tmp_db.get_session(session.session_id)["background_recovery_enabled"] == 1
+
+
 def test_ensure_columns_backfills_background_recovery_for_stopped_rows(
     tmp_path,
 ) -> None:

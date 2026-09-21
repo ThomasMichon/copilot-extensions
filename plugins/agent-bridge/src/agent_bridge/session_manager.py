@@ -5637,8 +5637,13 @@ class SessionManager(_RecoveryDormancyMixin):
         # If no turn is live to drain the queue on settle -- and we are not
         # mid-drain -- kick delivery now, resuming a recoverable STOPPED session
         # if needed. A live turn's settle tail (or the post-restart resume) will
-        # drain otherwise.
+        # drain otherwise. Arm recovery HERE, at admission -- not later inside
+        # the kick's resume_session() call -- so an explicit stop racing this
+        # admission cannot leave the session dormant despite a queued prompt
+        # already committed to running it (review of #3058).
         kick_session = session if not turn_live and not self._draining else None
+        if kick_session is not None and session.status == SessionStatus.STOPPED:
+            self._set_background_recovery_enabled(session, True)
         return (
             {
                 "queued": True,
@@ -6156,8 +6161,10 @@ class SessionManager(_RecoveryDormancyMixin):
 
             session.status = SessionStatus.STOPPED
             now = time.time()
-            self._db.update_session_status(session_id, SessionStatus.STOPPED.value, now)
-            self._set_background_recovery_enabled(session, allow_background_recovery)
+            self._db.update_session_stopped(session_id, now, allow_background_recovery)
+            session.background_recovery_enabled = allow_background_recovery
+            if not allow_background_recovery:
+                self._clear_disconnected_reattach_retry_state(session_id)
         # Release the per-worktree ownership reservation (#2912): a stopped
         # owned session is no longer actively controlling the worktree, so free
         # it for a live CLI (or a later fresh owner) to claim.
