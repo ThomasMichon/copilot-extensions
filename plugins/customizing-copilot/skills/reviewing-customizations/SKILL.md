@@ -170,12 +170,15 @@ A worker composes these with `sync_repository`/`scan_repository`'s own
 the first). See `projection_reflect.py`'s own module docstring for the
 immutable upstream-commit pinning conjunct (`pinned_commits`, additive and
 optional). `scan_plugin_sources.resolve_pinned_commits()` is a real,
-honestly-partial resolver for it: it can only pin a self-hosted/directory-
-marketplace source (via `git rev-parse HEAD` inside that source's own
-payload root) -- a plain installed-plugins payload copy (the common case
-for an externally-installed marketplace plugin) has no local git history to
-read, and is simply absent from the resulting map rather than guessed at
-(see its own docstring, and issue #3132 for that remaining half). See
+honestly-partial resolver for it: it re-probes each `is_local_checkout`
+source's commit **fresh at call time** (never trusting the informational-
+only `PluginSource.commit` field captured at discovery, which can precede
+a `refresh` that advances the checkout) via `git rev-parse HEAD` inside
+that source's own payload root -- a plain installed-plugins payload copy
+(the common case for an externally-installed marketplace plugin, and
+never marked `is_local_checkout`) has no local git history to read, and is
+simply absent from the resulting map rather than guessed at (see its own
+docstring, and issue #3132 for that remaining half). See
 `efforts/active/ambient-guidance-navigability`'s Journal for status on the
 externally-installed-source resolver described just above -- the only
 remaining piece; the scheduler wrapper (`projection_sync_worker.py`) and

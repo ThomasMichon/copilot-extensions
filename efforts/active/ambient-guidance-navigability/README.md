@@ -1006,10 +1006,21 @@ honestly rather than guessing at the full answer.
   calls it itself, after `refresh` and inside its own held lock, immediately
   before the locked sync -- both the CLI and the scheduler template now
   pass `resolve_pinned_commits` as that callback rather than precomputing
-  a map. `customizing-copilot`'s full suite: 232 passed, 8 skipped (31 new
-  tests total across all three rounds). `check-module-size`/
-  `check-version-bump`/`check-version-consistency`/`check-docs-consistency`
-  all pass. Bumped to `0.1.0-dev90`.
+  a map. **A fourth review round found this still incomplete**: calling
+  the callback after refresh didn't help if the callback itself
+  (`resolve_pinned_commits`) just read each source's already-populated
+  `commit` field -- that field was captured at *discovery* time, before
+  `refresh` even ran, so a directory-marketplace checkout that advanced
+  during refresh still passed its stale SHA. Fixed by making
+  `resolve_pinned_commits` **re-probe fresh at call time** instead of
+  trusting the field: added `PluginSource.is_local_checkout` (set only for
+  a genuine directory-marketplace footprint, never an installed-plugins
+  copy) so the resolver knows which sources are even eligible to
+  re-probe, and re-runs `_plugin_commit()` against each one's
+  `payload_root` live. `customizing-copilot`'s full suite: 233 passed, 8
+  skipped (33 new tests total across all four rounds). `check-module-
+  size`/`check-version-bump`/`check-version-consistency`/`check-docs-
+  consistency` all pass. Bumped to `0.1.0-dev91`.
 - **Issue #3132 is half closed, not fully.** What remains genuinely open:
   an externally-installed marketplace plugin -- the common adopter case --
   still cannot be pinned at all. Closing that needs either an install-time

@@ -419,7 +419,14 @@ def test_cli_happy_path_with_consent(
     assert payload["needsConflictDispatch"] is False
 
 
-def _real_source(plugin: Path, marketplace: str, name: str, *, commit: str = "") -> object:
+def _real_source(
+    plugin: Path,
+    marketplace: str,
+    name: str,
+    *,
+    commit: str = "",
+    is_local_checkout: bool = False,
+) -> object:
     return scan_plugin_sources.PluginSource(
         skills_root=plugin / "skills",
         origin=f"{marketplace}/{name}",
@@ -427,7 +434,21 @@ def _real_source(plugin: Path, marketplace: str, name: str, *, commit: str = "")
         source="",
         version="",
         commit=commit,
+        is_local_checkout=is_local_checkout,
     )
+
+
+def _git_init_and_commit(repo: Path) -> None:
+    import subprocess
+
+    for args in (
+        ["init", "-q"],
+        ["config", "user.email", "test@example.com"],
+        ["config", "user.name", "Test"],
+        ["add", "-A"],
+        ["commit", "-q", "-m", "initial"],
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
 
 
 def test_cli_ignores_pin_requirement_by_default(
@@ -480,6 +501,10 @@ def test_cli_require_immutable_pin_blocks_unpinned_source(
 def test_cli_require_immutable_pin_permits_pinned_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
+    import shutil
+
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
     repo = tmp_path / "repo"
     repo.mkdir()
     _write_consent(
@@ -488,7 +513,10 @@ def test_cli_require_immutable_pin_permits_pinned_source(
         require_immutable_pin=True,
     )
     plugin, _source = _write_plugin(tmp_path, "copilot-extensions", "policy")
-    pinned = _real_source(plugin, "copilot-extensions", "policy", commit="a" * 40)
+    _git_init_and_commit(plugin)
+    pinned = _real_source(
+        plugin, "copilot-extensions", "policy", is_local_checkout=True
+    )
     monkeypatch.setattr(
         worker.projections, "discover_enabled_sources", lambda *a, **kw: [pinned]
     )

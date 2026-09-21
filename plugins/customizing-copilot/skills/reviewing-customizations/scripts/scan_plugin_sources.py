@@ -23,11 +23,21 @@ class PluginSource:
     are reference-only for collision detection, while agent safety findings are
     advisory and carry an upstream remediation pointer.
 
-    ``commit`` is the immutable git commit SHA the payload was checked out
-    at, when (and only when) it lives inside a real git working tree (this
-    repo's own directory-marketplace plugins, or an ``agent-worktrees-repo``
-    checkout) -- empty when unresolvable (e.g. a plain installed-plugins
-    payload copy with no local git history). See :func:`resolve_pinned_commits`.
+    ``commit`` is a best-effort immutable git commit SHA captured at
+    *discovery* time -- when (and only when) the payload lives inside a
+    real git working tree (this repo's own directory-marketplace plugins,
+    or an ``agent-worktrees-repo`` checkout), empty otherwise (e.g. a plain
+    installed-plugins payload copy with no local git history). It can go
+    stale between discovery and use (e.g. across a `refresh` that advances
+    a directory-marketplace checkout) -- :func:`resolve_pinned_commits`
+    re-probes fresh rather than trusting this field for exactly that
+    reason. ``is_local_checkout`` marks which sources are even eligible for
+    that re-probe: only a directory-marketplace footprint (this reviewing
+    repo's own local checkout, or an ``agent-worktrees-repo`` one) is --
+    an installed-plugins footprint is a copied external payload with no
+    source-commit provenance of its own, even when it happens to live
+    under some unrelated enclosing git checkout, and must never be
+    re-probed or pinned.
     """
 
     skills_root: Path
@@ -36,6 +46,7 @@ class PluginSource:
     source: str = ""
     version: str = ""
     commit: str = ""
+    is_local_checkout: bool = False
 
     @property
     def payload_root(self) -> Path:
@@ -328,9 +339,17 @@ def _plugin_commit(footprint: Path) -> str:
 def resolve_pinned_commits(sources: list[PluginSource]) -> dict[str, str]:
     """Build a ``"<plugin>@<marketplace>" -> commit SHA`` map from ``sources``.
 
-    Only sources with a resolved :attr:`PluginSource.commit` are included --
-    a source this resolver could not pin (today: any plain installed-plugins
-    payload copy) is simply absent from the map, so
+    **Re-probes each eligible source's commit fresh at call time** -- it
+    does NOT trust :attr:`PluginSource.commit` (captured at discovery time,
+    which can precede a `refresh` that advances a directory-marketplace
+    checkout; using the stale field would let a payload that changed during
+    refresh still satisfy the pin conjunct with its old SHA). Only sources
+    with :attr:`PluginSource.is_local_checkout` are even eligible for
+    re-probing -- an installed-plugins payload copy is never re-probed or
+    pinned, no matter what its (informational-only) ``commit`` field says.
+    A source this resolver could not pin (today: any plain
+    installed-plugins payload copy, or a local checkout that is currently
+    dirty) is simply absent from the map, so
     ``projection_reflect.bypass_decision``'s ``pinned_commits`` conjunct
     correctly treats it as unpinned (fail-closed, review-only) rather than
     silently vacuously trusted. This is an honestly **partial** resolver: it
@@ -339,11 +358,14 @@ def resolve_pinned_commits(sources: list[PluginSource]) -> dict[str, str]:
     ones (see ``efforts/active/ambient-guidance-navigability``'s tracked
     follow-up, issue #3132, for that remaining half).
     """
-    return {
-        f"{source.plugin_name}@{source.marketplace}": source.commit
-        for source in sources
-        if source.commit
-    }
+    pinned: dict[str, str] = {}
+    for source in sources:
+        if not source.is_local_checkout:
+            continue
+        commit = _plugin_commit(source.payload_root)
+        if commit:
+            pinned[f"{source.plugin_name}@{source.marketplace}"] = commit
+    return pinned
 
 
 def _plugin_manifest_path(footprint: Path) -> Path:
@@ -617,6 +639,7 @@ def assemble_enabled_plugins(
                 source=source_url,
                 version=_plugin_version(footprint),
                 commit=_plugin_commit(footprint) if is_directory_marketplace else "",
+                is_local_checkout=is_directory_marketplace,
             )
         )
     return out

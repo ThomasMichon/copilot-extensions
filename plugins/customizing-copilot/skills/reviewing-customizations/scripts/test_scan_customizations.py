@@ -3000,18 +3000,49 @@ def test_plugin_commit_empty_when_git_unavailable(tmp_path: Path, monkeypatch):
     assert scan._plugin_commit(tmp_path) == ""
 
 
-def test_resolve_pinned_commits_includes_only_resolved_sources():
-    pinned = scan.PluginSource(
-        skills_root=Path("/x/skills"),
-        origin="copilot-extensions/agent-worktrees",
-        commit="a" * 40,
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_resolve_pinned_commits_re_probes_fresh_not_the_stale_field(
+    tmp_path: Path,
+):
+    # resolve_pinned_commits must NOT trust PluginSource.commit (captured at
+    # discovery time) -- it re-probes fresh, so a checkout that advanced
+    # since discovery (e.g. across a `refresh`) is reflected correctly.
+    checkout = tmp_path / "checkout"
+    _clean_git_checkout(checkout)
+    stale_sha = scan._plugin_commit(checkout)
+    (checkout / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.1"}), encoding="utf-8"
     )
+    _run_git(checkout, "add", "-A")
+    _run_git(checkout, "commit", "-q", "-m", "advance")
+    fresh_sha = scan._plugin_commit(checkout)
+    assert fresh_sha != stale_sha
+
+    local = scan.PluginSource(
+        skills_root=checkout / "skills",
+        origin="copilot-extensions/cap",
+        commit=stale_sha,  # deliberately stale
+        is_local_checkout=True,
+    )
+
+    result = scan.resolve_pinned_commits([local])
+
+    assert result == {"cap@copilot-extensions": fresh_sha}
+
+
+def test_resolve_pinned_commits_never_pins_a_non_local_checkout_source(
+    tmp_path: Path,
+):
+    # is_local_checkout=False (the default) must never be re-probed or
+    # pinned, regardless of what its (informational-only) commit field or
+    # payload_root on disk look like.
     unpinned = scan.PluginSource(
         skills_root=Path("/y/skills"),
         origin="third-party-marketplace/some-plugin",
-        commit="",
+        commit="a" * 40,
+        is_local_checkout=False,
     )
 
-    result = scan.resolve_pinned_commits([pinned, unpinned])
+    result = scan.resolve_pinned_commits([unpinned])
 
-    assert result == {"agent-worktrees@copilot-extensions": "a" * 40}
+    assert result == {}
