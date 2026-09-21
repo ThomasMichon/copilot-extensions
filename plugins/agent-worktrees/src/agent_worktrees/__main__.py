@@ -7500,6 +7500,7 @@ def cmd_effort_focus(args: argparse.Namespace) -> int:
 _RETIRE_TERMINAL_FAILURE_METHODS = frozenset(
     {
         "process-identity-unavailable",
+        "process-identity-mismatch",
         "identity-mismatch-skip",
         "identity-unresolved-skip",
         "last-window-skip",
@@ -7752,6 +7753,22 @@ def _monitor_retire_handoff_predecessor(
             or predecessor_start not in (None, "")
             and current_start != str(predecessor_start)
         ):
+            activity.log_event(
+                "handoff_predecessor_retire",
+                worktree_id=request.get("worktree_id"),
+                session_id=predecessor_session,
+                source="python",
+                handoff_token=request.get("handoff_token"),
+                successor_session_id=request.get("successor_session_id"),
+                old_pane=request.get("retire_pane"),
+                successor_verified=True,
+                reason=request.get("retire_reason"),
+                method="process-identity-mismatch",
+                outcome="identity-mismatch",
+                copilot_found=0,
+                copilot_reaped=0,
+                copilot_survivors=0,
+            )
             return 1, {
                 "ok": False,
                 "pane": request.get("retire_pane"),
