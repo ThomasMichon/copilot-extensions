@@ -406,7 +406,16 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   silent fallback could operate on a foreign cell's `agent-worktrees` --
   and a second finding that the same-cell subprocess spawn was missing
   `no_window_kwargs()` (present on agent-logger's equivalent same-cell
-  call); both fixed before merge.
+  call); both fixed before merge. A follow-up review round caught a third,
+  more subtle bug: the owner-root passed to `validate_owner()` was
+  `install_dir()` (honoring `AGENT_BRIDGE_INSTALL_DIR`), which reflects
+  *this process's own runtime root* -- only guaranteed to equal the
+  required plugin root (`.../marketplaces/<cell>/plugins/agent-bridge`) for
+  a freshly-resolved `runtime-gate.sh` invocation, not e.g. a long-lived
+  daemon started from a service unit's static environment. Switched to
+  `AGENT_BRIDGE_PAYLOAD_ROOT` (the same-cell launcher's own rebound
+  variable, set on every peer-launch invocation), falling back to
+  `install_dir()` only when that variable is absent.
 - Found and fixed a **pre-existing gap** in `tools/check-version-bump.py`
   while touching it: its hardcoded `packaged_peers` list (which plugins must
   bump when `libs/peer-launch` changes) already omitted `agent-index` and

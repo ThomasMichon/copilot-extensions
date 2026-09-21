@@ -5447,6 +5447,21 @@ def _cmd_handoff_request(args: argparse.Namespace) -> None:
     )
 
 
+def _agent_bridge_owner_root() -> Path:
+    """The plugin-root ``validate_owner`` requires: ``.../marketplaces/<cell>/
+    plugins/agent-bridge``. ``AGENT_BRIDGE_PAYLOAD_ROOT`` is the same-cell
+    launcher's own rebound variable (set on every peer-launch invocation, see
+    ``_peer_launch.peer_environment``); ``AGENT_BRIDGE_INSTALL_DIR`` (what
+    :func:`install_dir` honors) instead reflects this process's own runtime
+    root, which is only guaranteed to equal the plugin root for a
+    freshly-resolved ``runtime-gate.sh`` invocation, not e.g. a long-lived
+    daemon started from a service unit's static environment. Falls back to
+    :func:`install_dir` when the payload-root variable is absent, preserving
+    prior behavior for that case."""
+    payload_root = os.environ.get("AGENT_BRIDGE_PAYLOAD_ROOT")
+    return Path(payload_root) if payload_root else install_dir()
+
+
 def _agent_worktrees_launch_prefix() -> list[str] | None:
     """Resolve the exec prefix for ``agent-worktrees``, same-cell first.
 
@@ -5467,7 +5482,9 @@ def _agent_worktrees_launch_prefix() -> list[str] | None:
         exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
         return [exe] if exe else None
     try:
-        own = _peer_launch.validate_owner("agent-bridge", install_dir(), explicit_context)
+        own = _peer_launch.validate_owner(
+            "agent-bridge", _agent_bridge_owner_root(), explicit_context
+        )
     except (OSError, ValueError, ImportError) as error:
         raise _peer_launch.ContextRefused(
             f"agent-bridge installation context refused: {error}"
