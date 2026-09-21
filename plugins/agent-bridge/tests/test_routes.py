@@ -2203,6 +2203,13 @@ class TestWorktreeRoutes:
 
         assert resp.status_code == 200
         assert resp.json()["session_id"] == "fresh-sess-cb"
+        # The fresh session must be spawned using the *probed* entry's
+        # path/id, not an empty/incorrect cwd (review #3121) -- mirrors the
+        # cache-backed fresh-start assertion above.
+        spawned_target = mgr.start_session.call_args.args[0]
+        assert spawned_target.worktree_id == wt_id
+        assert spawned_target.cwd == f"/wt/{wt_id}"
+        assert mgr.start_session.call_args.kwargs["agent_name"] == "test-agent"
 
     def test_resume_worktree_cache_blind_probe_rejects_missing_path(
         self, client, app
