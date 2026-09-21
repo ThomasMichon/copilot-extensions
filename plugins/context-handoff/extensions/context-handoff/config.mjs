@@ -3,6 +3,7 @@ import {
   lstatSync,
   readFileSync,
 } from "node:fs";
+import { access, lstat, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -24,6 +25,36 @@ export function findRepositoryRoot(startDir) {
   let current = resolve(startDir);
   while (true) {
     if (existsSync(join(current, ".git"))) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+async function existsAsync(path) {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Async twin of findRepositoryRoot, using non-blocking fs/promises calls.
+// Extension load-time initialization (extension.mjs, pre-joinSession()) uses
+// this variant exclusively -- the same class of bug as aperture-labs#7291
+// (agent-bridge's synchronous execSync chain blocking readiness), just a much
+// cheaper instance (bounded existsSync-style stats up the tree, no subprocess
+// spawns). The synchronous findRepositoryRoot above stays as-is for the CLI
+// (handoff-cli.mjs) and tests, where blocking a short-lived process is fine.
+export async function findRepositoryRootAsync(startDir) {
+  let current = resolve(startDir);
+  while (true) {
+    if (await existsAsync(join(current, ".git"))) {
       return current;
     }
     const parent = dirname(current);
@@ -162,7 +193,30 @@ function loadConfigLayer(configPath) {
   };
 }
 
-function defaultConfig(configPath = null) {
+async function validateConfigPathAsync(configDir, configPath) {
+  const dirStat = await lstat(configDir);
+  if (!dirStat.isDirectory() || dirStat.isSymbolicLink()) {
+    throw new Error("config directory must be a regular, non-symlink directory");
+  }
+  const stat = await lstat(configPath);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error("config must be a regular, non-symlink file");
+  }
+}
+
+// Async twin of loadConfigLayer (see findRepositoryRootAsync above for why).
+async function loadConfigLayerAsync(configPath) {
+  if (!(await existsAsync(configPath))) {
+    return null;
+  }
+  await validateConfigPathAsync(dirname(configPath), configPath);
+  return {
+    path: configPath,
+    ...parseContextHandoffConfig(await readFile(configPath, "utf-8"), configPath),
+  };
+}
+
+export function defaultConfig(configPath = null) {
   return {
     mode: DEFAULT_HANDOFF_MODE,
     thresholds: DEFAULT_THRESHOLDS,
@@ -187,6 +241,60 @@ export function loadContextHandoffConfig(startDir, options = {}) {
   try {
     const userConfig = userConfigPath ? loadConfigLayer(userConfigPath) : null;
     const repoConfig = repoConfigPath ? loadConfigLayer(repoConfigPath) : null;
+    const thresholds = validateThresholds(
+      mergeThresholdConfigs(userConfig?.thresholds, repoConfig?.thresholds),
+      repoConfig?.path || userConfig?.path || CONFIG_RELATIVE_PATH,
+    );
+    const mode = validateHandoffMode(
+      repoConfig?.mode ?? userConfig?.mode ?? DEFAULT_HANDOFF_MODE,
+      repoConfig?.path || userConfig?.path || CONFIG_RELATIVE_PATH,
+    );
+    return {
+      mode,
+      thresholds,
+      configPath: repoConfig?.path || userConfig?.path || null,
+      warning: null,
+    };
+  } catch (error) {
+    return {
+      mode: DEFAULT_HANDOFF_MODE,
+      thresholds: DEFAULT_THRESHOLDS,
+      configPath,
+      warning:
+        "Invalid context-handoff config; using defaults " +
+        `(${DEFAULT_HANDOFF_MODE}; ${DEFAULT_THRESHOLDS.softPercent}%/` +
+        `${DEFAULT_THRESHOLDS.hardPercent}%/${DEFAULT_THRESHOLDS.forcePercent}%): ` +
+        describeError(error),
+    };
+  }
+}
+
+// Async twin of loadContextHandoffConfig -- identical logic and return shape,
+// but every fs call is a non-blocking fs/promises equivalent. This is the
+// variant extension.mjs's load-time initialization uses (see
+// findRepositoryRootAsync above): it runs concurrently with joinSession()
+// rather than blocking the event loop before it, per aperture-labs#7291's
+// finding that synchronous load-time I/O -- even a bounded, spawn-free one
+// like this directory walk -- gates the extension-readiness handshake. The
+// synchronous loadContextHandoffConfig above is unchanged and remains the
+// entry point for handoff-cli.mjs and existing tests, where blocking a
+// short-lived process is harmless.
+export async function loadContextHandoffConfigAsync(startDir, options = {}) {
+  const repositoryRoot = await findRepositoryRootAsync(startDir);
+  const home = options.homeDir ?? homedir();
+  const userConfigPath = home ? join(home, USER_CONFIG_RELATIVE_PATH) : null;
+  const repoConfigPath = repositoryRoot ? join(repositoryRoot, CONFIG_RELATIVE_PATH) : null;
+  const configPath = repoConfigPath && (await existsAsync(repoConfigPath))
+    ? repoConfigPath
+    : userConfigPath && (await existsAsync(userConfigPath))
+      ? userConfigPath
+      : null;
+  if (!repoConfigPath && !userConfigPath) {
+    return defaultConfig();
+  }
+  try {
+    const userConfig = userConfigPath ? await loadConfigLayerAsync(userConfigPath) : null;
+    const repoConfig = repoConfigPath ? await loadConfigLayerAsync(repoConfigPath) : null;
     const thresholds = validateThresholds(
       mergeThresholdConfigs(userConfig?.thresholds, repoConfig?.thresholds),
       repoConfig?.path || userConfig?.path || CONFIG_RELATIVE_PATH,

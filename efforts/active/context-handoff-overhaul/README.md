@@ -1384,3 +1384,57 @@ gate land._
   `agent-worktrees` suite passes aside from a pre-existing, unrelated
   `test_doctor.py` failure batch (confirmed failing identically on
   unmodified `main`, out of scope for this change).
+
+### 2026-09-20 (still later) -- Phase 7 item 1: plugin-load investigation, first pass
+
+- Picked up gitea aperture-labs#7264 (plugin frequently fails to load) per
+  this effort's own recommendation that it unblocks reasoning about the
+  other four remaining Phase 7 items.
+- Structural diff against known-reliable sibling plugins (`agent-worktrees`,
+  `agent-bridge`): `plugin.json`, `hooks.json`, and `session-context.json`
+  shapes are unremarkable and match the working plugins' conventions
+  (`runtimeScope: none` is a legitimate value, not a misconfiguration --
+  this plugin has no venv/runtime to manage). Ruled out as the cause.
+- Live-load smoke tests, both clean: (1) `copilot --plugin-dir
+  .../context-handoff -p "list tools containing 'handoff'"` from an
+  isolated scratch directory (no repo root above it) surfaced all four
+  tools (`generate_handoff_prompt`, `save_handoff_prompt`,
+  `consume_handoff`, `trigger_handoff`) correctly; (2) this very picked-up
+  session (real aperture-labs worktree, full production marketplace, `.git`
+  several directories deep) also had all four tools available, confirmed
+  via `tool_search_tool`. So the plugin is not *categorically* broken --
+  matches the issue's own "frequently", not "always", framing.
+- **Leading suspect identified, not yet confirmed:** `extension.mjs` line
+  ~30 runs `loadContextHandoffConfig(process.cwd())` synchronously at
+  **module top level**, before `joinSession()` and before any hook fires.
+  That call chain (`findRepositoryRoot` walking up the directory tree with
+  repeated `existsSync`, then `readFileSync`-ing up to two config layers)
+  is blocking I/O performed during the extension host's import/registration
+  phase. None of the sibling plugins checked (`agent-worktrees`,
+  `agent-bridge`) do comparable synchronous work at import time -- their
+  `extension.mjs` files only *define* handlers before `joinSession()`. If
+  the host enforces any load-time budget per extension (unconfirmed -- the
+  SDK internals aren't in this repo to inspect), a slow directory walk or
+  file read (e.g. a deeply nested worktree, a network/cloud-sync-backed
+  path where `existsSync`/`readFileSync` block on a placeholder hydration)
+  would be a plausible, environment-dependent way for *this* plugin
+  specifically to lose a race that others structurally can't lose, without
+  surfacing any diagnostic (a silent host-side drop, not a thrown error the
+  plugin's own try/catch could catch).
+  `fs.existsSync` swallows errors and returns `false` rather than throwing,
+  so this is a **latency** hypothesis, not an uncaught-exception hypothesis
+  -- ruled out crash-on-permission-error as the mechanism.
+- **Not yet done, needed to confirm or refute:** reproduce under conditions
+  that plausibly slow the walk/read (deeply nested or cloud-sync-backed
+  worktree path; a session start under heavier concurrent plugin load than
+  the two smoke tests above), and determine whether the extension host
+  actually enforces a load timeout at all (would need either SDK source/docs
+  access this repo doesn't vendor, or an operator-run clean-room experiment
+  instrumenting load duration across many real session starts). Until one
+  of those lands, do not treat the top-level-I/O theory as confirmed root
+  cause -- it is the most structurally distinctive lead found so far, not a
+  verified fix target.
+- Left issue #7264 open with these findings; recommend the next slice
+  either instrument `extension.mjs`'s import path with timing/diagnostics
+  (cheap, ships independent of confirming the theory) or run a multi-session
+  stress repro if the operator can supply one.
