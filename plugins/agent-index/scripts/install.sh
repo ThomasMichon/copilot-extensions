@@ -1142,9 +1142,21 @@ _ensure_runtime() {
     fi
 
     _pip_install() {
-        # This installer owns only the lightweight base/client footprint.
+        # A host runs the local indexing/vector-store stack and needs the
+        # [store] extra (numpy, pyarrow, lancedb, tree-sitter*, mcp); a client
+        # stays on the light base deps only. This is distinct from -- and
+        # must never pull in -- the durable [engine] (torch) extra, which is
+        # provisioned exclusively by `engine`/`engine-update` (see
+        # durable-vs-versioned-runtime.md). Resolve role BEFORE the package
+        # install so a host's versioned venv actually carries what its own
+        # service/search/index code imports. _activation_role falls back to
+        # _machine_role, so this is correct even before any per-repo role
+        # config exists.
+        local install_role
+        install_role="$(_activation_role)"
+        [[ "$install_role" == "unconfigured" ]] && install_role="$(_machine_role)"
         local pkg="$PLUGIN_DIR"
-        # Dispatch alone installs host dependencies; every plugin-side build is base-only.
+        [[ "$install_role" == "host" ]] && pkg="${PLUGIN_DIR}[store]"
         if [[ "$have_uv" -eq 1 ]]; then
             uv pip install --python "$VENV_PYTHON" "$pkg"
         else
