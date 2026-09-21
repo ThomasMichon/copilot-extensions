@@ -125,6 +125,39 @@ def test_health_report_combines_log_sweep_and_tool_cache(tmp_path, monkeypatch):
     assert report["tool_cache"]["found"] is True
     assert report["tool_cache"]["total_entries"] == 1
     assert report["tool_cache"]["stale_entries"] == 0
+    assert report["tool_cache"]["stale_ratio"] == 0.0
+
+
+def test_health_report_stale_ratio_reflects_mixed_cache(tmp_path):
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    (cache_dir / "current.json").write_text(
+        json.dumps({"schemaVersion": 3, "serverName": "a"}), encoding="utf-8"
+    )
+    (cache_dir / "stale.json").write_text(
+        json.dumps({"schemaVersion": 1, "serverName": "b"}), encoding="utf-8"
+    )
+
+    report = mcp_health.health_report(
+        log_dir_override=str(tmp_path / "no-logs"), cache_dir_override=str(cache_dir),
+        since_hours=None,
+    )
+
+    assert report["tool_cache"]["stale_ratio"] == 0.5
+
+
+def test_health_report_stale_ratio_is_defined_for_empty_cache(tmp_path):
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    report = mcp_health.health_report(
+        log_dir_override=str(tmp_path / "no-logs"), cache_dir_override=str(cache_dir),
+        since_hours=None,
+    )
+
+    assert report["tool_cache"]["found"] is True
+    assert report["tool_cache"]["total_entries"] == 0
+    assert report["tool_cache"]["stale_ratio"] == 0.0
 
 
 def test_cmd_mcp_health_missing_dirs_is_not_an_error(tmp_path, capsys):

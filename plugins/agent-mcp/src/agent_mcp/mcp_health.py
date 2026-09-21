@@ -188,14 +188,19 @@ def health_report(
     if cache_dir is not None and cache_dir.is_dir():
         scanned = tcm.scan(cache_dir)
         stale = scanned.stale_entries
+        total = len(scanned.entries)
         report["tool_cache"] = {
             "cache_dir": str(cache_dir),
             "found": True,
-            "total_entries": len(scanned.entries),
+            "total_entries": total,
             "current_schema_version": scanned.current_version,
             "schema_version_counts": dict(scanned.version_counts),
             "stale_entries": len(stale),
             "stale_bytes": sum(e.size for e in stale),
+            # Defined even for an empty cache (0.0, not stale) so a caller
+            # tracking this metric across scheduled runs never has to
+            # special-case a missing/null value.
+            "stale_ratio": (len(stale) / total) if total else 0.0,
         }
     else:
         report["tool_cache"] = {"cache_dir": str(cache_dir) if cache_dir else None, "found": False}

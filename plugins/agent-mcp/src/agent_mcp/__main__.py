@@ -279,7 +279,8 @@ def _cmd_mcp_health(args: argparse.Namespace) -> int:
         if cache.get("found"):
             print(f"Tool cache: {cache['cache_dir']}")
             print(f"  {cache['total_entries']} entries, {cache['stale_entries']} stale "
-                  f"({cache['stale_bytes']:,} bytes) -- current schema {cache['current_schema_version']}")
+                  f"({cache['stale_ratio']:.1%}, {cache['stale_bytes']:,} bytes) -- "
+                  f"current schema {cache['current_schema_version']}")
         else:
             print(f"No tool cache directory found at {cache.get('cache_dir')}.")
 
