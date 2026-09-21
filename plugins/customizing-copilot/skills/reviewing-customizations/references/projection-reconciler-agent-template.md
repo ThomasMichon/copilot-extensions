@@ -97,7 +97,7 @@ means "report, don't touch."
 
 ## Input -- a conflicted PR
 
-The dispatched task's payload (`agent-dispatch payload <task-id>`) is a
+The dispatched task's payload (`agent-dispatch payload <task-id>`) is a  <!-- marketplace-isolation: allow this template documents the scaffolded agent's own agent-dispatch CLI usage -->
 compact pointer, not a rule source:
 
 \```json
