@@ -1360,6 +1360,7 @@ def test_representative_plugins_ship_valid_canonical_declarations() -> None:
     )
 
 
+@pytest.mark.guard
 def test_context_handoff_handoff_fallback_projection_is_valid() -> None:
     """Regression test for the ``handoff-fallback`` template's forbidden-
     content scanner failure (see ThomasMichon/copilot-extensions#3079): it
