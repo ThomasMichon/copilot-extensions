@@ -149,12 +149,17 @@ def _release_dispatch_session_claims(
     """
     if not session_id:
         return []
+    # Mirrors `deregister_session`'s own `self_session_ref` construction
+    # exactly (tracking.py) -- an exact-string match on the fully qualified
+    # ref, not merely the parsed session fragment, so a claim is only ever
+    # released when its machine, project, AND worktree id all match this
+    # record too, not just an incidental session-id substring collision.
+    expected_ref = tracking.format_claim_ref(
+        record.machine, record.repo, record.worktree_id, session=session_id,
+    )
     released = [
         claim for claim in record.resources
-        if claim.is_live
-        and claim.kind == "session"
-        and (parsed := tracking.parse_claim_ref(claim.ref)) is not None
-        and parsed.session == session_id
+        if claim.is_live and claim.kind == "session" and claim.ref == expected_ref
     ]
     for claim in released:
         tracking.release_resource_claim(record, claim.ref, save=False)
