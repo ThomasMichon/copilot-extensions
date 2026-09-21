@@ -270,3 +270,65 @@ def test_clear_if_owner_only_clears_own_claim(cfg_dir: Path):
 
 def test_clear_if_owner_noop_when_absent(cfg_dir: Path):
     assert routing.clear_if_owner(cfg_dir, pid=1) is False
+
+
+# -- reap_stale_active: missing-active promotion -----------------------------
+
+
+def test_reap_stale_active_promotes_live_previous_when_active_missing(
+    cfg_dir: Path,
+):
+    """clear_if_owner's shutdown shape (previous only, no active) must heal.
+
+    A clean coordinator shutdown demotes its own claim to ``previous`` and
+    leaves no ``active`` behind, trusting a successor to publish itself. If
+    that successor never starts, nothing else ever notices -- confirmed live
+    on 2026-09-21 (dotfiles#2143): a wake sat ``pending`` with
+    ``last_error: "bridge delivery unavailable"`` for 15+ minutes because the
+    only coordinator that could have drained it never believed it owned the
+    route. ``reap_stale_active`` must promote a still-live ``previous`` in
+    this shape, not just the "active is dead" shape it already handled.
+    """
+    prev = _Listener()
+    try:
+        table = {
+            "previous": {
+                "bind": "127.0.0.1", "port": prev.port, "pid": 4242,
+                "generation": 5,
+            },
+            "epoch": "x",
+        }
+        routing.routing_table_path(cfg_dir).write_text(json.dumps(table))
+
+        result = routing.reap_stale_active(cfg_dir, service="agent-dispatch")
+
+        assert result["promoted_port"] == prev.port
+        assert result["reaped"] is False  # nothing dead was retired
+        data = routing.read_table(cfg_dir)
+        assert data["active"]["port"] == prev.port
+        assert data["active"]["pid"] == 4242
+    finally:
+        prev.close()
+
+
+def test_reap_stale_active_noop_when_previous_also_dead(cfg_dir: Path):
+    dead_port = _free_port()
+    table = {
+        "previous": {"bind": "127.0.0.1", "port": dead_port, "generation": 5},
+        "epoch": "x",
+    }
+    routing.routing_table_path(cfg_dir).write_text(json.dumps(table))
+
+    result = routing.reap_stale_active(cfg_dir, service="agent-dispatch")
+
+    assert result["promoted_port"] is None
+    assert result["reaped"] is False
+    data = routing.read_table(cfg_dir)
+    assert "active" not in data
+
+
+def test_reap_stale_active_noop_when_table_fully_empty(cfg_dir: Path):
+    result = routing.reap_stale_active(cfg_dir, service="agent-dispatch")
+    assert result["reaped"] is False
+    assert result["promoted_port"] is None
+    assert routing.read_table(cfg_dir) is None
