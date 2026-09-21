@@ -169,7 +169,7 @@ class DevTunnelRendezvous:
         ttl_seconds: float = DEFAULT_TTL_SECONDS,
         timeout: float = DEFAULT_TIMEOUT,
         runner: CommandRunner | None = None,
-        clock: Callable[[], float] = time.time,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._binary = binary or _default_binary()
         self._label = label
@@ -177,6 +177,13 @@ class DevTunnelRendezvous:
         self._ttl = float(ttl_seconds)
         self._timeout = timeout
         self._runner = runner or self._spawn
+        # Backoff-deadline clock only (never entry liveness -- _is_live and
+        # register/heartbeat's last_seen/registered_at compare against real
+        # wall-clock time embedded in tunnel descriptions, so they always use
+        # time.time() directly). Defaults to time.monotonic() specifically
+        # *because* an NTP correction or manual wall-clock adjustment must
+        # never extend or truncate a purely-local, in-process backoff window
+        # -- monotonic time can only ever move forward at a steady rate.
         self._clock = clock
         # Enumeration backoff state (see DEFAULT_ENUM_BACKOFF_SECONDS).
         self._enum_backoff_seconds = 0.0
