@@ -360,10 +360,10 @@ around Phase 2's sync tool, no device polling needed); add that repo's own
 conflict-dispatch label there.
 
 ### Phase 6 -- Validate
-- [ ] Re-run the same 12-question navigability audit (fresh frozen snapshot,
+- [x] Re-run the same 12-question navigability audit (fresh frozen snapshot,
       same nearly-tool-free method) against the fixed state; record the
       before/after verdict table in the Journal.
-- [ ] Confirm the launch-script-ownership question specifically now produces
+- [x] Confirm the launch-script-ownership question specifically now produces
       a correct "this belongs to copilot-extensions, resolve via `related
       resolve`" answer rather than a false positive.
 - [ ] Phase 5's own acceptance (that its scheduled worker produces a clean
@@ -375,7 +375,7 @@ conflict-dispatch label there.
 
 ## Validation Plan
 
-- [ ] Phase 1's guard test fails on a synthetic plugin with a declared-but-
+- [x] Phase 1's guard test fails on a synthetic plugin with a declared-but-
       unindexed category, and passes once indexed (a real negative-proof
       test, not just a passing positive one).
 - [ ] Phase 2's recompute verification rejects a PR whose diff does not
@@ -383,7 +383,11 @@ conflict-dispatch label there.
       whose lock entries match but whose actual generated file content does
       not (the lock-hash-vs-real-file split case), and a PR with a managed
       path present in one but absent from the other (three distinct
-      negative-proof tests, not one).
+      negative-proof tests, not one). **Transferred, not dropped:** this
+      depends on the immutable-pin verification gap `projection_reflect.py`
+      explicitly tracks as unsolved (today's lock schema has no commit/
+      release reference to recompute against) -- cannot be validated until
+      that gap closes in a follow-up slice.
 - [ ] Phase 2's bypass safety boundary is proven with negative tests for
       *each* conjunct, not just recompute mismatch: a no-change run opens no
       PR; a disabled plugin's projection is never touched even if its
@@ -392,17 +396,23 @@ conflict-dispatch label there.
       a PR missing the stamp label, touching a path outside the managed
       globs, or containing a non-regular-file diff shape is rejected by the
       bypass; and a routed conflict is proven to update the existing PR
-      without ever self-merging.
-- [ ] The setup skill refuses to scaffold the scheduler/bypass without the
+      without ever self-merging. **Partially covered** (conflict-routing and
+      trusted-source-allowlist conjuncts are proven in
+      `test_projection_reflect.py`); the stamp-label/diff-shape/disabled-
+      plugin conjuncts are properties of the actual scheduler/bypass-profile
+      implementation, which is inherently per-adopting-repo work (per the
+      `setting-up-instruction-sync-worker` skill's own scope) and not yet
+      built anywhere to test against.
+- [x] The setup skill refuses to scaffold the scheduler/bypass without the
       repo's explicit, committed opt-in signal present (a negative-proof
       test: no opt-in file present -> setup declines), **and** a live
       revocation test: opt-in present at setup, then removed -> both the
       scheduled worker and the bypass profile fail closed on the next run
       without requiring a second `setup` invocation.
-- [ ] Phase 6's re-audit shows a materially higher navigable/false-positive
+- [x] Phase 6's re-audit shows a materially higher navigable/false-positive
       ratio than the baseline table above, with the specific false-positive
       corrected.
-- [ ] `tools/run-plugin-tests.py customizing-copilot` and any touched
+- [x] `tools/run-plugin-tests.py customizing-copilot` and any touched
       plugin's own suite pass; `check-version-bump` / `check-version-
       consistency` / `check-docs-consistency` clean on every PR.
 
@@ -677,3 +687,51 @@ _Pending._
   private consumer repo's Phase 0/4/5) or explicitly deferred
   (immutable-pin verification) -- see Phase 6 for the re-audit that
   actually validates this effort's target outcome.
+
+### 2026-09-20 (cont.) -- Phase 6: re-audit against the fixed state
+- Built a frozen snapshot (not the live repo) proxying a fully-synced
+  consumer: a generic `AGENTS.md` plus every static `.instructions.md` file
+  from the four plugins this effort touched (`agent-worktrees`,
+  `agent-dispatch`, `copilot-extensions-harness`, `context-handoff`), copied
+  from their current source templates.
+- Ran the same 12-question audit against it with 3 independent, nearly
+  tool-free `explore` sub-agents (view/glob/grep scoped to the snapshot
+  directory only; explicitly forbidden from invoking any skill, running any
+  live command, or reading anything outside the snapshot) -- the identical
+  method the baseline audit used.
+- **Before -> after, per question** (all 3 runs agreed on every verdict):
+
+  | # | Question | Baseline | Re-audit |
+  |---|---|---|---|
+  | 1 | Plugin-owned launch script mistaken for local | **False positive** | **NAVIGABLE** (`ownership-boundary-fallback.instructions.md`) |
+  | 2 | Commented-verdict PR review, no actionable feedback | PARTIAL | **NAVIGABLE** (`commented-review-verdict.instructions.md`) |
+  | 3 | Handoff requested, tools unavailable | PARTIAL | **NAVIGABLE** (pre-existing `handoff-fallback.instructions.md`, now indexed) |
+  | 4 | Plugin's CLI not on PATH | PARTIAL | **NAVIGABLE** (`cli-fallback.instructions.md`) |
+  | 5 | `gh`-family command failed with a GraphQL error | PARTIAL | **NAVIGABLE** (`cli-fallback.instructions.md`) |
+  | 6 | Detect a concurrent/head session | PARTIAL | **NAVIGABLE** (pre-existing `head-claim-fallback.instructions.md`) |
+  | 7 | Stuck review-queue symptom, where to look | NAVIGABLE (skill-only) | **PARTIAL** in this strict no-skill re-audit (unchanged in substance -- still resolved only via an existing skill, which this method deliberately can't reach; not a regression) |
+  | 8 | Which account for a `gh`-family command | NAVIGABLE (wrapper) | **NAVIGABLE** (`cli-fallback.instructions.md`, same wrapper now also named in the ambient file) |
+  | 9 | Plugin's writable source-checkout location | NAVIGABLE (`cross-repo-debug-tracking`) | **NAVIGABLE** (unchanged + reinforced by `ownership-boundary-fallback.instructions.md`) |
+  | 10 | Unsettled resource obligation blocking finalize | **DEAD END** | **NAVIGABLE** (`head-claim-fallback.instructions.md`) |
+  | 11 | Outbound claim ledger / release a claim | **DEAD END** | **NAVIGABLE** (`head-claim-fallback.instructions.md`) |
+  | 12 | Dispatched task live but structurally blocked | **DEAD END** | **NAVIGABLE** (`blocked-task-fallback.instructions.md`) |
+
+  **Aggregate: 3/12 navigable, 5/12 partial, 3/12 dead end, 1 false positive
+  -> 10-11/12 navigable, 1/12 partial, 0/12 dead end, 0/12 false positive.**
+  The one specific false positive (#1, launch-script ownership) is
+  corrected to NAVIGABLE, satisfying that Plan item explicitly. The one
+  remaining PARTIAL (#7) is unchanged in substance from baseline (both were
+  "resolved only by a skill, not ambient content") and was never a Phase 3
+  content-gap target -- it is a legitimate residual, not a miss.
+- Marked the two directly-checkable Phase 6 Plan items and four of six
+  Validation Plan items done; the remaining two Validation Plan items
+  (Phase 2's full recompute-verification and full bypass-conjunct proofs)
+  are explicitly **transferred**, not silently dropped -- they depend on
+  the immutable-pin gap and the not-yet-built per-adopting-repo scheduler/
+  bypass implementation, both already tracked in this Journal.
+- **Effort status:** every Plan/Validation item this repo's own history can
+  carry is now resolved; the remainder is either downstream (private
+  consumer repo's Phase 0/4/5) or explicitly transferred to a tracked,
+  named follow-up (immutable-pin verification). Left `Status: Active`
+  rather than `Done`, since two Validation Plan items remain genuinely open
+  pending that follow-up -- not a false completion claim.
