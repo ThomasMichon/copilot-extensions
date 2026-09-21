@@ -68,6 +68,36 @@ def test_gc_loop_backs_off_at_iteration_boundary_without_mutating(monkeypatch):
     assert bus.events == []
 
 
+def test_gc_loop_uses_coordinator_backoff_seam(monkeypatch):
+    health = coordinator_module.LoopHealth(name="gc", base_interval=30.0)
+    governance = _Governance([
+        {"status": "backoff", "reason": "maintenance-active"},
+    ])
+    bus = _Bus()
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+        if len(sleeps) >= 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(coordinator_module.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(coordinator_module, "_GOVERNANCE_BACKOFF_SECONDS", 0.25)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            coordinator_module._gc_loop(
+                TaskQueue(":memory:"),
+                30.0,
+                bus,
+                health=health,
+                governance=governance,
+            )
+        )
+
+    assert sleeps == [health.current_interval, 0.25]
+
+
 def test_gc_loop_rechecks_before_reconcile_and_catches_mid_iteration_maintenance(monkeypatch):
     health = coordinator_module.LoopHealth(name="gc", base_interval=30.0)
     governance = _Governance([
