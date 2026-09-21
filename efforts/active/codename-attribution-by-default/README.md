@@ -902,7 +902,13 @@ these decisions directly and assumes this design is understood.
 ### Phase 4 — Live validation
 - [ ] Open a real PR in this repo after Phase 3's config change and confirm
   it now carries the `<!-- agent-worktrees:source codename=... -->` marker
-  (this effort's own landing PR is a natural candidate).
+  (this effort's own landing PR is a natural candidate). **In progress:**
+  this PR is the live-validation attempt, opened from a worktree created
+  fresh after Phase 3 merged and the runtime redeployed (a worktree
+  created mid-Phase-2, before that redeploy, had a `codename` assigned
+  with no `codename_source` at all -- a legacy-record gap the effort's
+  own fail-closed design correctly refused to publish, not a bug; see the
+  journal).
 - [ ] Confirm the private downstream repo's next merged PR still carries
   the full raw marker unchanged (regression check, not a new test — just
   observe the next real merge).
