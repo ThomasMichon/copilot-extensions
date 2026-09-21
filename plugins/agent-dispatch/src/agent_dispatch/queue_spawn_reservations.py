@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from collections.abc import Callable
 
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 
@@ -376,6 +377,7 @@ class SpawnReservationMixin:
         conclusion_state: str | None = None,
         conclusion_detail: str | None = None,
         claim_token: str | None = None,
+        guard: Callable[[sqlite3.Row], None] | None = None,
     ) -> SpawnReservation:
         ts = self._now(now)
         with self._connect() as conn:
@@ -390,6 +392,12 @@ class SpawnReservationMixin:
                     f"reservation {key} is {row['state']!r}, not one of "
                     f"{sorted(allowed_from)} (cannot -> {to_state!r})"
                 )
+            if guard is not None:
+                try:
+                    guard(row)
+                except TaskError:
+                    conn.execute("COMMIT")
+                    raise
             if to_state == SpawnState.DEFERRED and row["release_requested"]:
                 conn.execute("COMMIT")
                 raise TaskError(f"reservation {key} has pending release (cannot defer)")
@@ -605,6 +613,7 @@ class SpawnReservationMixin:
         conclusion_state: str | None = None,
         conclusion_detail: str | None = None,
         claim_token: str | None = None,
+        force: bool = False,
         now: float | None = None,
     ) -> SpawnReservation:
         """Mark a reservation ``failed`` (spawn failed or lost), releasing the
@@ -613,16 +622,50 @@ class SpawnReservationMixin:
         Repeating the call on an already-failed row is an idempotent metadata
         update, allowing allocation cleanup to remain inspectable after body
         release.
+
+        ``force`` is an explicit, audited operator override for a
+        ``releasing`` reservation that automatic cleanup
+        (``release_requested_bodies``) can never resolve on its own: one with
+        no recorded ``session_handle`` at all has nothing whose absence the
+        exact-absence proof (:meth:`retire_spawn`) could ever confirm, so it
+        would otherwise sit ``releasing`` forever (copilot-extensions#3179 --
+        e.g. a headless spawn whose create call raised before any session id
+        could be captured, orphaning the reservation with no recovery
+        handle). Only a **handle-less** ``releasing`` row is eligible: one
+        that did capture a handle still must go through the ordinary
+        liveness-checked release path (or ``reservations settle``/an
+        automatic retire), since forcing it here could mask a still-live
+        orphaned worker. The no-handle check is read inside the same
+        transaction as the state transition (via ``_update_reservation``'s
+        ``guard``), not a separate preceding query -- a concurrent
+        ``record_spawn`` attaching a handle between a preceding read and this
+        write would otherwise let ``--force`` race past a now-live handle.
         """
+        allowed_from = (SpawnState.ACTIVE - frozenset({SpawnState.RELEASING})) | frozenset(
+            {SpawnState.FAILED}
+        )
+        guard = None
+        if force:
+            allowed_from = allowed_from | frozenset({SpawnState.RELEASING})
+
+            def guard(row: sqlite3.Row) -> None:
+                if row["state"] == SpawnState.RELEASING and row["session_handle"]:
+                    raise TaskError(
+                        f"reservation {key} is 'releasing' with a recorded "
+                        f"session_handle {row['session_handle']!r} -- --force "
+                        "only overrides a releasing reservation with no handle "
+                        "to verify absence of; let automatic cleanup or "
+                        "`reservations settle` resolve this one instead"
+                    )
         return self._update_reservation(
             key,
             to_state=SpawnState.FAILED,
-            allowed_from=(SpawnState.ACTIVE - frozenset({SpawnState.RELEASING}))
-            | frozenset({SpawnState.FAILED}),
+            allowed_from=allowed_from,
             detail=detail,
             conclusion_state=conclusion_state,
             conclusion_detail=conclusion_detail,
             claim_token=claim_token,
+            guard=guard,
             now=now,
         )
 

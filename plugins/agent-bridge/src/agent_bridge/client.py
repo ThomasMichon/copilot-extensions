@@ -363,6 +363,8 @@ class BridgeClient:
         session_deadline: float | None = None
         session_replacement_used = False
         readiness_deadline: float | None = None
+        drain_deadline: float | None = None
+        drain_replacement_used = False
         backoff = 0.25
         while True:
             try:
@@ -379,12 +381,36 @@ class BridgeClient:
                     detail = json.loads(exc.read().decode()).get("detail", str(exc))
                 except Exception:
                     detail = str(exc)
-                if exc.code == 503 and "initializing" in str(detail).lower():
+                detail_text = str(detail).lower()
+                if exc.code == 503 and "initializing" in detail_text:
                     if readiness_deadline is None:
                         readiness_deadline = (
                             _time.monotonic() + self._connect_grace
                         )
                     if _time.monotonic() + backoff < readiness_deadline:
+                        _time.sleep(backoff)
+                        backoff = min(backoff * 2, 1.0)
+                        continue
+                # A graceful-cutover drain gate answers new-session/new-turn
+                # requests with 503 "draining" from the *retiring* daemon
+                # while it waits for its successor to take over -- this is a
+                # normal, bounded, self-resolving condition (typically well
+                # under a second), not a genuine failure. Follow the routing
+                # table to the new daemon (mirroring the 404 session-settle
+                # case below) and retry within the same bounded grace window
+                # instead of raising a hard error mid-drain (#3179: an
+                # unhandled BridgeClientError here previously escaped as a raw
+                # traceback from CLI commands like `create` that do not wrap
+                # every internal call in their own try/except).
+                if exc.code == 503 and "draining" in detail_text:
+                    if drain_deadline is None:
+                        drain_deadline = _time.monotonic() + self._connect_grace
+                        backoff = 0.25
+                    if not drain_replacement_used:
+                        if _follow_active_endpoint():
+                            drain_replacement_used = True
+                            continue
+                    if _time.monotonic() + backoff < drain_deadline:
                         _time.sleep(backoff)
                         backoff = min(backoff * 2, 1.0)
                         continue

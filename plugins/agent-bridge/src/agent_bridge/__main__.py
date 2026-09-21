@@ -6932,7 +6932,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     if hasattr(args, "func"):
-        from .client import BridgeConnectionError
+        from .client import BridgeClientError, BridgeConnectionError
 
         try:
             args.func(args)
@@ -6941,6 +6941,19 @@ def main(argv: list[str] | None = None) -> None:
             # one-shot command framing consistent; streaming commands
             # reconnect from the caller's acknowledged cursor internally.
             _exit_bridge_outage(exc)
+        except BridgeClientError as exc:
+            # Backstop for a command handler that does not wrap every
+            # internal client call in its own try/except (#3179: an
+            # unhandled BridgeClientError -- e.g. a transient 503 the
+            # client's own retry/follow logic did not recognize -- escaped
+            # `agent-bridge create` as a raw Python traceback instead of a
+            # clean CLI error, which a caller shelling out to this CLI
+            # (agent-dispatch's headless spawn) could not distinguish from a
+            # genuine failure). Every request-shaped error still reaches the
+            # caller with its status code and detail; only the presentation
+            # changes from an unhandled traceback to a clean one-line error.
+            print(f"[FAIL] agent-bridge request failed ({exc}).", file=sys.stderr)
+            sys.exit(1)
     else:
         parser.print_help()
 
