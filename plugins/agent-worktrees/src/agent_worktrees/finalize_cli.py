@@ -175,6 +175,16 @@ def _sweep_orphans_on_exit() -> None:
         pass
 
 
+def _invoke_post_exit_sweep() -> None:
+    """Honor ``__main__`` monkeypatch seams without recursing through our re-export."""
+    core = _core()
+    sweep = getattr(core, "_sweep_orphans_on_exit", None)
+    if sweep is _sweep_orphans_on_exit or sweep is None:
+        _sweep_orphans_on_exit()
+        return
+    sweep()
+
+
 def cmd_post_exit(args: argparse.Namespace) -> int:
     core = _core()
     config = cfg.load_config()
@@ -189,7 +199,7 @@ def cmd_post_exit(args: argparse.Namespace) -> int:
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         output.warn(f"No tracking record for {worktree_id} -- skipping post-exit.")
-        core._sweep_orphans_on_exit()
+        _invoke_post_exit_sweep()
         return 0
 
     try:
@@ -204,7 +214,7 @@ def cmd_post_exit(args: argparse.Namespace) -> int:
     else:
         rc = core._post_exit_gate(record, config)
 
-    core._sweep_orphans_on_exit()
+    _invoke_post_exit_sweep()
     return rc
 
 
