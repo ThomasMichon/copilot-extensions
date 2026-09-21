@@ -31,6 +31,8 @@ from .worktree_probe import (
     owning_agent as _owning_agent,
     probe_archived_owner as _probe_archived_owner,
     probe_live_worktree as _probe_live_worktree,
+    reassign_worktree_ownership as _reassign_worktree_ownership,
+    resolve_already_live as _resolve_already_live,
 )
 
 log = logging.getLogger("agent-bridge")
@@ -1067,8 +1069,7 @@ async def resume_worktree(
                 },
             )
 
-    # Already live -- nothing to do, return current state.
-    if session.status in (SessionStatus.RUNNING, SessionStatus.IDLE):
+    if await _resolve_already_live(mgr, worktree_id, session):  # live-checked, #6744
         return _session_info(session)
 
     try:
@@ -1104,11 +1105,9 @@ async def resume_worktree(
         except Exception as start_exc:
             raise HTTPException(
                 status_code=502,
-                detail=(
-                    f"Could not resume or restart worktree {worktree_id}: "
-                    f"{start_exc}"
-                ),
+                detail=f"Could not resume or restart worktree {worktree_id}: {start_exc}",
             ) from start_exc
+        _reassign_worktree_ownership(db, worktree_id, fresh.session_id)  # #3142
         return _session_info(fresh)
 
 
