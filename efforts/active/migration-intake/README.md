@@ -183,20 +183,26 @@ retain only genuinely unclassified general-purpose work here.
   ([#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113)
   and [#3114](https://github.com/ThomasMichon/copilot-extensions/issues/3114))
   under `worktree-finality-and-obligations`'s live umbrella #1312.
-- Drafted a public issue for #5
+- Created a public issue for #5
   ([#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115))
   citing `agent-machines-declarative-control-plane`'s umbrella #1418, then
   found on review that #1418 and all seven of that effort's listed
   sub-issues are closed -- there is currently no live umbrella to accept new
-  work. Edited #3115 to drop the false "Part of #1418" claim and stand alone;
-  the candidate stays `routed`-but-unaccepted (not "published") until that
-  effort has a live umbrella again, the same fail-closed treatment as #14/#15
-  below. Each issue body is a self-contained, repository-neutral restatement
-  of the routed Plan bullet with Summary/Scope/Validation sections, matching
-  this repo's existing issue convention -- no reference to this ledger, any
-  session, or any originating context.
+  work. Edited #3115 to drop the false "Part of #1418" claim, so it now
+  stands alone as a real, open tracker entry (tracker creation happened);
+  what remains outstanding is *acceptance* under a live umbrella, which is a
+  separate state -- the candidate stays `routed`-but-unaccepted, the same
+  fail-closed treatment as #14/#15 below, until that effort opens a live
+  umbrella and links #3115 under it. Marked #1418 explicitly historical in
+  that effort's own header metadata to remove the contradiction between the
+  header still presenting it as the current umbrella and this note calling
+  it closed. Each issue body is a self-contained, repository-neutral
+  restatement of the routed Plan bullet with Summary/Scope/Validation
+  sections, matching this repo's existing issue convention -- no reference
+  to this ledger, any session, or any originating context.
 - Left #14 (`account-aware-operations`) and #15
-  (`review-automation-reliability`) unpublished: both owning efforts are
+  (`review-automation-reliability`) unpublished (no public issue created for
+  either, unlike #5 which does have one): both owning efforts are
   still `Draft` status with no umbrella issue, so there is no accepting
   parent to attach a sub-issue to. Fail-closed per the Intake Contract's
   ownership rule rather than publishing a standalone issue with no umbrella

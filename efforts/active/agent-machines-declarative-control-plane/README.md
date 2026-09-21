@@ -8,8 +8,10 @@
 - **Vision:** agent-fabric `derive-dont-duplicate` and agent-ssh
   `declared-mesh-adoption`, `derived-agent-roster`, and
   `live-machine-introspection`
-- **Umbrella issue:** #1418
+- **Umbrella issue:** #1418 (closed; historical -- all listed sub-issues are
+  also closed, and no successor umbrella has been opened yet)
 - **Sub-issues:** #1455 · #1507 · #1529 · #1627 · #1631 · #1721 · #1961
+  (all closed)
 
 ## Guiding Intent
 
