@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -2670,6 +2671,13 @@ def test_crawl_agent_falls_back_when_classify_unsupported() -> None:
     assert "local" in cache._classify_unsupported
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="PATHEXT-based .cmd/.ps1 shim resolution is a Windows-only "
+    "concern; shutil.which() only tries PATHEXT suffixes on win32. On "
+    "POSIX the real shim is the bare, executable filename, already covered "
+    "by test_resolve_local_binstub_falls_back_to_path_when_no_local_shim.",
+)
 def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path, monkeypatch) -> None:
     """Regression (aperture-labs effort agent-bridge-worktree-native-agents):
     ``asyncio.create_subprocess_exec`` never consults Windows' PATHEXT the way
@@ -2682,7 +2690,6 @@ def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path, monkeypat
     :func:`shutil.which`, which performs the same PATHEXT-aware lookup a shell
     would, on every platform."""
     import os
-    import stat
     from pathlib import Path
 
     from agent_bridge.routes.worktrees import _resolve_local_binstub
@@ -2691,9 +2698,6 @@ def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path, monkeypat
     bin_dir.mkdir(parents=True)
     shim = bin_dir / "aperture-labs.cmd"
     shim.write_text("@echo off\n")
-    # shutil.which requires the executable bit on POSIX (PATHEXT covers the
-    # Windows side); irrelevant on Windows, harmless to set everywhere.
-    shim.chmod(shim.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     resolved = _resolve_local_binstub("aperture-labs")
