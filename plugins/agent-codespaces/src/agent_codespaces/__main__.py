@@ -1196,6 +1196,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         use_relay=not args.no_relay,
         ado_host=getattr(config.credentials, "ado_host", None),
         feed_token_env=getattr(config.credentials, "feed_token_env", None),
+        identity_env=getattr(config.credentials, "identity_env", None),
     )
 
     manager = ConnectionManager()
@@ -2747,6 +2748,9 @@ def _render_codespaces_yaml(defaults: dict | None) -> str:
         "#\n"
         "# credentials:\n"
         "#   ado_host: <your-org>.visualstudio.com   # only for bare ADO get-access-token\n"
+        "#   # Export the host Azure-login identity string into launch env vars.\n"
+        "#   # For ordinary user principals this is the short alias (UPN local part).\n"
+        "#   # identity_env: [GITHUB_USER]\n"
     )
 
 

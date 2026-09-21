@@ -18,6 +18,8 @@ import socket
 import sys
 from pathlib import Path
 
+from credential_relay.sources.az_login import current_identity
+
 # Static PATs a CodeSpace injects that must be neutralized so a dispatched agent
 # never relies on a stale/expired token instead of the credential relay.
 SCRUB_ENV_VARS: tuple[str, ...] = (
@@ -166,6 +168,28 @@ def build_feed_token_exports(var_names) -> str:
     return out
 
 
+def build_identity_env_exports(var_names) -> str:
+    """POSIX snippet exporting each identity env var from the host Azure login.
+
+    Unlike feed-token exports, these values are resolved on the HOST while the
+    launch prelude is being built, so they do not depend on
+    ``LC_GIT_CREDENTIAL_RELAY`` and can be emitted for any launch shape. The
+    resolved value comes from the same host Azure CLI session the relay mints
+    Azure bearers from; ordinary user principals export a short login-like
+    alias, while other principal types keep the reported identity string.
+    """
+    identity = current_identity()
+    if not identity:
+        return ""
+    out = ""
+    quoted = shlex.quote(identity)
+    for name in var_names or ():
+        if not name:
+            continue
+        out += f"export {name}={quoted}; "
+    return out
+
+
 def build_relay_env(
     relay_port: int,
     relay_token: str | None,
@@ -173,6 +197,7 @@ def build_relay_env(
     use_relay: bool,
     ado_host: str | None = None,
     feed_token_env: list[str] | None = None,
+    identity_env: list[str] | None = None,
 ) -> str:
     """Build the CodeSpace launch-prelude env string.
 
@@ -181,23 +206,26 @@ def build_relay_env(
     and appends the relay exports when ``use_relay``. ``GIT_TERMINAL_PROMPT=0``
     keeps git from blocking on an interactive prompt when a credential can't be
     resolved; ``GCM_INTERACTIVE=never`` makes Git Credential Manager fail fast
-    rather than starting an interactive broker in a headless ACP session. When
-    ``use_relay``, also publishes a port-mapping file so the auth helpers can
-    rediscover this relay channel by liveness probe even if the env is not
-    inherited by a later tool shell (see :func:`build_relay_portmap_write`),
-    exposes the bare ``azure-auth-helper`` name RushStack's
-    ``AdoCodespacesAuthCredential`` requires -- session/process-scoped only,
-    never a persisted shadow (see :func:`build_azure_auth_helper_compat_shim`,
-    #415) -- and -- for any ``feed_token_env`` var names -- exports a
-    feed-auth token minted from the ADO auth helper so env-token feed auth
-    (npm/nuget/rush) works over the relay (dotfiles#1221). The feed-token
-    exports come LAST so they can use the just-exported
-    ``LC_GIT_CREDENTIAL_RELAY``.
+    rather than starting an interactive broker in a headless ACP session. Any
+    ``identity_env`` vars are resolved on the host at prelude-build time and
+    exported regardless of ``use_relay`` because they do not depend on
+    ``LC_GIT_CREDENTIAL_RELAY``. When ``use_relay``, also publishes a
+    port-mapping file so the auth helpers can rediscover this relay channel by
+    liveness probe even if the env is not inherited by a later tool shell (see
+    :func:`build_relay_portmap_write`), exposes the bare
+    ``azure-auth-helper`` name RushStack's ``AdoCodespacesAuthCredential``
+    requires -- session/process-scoped only, never a persisted shadow (see
+    :func:`build_azure_auth_helper_compat_shim`, #415) -- and -- for any
+    ``feed_token_env`` var names -- exports a feed-auth token minted from the
+    ADO auth helper so env-token feed auth (npm/nuget/rush) works over the
+    relay (dotfiles#1221). The feed-token exports come LAST so they can use the
+    just-exported ``LC_GIT_CREDENTIAL_RELAY``.
     """
     from .codespace_assets import build_auth_error_policy_command
 
     env = "".join(f"unset {v}; " for v in SCRUB_ENV_VARS)
     env += build_auth_error_policy_command()
+    env += build_identity_env_exports(identity_env)
     if use_relay:
         env += (
             f"export LC_GIT_CREDENTIAL_RELAY={relay_port}; "
@@ -269,6 +297,7 @@ def build_relay_launch_env(
             use_relay=True,
             ado_host=getattr(cfg.credentials, "ado_host", None),
             feed_token_env=getattr(cfg.credentials, "feed_token_env", None),
+            identity_env=getattr(cfg.credentials, "identity_env", None),
         ),
         port,
     )

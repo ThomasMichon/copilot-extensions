@@ -500,6 +500,17 @@ def _validate_dropin_config(raw: object) -> str | None:
         )
         if error is not None:
             return error
+    if "identity_env" in credentials and not isinstance(
+        credentials["identity_env"], list
+    ):
+        return "credentials.identity_env must be a list"
+    if "identity_env" in credentials:
+        error = _validate_dropin_string_list(
+            credentials["identity_env"],
+            location="credentials.identity_env",
+        )
+        if error is not None:
+            return error
     sources = credentials.get("sources", {})
     if not isinstance(sources, dict):
         return "credentials.sources must be a mapping"
@@ -1524,6 +1535,14 @@ class CredentialsConfig:
     # Left empty (default), nothing is exported and behavior is unchanged.
     # dotfiles#1221.
     feed_token_env: list[str] = field(default_factory=list)
+    # Env var names to populate at launch with the host Azure login identity
+    # string the relay's Azure tokens are minted from. For ordinary user
+    # principals this exports the short login-like alias (the local part of the
+    # signed-in UPN); other principal types keep the reported identity string
+    # verbatim. Useful when tooling derives an upload/cache namespace from an
+    # env var and must match the identity behind relay-minted Azure tokens.
+    # Left empty (default), nothing is exported and behavior is unchanged.
+    identity_env: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -2492,6 +2511,10 @@ def load_merged_config(
             for _var in creds_raw.get("feed_token_env", []) or []:
                 if _var and _var not in merged.credentials.feed_token_env:
                     merged.credentials.feed_token_env.append(_var)
+            # Union identity env var names across adopted repos.
+            for _var in creds_raw.get("identity_env", []) or []:
+                if _var and _var not in merged.credentials.identity_env:
+                    merged.credentials.identity_env.append(_var)
             for source_name, source_raw in creds_raw.get("sources", {}).items():
                 if source_name not in merged.credentials.sources:
                     merged.credentials.sources[source_name] = _parse_credential_source(

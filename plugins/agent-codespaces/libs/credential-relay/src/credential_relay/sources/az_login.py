@@ -56,6 +56,60 @@ _NEEDS_LOGIN_MARKERS = (
 )
 
 
+def _identity_from_account(account: dict) -> str | None:
+    """Return a short stable identity string from ``az account show`` JSON.
+
+    For ordinary user principals Azure CLI reports a UPN-like ``user.name``.
+    Launch-time env consumers typically want the short login/alias segment, so
+    we export the part before ``@`` when ``user.type`` is ``user``. Other
+    principal types keep their reported name verbatim.
+    """
+    user = account.get("user")
+    if not isinstance(user, dict):
+        return None
+    raw = str(user.get("name") or "").strip()
+    if not raw:
+        return None
+    user_type = str(user.get("type") or "").strip().casefold()
+    if user_type == "user" and "@" in raw:
+        alias = raw.split("@", 1)[0].strip()
+        if alias:
+            return alias
+    return raw
+
+
+def current_identity(*, timeout: float = 10.0) -> str | None:
+    """Return the current host Azure-login identity string, or ``None``.
+
+    Uses the same Azure CLI session the relay's ``get-azure-token`` path mints
+    from. The value is intentionally short/login-like for ordinary user
+    principals so launch-time env exports can feed tools that expect a compact
+    identity segment rather than a full UPN.
+    """
+    args = _az_argv(["account", "show", "--output", "json"])
+    if args is None:
+        return None
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            creationflags=_SUBPROCESS_FLAGS,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return _identity_from_account(data)
+
+
 def _to_scope(target: str) -> str:
     """Canonicalize an AAD resource/scope to a valid ``--scope`` value.
 

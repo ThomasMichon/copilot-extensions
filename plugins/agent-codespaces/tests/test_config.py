@@ -310,6 +310,26 @@ class TestCwdAutoDiscovery:
         cfg = load_merged_config()
         assert cfg.credentials.feed_token_env == []
 
+    def test_credentials_identity_env_parsed(self, config_dir, monkeypatch):
+        repo = config_dir / "product"
+        _write_repo_config(
+            repo,
+            {"credentials": {"identity_env": ["GITHUB_USER"]}},
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.config.cwd_repo_root", lambda: repo
+        )
+        cfg = load_merged_config()
+        assert cfg.credentials.identity_env == ["GITHUB_USER"]
+
+    def test_credentials_identity_env_default_empty(self, config_dir, monkeypatch):
+        monkeypatch.setattr(
+            "agent_codespaces.config.cwd_repo_root",
+            lambda: config_dir / "no-config-repo",
+        )
+        cfg = load_merged_config()
+        assert cfg.credentials.identity_env == []
+
 
 class TestAdoptedRepos:
     def test_roundtrip(self, config_dir):
@@ -577,6 +597,27 @@ class TestMergedConfig:
         resources = config.credentials.sources["az-login"].allowed_resources
         assert "499b84ac-1321-427f-aa17-267ca6975798" in resources
         assert "https://storage.azure.com/" in resources
+
+    def test_multi_repo_merge_unions_identity_env(self, config_dir):
+        repo1 = config_dir / "repo1"
+        repo2 = config_dir / "repo2"
+        _write_codespaces_yaml(repo1, {
+            "credentials": {
+                "identity_env": ["GITHUB_USER"],
+            },
+        })
+        _write_codespaces_yaml(repo2, {
+            "credentials": {
+                "identity_env": ["UPLOAD_USER", "GITHUB_USER"],
+            },
+        })
+        save_adopted_repos([
+            AdoptedRepo(path=repo1),
+            AdoptedRepo(path=repo2),
+        ])
+
+        config = load_merged_config()
+        assert config.credentials.identity_env == ["GITHUB_USER", "UPLOAD_USER"]
 
 
 class TestKnowledgeOverlay:

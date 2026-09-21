@@ -7,6 +7,7 @@ from agent_codespaces.relay_launch import (
     SCRUB_ENV_VARS,
     build_azure_auth_helper_compat_shim,
     build_feed_token_exports,
+    build_identity_env_exports,
     build_relay_env,
 )
 
@@ -93,6 +94,56 @@ def test_build_feed_token_exports_multiple_and_empty():
     assert "export A_TOKEN=" in two and "export B_TOKEN=" in two
 
 
+def test_build_identity_env_exports_emits_host_identity(monkeypatch):
+    monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "tmichon")
+    snippet = build_identity_env_exports(["GITHUB_USER"])
+    assert snippet == "export GITHUB_USER=tmichon; "
+
+
+def test_build_identity_env_exports_multiple_and_empty(monkeypatch):
+    monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "tmichon")
+    assert build_identity_env_exports(None) == ""
+    assert build_identity_env_exports([]) == ""
+    assert build_identity_env_exports(["", None]) == ""
+    snippet = build_identity_env_exports(["GITHUB_USER", "UPLOAD_USER"])
+    assert "export GITHUB_USER=tmichon; " in snippet
+    assert "export UPLOAD_USER=tmichon; " in snippet
+
+
+def test_build_identity_env_exports_skips_when_identity_unavailable(monkeypatch):
+    monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: None)
+    assert build_identity_env_exports(["GITHUB_USER"]) == ""
+
+
+def test_build_relay_env_exports_identity_without_relay(monkeypatch):
+    monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "tmichon")
+    env = build_relay_env(
+        9857,
+        "tok",
+        use_relay=False,
+        identity_env=["GITHUB_USER"],
+    )
+    assert "export GITHUB_USER=tmichon;" in env
+    assert "LC_GIT_CREDENTIAL_RELAY" not in env
+
+
+def test_build_relay_env_exports_identity_before_relay(monkeypatch):
+    monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "tmichon")
+    env = build_relay_env(
+        9857,
+        "tok123",
+        use_relay=True,
+        identity_env=["GITHUB_USER"],
+        feed_token_env=["EXAMPLE_NPM_AUTH_TOKEN"],
+    )
+    assert env.index("export GITHUB_USER=tmichon;") < env.index(
+        "LC_GIT_CREDENTIAL_RELAY="
+    )
+    assert env.index("export GITHUB_USER=tmichon;") < env.index(
+        "export EXAMPLE_NPM_AUTH_TOKEN="
+    )
+
+
 def test_build_relay_env_exports_feed_token_after_relay():
     env = build_relay_env(
         9857,
@@ -126,6 +177,30 @@ def test_build_relay_env_no_relay_omits_feed_token():
         9857, "tok", use_relay=False, feed_token_env=["EXAMPLE_NPM_AUTH_TOKEN"]
     )
     assert "EXAMPLE_NPM_AUTH_TOKEN" not in env
+
+
+def test_current_identity_prefers_short_user_alias(monkeypatch):
+    import credential_relay.sources.az_login as az_login
+
+    class Result:
+        returncode = 0
+        stdout = '{"user":{"name":"someone@example.com","type":"user"}}'
+
+    monkeypatch.setattr(az_login, "_az_argv", lambda args: ["az", *args])
+    monkeypatch.setattr(az_login.subprocess, "run", lambda *a, **k: Result())
+    assert az_login.current_identity() == "someone"
+
+
+def test_current_identity_keeps_non_user_principal_name(monkeypatch):
+    import credential_relay.sources.az_login as az_login
+
+    class Result:
+        returncode = 0
+        stdout = '{"user":{"name":"app://principal@example.com","type":"servicePrincipal"}}'
+
+    monkeypatch.setattr(az_login, "_az_argv", lambda args: ["az", *args])
+    monkeypatch.setattr(az_login.subprocess, "run", lambda *a, **k: Result())
+    assert az_login.current_identity() == "app://principal@example.com"
 
 
 def test_build_relay_launch_env(monkeypatch, tmp_path):
@@ -349,4 +424,3 @@ def test_effective_relay_port_honors_configured_pin(monkeypatch, tmp_path):
 def test_credentials_config_relay_port_defaults_to_dynamic_sentinel():
     from agent_codespaces.config import CredentialsConfig
     assert CredentialsConfig().relay_port == 0
-
