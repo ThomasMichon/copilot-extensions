@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -2668,6 +2669,56 @@ def test_crawl_agent_falls_back_when_classify_unsupported() -> None:
     assert entries[0].id == "w1"
     assert entries[0].closure is None  # legacy list never carried one
     assert "local" in cache._classify_unsupported
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="PATHEXT-based .cmd/.ps1 shim resolution is a Windows-only "
+    "concern; shutil.which() only tries PATHEXT suffixes on win32. On "
+    "POSIX the real shim is the bare, executable filename, already covered "
+    "by test_resolve_local_binstub_falls_back_to_path_when_no_local_shim.",
+)
+def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path, monkeypatch) -> None:
+    """Regression (aperture-labs effort agent-bridge-worktree-native-agents):
+    ``asyncio.create_subprocess_exec`` never consults Windows' PATHEXT the way
+    a shell does, so an extensionless ``Path(...).exists()`` check silently
+    fell through to a bare project name that could never actually spawn on
+    Windows (``FileNotFoundError: [WinError 2]``) even though the installed
+    ``<project>.cmd``/``.ps1`` shim was right there -- this zeroed every local
+    Windows worktree-discovery crawl while WSL/Linux crawls (no extension
+    needed) kept working. ``_resolve_local_binstub`` must resolve through
+    :func:`shutil.which`, which performs the same PATHEXT-aware lookup a shell
+    would, on every platform."""
+    import os
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    shim = bin_dir / "aperture-labs.cmd"
+    shim.write_text("@echo off\n")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    resolved = _resolve_local_binstub("aperture-labs")
+    assert os.path.normcase(resolved) == os.path.normcase(str(shim))
+
+
+def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
+    tmp_path, monkeypatch,
+) -> None:
+    """No ``~/.local/bin/<project>`` shim -> fall back to whatever ``PATH``
+    resolves (still via the PATHEXT-aware :func:`shutil.which`), never the
+    bare, unresolved project name."""
+    import shutil
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "empty-home")
+    monkeypatch.setattr(shutil, "which", lambda name: f"/resolved/{name}" if name == "aperture-labs" else None)
+    resolved = _resolve_local_binstub("aperture-labs")
+    assert resolved == "/resolved/aperture-labs"
 
 
 def test_crawl_agent_skips_classify_probe_once_cached_unsupported() -> None:

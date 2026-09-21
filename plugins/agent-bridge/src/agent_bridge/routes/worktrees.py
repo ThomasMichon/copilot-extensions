@@ -494,21 +494,28 @@ async def _run_local(
     return stdout
 
 
+def _resolve_local_binstub(project: str) -> str:
+    """Resolve *project*'s binstub to a directly-executable path.
+
+    ``asyncio.create_subprocess_exec`` never consults Windows' ``PATHEXT``
+    the way a shell does, so an extensionless name can't resolve to the
+    installed ``.cmd``/``.ps1`` shim (``FileNotFoundError: [WinError 2]``;
+    see aperture-labs effort agent-bridge-worktree-native-agents).
+    ``shutil.which`` does the same PATHEXT-aware lookup on every platform.
+    """
+    import shutil
+    from pathlib import Path
+
+    explicit = Path.home() / ".local" / "bin" / project
+    return shutil.which(str(explicit)) or shutil.which(project) or project
+
+
 async def _run_local_ex(
     project: str, args: list[str] | None = None, *, timeout: float | None = None,
 ) -> tuple[str | None, str]:
     """Like :func:`_run_local`, also returning stderr (empty on success) so
     a caller can distinguish a timeout/crash from a rejected flag."""
-    from pathlib import Path
-
-    home = Path.home()
-    binstub = home / ".local" / "bin" / project
-    if not binstub.exists():
-        # Fall back to PATH
-        binstub_str = project
-    else:
-        binstub_str = str(binstub)
-
+    binstub_str = _resolve_local_binstub(project)
     cmd = [binstub_str, *(args if args is not None else ["list", "--json"])]
     return await _exec_ex(cmd, timeout=timeout)
 
