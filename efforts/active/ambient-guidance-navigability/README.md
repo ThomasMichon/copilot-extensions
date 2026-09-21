@@ -17,7 +17,8 @@ visions:
   already state the target; reality currently violates both.
 - **Umbrella issue:** [ThomasMichon/copilot-extensions#3033](https://github.com/ThomasMichon/copilot-extensions/issues/3033)
 - **Sub-issues:** [Phase 1 -- #3071](https://github.com/ThomasMichon/copilot-extensions/issues/3071),
-  [Phase 2 -- #3082](https://github.com/ThomasMichon/copilot-extensions/issues/3082).
+  [Phase 2 -- #3082](https://github.com/ThomasMichon/copilot-extensions/issues/3082),
+  [Phase 3 -- #3120](https://github.com/ThomasMichon/copilot-extensions/issues/3120).
 
 ## Guiding Intent
 
@@ -315,18 +316,18 @@ private paths).
       instruction sync worker."
 
 ### Phase 3 -- Populate the concrete content gaps found by the audit
-- [ ] `agent-worktrees`: claims-ledger index row (-> `claims` command /
+- [x] `agent-worktrees`: claims-ledger index row (-> `claims` command /
       `tracing-claimant-graphs` skill), resource-obligations index row (->
       `worktree/references/obligations.md` / `finalize` failure meaning).
-- [ ] `agent-dispatch`: blocked-task-recovery index row (live-but-
+- [x] `agent-dispatch`: blocked-task-recovery index row (live-but-
       structurally-blocked task -> inspect/suspend/release/escalate path).
-- [ ] `agent-worktrees` or a shared location: `repos gh` GraphQL-error
+- [x] `agent-worktrees` or a shared location: `repos gh` GraphQL-error
       triage row; command-not-found/PATH triage row.
-- [ ] `copilot-extensions-harness` or the reviewing agent's own guidance:
+- [x] `copilot-extensions-harness` or the reviewing agent's own guidance:
       commented-verdict-with-no-actionable-feedback handling row.
-- [ ] `context-handoff`: tools-unavailable fallback row (what a session does
+- [x] `context-handoff`: tools-unavailable fallback row (what a session does
       when the skill/tools it's told to invoke aren't present this session).
-- [ ] Ownership-boundary disambiguation: a rule (likely in the root
+- [x] Ownership-boundary disambiguation: a rule (likely in the root
       `AGENTS.md` template guidance, or `working-cross-repo`'s own ambient
       half) that says *check which repo actually owns this path/script
       before trusting a local tool index* -- closing the false-positive
@@ -626,3 +627,53 @@ _Pending._
   (0 errors, 71 skills), `check-marketplace-isolation` (0 new findings),
   `check-version-bump`, `check-version-consistency`, `check-docs-consistency`
   all green.
+
+### 2026-09-20 (cont.) -- Phase 3: populating the concrete content gaps
+- Landed every remaining Phase 3 checklist item in one pass, each backed by
+  Phase 1's `troubleshooting-index.json` registry + guard test so the claim
+  is fail-closed-proven, not just prose:
+  - `agent-worktrees`: extended `head-claim-fallback.instructions.md` with
+    an "outbound claim is blocking finalize" section (`claims show`/`sweep`,
+    pointing at `worktree:references/obligations.md` and
+    `tracing-claimant-graphs`); new `cli-fallback.instructions.md`
+    (GraphQL-error triage by failure class -- wrong account/scope, rate
+    limit, permission, schema drift -- and command-not-found/PATH triage,
+    distinguishing "not on PATH this process" from "not installed"); new
+    `ownership-boundary-fallback.instructions.md` (check plugin-owned vs.
+    local-repo-owned before trusting a local tool index, closing the
+    audit's false-positive class).
+  - `agent-dispatch`: new `blocked-task-fallback.instructions.md` --
+    inspect (`show`/`card show`/`events`) before acting, then match the
+    actual state (`release` a stuck-suspended task, `yield` a stuck-held
+    one with `--exclude-self`, `abandon --permit` a genuinely-done/
+    duplicate one, or recognize a normal SUSPEND on external state).
+  - `copilot-extensions-harness`: new `commented-review-verdict.instructions.md`
+    -- a plain-comment verdict is this repo's normal non-blocking shape, not
+    a stuck state; read advisory, land the change, don't loop chasing a
+    clean pass.
+  - `context-handoff`: no new content needed -- `handoff-fallback.instructions.md`
+    already ships a thorough "CLI fallback (tools unavailable)" +
+    "find it yourself, no tools required" pair; only a
+    `troubleshooting-index.json` registering it was missing, now added.
+  - Populated `troubleshooting-index.json` for all four plugins (10
+    categories total); re-ran `manage-instruction-projections.py sync` on
+    this repo's own enabled-plugin set so the new content is actually
+    checked in here too, not just declared.
+- Bumped all four plugins' versions (`plugin.json` + `pyproject.toml` where
+  applicable) and their marketplace entries + metadata version.
+- `customizing-copilot`'s full suite (188 passed), the Phase 1 guard test
+  (10 passed against real plugin content -- the first time it's exercised
+  against non-synthetic data), `agent-worktrees`/`agent-dispatch`/
+  `copilot-extensions-harness` guard suites, `check-marketplace-isolation`
+  (0 bare-agent-command findings), `check-docs-consistency`,
+  `check-version-bump`, `check-version-consistency`, `check-skills` all
+  green. `context-handoff`'s full (non-guard) suite has 3 pre-existing
+  local-environment failures (a Windows box's `bash.EXE` resolving to a
+  non-functional WSL stub, exit 127) -- confirmed unrelated to this change
+  (only a JSON file was added there) and left to CI's real Linux/Windows
+  runners to adjudicate rather than worked around locally.
+- With this pass, **Phase 3 and all of this repo's own Phase 1/2 Plan items
+  are now checked.** Remaining open work is entirely downstream (the
+  private consumer repo's Phase 0/4/5) or explicitly deferred
+  (immutable-pin verification) -- see Phase 6 for the re-audit that
+  actually validates this effort's target outcome.
