@@ -22610,8 +22610,12 @@ def cmd_related_dispatch(argv: list[str]) -> int:
 
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Bootstrap services that must be current before launching a session.
-_BOOTSTRAP_SERVICES = ("agent-worktrees", "vault")
+# agent-worktrees itself is always a bootstrap service that must be current
+# before launching a session. Any additional service names are provider-
+# neutral: a repo opts them in via its own config (`bootstrap_services`,
+# RepoConfig) rather than the launcher assuming a facility-specific name
+# (e.g. "vault") exists in every repo it drives.
+_BOOTSTRAP_SERVICES = ("agent-worktrees",)
 
 
 def plan_pre_launch() -> dict:
@@ -22645,8 +22649,13 @@ def plan_pre_launch() -> dict:
         service_paths=config.default_repo.service_paths or None,
     )
 
-    # Filter to bootstrap services only
-    bootstrap = {s.name: s for s in all_services if s.name in _BOOTSTRAP_SERVICES}
+    # Filter to bootstrap services only: agent-worktrees itself plus any the
+    # repo's own config opts in via `bootstrap_services`. getattr guards
+    # callers/tests whose config object predates this field.
+    bootstrap_names = _BOOTSTRAP_SERVICES + tuple(
+        getattr(config.default_repo, "bootstrap_services", None) or ()
+    )
+    bootstrap = {s.name: s for s in all_services if s.name in bootstrap_names}
     diagnostics: list[dict[str, str]] = []
     bootstrap.pop("agent-worktrees", None)
     aw_plugin_dir = _reconcile.core_installed_payload_dir("agent-worktrees")
