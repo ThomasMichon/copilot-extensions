@@ -6,6 +6,7 @@ import argparse
 import dataclasses
 import os
 import secrets
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -274,7 +275,7 @@ def _resolve_base_repo(
     output.warn("Commits will go directly to the current branch.")
     print()
 
-    dirty = git_ops.get_dirty_files(repo.anchor) if os.isatty(0) else []
+    dirty = git_ops.get_dirty_files(repo.anchor) if sys.stdin.isatty() else []
     if dirty:
         output.warn(f"Anchor repo has {len(dirty)} uncommitted change(s):")
         for path in dirty[:5]:
