@@ -178,19 +178,30 @@ def task_definition_matches(
     if not snapshot.present:
         return False
     spec = TIER_SPECS[tier]
-    arguments = _normalize_windows_text(snapshot.arguments)
+    # Case-fold only, WITHOUT the "/" -> "\\" path normalization below: the
+    # arguments string embeds cmd.exe's own "/c" flag syntax (forward slash,
+    # never a path separator there), and blanket-normalizing it corrupts that
+    # literal into "\c", making the "cmd.exe /c" containment check below
+    # always fail -- a real regression once the command switched from a
+    # bare versioned python.exe invocation to wrapping the stable binstub in
+    # `cmd.exe /c ...` (dotfiles maintenance-worker drift report).
+    literal_arguments = (snapshot.arguments or "").casefold().strip()
+    # The embedded binstub PATH, in contrast, legitimately needs "/" <-> "\\"
+    # tolerance (a path can be spelled either way), so it alone still uses
+    # the slash-normalizing helper.
+    normalized_arguments = _normalize_windows_text(snapshot.arguments)
     execute = Path(snapshot.execute or "").name.casefold()
     return (
         execute == "conhost.exe"
         and (snapshot.logon_type or "") == "Interactive"
         and (snapshot.description or "") == task_description(tier)
-        and "cmd.exe /c" in arguments
-        and _normalize_windows_text(task_binstub_path(home)) in arguments
-        and "self-update run" in arguments
-        and f"--tier {tier}" in arguments
+        and "cmd.exe /c" in literal_arguments
+        and _normalize_windows_text(task_binstub_path(home)) in normalized_arguments
+        and "self-update run" in literal_arguments
+        and f"--tier {tier}" in literal_arguments
         and (
-            (not machine and "--machine " not in arguments)
-            or (machine and f"--machine {machine.casefold()}" in arguments)
+            (not machine and "--machine " not in literal_arguments)
+            or (machine and f"--machine {machine.casefold()}" in literal_arguments)
         )
         and _normalize_windows_text(snapshot.working_directory)
         == _normalize_windows_text(task_working_directory(home))
