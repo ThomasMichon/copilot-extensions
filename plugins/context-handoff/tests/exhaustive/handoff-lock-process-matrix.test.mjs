@@ -783,7 +783,6 @@ test("releaseLock restores a foreign lock via linkSync (no-clobber), never renam
   );
   assert.ok(restoreBody.length > 0, "could not locate restoreClaimedLock's body");
   assert.match(restoreBody, /linkSync\(claimedPath,\s*lockPath\)/);
-  assert.doesNotMatch(restoreBody, /renameSync\(claimedPath,\s*lockPath\)/);
   const releaseBody = source.slice(
     source.indexOf("function releaseLock("),
     source.indexOf("// Async-only twin of resolveRuntimePython"),
@@ -792,18 +791,20 @@ test("releaseLock restores a foreign lock via linkSync (no-clobber), never renam
   assert.match(releaseBody, /restoreClaimedLock\(claimedPath,\s*lockPath\)/);
 });
 
-test("restoreClaimedLock only treats EEXIST as benign contention; other linkSync failures fail closed without deleting the claimed copy", () => {
-  // Real regression this guards: treating EVERY linkSync failure as "the
-  // destination already exists" and unconditionally deleting claimedPath
-  // regardless meant an unexpected failure (permissions, an unsupported
-  // filesystem, transient I/O) would still destroy the only remaining copy
-  // of a still-active replacement holder's lock content, leaving lockPath
-  // empty for a third invocation to acquire into. Structural check: the
-  // catch block must branch on error.code === "EEXIST" specifically, and
-  // the non-EEXIST branch must not delete claimedPath. This is now a
-  // single shared helper (restoreClaimedLock) used by both releaseLock and
-  // acquireLock's mismatch-restore branches, so it only needs verifying
-  // once here.
+test("restoreClaimedLock falls back to a direct renameSync restore (never leaving the canonical path empty) when linkSync fails for any reason OTHER than EEXIST", () => {
+  // Real regression this guards (round 26): treating every non-EEXIST
+  // linkSync failure as "fail closed, leave the orphaned copy in place"
+  // left `lockPath` (the canonical path) EMPTY with no recoverable trace
+  // at that path -- a third invocation's acquireLock (an exclusive
+  // `open(..., "wx")`) would then succeed there and run concurrently with
+  // the holder whose content survives only at the orphaned claimedPath,
+  // defeating serialization. EEXIST is the ONLY signal linkSync gives for
+  // "the destination is occupied" -- any OTHER failure means lockPath is
+  // presumably empty, so a direct renameSync restore there carries no
+  // clobber risk and closes that window. Structural check: the non-EEXIST
+  // branch must attempt renameSync(claimedPath, lockPath), and only fall
+  // back to preserving the orphaned copy (not deleting it) if THAT also
+  // fails.
   const source = readFileSync(
     join(
       dirname(fileURLToPath(import.meta.url)),
@@ -823,10 +824,12 @@ test("restoreClaimedLock only treats EEXIST as benign contention; other linkSync
   const eexistIfEnd = restoreBody.indexOf("}", restoreBody.indexOf("}", eexistIfIndex) + 1) + 1;
   const unexpectedFailureIndex = restoreBody.indexOf("Any OTHER failure", eexistIfEnd);
   assert.ok(unexpectedFailureIndex >= 0, "expected a distinct non-EEXIST branch comment after the EEXIST if-block");
-  const returnFalseIndex = restoreBody.indexOf("return false;", unexpectedFailureIndex);
-  assert.ok(returnFalseIndex >= 0, "expected the non-EEXIST branch to return false (fail closed)");
-  const unexpectedBranch = restoreBody.slice(unexpectedFailureIndex, returnFalseIndex + "return false;".length);
-  assert.doesNotMatch(unexpectedBranch, /unlinkSync\(claimedPath\)/);
+  const renameIndex = restoreBody.indexOf("renameSync(claimedPath, lockPath)", unexpectedFailureIndex);
+  assert.ok(renameIndex >= 0, "expected the non-EEXIST branch to attempt a direct renameSync restore");
+  const lastReturnFalseIndex = restoreBody.lastIndexOf("return false;");
+  assert.ok(lastReturnFalseIndex > renameIndex, "expected a final fail-closed return false if renameSync ALSO fails");
+  const finalCatchBranch = restoreBody.slice(renameIndex, lastReturnFalseIndex + "return false;".length);
+  assert.doesNotMatch(finalCatchBranch, /unlinkSync\(claimedPath\)/);
 });
 
 test("attemptWorktreeSyncLocked disables rebase.autoStash and repo hooks for the delegated agent-worktrees sync too", () => {
@@ -976,6 +979,43 @@ test("acquireLock treats a failed stat on lock contention as contention, not as 
   // <= STALE_LOCK_MS) rather than reclaimable, so ambiguous evidence never
   // resolves to "safe to reclaim".
   assert.match(statCatchBody.slice(0, statCatchBody.indexOf("}", 10) + 1), /ageMs = -Infinity/);
+});
+
+test("acquireLock never reclaims by age a lock it could not read at all, only one it read but could not parse a pid from", () => {
+  // Real regression this guards (round 26): an unreadable existing lock
+  // (permissions, transient I/O, an unsupported filesystem) is NOT the
+  // same evidence as a readable lock in a corrupt/legacy format with no
+  // parseable pid -- the latter is safe to fall back to the age-only
+  // heuristic (there is genuinely nothing else to go on), but the former
+  // gives NO evidence at all that the holder is gone or old, and folding
+  // it into the same age-fallback path could reclaim a lock whose
+  // (unreadable) content actually names a genuinely live holder. The two
+  // cases must be tracked separately and only the read-succeeded-but-
+  // unparseable case may reach the age-only branch. Structural check (no
+  // DI seam for the internal fs calls): the read-failure catch must set a
+  // distinct flag, and that flag must gate its OWN fail-closed branch
+  // ahead of (never falling into) the age-only heuristic.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const body = source.slice(
+    source.indexOf("function acquireLock("),
+    source.indexOf("async function withWorktreeSyncLock("),
+  );
+  assert.ok(body.length > 0, "could not locate acquireLock's body");
+  const readCatchIndex = body.indexOf("readFailed = true;");
+  assert.ok(readCatchIndex >= 0, "expected a distinct readFailed flag set when reading the lock's content fails");
+  const readFailedBranchIndex = body.indexOf("} else if (readFailed) {", readCatchIndex);
+  assert.ok(readFailedBranchIndex >= 0, "expected a dedicated readFailed branch, distinct from the no-pid-parsed branch");
+  const ageOnlyBranchIndex = body.indexOf("statSync(lockPath).mtimeMs", readFailedBranchIndex);
+  assert.ok(ageOnlyBranchIndex >= 0, "expected the age-only heuristic branch to still exist after the readFailed branch");
+  const readFailedBranchBody = body.slice(readFailedBranchIndex, ageOnlyBranchIndex);
+  assert.match(readFailedBranchBody, /reclaimable = false/);
+  assert.doesNotMatch(readFailedBranchBody, /statSync/);
 });
 
 test("attemptWorktreeSync rechecks for an in-progress rebase immediately before the sync exec (TOCTOU narrowing)", () => {

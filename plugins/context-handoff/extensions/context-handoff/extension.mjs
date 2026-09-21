@@ -359,16 +359,21 @@ async function autoForceHandoff(sid, cwd) {
     // contradicting the "post-capture only" contract). It runs regardless
     // of mode -- a worktree sync benefits a manual-only handoff too (a
     // human resuming it later still wants the latest code), not just an
-    // auto-mode live pickup. triggerHandoff's beforeArmPickup hook below
-    // awaits this SAME promise (not a second sync attempt) strictly before
-    // the live pickup signal is armed -- but ONLY in auto mode, since that
-    // is the only mode where a live monitor could launch a successor
-    // before this settles. In manual-only mode, triggerHandoff never calls
-    // beforeArmPickup, so this promise simply keeps running in the
-    // background and logs its own outcome. Its outcome is only ever
-    // logged, never folded back into the already-stored baton (there is
-    // no update path for a handoff that has already been triggered).
-    let syncPromise = null;
+    // auto-mode live pickup. Deliberately NOT awaited before the live
+    // pickup signal is armed (round-26 review finding: the sync performs
+    // network/CLI work with multiple 20-second timeouts, so gating arm-
+    // pickup on its full completion -- as an earlier `beforeArmPickup`
+    // hook here used to do -- could hold the force-tier trigger long
+    // enough for compaction to happen, defeating the last-chance/fire-
+    // and-forget guarantee this path exists for). Calling
+    // `attemptWorktreeSync` still reliably STARTS the sync before this
+    // function returns (JS runs an async function's body synchronously up
+    // to its first `await`), which is all round-12's original finding
+    // actually needed -- a live monitor racing to launch a successor can
+    // never observe a sync that hasn't even begun. The promise's outcome
+    // is only ever logged, never folded back into the already-stored
+    // baton (there is no update path for a handoff that has already been
+    // triggered).
     result = await triggerHandoff({
       promptText: markdown,
       sid,
@@ -376,7 +381,7 @@ async function autoForceHandoff(sid, cwd) {
       title: "Force-threshold auto-handoff",
       mode: handoffConfig.mode,
       afterStore: () => {
-        syncPromise = attemptWorktreeSync(cwd)
+        attemptWorktreeSync(cwd)
           .then((syncResult) => {
             if (syncResult.synced) {
               session.log(
@@ -397,7 +402,6 @@ async function autoForceHandoff(sid, cwd) {
           })
           .catch(() => {});
       },
-      beforeArmPickup: () => syncPromise || Promise.resolve(),
     });
   } catch (error) {
     session.log(

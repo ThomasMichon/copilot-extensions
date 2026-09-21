@@ -436,6 +436,7 @@ async function acquireLock(lockPath) {
     let holderPid = null;
     let holderStartTime = null;
     let observedContent = null;
+    let readFailed = false;
     try {
       observedContent = readFileSync(lockPath, "utf-8");
       const match = observedContent.match(/^(\d+)-(\d+|unknown)-/);
@@ -444,8 +445,14 @@ async function acquireLock(lockPath) {
         holderStartTime = match[2] === "unknown" ? null : Number(match[2]);
       }
     } catch {
-      // Couldn't read the existing lock's content at all -- fall through
-      // to the age-only fallback below rather than guessing a pid.
+      // Couldn't read the existing lock's content at all (permissions, a
+      // transient I/O error, an unsupported filesystem) -- this is
+      // DIFFERENT from a successful read that simply didn't parse a pid
+      // (a corrupt/legacy lock format, handled by the age-only fallback
+      // below). An unreadable lock provides no evidence the holder is
+      // gone or old, so it must fail closed as contention, never fall
+      // through to reclaim-by-age.
+      readFailed = true;
     }
     let reclaimable = false;
     if (holderPid !== null) {
@@ -471,10 +478,18 @@ async function acquireLock(lockPath) {
       // (never reclaim) rather than guessing from age alone (the exact
       // round-23 finding: age-based reclaim of a live-but-slow holder
       // reintroduces the very race this whole scheme exists to prevent).
+    } else if (readFailed) {
+      // Unreadable, not merely unparseable -- fail closed (see the comment
+      // at the catch site above). Do NOT fall through to the age-only
+      // heuristic: an unreadable lock is exactly as likely to belong to a
+      // genuinely live holder as a stale one, and age alone cannot tell
+      // them apart.
+      reclaimable = false;
     } else {
-      // No parseable pid (a corrupt/legacy lock, or it vanished before this
-      // read) -- fall back to the age-only heuristic as a last resort so a
-      // genuinely unreadable abandoned lock can still self-heal eventually.
+      // Read succeeded but no parseable pid (a corrupt/legacy lock format)
+      // -- fall back to the age-only heuristic as a last resort so a
+      // genuinely unreadable-as-in-unparseable abandoned lock can still
+      // self-heal eventually.
       let ageMs;
       try {
         ageMs = Date.now() - statSync(lockPath).mtimeMs;
@@ -491,7 +506,7 @@ async function acquireLock(lockPath) {
       reclaimable = ageMs > STALE_LOCK_MS;
     }
     if (!reclaimable) throw error;
-    // Confirmed dead, confirmed a different process, or unreadable-and-old
+    // Confirmed dead, confirmed a different process, or unparseable-and-old
     // -- reclaim it, but atomically: renaming lockPath AWAY (not unlinking
     // it) is the only step here the OS actually guarantees single-winner
     // semantics for. If two processes race to reclaim the SAME stale lock,
@@ -613,8 +628,12 @@ async function withWorktreeSyncLock(cwd, fn) {
 // whether it is safe to remove `claimedPath` (only when the restore
 // succeeded, or the failure was the expected "already re-occupied" EEXIST
 // case; any OTHER `linkSync` failure -- permissions, an unsupported
-// filesystem, I/O -- must fail closed and preserve `claimedPath`, since it
-// is the only remaining copy of that content).
+// filesystem, I/O -- falls back to a direct `renameSync` restore, since
+// EEXIST is the sole signal that `lockPath` is occupied: any OTHER
+// failure means `lockPath` is presumably empty, so a rename there carries
+// no clobber risk and closes the "canonical path sits empty while the
+// only surviving copy is the orphaned claimedPath" window a third actor's
+// acquireLock could otherwise walk straight through).
 function restoreClaimedLock(claimedPath, lockPath) {
   try {
     linkSync(claimedPath, lockPath);
@@ -624,13 +643,22 @@ function restoreClaimedLock(claimedPath, lockPath) {
       // the claim -- the claimed copy is now a redundant duplicate, safe
       // to drop by the caller.
       try { unlinkSync(claimedPath); } catch { /* already gone */ }
+      return true;
     }
-    // Any OTHER failure: do NOT delete claimedPath here -- it is the only
-    // remaining copy of that content, and unlinking it regardless (the
-    // prior behavior) left `lockPath` empty with no recoverable trace,
-    // letting a third actor acquire while the original holder was still
-    // active. Fail closed by leaving the orphaned copy in place instead.
-    return false;
+    // Any OTHER failure (permissions, an unsupported filesystem, cross-
+    // device link, I/O): `lockPath` is presumably NOT occupied (EEXIST is
+    // the only "already occupied" signal `linkSync` gives), so it is safe
+    // to fall back to a direct rename instead of leaving the canonical
+    // path empty.
+    try {
+      renameSync(claimedPath, lockPath);
+      return true;
+    } catch {
+      // Truly could not restore either way -- fail closed, leaving the
+      // orphaned copy at claimedPath as the only remaining trace rather
+      // than losing it outright.
+      return false;
+    }
   }
   // linkSync succeeded: lockPath now has a second name for the SAME
   // content via the hard link -- safe to drop the claimedPath name.
