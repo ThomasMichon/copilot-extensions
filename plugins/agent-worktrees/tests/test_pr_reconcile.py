@@ -1,5 +1,5 @@
 """Tests for agent_worktrees.pr_reconcile + the `reconcile` CLI verb
-(agent-worktrees-fleet-flows Phase 2, aperture-labs #2740)."""
+(agent-worktrees-fleet-flows Phase 2, #2740)."""
 
 from __future__ import annotations
 

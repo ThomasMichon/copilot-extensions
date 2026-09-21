@@ -1,5 +1,5 @@
 """Out-of-band PR-state reconcile for a single worktree record
-(agent-worktrees-fleet-flows Phase 2, aperture-labs #2740).
+(agent-worktrees-fleet-flows Phase 2, #2740).
 
 Extracted out of ``pr_ops.py`` (which is at its grandfathered module-size
 ceiling) rather than inlined there -- mirrors the ``session_host_liveness.py``

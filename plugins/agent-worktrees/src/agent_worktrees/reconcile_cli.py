@@ -1,6 +1,6 @@
 """agent-worktrees reconcile -- out-of-band PR-state refresh across every
 tracked worktree, including ``finalized`` (agent-worktrees-fleet-flows Phase
-2, aperture-labs #2740).
+2, #2740).
 
 Manual dispatch from ``__main__.py`` (mirrors ``fleet``/``lease``'s own
 top-level verb pattern -- ``__main__.py`` is at its grandfathered module-size
