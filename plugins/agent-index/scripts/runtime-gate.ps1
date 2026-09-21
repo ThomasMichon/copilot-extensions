@@ -352,6 +352,30 @@ elseif (
     Set-Location -LiteralPath $Root
     [IO.Directory]::SetCurrentDirectory($Root)
 }
+elseif (
+    $Command -eq 'installer-readiness' -and
+    $ResolutionStatus -ceq 'provenance-blocked' -and
+    -not $env:COPILOT_EXTENSIONS_CONTEXT
+) {
+    # A repo config can legitimately opt this machine in (e.g. designating a
+    # remote indexer) before this client has ever completed `agent-index
+    # setup` -- its own one-time role selection that would establish a
+    # namespaced installation-mode policy or context. That is an unconfigured
+    # ROLE, not a corrupt or foreign install: readiness for the base/client
+    # runtime must stay a non-mutating, non-blocking report (like the
+    # configuration-empty cases above) rather than a hard failure, so a
+    # maintenance-safe sweep never treats "setup hasn't run yet" as broken.
+    # Every other command (install/update/runtime/etc.) still falls through
+    # to the fail-closed branch below.
+    [ordered]@{
+        schema = 'copilot-extensions.module-readiness'
+        version = 1
+        module = 'agent-index/runtime'
+        state = 'configuration-empty'
+        detail = 'This client has not completed agent-index setup (no installation-mode policy or active context yet); session startup remains non-mutating.'
+    } | ConvertTo-Json -Compress
+    exit 0
+}
 else {
     [Console]::Error.WriteLine(
         "[agent-index] installation context blocks invocation: " +
