@@ -945,6 +945,31 @@ exit `$LASTEXITCODE
     }
 
     Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+
+    # #1836/readiness-flap: Start-ScheduledTask is fire-and-forget, and the task
+    # itself only resolves + launches the active slot -- it does not confirm the
+    # replacement daemon actually comes up. Poll the fixed endpoint so
+    # install/update never silently returns "done" while the service is still
+    # down (e.g. immediately after Stop-VaultDaemonGraceful released it, or a
+    # slow first import on a cold venv).
+    $py = if (Test-Path $LinkPython) { $LinkPython } else { $null }
+    if ($py) {
+        $ready = $false
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        for ($i = 0; $i -lt 40; $i++) {
+            Start-Sleep -Milliseconds 250
+            & $py -m agent_vault.service --ping 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+        }
+        $ErrorActionPreference = $prevEAP
+        if ($ready) {
+            Write-Ok 'agent-vault service is running (post-(re)start readiness confirmed)'
+        } else {
+            Write-Fail 'agent-vault service did not become reachable within 10s after (re)start'
+            exit 1
+        }
+    }
 }
 
 
@@ -1009,8 +1034,31 @@ function Stop-VaultDaemonGraceful {
         & $py -m agent_vault.service --ping 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { break }
     }
+    $stillRunning = ($LASTEXITCODE -eq 0)
+    if ($stillRunning) {
+        # The graceful `--stop` request did not retire the process within the
+        # drain window (observed in practice: an asyncio shutdown race can leave
+        # the old daemon's OS process alive even after it stops answering as the
+        # advertised endpoint). Force-retire it by PID from the run-dir marker so
+        # a stuck predecessor never lingers to contend for the fixed endpoint
+        # with the daemon this update starts next -- otherwise repeated updates
+        # accumulate zombie processes that intermittently win the port/pipe bind
+        # race and make readiness flap.
+        $oldPid = $null
+        if (Test-Path $PidFile) {
+            $oldPid = (Get-Content -LiteralPath $PidFile -Raw -ErrorAction SilentlyContinue).Trim()
+        }
+        if ($oldPid -match '^\d+$' -and (Get-Process -Id ([int]$oldPid) -ErrorAction SilentlyContinue)) {
+            Stop-Process -Id ([int]$oldPid) -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 250
+            Write-Warn "Old vault daemon (PID $oldPid) did not retire gracefully within 5s -- force-stopped"
+        } else {
+            Write-Warn 'Old vault daemon did not retire gracefully within 5s, and its PID could not be confirmed for a force-stop'
+        }
+    } else {
+        Write-Ok 'Old vault daemon drained + stopped (in-flight request finished; endpoint released for the new build)'
+    }
     $ErrorActionPreference = $prevEAP
-    Write-Ok 'Old vault daemon drained + stopped (in-flight request finished; endpoint released for the new build)'
     return $true
 }
 
