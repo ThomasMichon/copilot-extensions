@@ -20,6 +20,7 @@ import {
   decodeHandoffPayload,
   encodeHandoffPayload,
   formatConsumeResult,
+  handoffDedupKey,
   isolatedPythonArgs,
   logHandoffPromptReceived,
   manualFallbackInstructions,
@@ -1253,6 +1254,61 @@ test("attemptWorktreeSync never blocks the event loop before its first await", a
   }
 });
 
+test("attemptWorktreeSync detects dirty state hidden by status.showUntrackedFiles=no", async () => {
+  // Real regression this guards: plain `git status --porcelain` (no
+  // --untracked-files=all) can be silently suppressed for untracked files by
+  // a LOCAL repo config (`status.showUntrackedFiles=no`), reporting "clean"
+  // even though an untracked file -- e.g. an ignored/secret-adjacent file
+  // that was never staged -- exists and could later collide with content the
+  // sync brings in. --untracked-files=all overrides that local config.
+  const dir = initGitRepo();
+  try {
+    execFileSync(
+      "git", ["config", "status.showUntrackedFiles", "no"], { cwd: dir },
+    );
+    writeFileSync(join(dir, "untracked-secret.txt"), "shh\n");
+    // Sanity check: bare porcelain really is fooled by this config, so the
+    // fix is meaningfully exercised rather than trivially true either way.
+    const bareStatus = execFileSync(
+      "git", ["status", "--porcelain"], { cwd: dir, encoding: "utf-8" },
+    );
+    assert.equal(bareStatus.trim(), "", "config fixture did not suppress untracked files as expected");
+    const result = await attemptWorktreeSync(dir);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /uncommitted changes/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attemptWorktreeSync rechecks for an in-progress rebase immediately before the sync exec (TOCTOU narrowing)", () => {
+  // The initial dirty/rebase checks and the actual sync exec are not atomic
+  // (another process could start a rebase in between) -- this cannot be
+  // closed without a cross-process lock this plugin does not own, so the
+  // mitigation is a second, as-late-as-possible recheck right before each
+  // sync exec call. Structural check (no DI seam for the internal git
+  // calls): rebaseInProgress must be invoked more than once in
+  // attemptWorktreeSync's body.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const body = source.slice(
+    source.indexOf("export async function attemptWorktreeSync("),
+    source.indexOf("// True if an agent-dispatch coordinator"),
+  );
+  assert.ok(body.length > 0, "could not locate attemptWorktreeSync's body");
+  const callCount = (body.match(/rebaseInProgress\(cwd\)/g) || []).length;
+  assert.ok(
+    callCount >= 2,
+    `expected rebaseInProgress to be rechecked before the sync exec, saw ${callCount} call(s)`,
+  );
+});
+
 test("resolveRuntimePython with allowProvision:false fails fast instead of risking the 180s provisioning wait", () => {
   // Real regression this guards: attemptWorktreeSync's runCli call is
   // fire-and-forget from session.usage_info, before any await -- if an
@@ -1299,4 +1355,38 @@ test("resolveRuntimePython with allowProvision:false fails fast instead of riski
   } finally {
     rmSync(fakePluginRoot, { recursive: true, force: true });
   }
+});
+
+// --- handoffDedupKey (round-9 review fix: a repeat save_handoff_prompt call
+// after this session's own worktree sync must actually refresh a
+// task-backed baton, not silently keep serving the pre-sync payload) -------
+
+test("handoffDedupKey is stable for identical content (true accidental duplicates still dedupe)", () => {
+  const a = handoffDedupKey("sess-1", "same prompt text");
+  const b = handoffDedupKey("sess-1", "same prompt text");
+  assert.equal(a, b);
+});
+
+test("handoffDedupKey changes when the prompt content changes, even for the same session", () => {
+  // Real regression this guards: agent-dispatch's `create --dedup-key K` is
+  // idempotent per K -- a repeat call with the SAME key returns the existing
+  // nonterminal task UNCHANGED, even with different --payload-file content.
+  // Guidance tells the agent to always re-save after a post-approval sync;
+  // without the content folded into the key, that re-save would be a no-op
+  // against agent-dispatch and the successor would still get the stale
+  // pre-sync payload.
+  const before = handoffDedupKey("sess-1", "pre-sync content");
+  const after = handoffDedupKey("sess-1", "post-sync content, rebased on latest main");
+  assert.notEqual(before, after);
+});
+
+test("handoffDedupKey scopes different sessions to different keys even with identical content", () => {
+  const a = handoffDedupKey("sess-1", "identical text");
+  const b = handoffDedupKey("sess-2", "identical text");
+  assert.notEqual(a, b);
+});
+
+test("handoffDedupKey embeds the session id verbatim for debuggability", () => {
+  const key = handoffDedupKey("my-session-42", "content");
+  assert.match(key, /^handoff-my-session-42-[0-9a-f]{12}$/);
 });
