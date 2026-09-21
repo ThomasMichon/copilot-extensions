@@ -109,7 +109,10 @@ def test_live_cli_holder_is_stopped_revalidated_then_force_resumed(monkeypatch):
         ("/usr/bin/agent-bridge", "--json"),          # force resume -> ok
         ("/usr/bin/agent-bridge", "send"),
     ]
-    assert calls[1] == ["/usr/bin/agent-bridge", "restart-worktree", "wt-1", "--json"]
+    assert calls[1] == [
+        "/usr/bin/agent-bridge", "restart-worktree", "wt-1", "--json",
+        "--expected-holder", "live-7",
+    ]
     assert "--force" not in calls[2]
     assert "--force" in calls[3]
     assert "reclaimed-1" in calls[4]
@@ -226,6 +229,31 @@ def test_busy_reused_session_is_ended_then_resumed_again_for_its_replacement(
     assert calls[2] == ["/usr/bin/agent-bridge", "end", "reused-1", "--force"]
     assert "fresh-2" in calls[4]
     assert not any("--force" in c for c in calls if c[1] == "--json")
+
+
+def test_failed_busy_session_deletion_is_reported_not_silently_reused(monkeypatch):
+    """If 'end --force' fails, the busy session is still live -- resuming
+    again and sending would just reuse and re-deliver to the EXACT session
+    this take-over was supposed to replace. Must report the failure instead
+    of proceeding as if the deletion had worked."""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if _is_resume(cmd):
+            return _proc(cmd, 0, json.dumps({"session_id": "reused-1"}))
+        if cmd[1] == "send":
+            return _proc(cmd, bridge_reclaim._SEND_BUSY_EXIT, "", "busy")
+        if cmd[1] == "end":
+            return _proc(cmd, 1, "", "no such session")
+        return _proc(cmd, 0, "ok")
+
+    result = _resume(monkeypatch, fake_run)
+    assert result.returncode == 1
+    assert "could not end the busy session" in result.stderr
+    assert "reused-1" in result.stderr
+    kinds = [c[1] for c in calls]
+    assert kinds == ["--json", "send", "end"]  # never a 2nd resume/send
 
 
 def test_json_output_reshapes_send_result(monkeypatch):

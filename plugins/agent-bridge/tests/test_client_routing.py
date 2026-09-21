@@ -81,11 +81,24 @@ def test_restart_worktree_force_query_param(cfg_dir: Path, monkeypatch):
     )
     client.restart_worktree("wt-1")
     client.restart_worktree("wt-2", force=True)
+    client.restart_worktree("wt-3", expected_holder="sess-a")
+    client.restart_worktree("wt-4", force=True, expected_holder="sess-b")
     assert calls == [
         ("POST", "/api/v1/worktrees/wt-1/restart", {"params": None, "request_timeout": None}),
         (
             "POST", "/api/v1/worktrees/wt-2/restart",
             {"params": {"force": "true"}, "request_timeout": None},
+        ),
+        (
+            "POST", "/api/v1/worktrees/wt-3/restart",
+            {"params": {"expected_holder": "sess-a"}, "request_timeout": None},
+        ),
+        (
+            "POST", "/api/v1/worktrees/wt-4/restart",
+            {
+                "params": {"force": "true", "expected_holder": "sess-b"},
+                "request_timeout": None,
+            },
         ),
     ]
 

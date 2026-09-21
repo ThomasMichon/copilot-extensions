@@ -49,6 +49,7 @@ class WorktreeRestartMixin(_Base):
         worktree_id: str,
         *,
         force: bool = False,
+        expected_holder: str | None = None,
         request_timeout: float | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/worktrees/{id}/restart -- stop the worktree's
@@ -56,15 +57,23 @@ class WorktreeRestartMixin(_Base):
         mux kill-session; ``force=true`` skips the graceful quit), keeping
         the worktree on disk. On success this also **expires any
         live-session registration** for it (#2906) -- see the module
-        docstring. Returns ``{worktree_id, agent_name, had_session, method,
-        ok}`` (``method``: none | graceful | hard | failed).
+        docstring. ``expected_holder``, when given, fences that
+        invalidation to only that session id, so a genuinely different
+        claimant that registers while this call is in flight is left
+        untouched (#2906 race hardening). Returns ``{worktree_id,
+        agent_name, had_session, method, ok}`` (``method``: none | graceful
+        | hard | failed).
         """
-        params = {"force": "true"} if force else None
+        params: dict[str, Any] = {}
+        if force:
+            params["force"] = "true"
+        if expected_holder:
+            params["expected_holder"] = expected_holder
         return (
             self._request(
                 "POST",
                 f"/api/v1/worktrees/{worktree_id}/restart",
-                params=params,
+                params=params or None,
                 request_timeout=request_timeout,
             )
             or {}

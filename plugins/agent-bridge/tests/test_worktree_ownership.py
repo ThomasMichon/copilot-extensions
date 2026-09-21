@@ -50,6 +50,37 @@ class TestTakenOverTerminalState:
         row = tmp_db.get_live_session("cli-1")
         assert row is not None and row["status"] == "taken-over"
 
+    def test_expected_session_id_fences_a_different_claimant(self, tmp_db: Database) -> None:
+        """A racing new claimant (a different session id) that registered
+        while the take-over was in flight must not be collaterally demoted
+        (#2906 race hardening) when the caller names the ORIGINAL holder it
+        actually stopped."""
+        now = time.time()
+        _register(tmp_db, "cli-1", "wt-A", now)
+        # A different, genuinely live CLI wins the race and registers too.
+        _register(tmp_db, "cli-2", "wt-A", now + 0.5)
+        n = tmp_db.expire_live_sessions_for_worktree(
+            "wt-A", now=now + 1, expected_session_id="cli-1"
+        )
+        assert n == 1
+        assert tmp_db.get_live_session("cli-1")["status"] == "taken-over"
+        # The new claimant's own registration is untouched.
+        assert tmp_db.get_live_session("cli-2")["status"] == "live"
+
+    def test_expected_session_id_no_match_expires_nothing(self, tmp_db: Database) -> None:
+        """If the original holder is already gone by the time this runs (a
+        different claimant already replaced its row), the fenced expiry is a
+        no-op rather than demoting the new claimant."""
+        now = time.time()
+        _register(tmp_db, "cli-1", "wt-A", now)
+        _register(tmp_db, "cli-2", "wt-A", now + 0.5)
+        n = tmp_db.expire_live_sessions_for_worktree(
+            "wt-A", now=now + 1, expected_session_id="cli-1-already-gone"
+        )
+        assert n == 0
+        assert tmp_db.get_live_session("cli-1")["status"] == "live"
+        assert tmp_db.get_live_session("cli-2")["status"] == "live"
+
     def test_register_refuses_to_revive_taken_over(self, tmp_db: Database) -> None:
         """A killed predecessor's late heartbeat cannot resurrect its row."""
         now = time.time()

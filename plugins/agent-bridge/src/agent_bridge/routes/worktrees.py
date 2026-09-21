@@ -1525,16 +1525,18 @@ async def get_worktree_session_transcript(
 @router.post("/api/v1/worktrees/{worktree_id}/restart")
 async def restart_worktree_copilot(
     worktree_id: str, request: Request, force: bool = False,
+    expected_holder: str | None = None,
 ) -> dict[str, Any]:
     """Restart a worktree's interactive (mux-launched) Copilot in place.
 
     Shells to ``<project> restart <id> --json`` on the owning machine:
     graceful double Ctrl-C then a hard mux ``kill-session`` fallback,
     keeping the worktree **on disk** for a later relaunch/ACP-resume.
-    ``force=true`` skips the graceful quit.
-
-    Returns ``{worktree_id, had_session, method, ok}`` (``method``: none |
-    graceful | hard | failed).
+    ``force=true`` skips the graceful quit. ``expected_holder``, when given,
+    fences the invalidate-on-take-over below to that live-session id (#2906
+    race hardening; see ``db.expire_live_sessions_for_worktree``). Returns
+    ``{worktree_id, had_session, method, ok}`` (``method``: none | graceful |
+    hard | failed).
     """
     cache = get_cache()
     await cache.crawl_if_empty()
@@ -1569,18 +1571,16 @@ async def restart_worktree_copilot(
     method = data.get("method", "unknown")
     ok = bool(data.get("ok", False))
 
-    # Invalidate-on-take-over (#2906): a successful restart has just terminated
-    # the interactive CLI, so immediately demote any live-session registration
-    # for this worktree and drop its queued inbox messages. This closes the
-    # window where a racing steer could land on the CLI that was just killed,
-    # and ensures the subsequent reclaim resume is never blocked by the atomic
-    # ownership guard (#2879) waiting on a not-yet-heartbeat-reaped row.
+    # Invalidate-on-take-over (#2906): demote the live-session registration
+    # (fenced to expected_holder when given -- #2906 race hardening) and drop
+    # queued inbox messages, so the reclaim resume isn't blocked by the
+    # atomic ownership guard (#2879) waiting on a not-yet-reaped row.
     if ok:
         db = getattr(request.app.state, "db", None)
         if db is not None:
             try:
                 n = db.expire_live_sessions_for_worktree(
-                    worktree_id, now=time.time()
+                    worktree_id, now=time.time(), expected_session_id=expected_holder
                 )
                 if n:
                     log.info(

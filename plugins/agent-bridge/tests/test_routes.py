@@ -2231,6 +2231,48 @@ class TestWorktreeRoutes:
         assert resp.status_code == 200
         assert db.get_live_session("cli-live")["status"] == "live"
 
+    def test_restart_expected_holder_fences_invalidation(
+        self, client, app,
+    ) -> None:
+        """``?expected_holder=`` scopes the invalidate-on-take-over to only
+        that session id -- a different, genuinely live registration for the
+        same worktree (a claimant that raced in) is left untouched (#2906
+        race hardening)."""
+        import time
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "anomalous-potato-wsl-20250101-193450-fenced"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        db = app.state.db
+        now = time.time()
+        db.register_live_session(
+            "cli-original", machine="test-agent", cwd=None, worktree_id=wt_id,
+            repo=None, branch=None, pid=None, role=None, now=now,
+        )
+        db.register_live_session(
+            "cli-new-claimant", machine="test-agent", cwd=None,
+            worktree_id=wt_id, repo=None, branch=None, pid=None, role=None,
+            now=now + 0.5,
+        )
+
+        payload = (
+            '{"worktree_id": "%s", "had_session": true, '
+            '"method": "graceful", "ok": true}' % wt_id
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ):
+            resp = client.post(
+                f"/api/v1/worktrees/{wt_id}/restart?expected_holder=cli-original"
+            )
+
+        assert resp.status_code == 200
+        assert db.get_live_session("cli-original")["status"] == "taken-over"
+        assert db.get_live_session("cli-new-claimant")["status"] == "live"
+
     def test_resume_worktree_no_session_starts_fresh(self, client, app) -> None:
         """A worktree with no prior bridge session (e.g. just taken over, its
         interactive Copilot never persisted a session) starts a *fresh* owned

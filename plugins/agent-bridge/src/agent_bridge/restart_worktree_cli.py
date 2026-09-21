@@ -40,7 +40,17 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "--force", action="store_true",
         help="Skip the graceful double-Ctrl-C quit; hard-kill the mux session immediately",
     )
-    p.add_argument("--json", action="store_true", help="JSON output mode")
+    p.add_argument(
+        "--expected-holder", default=None,
+        help="Fence the server-side live-session invalidation to only this "
+        "session id (a prior refusal's holder), so a genuinely different "
+        "claimant that registers while this call is in flight is left "
+        "untouched (#2906 race hardening)",
+    )
+    p.add_argument(
+        "--json", action="store_true", default=argparse.SUPPRESS,
+        help="JSON output mode",
+    )
     p.set_defaults(func=cmd_restart_worktree)
 
 
@@ -50,10 +60,14 @@ def cmd_restart_worktree(args: argparse.Namespace) -> None:
     result = client.restart_worktree(
         args.worktree_id,
         force=bool(getattr(args, "force", False)),
+        expected_holder=getattr(args, "expected_holder", None),
         request_timeout=core._startup_request_timeout(),
     )
+    ok = bool(result.get("ok"))
     if getattr(args, "json", False):
         core._json_out(result)
+        if not ok:
+            sys.exit(1)
         return
     wt = result.get("worktree_id", args.worktree_id)
     if not result.get("had_session"):

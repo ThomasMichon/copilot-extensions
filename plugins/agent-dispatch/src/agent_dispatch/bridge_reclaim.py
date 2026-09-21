@@ -33,15 +33,23 @@ interactive CLI could attach to the worktree in the gap between them, and
 ``--force`` bypasses the ownership guard unconditionally. Forcing straight
 through in that window would recreate the exact duplicate-controller race
 the guard exists to prevent -- forcing past a holder we never actually
-confirmed dead. So after ``restart`` succeeds, this repeats the *plain*
-(non-forcing) resume check once more before ever forcing: if that
-succeeds outright, no force was even needed (best case). If it is refused
-again for the same reason, this compares the refusal's holder session id
-against the one recorded on the *original* refusal -- identical means the
-guard is still keyed on the (now confirmed-dead) process we just stopped,
-so forcing through it is safe; a *different* id means a fresh claimant won
-the worktree in the race window, and this refuses rather than force
-through a live process it never confirmed dead.
+confirmed dead. Two layers close this:
+
+1. ``restart-worktree`` is called with ``--expected-holder`` set to the
+   *original* refusal's holder session id, so the server-side
+   invalidate-on-take-over (#2906) is fenced to only that registration -- a
+   genuinely different claimant that registers for this worktree while the
+   stop is in flight is never collaterally demoted.
+2. After ``restart`` succeeds, this repeats the *plain* (non-forcing)
+   resume check once more before ever forcing: if that succeeds outright,
+   no force was even needed (best case). If it is refused again for the
+   same reason, this compares the refusal's holder session id against the
+   original one -- identical means the guard is still keyed on the (now
+   confirmed-dead) process we just stopped, so forcing through it is safe;
+   a *different* id means a fresh claimant won the worktree in the race
+   window (and, thanks to the fencing above, that claimant's own
+   registration was never touched), and this refuses rather than force
+   through a live process it never confirmed dead.
 
 :func:`resume_worktree_and_send` orchestrates the whole sequence, then
 delivers ``prompt`` via ``send <session_id> --prompt-file - --caller
@@ -128,7 +136,8 @@ def _resume_refusal(resumed: subprocess.CompletedProcess) -> tuple[str | None, s
 
 
 def _stop_worktree_copilot(
-    worktree_id: str, *, exe: Sequence[str], timeout: float | None,
+    worktree_id: str, *, exe: Sequence[str], expected_holder: str | None,
+    timeout: float | None,
 ) -> dict:
     """Kill the interactive Copilot CLI holding ``worktree_id`` via
     ``agent-bridge restart-worktree`` -- the reclaim sequence's stop half
@@ -139,11 +148,21 @@ def _stop_worktree_copilot(
     live-session registration server-side on success (#2906) -- calling
     ``agent-worktrees restart`` directly skips that invalidation entirely,
     which is exactly what the caller's revalidation-before-forcing step
-    below exists to detect and refuse rather than silently miss. Returns
-    the JSON payload (``{"ok": bool, "had_session": bool, "method": ...}``),
-    or ``{"ok": False, "error": ...}`` on any failure to parse/run it.
+    below exists to detect and refuse rather than silently miss.
+
+    ``expected_holder`` (the original refusal's holder session id) is
+    passed through as ``--expected-holder`` so the server-side invalidation
+    is fenced to only that registration -- a genuinely different claimant
+    that registers for this worktree while this call is in flight is left
+    untouched rather than collaterally demoted (#2906 race hardening).
+
+    Returns the JSON payload (``{"ok": bool, "had_session": bool, "method":
+    ...}``), or ``{"ok": False, "error": ...}`` on any failure to
+    parse/run it.
     """
     cmd = [*exe, "restart-worktree", worktree_id, "--json"]
+    if expected_holder:
+        cmd += ["--expected-holder", expected_holder]
     proc = subprocess.run(  # noqa: S603
         cmd, check=False, capture_output=True, text=True, timeout=timeout,
         **no_window_kwargs(),
@@ -195,7 +214,9 @@ def _take_over_live_holder(
     actually gone, and only then force-resume. Returns ``(failure_or_None,
     session_id_or_None)`` -- exactly one is non-``None``.
     """
-    stopped = _stop_worktree_copilot(worktree_id, exe=exe, timeout=timeout)
+    stopped = _stop_worktree_copilot(
+        worktree_id, exe=exe, expected_holder=original_holder, timeout=timeout
+    )
     if not stopped.get("ok"):
         return subprocess.CompletedProcess(
             args=[], returncode=1, stdout="",
@@ -288,10 +309,21 @@ def resume_worktree_and_send(
         # busy turn and resume again for its replacement (end deletes the
         # busy session outright, so the prompt can no longer reach that
         # exact id), then send to the new one, once.
-        subprocess.run(  # noqa: S603
+        ended = subprocess.run(  # noqa: S603
             [*exe, "end", session_id, "--force"], check=False,
             capture_output=True, text=True, timeout=timeout, **no_window_kwargs(),
         )
+        if ended.returncode != 0:
+            # Deletion failed -- the busy session is still live. Resuming
+            # again here would just reuse and re-send to the exact session
+            # this take-over was supposed to replace, so report the
+            # failure instead of silently proceeding as if it were gone.
+            return subprocess.CompletedProcess(
+                args=ended.args, returncode=1, stdout=ended.stdout,
+                stderr=(ended.stderr or "")
+                + f"\ncould not end the busy session {session_id} before "
+                "re-resuming -- refusing to reuse it",
+            )
         resumed, session_id = _resume(worktree_id, exe=exe, force=False, timeout=timeout)
         if session_id is None:
             if resumed.returncode == 0:
