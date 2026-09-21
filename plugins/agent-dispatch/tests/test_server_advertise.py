@@ -387,6 +387,45 @@ def test_serve_force_bypasses_live_coordinator_guard(monkeypatch, tmp_path):
     assert rendezvous.read_endpoint(run) is None  # cleared on shutdown, as usual
 
 
+def test_serve_force_still_serializes_against_concurrent_transition(monkeypatch, tmp_path):
+    """``force`` bypasses only the live-coordinator *rejection*, not the
+    routing-transition lock itself -- otherwise a forced start could still
+    race a normal ``serve()`` or an in-progress `deploy`/cutover (which holds
+    this same lock through its own transition) and publish over it,
+    recreating the exact undrained duplicate this guard exists to prevent
+    (review follow-up on ThomasMichon/copilot-extensions#3066)."""
+    import pytest
+
+    from agent_dispatch.single_instance import SingleInstance
+
+    run = tmp_path / "run"
+    routing = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing))
+    # has_live_local_coordinator must never even be consulted when force=True
+    # (its rejection is bypassed entirely) -- only the lock acquisition
+    # itself should be able to refuse the start.
+    monkeypatch.setattr(
+        server,
+        "has_live_local_coordinator",
+        lambda **_: (_ for _ in ()).throw(
+            AssertionError("force=True must not consult liveness")
+        ),
+    )
+    # Simulate a concurrent starter (or an in-progress deploy/cutover)
+    # already holding the transition lock.
+    routing.mkdir(parents=True, exist_ok=True)
+    holder = SingleInstance(routing / "serve-start.lock")
+    assert holder.acquire()
+    try:
+        cfg = Config(host="127.0.0.1", port=0, db_path=str(tmp_path / "tasks.db"))
+        with pytest.raises(server.CoordinatorAlreadyLiveError):
+            server.serve(cfg, force=True)
+        assert rendezvous.read_endpoint(run) is None
+    finally:
+        holder.release()
+
+
 def test_serve_passive_never_checks_live_coordinator(monkeypatch, tmp_path):
     run = tmp_path / "run"
     monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))

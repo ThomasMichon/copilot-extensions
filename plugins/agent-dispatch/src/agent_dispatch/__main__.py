@@ -864,10 +864,16 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
             drain_timeout=args.drain_timeout,
             force=args.force,
         )
+        # Keep the lock through the post-cutover reap too -- otherwise a
+        # second `deploy` can acquire it in the gap right after release,
+        # spawn its own new passive coordinator, and have *this* command's
+        # reaper (which only knows about `result`'s own before/after PIDs)
+        # terminate that still-passive process as an apparent leftover
+        # (review follow-up on ThomasMichon/copilot-extensions#3066).
+        if result.ok:
+            _reap_superseded_coordinators(result)
     finally:
         routing_lock.release()
-    if result.ok:
-        _reap_superseded_coordinators(result)
     if getattr(args, "json", False):
         _emit(result.to_dict())
     else:

@@ -296,34 +296,43 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
 
     cfg = cfg or load_config()
     start_lock: SingleInstance | None = None
-    if not passive and not force:
+    if not passive:
         # Keyed by routing_dir() -- the directory the actual raced-over
         # resource (the zdd routing table) lives in -- not run_dir(), which
         # has an independent AGENT_DISPATCH_* override and so would not
         # serialize two processes sharing one routing table but different
         # run dirs (review follow-up on ThomasMichon/copilot-extensions#3066).
+        #
+        # Acquired even when ``force`` is set: ``force`` only bypasses the
+        # *liveness rejection* below, not serialization against a concurrent
+        # transition -- a forced start still must not race a normal
+        # ``serve()`` or the `deploy`/cutover path (which holds this same
+        # lock through its own route transition), or it could publish over
+        # that other transition and recreate the exact undrained duplicate
+        # this whole guard exists to prevent.
         start_lock = SingleInstance(routing_dir() / "serve-start.lock")
         if not start_lock.acquire():
             raise CoordinatorAlreadyLiveError(
                 "another process is concurrently starting a coordinator on this "
                 "host; refusing to race it for the active route"
             )
-        try:
-            live = has_live_local_coordinator(token=cfg.token)
-        except BaseException:
-            # An exception here (e.g. a malformed AGENT_DISPATCH_ENDPOINT
-            # override raised while parsing) must not strand the lock --
-            # otherwise a caller that catches this and retries in the same
-            # process deadlocks against its own held lock (review follow-up
-            # on ThomasMichon/copilot-extensions#3066).
-            start_lock.release()
-            raise
-        if live:
-            start_lock.release()
-            raise CoordinatorAlreadyLiveError(
-                "a coordinator is already live and answering on this host; "
-                "refusing to seize its active route non-passively"
-            )
+        if not force:
+            try:
+                live = has_live_local_coordinator(token=cfg.token)
+            except BaseException:
+                # An exception here (e.g. a malformed AGENT_DISPATCH_ENDPOINT
+                # override raised while parsing) must not strand the lock --
+                # otherwise a caller that catches this and retries in the same
+                # process deadlocks against its own held lock (review follow-up
+                # on ThomasMichon/copilot-extensions#3066).
+                start_lock.release()
+                raise
+            if live:
+                start_lock.release()
+                raise CoordinatorAlreadyLiveError(
+                    "a coordinator is already live and answering on this host; "
+                    "refusing to seize its active route non-passively"
+                )
     try:
         sock = None
         fed_runner = None

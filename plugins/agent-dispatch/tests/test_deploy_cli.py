@@ -171,6 +171,68 @@ def test_cutover_holds_lock_across_recovery_preamble(tmp_path, monkeypatch):
     )
 
 
+def test_cutover_holds_lock_through_post_cutover_reap(tmp_path, monkeypatch):
+    """The lock must also cover ``_reap_superseded_coordinators(result)`` --
+    otherwise a second `deploy` could acquire it in the gap right after
+    release, spawn its own new passive coordinator, and have this command's
+    reaper (which only knows about its own before/after PIDs) terminate that
+    still-passive process as an apparent leftover (review follow-up on
+    ThomasMichon/copilot-extensions#3066)."""
+    import zdd.breadcrumb as zdd_breadcrumb
+    import zdd.cutover as zdd_cutover
+
+    from agent_dispatch import __main__ as main_mod
+    from agent_dispatch.single_instance import SingleInstance
+
+    routing = tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing))
+    monkeypatch.setattr("agent_dispatch.config.client_token", lambda: None)
+    monkeypatch.setattr(zdd_breadcrumb, "recover_stale_cutover", lambda *a, **k: {"recovered": False})
+    monkeypatch.setattr(zdd_breadcrumb, "read_breadcrumb", lambda *a, **k: None)
+    monkeypatch.setattr(main_mod, "_reap_abandoned_passive", lambda *_a, **_k: {"reaped": False})
+
+    seen: dict = {}
+
+    def _fake_reap_superseded(_result):
+        contender = SingleInstance(routing / "serve-start.lock")
+        seen["acquired_during_reap"] = contender.acquire()
+        if seen["acquired_during_reap"]:
+            contender.release()
+
+    monkeypatch.setattr(main_mod, "_reap_superseded_coordinators", _fake_reap_superseded)
+
+    class _FakeResult:
+        ok = True
+        new_port = 1234
+        error = None
+        rolled_back = False
+        steps: list = []
+
+        def to_dict(self):
+            return {"ok": True}
+
+    class _FakeOrchestrator:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def run(self, **_kwargs):
+            return _FakeResult()
+
+    monkeypatch.setattr(zdd_cutover, "CutoverOrchestrator", _FakeOrchestrator)
+
+    parser = main_mod.build_parser()
+    ns = parser.parse_args(["deploy", "--json"])
+    exit_code = main_mod._cmd_cutover(ns)
+
+    assert exit_code == 0
+    assert seen["acquired_during_reap"] is False, (
+        "lock must still be held during the post-cutover reap"
+    )
+    probe = SingleInstance(routing / "serve-start.lock")
+    assert probe.acquire(), "lock was not released after the reap completed"
+    probe.release()
+
+
 def test_reap_abandoned_passive_delegates_to_reap_module(tmp_path, monkeypatch):
     """#5195: the CLI-level wrapper is a thin, correctly-anchored delegate to
     ``agent_dispatch.reap.reap_abandoned_passive_backstop``."""
