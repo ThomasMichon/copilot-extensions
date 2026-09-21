@@ -510,28 +510,47 @@ def resolve_slug_owner(target: str | None) -> str | None:
 
 def is_unresolved_registered_target(target: str | None) -> bool:
     """True when *target* names a **registered** repo whose remote has no
-    derivable github owner (e.g. a non-github/Azure DevOps remote).
+    derivable github owner (e.g. a non-github/Azure DevOps remote) *and* has
+    no explicit per-repo ``account:`` override to fall back on.
 
     This is the identity-known-but-unresolvable case #3032 flags as a hazard:
     a caller explicitly named a repo this tool knows about, so silently
     falling back to ambient ``gh`` auth would still risk acting under the
     wrong account. Distinct from an unregistered/ambiguous bare name, where no
     preference exists and ambient auth remains the documented, safe default.
+    An explicit ``account:`` override is a real, resolvable identity even
+    without a derivable github owner, so it is not unresolved.
     """
     if not target or "/" in target:
         return False
     entry = find_repo(target)
     if entry is None:
         return False
+    if entry.account:
+        return False
     return github_owner(entry.remote) is None
 
 
 def account_for_github_slug(slug: str | None) -> str | None:
     """Resolve the effective account for a github ``owner/name`` slug, a bare
-    ``owner``, or a bare registered repo *name* (see :func:`resolve_slug_owner`).
+    ``owner``, or a bare registered repo *name*.
+
+    A bare registered repo name resolves via its own matched entry first (an
+    explicit ``account:`` on *that* entry wins outright), then via its remote
+    owner through :func:`account_for_github_owner` -- never by handing the
+    owner alone to the owner-wide resolver, which would pick whichever
+    registered repo happens to iterate first under a shared owner and can
+    return a *different* repo's explicit account (see #3032 follow-up).
     """
     if not slug:
         return None
+    if "/" not in slug:
+        entry = find_repo(slug)
+        if entry is not None:
+            if entry.account:
+                return entry.account
+            owner = github_owner(entry.remote)
+            return account_for_github_owner(owner) if owner else None
     owner = resolve_slug_owner(slug)
     return account_for_github_owner(owner)
 

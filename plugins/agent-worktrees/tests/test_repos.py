@@ -544,6 +544,41 @@ def test_is_unresolved_registered_target_true_for_non_github_registered_repo(
     assert repos.is_unresolved_registered_target("azdo-proj") is True
 
 
+def test_is_unresolved_registered_target_false_with_explicit_account_override(
+    home: Path,
+):
+    # An explicit per-repo `account:` is a real, resolvable identity even
+    # without a derivable github owner -- it must not be treated as unresolved.
+    repos.add_repo(
+        "azdo-proj", "D:/Src/azdo-proj", repo_class="reference",
+        remote="https://my-org.visualstudio.com/x/_git/azdo-proj",
+        account="explicit-login", plat="windows",
+    )
+    assert repos.is_unresolved_registered_target("azdo-proj") is False
+    assert repos.account_for_github_slug("azdo-proj") == "explicit-login"
+
+
+def test_account_for_github_slug_preserves_matched_entrys_own_override(
+    home: Path,
+):
+    # Two registered repos share a github owner but have different explicit
+    # `account:` overrides -- resolving the second by its bare registered name
+    # must return *its own* account, not whichever entry the owner-wide
+    # resolver happens to iterate first (the #3032 follow-up finding).
+    repos.add_repo(
+        "proj-a", "D:/Src/proj-a", repo_class="worktree",
+        remote="https://github.com/shared-owner/proj-a.git",
+        account="account-a", plat="windows",
+    )
+    repos.add_repo(
+        "proj-b", "D:/Src/proj-b", repo_class="worktree",
+        remote="https://github.com/shared-owner/proj-b.git",
+        account="account-b", plat="windows",
+    )
+    assert repos.account_for_github_slug("proj-a") == "account-a"
+    assert repos.account_for_github_slug("proj-b") == "account-b"
+
+
 def test_is_unresolved_registered_target_false_for_github_registered_repo(
     home: Path,
 ):
