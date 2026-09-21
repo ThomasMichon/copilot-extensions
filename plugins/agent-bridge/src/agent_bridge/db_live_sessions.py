@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -73,6 +74,19 @@ class _LiveSessionsMixin:
              driven_by, now, now, worktree_id, worktree_id),
         )
         if cur.rowcount == 1:
+            # Best-effort, additive: a worktree with a pending, unclaimed
+            # CLI-mode reservation (agent-bridge-cli-mode-sessions Phase 2) is
+            # claimed by this registration and the row is marked accordingly.
+            # Never blocks or reverses the registration above -- claiming is
+            # honest bookkeeping, not an admission gate; an unclaimed or absent
+            # reservation is not an error.
+            if worktree_id is not None and self.claim_cli_mode_reservation(
+                worktree_id, session_id, now=now
+            ):
+                self.execute_write(
+                    "UPDATE live_sessions SET cli_mode=1 WHERE session_id=?",
+                    (session_id,),
+                )
             return "live"
         # Rejected -- derive why for the caller's error (the authoritative
         # decision was the 0-row write above).
@@ -80,6 +94,82 @@ class _LiveSessionsMixin:
         if existing is not None and (existing.get("status") or "live") == "taken-over":
             return "taken-over"
         return "reserved"
+
+    def create_cli_mode_reservation(
+        self, worktree_id: str, *, now: float, ttl_seconds: float = 300.0,
+    ) -> str | None:
+        """Atomically reserve a worktree's next CLI-mode Session Host.
+
+        Returns the new ``reservation_id``, or ``None`` if refused because a
+        not-yet-expired reservation already holds this worktree (one active
+        CLI-mode allocation per worktree at a time --
+        §one-host-per-cwd-lane). An expired reservation (past ``expires_at``)
+        is silently replaced, whether or not it was ever claimed -- an expired
+        reservation is not a live session.
+
+        This is the explicit, operator-initiated half of
+        §opt-in-not-ambient-default: nothing calls this on a caller's behalf,
+        so no worktree is CLI-mode-eligible unless someone deliberately
+        allocated one.
+        """
+        reservation_id = uuid.uuid4().hex
+        cur = self.execute_write(
+            "INSERT INTO cli_mode_reservations "
+            "(worktree_id, reservation_id, created_at, expires_at, "
+            "claimed_by_session_id) "
+            "VALUES (?, ?, ?, ?, NULL) "
+            "ON CONFLICT(worktree_id) DO UPDATE SET "
+            "reservation_id=excluded.reservation_id, "
+            "created_at=excluded.created_at, expires_at=excluded.expires_at, "
+            "claimed_by_session_id=NULL "
+            "WHERE cli_mode_reservations.expires_at <= excluded.created_at",
+            (worktree_id, reservation_id, now, now + ttl_seconds),
+        )
+        return reservation_id if cur.rowcount == 1 else None
+
+    def get_cli_mode_reservation(self, worktree_id: str) -> dict[str, Any] | None:
+        rows = self.execute_read(
+            "SELECT * FROM cli_mode_reservations WHERE worktree_id=?",
+            (worktree_id,),
+        )
+        return dict(rows[0]) if rows else None
+
+    def claim_cli_mode_reservation(
+        self, worktree_id: str, session_id: str, *, now: float,
+    ) -> bool:
+        """Atomically claim the worktree's pending CLI-mode reservation, if any.
+
+        Returns ``True`` only when an unclaimed, unexpired reservation existed
+        and this call claimed it. A second claim attempt (e.g. a heartbeat
+        re-registration) safely no-ops (``False``) once claimed -- callers
+        should treat that as "already claimed", not an error.
+        """
+        cur = self.execute_write(
+            "UPDATE cli_mode_reservations SET claimed_by_session_id=? "
+            "WHERE worktree_id=? AND claimed_by_session_id IS NULL "
+            "AND expires_at > ?",
+            (session_id, worktree_id, now),
+        )
+        return cur.rowcount == 1
+
+    def release_cli_mode_reservation(
+        self, worktree_id: str, *, reservation_id: str | None = None,
+    ) -> int:
+        """Delete a CLI-mode reservation -- by worktree, or the exact
+        ``reservation_id`` if given (refuses to delete a different, newer
+        reservation created since). Returns how many rows were removed."""
+        if reservation_id is not None:
+            cur = self.execute_write(
+                "DELETE FROM cli_mode_reservations "
+                "WHERE worktree_id=? AND reservation_id=?",
+                (worktree_id, reservation_id),
+            )
+        else:
+            cur = self.execute_write(
+                "DELETE FROM cli_mode_reservations WHERE worktree_id=?",
+                (worktree_id,),
+            )
+        return cur.rowcount
 
     def update_live_turn_state(
         self,

@@ -1933,6 +1933,65 @@ def mux_available(mux: str | None = None) -> bool:
     return shutil.which(_mux_bin(mux)) is not None
 
 
+# Package managers tried, in order, to self-heal a missing ``tmux`` (POSIX
+# only -- see ensure_mux_available). Each installs non-interactively.
+_TMUX_INSTALL_CANDIDATES: tuple[tuple[str, list[str]], ...] = (
+    ("apt-get", ["apt-get", "install", "-y", "tmux"]),
+    ("dnf", ["dnf", "install", "-y", "tmux"]),
+    ("yum", ["yum", "install", "-y", "tmux"]),
+    ("apk", ["apk", "add", "tmux"]),
+)
+
+
+def ensure_mux_available(mux: str | None = None) -> bool:
+    """Best-effort self-heal a missing multiplexer binary (POSIX only).
+
+    A freshly-provisioned remote venue (a CodeSpace, a trusted container) has
+    the Copilot CLI and this plugin's own runtime but, unlike a developer's
+    long-lived machine, virtually never has ``tmux`` preinstalled --
+    confirmed against a real CodeSpace devcontainer
+    (agent-bridge-cli-mode-sessions Phase 4 prep). ``embody``'s whole point
+    (a genuinely reattachable CLI-mode session) is unusable without a
+    multiplexer, so this attempts a one-shot, non-interactive package-manager
+    install before a caller falls back to :func:`headless_new_session`'s
+    no-reattach shape.
+
+    Best-effort and silent-safe: never raises, and returns the current
+    :func:`mux_available` state unchanged when the multiplexer is already
+    present, on Windows (``psmux`` is a separately-installed tool this does
+    not attempt to provision), or when no supported package manager /
+    passwordless privilege escalation is available. Uses
+    ``apt-get``/``dnf``/``yum``/``apk`` directly when already root, else via
+    ``sudo -n`` (never prompts for a password -- fails fast instead).
+    """
+    if mux_available(mux):
+        return True
+    if platform.system() == "Windows":
+        return False
+
+    import shutil
+    import subprocess
+
+    is_root = hasattr(os, "geteuid") and os.geteuid() == 0
+    sudo = None if is_root else shutil.which("sudo")
+    if not is_root and not sudo:
+        return False
+
+    for tool, install_argv in _TMUX_INSTALL_CANDIDATES:
+        if not shutil.which(tool):
+            continue
+        argv = list(install_argv) if is_root else [sudo, "-n", *install_argv]
+        try:
+            subprocess.run(
+                argv, capture_output=True, timeout=180, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if mux_available(mux):
+            return True
+    return False
+
+
 def headless_new_session(
     worktree_id: str,
     work_dir: str,

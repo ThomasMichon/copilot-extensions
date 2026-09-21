@@ -724,6 +724,42 @@ class BridgeClient:
                 return {}
             raise
 
+    def create_cli_mode_reservation(
+        self, worktree_id: str, *, ttl_seconds: float = 300.0,
+    ) -> dict[str, Any]:
+        """POST /api/v1/live-sessions/cli-mode-reservations/{worktree_id}.
+
+        Explicitly, per-request allocates the worktree's next CLI-mode Session
+        Host (agent-bridge-cli-mode-sessions Phase 2, §opt-in-not-ambient-default).
+        Raises ``BridgeClientError`` (status 409) if a not-yet-expired
+        reservation already holds this worktree (§one-host-per-cwd-lane).
+        """
+        return self._request(
+            "POST",
+            f"/api/v1/live-sessions/cli-mode-reservations/{worktree_id}",
+            {"worktree_id": worktree_id, "ttl_seconds": ttl_seconds},
+        ) or {}
+
+    def get_cli_mode_reservation(self, worktree_id: str) -> dict[str, Any]:
+        """GET /api/v1/live-sessions/cli-mode-reservations/{worktree_id}; {} if none."""
+        try:
+            return self._request(
+                "GET",
+                f"/api/v1/live-sessions/cli-mode-reservations/{worktree_id}",
+            ) or {}
+        except BridgeClientError as exc:
+            if exc.status == 404:
+                return {}
+            raise
+
+    def release_cli_mode_reservation(self, worktree_id: str) -> int:
+        """DELETE /api/v1/live-sessions/cli-mode-reservations/{worktree_id}."""
+        resp = self._request(
+            "DELETE",
+            f"/api/v1/live-sessions/cli-mode-reservations/{worktree_id}",
+        )
+        return (resp or {}).get("removed", 0)
+
     def send_live_message(
         self, session_id: str, *, sender: str, body: str,
         reply_to: str | None = None, kind: str = "prompt",

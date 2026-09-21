@@ -231,6 +231,58 @@ class TestCmdEmbody:
             "pane": "%5", "seed": "do the thing", "ready_timeout": 180.0,
         }
 
+    def test_ensure_mux_not_called_without_explicit_opt_in(self, monkeypatch, tmp_path):
+        # opt-in-not-ambient-default: a bare embody must never install tmux
+        # underneath an operator running their own terminal/session manager.
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtY")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtY.yaml").write_text("x")
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda p: type("Rec", (), {"worktree_path": "/w/wtY"})(),
+        )
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda *a, **k: {"ok": True, "session": "wt-wtY", "new_pane": "%1", "error": None},
+        )
+        called = []
+        monkeypatch.setattr(
+            sessions, "ensure_mux_available", lambda *a, **k: called.append(1) or True,
+        )
+
+        rc = m.cmd_embody(_ns(worktree_id="wtY"))
+
+        assert rc == 0
+        assert called == []
+
+    def test_ensure_mux_called_with_explicit_opt_in(self, monkeypatch, tmp_path):
+        # `cli-mode launch` (agent-bridge) is the deliberate per-request case
+        # that IS fine defaulting tmux on -- it passes --ensure-mux.
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtX")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtX.yaml").write_text("x")
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda p: type("Rec", (), {"worktree_path": "/w/wtX"})(),
+        )
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda *a, **k: {"ok": True, "session": "wt-wtX", "new_pane": "%1", "error": None},
+        )
+        called = []
+        monkeypatch.setattr(
+            sessions, "ensure_mux_available", lambda *a, **k: called.append(1) or True,
+        )
+
+        rc = m.cmd_embody(_ns(worktree_id="wtX", ensure_mux=True))
+
+        assert rc == 0
+        assert called == [1]
+
     def test_terminal_managed_worktree_refuses_embodiment(
         self,
         monkeypatch,

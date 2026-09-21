@@ -26,6 +26,7 @@ import { homedir, release } from "node:os";
 import { execFileSync, execSync } from "node:child_process";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
+import { buildDeliveredSendOptions } from "./delivery.mjs";
 
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
@@ -258,44 +259,6 @@ async function flushEvents() {
   }
 }
 
-// Render an incoming envelope as an ATTRIBUTED, ANSWERABLE agent-message. The
-// wrapper mirrors the runtime's own system markers (<system_reminder> /
-// <system_notification>) so a cooperating agent parses it as authoritative
-// structure: it can tell peer traffic from operator input, see who sent it, and
-// reply with the agent-bridge session catalog's exact argv[0] plus
-// `send <reply-to> "..."`.
-// Attribute values are escaped; the body is left literal (trusted single-
-// operator mesh) for readability.
-function escAttr(v) {
-  return String(v == null ? "" : v)
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-// A non-`prompt` kind (D2) asks only for a terse out-of-band acknowledgement --
-// it must NOT be treated as new work. The guidance line makes that explicit to
-// the receiving agent so a status ping doesn't spawn a task.
-const KIND_GUIDANCE = {
-  notify: "This is a NOTIFY (informational). No reply or new work is expected; " +
-    "acknowledge only if useful.",
-  "status-check": "This is a STATUS-CHECK. Answer tersely using the exact " +
-    "argv[0] from the agent-bridge session command catalog with " +
-    "`send <reply-to> \"...\"`; do NOT treat it as new work or start a task.",
-};
-
-function renderDeliveredPrompt(msg) {
-  const kind = msg.kind && msg.kind !== "prompt" ? String(msg.kind) : null;
-  const attrs = [`from="${escAttr(msg.sender || "unknown")}"`];
-  if (msg.reply_to) attrs.push(`reply-to="${escAttr(msg.reply_to)}"`);
-  if (typeof msg.id === "number") attrs.push(`msg-id="${msg.id}"`);
-  if (kind) attrs.push(`kind="${escAttr(kind)}"`);
-  const body = String(msg.body ?? "");
-  const guidance = kind && KIND_GUIDANCE[kind] ? `\n\n(${KIND_GUIDANCE[kind]})` : "";
-  return `<agent-message ${attrs.join(" ")}>\n${body}${guidance}\n</agent-message>`;
-}
-
 // Poll the bridge inbox and deliver pending messages into THIS session via
 // session.send (off the CLI event loop, on the poll timer). Delivery is on by
 // default; this does nothing only while the session is MUTED (/peer).
@@ -303,6 +266,19 @@ function renderDeliveredPrompt(msg) {
 // undelivered message is redelivered next tick rather than lost, and the ack
 // makes redelivery a no-op on the bridge (idempotent) rather than a double
 // injection.
+//
+// buildDeliveredSendOptions (delivery.mjs) always sets an explicit
+// `source: "agent-bridge"`, not cosmetic: SendRequest.source is the runtime's
+// own provenance tag (must be `user`, `system`, `command-<id>`,
+// `schedule-<id>`, or `agent-<agent-id>` -- see the generated API docs for
+// SendRequest). Omitting it lets the runtime's admission logic default an
+// immediate/visible send to `source: "user"` (apply_public_send_admission),
+// which makes a bridge-delivered message indistinguishable from the real
+// operator's own live keystrokes at the contention/steering layer -- exactly
+// the collision "prompt control is experimental until single-stream admission
+// is proven" warns about in docs/delegation-contract.md. Tagging every
+// delivery as an explicit `agent-` source keeps it on its own,
+// correctly-arbitrated lane.
 async function pollInbox() {
   if (state.delivering) return;
   if (!state.deliveryEnabled) return;
@@ -318,10 +294,7 @@ async function pollInbox() {
     for (const msg of messages) {
       if (!msg || typeof msg.id !== "number") continue;
       try {
-        await session.send({
-          prompt: renderDeliveredPrompt(msg),
-          displayPrompt: `Message from ${msg.sender || "peer"} (via agent-bridge)`,
-        });
+        await session.send(buildDeliveredSendOptions(msg));
         delivered.push(msg.id);
       } catch (e) {
         // Stop the batch on the first send failure; unacked messages redeliver.

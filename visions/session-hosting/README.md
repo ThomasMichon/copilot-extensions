@@ -278,6 +278,11 @@ continuation.
 - Human presentation: [picker](../picker/README.md)
 - Native host convergence:
   [native-convergence](../native-convergence/README.md)
+- Remote venue extension:
+  [remote-interactive-sessions](../remote-interactive-sessions/README.md) — how
+  a Session-host-provider's mechanics extend into a remote venue via a CLI mode
+  bound through explicit worktree-keyed reservation, rather than a parallel execution
+  protocol.
 
 ## Provenance
 

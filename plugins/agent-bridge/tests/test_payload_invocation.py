@@ -100,8 +100,21 @@ def test_out_of_session_boundaries_remain_explicit() -> None:
     extension = (
         PLUGIN / "extensions" / "agent-bridge" / "extension.mjs"
     ).read_text(encoding="utf-8")
-    assert "agent-bridge session command catalog" in extension
+    # KIND_GUIDANCE (the status-check reply instructions) moved out of
+    # extension.mjs into delivery.mjs during agent-bridge-cli-mode-sessions
+    # Phase 1 (extension.mjs's top-level joinSession() makes it untestable
+    # directly, so the pure rendering/options logic was extracted into a
+    # separately-importable module -- see delivery.mjs's own module docstring
+    # and extension.mjs's `import { buildDeliveredSendOptions } from
+    # "./delivery.mjs"`). extension.mjs still delivers that guidance to the
+    # operator at runtime through the import; the literal text now lives in
+    # delivery.mjs, not duplicated here.
+    delivery = (
+        PLUGIN / "extensions" / "agent-bridge" / "delivery.mjs"
+    ).read_text(encoding="utf-8")
+    assert "agent-bridge session command catalog" in delivery
     assert "`agent-bridge send <reply-to>" not in extension
+    assert "`agent-bridge send <reply-to>" not in delivery
 
 
 def test_list_command_docs_place_global_json_before_subcommand() -> None:

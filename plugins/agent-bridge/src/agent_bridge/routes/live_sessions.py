@@ -21,6 +21,8 @@ from fastapi.responses import StreamingResponse
 from ..models import (
     AckMessagesRequest,
     AckMessagesResult,
+    CliModeReservationInfo,
+    CreateCliModeReservationRequest,
     DelegatedResultSnapshot,
     IngestLiveEventsRequest,
     IngestLiveEventsResult,
@@ -152,6 +154,7 @@ def _to_info(row: dict[str, Any]) -> LiveSessionInfo:
         last_activity_at=row.get("last_activity_at"),
         liveness=_live_liveness(row),
         latest_progress=_parse_progress(row.get("latest_progress")),
+        cli_mode=bool(row.get("cli_mode")),
         registered_at=row["registered_at"],
         updated_at=row["updated_at"],
     )
@@ -212,6 +215,66 @@ async def register_live_session(
     if row is None:  # pragma: no cover -- write-then-read on the same connection
         raise HTTPException(status_code=500, detail="registration not persisted")
     return _to_info(row)
+
+
+# -- CLI-mode Session Host reservations (agent-bridge-cli-mode-sessions) -----
+#
+# An explicit, operator-initiated allocation made *before* a muxed, interactive
+# CLI process starts (§allocate-before-launch, §opt-in-not-ambient-default).
+# A later live-session registration for the same worktree_id atomically claims
+# it (see ``register_live_session`` above); nothing here changes the ordinary
+# registration flow's behavior when no reservation was ever created.
+
+
+@router.post(
+    "/cli-mode-reservations/{worktree_id}", response_model=CliModeReservationInfo
+)
+async def create_cli_mode_reservation(
+    worktree_id: str, body: CreateCliModeReservationRequest, request: Request
+) -> CliModeReservationInfo:
+    db = _db(request)
+    if body.worktree_id != worktree_id:
+        raise HTTPException(
+            status_code=400,
+            detail="worktree_id path segment and body must match",
+        )
+    now = time.time()
+    reservation_id = db.create_cli_mode_reservation(
+        worktree_id, now=now, ttl_seconds=body.ttl_seconds
+    )
+    if reservation_id is None:
+        # One-host-per-cwd-lane (§one-host-per-cwd-lane): a not-yet-expired
+        # reservation already holds this worktree.
+        raise HTTPException(
+            status_code=409,
+            detail={"reason": "reservation_active", "worktree_id": worktree_id},
+        )
+    row = db.get_cli_mode_reservation(worktree_id)
+    if row is None:  # pragma: no cover -- write-then-read on the same connection
+        raise HTTPException(status_code=500, detail="reservation not persisted")
+    return CliModeReservationInfo(**row)
+
+
+@router.get(
+    "/cli-mode-reservations/{worktree_id}", response_model=CliModeReservationInfo
+)
+async def get_cli_mode_reservation(
+    worktree_id: str, request: Request
+) -> CliModeReservationInfo:
+    db = _db(request)
+    row = db.get_cli_mode_reservation(worktree_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="no reservation for worktree")
+    return CliModeReservationInfo(**row)
+
+
+@router.delete("/cli-mode-reservations/{worktree_id}")
+async def release_cli_mode_reservation(
+    worktree_id: str, request: Request
+) -> dict[str, int]:
+    db = _db(request)
+    removed = db.release_cli_mode_reservation(worktree_id)
+    return {"removed": removed}
 
 
 @router.get("", response_model=LiveSessionListResponse)

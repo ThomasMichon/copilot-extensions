@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -196,6 +196,7 @@ CREATE TABLE IF NOT EXISTS live_sessions (
     turn_state TEXT,
     last_activity_at REAL,
     latest_progress TEXT,
+    cli_mode INTEGER NOT NULL DEFAULT 0,
     registered_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -217,6 +218,14 @@ CREATE TABLE IF NOT EXISTS worktree_ownership (
     session_id TEXT NOT NULL,
     reserved_at REAL NOT NULL,
     updated_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cli_mode_reservations (
+    worktree_id TEXT PRIMARY KEY,
+    reservation_id TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    claimed_by_session_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS pending_prompts (
