@@ -117,7 +117,13 @@ _PAGE = r"""<!doctype html>
       <div id="view-main" class="view">
         <pre id="mainlog"></pre>
         <div class="compose">
-          <input id="mainprompt" type="text" placeholder="Prompt the main Copilot CLI..." />
+          <select id="mainvenue" title="Where should a new task be solved?">
+            <option value="">venue: auto</option>
+            <option value="codespace">codespace</option>
+            <option value="container">container</option>
+            <option value="worktree">worktree</option>
+          </select>
+          <input id="mainprompt" type="text" placeholder="Give the main session a task..." />
           <button id="mainsend">Send</button>
         </div>
       </div>
@@ -312,7 +318,11 @@ function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 async function sendMain() {
   if (!sel || sel.kind !== "main") return;
-  const body = $("#mainprompt").value.trim(); if (!body) return;
+  const task = $("#mainprompt").value.trim(); if (!task) return;
+  const venue = $("#mainvenue").value;
+  // A venue hint is a machine-readable directive the orchestrator contract
+  // honors; the main session still runs venue-select to confirm it is viable.
+  const body = venue ? ("[venue: " + venue + "] " + task) : task;
   $("#mainprompt").value = "";
   try {
     await api(`/api/v1/live-sessions/${encodeURIComponent(sel.sid)}/messages`, {
