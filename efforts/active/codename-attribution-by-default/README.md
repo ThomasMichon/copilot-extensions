@@ -72,7 +72,8 @@ decided they want it (private/closed-circuit repos, not open ones).
 `agent_worktrees.config._parse_pr`/`_source_attribution` and consumed by
 `pr_ops.py`/`providers/attribution.py`:
 
-- `false` (current default) — no marker at all.
+- `false` (the default before this effort's Phase 1 landed; `"codename"` is
+  the default now) — no marker at all.
 - `true` — the full raw marker (worktree id, machine, session, head SHA);
   closed-circuit repos only.
 - `"codename"` — a public-safe marker carrying **only** the worktree's
