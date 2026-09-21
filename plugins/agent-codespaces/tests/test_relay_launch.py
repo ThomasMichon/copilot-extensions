@@ -94,6 +94,13 @@ def test_build_feed_token_exports_multiple_and_empty():
     assert "export A_TOKEN=" in two and "export B_TOKEN=" in two
 
 
+def test_build_feed_token_exports_skips_invalid_env_names():
+    assert build_feed_token_exports(["VALID_TOKEN", "bad-name", "A=B"]) == (
+        'export VALID_TOKEN="$($HOME/.local/bin/ado-auth-helper '
+        'get-access-token 2>/dev/null || true)"; '
+    )
+
+
 def test_build_identity_env_exports_emits_host_identity(monkeypatch):
     monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "tmichon")
     snippet = build_identity_env_exports(["GITHUB_USER"])
@@ -113,6 +120,14 @@ def test_build_identity_env_exports_multiple_and_empty(monkeypatch):
 def test_build_identity_env_exports_skips_when_identity_unavailable(monkeypatch):
     monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: None)
     assert build_identity_env_exports(["GITHUB_USER"]) == ""
+
+
+def test_build_identity_env_exports_skips_invalid_env_names(monkeypatch):
+    monkeypatch.setattr(
+        "agent_codespaces.relay_launch.current_identity",
+        lambda: (_ for _ in ()).throw(AssertionError("should not resolve identity")),
+    )
+    assert build_identity_env_exports(["bad-name", "A=B"]) == ""
 
 
 def test_build_relay_env_exports_identity_without_relay(monkeypatch):
@@ -201,6 +216,18 @@ def test_current_identity_keeps_non_user_principal_name(monkeypatch):
     monkeypatch.setattr(rl, "_az_argv", lambda args: ["az", *args])
     monkeypatch.setattr(rl.subprocess, "run", lambda *a, **k: Result())
     assert rl.current_identity() == "app://principal@example.com"
+
+
+def test_current_identity_rejects_multiline_value(monkeypatch):
+    import agent_codespaces.relay_launch as rl
+
+    class Result:
+        returncode = 0
+        stdout = '{"user":{"name":"someone\\nelse@example.com","type":"user"}}'
+
+    monkeypatch.setattr(rl, "_az_argv", lambda args: ["az", *args])
+    monkeypatch.setattr(rl.subprocess, "run", lambda *a, **k: Result())
+    assert rl.current_identity() is None
 
 
 def test_build_relay_launch_env(monkeypatch, tmp_path):

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import json
+import re
 import shlex
 import shutil
 import socket
@@ -49,6 +50,7 @@ RELAY_PORTMAP_DIR = "$HOME/.agent-bridge/relay-ports"
 # it never survives past this one launch's shell.
 AZURE_AUTH_HELPER_COMPAT_DIR = "$HOME/.cache/agent-codespaces/compat-path"
 _SUBPROCESS_FLAGS = no_window_flags()
+_ENV_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _az_argv(rest: list[str]) -> list[str] | None:
@@ -86,13 +88,21 @@ def current_identity(*, timeout: float = 10.0) -> str | None:
     if not isinstance(user, dict):
         return None
     raw = str(user.get("name") or "").strip()
-    if not raw:
+    if not raw or any(ch in raw for ch in "\r\n\0"):
         return None
     if str(user.get("type") or "").strip().casefold() == "user" and "@" in raw:
         alias = raw.split("@", 1)[0].strip()
         if alias:
             return alias
     return raw
+
+
+def _valid_env_names(var_names) -> list[str]:
+    """Return only safe shell env-var names."""
+    return [
+        name for name in (var_names or ())
+        if isinstance(name, str) and _ENV_VAR_NAME_RE.fullmatch(name)
+    ]
 
 
 def build_azure_auth_helper_compat_shim() -> str:
@@ -206,9 +216,7 @@ def build_feed_token_exports(var_names) -> str:
     outlives it re-borrows on the next launch, matching the relay's own model).
     """
     out = ""
-    for name in var_names or ():
-        if not name:
-            continue
+    for name in _valid_env_names(var_names):
         out += (
             f'export {name}="$({ADO_AUTH_HELPER} get-access-token '
             '2>/dev/null || true)"; '
@@ -226,14 +234,15 @@ def build_identity_env_exports(var_names) -> str:
     Azure bearers from; ordinary user principals export a short login-like
     alias, while other principal types keep the reported identity string.
     """
+    names = _valid_env_names(var_names)
+    if not names:
+        return ""
     identity = current_identity()
     if not identity:
         return ""
     out = ""
     quoted = shlex.quote(identity)
-    for name in var_names or ():
-        if not name:
-            continue
+    for name in names:
         out += f"export {name}={quoted}; "
     return out
 
