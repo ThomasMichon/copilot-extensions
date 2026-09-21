@@ -1442,6 +1442,44 @@ test("plainGitSync fails honestly when no origin remote exists to determine a de
   }
 });
 
+test("plainGitSync queries the remote directly for its default branch, not a stale local origin/HEAD cache", async () => {
+  // Real regression this guards: the local `origin/HEAD` symref is a cache
+  // set at clone time -- it can remain pointed at the remote's OLD default
+  // branch after the remote renames/changes it, silently fetching/rebasing
+  // onto the wrong branch while reporting a successful sync. Renames the
+  // "remote"'s default branch after cloning (so the clone's cached
+  // origin/HEAD still points at the old name) and confirms the sync
+  // correctly follows the NEW name via a direct remote query.
+  const origin = initGitRepo();
+  const clone = mkdtempSync(join(tmpdir(), "context-handoff-sync-clone-"));
+  try {
+    execFileSync("git", ["clone", "-q", origin, clone]);
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: clone });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: clone });
+    const cachedDefault = execFileSync(
+      "git", ["rev-parse", "--abbrev-ref", "origin/HEAD"], { cwd: clone, encoding: "utf-8" },
+    ).trim().replace(/^origin\//, "");
+    // Rename the remote's default branch and advance it -- the clone's
+    // cached origin/HEAD still points at the OLD name.
+    execFileSync("git", ["branch", "-m", cachedDefault, "renamed-default"], { cwd: origin });
+    writeFileSync(join(origin, "file.txt"), "one\ntwo\n");
+    execFileSync("git", ["add", "."], { cwd: origin });
+    execFileSync("git", ["commit", "-q", "-m", "second"], { cwd: origin });
+    const staleCache = execFileSync(
+      "git", ["rev-parse", "--abbrev-ref", "origin/HEAD"], { cwd: clone, encoding: "utf-8" },
+    ).trim();
+    assert.match(staleCache, new RegExp(cachedDefault), "test fixture's cached origin/HEAD did not stay stale as expected");
+    const result = await plainGitSync(clone);
+    assert.equal(result.synced, true, JSON.stringify(result));
+    assert.equal(
+      readFileSync(join(clone, "file.txt"), "utf-8").replace(/\r/g, "").trim(), "one\ntwo",
+    );
+  } finally {
+    rmSync(origin, { recursive: true, force: true });
+    rmSync(clone, { recursive: true, force: true });
+  }
+});
+
 test("plainGitSync rechecks for an in-progress rebase immediately before its own rebase exec, and never aborts it", async () => {
   // Real regression this guards: the remote-discovery + fetch awaits before
   // the rebase exec are exactly the kind of gap another process could start
