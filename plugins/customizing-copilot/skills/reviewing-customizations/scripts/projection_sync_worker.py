@@ -318,6 +318,16 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         projections.validate_repository_root(root)
+        # discover_enabled_sources() already hardcodes include_user=False
+        # and include_local=False internally when it calls
+        # assemble_enabled_plugins() -- machine-global (~/.copilot/
+        # settings.json) and repo-local-untracked (settings.local.json)
+        # layers are unconditionally excluded here, regardless of caller;
+        # only this repo's own committed settings can enable a source for
+        # this consent-gated, bypass-capable path. Covered by
+        # test_instruction_projections.py's discover_enabled_sources
+        # settings-layer test (repo-committed plugin included,
+        # user/local-only plugin excluded).
         sources = projections.discover_enabled_sources(root, require_trust=False)
     except ValueError as exc:
         _emit_error(str(exc), as_json=args.json)
