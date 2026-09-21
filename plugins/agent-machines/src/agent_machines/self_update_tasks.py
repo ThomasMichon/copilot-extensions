@@ -1,4 +1,15 @@
-"""Windows Scheduled Task management for agent-machines self-update."""
+"""Unattended-scheduling management for agent-machines self-update.
+
+Windows uses Scheduled Tasks (``schtasks``/``Register-ScheduledTask`` via
+PowerShell). Linux/WSL uses per-user ``systemd`` timers (``systemctl
+--user``) -- the same mechanism already used elsewhere in this facility for
+unattended per-user timers (e.g. ``vei-push-daemon.timer``,
+``agent-logger-sync.timer``), and reachable without an active login session
+when ``loginctl enable-linger`` has been set for the account. Both platforms
+share the same reconcile/status result shapes so callers (the CLI, the
+``self-update`` resource, and ``restore``'s drift reconciliation) never
+branch on platform themselves.
+"""
 
 from __future__ import annotations
 
@@ -365,6 +376,335 @@ def scheduled_task_retry_message(tier: str, *, existing: bool, machine: str | No
     )
 
 
+# --- Linux/WSL: per-user systemd timers ------------------------------------
+#
+# Mirrors the Windows Scheduled Task lifecycle above (query / register /
+# unregister / reconcile / status) using ``systemctl --user`` and a pair of
+# unit files (a oneshot ``.service`` plus its driving ``.timer``), the same
+# pattern already used elsewhere in this facility for unattended per-user
+# timers. Reachable without an active login session once ``loginctl
+# enable-linger <user>`` is set (`systemd`'s own mechanism for "run this
+# user's units even when they're logged out" -- not managed by this module).
+
+
+def _linux_unit_dir(home: Path | None = None) -> Path:
+    base = home if home is not None else Path.home()
+    return base / ".config" / "systemd" / "user"
+
+
+def _linux_service_name(tier: str) -> str:
+    return f"{TIER_SPECS[tier].task_name}.service"
+
+
+def _linux_timer_name(tier: str) -> str:
+    return f"{TIER_SPECS[tier].task_name}.timer"
+
+
+def _linux_service_unit_path(tier: str, home: Path | None = None) -> Path:
+    return _linux_unit_dir(home) / _linux_service_name(tier)
+
+
+def _linux_timer_unit_path(tier: str, home: Path | None = None) -> Path:
+    return _linux_unit_dir(home) / _linux_timer_name(tier)
+
+
+def _linux_exec_start(tier: str, *, machine: str | None = None) -> str:
+    parts = [task_runtime_python(), "-m", "agent_machines", "self-update", "run", "--tier", tier]
+    if machine:
+        parts.extend(["--machine", machine])
+    # systemd ExecStart= splits on whitespace itself; no extra quoting needed
+    # since none of these arguments can contain spaces.
+    return " ".join(parts)
+
+
+def render_linux_service_unit(
+    tier: str, *, machine: str | None = None, home: Path | None = None
+) -> str:
+    return (
+        "[Unit]\n"
+        f"Description={task_description(tier)}\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        f"WorkingDirectory={task_working_directory(home)}\n"
+        f"ExecStart={_linux_exec_start(tier, machine=machine)}\n"
+    )
+
+
+def render_linux_timer_unit(tier: str) -> str:
+    spec = TIER_SPECS[tier]
+    schedule = (
+        "OnBootSec=5min\nOnUnitActiveSec=1h\n"
+        if spec.schedule_kind == "hourly"
+        else "OnCalendar=*-*-* 03:00:00\n"
+    )
+    return (
+        "[Unit]\n"
+        f"Description={task_description(tier)}\n"
+        "\n"
+        "[Timer]\n"
+        f"{schedule}"
+        "Persistent=true\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
+    )
+
+
+def linux_systemd_user_available(*, resolve_binary, runner) -> bool:
+    """Best-effort probe: is a reachable ``systemctl --user`` manager here?
+
+    Distinguishes "systemd isn't the init system / no user manager" (skip
+    quietly, matching the existing Windows-absent behavior on non-Windows
+    platforms without one) from a real failure worth surfacing.
+    """
+    if resolve_binary("systemctl") is None:
+        return False
+    try:
+        result = runner(["systemctl", "--user", "is-system-running"], timeout=15)
+    except Exception:
+        return False
+    # "running" and "degraded" both mean the user manager itself is up and
+    # answering; only a hard failure to reach it (non-zero with no output,
+    # timeout, or missing binary) means "unavailable here".
+    return result.returncode == 0 or bool(result.stdout.strip())
+
+
+def query_systemd_timer(
+    tier: str,
+    *,
+    machine: str | None = None,
+    runner,
+    resolve_binary,
+    home: Path | None = None,
+) -> ScheduledTaskSnapshot:
+    task_name = _linux_timer_name(tier)
+    service_path = _linux_service_unit_path(tier, home)
+    timer_path = _linux_timer_unit_path(tier, home)
+    if not (service_path.exists() and timer_path.exists()):
+        return ScheduledTaskSnapshot(task_name=task_name, present=False)
+    enabled_result = runner(["systemctl", "--user", "is-enabled", task_name], timeout=30)
+    active_result = runner(["systemctl", "--user", "is-active", task_name], timeout=30)
+    enabled = enabled_result.stdout.strip() == "enabled"
+    state = active_result.stdout.strip() or None
+    expected_service = render_linux_service_unit(tier, machine=machine, home=home)
+    expected_timer = render_linux_timer_unit(tier)
+    try:
+        actual_service = service_path.read_text(encoding="utf-8")
+        actual_timer = timer_path.read_text(encoding="utf-8")
+    except OSError:
+        actual_service = actual_timer = None
+    matching = enabled and actual_service == expected_service and actual_timer == expected_timer
+    spec = TIER_SPECS[tier]
+    return ScheduledTaskSnapshot(
+        task_name=task_name,
+        present=True,
+        enabled=enabled,
+        state=state,
+        logon_type="systemd-user",
+        description=task_description(tier),
+        execute=task_runtime_python(),
+        arguments=_linux_exec_start(tier, machine=machine),
+        working_directory=task_working_directory(home),
+        trigger_kind=spec.schedule_kind,
+        trigger_value=spec.schedule_value,
+        matching=matching,
+    )
+
+
+def register_systemd_timer(
+    tier: str,
+    *,
+    machine: str | None = None,
+    runner,
+    resolve_binary,
+    home: Path | None = None,
+):
+    unit_dir = _linux_unit_dir(home)
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    _linux_service_unit_path(tier, home).write_text(
+        render_linux_service_unit(tier, machine=machine, home=home), encoding="utf-8"
+    )
+    _linux_timer_unit_path(tier, home).write_text(render_linux_timer_unit(tier), encoding="utf-8")
+    reloaded = runner(["systemctl", "--user", "daemon-reload"], timeout=60)
+    if reloaded.returncode != 0:
+        return reloaded
+    return runner(["systemctl", "--user", "enable", "--now", _linux_timer_name(tier)], timeout=60)
+
+
+def unregister_systemd_timer(
+    tier: str,
+    *,
+    runner,
+    resolve_binary,
+    home: Path | None = None,
+):
+    timer_name = _linux_timer_name(tier)
+    # Best-effort: a timer that's present on disk but never loaded into
+    # systemd (e.g. a prior write that failed before daemon-reload) has
+    # nothing to disable; ignore that failure and still clean up the files.
+    runner(["systemctl", "--user", "disable", "--now", timer_name], timeout=60)
+    service_path = _linux_service_unit_path(tier, home)
+    timer_path = _linux_timer_unit_path(tier, home)
+    if service_path.exists():
+        service_path.unlink()
+    if timer_path.exists():
+        timer_path.unlink()
+    return runner(["systemctl", "--user", "daemon-reload"], timeout=60)
+
+
+def _reconcile_linux_timer(
+    tier: str,
+    *,
+    desired_present: bool,
+    machine: str | None = None,
+    runner,
+    resolve_binary,
+    record_task_config,
+    home: Path | None = None,
+) -> ScheduledTaskReconcileResult:
+    desired_state = "present" if desired_present else "absent"
+    if not linux_systemd_user_available(resolve_binary=resolve_binary, runner=runner):
+        return ScheduledTaskReconcileResult(
+            tier=tier,
+            desired_state=desired_state,
+            status="skipped",
+            changed=False,
+            detail=(
+                "no reachable systemd --user manager on this host; self-update "
+                "scheduling is unavailable here (Windows uses Scheduled Tasks; "
+                "Linux/WSL needs a running `systemctl --user` session)"
+            ),
+        )
+    snapshot = query_systemd_timer(
+        tier, machine=machine, runner=runner, resolve_binary=resolve_binary, home=home
+    )
+    try:
+        if desired_present:
+            if snapshot.present and snapshot.matching:
+                record_task_config(
+                    home, tier, installed=True, opted_in=True, attempted_elevation=False
+                )
+                return ScheduledTaskReconcileResult(
+                    tier=tier,
+                    desired_state=desired_state,
+                    status="ok",
+                    changed=False,
+                    detail="systemd --user timer is already registered",
+                    snapshot=snapshot,
+                )
+            registered = register_systemd_timer(
+                tier, machine=machine, runner=runner, resolve_binary=resolve_binary, home=home
+            )
+            if registered.returncode != 0:
+                raise RuntimeError(
+                    registered.output or f"failed to register systemd timer {snapshot.task_name!r}"
+                )
+            current = query_systemd_timer(
+                tier, machine=machine, runner=runner, resolve_binary=resolve_binary, home=home
+            )
+            record_task_config(
+                home, tier, installed=True, opted_in=True, attempted_elevation=False
+            )
+            return ScheduledTaskReconcileResult(
+                tier=tier,
+                desired_state=desired_state,
+                status="changed",
+                changed=True,
+                detail="registered the systemd --user timer",
+                snapshot=current,
+            )
+        if not snapshot.present:
+            record_task_config(
+                home, tier, installed=False, opted_in=False, attempted_elevation=False
+            )
+            return ScheduledTaskReconcileResult(
+                tier=tier,
+                desired_state=desired_state,
+                status="ok",
+                changed=False,
+                detail="systemd --user timer is already absent",
+                snapshot=snapshot,
+            )
+        removed = unregister_systemd_timer(
+            tier, runner=runner, resolve_binary=resolve_binary, home=home
+        )
+        if removed.returncode != 0:
+            raise RuntimeError(
+                removed.output or f"failed to remove systemd timer {snapshot.task_name!r}"
+            )
+        record_task_config(home, tier, installed=False, opted_in=False, attempted_elevation=False)
+        snapshot.present = False
+        snapshot.enabled = False
+        snapshot.matching = False
+        return ScheduledTaskReconcileResult(
+            tier=tier,
+            desired_state=desired_state,
+            status="changed",
+            changed=True,
+            detail="removed the systemd --user timer",
+            snapshot=snapshot,
+        )
+    except Exception as exc:
+        return ScheduledTaskReconcileResult(
+            tier=tier,
+            desired_state=desired_state,
+            status="error",
+            changed=False,
+            detail=str(exc),
+            snapshot=snapshot,
+        )
+
+
+def _linux_timer_status(
+    tier: str,
+    *,
+    opted_in: bool,
+    machine: str | None = None,
+    runner,
+    resolve_binary,
+    home: Path | None = None,
+) -> ScheduledTaskStatus:
+    observed = tier_status(home, tier)
+    if not linux_systemd_user_available(resolve_binary=resolve_binary, runner=runner):
+        return ScheduledTaskStatus(
+            tier=tier,
+            opted_in=opted_in,
+            task_name=_linux_timer_name(tier),
+            registered=False,
+            enabled=None,
+            matching=False,
+            state=None,
+            detail=(
+                "no reachable systemd --user manager on this host; self-update "
+                "scheduling is unavailable here"
+            ),
+            last_attempt=observed.last_attempt,
+            last_success=observed.last_success,
+        )
+    snapshot = query_systemd_timer(
+        tier, machine=machine, runner=runner, resolve_binary=resolve_binary, home=home
+    )
+    if not snapshot.present:
+        detail = "systemd --user timer is not registered"
+    elif snapshot.matching:
+        detail = "systemd --user timer is registered"
+    else:
+        detail = "systemd --user timer is present but does not match the expected definition"
+    return ScheduledTaskStatus(
+        tier=tier,
+        opted_in=opted_in,
+        task_name=snapshot.task_name,
+        registered=snapshot.present,
+        enabled=snapshot.enabled,
+        matching=snapshot.matching,
+        state=snapshot.state,
+        detail=detail,
+        last_attempt=observed.last_attempt,
+        last_success=observed.last_success,
+    )
+
+
 def reconcile_scheduled_task(
     tier: str,
     *,
@@ -376,12 +716,14 @@ def reconcile_scheduled_task(
     home: Path | None = None,
 ) -> ScheduledTaskReconcileResult:
     if sys.platform != "win32":
-        return ScheduledTaskReconcileResult(
-            tier=tier,
-            desired_state="present" if desired_present else "absent",
-            status="skipped",
-            changed=False,
-            detail="Scheduled Task reconciliation is supported only on Windows",
+        return _reconcile_linux_timer(
+            tier,
+            desired_present=desired_present,
+            machine=machine,
+            runner=runner,
+            resolve_binary=resolve_binary,
+            record_task_config=record_task_config,
+            home=home,
         )
     snapshot = query_scheduled_task(
         tier,
@@ -523,17 +865,13 @@ def scheduled_task_status(
 ) -> ScheduledTaskStatus:
     observed = tier_status(home, tier)
     if sys.platform != "win32":
-        return ScheduledTaskStatus(
-            tier=tier,
+        return _linux_timer_status(
+            tier,
             opted_in=opted_in,
-            task_name=TIER_SPECS[tier].task_name,
-            registered=False,
-            enabled=None,
-            matching=False,
-            state=None,
-            detail="Scheduled Tasks are supported only on Windows",
-            last_attempt=observed.last_attempt,
-            last_success=observed.last_success,
+            machine=machine,
+            runner=runner,
+            resolve_binary=resolve_binary,
+            home=home,
         )
     snapshot = query_scheduled_task(
         tier,
