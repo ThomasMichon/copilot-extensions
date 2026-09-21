@@ -18697,10 +18697,17 @@ def _uninstall_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | No
 def _update_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | None = None) -> str:
     """Update (or install) a single copilot-extensions plugin payload.
 
-    Idempotent and network-facing. Chooses ``update`` when the payload is
-    already installed, else ``install``; on a failed ``update`` for a plugin
-    that is not actually installed it falls back to ``install``. Never raises:
-    a single plugin's failure is reported as a short status string so the
+    Idempotent and network-facing. Chooses ``update`` when the payload
+    directory is already present, else ``install``. If that attempt exits
+    non-zero (an exception -- ``copilot`` missing, a preservation error, a
+    timeout -- returns immediately without retrying), retries with
+    ``install`` -- a plugin whose payload directory exists (bootstrap-
+    installed, never through an interactive ``copilot plugin install``) has
+    no ledger entry in Copilot's own plugin manager, so ``update`` fails "not
+    installed" even though the payload is genuinely present; ``install`` is
+    the only verb that backfills that ledger entry, and re-running it
+    against an already-current payload is a proven no-op. Never raises: a
+    single plugin's failure is reported as a short status string so the
     caller can continue with the rest.
 
     Returns one of ``"OK"``, ``"OK (installed)"``, or an error description.
@@ -18745,15 +18752,21 @@ def _update_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | None 
             output.ok(line)
         return "OK" if installed else "OK (installed)"
 
-    # Non-zero. If we tried to update but the plugin was not actually
-    # installed, fall back to a fresh install.
+    # Non-zero. A payload directory existing on disk (``installed``) does NOT
+    # mean Copilot's own plugin manager has a ledger entry for it -- a plugin
+    # whose payload was bootstrap-installed (a direct file copy into
+    # installed-plugins/, never through an interactive `copilot plugin
+    # install`) has no such ledger entry, so `update` fails with "not
+    # installed" even though the payload is right there. Retry with
+    # `install` in BOTH cases (``installed`` or not) -- it is idempotent and
+    # safe to re-run against an already-correct payload (verified: no
+    # content drift, no activation-state change), and it is the only verb
+    # that backfills the missing ledger entry. Only report failure once the
+    # install retry ALSO fails.
     if installed:
-        output.warn(
-            f"Plugin update for {name} returned non-zero (continuing with installed version)"
-        )
-        return f"update exited {r.returncode}"
-
-    output.info(f"Plugin install for {name} returned non-zero -- retrying")
+        output.info(f"Plugin update for {name} returned non-zero -- retrying with install")
+    else:
+        output.info(f"Plugin install for {name} returned non-zero -- retrying")
     try:
         r2 = _run("install")
     except (
@@ -18767,6 +18780,11 @@ def _update_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | None 
         for line in r2.stdout.strip().splitlines():
             output.ok(line)
         return "OK (installed)"
+    if installed:
+        output.warn(
+            f"Plugin update for {name} returned non-zero (continuing with installed version)"
+        )
+        return f"update exited {r.returncode}"
     output.warn(f"Plugin install for {name} returned non-zero (skipping)")
     return f"install exited {r2.returncode}"
 
