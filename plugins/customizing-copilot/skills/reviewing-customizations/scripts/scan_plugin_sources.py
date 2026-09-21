@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -21,6 +22,25 @@ class PluginSource:
     the plugin is **external** (installed from another marketplace) -- its skills
     are reference-only for collision detection, while agent safety findings are
     advisory and carry an upstream remediation pointer.
+
+    ``commit`` is a best-effort immutable git commit SHA captured at
+    *discovery* time -- when (and only when) the payload lives inside a
+    trusted git working tree (this repo's own tree, or a checkout resolved
+    via the ``agent-worktrees-repo`` source kind), empty otherwise (e.g. a
+    plain installed-plugins payload copy with no local git history, or an
+    arbitrary ``directory`` source with no verifiable provenance). It can
+    go stale between discovery and use (e.g. across a `refresh` that
+    advances the checkout) -- :func:`resolve_pinned_commits` re-probes
+    fresh rather than trusting this field for exactly that reason.
+    ``is_local_checkout`` marks which sources are even eligible for that
+    re-probe: only ``controlled`` (this reviewing repo's own tree) or a
+    footprint resolved via ``agent-worktrees-repo`` (a registered, named
+    repo looked up through the trusted ``agent-worktrees`` CLI) qualify --
+    a plain ``directory`` source is an arbitrary local path declared in a
+    marketplace manifest with no provenance guarantee at all (it could
+    point at a payload copied into a subdirectory of some entirely
+    unrelated git repository), and an installed-plugins footprint is
+    always a copied external payload; neither is ever re-probed or pinned.
     """
 
     skills_root: Path
@@ -28,6 +48,8 @@ class PluginSource:
     controlled: bool = False
     source: str = ""
     version: str = ""
+    commit: str = ""
+    is_local_checkout: bool = False
 
     @property
     def payload_root(self) -> Path:
@@ -177,6 +199,179 @@ def _plugin_version(footprint: Path) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+_GIT_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+#: Git environment variables that let a subprocess override which
+#: repository/worktree/object-store it operates against, independent of
+#: the ``-C <path>`` argument -- an ambient `GIT_DIR`/`GIT_WORK_TREE`/object-
+#: directory value inherited from the caller's environment must never be
+#: allowed to redirect a provenance probe at an unrelated repository.
+_GIT_ENV_PREFIX = "GIT_"
+
+
+def _git_isolated_env() -> dict[str, str]:
+    """A subprocess environment with every ``GIT_*`` variable stripped.
+
+    Mirrors the repository-identity isolation pattern used elsewhere in the
+    facility's own git-identity probes (an inherited `GIT_DIR`/
+    `GIT_WORK_TREE`/object-directory override must never let a caller
+    redirect this probe at a different repository than the one named by
+    ``-C``).
+    """
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(_GIT_ENV_PREFIX)
+    }
+
+
+def _payload_is_clean(git: str, footprint: Path) -> bool:
+    """Whether ``footprint`` has no local modifications, untracked, or
+    ignored files.
+
+    ``git rev-parse HEAD`` alone only proves the *containing repository's*
+    current commit -- it says nothing about whether the payload on disk at
+    ``footprint`` actually matches that commit. A dirty or untracked file
+    within the payload would otherwise still receive a valid-looking pin,
+    letting the bypass path publish content that was never present at the
+    pinned commit. ``git status --porcelain --ignored --untracked-files=all``
+    scoped to ``footprint`` (via ``-C`` + a ``.`` pathspec) reports
+    staged/unstaged modifications, untracked files, **and** ignored files --
+    plain ``--porcelain`` alone omits ignored entries, and
+    ``--untracked-files=all`` is required too: a caller's (or the ambient
+    environment's) ``status.showUntrackedFiles=no`` config would otherwise
+    silently hide a genuinely new, uncommitted payload file from even the
+    default untracked reporting. An ignored-but-still-read file (the
+    projection scanner does not consult ``.gitignore``) is exactly as
+    unproven against ``HEAD`` as an untracked one. Any output at all means
+    the payload is not a faithful checkout of ``HEAD`` -- this deliberately
+    over-rejects (e.g. a stray `__pycache__`/build-cache directory inside
+    the payload also blocks pinning) rather than trying to distinguish
+    "harmless" ignored content from real payload drift.
+    """
+    try:
+        result = subprocess.run(
+            [
+                git, "-C", str(footprint),
+                "status", "--porcelain", "--ignored", "--untracked-files=all",
+                "--", ".",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=_git_isolated_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and not result.stdout.strip()
+
+
+def _git_head(git: str, footprint: Path) -> str:
+    """Return ``footprint``'s current ``HEAD`` commit SHA, or ``""``."""
+    try:
+        result = subprocess.run(
+            [git, "-C", str(footprint), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=_git_isolated_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    sha = result.stdout.strip()
+    return sha if _GIT_COMMIT_SHA.fullmatch(sha) else ""
+
+
+def _plugin_commit(footprint: Path) -> str:
+    """Return the immutable git commit SHA a payload was checked out at.
+
+    Only resolvable when ``footprint`` lives inside a real git working tree
+    -- this repo's own directory-marketplace plugins, or an
+    ``agent-worktrees-repo`` checkout, are the two cases that qualify today
+    -- **and** that payload has no local modifications, untracked, or
+    ignored files (see :func:`_payload_is_clean`): a dirty checkout cannot
+    be pinned, since the commit it would report no longer describes what is
+    actually on disk. Returns ``""`` -- never raises -- for every other
+    case: git is unavailable, the footprint is not inside a git working
+    tree, the payload is dirty, or any command fails for any reason. Every
+    git subprocess runs with `GIT_*` environment variables stripped (see
+    :func:`_git_isolated_env`) so an inherited `GIT_DIR`/`GIT_WORK_TREE`
+    override can never redirect this probe at an unrelated repository.
+    Deliberately never attempts to resolve a commit for a plain
+    installed-plugins payload copy (no local git history to read there) --
+    that remains a genuinely unsolved case (see
+    ``efforts/active/ambient-guidance-navigability``'s Journal), not
+    something to guess at. **Callers must only invoke this against a
+    trusted-checkout footprint** (``controlled`` -- this reviewing repo's
+    own tree -- or one resolved via the ``agent-worktrees-repo`` source
+    kind) -- a plain ``directory`` source is an arbitrary local path with
+    no provenance guarantee, and an installed-plugins footprint is always a
+    copied external payload with no source-commit provenance of its own,
+    even when either happens to live under some unrelated enclosing git
+    checkout; `assemble_enabled_plugins` and `_sources_from_raw_dir`
+    enforce this by construction (see their own call sites, and
+    `PluginSource.is_local_checkout`) rather than this function guessing at
+    the caller's intent.
+
+    **HEAD is read before *and* after the cleanliness check**, and both
+    reads must agree: the clean check and a single ``rev-parse`` are two
+    separate subprocesses with no shared lock, so a payload modified in the
+    gap between them could otherwise still report a stale, no-longer-
+    accurate ``HEAD`` as clean. Reading ``HEAD`` again immediately after
+    and requiring it to be unchanged catches any concurrent commit/checkout
+    that moved it during the probe -- it does not eliminate every possible
+    race against a payload change (no purely read-only, unlocked probe
+    can), but it closes the specific, easily-observable window between this
+    function's own two subprocess calls.
+    """
+    git = shutil.which("git")
+    if git is None:
+        return ""
+    head_before = _git_head(git, footprint)
+    if not head_before:
+        return ""
+    if not _payload_is_clean(git, footprint):
+        return ""
+    head_after = _git_head(git, footprint)
+    return head_after if head_after and head_after == head_before else ""
+
+
+def resolve_pinned_commits(sources: list[PluginSource]) -> dict[str, str]:
+    """Build a ``"<plugin>@<marketplace>" -> commit SHA`` map from ``sources``.
+
+    **Re-probes each eligible source's commit fresh at call time** -- it
+    does NOT trust :attr:`PluginSource.commit` (captured at discovery time,
+    which can precede a `refresh` that advances a directory-marketplace
+    checkout; using the stale field would let a payload that changed during
+    refresh still satisfy the pin conjunct with its old SHA). Only sources
+    with :attr:`PluginSource.is_local_checkout` are even eligible for
+    re-probing -- an installed-plugins payload copy is never re-probed or
+    pinned, no matter what its (informational-only) ``commit`` field says.
+    A source this resolver could not pin (today: any plain
+    installed-plugins payload copy, or a local checkout that is currently
+    dirty) is simply absent from the map, so
+    ``projection_reflect.bypass_decision``'s ``pinned_commits`` conjunct
+    correctly treats it as unpinned (fail-closed, review-only) rather than
+    silently vacuously trusted. This is an honestly **partial** resolver: it
+    closes the immutable-pin gap for self-hosted/directory-marketplace
+    sources today, and does not invent an answer for externally-installed
+    ones (see ``efforts/active/ambient-guidance-navigability``'s tracked
+    follow-up, issue #3132, for that remaining half).
+    """
+    pinned: dict[str, str] = {}
+    for source in sources:
+        if not source.is_local_checkout:
+            continue
+        commit = _plugin_commit(source.payload_root)
+        if commit:
+            pinned[f"{source.plugin_name}@{source.marketplace}"] = commit
+    return pinned
 
 
 def _plugin_manifest_path(footprint: Path) -> Path:
@@ -414,6 +609,20 @@ def assemble_enabled_plugins(
         )
 
         footprint = _directory_marketplace_plugin(mkt, name, declaration, base)
+        # A directory-marketplace footprint is only trusted checkout
+        # provenance when it is EITHER this reviewing repo's own tree
+        # (`controlled`) OR resolved via the `agent-worktrees-repo` source
+        # kind (a registered, named repo looked up through the trusted
+        # `agent-worktrees` CLI). A plain `directory` source is an
+        # arbitrary local path declared in the marketplace manifest -- it
+        # could point at a payload copied into a subdirectory of some
+        # entirely unrelated git repository, so `footprint is not None`
+        # alone is not proof of provenance. An installed_root footprint
+        # (the `else` branch below) is always a copied external payload
+        # with no source-commit provenance of its own. `_plugin_commit()`
+        # must never run against anything that fails this check: doing so
+        # could return an unrelated enclosing repository's HEAD and let
+        # `requireImmutablePin` accept the wrong identity.
         if footprint is not None:
             try:
                 controlled = (
@@ -422,12 +631,14 @@ def assemble_enabled_plugins(
                 )
             except Exception:
                 controlled = False
+            is_local_checkout = controlled or src_kind == "agent-worktrees-repo"
             skills_root = footprint / "skills"
             source_url = "" if controlled else _plugin_repo_url(footprint)
         else:
             footprint = installed_root / mkt / name if mkt else installed_root / name
             skills_root = footprint / "skills"
             controlled = False
+            is_local_checkout = False
             source_url = ""
             if isinstance(src, dict) and src_kind == "github" and src.get("repo"):
                 source_url = f"https://github.com/{str(src['repo']).strip()}"
@@ -441,6 +652,8 @@ def assemble_enabled_plugins(
                 controlled=controlled,
                 source=source_url,
                 version=_plugin_version(footprint),
+                commit=_plugin_commit(footprint) if is_local_checkout else "",
+                is_local_checkout=is_local_checkout,
             )
         )
     return out
@@ -460,6 +673,12 @@ def _sources_from_raw_dir(root: Path) -> list[PluginSource]:
                 controlled=False,
                 source=_plugin_repo_url(plugin_dir),
                 version=_plugin_version(plugin_dir),
+                # This converts a raw *installed-plugins* tree -- a copied
+                # external payload with no source-commit provenance of its
+                # own -- into external sources; never call _plugin_commit()
+                # here (it could accidentally return an enclosing checkout's
+                # HEAD and mark a copied payload as pinned).
+                commit="",
             )
         )
     return out

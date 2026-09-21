@@ -55,6 +55,29 @@ def test_valid_consent_loads(tmp_path: Path) -> None:
         trusted_marketplaces=("copilot-extensions",),
         dispatch_label="projection-conflict",
     )
+    assert result.require_immutable_pin is False
+
+
+def test_require_immutable_pin_defaults_false_when_absent(tmp_path: Path) -> None:
+    _write(tmp_path, _valid_payload())
+
+    result = consent.load_consent(tmp_path)
+
+    assert result.require_immutable_pin is False
+
+
+def test_require_immutable_pin_true_is_honored(tmp_path: Path) -> None:
+    _write(tmp_path, _valid_payload(requireImmutablePin=True))
+
+    result = consent.load_consent(tmp_path)
+
+    assert result.require_immutable_pin is True
+
+
+def test_require_immutable_pin_non_bool_is_not_consent(tmp_path: Path) -> None:
+    _write(tmp_path, _valid_payload(requireImmutablePin="true"))
+
+    assert consent.load_consent(tmp_path) is None
 
 
 def test_setup_declines_without_opt_in_file(tmp_path: Path) -> None:

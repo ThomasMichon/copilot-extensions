@@ -283,12 +283,22 @@ private paths).
       `setting-up-instruction-sync-worker` scaffolder template was updated
       to call `run_sync_pass()` instead of hand-rolling the sequence.
       **What remains open** is solely the deep byte-exact
-      recompute-against-a-pinned-artifact verification described above,
-      which depends on the still-missing marketplace-source commit resolver
-      (tracked in #3132) to actually populate `projection_reflect.py`'s
-      `pinned_commits` map for a real run -- `run_sync_pass()` already wires
-      that parameter through today, so wiring in a real resolver's output
-      requires no further orchestration change here.
+      recompute-against-a-pinned-artifact verification described above.
+      **2026-09-21: partially closed.** `scan_plugin_sources.
+      resolve_pinned_commits()` is a real, honestly-partial resolver: it
+      resolves an immutable commit SHA (`git rev-parse HEAD`) for a
+      self-hosted/directory-marketplace source's own payload root, and is
+      simply absent from the map for anything it cannot resolve (today: any
+      plain installed-plugins payload copy -- the common case for an
+      externally-installed marketplace plugin, which has no local git
+      history to read). The consent schema gained an opt-in
+      `requireImmutablePin` (default `false`) so enforcing the pin conjunct
+      never silently disables the bypass path for the common
+      externally-installed case; a repo that only syncs self-hosted plugins
+      can opt in today. **What remains open, tracked in #3132:** an
+      externally-installed marketplace plugin can still never be pinned --
+      that needs either an install-time provenance record or a
+      marketplace-release-API lookup, deliberately not guessed at here.
 - [x] **Conflict-dispatch primitive**: a reusable helper (candidate home:
       `agent-dispatch`, since dispatch itself is a copilot-extensions
       plugin) generalizing `config-reflect`'s `conflict_dispatch.py` pattern
@@ -915,4 +925,122 @@ green at that point. That round's findings were genuinely still open:
   merged. Only the deep byte-exact recompute-against-a-pinned-artifact
   verification remains open, gated on the still-missing marketplace-source
   commit resolver (#3132) -- unchanged from the prior entry's assessment.
+
+### 2026-09-21 (cont.) -- Partial immutable-pin resolver (issue #3132, half closed)
+
+Took on the still-open half of the immutable-pin gap directly, but scoped
+honestly rather than guessing at the full answer.
+
+- Confirmed via `scan_plugin_sources.py`'s existing code (not a new
+  investigation -- this was already documented) that the two candidate
+  sources genuinely differ: a self-hosted/directory-marketplace plugin's
+  `payload_root` lives inside this repo's (or an `agent-worktrees-repo`'s)
+  real git working tree, while an externally-installed marketplace
+  plugin's `installed_root` footprint is a plain file copy with no local
+  git history at all.
+- Added `_plugin_commit(footprint)`: resolves `git rev-parse HEAD` inside
+  `footprint` (non-blocking, 5s timeout, validates the 40-hex SHA shape),
+  returning `""` -- never raising -- for every case with no trustworthy
+  commit (git unavailable, not a git working tree, command failure).
+  Wired into `PluginSource.commit` at both `assemble_enabled_plugins`
+  construction sites and `_sources_from_raw_dir`.
+- Added `resolve_pinned_commits(sources) -> dict[str, str]`: builds the
+  `"<plugin>@<marketplace>" -> commit SHA` map `projection_reflect.
+  bypass_decision`'s `pinned_commits` parameter already accepted (landed
+  2026-09-20) -- a source with no resolved commit is simply absent, so the
+  existing fail-closed conjunct treats it as unpinned rather than this
+  resolver inventing an answer for it.
+- **Deliberately did not make pin enforcement unconditional.** Wiring
+  `resolve_pinned_commits()`'s output into every real CLI run by default
+  would have silently made *every* externally-installed-marketplace sync
+  permanently review-only (since that source can never be pinned today) --
+  a major, undiscussed behavior regression for the exact adopter case this
+  whole effort's audit was motivated by. Instead extended
+  `projection_reflect_consent.Consent` with an optional
+  `requireImmutablePin` (default `false` when absent, strictly validated
+  as a real boolean when present -- a non-bool value fails the whole
+  consent file closed rather than guessing an interpretation): the CLI
+  only computes and enforces pins when a repo's own committed consent
+  explicitly opts in.
+- 13 new tests: `_plugin_commit` resolves inside a real git checkout /
+  empty outside one / empty when git is unavailable;
+  `resolve_pinned_commits` includes only resolved sources (in
+  `test_scan_customizations.py`); `Consent.require_immutable_pin` defaults
+  false / honors an explicit `true` / rejects a non-bool value (in
+  `test_projection_reflect_consent.py`); and three CLI-level tests proving
+  the wiring (default ignores the requirement, `true` blocks an unpinned
+  source, `true` permits a pinned one, in `test_projection_sync_worker.py`).
+  Updated `reviewing-customizations/SKILL.md` and
+  `setting-up-instruction-sync-worker/SKILL.md` (including its consent-
+  schema example and scheduler-config description, which still described
+  hand-rolling `sync`/`scan`/`bypass_decision` rather than calling
+  `run_sync_pass()` -- fixed alongside). Two review rounds on PR #3159
+  caught real gaps in the resolver itself, fixed in the same PR: a dirty
+  or untracked payload could still receive a valid-looking pin (added
+  `_payload_is_clean`, extended to `--ignored` files in round 2 since
+  plain `--porcelain` omits them and the projection scanner does not
+  consult `.gitignore`); the git subprocess inherited the ambient
+  environment, so a caller-set `GIT_DIR`/`GIT_WORK_TREE` could redirect
+  the probe at an unrelated repository (added `_git_isolated_env`); an
+  installed-plugins footprint (a copied external payload) could still get
+  pinned if it happened to sit under an unrelated enclosing git checkout
+  (scoped `_plugin_commit` calls to the directory-marketplace branch only,
+  in both `assemble_enabled_plugins` and `_sources_from_raw_dir`); and the
+  scaffolder template called `run_sync_pass()` without ever resolving or
+  passing `pinned_commits`, so a scaffolded scheduler would silently drop
+  pin enforcement even with `requireImmutablePin: true` set (wired
+  `resolve_pinned_commits()` through, gated on the same consent flag).
+  A **third** review round caught a genuine TOCTOU race across all of the
+  above: the clean check and `rev-parse HEAD` were two separate
+  subprocesses with no shared lock (fixed by reading `HEAD` before *and*
+  after the clean check and requiring agreement), `git status --porcelain`
+  even with `--ignored` still respects a local `status.showUntrackedFiles`
+  config that could hide a new file (fixed with
+  `--untracked-files=all`), and -- most substantively -- pins were resolved
+  *before* `run_sync_pass`'s own `refresh`/lock, in both the CLI and the
+  scheduler template, so a refresh or concurrent update could change a
+  payload after its commit was captured while the stale-but-well-formed SHA
+  still passed the pin conjunct. Closed by changing `run_sync_pass()`'s
+  contract: it now takes a `resolve_pins` callback (in addition to the
+  simpler precomputed `pinned_commits` for tests/resolver-free callers) and
+  calls it itself, after `refresh` and inside its own held lock, immediately
+  before the locked sync -- both the CLI and the scheduler template now
+  pass `resolve_pinned_commits` as that callback rather than precomputing
+  a map. **A fourth review round found this still incomplete**: calling
+  the callback after refresh didn't help if the callback itself
+  (`resolve_pinned_commits`) just read each source's already-populated
+  `commit` field -- that field was captured at *discovery* time, before
+  `refresh` even ran, so a directory-marketplace checkout that advanced
+  during refresh still passed its stale SHA. Fixed by making
+  `resolve_pinned_commits` **re-probe fresh at call time** instead of
+  trusting the field: added `PluginSource.is_local_checkout` (set only for
+  a genuine directory-marketplace footprint, never an installed-plugins
+  copy) so the resolver knows which sources are even eligible to
+  re-probe, and re-runs `_plugin_commit()` against each one's
+  `payload_root` live. A **fifth** review round found `is_local_checkout`
+  itself too permissive (`footprint is not None` alone -- a plain
+  `directory` marketplace source is an arbitrary local path with no
+  provenance guarantee, and could point at a payload copied into a
+  subdirectory of some entirely unrelated git repository) and a
+  fail-open gap (a custom `resolve_pins` returning `None` was
+  indistinguishable from "no `pinned_commits` ever supplied", silently
+  disabling the conjunct for a caller that had explicitly opted in).
+  Fixed: `is_local_checkout` now requires `controlled` (this repo's own
+  tree) or resolution via the trusted `agent-worktrees-repo` source kind;
+  `run_sync_pass()` normalizes a `None` `resolve_pins` result to an empty
+  map (fail-closed) rather than treating it as opt-out. Also fixed a
+  broken markdown code span split across a newline in the scheduler-
+  config recipe. `customizing-copilot`'s full suite: 235 passed, 8
+  skipped (36 new tests total across all five rounds). `check-module-
+  size`/`check-version-bump`/`check-version-consistency`/`check-docs-
+  consistency` all pass. Bumped to `0.1.0-dev92`.
+- **Issue #3132 is half closed, not fully.** What remains genuinely open:
+  an externally-installed marketplace plugin -- the common adopter case --
+  still cannot be pinned at all. Closing that needs either an install-time
+  provenance record (the harness's own plugin-install mechanism recording
+  a source commit alongside the payload copy) or a marketplace-release-API
+  lookup (network-dependent, its own design questions around auth/rate
+  limits/trust) -- correctly left as a further follow-up rather than
+  guessed at in this slice.
+
 

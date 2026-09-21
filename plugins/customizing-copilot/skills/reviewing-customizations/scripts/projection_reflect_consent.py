@@ -71,11 +71,21 @@ def _has_indirected_component(repo_root: Path, path: Path) -> bool:
 
 @dataclass(frozen=True)
 class Consent:
-    """A repo's validated, live-checked opt-in for `projection-reflect`."""
+    """A repo's validated, live-checked opt-in for `projection-reflect`.
+
+    ``require_immutable_pin`` defaults to ``False`` (absent in the committed
+    file): most adopters sync externally-installed marketplace plugins,
+    which today's resolver (``scan_plugin_sources.resolve_pinned_commits``)
+    cannot pin at all -- requiring a pin unconditionally would silently
+    disable the bypass path entirely for that common case. A repo opts in
+    explicitly only once it understands the tradeoff (today: only
+    self-hosted/directory-marketplace sources can ever be pinned).
+    """
 
     reconciler_agent: str
     trusted_marketplaces: tuple[str, ...]
     dispatch_label: str
+    require_immutable_pin: bool = False
 
 
 def _valid_identifier(value: object) -> bool:
@@ -138,8 +148,15 @@ def load_consent(repo_root: Path) -> Consent | None:
     if not all(_valid_identifier(entry) for entry in trusted_raw):
         return None
 
+    require_pin = raw.get("requireImmutablePin", False)
+    if not isinstance(require_pin, bool):
+        # Present but not a genuine boolean -- malformed, fail closed on
+        # the whole consent file rather than guessing an interpretation.
+        return None
+
     return Consent(
         reconciler_agent=reconciler_agent,
         trusted_marketplaces=tuple(trusted_raw),
         dispatch_label=dispatch_label,
+        require_immutable_pin=require_pin,
     )
