@@ -1488,4 +1488,5 @@ gate land._
   onto the latest default branch (`agent-worktrees git sync` when
   available, conflict-safe by construction), noting an unresolved conflict
   in the handoff brief rather than blocking on it. Bumped
-  `plugin.json`/`marketplace.json` to `0.1.1-dev33`.
+  `plugin.json`/`marketplace.json` to `0.1.1-dev34` (dev33 collided with a
+  concurrent main merge).
