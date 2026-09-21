@@ -270,6 +270,18 @@ def test_create_parser_rejects_reclaim_flag():
         parser.parse_args(["create", "task-worker", "--worktree-id", "wt-review", "--reclaim"])
 
 
+def test_global_json_flag_survives_into_resume_namespace():
+    # Regression guard: 'resume' must NOT redeclare its own '--json' (it
+    # previously did, colliding with the top-level '--json' flag's same
+    # 'json' dest -- the subparser's default (False) would silently
+    # overwrite the global flag's True). 'agent-bridge --json resume <target>
+    # --force' is exactly the invocation shape agent_dispatch.bridge_reclaim
+    # relies on for a machine-readable session id.
+    parser = m.build_parser()
+    args = parser.parse_args(["--json", "resume", "wt-review", "--force"])
+    assert args.json is True
+
+
 def test_create_refuse_on_conflict_raises(fixed_caller):
     client = FakeClient(sessions=[], conflict_sid="s9")
     with pytest.raises(m._AgentSessionConflict) as ei:
