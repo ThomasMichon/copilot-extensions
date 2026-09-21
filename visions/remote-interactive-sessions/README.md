@@ -127,6 +127,23 @@ back-channel [venue-parity](../venue-parity/README.md) already establishes
 for headless dispatch; it does not require or invent a second,
 venue-specific transport for the interactive case.
 
+**One verb name, everywhere: `copilot`.** "Deliver a TTY Copilot session to
+the user in the current terminal" is a single, unambiguous action —
+`agent-worktrees copilot` performs it locally (ensure a durable mux'd
+session exists, then hand this process's own terminal to it via exec);
+`agent-codespaces copilot <name>` / `agent-containers copilot <name>`
+perform the *identical* action for a remote venue by preparing it (the
+venue-specific "setup" step: reverse forwards, credentials, the reservation)
+and then running that same local `copilot` command remotely over an
+interactive SSH channel. "Interactive," reused elsewhere in this vocabulary
+for at least three different meanings (has a TTY, has a picker UI, is a
+muxed human-attended session), is deliberately retired in favor of this one
+named action. This is also the primitive the Worktree Picker's own
+CodeSpaces/containers navigation invokes on "Open" (or "create a new
+session" for an idle venue) — the CLI ergonomics of the verb itself matter
+less than it being one cleanly scriptable action any caller (a human typing
+it directly, or Picker driving it) can invoke the same way.
+
 ### Human-attended, honestly marked
 
 A session bound through CLI mode carries a durable marker distinguishing it as
@@ -278,6 +295,19 @@ headless session's mechanics do not actually extend to an attended one.
 
 ## Provenance
 
+- **2026-09-20** — Named the canonical local/remote launch verb `copilot`
+  ("deliver a TTY Copilot session to the user in the current terminal"),
+  replacing the ambiguous "interactive" vocabulary used elsewhere for at
+  least three different meanings. `agent-worktrees copilot` is the
+  foundational local case (ensure-then-attach, landed); `agent-codespaces`/
+  `agent-containers copilot <name>` reuse it verbatim over an interactive
+  SSH channel rather than reimplementing attach logic per venue. Also
+  clarified that this verb's primary caller is expected to be the Worktree
+  Picker's own CodeSpaces/containers navigation (already exists as an
+  account-scoped pivot in `worktree-manager`'s Picker TUI) invoking it on
+  "Open"/"create a new session," not a human typing it directly most of the
+  time -- the verb's scriptability (clean JSON/exit-code contract from the
+  `embody` logic it wraps) matters more than CLI ergonomics polish.
 - **2026-09-20** — Same-day correction to the entry directly below: the
   `host_index` framing was itself wrong, found while starting the
   implementation follow-up it called for. `host_index` is specifically the
