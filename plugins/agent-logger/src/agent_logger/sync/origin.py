@@ -268,6 +268,7 @@ def _bound_knowledge_repo_cached(repo_path_str: str) -> str | None:
                 text=True,
                 timeout=_OPT_IN_SUBPROCESS_TIMEOUT,
                 check=False,
+                **_peer_launch.no_window_kwargs(),
             )
         except (OSError, subprocess.SubprocessError):
             return None
