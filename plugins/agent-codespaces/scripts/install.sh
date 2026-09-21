@@ -688,13 +688,19 @@ MANIFEST
 
 # -- Actions ---------------------------------------------------------------
 
-# -- Connection Owner service (config-gated; default off) ------------------
+# -- Connection Owner service (config-gated; default on, on-demand) --------
 # The persistent per-machine Connection Owner relay daemon (dotfiles#1320/#1333)
 # is provisioned as a systemd --user service, but ONLY when connection_owner is
-# enabled in config. Default off -> the unit is ensured ABSENT, so a machine with
-# the feature disabled is unchanged (truly inert). Enabling it is "flip the
-# config, run update" (the install/update convergence contract, ce#488). ExecStart
-# resolves through the stable `.venv` symlink so it survives version cutover.
+# enabled in config -- default is now ON (the daemon + defer wiring finished
+# rolling out; this is the login-triggered convenience, not the only way it
+# starts: a tenant (ssh/dispatch) also spins it up itself on-demand if it isn't
+# already running, and the daemon exits on its own once idle -- see
+# connection_owner.idle_shutdown_after; `Restart=on-failure` below means a
+# clean idle-exit is NOT treated as a failure to restart-loop). An explicit
+# opt-out -> the unit is ensured ABSENT, so a machine that disabled the feature
+# is unchanged (truly inert; on-demand spin-up also respects the disabled
+# config). ExecStart resolves through the stable `.venv` symlink so it
+# survives version cutover.
 SYSTEMD_OWNER_UNIT="agent-codespaces-owner.service"
 
 # Echo "1" if the Connection Owner is enabled in the merged config, else "0".
@@ -793,7 +799,7 @@ do_install() {
         return 1
     fi
 
-    # Connection Owner daemon (config-gated; default off -> ensured absent).
+    # Connection Owner daemon (config-gated; default on unless opted out).
     _sync_owner_service
 
     echo ""
@@ -979,7 +985,7 @@ do_update() {
     # Update manifest
     write_deploy_manifest
 
-    # Connection Owner daemon (config-gated; default off -> ensured absent).
+    # Connection Owner daemon (config-gated; default on unless opted out).
     _sync_owner_service
 
     _ok "$SERVICE_NAME updated"
@@ -1021,7 +1027,7 @@ do_provision() {
         _fail "Verification: module import failed"
         return 1
     fi
-    # Connection Owner daemon (config-gated; default off -> ensured absent).
+    # Connection Owner daemon (config-gated; default on unless opted out).
     _sync_owner_service
     _ok "$SERVICE_NAME runtime provisioned"
 }

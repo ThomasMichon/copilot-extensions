@@ -884,20 +884,26 @@ function Write-DeployManifest {
 
 # -- Actions ---------------------------------------------------------------
 
-# -- Connection Owner service (config-gated; default off) ------------------
+# -- Connection Owner service (config-gated; default on, on-demand) --------
 # The persistent per-machine Connection Owner relay daemon (dotfiles#1320/#1333)
 # is provisioned as a per-user scheduled task, but ONLY when connection_owner is
-# enabled in config. Default off -> the task is ensured ABSENT, so a machine with
-# the feature disabled is unchanged (truly inert). Enabling it is "flip the
-# config, run update" (the install/update convergence contract, ce#488). The task
+# enabled in config -- default is now ON (the daemon + defer wiring finished
+# rolling out; this is the login-triggered convenience, not the only way it
+# starts: a tenant (ssh/dispatch) also spins it up itself on-demand if it isn't
+# already running, and the daemon exits on its own once idle -- see
+# connection_owner.idle_shutdown_after). An explicit opt-out -> the task is
+# ensured ABSENT, so a machine that disabled the feature is unchanged (truly
+# inert; on-demand spin-up also respects the disabled config). The task
 # launches through the stable self-provisioning binstub (agent-codespaces.ps1),
 # which resolves the active versioned slot at runtime, so it survives updates.
 $OwnerTaskName = 'agent-codespaces-owner'
 
 function Get-ConnectionOwnerConfig {
     <# Ask the freshly-built runtime whether the Connection Owner is enabled.
-       Returns @{ Enabled = <bool>; Interval = <double> }; disabled on any
-       failure (never throws). #>
+       Returns @{ Enabled = <bool>; Interval = <double> }; a query failure
+       fails CLOSED (Enabled=$false) regardless of the config's own default,
+       since we cannot safely provision a login service without confirming
+       what the resolved config actually says. #>
     $result = @{ Enabled = $false; Interval = 15.0 }
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     try {
@@ -1025,7 +1031,7 @@ function Invoke-Install {
         throw 'Runtime verification failed'
     }
 
-    # Connection Owner daemon (config-gated; default off -> ensured absent).
+    # Connection Owner daemon (config-gated; default on unless opted out).
     Sync-ConnectionOwnerService
 
     Write-Host ''
@@ -1275,7 +1281,7 @@ function Invoke-Update {
     # Update manifest
     Write-DeployManifest
 
-    # Connection Owner daemon (config-gated; default off -> ensured absent).
+    # Connection Owner daemon (config-gated; default on unless opted out).
     Sync-ConnectionOwnerService
 
     Write-ServiceOk "$ServiceName updated"
