@@ -133,6 +133,57 @@ def test_start_raises_when_venv_missing(monkeypatch, tmp_path):
         daemon.start(tmp_path)
 
 
+def _prepare_venv(tmp_path):
+    py = daemon.engine_venv_python(tmp_path)
+    py.parent.mkdir(parents=True, exist_ok=True)
+    py.write_text("", encoding="ascii")
+    return py
+
+
+def test_start_default_wait_timeout_is_300_seconds(monkeypatch, tmp_path):
+    """A cold torch + embedding-model import (before uvicorn even starts
+    listening) has been observed to take upwards of two minutes -- the
+    default wait must be generous enough to tolerate that, not the old 90s
+    that gave up while the engine was still loading."""
+    monkeypatch.delenv("AGENT_INDEX_ENGINE_START_TIMEOUT", raising=False)
+    _prepare_venv(tmp_path)
+    monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
+    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python: FakeProc(alive=True))
+    monkeypatch.setattr(daemon, "_write_pid", lambda *a, **k: None)
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: clock["t"])
+
+    def advancing_sleep(_seconds):
+        clock["t"] += 1.0
+
+    monkeypatch.setattr(daemon.time, "sleep", advancing_sleep)
+
+    with pytest.raises(TimeoutError, match="within 300s"):
+        daemon.start(tmp_path)
+    assert clock["t"] >= 300.0
+
+
+def test_start_wait_timeout_is_overridable_via_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_START_TIMEOUT", "5")
+    _prepare_venv(tmp_path)
+    monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
+    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python: FakeProc(alive=True))
+    monkeypatch.setattr(daemon, "_write_pid", lambda *a, **k: None)
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: clock["t"])
+
+    def advancing_sleep(_seconds):
+        clock["t"] += 1.0
+
+    monkeypatch.setattr(daemon.time, "sleep", advancing_sleep)
+
+    with pytest.raises(TimeoutError, match="within 5s"):
+        daemon.start(tmp_path)
+    assert 5.0 <= clock["t"] < 300.0
+
+
 def test_start_spawns_and_waits_for_health(monkeypatch, tmp_path):
     # Make the durable venv python "exist".
     py = daemon.engine_venv_python(tmp_path)
