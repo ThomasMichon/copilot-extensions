@@ -96,6 +96,11 @@ class _WorktreeEntry:
     # ``DESCRIPTOR_VERSION`` may treat it as authoritative. Absent on an
     # older runtime or when git classification wasn't run.
     closure: dict[str, Any] | None = None
+    # agent-bridge-worktree-native-agents: the charter (spawn profile name)
+    # bound to this worktree at create/embody time, surfaced from
+    # ``agent-worktrees list --json`` as ``bound_agent``. None = unbound
+    # (the venue's default agent drives, today's behavior).
+    bound_agent: str | None = None
 
     def interactive_cli_state(self) -> str:
         """Classify interactive-CLI ownership from mux liveness.
@@ -140,6 +145,7 @@ class _WorktreeEntry:
             "live_intent_at": self.live_intent_at,
             "live_intent_idle": self.live_intent_idle,
             "closure": self.closure,
+            "bound_agent": self.bound_agent,
         }
 
 
@@ -724,6 +730,7 @@ def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
             live_intent_idle=bool(w.get("live_intent_idle", False)),
             # Phase 5: raw/opaque passthrough, absent unless --classify ran.
             closure=w.get("closure") if isinstance(w.get("closure"), dict) else None,
+            bound_agent=w.get("bound_agent") or None,
         ))
     return entries
 
@@ -823,6 +830,74 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
         },
     }
 
+async def _find_cached_worktree_entry(
+    worktree_id: str, resolver: Any,
+) -> tuple[str, "_WorktreeEntry"] | tuple[None, None]:
+    """Resolve a worktree id to its owning agent name + cache entry.
+
+    Shared by both the fresh-spawn path and the resume-failed-restart path
+    so charter resolution (:func:`_apply_bound_charter`) sees the same
+    ``bound_agent`` either way. Falls back to a targeted live probe when
+    the fleet-wide crawl cache hasn't seen this worktree yet (#6744) --
+    the cache is a performance shortcut, never the authority.
+    """
+    cache = get_cache()
+    await cache.crawl_if_empty()
+    for agent_name, worktrees in cache.get_all().items():
+        match = next((wt for wt in worktrees if wt.id == worktree_id), None)
+        if match is not None:
+            return agent_name, match
+    probed = await cache.probe_live(worktree_id, resolver)
+    if probed is not None:
+        return probed
+    return None, None
+
+
+def _apply_bound_charter(
+    target: Any, resolver: Any, entry: "_WorktreeEntry", worktree_id: str,
+) -> Any:
+    """Layer a worktree's bound charter onto its venue-resolved spawn target.
+
+    agent-bridge-worktree-native-agents: a charter (``bound_agent``) is a
+    spawn PROFILE, never a first-class fabric target -- the venue still
+    owns host/cwd/project resolution. Only the charter's own launch shape
+    (``copilot_path``, ``mcp_servers``, charter ``copilot_args`` APPENDED
+    after the venue's own -- so venue-level staging like `--plugin-dir`/
+    `--allow-all` survives -- and any charter ``env`` layered over the
+    venue's) is borrowed, when the charter name resolves in the registry.
+    An unresolvable or managed (non-spawnable) charter degrades to the
+    venue default rather than failing the spawn.
+    """
+    if not entry.bound_agent:
+        return target
+    canonical = resolver.canonical_agent_name(entry.bound_agent)
+    charter = resolver.agents.get(canonical) if canonical else None
+    if charter is None:
+        log.warning(
+            "worktree %s: bound_agent %r not found in the agent registry; "
+            "using the venue's default spawn profile",
+            worktree_id, entry.bound_agent,
+        )
+        return target
+    if getattr(charter, "managed", False):
+        # Mirror AgentResolver._resolve_static's own managed guard: a
+        # managed=true entry is explicitly non-spawnable and must never be
+        # borrowed as a charter's launch shape, even though a worktree's
+        # bound_agent binding is independent of that resolve-time gate.
+        log.warning(
+            "worktree %s: bound_agent %r is managed (non-spawnable); "
+            "using the venue's default spawn profile",
+            worktree_id, entry.bound_agent,
+        )
+        return target
+    return replace(
+        target,
+        copilot_path=charter.copilot_path or target.copilot_path,
+        copilot_args=[*target.copilot_args, *charter.copilot_args],
+        mcp_servers=list(charter.mcp_servers) or target.mcp_servers,
+        env={**target.env, **charter.env},
+    )
+
 
 def _latest_session_for_worktree(mgr: Any, worktree_id: str) -> Any:
     """Return the most-recently-updated bridge session for a worktree, or None."""
@@ -857,25 +932,7 @@ async def _start_fresh_worktree_session(
     if resolver is None:
         return None
 
-    cache = get_cache()
-    await cache.crawl_if_empty()
-    entry = None
-    owner_agent = None
-    for agent_name, worktrees in cache.get_all().items():
-        match = next((wt for wt in worktrees if wt.id == worktree_id), None)
-        if match is not None:
-            entry, owner_agent = match, agent_name
-            break
-    if entry is None or owner_agent is None:
-        # Cache-blind / stale-cache case (#6744): the fleet-wide crawl cache
-        # is only ever a performance shortcut for "does this worktree
-        # exist" -- never the authority. A worktree the cache hasn't seen
-        # yet (fresh daemon start, or created after the last crawl) must
-        # still resolve via a targeted, live, single-worktree query before
-        # this falls through to a 404.
-        probed = await cache.probe_live(worktree_id, resolver)
-        if probed is not None:
-            owner_agent, entry = probed
+    owner_agent, entry = await _find_cached_worktree_entry(worktree_id, resolver)
     if entry is None or owner_agent is None:
         return None
     if not entry.path:
@@ -933,6 +990,7 @@ async def _start_fresh_worktree_session(
                 "session: %s", worktree_id, owner_agent, exc,
             )
             return None
+        target = _apply_bound_charter(target, resolver, entry, worktree_id)
 
         # Scope the agent's spawn target to this worktree's directory + id (the
         # same augmentation a session roll / new-owned-chat applies), so the
@@ -1096,9 +1154,31 @@ async def resume_worktree(
             "resume_worktree %s: resume of %s failed (%s); starting fresh session",
             worktree_id, session.session_id, exc,
         )
+        restart_target = session.target
+        resolver = getattr(request.app.state, "resolver", None)
+        if resolver is not None:
+            owner_agent, cached_entry = await _find_cached_worktree_entry(
+                worktree_id, resolver,
+            )
+            if cached_entry is not None and owner_agent is not None:
+                # Re-resolve a CLEAN venue target rather than layering onto
+                # ``session.target`` -- a session created through the fresh-
+                # spawn path already carries the charter's copilot_args, so
+                # re-applying the charter on top would append them a second
+                # time on every resume-failed restart (review #3163).
+                try:
+                    restart_target = replace(
+                        resolver.resolve(owner_agent),
+                        worktree_id=worktree_id, cwd=cached_entry.path,
+                    )
+                except (KeyError, ValueError):
+                    restart_target = session.target
+                restart_target = _apply_bound_charter(
+                    restart_target, resolver, cached_entry, worktree_id,
+                )
         try:
             fresh = await mgr.start_session(
-                session.target,
+                restart_target,
                 agent_name=session.agent_name,
                 caller_id=session.caller_id,
             )
