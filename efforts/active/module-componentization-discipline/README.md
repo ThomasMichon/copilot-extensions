@@ -591,5 +591,7 @@ the Phase 0 runbook, picked up as capacity allows.
   lines in `agent-worktrees/__main__.py`, so the final validation branch
   needed the same explicit reviewed baseline widen prior slices already used
   for this scenario (23,249 → 23,275) to keep the shrink-only guard honest.
-  This slice bumps `agent-worktrees` to `1.5.5-dev204` and marketplace
-  `metadata.version` to `1.7.7-dev176`.
+  Rebasing also advanced `main` to `agent-worktrees` `1.5.5-dev204`, so the
+  final publishable branch needed the next patch `-devN` bump on top of the
+  slice itself. This slice therefore lands as `agent-worktrees`
+  `1.5.5-dev205` and marketplace `metadata.version` `1.7.7-dev177`.
