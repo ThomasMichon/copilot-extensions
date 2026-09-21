@@ -1358,3 +1358,41 @@ def test_representative_plugins_ship_valid_canonical_declarations() -> None:
         for spec in specs
         if spec.source_id != "session-guidance"
     )
+
+
+@pytest.mark.guard
+def test_context_handoff_handoff_fallback_projection_is_valid() -> None:
+    """Regression test for the ``handoff-fallback`` template's forbidden-
+    content scanner failure (see ThomasMichon/copilot-extensions#3079): it
+    used ``$env:COPILOT_PLUGIN_ROOT`` and a hardcoded
+    ``~/.copilot/session-state/...`` path as CLI-fallback documentation, both
+    of which trip the dynamic-content scanner below and silently aborted
+    ``manage-instruction-projections.py sync`` for every consuming repo
+    before it could create or refresh any other plugin's projections.
+    context-handoff's own test suite covers ``session-guidance`` but not
+    ``handoff-fallback``, so this loads the real declaration and runs the
+    actual forbidden-content + rendered-byte-budget validation against it,
+    catching a future regression here rather than only via a downstream
+    repo's sync silently aborting.
+    """
+    sources = [
+        _source(
+            REPO / "plugins" / "context-handoff",
+            "copilot-extensions",
+            "context-handoff",
+        ),
+    ]
+    result = projections.Result(operation="test")
+
+    specs, _unknown = projections._load_specs(REPO, sources, result)
+
+    assert result.blocking == 0
+    assert {spec.source_id for spec in specs} == {
+        "session-guidance",
+        "handoff-fallback",
+    }
+    handoff_fallback = next(
+        spec for spec in specs if spec.source_id == "handoff-fallback"
+    )
+    rendered = projections.render_projection(handoff_fallback)
+    assert rendered.byte_count <= projections.MAX_PROJECTION_BYTES
