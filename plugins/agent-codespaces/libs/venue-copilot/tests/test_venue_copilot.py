@@ -32,7 +32,8 @@ def _run_returning(payload: dict[str, Any], returncode: int = 0):
 
 
 class TestReserveCliMode:
-    def test_builds_expected_argv_and_parses_reservation(self) -> None:
+    def test_builds_expected_argv_and_parses_reservation(self, monkeypatch) -> None:
+        monkeypatch.setattr("venue_copilot.shutil.which", lambda name: None)
         seen: list[list[str]] = []
 
         def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
@@ -46,7 +47,26 @@ class TestReserveCliMode:
             "--worktree-id", "wt-A", "--ttl-seconds", "60.0",
         ]]
 
-    def test_uses_custom_bridge_bin(self) -> None:
+    def test_resolves_bridge_bin_via_path_when_available(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "venue_copilot.shutil.which",
+            lambda name: r"C:\fake\agent-bridge.CMD" if name == "agent-bridge" else None,
+        )
+        seen: list[list[str]] = []
+
+        def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
+            seen.append(argv)
+            return _FakeCompletedProcess(json.dumps({}))
+
+        reserve_cli_mode("wt-A", run=fake_run)
+        # A bare binstub name resolves via PATH to its real (extensioned) file
+        # before spawning -- a direct list-argv subprocess spawn on Windows
+        # never tries PATHEXT itself (confirmed live against a real
+        # CodeSpace, agent-bridge-cli-mode-sessions Phase 4 validation).
+        assert seen[0][0] == r"C:\fake\agent-bridge.CMD"
+
+    def test_uses_custom_bridge_bin(self, monkeypatch) -> None:
+        monkeypatch.setattr("venue_copilot.shutil.which", lambda name: None)
         seen: list[list[str]] = []
 
         def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
@@ -72,7 +92,8 @@ class TestReserveCliMode:
 
 
 class TestReleaseCliMode:
-    def test_returns_removed_count(self) -> None:
+    def test_returns_removed_count(self, monkeypatch) -> None:
+        monkeypatch.setattr("venue_copilot.shutil.which", lambda name: None)
         seen: list[list[str]] = []
 
         def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:

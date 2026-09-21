@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 from collections.abc import Callable
 from typing import Any
@@ -29,6 +30,28 @@ DEFAULT_TTL_SECONDS = 300.0
 # The daemon's own config dir, matching agent-bridge's ``effective_config_dir()``
 # default -- overridable the same way, via ``AGENT_BRIDGE_CONFIG_DIR``.
 _DEFAULT_BRIDGE_CONFIG_DIR = "~/.agent-bridge"
+
+#: Env vars scrubbed before spawning the ``agent-bridge`` CLI as a plain
+#: sibling binstub -- mirrors ``agent_dispatch.procutil``'s
+#: ``_AGENT_WORKTREES_ENV_SCRUB`` precedent (itself citing agent-bridge's
+#: ``worktree_head.py``): a caller running inside its own uv-managed venv
+#: (e.g. this process itself, or a test harness invoking it) leaks
+#: ``PYTHONHOME``/``VIRTUAL_ENV``/``__PYVENV_LAUNCHER__``/``PYTHONPATH`` into
+#: the child by default (``subprocess`` inherits ``os.environ`` verbatim when
+#: no ``env=`` is given), which then forces the sibling binstub's OWN
+#: re-exec'd interpreter to resolve the WRONG stdlib/native-extension
+#: location -- confirmed live (agent-bridge-cli-mode-sessions Phase 4
+#: validation): an inherited ``PYTHONHOME`` pointed at a different
+#: interpreter's tree, and the spawned ``agent-bridge`` died importing
+#: ``socket`` with ``ImportError: DLL load failed ... not a valid Win32
+#: application`` -- the same ``_sre``-mismatch bug class this scrub already
+#: guards against elsewhere, just manifesting in a different stdlib module.
+_ENV_SCRUB = frozenset({
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "VIRTUAL_ENV",
+    "__PYVENV_LAUNCHER__",
+})
 
 
 class VenueCopilotError(RuntimeError):
@@ -44,7 +67,18 @@ class VenueCopilotError(RuntimeError):
 def _run_bridge(
     argv: list[str], *, run: Callable[..., Any] = subprocess.run,
 ) -> dict[str, Any]:
-    result = run(argv, capture_output=True, text=True)
+    # A bare binstub name (e.g. "agent-bridge") is only resolved by a real
+    # shell's PATHEXT search; a direct (list-argv, ``shell=False``) subprocess
+    # spawn on Windows does not try ``.cmd``/``.ps1`` and fails with
+    # ``FileNotFoundError: [WinError 2]`` -- confirmed live against a real
+    # CodeSpace (agent-bridge-cli-mode-sessions Phase 4 validation). Resolve
+    # via PATH first so the same argv works cross-platform; fall back to the
+    # bare name (e.g. a caller-supplied absolute path, or so a genuinely
+    # missing binstub still raises the caller's own natural error).
+    resolved = shutil.which(argv[0]) or argv[0]
+    argv = [resolved, *argv[1:]]
+    env = {k: v for k, v in os.environ.items() if k not in _ENV_SCRUB}
+    result = run(argv, capture_output=True, text=True, env=env)
     stdout = getattr(result, "stdout", None) or ""
     returncode = getattr(result, "returncode", 0)
     parsed: dict[str, Any] = {}

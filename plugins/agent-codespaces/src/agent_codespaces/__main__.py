@@ -2349,11 +2349,12 @@ def _interactive_ssh(
             env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = relay_token
 
     args = ["gh", "codespace", "ssh", "-c", codespace_name]
+    if port_forwards or remote_command:
+        args.append("--")
     for fwd in port_forwards:
-        # Split "-R port:host:port" into SSH option
-        args.extend(["--", fwd])
+        args.extend(["-R", fwd])
     if remote_command:
-        args.extend(["--", remote_command])
+        args.append(remote_command)
 
     return sp.call(args, env=env)
 
