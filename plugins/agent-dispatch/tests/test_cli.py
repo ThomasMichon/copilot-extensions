@@ -42,7 +42,7 @@ def test_should_ssh_failover_none_on_explicit_url_or_shared(monkeypatch):
 
     monkeypatch.setenv("AGENT_DISPATCH_FAILOVER_MACHINE", "peer-host")
     monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: True)
-    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: False)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda **_: False)
     assert m._should_ssh_failover(_args(["--url", "http://x:9847", "list"])) is None
     assert m._should_ssh_failover(_args(["--shared", "list"])) is None
 
@@ -52,7 +52,7 @@ def test_should_ssh_failover_none_when_local_live(monkeypatch):
 
     monkeypatch.setenv("AGENT_DISPATCH_FAILOVER_MACHINE", "peer-host")
     monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: True)
-    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: True)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda **_: True)
     assert m._should_ssh_failover(_args(["list"])) is None
 
 
@@ -61,7 +61,7 @@ def test_should_ssh_failover_none_when_not_a_peer(monkeypatch):
 
     monkeypatch.setenv("AGENT_DISPATCH_FAILOVER_MACHINE", "myself")
     monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: False)
-    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: False)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda **_: False)
     assert m._should_ssh_failover(_args(["list"])) is None
 
 
@@ -70,7 +70,7 @@ def test_should_ssh_failover_returns_peer_when_local_down(monkeypatch):
 
     monkeypatch.setenv("AGENT_DISPATCH_FAILOVER_MACHINE", "peer-host")
     monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: True)
-    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: False)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda **_: False)
     assert m._should_ssh_failover(_args(["list"])) == "peer-host"
 
 
@@ -240,7 +240,7 @@ def test_resolve_target_falls_back_to_shared_when_local_down(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://coordinator.example/dispatch")
     monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN", "shared-secret")
-    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: False)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda **_: False)
     args = _args(["list"])
     url, token = _resolve_client_target(args)
     assert url == "https://coordinator.example/dispatch"
@@ -253,7 +253,7 @@ def test_resolve_target_prefers_local_when_live(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://coordinator.example/dispatch")
     monkeypatch.setattr("agent_dispatch.netinfo.is_wsl", lambda: False)
-    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: True)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda **_: True)
     args = _args(["list"])
     url, _ = _resolve_client_target(args)
     assert url == "http://127.0.0.1:9847"
@@ -1550,7 +1550,7 @@ def test_cmd_serve_refuses_when_coordinator_already_live(monkeypatch, capsys):
 
     from agent_dispatch import __main__, server
 
-    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda: True)
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda **_: True)
     calls = []
     monkeypatch.setattr(server, "serve", lambda *a, **k: calls.append((a, k)))
     args = argparse.Namespace(
@@ -1571,7 +1571,7 @@ def test_cmd_serve_force_bypasses_live_coordinator_guard(monkeypatch, tmp_path):
 
     from agent_dispatch import __main__, runtime_version, server
 
-    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda: True)
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda **_: True)
     monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path / "runtime")
     calls = []
     monkeypatch.setattr(server, "serve", lambda *a, **k: calls.append((a, k)))
@@ -1595,7 +1595,7 @@ def test_cmd_serve_passive_bypasses_live_coordinator_guard(monkeypatch, tmp_path
 
     from agent_dispatch import __main__, runtime_version, server
 
-    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda: True)
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda **_: True)
     monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path / "runtime")
     calls = []
     monkeypatch.setattr(server, "serve", lambda *a, **k: calls.append((a, k)))
@@ -1616,7 +1616,7 @@ def test_cmd_serve_proceeds_when_no_coordinator_live(monkeypatch, tmp_path):
 
     from agent_dispatch import __main__, runtime_version, server
 
-    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda: False)
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda **_: False)
     monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path / "runtime")
     calls = []
     monkeypatch.setattr(server, "serve", lambda *a, **k: calls.append((a, k)))

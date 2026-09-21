@@ -442,6 +442,76 @@ def test_health_responsive_omits_auth_header_when_no_token(monkeypatch):
     assert captured["auth_header"] is None
 
 
+def test_health_responsive_explicit_token_overrides_ambient(monkeypatch):
+    # A caller with its own known effective token (e.g. serve()'s cfg.token)
+    # must be able to probe accurately even when it differs from the ambient
+    # AGENT_DISPATCH_TOKEN -- otherwise a token-protected incumbent started
+    # with a non-default token is misclassified as dead (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
+    captured: dict = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _fake_urlopen(request, timeout=None):
+        captured["auth_header"] = request.get_header("Authorization")
+        return _FakeResponse()
+
+    monkeypatch.setattr(config_mod, "client_token", lambda: "ambient-token")
+    monkeypatch.setattr(config_mod.urllib.request, "urlopen", _fake_urlopen)
+    assert (
+        config_mod._health_responsive(
+            "http://127.0.0.1:59999", token="explicit-token"
+        )
+        is True
+    )
+    assert "ambient-token" not in captured["auth_header"]
+    assert "explicit-token" in captured["auth_header"]
+
+
+def test_health_responsive_explicit_none_token_falls_back_to_ambient(monkeypatch):
+    captured: dict = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _fake_urlopen(request, timeout=None):
+        captured["auth_header"] = request.get_header("Authorization")
+        return _FakeResponse()
+
+    monkeypatch.setattr(config_mod, "client_token", lambda: "ambient-token")
+    monkeypatch.setattr(config_mod.urllib.request, "urlopen", _fake_urlopen)
+    assert config_mod._health_responsive("http://127.0.0.1:59999") is True
+    assert "ambient-token" in captured["auth_header"]
+
+
+def test_has_live_local_coordinator_passes_token_through_routed_probe(monkeypatch):
+    captured: dict = {}
+
+    monkeypatch.setattr(config_mod, "_routing_url", lambda: "http://127.0.0.1:59999")
+    monkeypatch.setattr(config_mod, "_url_listening", lambda _url: True)
+
+    def _fake_health_responsive(url, *, timeout=3.0, token=None):
+        captured["token"] = token
+        return True
+
+    monkeypatch.setattr(config_mod, "_health_responsive", _fake_health_responsive)
+    assert config_mod.has_live_local_coordinator(token="explicit-token") is True
+    assert captured["token"] == "explicit-token"
+
+
 def test_client_url_wsl_uses_discovered_port_when_opted_in(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_WSL_WINDOWS_CLIENT", "1")

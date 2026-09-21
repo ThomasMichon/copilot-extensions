@@ -130,6 +130,12 @@ def test_bind_listen_socket_assigns_os_port():
 def _run_serve_capturing(monkeypatch, run, cfg):
     """Run ``serve`` with uvicorn stubbed out, returning the endpoint advertised
     while the server was 'running' plus the sockets uvicorn was handed."""
+    # Isolate the routing-table lookup too, not just run_dir() -- otherwise
+    # the non-passive liveness guard consults *this real host's* actual
+    # routing table and can spuriously refuse to start under `serve(cfg)`
+    # whenever a real coordinator happens to be live on the machine running
+    # the tests.
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(run.parent / "routing"))
     seen: dict = {}
 
     def _fake_run(self, sockets=None):
@@ -183,7 +189,7 @@ def test_serve_raises_when_coordinator_already_live(monkeypatch, tmp_path):
 
     run = tmp_path / "run"
     monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
-    monkeypatch.setattr(server, "has_live_local_coordinator", lambda: True)
+    monkeypatch.setattr(server, "has_live_local_coordinator", lambda **_: True)
     cfg = Config(host="127.0.0.1", port=0, db_path=str(tmp_path / "tasks.db"))
 
     with pytest.raises(server.CoordinatorAlreadyLiveError):
@@ -202,10 +208,14 @@ def test_serve_raises_when_start_lock_already_held(monkeypatch, tmp_path):
     from agent_dispatch.single_instance import SingleInstance
 
     run = tmp_path / "run"
+    routing = tmp_path / "routing"
     monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
-    monkeypatch.setattr(server, "has_live_local_coordinator", lambda: False)
-    # Simulate a concurrent starter already holding the lock.
-    holder = SingleInstance(run / "serve-start.lock")
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing))
+    monkeypatch.setattr(server, "has_live_local_coordinator", lambda **_: False)
+    # Simulate a concurrent starter already holding the lock. The lock is
+    # keyed by routing_dir() (the shared, raced-over resource), not run_dir().
+    routing.mkdir(parents=True, exist_ok=True)
+    holder = SingleInstance(routing / "serve-start.lock")
     assert holder.acquire()
     try:
         cfg = Config(host="127.0.0.1", port=0, db_path=str(tmp_path / "tasks.db"))
@@ -219,7 +229,7 @@ def test_serve_raises_when_start_lock_already_held(monkeypatch, tmp_path):
 def test_serve_force_bypasses_live_coordinator_guard(monkeypatch, tmp_path):
     run = tmp_path / "run"
     monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
-    monkeypatch.setattr(server, "has_live_local_coordinator", lambda: True)
+    monkeypatch.setattr(server, "has_live_local_coordinator", lambda **_: True)
 
     def _fake_run(self, sockets=None):
         pass

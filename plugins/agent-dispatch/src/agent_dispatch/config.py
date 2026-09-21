@@ -326,7 +326,7 @@ def _url_listening(base_url: str, *, timeout: float = 0.25) -> bool:
         return False
 
 
-def _health_responsive(base_url: str, *, timeout: float = 3.0) -> bool:
+def _health_responsive(base_url: str, *, timeout: float = 3.0, token: str | None = None) -> bool:
     """True if ``base_url``'s ``/health`` endpoint answers within ``timeout``.
 
     A TCP listener can stay open (still ``accept()``-ing new connections) long
@@ -336,13 +336,16 @@ def _health_responsive(base_url: str, *, timeout: float = 3.0) -> bool:
     CLI's lazy-start never tried to replace it. Liveness must therefore include
     a real bounded HTTP round-trip, not just a socket connect.
 
-    Sends the configured bearer token (``client_token()``), if any -- a
-    token-protected coordinator otherwise answers 401 here and would be
-    permanently misclassified as dead, causing every autostarting CLI
-    invocation to attempt an unnecessary recovery against a healthy process.
+    Sends ``token`` if given, else the configured bearer token
+    (``client_token()``) -- a token-protected coordinator otherwise answers 401
+    here and would be permanently misclassified as dead. An explicit ``token``
+    lets a caller that knows its own effective server token (e.g. ``serve()``
+    with an explicit ``--token``/``Config.token`` override differing from the
+    ambient environment) probe accurately instead of always falling back to
+    the environment's token (ThomasMichon/copilot-extensions#3066 follow-up).
     """
     request = urllib.request.Request(f"{base_url.rstrip('/')}/health")
-    token = client_token()
+    token = token if token is not None else client_token()
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     try:
@@ -352,7 +355,9 @@ def _health_responsive(base_url: str, *, timeout: float = 3.0) -> bool:
         return False
 
 
-def _discovered_endpoint_health_responsive(endpoint, *, timeout: float = 3.0) -> bool:
+def _discovered_endpoint_health_responsive(
+    endpoint, *, timeout: float = 3.0, token: str | None = None,
+) -> bool:
     """True if a discovered ``rendezvous.Endpoint`` answers ``/health``.
 
     ``_discover_local_endpoint()`` returns a ``rendezvous.Endpoint`` (already
@@ -364,10 +369,10 @@ def _discovered_endpoint_health_responsive(endpoint, *, timeout: float = 3.0) ->
     """
     if endpoint.transport != "tcp":
         return True
-    return _health_responsive(f"http://{endpoint.address}")
+    return _health_responsive(f"http://{endpoint.address}", token=token)
 
 
-def has_live_local_coordinator() -> bool:
+def has_live_local_coordinator(*, token: str | None = None) -> bool:
     """True if a local coordinator is discoverable **and** answering its probe.
 
     Consults the zdd routing table first (authoritative on the host; it self-heals
@@ -392,12 +397,21 @@ def has_live_local_coordinator() -> bool:
     URL whenever one exists, so falling back here to a *different*, healthy
     legacy endpoint would report "live" while every real request still goes to
     the wedged routed generation, silently defeating this whole check.
+
+    ``token`` overrides the ambient environment token for the ``/health`` probe
+    -- pass a caller-known effective token (e.g. an explicit ``--token``/
+    ``Config.token``) when it may differ from ``AGENT_DISPATCH_TOKEN``, else the
+    probe against a token-protected incumbent started with a different token
+    would 401 and be misclassified as dead (ThomasMichon/copilot-extensions#3066
+    follow-up).
     """
     routed = _routing_url()
     if routed is not None:
-        return _url_listening(routed) and _health_responsive(routed)
+        return _url_listening(routed) and _health_responsive(routed, token=token)
     discovered = _discover_local_endpoint()
-    return discovered is not None and _discovered_endpoint_health_responsive(discovered)
+    return discovered is not None and _discovered_endpoint_health_responsive(
+        discovered, token=token,
+    )
 
 
 def client_url() -> str:

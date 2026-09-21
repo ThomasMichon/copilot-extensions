@@ -296,13 +296,18 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
     cfg = cfg or load_config()
     start_lock: SingleInstance | None = None
     if not passive and not force:
-        start_lock = SingleInstance(run_dir() / "serve-start.lock")
+        # Keyed by routing_dir() -- the directory the actual raced-over
+        # resource (the zdd routing table) lives in -- not run_dir(), which
+        # has an independent AGENT_DISPATCH_* override and so would not
+        # serialize two processes sharing one routing table but different
+        # run dirs (review follow-up on ThomasMichon/copilot-extensions#3066).
+        start_lock = SingleInstance(routing_dir() / "serve-start.lock")
         if not start_lock.acquire():
             raise CoordinatorAlreadyLiveError(
                 "another process is concurrently starting a coordinator on this "
                 "host; refusing to race it for the active route"
             )
-        if has_live_local_coordinator():
+        if has_live_local_coordinator(token=cfg.token):
             start_lock.release()
             raise CoordinatorAlreadyLiveError(
                 "a coordinator is already live and answering on this host; "

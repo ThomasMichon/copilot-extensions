@@ -523,12 +523,22 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     passive = bool(getattr(args, "passive", False))
     force = bool(getattr(args, "force", False))
+    base = load_config()
+    effective_token = args.token or base.token
     # A cheap, friendly fast path: most refusals are caught here without even
     # binding a socket. This is NOT atomic against a second, concurrent
     # non-passive `serve()` -- `serve()` itself holds a lock across its own
     # re-check and the routing-table publish, so a race that slips past this
     # pre-check is still caught there (see CoordinatorAlreadyLiveError below).
-    if not passive and not force and has_live_local_coordinator():
+    # Pass the *effective* token (CLI --token, falling back to config), not the
+    # ambient environment default -- a token-protected incumbent started with a
+    # different token would otherwise 401 the probe and be misclassified as
+    # dead (review follow-up on ThomasMichon/copilot-extensions#3066).
+    if (
+        not passive
+        and not force
+        and has_live_local_coordinator(token=effective_token)
+    ):
         print(
             "agent-dispatch: a coordinator is already live and answering on this "
             "host; refusing to start a second one non-passively (it would seize "
@@ -540,12 +550,11 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         )
         return 2
     _reroot_serve_cwd()
-    base = load_config()
     cfg = Config(
         host=_resolve_serve_host(args, base),
         port=args.port or base.port,
         db_path=args.db or base.db_path,
-        token=args.token or base.token,
+        token=effective_token,
         control_token=getattr(args, "control_token", None) or base.control_token,
     )
     try:
