@@ -1082,12 +1082,39 @@ function New-SyncTaskAction {
     if (-not (Test-Path -LiteralPath $TaskLauncher)) {
         return $null
     }
-    $taskHost = (Get-Process -Id $PID).Path
-    if (-not $taskHost) {
-        $taskHost = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    }
+    # STABLE host binary, never the invoking process's own path: (Get-Process
+    # -Id $PID).Path resolves to whatever happened to launch *this* install.ps1
+    # invocation (a Copilot CLI wrapper, a different pwsh/powershell install, a
+    # differently-versioned host after a PATH update, ...) -- that is exactly
+    # the kind of run-to-run drift that defeats an idempotent, compare-before-
+    # write task registration: the resolved action would legitimately differ
+    # on almost every run even though nothing about the sync task itself
+    # changed, forcing a real (and often access-denied) rewrite every time.
+    # Prefer `pwsh` (matches this facility's other scheduled-task launchers --
+    # agent-index/agent-dispatch/agent-codespaces all resolve a fixed system
+    # shell the same way), falling back to the well-known Windows PowerShell
+    # path so this never depends on PATH contents at all.
+    $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+    $taskHost = if ($pwshCmd) { $pwshCmd.Source } else { Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' }
     return New-ScheduledTaskAction -Execute $taskHost `
         -Argument ('-NoProfile -ExecutionPolicy Bypass -File "' + $TaskLauncher + '"')
+}
+
+function Test-SyncTaskActionCurrent {
+    # True when the task already exists and its registered action already
+    # matches the freshly-resolved desired action -- so the caller can skip
+    # Set-ScheduledTask entirely. The task's action is meant to be byte-
+    # identical across routine updates (a stable launcher + a stable host
+    # binary resolve the live runtime internally); writing it again when
+    # nothing changed only risks an unnecessary Access-Denied WARN on a
+    # non-elevated run for zero effect.
+    param($Action)
+    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $existing) { return $false }
+    $existingAction = @($existing.Actions) | Select-Object -First 1
+    return $existingAction -and
+        $existingAction.Execute -eq $Action.Execute -and
+        ("$($existingAction.Arguments)").Trim() -eq ("$($Action.Arguments)").Trim()
 }
 
 function Register-SyncTask {
@@ -1110,6 +1137,10 @@ function Register-SyncTask {
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        if (Test-SyncTaskActionCurrent -Action $action) {
+            Write-Ok "scheduled task already correct (every 4h) -- left registered as-is"
+            return
+        }
         try {
             Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
                 -Settings $settings -Principal $principal -ErrorAction Stop | Out-Null
@@ -1164,6 +1195,10 @@ function Update-SyncTaskBinding {
         $action = New-SyncTaskAction
         if (-not $action) {
             Write-Warn2 "scheduled task left unchanged: no provisioned runtime"
+            return
+        }
+        if (Test-SyncTaskActionCurrent -Action $action) {
+            Write-Ok "scheduled task already current -- not re-registering"
             return
         }
         try {
