@@ -544,10 +544,17 @@ class DevTunnelRendezvous:
         :meth:`discover_coordinator` has already checked the backoff timer
         itself, by the claim plane.
         """
-        now = self._clock()
         try:
             result = self._call(["list", "--all-labels", self._label])
         except DevTunnelError:
+            # Capture "now" AFTER the call fails, not before it starts: the
+            # call itself can block up to ``timeout`` seconds (a slow
+            # failure, e.g. a hung network request), and anchoring the
+            # deadline to the pre-call clock would let that elapsed time eat
+            # into (or exceed) the backoff window before it is even set --
+            # the next tick would then immediately retry, defeating the
+            # rate-limiting this backoff exists for.
+            now = self._clock()
             self._enum_backoff_seconds = min(
                 self._enum_backoff_seconds * 2 if self._enum_backoff_seconds else (
                     DEFAULT_ENUM_BACKOFF_SECONDS

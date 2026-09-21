@@ -385,6 +385,30 @@ def test_discover_peers_first_failure_raises_and_backs_off():
     assert len(calls) == 1
 
 
+def test_backoff_deadline_is_anchored_after_a_slow_failure_completes():
+    """Regression test: the backoff deadline must start when the failure is
+    OBSERVED, not when the call began. A slow failing call (the CLI's own
+    timeout can take up to DEFAULT_TIMEOUT seconds) must not eat into the
+    backoff window before it is even set."""
+    clock = FakeClock()
+
+    def slow_failing_runner(args):
+        # Simulate a slow call: the clock advances *during* the call, before
+        # it returns a failure -- as a real timed-out subprocess would.
+        clock.advance(4.9)
+        return subprocess.CompletedProcess(["devtunnel"], 1, "", "not logged in")
+
+    rv = DevTunnelRendezvous(runner=slow_failing_runner, clock=clock)
+    with pytest.raises(DevTunnelError):
+        rv.discover_peers()
+    # If the deadline had been anchored BEFORE the call (at clock=1000), a
+    # 4.9s "slow call" would leave only 0.1s of the 5s window remaining. It
+    # must instead be anchored AFTER the call fails (at clock=1004.9), giving
+    # the full ~5s window from here.
+    assert clock.t < rv._enum_backoff_until
+    assert (rv._enum_backoff_until - clock.t) == pytest.approx(5.0)
+
+
 def test_discover_peers_backoff_doubles_then_recovers_after_elapsing():
     clock = FakeClock()
     calls = []
