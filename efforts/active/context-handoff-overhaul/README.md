@@ -1825,3 +1825,26 @@ Round 15 confirmed the detached-HEAD fix resolved and surfaced 1
 Re-verified the review's other 7 "carried over" items again against
 current file/PR state -- all still genuinely resolved from earlier rounds
 (the same known re-flagging pattern); none required action this round.
+
+### 2026-09-21 (cont.) -- PR #3167 round 16: atomic stale-lock reclaim
+
+Round 16 surfaced 1 new HIGH finding, fixed in this pass:
+
+- **Stale-lock reclaim was not concurrency-safe:** round 12's reclaim
+  (`unlinkSync` the stale lock, then `openSync(..., "wx")`) let two
+  processes racing to reclaim the SAME stale lock both pass the staleness
+  check, then one's `unlinkSync` could delete the OTHER's freshly-created
+  replacement lock, letting both acquire and run concurrently -- defeating
+  the entire point of the lock. Replaced the unlink step with an atomic
+  `renameSync(lockPath, <unique graveyard path>)`: only one racing renamer
+  can ever succeed (the source stops existing the instant the first one
+  wins), so only the single winner ever reaches the subsequent
+  `openSync(lockPath, "wx")`; a loser's own final open (if it still somehow
+  raced there) simply hits the winner's fresh lock and correctly reports
+  contention via the existing generic catch, rather than crashing.
+- 2 new tests (a structural check that the reclaim path uses `renameSync`,
+  not a bare unlink; a best-effort concurrency integration test firing 5
+  real concurrent `attemptWorktreeSync` calls at the same stale lock and
+  confirming exactly one ever proceeds past it). `node --test`: 147 tests,
+  145 pass (2 pre-existing skips), no regressions. All guards pass. No
+  version bump needed (still `0.1.1-dev36`).

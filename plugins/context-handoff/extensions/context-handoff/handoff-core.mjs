@@ -335,10 +335,27 @@ function acquireLock(lockPath) {
       throw error;
     }
     if (ageMs <= STALE_LOCK_MS) throw error;
-    // Stale -- reclaim it. A second, harmless race is possible here (another
-    // process reclaiming the same stale lock at the same instant); only one
-    // `wx` create can win, and the loser correctly reports "in progress".
-    try { unlinkSync(lockPath); } catch { /* already gone */ }
+    // Stale -- reclaim it, but atomically: renaming lockPath AWAY (not
+    // unlinking it) is the only step here the OS actually guarantees
+    // single-winner semantics for. If two processes race to reclaim the
+    // SAME stale lock, only one `renameSync` can succeed (the source path
+    // stops existing the instant the first one wins); the loser's rename
+    // throws ENOENT and it must NOT proceed to acquire -- an unconditional
+    // unlink+open here (the prior approach) let a second reclaimer delete
+    // the FIRST reclaimer's fresh lock and acquire its own, letting both
+    // run concurrently and defeating the whole point of the lock.
+    const graveyardPath = `${lockPath}.stale-${process.pid}-${Date.now()}`;
+    try {
+      renameSync(lockPath, graveyardPath);
+    } catch {
+      // Lost the race to reclaim (someone else's rename won first, or the
+      // lock is already gone/held again) -- this is genuine contention,
+      // not something to retry past.
+      throw error;
+    }
+    try { unlinkSync(graveyardPath); } catch { /* best-effort cleanup */ }
+    // Only the single winning reclaimer reaches here, so this create is
+    // guaranteed fresh -- no residual race with another reclaimer.
     return openSync(lockPath, "wx");
   }
 }
