@@ -325,6 +325,19 @@ async function onPermissionRequest(request, invocation) {
   return approveAll(request, invocation);
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Ceiling on how long the force-tier trigger will wait for the post-store
+// worktree sync to settle before arming live pickup (see autoForceHandoff's
+// beforeArmPickup comment for the round-12/26/27 tension this bounds).
+// Comfortably shorter than triggerHandoff's own default 30s pickup-wait
+// window, so this can never itself become the dominant source of the
+// force-tier trigger's total latency, while still covering a healthy,
+// reachable remote's typical fetch+rebase duration in the common case.
+const FORCE_TIER_SYNC_ARM_TIMEOUT_MS = 10000;
+
 // Auto-draft, store, and trigger a handoff without agent involvement. Fire-
 // and-forget from the session.usage_info handler (below); reports its own
 // outcome via session.log/session.send rather than being awaited there.
@@ -359,21 +372,30 @@ async function autoForceHandoff(sid, cwd) {
     // contradicting the "post-capture only" contract). It runs regardless
     // of mode -- a worktree sync benefits a manual-only handoff too (a
     // human resuming it later still wants the latest code), not just an
-    // auto-mode live pickup. Deliberately NOT awaited before the live
-    // pickup signal is armed (round-26 review finding: the sync performs
-    // network/CLI work with multiple 20-second timeouts, so gating arm-
-    // pickup on its full completion -- as an earlier `beforeArmPickup`
-    // hook here used to do -- could hold the force-tier trigger long
-    // enough for compaction to happen, defeating the last-chance/fire-
-    // and-forget guarantee this path exists for). Calling
-    // `attemptWorktreeSync` still reliably STARTS the sync before this
-    // function returns (JS runs an async function's body synchronously up
-    // to its first `await`), which is all round-12's original finding
-    // actually needed -- a live monitor racing to launch a successor can
-    // never observe a sync that hasn't even begun. The promise's outcome
-    // is only ever logged, never folded back into the already-stored
-    // baton (there is no update path for a handoff that has already been
+    // auto-mode live pickup.
+    //
+    // beforeArmPickup below awaits this SAME promise, but only up to
+    // FORCE_TIER_SYNC_ARM_TIMEOUT_MS -- resolving a genuine tension
+    // between two prior findings rather than picking one side over the
+    // other:
+    //   - round 12: arming pickup with NO regard for the sync at all let a
+    //     fast live monitor launch a successor before the sync had even
+    //     begun (or, per round 27's re-statement of the same concern,
+    //     while it was still mid-fetch/rebase), handing the successor a
+    //     stale or momentarily-inconsistent worktree.
+    //   - round 26: awaiting the sync's FULL completion (multiple 20s+
+    //     network/CLI timeouts stacked) could hold the last-chance/fire-
+    //     and-forget trigger long enough for compaction to happen,
+    //     defeating the guarantee this path exists for.
+    // A bounded wait gets both in the common case: a healthy, reachable
+    // remote finishes well inside the timeout, so pickup is armed only
+    // AFTER the sync genuinely settled; an unreachable/slow remote still
+    // cannot block the trigger past a small, fixed ceiling, and the sync
+    // keeps running in the background regardless -- its outcome is only
+    // ever logged, never folded back into the already-stored baton
+    // (there is no update path for a handoff that has already been
     // triggered).
+    let syncPromise = null;
     result = await triggerHandoff({
       promptText: markdown,
       sid,
@@ -381,7 +403,7 @@ async function autoForceHandoff(sid, cwd) {
       title: "Force-threshold auto-handoff",
       mode: handoffConfig.mode,
       afterStore: () => {
-        attemptWorktreeSync(cwd)
+        syncPromise = attemptWorktreeSync(cwd)
           .then((syncResult) => {
             if (syncResult.synced) {
               session.log(
@@ -402,6 +424,11 @@ async function autoForceHandoff(sid, cwd) {
           })
           .catch(() => {});
       },
+      beforeArmPickup: () =>
+        Promise.race([
+          syncPromise || Promise.resolve(),
+          delay(FORCE_TIER_SYNC_ARM_TIMEOUT_MS),
+        ]),
     });
   } catch (error) {
     session.log(

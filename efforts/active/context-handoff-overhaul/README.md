@@ -2267,3 +2267,67 @@ not re-fixed):
   37/37 pass (164 total, no regressions). Bumped plugin.json/marketplace.json
   to `0.1.1-dev38` (content changed again after dev37's own bump). All
   guards pass.
+
+### 2026-09-21 (cont.) -- PR #3167 round 27: exclusive-create restore fallback, releaseLock read-failure restore, bounded pickup-arm reintroduced
+
+Round 27 surfaced 4 new findings (3 HIGH, 1 LOW PR-metadata) plus the same 6
+carryovers re-flagged again (all re-verified against current file state as
+already resolved, not re-fixed -- see round 26's entry for the detailed
+per-item confirmation, unchanged since):
+
+- **(HIGH) Round 26's own `renameSync` restore fallback was unsafe on
+  filesystems without hard-link support:** `linkSync` can fail with
+  `ENOTSUP`/`EPERM` even when `lockPath` genuinely IS occupied (not only
+  when it's empty, as round 26 assumed) -- a `renameSync` there would
+  silently replace a still-active lock, letting two holders run
+  concurrently. Replaced the `renameSync` fallback with a read +
+  exclusive-create write (`openSync(lockPath, "wx")`, atomic on both
+  POSIX and Windows): its own `EEXIST` is a reliable "already occupied"
+  signal regardless of hard-link support, closing the gap round 26's fix
+  left open.
+- **(HIGH) `releaseLock` still didn't restore when it couldn't even read
+  the just-claimed content:** the read-failure branch simply `return`ed,
+  leaving `lockPath` (the canonical path) empty with the only surviving
+  content at the orphaned `claimedPath` -- exactly the "canonical path
+  left empty" bug round 26 fixed elsewhere in this same function, just
+  missed at this one call site. Now restores via `restoreClaimedLock`
+  instead of returning.
+- **(Re-flagged, addressed with reasoning rather than a literal fix) "Wait
+  for worktree sync before starting successor handoff":** round 26's
+  complete removal of `beforeArmPickup` (to stop it blocking on the
+  sync's full completion) reintroduced the exact race round 12 built that
+  hook to close -- pickup could now be armed before the sync had even
+  started. Reintroduced `beforeArmPickup`, but bounded to a fixed 10s
+  ceiling (`FORCE_TIER_SYNC_ARM_TIMEOUT_MS`) via `Promise.race` rather
+  than an unbounded await: a healthy, reachable remote settles well
+  inside the ceiling (satisfying round 12/27's concern in the common
+  case), while an unreachable/slow remote still cannot block the trigger
+  past a small fixed bound (satisfying round 26's concern). Resolves the
+  tension between the two prior findings instead of re-litigating one
+  side of it.
+- **(LOW, PR metadata) PR description's final Changes bullet still said
+  dev37 after this round's fixes needed dev38:** updated the version
+  bullet and added a Changes-section summary of this round's three fixes.
+- **(Reviewed but NOT changed) "Restore claimed lock when unlink fails"
+  (releaseLock's own-token release branch):** examined carefully and
+  concluded the suggested "restore on non-ENOENT unlink failure" would be
+  actively WRONG here, not merely unneeded -- this branch is the
+  legitimate self-release path (content genuinely matches this
+  invocation's own token), so `lockPath` is SUPPOSED to end up empty
+  after it; restoring would reintroduce a zombie lock nobody currently
+  holds, blocking future acquisitions until staleness eventually reclaims
+  it. `lockPath` is already correctly vacated by the earlier
+  `renameSync` claim regardless of whether this cleanup `unlinkSync`
+  succeeds -- a failure here only leaves harmless orphaned garbage, never
+  a live or ambiguous lock. Left the swallow-all-errors behavior as is,
+  but clarified the comment to explicitly distinguish this branch's
+  "intentional vacate" semantics from `restoreClaimedLock`'s "must
+  restore" semantics, so a future reader (or reviewer) doesn't need to
+  re-derive the same reasoning from scratch.
+- 4 new/changed exhaustive-suite tests (exclusive-create fallback
+  structural checks replacing the outdated renameSync-fallback assertion;
+  releaseLock's read-failure restore). `node --test`: fast suite 127
+  tests/125 pass (2 pre-existing skips, unchanged), exhaustive suite
+  39/39 pass (166 total, no regressions). No version bump needed for the
+  code fixes themselves (still `0.1.1-dev38`, bumped last round) --
+  guards all pass.

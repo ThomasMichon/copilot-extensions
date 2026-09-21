@@ -627,13 +627,13 @@ async function withWorktreeSyncLock(cwd, fn) {
 // restore succeeded, false otherwise -- the caller decides in EITHER case
 // whether it is safe to remove `claimedPath` (only when the restore
 // succeeded, or the failure was the expected "already re-occupied" EEXIST
-// case; any OTHER `linkSync` failure -- permissions, an unsupported
-// filesystem, I/O -- falls back to a direct `renameSync` restore, since
-// EEXIST is the sole signal that `lockPath` is occupied: any OTHER
-// failure means `lockPath` is presumably empty, so a rename there carries
-// no clobber risk and closes the "canonical path sits empty while the
-// only surviving copy is the orphaned claimedPath" window a third actor's
-// acquireLock could otherwise walk straight through).
+// case; any OTHER `linkSync` failure falls back to a read + no-clobber
+// EXCLUSIVE-create write, since `linkSync` can fail for reasons OTHER than
+// "already occupied" too -- e.g. `ENOTSUP`/`EPERM` on a filesystem without
+// hard-link support -- so its failure alone is never proof `lockPath` is
+// actually empty; only an exclusive-create's own `EEXIST` is. A plain
+// `renameSync` fallback here would silently replace a genuinely active
+// lock in exactly that case, which is the bug this now avoids).
 function restoreClaimedLock(claimedPath, lockPath) {
   try {
     linkSync(claimedPath, lockPath);
@@ -645,20 +645,42 @@ function restoreClaimedLock(claimedPath, lockPath) {
       try { unlinkSync(claimedPath); } catch { /* already gone */ }
       return true;
     }
-    // Any OTHER failure (permissions, an unsupported filesystem, cross-
-    // device link, I/O): `lockPath` is presumably NOT occupied (EEXIST is
-    // the only "already occupied" signal `linkSync` gives), so it is safe
-    // to fall back to a direct rename instead of leaving the canonical
-    // path empty.
+    // Any OTHER linkSync failure (permissions, an unsupported filesystem,
+    // cross-device link, I/O) does NOT prove lockPath is empty -- fall
+    // back to a read + exclusive-create write (`wx`, atomic on both POSIX
+    // and Windows: fails with EEXIST if the destination already exists,
+    // exactly like linkSync's own EEXIST signal, but without requiring
+    // hard-link support).
+    let content;
     try {
-      renameSync(claimedPath, lockPath);
-      return true;
+      content = readFileSync(claimedPath, "utf-8");
     } catch {
+      // Can't even read our own claimed copy -- nothing left to restore
+      // FROM. Fail closed.
+      return false;
+    }
+    let fd;
+    try {
+      fd = openSync(lockPath, "wx");
+    } catch (writeError) {
+      if (writeError?.code === "EEXIST") {
+        // Same benign case as linkSync's EEXIST above: someone else
+        // already re-occupied lockPath since the claim.
+        try { unlinkSync(claimedPath); } catch { /* already gone */ }
+        return true;
+      }
       // Truly could not restore either way -- fail closed, leaving the
       // orphaned copy at claimedPath as the only remaining trace rather
       // than losing it outright.
       return false;
     }
+    try {
+      writeFileSync(fd, content);
+    } finally {
+      try { closeSync(fd); } catch { /* already closed */ }
+    }
+    try { unlinkSync(claimedPath); } catch { /* already gone */ }
+    return true;
   }
   // linkSync succeeded: lockPath now has a second name for the SAME
   // content via the hard link -- safe to drop the claimedPath name.
@@ -680,11 +702,23 @@ function releaseLock(lockPath, token) {
   try {
     content = readFileSync(claimedPath, "utf-8");
   } catch {
-    // Unexpected: we just renamed it into existence ourselves. Fail closed
-    // -- leave the orphaned claimedPath rather than guessing.
+    // Unexpected: we just renamed it into existence ourselves. We cannot
+    // tell whether this was our own lock or a foreign one already
+    // reclaimed since -- but either way, leaving lockPath (the canonical
+    // path) empty here would let a third invocation acquire concurrently
+    // with whatever this claim actually represented. Restore it rather
+    // than guess.
+    restoreClaimedLock(claimedPath, lockPath);
     return;
   }
   if (content === token) {
+    // Genuinely our own lock, being released as intended -- lockPath is
+    // MEANT to end up empty here (that is the whole point of a release),
+    // so unlike every other catch in this pair of functions, this one is
+    // NOT a "must restore" situation: a failed cleanup below only leaves
+    // harmless orphaned garbage at claimedPath, never a live/ambiguous
+    // lock, since lockPath is already correctly vacated by the rename
+    // above regardless of what happens to the orphan copy's name.
     try { unlinkSync(claimedPath); } catch { /* already gone */ }
     return;
   }

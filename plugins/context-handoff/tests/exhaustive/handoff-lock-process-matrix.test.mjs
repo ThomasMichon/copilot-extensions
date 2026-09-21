@@ -791,20 +791,55 @@ test("releaseLock restores a foreign lock via linkSync (no-clobber), never renam
   assert.match(releaseBody, /restoreClaimedLock\(claimedPath,\s*lockPath\)/);
 });
 
-test("restoreClaimedLock falls back to a direct renameSync restore (never leaving the canonical path empty) when linkSync fails for any reason OTHER than EEXIST", () => {
-  // Real regression this guards (round 26): treating every non-EEXIST
-  // linkSync failure as "fail closed, leave the orphaned copy in place"
-  // left `lockPath` (the canonical path) EMPTY with no recoverable trace
-  // at that path -- a third invocation's acquireLock (an exclusive
-  // `open(..., "wx")`) would then succeed there and run concurrently with
-  // the holder whose content survives only at the orphaned claimedPath,
-  // defeating serialization. EEXIST is the ONLY signal linkSync gives for
-  // "the destination is occupied" -- any OTHER failure means lockPath is
-  // presumably empty, so a direct renameSync restore there carries no
-  // clobber risk and closes that window. Structural check: the non-EEXIST
-  // branch must attempt renameSync(claimedPath, lockPath), and only fall
-  // back to preserving the orphaned copy (not deleting it) if THAT also
-  // fails.
+test("releaseLock restores the claim (never just returns) when reading the claimed content fails", () => {
+  // Real regression this guards (round 27): if readFileSync fails right
+  // after releaseLock's own renameSync just claimed the path (an
+  // essentially-impossible-in-practice but not-provably-impossible
+  // failure), the prior code simply `return`ed -- leaving lockPath (the
+  // canonical path) EMPTY, with the only surviving content sitting at the
+  // orphaned claimedPath. A third invocation's exclusive acquireLock could
+  // then succeed at lockPath and run concurrently with whatever that claim
+  // actually represented. Since the content couldn't even be read, there
+  // is no way to tell whether it was this invocation's own lock or a
+  // foreign one -- but either way, the canonical path must not end up
+  // empty, so this must restore via restoreClaimedLock rather than
+  // silently returning.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const releaseBody = source.slice(
+    source.indexOf("function releaseLock("),
+    source.indexOf("// Async-only twin of resolveRuntimePython"),
+  );
+  assert.ok(releaseBody.length > 0, "could not locate releaseLock's body");
+  const readAttemptIndex = releaseBody.indexOf("readFileSync(claimedPath");
+  assert.ok(readAttemptIndex >= 0, "expected releaseLock to read the claimed content");
+  const readCatchIndex = releaseBody.indexOf("} catch {", readAttemptIndex);
+  assert.ok(readCatchIndex >= 0, "expected a catch block for the content read");
+  const readCatchEnd = releaseBody.indexOf("if (content === token)", readCatchIndex);
+  assert.ok(readCatchEnd >= 0, "expected the read-failure catch to precede the own-token check");
+  const readCatchBody = releaseBody.slice(readCatchIndex, readCatchEnd);
+  assert.match(readCatchBody, /restoreClaimedLock\(claimedPath,\s*lockPath\)/);
+  assert.doesNotMatch(readCatchBody.slice(0, readCatchBody.indexOf("restoreClaimedLock")), /^\s*return;\s*$/m);
+});
+
+test("restoreClaimedLock falls back to a no-clobber exclusive-create write (never a plain renameSync) when linkSync fails for any reason OTHER than EEXIST", () => {
+  // Real regression this guards (round 27): a plain renameSync fallback
+  // (round 26's fix) assumed EEXIST was the ONLY signal linkSync gives
+  // for "the destination is occupied" -- but linkSync can also fail with
+  // ENOTSUP/EPERM on a filesystem without hard-link support even when
+  // lockPath genuinely IS occupied, and a renameSync there would silently
+  // replace a still-active lock, letting two holders run concurrently.
+  // The fix replaces the renameSync fallback with a read + exclusive-
+  // create write (`openSync(lockPath, "wx")`, atomic on both POSIX and
+  // Windows): its own EEXIST is the reliable "already occupied" signal
+  // instead, regardless of hard-link support. Structural check: the
+  // non-EEXIST branch must attempt an exclusive-create open, never a bare
+  // renameSync(claimedPath, lockPath).
   const source = readFileSync(
     join(
       dirname(fileURLToPath(import.meta.url)),
@@ -822,14 +857,38 @@ test("restoreClaimedLock falls back to a direct renameSync restore (never leavin
   assert.match(restoreBody.slice(catchIndex), /error\?\.code === "EEXIST"/);
   const eexistIfIndex = restoreBody.indexOf('if (error?.code === "EEXIST")', catchIndex);
   const eexistIfEnd = restoreBody.indexOf("}", restoreBody.indexOf("}", eexistIfIndex) + 1) + 1;
-  const unexpectedFailureIndex = restoreBody.indexOf("Any OTHER failure", eexistIfEnd);
+  const unexpectedFailureIndex = restoreBody.indexOf("Any OTHER linkSync failure", eexistIfEnd);
   assert.ok(unexpectedFailureIndex >= 0, "expected a distinct non-EEXIST branch comment after the EEXIST if-block");
-  const renameIndex = restoreBody.indexOf("renameSync(claimedPath, lockPath)", unexpectedFailureIndex);
-  assert.ok(renameIndex >= 0, "expected the non-EEXIST branch to attempt a direct renameSync restore");
-  const lastReturnFalseIndex = restoreBody.lastIndexOf("return false;");
-  assert.ok(lastReturnFalseIndex > renameIndex, "expected a final fail-closed return false if renameSync ALSO fails");
-  const finalCatchBranch = restoreBody.slice(renameIndex, lastReturnFalseIndex + "return false;".length);
-  assert.doesNotMatch(finalCatchBranch, /unlinkSync\(claimedPath\)/);
+  const nonEexistBranch = restoreBody.slice(unexpectedFailureIndex);
+  assert.doesNotMatch(nonEexistBranch, /renameSync\(claimedPath,\s*lockPath\)/);
+  const openIndex = nonEexistBranch.indexOf('openSync(lockPath, "wx")');
+  assert.ok(openIndex >= 0, "expected the non-EEXIST branch to attempt an exclusive-create openSync restore");
+});
+
+test("restoreClaimedLock's exclusive-create fallback treats its own EEXIST as benign contention, and any other failure as fail-closed without deleting the claimed copy", () => {
+  // Companion to the test above: the exclusive-create fallback needs the
+  // SAME two-way branch linkSync's own catch has -- EEXIST (someone else
+  // already re-occupied lockPath, safe to drop the redundant claim) vs.
+  // any other failure (fail closed, preserve the orphaned copy as the
+  // only remaining trace).
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const restoreBody = source.slice(
+    source.indexOf("function restoreClaimedLock("),
+    source.indexOf("function releaseLock("),
+  );
+  assert.ok(restoreBody.length > 0, "could not locate restoreClaimedLock's body");
+  const openCatchIndex = restoreBody.indexOf("} catch (writeError) {");
+  assert.ok(openCatchIndex >= 0, "expected the exclusive-create open to have its own catch inspecting the error");
+  const openCatchBody = restoreBody.slice(openCatchIndex, restoreBody.indexOf("return false;", openCatchIndex) + "return false;".length);
+  assert.match(openCatchBody, /writeError\?\.code === "EEXIST"/);
+  const eexistBranchEnd = openCatchBody.indexOf("}", openCatchBody.indexOf('writeError?.code === "EEXIST"'));
+  assert.doesNotMatch(openCatchBody.slice(eexistBranchEnd), /unlinkSync\(claimedPath\)/);
 });
 
 test("attemptWorktreeSyncLocked disables rebase.autoStash and repo hooks for the delegated agent-worktrees sync too", () => {
