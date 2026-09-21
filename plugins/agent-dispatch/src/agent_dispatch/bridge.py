@@ -341,7 +341,8 @@ def spawn_worker(
         from . import bridge_reclaim
 
         return bridge_reclaim.resume_worktree_and_send(
-            worktree_id, prompt, exe=exe, wait=wait,
+            worktree_id, prompt, exe=exe, agent=agent,
+            caller=f"agent-dispatch:{worker_id}", wait=wait,
             json_output=json_output, timeout=timeout,
         )
     cmd = [*exe]
