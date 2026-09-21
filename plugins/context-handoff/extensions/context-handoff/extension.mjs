@@ -352,6 +352,39 @@ async function autoForceHandoff(sid, cwd) {
   }
   let result;
   try {
+    // Best-effort, kicked off concurrently WITH triggerHandoff below (not
+    // sequenced after it) rather than awaited by the critical capture path:
+    // a slow/unreachable remote must never delay or defeat the force-tier
+    // guarantee. Starting it here -- before triggerHandoff's own network
+    // calls and pickup wait -- gives the sync a real chance to finish (or
+    // at least progress) before a live monitor could claim the signal and
+    // launch a successor, rather than only starting once triggerHandoff has
+    // already returned (a round-11 review finding: sequencing the sync
+    // strictly after the live trigger let a fast monitor launch the
+    // successor onto a still-syncing, possibly still-mid-rebase worktree).
+    // Its outcome is only ever logged, never folded back into the
+    // already-stored baton (there is no update path for a handoff that has
+    // already been triggered).
+    const syncPromise = attemptWorktreeSync(cwd)
+      .then((syncResult) => {
+        if (syncResult.synced) {
+          session.log(
+            "[Context Handoff] Force-tier: worktree synced onto the latest " +
+            "default branch after the handoff above was already captured.",
+            { level: "info" },
+          );
+        } else {
+          session.log(
+            `[Context Handoff] Force-tier: worktree sync ` +
+            `${syncResult.attempted ? "failed" : "was skipped"} after the ` +
+            `handoff above was already captured (${syncResult.reason}). The ` +
+            "successor should sync onto the latest default branch itself.",
+            { level: "warning" },
+          );
+        }
+      })
+      .catch(() => {});
+    void syncPromise;
     result = await triggerHandoff({
       promptText: markdown,
       sid,
@@ -389,30 +422,6 @@ async function autoForceHandoff(sid, cwd) {
       session.log(`[Context Handoff] Force-tier manual-instructions send failed: ${e.message}`, { level: "warning" })
     );
   }
-  // Best-effort, strictly after the capture above -- never awaited by the
-  // critical path, so a slow or unreachable remote cannot delay or defeat
-  // the force-tier guarantee. Its outcome is only ever logged, never folded
-  // back into the already-stored baton (there is no update path for a
-  // handoff that has already been triggered).
-  attemptWorktreeSync(cwd)
-    .then((syncResult) => {
-      if (syncResult.synced) {
-        session.log(
-          "[Context Handoff] Force-tier: worktree synced onto the latest " +
-          "default branch after the handoff above was already captured.",
-          { level: "info" },
-        );
-      } else {
-        session.log(
-          `[Context Handoff] Force-tier: worktree sync ` +
-          `${syncResult.attempted ? "failed" : "was skipped"} after the ` +
-          `handoff above was already captured (${syncResult.reason}). The ` +
-          "successor should sync onto the latest default branch itself.",
-          { level: "warning" },
-        );
-      }
-    })
-    .catch(() => {});
 }
 
 // --- Extension ---

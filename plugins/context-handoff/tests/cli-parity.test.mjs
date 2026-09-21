@@ -49,7 +49,7 @@ test("payload-local CLI exposes the extension fallback flow", () => {
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
-  for (const command of ["facts", "save", "trigger", "consume", "check-heads", "retry-cutover"]) {
+  for (const command of ["facts", "save", "trigger", "consume", "check-heads", "retry-cutover", "sync-worktree"]) {
     assert.match(result.stdout, new RegExp(`\\b${command}\\b`));
   }
   assert.match(result.stdout, /--locator/);
@@ -157,10 +157,40 @@ test("extension and CLI delegate storage, signaling, and consumption to the same
     "consumeFileHandoff",
     "consumeDispatchHandoffTask",
     "formatConsumeResult",
+    "attemptWorktreeSync",
   ]) {
     assert.match(source, new RegExp(`\\b${shared}\\b`));
   }
   assert.doesNotMatch(source, /runHandoffCutover/);
+});
+
+test("sync-worktree shares the same lock/rebase-safe helper the force-tier path uses", async () => {
+  // Real regression this guards: without a shared entry point, the
+  // skill-guided flow invoked `agent-worktrees git sync` directly, bypassing
+  // attemptWorktreeSync's lock and rebase check entirely -- a force-tier
+  // sync and a skill-guided sync could then race on the same worktree.
+  const root = mkdtempSync(join(tmpdir(), "context-handoff-cli-sync-"));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: root });
+    spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    spawnSync("git", ["config", "user.name", "Test"], { cwd: root });
+    writeFileSync(join(root, "file.txt"), "one\n");
+    spawnSync("git", ["add", "."], { cwd: root });
+    spawnSync("git", ["commit", "-q", "-m", "initial"], { cwd: root });
+    const result = spawnSync(
+      process.execPath, [cli, "sync-worktree", "--json", "--cwd", root],
+      { encoding: "utf8" },
+    );
+    const parsed = JSON.parse(result.stdout);
+    // No reachable agent-worktrees catalog in this bare test environment,
+    // so it fails honestly rather than fabricating success -- proves the
+    // command actually reached attemptWorktreeSync's real logic.
+    assert.equal(parsed.attempted, true);
+    assert.equal(parsed.synced, false);
+    assert.match(parsed.reason, /sync failed|unavailable/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("fallback remains payload-only with no installed runtime", () => {

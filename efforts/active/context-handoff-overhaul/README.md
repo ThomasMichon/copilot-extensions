@@ -1618,3 +1618,48 @@ reviewer's bar; all fixed in this pass:
   regressions. All guards pass. No version bump needed (still `0.1.1-dev36`
   from round 9 -- these fixes are additional commits within the same
   unreleased dev version).
+
+### 2026-09-21 (cont.) -- PR #3167 round 11: shared sync entry point, force-tier trigger-race narrowing
+
+Round 11 confirmed all 4 of round 10's fixes resolved and surfaced 2 new
+HIGH findings plus 1 "previously missed" (unchanged-code) finding, all
+addressed in this pass:
+
+- **Skill-guided sync bypassed the force-tier's own safety machinery:**
+  `attemptWorktreeSync`'s lock/rebase-check/sanitized-env only protected the
+  JS force-tier path -- the agent-guided skill flow called
+  `agent-worktrees git sync` directly, so a force-tier sync and a
+  skill-guided sync could still race and rebase the same worktree
+  concurrently, and the manual path had no rebase-in-progress check of its
+  own at all. Fixed by exposing `attemptWorktreeSync` as a new
+  `handoff-cli.mjs sync-worktree` command -- ONE shared, lock-aware entry
+  point both paths now go through (the skill's "Sync before triggering"
+  step 2 now calls this instead of a bare `agent-worktrees git sync`). The
+  skill still owns committing reviewed WIP itself before calling it, which
+  matches `attemptWorktreeSync`'s existing already-clean-tree precondition.
+- **Force-tier: sync started only after the live trigger signal, not before
+  or during it:** `autoForceHandoff` awaited `triggerHandoff` (which arms
+  the live-cutover signal a fast monitor could act on) BEFORE starting the
+  fire-and-forget sync, so a successor could plausibly be launched before
+  the sync had even begun. Fully serializing sync-before-trigger would
+  reintroduce the exact regression rounds 6/8 already fixed (a slow/
+  unreachable remote delaying or defeating the force-tier's capture
+  guarantee), so the fix taken is a middle ground: the sync is now kicked
+  off (still fire-and-forget, still un-awaited) immediately before
+  `triggerHandoff` rather than after it returns, so the two run
+  concurrently and the sync gets a real chance to progress or finish during
+  triggerHandoff's own network calls and pickup-wait window, instead of
+  only starting once that window has already closed. This narrows the race
+  meaningfully without reintroducing the delayed-capture regression;
+  documented in-code as a deliberate tradeoff.
+- Re-verified round 9's `handoffDedupKey` stale re-flag: confirmed (again)
+  the review comment is pinned to unchanged `SKILL.md` prose, not the
+  actual (already fixed) `handoff-core.mjs` dedup logic -- expect this to
+  clear once the reviewer re-scans the referenced code path.
+- 2 new tests (`sync-worktree` CLI command exists and reaches the real
+  `attemptWorktreeSync` logic; help text lists it). `node --test`: 134
+  tests, 132 pass (2 pre-existing skips), no regressions. All guards pass
+  (one transient `bare-agent-command` marketplace-isolation finding from
+  the new skill wording was fixed with the established
+  `<!-- marketplace-isolation: allow ... -->` marker, back to the 702
+  baseline). No version bump needed (still `0.1.1-dev36`).
