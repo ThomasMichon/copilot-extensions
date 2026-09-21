@@ -627,7 +627,23 @@ async function withWorktreeSyncLock(cwd, fn) {
 // remote must never turn this into an unbounded wait on EITHER side. Never
 // reclaims or otherwise mutates the lock; that remains attemptWorktreeSync's
 // own job alone.
-export async function waitForWorktreeSyncToSettle(cwd, { timeoutMs = 15000, pollMs = 500 } = {}) {
+//
+// Start-barrier note (`startGraceMs`): attemptWorktreeSync's own path to
+// actually creating the lock file has several async steps of its own
+// (resolving the lock path, querying the holder's own start time) -- a
+// caller that KNOWS it just dispatched a sync attempt a moment ago (the
+// force-tier's own beforeArmPickup, the only caller that can make that
+// claim) could otherwise observe "no lock file yet" and wrongly conclude
+// "already settled" before the sync even had a chance to register itself.
+// Passing a nonzero `startGraceMs` makes that caller's early
+// absent/unparseable readings NOT trusted as settled until either genuine
+// evidence of a live holder is observed (no further grace needed from
+// then on) or the grace window itself elapses. Defaults to 0 (trust the
+// very first reading immediately) for a caller with NO such certainty --
+// e.g. consume_handoff's defensive startup check, which has no reason to
+// believe a sync is in flight at all and must stay fast in the overwhelmingly
+// common case where none is.
+export async function waitForWorktreeSyncToSettle(cwd, { timeoutMs = 15000, pollMs = 500, startGraceMs = 0 } = {}) {
   let lockPath;
   try {
     lockPath = await resolveWorktreeSyncLockPath(cwd);
@@ -636,28 +652,49 @@ export async function waitForWorktreeSyncToSettle(cwd, { timeoutMs = 15000, poll
     return { waited: false, settled: true, reason: "could not resolve a lock path for this worktree" };
   }
   const deadline = Date.now() + Math.max(0, timeoutMs);
+  const startGraceDeadline = Date.now() + Math.min(Math.max(0, startGraceMs), Math.max(0, timeoutMs));
+  const gracePollMs = Math.min(pollMs, 100);
+  let everObservedLive = false;
   for (;;) {
-    let content;
+    let content = null;
     try {
       content = readFileSync(lockPath, "utf-8");
     } catch {
-      // No lock present -- either no sync ever started, or one already
-      // finished and released cleanly. Either way, nothing to wait for.
-      return { waited: true, settled: true, reason: "lock-absent" };
+      // No lock file at this instant.
     }
-    const match = content.match(/^(\d+)-(\d+|unknown)-/);
+    const match = content !== null ? content.match(/^(\d+)-(\d+|unknown)-/) : null;
     const holderPid = match ? Number(match[1]) : null;
-    if (holderPid === null || !isProcessAlive(holderPid)) {
-      // Unparseable/foreign content, or a confirmed-dead holder -- not
-      // something currently in flight from this waiter's point of view.
-      // (Reclaiming a stale-but-parseable lock remains attemptWorktreeSync's
-      // own job; this function only ever reads.)
-      return { waited: true, settled: true, reason: holderPid === null ? "lock-unparseable" : "holder-dead" };
+    const liveNow = holderPid !== null && isProcessAlive(holderPid);
+    if (liveNow) {
+      everObservedLive = true;
+    } else if (everObservedLive) {
+      // Was genuinely observed live at least once, and is now
+      // absent/unparseable/dead -- this really is settled (released or
+      // reclaimed since we last saw it in flight), not a startup artifact.
+      return {
+        waited: true,
+        settled: true,
+        reason: content === null ? "lock-absent-after-live" : (holderPid === null ? "lock-unparseable-after-live" : "holder-dead"),
+      };
+    } else if (Date.now() >= startGraceDeadline) {
+      // Never once observed live, and the startup grace window (zero by
+      // default) has fully elapsed -- genuinely nothing in flight (never
+      // started, or a dead/unparseable lock that predates this wait
+      // entirely).
+      return {
+        waited: true,
+        settled: true,
+        reason: content === null ? "lock-absent" : (holderPid === null ? "lock-unparseable" : "holder-dead"),
+      };
     }
+    // Still within an opted-in startup grace window with no live evidence
+    // yet, or observed live and still waiting for it to clear -- keep
+    // polling.
     if (Date.now() >= deadline) {
       return { waited: true, settled: false, reason: "timeout" };
     }
-    await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
+    const nextPollMs = everObservedLive ? pollMs : gracePollMs;
+    await sleep(Math.min(nextPollMs, Math.max(0, deadline - Date.now())));
   }
 }
 

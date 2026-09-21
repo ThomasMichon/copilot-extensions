@@ -328,14 +328,26 @@ async function onPermissionRequest(request, invocation) {
 
 // Ceiling on how long the force-tier trigger will wait for the post-store
 // worktree sync to settle before arming live pickup (see autoForceHandoff's
-// beforeArmPickup comment for the round-12/26/27/28 tension this bounds),
-// and how long consume_handoff (below) will defensively wait at successor
-// startup in case pickup was armed while a sync was still settling.
-// Comfortably shorter than triggerHandoff's own default 30s pickup-wait
-// window, so this can never itself become the dominant source of the
-// force-tier trigger's total latency, while still covering a healthy,
-// reachable remote's typical fetch+rebase duration in the common case.
+// beforeArmPickup comment for the round-12/26/27/28/29 tension this
+// bounds), and how long consume_handoff (below) will defensively wait at
+// successor startup in case pickup was armed while a sync was still
+// settling. Comfortably shorter than triggerHandoff's own default 30s
+// pickup-wait window, so this can never itself become the dominant source
+// of the force-tier trigger's total latency, while still covering a
+// healthy, reachable remote's typical fetch+rebase duration in the common
+// case.
 const FORCE_TIER_SYNC_ARM_TIMEOUT_MS = 15000;
+
+// Only autoForceHandoff's beforeArmPickup can claim "a sync attempt was
+// just dispatched a moment ago" -- it fires attemptWorktreeSync itself,
+// synchronously, right before calling this. That certainty is what
+// justifies giving waitForWorktreeSyncToSettle's own startup race (the
+// lock file does not exist for the first few async steps of a genuinely
+// in-flight sync) a short grace period there (see its own doc comment).
+// consume_handoff has no such certainty and must not adopt the same
+// grace -- it would only slow down the overwhelmingly common case where
+// no sync is in flight at all.
+const FORCE_TIER_SYNC_START_GRACE_MS = 2000;
 
 // Auto-draft, store, and trigger a handoff without agent involvement. Fire-
 // and-forget from the session.usage_info handler (below); reports its own
@@ -428,7 +440,10 @@ async function autoForceHandoff(sid, cwd) {
           .catch(() => {});
       },
       beforeArmPickup: () =>
-        waitForWorktreeSyncToSettle(cwd, { timeoutMs: FORCE_TIER_SYNC_ARM_TIMEOUT_MS }),
+        waitForWorktreeSyncToSettle(cwd, {
+          timeoutMs: FORCE_TIER_SYNC_ARM_TIMEOUT_MS,
+          startGraceMs: FORCE_TIER_SYNC_START_GRACE_MS,
+        }),
     });
   } catch (error) {
     session.log(

@@ -1,0 +1,37 @@
+name: context-handoff exhaustive suite
+
+# Deliberately its OWN workflow file, not a job inside ci.yml: a top-level
+# `schedule` trigger applies to EVERY job declared on that trigger's
+# workflow, so adding it directly to ci.yml would have put the entire
+# fast/smoke/full test matrix on a weekly cron too, not just this one suite
+# (round-29 review finding on #3167).
+#
+# This suite spins up real git repos and real child processes and exercises
+# timing-sensitive lock-reclaim races (see
+# plugins/context-handoff/tests/exhaustive/), so it is both slower and less
+# deterministic than the fast contract suite ci.yml's `checks` job already
+# runs on every PR via `node --test plugins/*/tests/*.test.mjs` (a glob that
+# does not recurse into this suite's `tests/exhaustive/` subdirectory).
+# Runs on workflow_dispatch (on demand) and a weekly schedule; never blocks
+# a PR merge.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  exhaustive:
+    name: exhaustive lock/process matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Exhaustive lock/process-race suite
+        run: node --test plugins/context-handoff/tests/exhaustive/*.test.mjs

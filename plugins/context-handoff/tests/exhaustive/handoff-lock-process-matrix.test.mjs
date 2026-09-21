@@ -1292,9 +1292,79 @@ test("waitForWorktreeSyncToSettle stops waiting as soon as the lock is released 
     const result = await waitForWorktreeSyncToSettle(dir, { timeoutMs: 5000, pollMs: 100 });
     const elapsedMs = Date.now() - start;
     assert.equal(result.settled, true);
-    assert.equal(result.reason, "lock-absent");
+    assert.equal(result.reason, "lock-absent-after-live");
     assert.ok(elapsedMs < 2000, `expected to notice the release well before the 5s timeout, took ${elapsedMs}ms`);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("waitForWorktreeSyncToSettle with no startGraceMs (the default) does NOT wait for a lock that appears late", async () => {
+  // Documents the deliberate trade-off default: a caller with no
+  // certainty a sync was just dispatched (consume_handoff) must stay fast
+  // in the common "nothing in flight" case, even at the cost of a narrow
+  // startup-race window if a sync happens to begin at the exact wrong
+  // instant. Without an opted-in startGraceMs, a lock that appears AFTER
+  // the first read is missed entirely.
+  const dir = initGitRepo();
+  let timer;
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    timer = setTimeout(() => {
+      writeFileSync(lockPath, `${process.pid}-unknown-liveholder`);
+    }, 300);
+    const start = Date.now();
+    const result = await waitForWorktreeSyncToSettle(dir, { timeoutMs: 5000, pollMs: 100 });
+    const elapsedMs = Date.now() - start;
+    assert.equal(result.settled, true);
+    assert.equal(result.reason, "lock-absent");
+    assert.ok(elapsedMs < 1000, `expected an immediate return with no grace window, took ${elapsedMs}ms`);
+  } finally {
+    clearTimeout(timer);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("waitForWorktreeSyncToSettle with a nonzero startGraceMs catches a lock that appears shortly after the wait begins (the round-29 startup race)", async () => {
+  // Real regression this guards: attemptWorktreeSync's own path to create
+  // the lock file has several async steps of its own (resolving the lock
+  // path, querying the holder's own start time) -- a caller that fires
+  // attemptWorktreeSync and then immediately calls
+  // waitForWorktreeSyncToSettle (autoForceHandoff's beforeArmPickup) could
+  // observe "no lock yet" before the sync has had a chance to register
+  // itself. A nonzero startGraceMs must keep polling through that window
+  // instead of trusting the very first "absent" reading.
+  const dir = initGitRepo();
+  let lockPath;
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    // The lock does not exist YET when the wait begins -- simulates the
+    // async gap between "sync dispatched" and "lock file created".
+    setTimeout(() => {
+      writeFileSync(lockPath, `${process.pid}-unknown-liveholder`);
+    }, 300);
+    setTimeout(() => {
+      try { rmSync(lockPath); } catch { /* ignore */ }
+    }, 900);
+    const start = Date.now();
+    const result = await waitForWorktreeSyncToSettle(dir, { timeoutMs: 5000, pollMs: 100, startGraceMs: 2000 });
+    const elapsedMs = Date.now() - start;
+    assert.equal(result.settled, true);
+    assert.equal(result.reason, "lock-absent-after-live");
+    // Must have waited long enough to observe the lock appear AND clear,
+    // not returned instantly on the initial "absent" reading.
+    assert.ok(elapsedMs >= 800, `expected to have waited through the lock's lifecycle, took ${elapsedMs}ms`);
+    assert.ok(elapsedMs < 5000, `expected to settle well before the overall timeout, took ${elapsedMs}ms`);
+  } finally {
+    try { rmSync(lockPath); } catch { /* ignore */ }
     rmSync(dir, { recursive: true, force: true });
   }
 });

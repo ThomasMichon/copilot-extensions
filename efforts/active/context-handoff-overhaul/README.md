@@ -2382,3 +2382,50 @@ liveness-aware wait usable from BOTH ends of a handoff:
   (2 pre-existing skips, unchanged), exhaustive suite 43/43 pass (170
   total, no regressions). Bumped plugin.json/marketplace.json to
   `0.1.1-dev39`. All guards pass.
+
+### 2026-09-21 (cont.) -- PR #3167 round 29: real start-barrier for waitForWorktreeSyncToSettle, exhaustive suite moved to its own workflow file
+
+Round 29 confirmed round 28's `waitForWorktreeSyncToSettle` genuinely
+resolved the round-12/26/27/28 pickup-arm tension, and surfaced 2 new
+MEDIUM findings, both fixed:
+
+- **CI schedule trigger applied to every job, not just the exhaustive
+  suite:** a top-level `schedule:` trigger on `ci.yml` applies to EVERY
+  job in that workflow -- `checks`, Windows hooks, runner tests, the
+  `discover`/`smoke`/`worktrees-smoke` matrix, and the manual `full` job
+  would ALL have started running weekly, not just the one exhaustive job
+  that needed it, silently multiplying CI cost. Moved the exhaustive job
+  (and its `workflow_dispatch`/weekly-`schedule` triggers) into its OWN
+  dedicated workflow file, `.github/workflows/context-handoff-exhaustive.yml`
+  -- `ci.yml` itself reverts to its original `pull_request`/`push`/
+  `workflow_dispatch` triggers only.
+- **`waitForWorktreeSyncToSettle`'s lock-visibility could race with the
+  sync's own startup:** `attemptWorktreeSync` has several async steps of
+  its own (resolving the lock path, querying the holder's start time)
+  before the lock file exists on disk at all -- a caller invoking the
+  wait function at roughly the same moment a sync begins could observe
+  "no lock yet" and wrongly conclude "already settled" before the sync
+  had a chance to register itself, letting `autoForceHandoff` arm pickup
+  while a successor could still read stale or mid-rebase files. Added an
+  opt-in `startGraceMs` parameter: during that grace window, an absent or
+  unparseable reading is NOT trusted as settled -- only once genuine
+  evidence of a live holder is observed (no further grace needed from
+  then on), or the grace window itself elapses with no evidence at all,
+  is "settled" concluded. Deliberately opt-in (defaults to 0): only
+  `autoForceHandoff`'s `beforeArmPickup` -- the one caller that KNOWS a
+  sync was just dispatched a moment ago -- passes a nonzero
+  `FORCE_TIER_SYNC_START_GRACE_MS` (2000ms); `consume_handoff`'s
+  defensive successor-side check has no such certainty and must stay
+  fast in the overwhelmingly common case where nothing is in flight at
+  all, so it keeps the zero-grace default.
+- 2 new/changed exhaustive-suite tests proving the grace-window trade-off
+  both ways (a lock that appears late is missed with the default 0ms
+  grace; the same lock is caught with a nonzero grace configured), plus
+  reason-string updates on 2 existing tests to reflect the richer
+  before/after-observed-live distinction. `node --test`: fast suite 127
+  tests/125 pass (2 pre-existing skips, unchanged), exhaustive suite
+  45/45 pass (172 total; one transient Windows `EPERM` on an unrelated
+  test's cleanup, confirmed non-reproducing on immediate re-run -- the
+  same known flake documented earlier in this journal). Bumped
+  plugin.json/marketplace.json to `0.1.1-dev40`. All guards pass,
+  including `check-trusted-ci.py` on the new workflow file.
