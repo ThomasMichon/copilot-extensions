@@ -9,6 +9,7 @@ Verbs:
 * ``validate`` -- run the conflict validator over the package union
 * ``restore``  -- converge the machine (``--dry-run`` prints the plan; apply lands in #4006)
 * ``self-update`` -- run unattended watchdog / sweep tiers
+* ``fleet-update`` -- run the unattended daily worktree-manager update sweep
 * ``provision-playwright-cli`` -- converge the machine-local Playwright CLI workspace
 * ``capture`` / ``prune`` -- harvest / GC verbs (issue #4006)
 """
@@ -20,7 +21,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__
+from . import __version__, cli_fleet_update
 from . import discover as _discover
 from . import identity as _identity
 from . import layout as _layout
@@ -664,7 +665,7 @@ def _cmd_self_update_uninstall(args: argparse.Namespace) -> int:
         for result in results:
             print(f"{result.tier}: {result.status}")
             print(f"  {result.detail}")
-    return 0 if all(result.ok for result in results) else 2
+    return 0 if all(result.ok or result.status == "skipped" for result in results) else 2
 
 
 def _cmd_todo(args: argparse.Namespace) -> int:
@@ -818,6 +819,7 @@ def _build_parser() -> argparse.ArgumentParser:
         current.add_argument("--machine", help="override the target machine name")
         current.add_argument("--json", action="store_true", help="emit JSON")
         current.set_defaults(func=func)
+    cli_fleet_update.register_parser(sub)
     playwright = sub.add_parser("provision-playwright-cli")
     playwright.add_argument("--json", action="store_true", help="emit JSON")
     playwright_mode = playwright.add_mutually_exclusive_group()

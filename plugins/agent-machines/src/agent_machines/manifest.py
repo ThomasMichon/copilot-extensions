@@ -59,10 +59,12 @@ BOOTSTRAP_CRITICAL_MARKETPLACES = ("copilot-extensions",)
 #: today -- ``package``, ``file`` (whole-file and managed-block),
 #: ``registry`` (Windows), ``feature`` (Windows optional features /
 #: capabilities and Linux/WSL units), ``power-setting`` (Windows power
-#: schemes), and ``self-update`` (machine-local unattended tier opt-in). See
-#: ``resources.py`` for the handlers.
+#: schemes), ``self-update`` (machine-local unattended tier opt-in), and
+#: ``fleet-update`` (machine-local unattended worktree-manager update
+#: sweep opt-in). See ``resources.py`` for the handlers.
 KNOWN_RESOURCE_TYPES = (
-    "package", "file", "registry", "feature", "power-setting", "self-update"
+    "package", "file", "registry", "feature", "power-setting", "self-update",
+    "fleet-update",
 )
 
 #: Minimal required identity fields per resource type (checked at load).
@@ -73,12 +75,14 @@ REQUIRED_FIELDS = {
     "feature": ("id", "manager"),
     "power-setting": ("subgroup", "setting"),
     "self-update": ("tier",),
+    "fleet-update": ("tier",),
 }
 
 #: Accepted values for a resource's ``state`` / ``strategy`` selectors.
 RESOURCE_STATES = ("present", "absent")
 RESOURCE_STRATEGIES = ("enforce", "ensure-present", "managed-block")
 SELF_UPDATE_TIERS = ("watchdog", "sweep")
+FLEET_UPDATE_TIERS = ("sweep",)
 
 #: Registry value types accepted by the ``registry`` resource (friendly names
 #: mapped to ``reg.exe`` ``REG_*`` types in ``resources.py``). Kept here for
@@ -519,6 +523,13 @@ def load_package(
                 raise ManifestError(
                     f"{path}: self-update tier {tier!r} must be one of "
                     f"{SELF_UPDATE_TIERS}"
+                )
+        if rtype == "fleet-update":
+            tier = res.get("tier")
+            if tier not in FLEET_UPDATE_TIERS:
+                raise ManifestError(
+                    f"{path}: fleet-update tier {tier!r} must be one of "
+                    f"{FLEET_UPDATE_TIERS}"
                 )
         process_guard = res.get("process_guard")
         if process_guard is not None:

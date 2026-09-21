@@ -53,6 +53,14 @@ actions) and per-machine data stay in the consuming repo.
   defer around a live session and are a clean no-op when not opted in. See the
   `agent-machines-setup` skill's *Enable a regular unattended maintenance
   schedule* section and [`docs/resources.md`](docs/resources.md#self-update).
+- **Optional unattended fleet-update sweep.** A distinct, independently
+  scheduled `fleet-update` resource opts a machine into a daily Scheduled
+  Task/`systemd --user` timer that runs `worktree-manager update` -- the
+  fleet-wide plugin install/update orchestrator the Worktree Manager already
+  owns -- asynchronously, without waiting on an interactive session. Uses its
+  own state directory, lock namespace, and scheduled-task family from
+  self-update's, so a bug in one can never affect the other's already-
+  deployed mechanism. See [`docs/resources.md`](docs/resources.md#fleet-update).
 
 For implementation details, see [`docs/architecture.md`](docs/architecture.md).
 
@@ -253,6 +261,10 @@ agent-machines self-update status       # show opt-in + task presence
 agent-machines self-update uninstall    # remove registered self-update tasks
 agent-machines self-update run --tier watchdog
 agent-machines self-update run --tier sweep --json
+agent-machines fleet-update install     # register the opted-in fleet-update sweep task
+agent-machines fleet-update status      # show opt-in + task presence
+agent-machines fleet-update uninstall   # remove the registered fleet-update task
+agent-machines fleet-update run --tier sweep --json
 agent-machines provision-playwright-cli # preview user-home package/skill changes
 agent-machines provision-playwright-cli --apply
 agent-machines provision-playwright-cli --json

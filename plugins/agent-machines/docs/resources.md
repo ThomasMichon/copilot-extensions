@@ -32,6 +32,9 @@ resources:
   - type: self-update
     tier: watchdog              # watchdog | sweep
     state: present              # present (default) | absent
+  - type: fleet-update
+    tier: sweep                 # sweep (the only tier today)
+    state: present              # present (default) | absent
 ```
 
 ## Common resource fields
@@ -248,6 +251,40 @@ scheduler pinned to an old version:
   elevate-and-retry instruction), and a newly opted-out tier is removed without
   a separate install/uninstall step.
 
+### `fleet-update`
+
+Declare machine-local opt-in for the unattended `agent-machines fleet-update`
+sweep. Identity is `tier`; today there is a single `sweep` tier.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `type` | yes | `fleet-update` |
+| `tier` | yes | `sweep` (the only tier today). |
+| `state` | no | `present` (opted in; default) or `absent` (opted out). |
+| `platforms` | no | Restrict to a subset of `windows` / `linux` / `wsl`. |
+| `gate` | no | Restrict to specific machines (defaults to the package gate). |
+| `owner` | no | Override the collision owner label (defaults to the package name). |
+
+A distinct resource from `self-update` (different scheduler, state directory,
+and lock namespace, so a bug in one can never affect the other's already-
+deployed mechanism): `sweep` runs `worktree-manager update` once a day,
+independent of and in parallel with any `self-update` tiers. Declaring the
+resource controls both `agent-machines fleet-update run` and the machine-local
+scheduler presence reconciled by `agent-machines fleet-update install` (Windows
+Scheduled Tasks; Linux/WSL `systemd --user` timers). The registered command
+targets the stable `worktree-manager` binstub (`~/.local/bin/worktree-manager`
+on POSIX, `worktree-manager.cmd` on Windows) -- not the `agent-machines`
+binstub self-update uses -- so the fleet-wide plugin install/update
+orchestration the Worktree Manager already owns runs asynchronously on a
+schedule, rather than only inline during an interactive `worktree-manager
+update` invocation:
+
+- `run` resolves the selected tier first and is a clean no-op when it is
+  opted out.
+- `install` resolves the same authority-selected state first and attempts
+  Scheduled Task registration only for tiers whose resolved state is `present`.
+- `status` / `uninstall` mirror `self-update`'s equivalents.
+
 The created Windows tasks run only when the user is logged on, matching the
 interactive credential/token needs of the dtssh watchdog and restore sweep.
 
@@ -289,6 +326,7 @@ compatibility data from lower-authority declarations remain effective:
 | feature `present` + `absent` | highest authority wins; equal-highest disagreement errors |
 | power setting conflicting `ac` or `dc` value | highest authority for that power source wins; equal-highest disagreement errors |
 | self-update `present` + `absent` | highest authority wins; equal-highest disagreement errors |
+| fleet-update `present` + `absent` | highest authority wins; equal-highest disagreement errors |
 
 File `format` and `content` are selected from declarations participating in the
 winning strategy (`enforce` when present, otherwise `ensure-present`), so
