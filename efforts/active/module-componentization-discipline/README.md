@@ -69,7 +69,7 @@ table):
 |------:|---------:|------|-------|
 | 9,267 | +8,267 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression); it drifted again while this slice was in flight, so the baseline was manually widened (9191 → 9267) to restore a green full-tree guard pending its own future split |
 | 9,169 | +8,169 | `libs/installation-context/installation_context.py` (+17 vendored copies) | Split the **canonical** copy only; `sync-installation-context.py` propagates to every vendored copy |
-| 8,139 | +7,139 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
+| 8,140 | +7,140 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
 | 6,972 | +5,972 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
 | 6,751 | +5,751 | `plugins/agent-bridge/src/agent_bridge/session_manager.py` | |
 | 5,872 | +4,872 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | |
@@ -1033,8 +1033,8 @@ the Phase 0 runbook, picked up as capacity allows.
   `status_monitor_cli.py` so the runtime helper file lands at **800** lines and
   the command wrapper at **303**. `front_door_cli.py` lands at **897** lines.
   Net result for the parent module: `plugins/agent-worktrees/src/agent_worktrees/__main__.py`
-  dropped from **9,420** lines at slice start to **8,139** (a **1,281-line**
-  reduction this pass; **29,173 → 8,139** across the full ten-slice campaign).
+  dropped from **9,420** lines at slice start to **8,140** (a **1,280-line**
+  reduction this pass; **29,173 → 8,140** across the full ten-slice campaign).
 - The live `cmd_*` inventory after this slice is now down to exactly:
   `cmd_launch`, `cmd_execution_leg`, the explicitly excluded `cmd_copilot`,
   thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace`. That is the
@@ -1066,7 +1066,7 @@ the Phase 0 runbook, picked up as capacity allows.
   (**551 passed, 10 failed, 1 skipped**) already accepted as pre-existing.
   `python tools/check-module-size.py --refresh-baseline` lowered
   `tools/module-size-baseline.json`'s ceiling for `agent_worktrees/__main__.py`
-  to **8,139**, and `python tools/check-install-contract.py` plus
+  to **8,140**, and `python tools/check-install-contract.py` plus
   `python tools/check-version-consistency.py` both pass. Dogfooded the touched
   surfaces with read-only help/output paths through the plugin test venv:
   global `--help`, `status-monitor --help`, `reconcile-sessions --help`,

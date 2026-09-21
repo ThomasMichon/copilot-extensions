@@ -97,6 +97,7 @@ from . import (
     effort_focus,
     git_ops,
     handoff_trace,
+    list_cache,  # noqa: F401 -- compatibility re-export for extracted status-monitor CLI
     locks,
     obligations,
     output,
