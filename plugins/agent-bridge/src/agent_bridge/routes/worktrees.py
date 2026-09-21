@@ -1528,7 +1528,6 @@ async def restart_worktree_copilot(
     expected_holder: str | None = None,
 ) -> dict[str, Any]:
     """Restart a worktree's interactive (mux-launched) Copilot in place.
-
     Shells to ``<project> restart <id> --json`` on the owning machine:
     graceful double Ctrl-C then a hard mux ``kill-session`` fallback,
     keeping the worktree **on disk** for a later relaunch/ACP-resume.
@@ -1570,12 +1569,13 @@ async def restart_worktree_copilot(
 
     method = data.get("method", "unknown")
     ok = bool(data.get("ok", False))
+    had_session = bool(data.get("had_session", False))
 
-    # Invalidate-on-take-over (#2906): demote the live-session registration
-    # (fenced to expected_holder when given -- #2906 race hardening) and drop
-    # queued inbox messages, so the reclaim resume isn't blocked by the
-    # atomic ownership guard (#2879) waiting on a not-yet-reaped row.
-    if ok:
+    # Invalidate-on-take-over (#2906): demote the live registration (fenced
+    # to expected_holder) and drop queued inbox messages so reclaim isn't
+    # blocked by the ownership guard (#2879). Only when had_session is
+    # true -- a no-op is never proof a bare claimant was terminated.
+    if ok and had_session:
         db = getattr(request.app.state, "db", None)
         if db is not None:
             try:
@@ -1596,7 +1596,7 @@ async def restart_worktree_copilot(
     return {
         "worktree_id": data.get("worktree_id", worktree_id),
         "agent_name": agent_name,
-        "had_session": bool(data.get("had_session", False)),
+        "had_session": had_session,
         "method": method,
         "ok": ok,
     }

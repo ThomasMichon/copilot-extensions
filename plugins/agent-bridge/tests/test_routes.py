@@ -2231,6 +2231,40 @@ class TestWorktreeRoutes:
         assert resp.status_code == 200
         assert db.get_live_session("cli-live")["status"] == "live"
 
+    def test_restart_ok_no_session_keeps_live_registration(
+        self, client, app,
+    ) -> None:
+        """``ok:true, had_session:false`` is a no-op (no mux session existed
+        to stop) -- it is NOT proof that whatever registered
+        live_cli_holds_worktree (possibly a bare, un-muxed CLI) was actually
+        terminated, so the live registration must be left intact."""
+        import time
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "anomalous-potato-wsl-20250101-193420-bare"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        db = app.state.db
+        now = time.time()
+        db.register_live_session(
+            "cli-bare", machine="test-agent", cwd=None, worktree_id=wt_id,
+            repo=None, branch=None, pid=None, role=None, now=now,
+        )
+
+        payload = (
+            '{"worktree_id": "%s", "had_session": false, '
+            '"method": "none", "ok": true}' % wt_id
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ):
+            resp = client.post(f"/api/v1/worktrees/{wt_id}/restart")
+
+        assert resp.status_code == 200
+        assert db.get_live_session("cli-bare")["status"] == "live"
+
     def test_restart_expected_holder_fences_invalidation(
         self, client, app,
     ) -> None:

@@ -70,6 +70,9 @@ def cmd_restart_worktree(args: argparse.Namespace) -> None:
             sys.exit(1)
         return
     wt = result.get("worktree_id", args.worktree_id)
+    if not ok:
+        print(f"[FAIL] {wt}: failed to stop the interactive Copilot.", file=sys.stderr)
+        sys.exit(1)
     if not result.get("had_session"):
         print(f"{wt}: no interactive Copilot running (nothing to stop).")
         return

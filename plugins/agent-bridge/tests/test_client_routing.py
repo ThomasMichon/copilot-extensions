@@ -79,6 +79,7 @@ def test_restart_worktree_force_query_param(cfg_dir: Path, monkeypatch):
         client, "_request",
         lambda method, path, **kw: calls.append((method, path, kw)) or None,
     )
+    monkeypatch.setattr(client, "daemon_supports", lambda min_version: True)
     client.restart_worktree("wt-1")
     client.restart_worktree("wt-2", force=True)
     client.restart_worktree("wt-3", expected_holder="sess-a")
@@ -101,6 +102,25 @@ def test_restart_worktree_force_query_param(cfg_dir: Path, monkeypatch):
             },
         ),
     ]
+
+
+def test_restart_worktree_expected_holder_fails_closed_on_old_daemon(
+    cfg_dir: Path, monkeypatch,
+):
+    """``expected_holder`` is protocol-16 behavior -- a daemon that doesn't
+    advertise it would silently ignore the query param and run its old
+    unfenced restart, so this refuses the call outright rather than sending
+    an unfenced restart the daemon can't honor (#2906 race hardening)."""
+    client = BridgeClient.from_config()
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        client, "_request",
+        lambda method, path, **kw: calls.append((method, path, kw)) or None,
+    )
+    monkeypatch.setattr(client, "daemon_supports", lambda min_version: False)
+    result = client.restart_worktree("wt-1", expected_holder="sess-a")
+    assert result["ok"] is False
+    assert calls == []  # never even sent
 
 
 def test_explicit_base_url_env_wins(cfg_dir: Path, monkeypatch):

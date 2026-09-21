@@ -126,7 +126,7 @@ def test_revalidation_succeeding_needs_no_force_at_all(monkeypatch):
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
         if _is_restart(cmd):
-            return _proc(cmd, 0, json.dumps({"ok": True}))
+            return _proc(cmd, 0, json.dumps({"ok": True, "had_session": True}))
         if _is_resume(cmd):
             if calls.count(list(cmd)) == 1:
                 return _live_cli_refusal(cmd)
@@ -149,7 +149,7 @@ def test_different_holder_after_stop_refuses_to_force(monkeypatch):
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
         if _is_restart(cmd):
-            return _proc(cmd, 0, json.dumps({"ok": True}))
+            return _proc(cmd, 0, json.dumps({"ok": True, "had_session": True}))
         if _is_resume(cmd):
             if calls.count(list(cmd)) == 1:
                 return _live_cli_refusal(cmd, holder="live-7")
@@ -183,6 +183,29 @@ def test_stop_failure_is_reported_without_forcing_through(monkeypatch):
     assert len(calls) == 2  # one resume attempt, one stop attempt -- never a 2nd resume
     assert not any("--force" in c for c in calls)
 
+
+def test_no_mux_session_to_stop_refuses_to_force(monkeypatch):
+    """``ok:true, had_session:false`` means restart found no mux session to
+    stop -- never proof the live_cli_holds_worktree claimant (possibly a
+    bare, un-muxed CLI) was actually terminated. Must refuse to force
+    through it, the same as an outright stop failure."""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if _is_restart(cmd):
+            return _proc(cmd, 0, json.dumps(
+                {"ok": True, "had_session": False, "method": "none"}
+            ))
+        if _is_resume(cmd):
+            return _live_cli_refusal(cmd)
+        return _proc(cmd, 0, "ok")
+
+    result = _resume(monkeypatch, fake_run)
+    assert result.returncode == 1
+    assert "no mux session to stop" in result.stderr
+    assert len(calls) == 2  # one resume attempt, one stop attempt -- never a 2nd resume
+    assert not any("--force" in c for c in calls)
 
 def test_missing_session_id_reports_failure_not_a_legacy_fallback(monkeypatch):
     """A successful (returncode 0) resume whose stdout carries no session_id

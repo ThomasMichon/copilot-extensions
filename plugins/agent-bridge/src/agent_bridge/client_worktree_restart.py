@@ -34,6 +34,8 @@ class _SupportsRequest(Protocol):
         request_timeout: float | None = ...,
     ) -> dict[str, Any] | None: ...
 
+    def daemon_supports(self, min_version: int) -> bool: ...
+
 
 if TYPE_CHECKING:
     _Base = _SupportsRequest
@@ -60,10 +62,29 @@ class WorktreeRestartMixin(_Base):
         docstring. ``expected_holder``, when given, fences that
         invalidation to only that session id, so a genuinely different
         claimant that registers while this call is in flight is left
-        untouched (#2906 race hardening). Returns ``{worktree_id,
-        agent_name, had_session, method, ok}`` (``method``: none | graceful
-        | hard | failed).
+        untouched (#2906 race hardening).
+
+        ``expected_holder`` is protocol-16 behavior (the daemon ignores an
+        unrecognized query param rather than rejecting it): a v15 daemon
+        would silently run its old *unfenced* invalidation, so this fails
+        closed -- refuses the whole call, rather than silently downgrading
+        -- when the daemon doesn't advertise protocol 16, instead of
+        blind-sending a fence the daemon can't honor.
+
+        Returns ``{worktree_id, agent_name, had_session, method, ok}``
+        (``method``: none | graceful | hard | failed), or ``{"ok": False,
+        "error": ...}`` on the fail-closed refusal above.
         """
+        if expected_holder and not self.daemon_supports(16):
+            return {
+                "ok": False,
+                "error": (
+                    "the hosting Agent Bridge does not support "
+                    "expected_holder-fenced restart (protocol 16 required) "
+                    "-- refusing rather than sending an unfenced restart "
+                    "the daemon would silently run instead"
+                ),
+            }
         params: dict[str, Any] = {}
         if force:
             params["force"] = "true"

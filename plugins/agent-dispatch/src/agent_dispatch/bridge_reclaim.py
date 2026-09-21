@@ -223,6 +223,21 @@ def _take_over_live_holder(
             stderr=f"could not stop the interactive CLI holding {worktree_id}: "
             f"{stopped.get('error', stopped)}",
         ), None
+    if not stopped.get("had_session"):
+        # ok=true/had_session=false is a no-op (no MUX session existed to
+        # stop) -- never proof that whatever registered live_cli_holds_worktree
+        # was actually terminated: the holder could be a bare, un-muxed CLI
+        # (invisible to 'agent-worktrees restart', which only ever sees mux
+        # sessions). Forcing past it here would be forcing past a process
+        # never confirmed dead. Refuse; 'agent-worktrees reclaim
+        # --worktree-id ... --yes' is the primitive for a bare orphan.
+        return subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="",
+            stderr=f"{worktree_id}: restart reported no mux session to stop, "
+            f"but a live interactive CLI ({original_holder}) still holds it "
+            "-- likely a bare/un-muxed Copilot; refusing to force through a "
+            "process never confirmed dead (see 'agent-worktrees reclaim')",
+        ), None
 
     # Revalidate before forcing (see the module docstring): a different live
     # CLI could have attached in the gap between 'restart' returning and
