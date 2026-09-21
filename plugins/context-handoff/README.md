@@ -152,7 +152,7 @@ It always:
    otherwise a worktree-state file) and notes it in the worktree's own record.
 
 **Only when `.context-handoff/config.yaml`'s `mode` is `auto`** (the default
-is `manual-only`, which skips straight to step 8) does it additionally:
+is `manual-only`) does it additionally:
 
 3. refresh worktree-visible PENDING-HANDOFF state -- the signal
    agent-worktrees' resident status-monitor watches for -- when
@@ -160,19 +160,21 @@ is `manual-only`, which skips straight to step 8) does it additionally:
 4. best-effort ping `agent-bridge` if present,
 5. wait up to 30 seconds for the CUTOVER to start -- not for the successor to
    fully finish cold-starting and consume the handoff, which legitimately
-   takes longer (40-90+ seconds) and isn't worth blocking on,
-6. check whether the session-state marker was consumed, the worktree recorded
-   a successor, the dispatch task moved out of `proposed` / `queued`, or (the
-   earlier, cheaper signal) the resident status-monitor has already logged a
-   `handoff_cutover_spawn` for this token.
+   takes longer (40-90+ seconds) and isn't worth blocking on.
 
-It then:
+Regardless of mode, it always:
 
-7. prints manual continuation instructions -- distinctly worded when
+6. check once whether the session-state marker was consumed, the worktree
+   recorded a successor, the dispatch task moved out of `proposed` /
+   `queued`, or (the earlier, cheaper signal) the resident status-monitor
+   has already logged a `handoff_cutover_spawn` for this token -- under
+   `manual-only` this is a single check with no polling wait (steps 3-5 are
+   the only ones actually skipped),
+7. print manual continuation instructions -- distinctly worded when
    automatic cutover is simply disabled by `mode` versus when it was
    attempted and nothing happened, or a distinct "already under way" note if
    a spawn is merely in flight,
-8. always ends by printing the final short handoff prompt/seed.
+8. always end by printing the final short handoff prompt/seed.
 
 That final seed is the "if your download doesn't start, click here" fallback:
 it gives a human or control system enough to continue even if none of the
