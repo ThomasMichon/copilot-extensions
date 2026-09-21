@@ -2815,14 +2815,16 @@ def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
 
 def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
     """agent-bridge-worktree-native-agents (Phase 3): a worktree's bound
-    charter borrows only its own launch shape (copilot_args/copilot_path/
-    mcp_servers/env) onto the venue-resolved target -- host/cwd/project
-    stay the venue's, never the charter's."""
+    charter borrows its own launch shape (copilot_path/mcp_servers/env, and
+    its own copilot_args APPENDED after the venue's) onto the
+    venue-resolved target -- host/cwd/project stay the venue's, and the
+    venue's own args (e.g. --plugin-dir staging, --allow-all) survive."""
     from agent_bridge.routes.worktrees import _WorktreeEntry, _apply_bound_charter
     from agent_bridge.transport import SpawnTarget
 
     venue_target = SpawnTarget(
         type="local", cwd="/wt/path", project="aperture-labs",
+        copilot_args=["--plugin-dir", "/staged/plugin"],
         env={"BASE": "1"},
     )
     charter_config = MagicMock()
@@ -2843,7 +2845,9 @@ def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
     result = _apply_bound_charter(venue_target, resolver, entry, "wt1")
 
     assert result.copilot_path == "/opt/special/copilot"
-    assert result.copilot_args == ["--agent", "board-sweep-worker"]
+    assert result.copilot_args == [
+        "--plugin-dir", "/staged/plugin", "--agent", "board-sweep-worker",
+    ]
     assert result.mcp_servers == [{"name": "gitea"}]
     assert result.env == {"BASE": "1", "CHARTER": "1"}
     assert result.cwd == "/wt/path"
@@ -2876,10 +2880,15 @@ def test_apply_bound_charter_unresolvable_charter_degrades_to_venue_default() ->
     assert result is venue_target
 
 
-def test_apply_bound_charter_managed_charter_degrades_to_venue_default() -> None:
+def test_apply_bound_charter_managed_charter_degrades_to_venue_default(
+    caplog,
+) -> None:
     """A managed=true charter is explicitly non-spawnable (mirrors
     AgentResolver._resolve_static's own guard) -- binding a worktree to one
-    must never smuggle its launch shape into a spawn anyway."""
+    must never smuggle its launch shape into a spawn anyway. Exactly one
+    accurate warning is logged, not a second misleading "not found" one."""
+    import logging
+
     from agent_bridge.routes.worktrees import _WorktreeEntry, _apply_bound_charter
     from agent_bridge.transport import SpawnTarget
 
@@ -2895,8 +2904,12 @@ def test_apply_bound_charter_managed_charter_degrades_to_venue_default() -> None
         bound_agent="intelligence-dampener-reviewer",
     )
 
-    result = _apply_bound_charter(venue_target, resolver, entry, "wt3")
+    with caplog.at_level(logging.WARNING, logger="agent-bridge"):
+        result = _apply_bound_charter(venue_target, resolver, entry, "wt3")
     assert result is venue_target
+    assert len(caplog.records) == 1
+    assert "managed" in caplog.records[0].message
+    assert "not found" not in caplog.records[0].message
 
 
 def test_crawl_agent_skips_classify_probe_once_cached_unsupported() -> None:
