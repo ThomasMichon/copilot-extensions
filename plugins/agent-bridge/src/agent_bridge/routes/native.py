@@ -98,7 +98,11 @@ async def terminal(
     expected = getattr(websocket.app.state, "auth_token", None)
     offered = list(websocket.scope.get("subprotocols", []))
     supplied = _provided_token(websocket, offered)
-    if not expected or not supplied or not hmac.compare_digest(supplied, expected):
+    # Single-user localhost tool: trust a loopback Host, no token needed.
+    from ..auth import request_is_trusted_local
+    if not request_is_trusted_local(websocket.headers) and (
+        not expected or not supplied or not hmac.compare_digest(supplied, expected)
+    ):
         await websocket.close(code=1008)
         return
     client = None

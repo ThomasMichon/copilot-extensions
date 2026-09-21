@@ -78,10 +78,12 @@ _PAGE = r"""<!doctype html>
 <body>
 <header>
   <h1>Agent Bridge Console</h1>
-  <input id="token" type="password" placeholder="Bridge token (agent-bridge token)" size="30" />
-  <button id="save">Save</button>
   <button id="refresh">Refresh</button>
   <span id="status" class="muted status"></span>
+  <details style="margin-left:.5rem"><summary class="muted status" style="cursor:pointer">token (optional)</summary>
+    <input id="token" type="password" placeholder="only needed for non-localhost access" size="34" />
+    <button id="save">Save</button>
+  </details>
   <span style="flex:1"></span>
   <span class="muted status">streams go browser&#8596;bridge&#8596;codespace (not the main context)</span>
 </header>
@@ -135,7 +137,8 @@ function setStatus(m, e) { const el = $("#status"); el.textContent = m; el.class
 function esc(s){ return String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
 async function api(path, opts) {
   const o = opts || {};
-  o.headers = Object.assign({ Authorization: "Bearer " + token }, o.headers || {});
+  o.headers = Object.assign({}, o.headers || {});
+  if (token) o.headers["Authorization"] = "Bearer " + token; // optional on localhost
   const r = await fetch(httpBase + path, o);
   if (!r.ok) throw new Error(path + " -> " + r.status);
   return r.status === 204 ? null : r.json();
@@ -143,7 +146,6 @@ async function api(path, opts) {
 
 // ---- sidebar listing ----
 async function refresh() {
-  if (!token) { setStatus("Enter the bridge token.", true); return; }
   try {
     const [live, native] = await Promise.all([
       api("/api/v1/live-sessions").catch(() => ({ live_sessions: [] })),
@@ -226,7 +228,7 @@ function openTerminal(ex) {
   const url = `${wsBase}/api/v1/native-executions/${encodeURIComponent(ex.executionId)}/terminal`
     + `?generation=${encodeURIComponent(ex.generation)}&role=${role}`
     + `&takeover=${$("#takeover").checked ? "true" : "false"}&after=${lastAck}`;
-  ws = new WebSocket(url, ["native.v1", "bearer." + token]);
+  ws = new WebSocket(url, token ? ["native.v1", "bearer." + token] : ["native.v1"]);
   ws.binaryType = "arraybuffer";
   ws.onopen = () => setStatus("terminal connected (" + role + ")");
   ws.onclose = (ev) => { if (closed) return;
