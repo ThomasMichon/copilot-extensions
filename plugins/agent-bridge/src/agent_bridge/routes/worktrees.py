@@ -1068,7 +1068,7 @@ async def resume_worktree(
                 },
             )
 
-    if _resolve_already_live(mgr, db, worktree_id, session):  # live-checked, #6744
+    if _resolve_already_live(mgr, worktree_id, session):  # live-checked, #6744
         return _session_info(session)
 
     try:

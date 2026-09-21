@@ -31,7 +31,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from typing import TYPE_CHECKING
 
 from fastapi import Request
@@ -64,16 +63,18 @@ def _local_host_child_alive(mgr: object, session_id: str) -> bool | None:
 
 
 def resolve_already_live(
-    mgr: object | None, db: object | None, worktree_id: str, session: object,
+    mgr: object | None, worktree_id: str, session: object,
 ) -> bool:
     """True if ``session`` should be returned as-is (still live).
 
     RUNNING/IDLE is never trusted blindly (Phase 2, #6744): when a live
     local-host pid check confirms the Session Host child is actually dead,
-    reclassify the session to STOPPED (in-memory + DB) and return False so
-    the caller falls through to the normal resume path. Any other status,
-    or an inconclusive/confirmed-alive live check, returns True/False
-    matching the plain "was it live" question.
+    settle the session (stale client cleared, host record reaped, STOPPED
+    persisted -- via ``mgr.settle_dead_local_session``, which owns that
+    mutation since it touches SessionManager-internal state) and return
+    False so the caller falls through to the normal resume path. Any other
+    status, or an inconclusive/confirmed-alive live check, returns
+    True/False matching the plain "was it live" question.
     """
     if session.status not in (SessionStatus.RUNNING, SessionStatus.IDLE):
         return False
@@ -84,11 +85,7 @@ def resolve_already_live(
         "dead; reclassifying to stopped",
         worktree_id, session.session_id, session.status.value,
     )
-    session.status = SessionStatus.STOPPED
-    if db is not None:
-        db.update_session_status(
-            session.session_id, SessionStatus.STOPPED.value, time.time()
-        )
+    mgr.settle_dead_local_session(session)
     return False
 
 

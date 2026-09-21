@@ -1441,6 +1441,7 @@ class TestWorktreeRoutes:
         session has no ACP id, so it starts a fresh session instead,
         exactly like the existing no-prior-session fresh-start case)."""
         from unittest.mock import AsyncMock, MagicMock
+        import time
 
         from agent_bridge.session_host.host_index import HostRecord
         from agent_bridge.transport import SpawnTarget as _SpawnTarget
@@ -1460,6 +1461,10 @@ class TestWorktreeRoutes:
         # anyway, so the reclassify-to-stopped path must go through the
         # fresh-session fallback, not mgr.resume_session.
         mgr._sessions[stale.session_id] = stale
+        mgr._db.create_session(
+            stale.session_id, stale.name, "test-agent", "/wt", "local",
+            SessionStatus.IDLE.value, time.time(),
+        )
         mgr._host_index.register(HostRecord(
             session_id=stale.session_id, port=1,
             host_pid=0, child_pid=0, boundary="local",
@@ -1473,8 +1478,16 @@ class TestWorktreeRoutes:
         resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
         assert resp.status_code == 200
         assert resp.json()["session_id"] == "fresh-sess-deadhost"
-        # The stale session's in-memory + persisted status was reclassified.
+        # The stale session's in-memory status was reclassified...
         assert stale.status == SessionStatus.STOPPED
+        # ...and so was the persisted row (review #3142: asserting only the
+        # in-memory object wouldn't catch a regression dropping the DB write).
+        row = mgr._db.execute_read(
+            "SELECT status FROM sessions WHERE id=?", (stale.session_id,)
+        )
+        assert row[0]["status"] == SessionStatus.STOPPED.value
+        # The stale host record is reaped, not left to linger.
+        assert mgr._host_index.get(stale.session_id) is None
 
     def test_resume_worktree_falls_back_to_fresh_session(
         self, client, app,

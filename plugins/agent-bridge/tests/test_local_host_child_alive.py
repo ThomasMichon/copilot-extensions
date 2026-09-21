@@ -1,12 +1,14 @@
 """Unit tests for `worktree_probe.resolve_already_live` / its
-`_local_host_child_alive` helper (agent-bridge-cold-resume Phase 2,
-aperture-labs #6744): never trust a stale RUNNING/IDLE status blindly --
-verify against the actual Session Host child pid.
+`_local_host_child_alive` helper, and `SessionManager.settle_dead_local_session`
+(agent-bridge-cold-resume Phase 2, aperture-labs #6744): never trust a stale
+RUNNING/IDLE status blindly -- verify against the actual Session Host child
+pid, and persist the reclassification, not just mutate the in-memory object.
 """
 
 from __future__ import annotations
 
 import os
+import time
 
 from agent_bridge.db import Database
 from agent_bridge.models import SessionStatus
@@ -23,9 +25,16 @@ def _mgr(tmp_path) -> SessionManager:
     )
 
 
-def _session(sid: str, status: SessionStatus) -> Session:
+def _seeded_session(mgr: SessionManager, sid: str, status: SessionStatus) -> Session:
+    """A session registered both in-memory and as a real persisted row, so a
+    settle's DB write has an actual row to affect (review #3142: a test that
+    never inserts a row can't distinguish a real UPDATE from a silent no-op)."""
     s = Session(sid, sid, SpawnTarget(type="local", cwd="/tmp/x"))
     s.status = status
+    mgr._sessions[sid] = s
+    mgr._db.create_session(
+        sid, sid, None, "/tmp/x", "local", status.value, time.time(),
+    )
     return s
 
 
@@ -69,17 +78,24 @@ def test_resolve_already_live_non_running_idle_is_false(tmp_path) -> None:
     """A STOPPED/FAILED/etc. session is never "already live" -- the live
     check is only meaningful for RUNNING/IDLE."""
     mgr = _mgr(tmp_path)
-    session = _session("s1", SessionStatus.STOPPED)
-    assert worktree_probe.resolve_already_live(mgr, None, "wt-1", session) is False
+    session = _seeded_session(mgr, "s1", SessionStatus.STOPPED)
+    assert worktree_probe.resolve_already_live(mgr, "wt-1", session) is False
 
 
-def test_resolve_already_live_reclassifies_confirmed_dead_session(tmp_path) -> None:
+def test_resolve_already_live_reclassifies_and_persists_confirmed_dead_session(
+    tmp_path,
+) -> None:
     mgr = _mgr(tmp_path)
-    session = _session("s1", SessionStatus.IDLE)
+    session = _seeded_session(mgr, "s1", SessionStatus.IDLE)
     mgr._host_index.register(HostRecord(
         session_id="s1", port=1, host_pid=0, child_pid=0, boundary="local",
     ))
-    db = Database(tmp_path / "c.db")
 
-    assert worktree_probe.resolve_already_live(mgr, db, "wt-1", session) is False
+    assert worktree_probe.resolve_already_live(mgr, "wt-1", session) is False
     assert session.status == SessionStatus.STOPPED
+    # The persisted row, not just the in-memory object, must reflect it --
+    # otherwise a regression dropping the DB write would still pass (#3142).
+    row = mgr._db.execute_read("SELECT status FROM sessions WHERE id=?", ("s1",))
+    assert row[0]["status"] == SessionStatus.STOPPED.value
+    # The stale host record is reaped, not left to linger.
+    assert mgr._host_index.get("s1") is None
