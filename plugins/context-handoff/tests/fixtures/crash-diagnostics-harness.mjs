@@ -37,7 +37,9 @@ switch (scenario) {
     // extension.mjs never has this problem since its live joinSession() IPC
     // connection is its own independent keep-alive handle). This interval
     // is a harmless, real keep-alive for the test harness only; the signal
-    // handler's own process.exit() call is what actually ends the process.
+    // handler re-raises the signal after logging, so the process still
+    // dies from that re-raised signal once no listener remains to catch
+    // it -- this interval never prevents that.
     setInterval(() => {}, 60_000);
     break;
   default:

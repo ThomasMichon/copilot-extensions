@@ -334,40 +334,75 @@ attributing a change in rate to a specific fix.
 ### Post-readiness crash diagnostics
 
 The launch log above records only a terminal disposition and exit code --
-if the extension reaches `ready` and then crashes with no further harness
+if the extension reaches `ready` and then stops with no further harness
 output (observed and diagnosed on at least one host, with no root cause
-identified yet), the launch log alone cannot say *why*. `extension.mjs` registers `process.on('uncaughtException'
+identified yet), the launch log alone cannot say *why*, or even *whether it
+was actually a crash at all* -- see "interpreting an entry" below.
+`extension.mjs` registers `process.on('uncaughtException'
 /'unhandledRejection'/'exit'/'SIGTERM'/'SIGINT'/'SIGHUP')` handlers (added
 directly above the `--- State ---` section) that write a synchronous,
-durable diagnostic line to
+durable diagnostic line the instant anything goes wrong, plus a
+`joinSession-resolved` marker immediately after `joinSession()` succeeds, to
 `<os.tmpdir()>/context-handoff-extension-crash.log` (e.g.
 `/tmp/context-handoff-extension-crash.log` on Linux/macOS,
-`%TEMP%\context-handoff-extension-crash.log` on Windows) the instant
-anything goes wrong, plus a `joinSession-resolved` marker immediately after
-`joinSession()` succeeds. Read this file after a suspected crash to get
-the actual stack trace (or confirm its absence, which is itself
-diagnostic -- see below).
+`%TEMP%\context-handoff-extension-crash.log` on Windows). Read this file
+after a suspected crash.
 
 This file is:
 
+- **Created privately, symlink-safe.** `os.tmpdir()` is commonly a shared,
+  world-writable directory on POSIX (`/tmp`); a predictable filename there
+  is both world-readable by default and a symlink-attack target. The first
+  write opens it with `O_CREAT|O_WRONLY|O_APPEND|O_NOFOLLOW` and mode
+  `0o600` -- private to this user, and the kernel itself refuses to open
+  through a pre-existing symlink rather than following it. `O_NOFOLLOW` is
+  absent on Windows (no equivalent local-multi-user attack surface there in
+  the same shape); the file descriptor, once opened, is reused for every
+  subsequent write in the same process.
 - **Append-only and unmanaged.** Nothing in this plugin rotates, caps, or
-  deletes it; it grows across every crash on the host until an operator
+  deletes it; it grows across every stop on the host until an operator
   clears it manually. It is intentionally OS-temp-scoped (not under
-  `~/.copilot/`) so a crash occurring before the extension can resolve its
+  `~/.copilot/`) so a stop occurring before the extension can resolve its
   own config/session directories still has somewhere durable to write.
-- **Diagnostic by omission as much as by content.** If the process
-  terminates and this file gained **no** new `exit` line for that launch,
-  something external force-killed the process before Node's own exit
-  handling could run (SIGKILL, an out-of-process kill of the whole tree) --
-  registering a handler for a given event does not help when the process
-  never gets to run any JS again. If an `exit` line *is* present, the
-  process died through ordinary Node lifecycle (an uncaught exception, a
-  rejected top-level `await joinSession(...)`, or a natural event-loop
-  drain), and the accompanying `uncaughtException`/`unhandledRejection`
-  line (if any) carries the actual stack.
 - **Not itself instrumented for retention.** No log-rotation, size cap, or
   scheduled cleanup exists yet; treat it as a manually-cleared scratch file
   until/unless that becomes worth adding.
+
+**Interpreting an entry -- a `SIGTERM`/`SIGINT`/`SIGHUP` line does not by
+itself mean a crash.** The Copilot CLI's own documented extension lifecycle
+stops and reloads every extension process "on `/clear` (or if the
+foreground session is replaced)" via SIGTERM (then SIGKILL after 5s if it
+doesn't exit) -- a routine, expected event, not a bug. A signal handler here
+logs, then **removes its own listener and re-sends the identical signal to
+itself**, so the OS's default disposition genuinely terminates the process
+by that signal -- Node then reports the same `(code=null,
+signal="SIGTERM"/"SIGINT"/"SIGHUP")` shape a parent observes with no
+diagnostics installed at all (deliberately *not* converted into
+`process.exit(128 + signum)`, which would silently change that contract for
+any host code that distinguishes a signal-terminated child from a normal
+exit). Because the re-raised signal kills the process before Node's own
+`exit` event gets a chance to run, **a `signal: <name>` line with no
+following `exit: code=...` line is the *expected* shape for this legitimate,
+host-initiated stop** -- not evidence of a crash.
+
+So, reading a launch's entries in this file (if any):
+
+- `signal: SIGTERM`/`SIGINT`/`SIGHUP`, no `exit` line -- an expected,
+  host-initiated stop (`/clear`, foreground session replaced, or a real
+  Ctrl+C/HUP). Given how handoff/session-switch-heavy some workflows are,
+  this may explain a large share of historical `exit code=1
+  disposition=stopped-normally` launch-log entries that were never actually
+  crashes.
+- `uncaughtException`/`unhandledRejection` (with a stack), followed by
+  `exit: code=1` -- a genuine bug in this extension's own code. The stack
+  is the actual diagnostic payoff.
+- `exit: code=0` alone, nothing else -- an intentional, non-error exit (for
+  example the bootstrap's own parent-liveness check exiting early).
+- **No entry at all for a launch whose own harness log shows it reached
+  `ready` and then stopped** -- something bypassed Node's own signal/exit
+  handling entirely (`SIGKILL`, an external whole-process-tree kill).
+  Registering a handler for a given event cannot help when the process
+  never gets to run any more JS at all.
 
 ## Payload-local CLI fallback
 

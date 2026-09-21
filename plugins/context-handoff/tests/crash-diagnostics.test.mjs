@@ -86,7 +86,7 @@ test("an unhandled rejection is logged with its stack, then exits 1", async () =
 // So this assertion is POSIX-only; the extension's own comments already
 // document SIGTERM as inert on Windows for the same reason.
 test(
-  "SIGTERM is logged with the conventional 128+signum exit status",
+  "SIGTERM is logged, then re-raised so the process still dies BY that signal",
   { skip: process.platform === "win32" },
   async () => {
     await withCrashLog(async (logPath) => {
@@ -105,15 +105,24 @@ test(
       const [code, signal] = await new Promise((resolve) => {
         child.on("exit", (exitCode, exitSignal) => resolve([exitCode, exitSignal]));
       });
-      // Node reports a signal-terminated child as (code=null, signal="SIGTERM")
-      // only when the OS itself killed it without running JS. Here the
-      // handler calls process.exit(143) explicitly, so Node instead reports
-      // a normal numeric exit code with signal=null.
-      assert.equal(signal, null);
-      assert.equal(code, 143);
+      // installEmergencyDiagnostics() deliberately does NOT call
+      // process.exit() for a signal: it logs, removes its own listener for
+      // that one signal, then re-sends the same signal to this process so
+      // the OS's default disposition (genuine termination) applies with no
+      // listener left to intercept it -- exactly the (code=null,
+      // signal="SIGTERM") shape a parent would see with no diagnostics
+      // installed at all. Converting this into a plain process.exit(143)
+      // would instead report (code=143, signal=null), silently changing
+      // what a host watching for a signal-terminated child observes.
+      assert.equal(code, null);
+      assert.equal(signal, "SIGTERM");
       const log = readLogSafe(logPath);
       assert.match(log, /\bsignal: SIGTERM\b/);
-      assert.match(log, /\bexit: code=143\b/);
+      // The re-raised signal kills the process before Node's own 'exit'
+      // event has a chance to run (no listener remains to intercept it at
+      // that point), so -- unlike every other scenario in this file -- no
+      // "exit: code=..." line is expected here.
+      assert.doesNotMatch(log, /\bexit: code=/);
     });
   },
 );
