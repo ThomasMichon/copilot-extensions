@@ -67,7 +67,7 @@ table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 23,275 | +22,275 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Third dedicated slice landed: the status family now lives in `status_cli.py`, `status_bar_cli.py`, `status_updater_cli.py`, and `status_monitor_runtime.py`; the next obvious seams are the session/handoff/reap lifecycle and then install/update/register/uninstall |
+| 23,292 | +22,292 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Third dedicated slice landed: the status family now lives in `status_cli.py`, `status_bar_cli.py`, `status_updater_cli.py`, and `status_monitor_runtime.py`; the next obvious seams are the session/handoff/reap lifecycle and then install/update/register/uninstall |
 | 9,267 | +8,267 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression); it drifted again while this slice was in flight, so the baseline was manually widened (9191 → 9267) to restore a green full-tree guard pending its own future split |
 | 9,169 | +8,169 | `libs/installation-context/installation_context.py` (+17 vendored copies) | Split the **canonical** copy only; `sync-installation-context.py` propagates to every vendored copy |
 | 6,873 | +5,873 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
@@ -559,7 +559,7 @@ the Phase 0 runbook, picked up as capacity allows.
   the moved names back onto `agent_worktrees.__main__` so existing direct
   imports and monkeypatch seams still land on the right call sites.
 - Net result: `plugins/agent-worktrees/src/agent_worktrees/__main__.py`
-  dropped from 25,269 lines at rebase-complete `HEAD` to 23,275 (a 1,994-line reduction this
+  dropped from 25,269 lines at rebase-complete `HEAD` to 23,292 (a 1,977-line reduction this
   slice). The four new modules land at 218 / 757 / 562 / 799 lines
   respectively, all safely under the cap. The remaining `__main__.py` backlog
   is now more sharply constrained to the session/handoff/reap/reclaim/remux/
@@ -590,7 +590,10 @@ the Phase 0 runbook, picked up as capacity allows.
   onto newer `main` during publication pulled in 26 more unrelated upstream
   lines in `agent-worktrees/__main__.py`, so the final validation branch
   needed the same explicit reviewed baseline widen prior slices already used
-  for this scenario (23,249 → 23,275) to keep the shrink-only guard honest.
+  for this scenario (23,249 → 23,275). Addressing the substantive Copilot
+  review finding then added a further 17 lines to `__main__.py`, so the final
+  publishable branch needed one last matching reviewed widen (23,275 →
+  23,292) to keep the shrink-only guard honest.
   Rebasing also advanced `main` to `agent-worktrees` `1.5.5-dev204`, so the
   final publishable branch needed the next patch `-devN` bump on top of the
   slice itself. This slice therefore lands as `agent-worktrees`
