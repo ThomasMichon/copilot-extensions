@@ -164,8 +164,8 @@ class WorktreeDiscoveryCache:
         # classify probe on every periodic sweep. Mirrors the Picker's own
         # per-source `use_classify` caching (picker_tui.data_ssh).
         self._classify_unsupported: set[str] = set()
-        # review r4056857325: coalesce concurrent same-id archived probes
-        # onto one in-flight task instead of an N-agent stampede per call.
+        # Coalesce concurrent same-id archived probes onto one in-flight
+        # task instead of an N-agent stampede per call.
         self._archive_probe_inflight: dict[
             str, asyncio.Task[tuple[str, AgentConfig] | None]
         ] = {}
@@ -225,8 +225,8 @@ class WorktreeDiscoveryCache:
         self, worktree_id: str, resolver: AgentResolver,
     ) -> tuple[str, AgentConfig] | None:
         """Single-flight archived-record probe: coalesces concurrent callers
-        for the same ``worktree_id`` onto one in-flight task (review
-        r4056857325), shielded from a cancelled caller (review r4056888749).
+        for the same ``worktree_id`` onto one in-flight task, shielded from
+        a cancelled caller.
         """
         task = self._archive_probe_inflight.get(worktree_id)
         if task is None:

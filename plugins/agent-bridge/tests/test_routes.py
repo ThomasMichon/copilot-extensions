@@ -1687,10 +1687,10 @@ class TestWorktreeRoutes:
     async def test_archive_probe_single_flight_coalesces_concurrent_lookups(
         self,
     ) -> None:
-        # review r4056857325: concurrent callers for the same archived
-        # worktree_id must share one in-flight probe (an N-agent
-        # subprocess/SSH fan-out), not each trigger their own -- the same
-        # stampede _crawl_lock prevents for the main discovery crawl.
+        # Concurrent callers for the same archived worktree_id must share
+        # one in-flight probe (an N-agent subprocess/SSH fan-out), not each
+        # trigger their own -- the same stampede _crawl_lock prevents for
+        # the main discovery crawl.
         import asyncio as _asyncio
 
         from agent_bridge.agent_registry import AgentConfig, AgentResolver
@@ -1724,7 +1724,7 @@ class TestWorktreeRoutes:
         assert all(r == ("test-agent", resolver.agents["test-agent"]) for r in results)
         # Eviction runs via the task's done-callback, which is only guaranteed
         # to have fired -- not necessarily before gather() returns -- once the
-        # event loop gets a further tick (review r4058565895).
+        # event loop gets a further tick.
         await _asyncio.sleep(0)
         assert wt_id not in cache._archive_probe_inflight
 
@@ -1732,9 +1732,9 @@ class TestWorktreeRoutes:
     async def test_archive_probe_survives_a_cancelled_concurrent_caller(
         self,
     ) -> None:
-        # review r4056888749: a cancelled caller (client disconnect/timeout)
-        # must not cancel the shared in-flight task out from under a
-        # concurrent caller still waiting on the same worktree_id.
+        # A cancelled caller (client disconnect/timeout) must not cancel
+        # the shared in-flight task out from under a concurrent caller
+        # still waiting on the same worktree_id.
         import asyncio as _asyncio
 
         from agent_bridge.agent_registry import AgentConfig, AgentResolver
@@ -1767,8 +1767,8 @@ class TestWorktreeRoutes:
 
     @pytest.mark.asyncio
     async def test_archive_probe_returns_early_on_first_match(self) -> None:
-        # review r4056904161: a match from a fast agent must return without
-        # waiting for a slow/unreachable agent to finish or time out.
+        # A match from a fast agent must return without waiting for a
+        # slow/unreachable agent to finish or time out.
         import asyncio as _asyncio
 
         from agent_bridge.agent_registry import AgentConfig, AgentResolver
