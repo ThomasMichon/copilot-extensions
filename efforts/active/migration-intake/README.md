@@ -163,6 +163,57 @@ retain only genuinely unclassified general-purpose work here.
 
 ## Journal
 
+### 2026-09-20 — Phase 3: created 3 issues for already-`routed` candidates; 2 have no live umbrella yet
+
+- Worked through the 6 `routed` candidates left after the post-merge
+  correction pass (#3, #5, #9, #14, #15, #16), confirming each target's
+  domain-plan addition is already merged to `main`, i.e. domain-plan
+  acceptance already happened. This pass does not change any candidate's
+  disposition -- all 6 stay `routed`, per the Intake Contract's taxonomy. It
+  only creates public tracker issues (tracker metadata, not a disposition)
+  where a live umbrella exists to attach them under.
+- Before creating an issue for #3 (worktree-manager-control-plane's cached
+  worktree-status projection), found it already addressed by an open,
+  not-yet-merged PR under a *different* effort
+  ([#3102](https://github.com/ThomasMichon/copilot-extensions/pull/3102),
+  `agent-worktrees-external-status-accelerator`) -- no new public issue
+  needed unless that PR does not land; annotated the domain Plan bullet with
+  a pointer to it, keeping the candidate `routed` (not `superseded`/
+  `closed-obsolete`) pending its merge, per Copilot review feedback on this
+  PR that flagged the original wording as prematurely treating open work as
+  delivered.
+- Created public issues for #9 and #16
+  ([#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113)
+  and [#3114](https://github.com/ThomasMichon/copilot-extensions/issues/3114))
+  under `worktree-finality-and-obligations`'s live umbrella #1312.
+- Created a public issue for #5
+  ([#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115))
+  citing `agent-machines-declarative-control-plane`'s umbrella #1418, then
+  found on review that #1418 and all seven of that effort's listed
+  sub-issues are closed -- there is currently no live umbrella to attach it
+  under. Edited #3115 to drop the false "Part of #1418" claim, so it now
+  stands alone as a real, open tracker entry; the candidate's disposition
+  stays `routed` (unchanged -- a missing umbrella is tracker metadata, not a
+  new taxonomy state), and the issue will be linked under a live umbrella
+  once that effort opens one. Marked #1418 historical everywhere it's
+  referenced in that effort's own README (header, coordination-token line,
+  delegate line) and in the efforts index, removing the contradiction
+  between those references and this note calling it closed. Each issue
+  body is a self-contained, repository-neutral restatement of the routed
+  Plan bullet with Summary/Scope/Validation sections, matching this repo's
+  existing issue convention -- no reference to this ledger, any session, or
+  any originating context.
+- Left #14 (`account-aware-operations`) and #15
+  (`review-automation-reliability`) without a created issue (unlike #5,
+  which does have one): both owning efforts are still `Draft` status with
+  no umbrella issue, so there is no accepting parent to attach a sub-issue
+  to yet. Disposition stays `routed` for both -- this is a gap in tracker
+  metadata (no issue created yet), not a fail-closed disposition change; an
+  issue will be created for each once its owning effort is both `Active` and
+  has a live umbrella.
+- Appended a dated "Phase 3 publication" section to `ledger.md` recording the
+  per-candidate outcome, alongside (not overwriting) the prior passes.
+
 ### 2026-09-20 — Post-merge correction: 2 mis-routed candidates were duplicate ownership
 
 - Self-audit after merging the Phase 2 revalidation PR found candidates

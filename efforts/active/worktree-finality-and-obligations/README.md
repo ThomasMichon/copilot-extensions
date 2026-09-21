@@ -468,11 +468,13 @@ below for the carved implementation plan.
   cutover transitions (creation, transfer, completion, abandonment) so the
   full audit trail is traceable, closing the remaining cross-link/session-
   state trace gaps beyond what the session-claim lifecycle (Phase 8) already
-  covers.
+  covers. Tracked in
+  [#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113).
 - [ ] Claim-safe terminal reclamation: finish reclaiming terminal workspaces
   with obligation-preserving release semantics -- inbound-claim release,
   multi-claim safety, and historical adoption/status surfaces -- rather than
-  as a standalone reclamation slice.
+  as a standalone reclamation slice. Tracked in
+  [#3114](https://github.com/ThomasMichon/copilot-extensions/issues/3114).
 - [ ] Keep fixtures synthetic and independent of any adopting worktree registry.
 
 ### Phase 8 - Session-claim lifecycle (proposed 2026-09-14; designed 2026-09-16; build started 2026-09-17)

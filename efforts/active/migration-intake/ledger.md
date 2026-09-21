@@ -91,3 +91,44 @@ domain effort's generic backlog phase, first check whether a smaller,
 dedicated (possibly still-Draft) effort already exists for that exact
 scope -- a Draft effort is still a real owner, not an absence of one.
 
+## Phase 3 publication (2026-09-20)
+
+Creates a public tracker issue for each remaining `routed` candidate's
+accepted domain-plan item, per Phase 3's own steps (domain-plan acceptance,
+already confirmed merged to `main`, plus owner/novelty/portability). Every
+row below keeps disposition `routed` -- domain-plan acceptance already
+happened and this pass does not change disposition. What this pass adds is
+purely **tracker metadata**, tracked separately from disposition: whether a
+public issue exists yet, and whether the owning effort currently has a live
+umbrella to attach it under. A missing or closed umbrella is not itself a
+disposition and is not defined as an acceptance gate anywhere in the Intake
+Contract; it is recorded here only as an operational fact about *where* the
+already-`routed` item's public issue can be filed today.
+
+| # | Disposition | Owner | Tracker outcome | What changed vs. prior pass |
+|---|-------------|-------|------------------|-------------------------------|
+| 5 | routed | agent-machines-declarative-control-plane | issue [#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115) created, standalone (no umbrella) -- the effort's own umbrella (#1418) and all sub-issues are closed | issue created this pass; stands alone until the effort opens a live umbrella to attach it under |
+| 9 | routed | worktree-finality-and-obligations | issue [#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113) created under live umbrella #1312 | issue created this pass |
+| 14 | routed | account-aware-operations | no issue created yet -- owning effort is `Draft` with no umbrella issue | unchanged; no issue created this pass, since the effort is not yet `Active` and has no umbrella to attach one under |
+| 15 | routed | review-automation-reliability | no issue created yet -- owning effort is `Draft` with no umbrella issue | unchanged; no issue created this pass, since the effort is not yet `Active` and has no umbrella to attach one under |
+| 16 | routed | worktree-finality-and-obligations | issue [#3114](https://github.com/ThomasMichon/copilot-extensions/issues/3114) created under live umbrella #1312 | issue created this pass |
+| 3 | routed | worktree-manager-control-plane | no new issue needed -- already addressed by open, not-yet-merged PR [#3102](https://github.com/ThomasMichon/copilot-extensions/pull/3102) | annotated with a pointer to #3102; no separate public issue while that PR covers the same scope |
+
+
+*(Phase 3 publication, 2026-09-20: of the 6 routed candidates not already
+resolved by an earlier ledger pass, all 6 keep disposition `routed`
+(domain-plan acceptance was already completed in an earlier pass). 3 new
+public issues were created (#3113, #3114 under
+`worktree-finality-and-obligations`'s live umbrella #1312; #3115 standalone,
+since `agent-machines-declarative-control-plane`'s own umbrella #1418 and all
+seven listed sub-issues are closed), 1 needed no new issue because an
+in-flight, not-yet-merged PR under a different effort already covers the
+same scope (#3, disposition stays `routed`), and 2 have no public issue yet
+because their owning effort is still `Draft` with no umbrella issue to
+attach one under (#14, #15) -- disposition stays `routed` for both; this is
+a tracker-metadata gap, not a taxonomy state, and the ledger will record a
+new issue for each once its owning effort has a live umbrella. Each created
+issue's body is a self-contained, repository-neutral restatement of the
+routed Plan bullet with no reference to this ledger's originating session
+context.)*
+
