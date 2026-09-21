@@ -31,6 +31,7 @@ from .worktree_probe import (
     owning_agent as _owning_agent,
     probe_archived_owner as _probe_archived_owner,
     probe_live_worktree as _probe_live_worktree,
+    resolve_already_live as _resolve_already_live,
 )
 
 log = logging.getLogger("agent-bridge")
@@ -1067,25 +1068,8 @@ async def resume_worktree(
                 },
             )
 
-    # Already live -- nothing to do, return current state. Phase 2 (#6744):
-    # never trust a stale RUNNING/IDLE status blindly -- verify against the
-    # actual local Session Host child pid before trusting it (None means
-    # inconclusive, e.g. no host record or a remote/unverifiable boundary,
-    # so the existing status is the only signal available and is honored).
-    if session.status in (SessionStatus.RUNNING, SessionStatus.IDLE):
-        live = mgr.local_host_child_alive(session.session_id) if mgr else None
-        if live is not False:
-            return _session_info(session)
-        log.info(
-            "resume_worktree %s: session %s reports %s but its local host "
-            "child is confirmed dead; reclassifying to stopped and resuming",
-            worktree_id, session.session_id, session.status.value,
-        )
-        session.status = SessionStatus.STOPPED
-        if db is not None:
-            db.update_session_status(
-                session.session_id, SessionStatus.STOPPED.value, time.time()
-            )
+    if _resolve_already_live(mgr, db, worktree_id, session):  # live-checked, #6744
+        return _session_info(session)
 
     try:
         resumed = await mgr.resume_session(session.session_id)

@@ -30,14 +30,48 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from typing import TYPE_CHECKING
 
 from fastapi import Request
 
 from ..agent_registry import AgentConfig, AgentResolver
+from ..models import SessionStatus
 
 if TYPE_CHECKING:
     from .worktrees import _WorktreeEntry
+
+log = logging.getLogger("agent-bridge")
+
+
+def resolve_already_live(
+    mgr: object | None, db: object | None, worktree_id: str, session: object,
+) -> bool:
+    """True if ``session`` should be returned as-is (still live).
+
+    RUNNING/IDLE is never trusted blindly (Phase 2, #6744): when
+    ``mgr.local_host_child_alive`` confirms the local Session Host child is
+    actually dead, reclassify the session to STOPPED (in-memory + DB) and
+    return False so the caller falls through to the normal resume path.
+    Any other status, or an inconclusive/confirmed-alive live check,
+    returns True/False matching the plain "was it live" question.
+    """
+    if session.status not in (SessionStatus.RUNNING, SessionStatus.IDLE):
+        return False
+    if mgr is None or mgr.local_host_child_alive(session.session_id) is not False:
+        return True
+    log.info(
+        "resume_worktree %s: %s reports %s but its local host child is "
+        "dead; reclassifying to stopped",
+        worktree_id, session.session_id, session.status.value,
+    )
+    session.status = SessionStatus.STOPPED
+    if db is not None:
+        db.update_session_status(
+            session.session_id, SessionStatus.STOPPED.value, time.time()
+        )
+    return False
 
 
 async def owning_agent(
