@@ -15,6 +15,10 @@ Subcommands:
                                 persisted MCP tool-snapshot cache (the runtime
                                 only age-expires entries itself, never
                                 schema-mismatched ones).
+  mcp-health                     Sweep the CLI's own process logs for known
+                                MCP-lifecycle warning signals and snapshot
+                                the tool-cache staleness ratio. Read-only;
+                                meant for periodic health tracking.
   call <bridge> <tool> [args]   One-shot: invoke one upstream tool, print result.
   source-digest <bridge>        Print the keyed effective source fingerprint.
   materialize <bridge>          Project the upstream catalog into a CLI stub fleet.
@@ -242,6 +246,47 @@ def _cmd_clean_tool_cache(args: argparse.Namespace) -> int:
         return 1
     if stale and not args.apply:
         return 1
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# mcp-health -- sweep the CLI's own logs for known MCP-lifecycle signals
+# ---------------------------------------------------------------------------
+
+def _cmd_mcp_health(args: argparse.Namespace) -> int:
+    from . import mcp_health
+
+    report = mcp_health.health_report(
+        log_dir_override=args.log_dir,
+        cache_dir_override=args.cache_dir,
+        since_hours=None if args.since_hours <= 0 else args.since_hours,
+    )
+
+    if not args.quiet and not args.json:
+        sweep = report["log_sweep"]
+        if sweep.get("found") is False:
+            print(f"No Copilot log directory found at {sweep.get('log_dir')} -- nothing to sweep.")
+        else:
+            window = f"last {args.since_hours}h" if args.since_hours > 0 else "all available history"
+            print(f"MCP log sweep: {sweep['log_dir']} ({window})")
+            print(f"  {sweep['files_scanned']} file(s), {sweep['lines_scanned']:,} line(s) scanned")
+            for name, count in sweep["signal_counts"].items():
+                marker = "" if count == 0 else "  <-- "
+                print(f"    {name}: {count}{marker}")
+                if count and name in sweep["first_seen"]:
+                    print(f"        first: {sweep['first_seen'][name]}  last: {sweep['last_seen'][name]}")
+        cache = report["tool_cache"]
+        if cache.get("found"):
+            print(f"Tool cache: {cache['cache_dir']}")
+            print(f"  {cache['total_entries']} entries, {cache['stale_entries']} stale "
+                  f"({cache['stale_ratio']:.1%}, {cache['stale_bytes']:,} bytes) -- "
+                  f"current schema {cache['current_schema_version']}")
+        else:
+            print(f"No tool cache directory found at {cache.get('cache_dir')}.")
+
+    if args.json:
+        print(json.dumps(report))
+
     return 0
 
 
@@ -662,6 +707,28 @@ def build_parser() -> argparse.ArgumentParser:
     p_clean_cache.add_argument("--quiet", action="store_true",
                                help="suppress per-file detail (summary only)")
     p_clean_cache.set_defaults(func=_cmd_clean_tool_cache)
+
+    p_health = sub.add_parser(
+        "mcp-health",
+        help="sweep the CLI's own process logs for known MCP-lifecycle "
+             "warning signals (stale cache rejects, hydration timeouts, "
+             "stuck-pending snapshots, explicit failed-retry counts) and "
+             "snapshot the tool-cache staleness ratio -- read-only, meant "
+             "to be run periodically to track MCP reliability over time",
+    )
+    p_health.add_argument("--since-hours", type=float, default=24.0,
+                          help="only count log lines newer than this many hours ago "
+                               "(0 or negative = scan all available log history, "
+                               "default: 24)")
+    p_health.add_argument("--log-dir",
+                          help="override the auto-detected Copilot CLI log directory")
+    p_health.add_argument("--cache-dir",
+                          help="override the auto-detected mcp-tools cache directory")
+    p_health.add_argument("--json", action="store_true",
+                          help="emit a JSON report instead of text")
+    p_health.add_argument("--quiet", action="store_true",
+                          help="suppress the text report (use with --json)")
+    p_health.set_defaults(func=_cmd_mcp_health)
 
     p_call = sub.add_parser(
         "call", help="one-shot: invoke a single upstream tool and print its result")
