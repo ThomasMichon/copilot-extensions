@@ -1293,3 +1293,45 @@ this effort. Two genuine issues:
 Added 1 new regression test
 (`test_select_sample_never_raises_on_a_non_positive_sample_size`).
 
+### 2026-09-21 — post-merge: daemon-liveness redesigned to boot-and-wait like a real caller
+After PR #3186 merged and deployed (dev219), an hourly scheduled run of
+`worktree-status-audit --sample 15` fired twice and both times reported
+`daemon.responsive: false` / `cache_row_count: 0`, with a manual retry
+immediately after each firing showing `responsive: true`. Investigated
+rather than dismissing the second occurrence as a fluke: the resident
+status-monitor's PID and lock `created_at` differed on each check --
+confirming the monitor idle-exits between infrequent callers (its own
+empty-strike logic, see `cmd_status_monitor`) and only comes back up when
+something actually demands it via `ensure_monitor`. The audit's original
+`check_daemon_liveness` only ever did a bare, non-booting snapshot read
+(parse the lock, check the owner PID, resolve the rendezvous fields) --
+exactly the probe that will see this idle-exited resting state and
+misreport it as an outage, even though every real caller
+(`worktree-status-bundle`'s own fallback path) already tolerates it by
+booting the monitor and waiting.
+
+Redesigned `check_daemon_liveness` to route its probe through
+`worktree_status_daemon.status_with_boot` -- the same dial/boot/wait/
+fallback path every real production caller uses -- instead of the old
+bare `status_via_daemon` snapshot. Threaded an `ensure_monitor` callable
+through `run_audit` and `cmd_worktree_status_audit`, resolved from
+`core._ensure_status_monitor` (only when `core._status_monitor_enabled()`
+is true, mirroring `session_tracking_cli.cmd_worktree_status_bundle`'s
+own opt-out check exactly -- an operator who's disabled the resident
+monitor via `AGENT_WORKTREES_STATUS_MONITOR=0` should never have the
+audit spawn one anyway). When no real `(project, worktree_id)` probe
+pair exists (empty sample), the check still degrades to the old static
+read rather than guessing. Added 2 new regression tests covering the
+boot-wait path: one confirming `ensure_monitor` is invoked when nothing
+is currently reachable, and one confirming a lock write that lands
+*during* the wait window is picked up before the boot-wait limit expires
+(not just a before/after snapshot). Updated the 4 existing CLI-level
+tests' fake `core` stand-ins to supply `_status_monitor_enabled`/
+`_ensure_status_monitor` now that `cmd_worktree_status_audit` always
+resolves them.
+
+This is expected to eliminate the two false-positive firings above once
+deployed: after this change, `responsive` should reliably read `true`
+even when the monitor was resting between callers, because the audit's
+own probe now boots and waits for it exactly as a real caller would.
+

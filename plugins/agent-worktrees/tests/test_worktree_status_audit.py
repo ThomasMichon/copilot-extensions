@@ -313,6 +313,49 @@ def test_daemon_liveness_probe_reports_unresponsive_when_daemon_is_down(tmp_path
     assert liveness.responsive is False
 
 
+def test_daemon_liveness_calls_ensure_monitor_when_nothing_is_reachable(tmp_path):
+    """Copilot review-driven redesign: a real caller always reaches the
+    daemon via `status_with_boot`, which triggers `ensure_monitor` and
+    waits when no endpoint is currently reachable -- an idle-exited
+    resident monitor (this system's own resting state between infrequent
+    callers) is not a fault a bare, never-boots probe would otherwise
+    misreport as `responsive: false`."""
+    lock_path = tmp_path / "status-monitor.lock"
+    calls = []
+    wsa.check_daemon_liveness(
+        lock_path, probe=("proj", "wt1"), ensure_monitor=lambda: calls.append(1) or True,
+    )
+    assert calls == [1]
+
+
+def test_daemon_liveness_ensure_monitor_boot_is_picked_up_within_the_wait(tmp_path, monkeypatch):
+    """The full boot-and-wait path: `ensure_monitor` starts a real server
+    and writes the lock shortly after being called (simulating a resident
+    monitor's real spawn latency) -- `status_with_boot`'s own poll loop
+    must pick it up before its wait expires, exactly as any real caller's
+    first request after an idle-exit would."""
+    from agent_worktrees import locks
+
+    lock_path = tmp_path / "status-monitor.lock"
+    server = worktree_status_daemon.start_server(
+        lambda kind, payload: {"worktree_id": payload["worktree_id"]}
+    )
+    server.start()
+    try:
+        def _ensure_monitor():
+            locks.write_lock(lock_path, extra=worktree_status_daemon.rendezvous_fields(server))
+            return True
+
+        liveness = wsa.check_daemon_liveness(
+            lock_path, probe=("proj", "wt1"), ensure_monitor=_ensure_monitor,
+        )
+        assert liveness.responsive is True
+        assert liveness.lock_present is True
+        assert liveness.rendezvous_present is True
+    finally:
+        server.close()
+
+
 # -- run_audit / report_to_dict / telemetry log --------------------------
 
 def test_run_audit_writes_a_telemetry_log_line(tmp_path, monkeypatch):
@@ -389,6 +432,8 @@ def test_cmd_worktree_status_audit_exit_code_clean(tmp_path, monkeypatch):
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
         _json_output=lambda payload: None,
+        _status_monitor_enabled=lambda: True,
+        _ensure_status_monitor=lambda: True,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     bundle = _bundle("p", "wt1", git_state={"state": "clean"})
@@ -396,7 +441,7 @@ def test_cmd_worktree_status_audit_exit_code_clean(tmp_path, monkeypatch):
     monkeypatch.setattr(wsa.worktree_status_compute, "compute", lambda project, wt_id: bundle)
     monkeypatch.setattr(
         wsa, "check_daemon_liveness",
-        lambda lock_path, probe=None: wsa.DaemonLiveness(
+        lambda lock_path, probe=None, ensure_monitor=None: wsa.DaemonLiveness(
             lock_present=True, rendezvous_present=True, responsive=True,
         ),
     )
@@ -410,6 +455,8 @@ def test_cmd_worktree_status_audit_exit_code_nonzero_on_mismatch(tmp_path, monke
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
         _json_output=lambda payload: None,
+        _status_monitor_enabled=lambda: False,
+        _ensure_status_monitor=lambda: True,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     cached = _bundle("p", "wt1", git_state={"state": "clean"})
@@ -426,6 +473,8 @@ def test_cmd_worktree_status_audit_respects_no_log(tmp_path, monkeypatch):
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
         _json_output=lambda payload: None,
+        _status_monitor_enabled=lambda: False,
+        _ensure_status_monitor=lambda: True,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     monkeypatch.setattr(
@@ -441,6 +490,8 @@ def test_cmd_worktree_status_audit_uses_explicit_log_path(tmp_path, monkeypatch)
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
         _json_output=lambda payload: None,
+        _status_monitor_enabled=lambda: False,
+        _ensure_status_monitor=lambda: True,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     monkeypatch.setattr(
