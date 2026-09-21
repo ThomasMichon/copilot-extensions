@@ -3067,6 +3067,26 @@ class TestSystemWorktreeKind:
         assert loaded.kind == "system"
         assert loaded.owner == "session-sync"
 
+    def test_create_new_record_bound_agent_round_trips(self, tmp_path: Path):
+        """agent-bridge-worktree-native-agents: a charter bound at create
+        time persists through save/load, and an unbound worktree's YAML
+        carries no bound_agent key at all (legacy-shape preserved)."""
+        rec = create_new_record(
+            "wt-bound", "worktree/wt-bound", "/tmp/wt-bound", "test-repo",
+            "test", "wsl", tmp_path, bound_agent="board-sweep-worker",
+        )
+        assert rec.bound_agent == "board-sweep-worker"
+        loaded = load_record(tmp_path / "wt-bound.yaml")
+        assert loaded.bound_agent == "board-sweep-worker"
+
+        unbound = create_new_record(
+            "wt-unbound", "worktree/wt-unbound", "/tmp/wt-unbound",
+            "test-repo", "test", "wsl", tmp_path,
+        )
+        assert unbound.bound_agent is None
+        raw = (tmp_path / "wt-unbound.yaml").read_text(encoding="utf-8")
+        assert "bound_agent" not in raw
+
 
 # ---------------------------------------------------------------------------
 # #2668 -- two-axis taxonomy (interface x origin) + Picker visibility
