@@ -279,7 +279,7 @@ private paths).
       re-deriving the canonical render fresh; it never blends two candidate
       "truths" for a managed file. Never self-merges; updates the same PR
       and returns.
-- [ ] **`setting-up-instruction-sync-worker` skill** (or a section within
+- [x] **`setting-up-instruction-sync-worker` skill** (or a section within
       `authoring-harness-plugins`): scaffolds, for any harness repo that
       asks for it, the scheduler config template, a bypass-config-profile
       template (label / path-globs / diff-shape rule / recompute-verify
@@ -298,7 +298,7 @@ private paths).
       open a PR, bypass refuses to auto-merge) the moment it's missing or
       revoked -- an adopter withdrawing consent must disable the automation
       immediately, not only prevent a future `setup`.
-- [ ] Reuse the **same** deterministic producer identity a repo already
+- [x] Reuse the **same** deterministic producer identity a repo already
       trusts for its own reflect-style automation (do not mint a new
       identity per feature) -- the safety boundary is the conjunction of
       identity + stamp label + path-scope + diff-shape + recompute-match +
@@ -586,3 +586,43 @@ _Pending._
   `setting-up-instruction-sync-worker` skill itself (which this template
   depends on for actual installation), and the immutable-pin verification
   gap.
+
+### 2026-09-20 (cont.) -- Phase 2 slice 4: the `setting-up-instruction-sync-worker` skill
+- Landed `plugins/customizing-copilot/skills/setting-up-instruction-sync-worker/`:
+  the last Phase 2 checklist item with a concrete, landable scope this
+  session. Ships:
+  - `projection_reflect_consent.py` + `Consent`/`load_consent`: the
+    fail-closed opt-in loader (`.github/copilot/projection-reflect.json`,
+    schema `copilot-extensions.projection-reflect-consent`) both the
+    (not-yet-built) scheduler and bypass profile must call fresh on every
+    run/PR -- 13 tests including the two negative-proof cases the
+    Validation Plan calls for: no opt-in file present -> refuses, and a
+    live-revocation test (opt-in present, then deleted -> the very next
+    call fails closed without a second `setup`).
+  - `SKILL.md`: the consent-gate-first procedure, what to scaffold once
+    consent exists (the reconciler agent from slice 3's template, a
+    scheduler config, a bypass profile), and the same-identity-reuse /
+    decline-if-no-identity requirement from the Plan's own next bullet --
+    marked that Plan item done too, since the skill's content is exactly
+    where that requirement had to live.
+  - `references/templates/scheduler-config.md` and `references/templates/
+    bypass-profile.md`: generic, mechanism-agnostic templates a repo adapts
+    to its own scheduler/review-gate, wiring the already-landed
+    `projection_reflect.py` decision layer and
+    `agent_dispatch.conflict_dispatch` primitive.
+- `customizing-copilot` now ships 11 skills (was 10) -- updated the
+  plugin's own README skill table and both stale skill-count mentions
+  found while editing it (a pre-existing "nine skills" / "Ten skills"
+  inconsistency, fixed alongside).
+- **What's still open, honestly:** the actual scheduler script and bypass
+  profile wiring for a real adopting repo remain unbuilt -- this skill
+  scaffolds/documents the contract and ships the reusable Python pieces,
+  but does not itself stand up a running worker (that is inherently
+  per-adopting-repo work, per the skill's own scope). The immutable-pin
+  verification gap flagged in slice 1 is also still open. With this slice,
+  every Phase 2 Plan checklist item this repo's own history can carry is
+  now checked; the remainder is downstream Phase 5 instantiation work.
+- `customizing-copilot`'s full suite (188 passed, 6 skipped), `check-skills`
+  (0 errors, 71 skills), `check-marketplace-isolation` (0 new findings),
+  `check-version-bump`, `check-version-consistency`, `check-docs-consistency`
+  all green.
