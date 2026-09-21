@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import installer as inst, output, services as svc
+from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
 
 
 def _core():
@@ -245,8 +246,10 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
             detail = "\n".join(x for x in [r.stdout.strip(), r.stderr.strip()] if x)
             output.warn(f"Plugin update returned non-zero:\n{detail}")
             payloads_ok = False
-    except OSError:
-        output.warn("'copilot' CLI not found or not executable -- skipping plugin update")
+    except OSError as exc:
+        output.warn(
+            f"{_describe_copilot_spawn_error(exc, cwd=update_context)} -- skipping plugin update"
+        )
         payloads_ok = False
     except subprocess.TimeoutExpired:
         output.warn("Plugin update timed out -- continuing with installed version")
@@ -428,8 +431,10 @@ def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> bool:
             output.warn("Marketplace refresh returned non-zero -- continuing")
             return False
         return True
-    except OSError:
-        output.warn("'copilot' CLI not found or not executable -- skipping marketplace refresh")
+    except OSError as exc:
+        output.warn(
+            f"{_describe_copilot_spawn_error(exc, cwd=cwd)} -- skipping marketplace refresh"
+        )
         return False
     except subprocess.TimeoutExpired:
         output.warn("Marketplace refresh timed out -- continuing")
@@ -452,8 +457,10 @@ def _browse_marketplace_plugins(marketplace: str, *, cwd: Path | None = None) ->
             timeout=120,
             cwd=cwd,
         )
-    except OSError:
-        output.warn("'copilot' CLI not found or not executable -- skipping retired plugin purge")
+    except OSError as exc:
+        output.warn(
+            f"{_describe_copilot_spawn_error(exc, cwd=cwd)} -- skipping retired plugin purge"
+        )
         return None
     except subprocess.TimeoutExpired:
         output.warn("Marketplace inventory timed out -- skipping retired plugin purge")
@@ -490,8 +497,8 @@ def _uninstall_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | No
             timeout=120,
             cwd=cwd,
         )
-    except OSError:
-        return "copilot CLI not found or not executable"
+    except OSError as exc:
+        return _describe_copilot_spawn_error(exc, cwd=cwd)
     except subprocess.TimeoutExpired:
         return "uninstall timed out"
     if r.returncode == 0:
@@ -528,9 +535,10 @@ def _update_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | None 
 
     try:
         r = _run(verb)
-    except OSError:
-        output.warn("'copilot' CLI not found or not executable -- skipping plugin payload update")
-        return "copilot CLI not found or not executable"
+    except OSError as exc:
+        message = _describe_copilot_spawn_error(exc, cwd=cwd)
+        output.warn(f"{message} -- skipping plugin payload update")
+        return message
     except PluginStateError as exc:
         output.warn(f"Plugin state for {name} could not be preserved: {exc}")
         return f"plugin state error: {exc}"
