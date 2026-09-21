@@ -497,12 +497,19 @@ def build_ssh_command(
     remote_command: str,
     *,
     reverse_forwards: list[str] | None = None,
+    pty: bool = False,
 ) -> list[str]:
-    """Build the shared OpenSSH remote-exec argv for the ACP stdio channel."""
+    """Build the shared OpenSSH remote-exec argv for the ACP stdio channel.
+
+    ``pty=True`` requests a real PTY (used by the venue `copilot` verb, whose
+    remote command attaches an interactive tmux session -- an ordinary ACP
+    stdio dispatch never sets this).
+    """
     if not shutil.which("ssh"):
         raise RuntimeError("ssh is required for trusted-container transport")
     return build_remote_exec_args(
         config,
         remote_command,
         reverse_forwards=reverse_forwards,
+        pty=pty,
     )

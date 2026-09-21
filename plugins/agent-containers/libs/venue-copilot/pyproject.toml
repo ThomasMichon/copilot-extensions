@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Distribution name is namespaced (agent-venue-copilot, not the squattable
+# "venue-copilot") to prevent dependency-confusion; the import module stays
+# ``venue_copilot``. Mirrors agent-ssh-manager / agent-credential-relay.
+name = "agent-venue-copilot"
+version = "0.1.0-dev1"
+description = "Provider-agnostic reserve/connect/release orchestration for a venue's CLI-mode `copilot` verb"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+# Pure stdlib (json/shlex/subprocess) -- no non-stdlib dependency.
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -257,7 +257,7 @@ mechanism CLI mode binds through.
 ### Phase 4 — Symmetric venue launch
 
 - [x] **Venue-prep checklist established, from a real venue, not a guess.**
-      Checked a live, currently-running CodeSpace (`odsp-web-codespaces`,
+      Checked a live, currently-running operator CodeSpace (an
       Ubuntu 24.04 devcontainer) directly rather than assuming: `copilot` is
       present (devcontainer convention — `nvm`-installed, v1.0.86), as are
       `git`/`node`/`python3`/`uv`. **`tmux` is NOT present**, though `apt`
@@ -439,7 +439,71 @@ mechanism CLI mode binds through.
       teardown, and specifically: confirm the daemon-port forward survives
       well past the launch command's own exit, and is torn down promptly on
       detach) -- not only unit tests with fakes.
+      **Landed (2026-09-21), unit-level; live clean-room validation still
+      pending.** Built a new shared, vendored lib (`agent-venue-copilot`,
+      byte-identical `plugins/{agent-codespaces,agent-containers}/libs/
+      venue-copilot`, per this repo's `check-vendored-libs-sync.py`
+      contract) holding the provider-agnostic reserve -> connect -> release
+      orchestration (`reserve_cli_mode`/`release_cli_mode` shelling to
+      `agent-bridge --json live-sessions cli-mode {reserve,release}`,
+      `build_copilot_remote_command`, `run_venue_copilot`) plus
+      `resolve_daemon_port`/`daemon_port_reverse_forward`, which read the
+      host daemon's routing table via a newly-vendored `zdd` copy
+      (`zdd.routing.read_active_endpoint`, `verify_listener=False`) --
+      exactly the daemon-port-forward gap this checklist called out, now
+      wired rather than only grounded. `agent-codespaces copilot <name>
+      --worktree-id <id>` places a Connection Owner tenant hold
+      (`ensure_owner_running` + `hold`), runs a background heartbeat thread
+      for the process's lifetime, layers the daemon-port forward onto
+      `gh codespace ssh` alongside the existing credential-relay forward
+      (extended `_interactive_ssh` to accept a trailing remote command), and
+      releases the hold in a `finally`. `agent-containers copilot <name>
+      --worktree-id <id>` mirrors the same reserve/connect/release contract
+      over the trusted-container OpenSSH transport (extended
+      `ssh_transport.build_ssh_command`/`ssh_manager.build_remote_exec_args`
+      with a new `pty=True` option, since the prior transport was
+      no-PTY-only); refuses a restricted fleet outright (no SSH key
+      projection there) rather than degrading silently. Both command bodies
+      live in a per-plugin `copilot_venue.py` (not inline in `__main__.py`,
+      which was already at this repo's module-size ceiling --
+      `tools/module-size-baseline.json` widened by the small net remainder
+      after extraction, a deliberate reviewed edit per its own stated
+      escape hatch). 9 new unit tests per plugin (fakes throughout); full
+      plugin suites otherwise unchanged (only the same pre-existing,
+      unrelated Windows/bash failures). **Still not done:** the full
+      end-to-end `copilot` attach/reattach pass this checklist requires
+      (confirming the daemon-port forward survives past the launch
+      command's own exit and tears down on detach) — that needs a
+      registered worktree + host daemon coordination this session didn't
+      set up.
+      **Read-only re-confirmation against a real, currently-available
+      operator CodeSpace (2026-09-21):** rather than leave the venue-prep
+      checklist's findings above resting only on the 2026-09-20 session's
+      earlier probe, re-checked them live against a different currently-
+      running venue (`gh codespace ssh -c <name> -- <probe>`, a plain read
+      probe, no writes): `copilot` present (v1.0.86, `/usr/local/share/
+      nvm/current/bin/copilot`) alongside `node`/`python3`/`uv`/`git`;
+      **`tmux` still absent** (`apt-cache policy` shows `Candidate:
+      3.4-1ubuntu0.1`, `Installed: (none)`) with passwordless `sudo`
+      confirmed working; `~/.agent-worktrees` exists but holds only
+      `.install-stage`/`payload-dir` -- no `agent-worktrees`/`agent-bridge`
+      binstub resolves on `PATH`. This reconfirms, on a second independent
+      venue, exactly the venue-prep gaps the 2026-09-20 probe found (lean
+      self-provisioning, no full install) -- not a one-off. Also confirmed
+      (operationally, not a code change) that `agent-codespaces ssh`'s own
+      `--remote-cmd` path 404s mid-connect against this account's
+      codespaces (`getting full codespace details ... refresh=true`) while
+      plain `gh codespace ssh` connects fine -- a real, pre-existing,
+      unrelated quirk in that refresh-details call, not this change's
+      concern; noted here only so a future session doesn't re-diagnose it
+      from scratch.
 - [x] **New finding (2026-09-20): `live_sessions` needs a reattach-shaped
+      field for remote CLI-mode sessions.** Today's schema (`machine`,
+      `cwd`, `worktree_id`, `pid`, ...) has no venue identity or mux-session
+      descriptor, so nothing durably records "which CodeSpace/container this
+      is, and what to attach to" for an operator or the daemon to use later.
+      Needs an additive field (e.g. a `venue`/reattach descriptor: boundary +
+      target + mux session name) alongside the existing columns — additive
       field for remote CLI-mode sessions.** Today's schema (`machine`,
       `cwd`, `worktree_id`, `pid`, ...) has no venue identity or mux-session
       descriptor, so nothing durably records "which CodeSpace/container this
@@ -459,7 +523,7 @@ mechanism CLI mode binds through.
       (`test_route_register_carries_venue_for_remote_cli_mode`): the
       descriptor round-trips through register/list/get, and an ordinary
       local registration carries `venue: null`.
-- [ ] Extend `agent-codespaces` **and** `agent-containers` to offer the same
+- [x] Extend `agent-codespaces` **and** `agent-containers` to offer the same
       CLI-mode launch shape — prepare the venue (the checklist above),
       allocate the CLI-mode reservation, start a standard muxed CLI process
       (`embody`, run remotely) bound to it, with the daemon-port reverse
@@ -467,6 +531,14 @@ mechanism CLI mode binds through.
       SSH transport and auth-relay back-channel. No new venue-specific
       transport; both venues use the same `CodeSpaceSpawner`-shaped seam
       already, so neither is ahead of the other here.
+      **Done at the unit level (2026-09-21)** — see the detailed entry
+      above under the daemon-port-forward checklist item. Reattach metadata
+      (`live_sessions.venue`) itself was already landed separately (below);
+      wiring the running venue-side `agent-worktrees copilot` to actually
+      *populate* that field on self-registration is not part of this
+      change and remains open (the schema/model side is done; nothing yet
+      sets a non-null `venue` value end-to-end). Live clean-room validation
+      also remains open -- see above.
 
 ### Phase 5 — Docs and vision closure
 
@@ -888,7 +960,7 @@ rebased PR.
 
 Before writing any venue-specific launch code, checked what a **real** venue
 actually has, rather than assuming symmetry with a local dev box. SSH'd into
-a live, currently-running CodeSpace (`odsp-web-codespaces`, an existing venue
+a live, currently-running operator CodeSpace (an existing venue
 of this harness's own operator, Ubuntu 24.04 devcontainer) and checked
 directly: `copilot` present (`nvm`-installed, v1.0.86) alongside
 `git`/`node`/`python3`/`uv` — all devcontainer conventions. **`tmux` is

@@ -437,8 +437,9 @@ def test_build_ssh_command_uses_shared_builder(monkeypatch):
     config = SimpleNamespace()
     seen = {}
 
-    def fake_build(cfg, cmd, *, reverse_forwards=None):
+    def fake_build(cfg, cmd, *, reverse_forwards=None, pty=False):
         seen["reverse_forwards"] = reverse_forwards
+        seen["pty"] = pty
         return ["ssh", "target", cmd]
 
     monkeypatch.setattr(transport.shutil, "which", lambda name: "ssh")
@@ -455,3 +456,20 @@ def test_build_ssh_command_uses_shared_builder(monkeypatch):
         "ssh", "target", "echo ok"
     ]
     assert seen["reverse_forwards"] == ["9857:127.0.0.1:61234"]
+    assert seen["pty"] is False
+
+
+def test_build_ssh_command_forwards_pty(monkeypatch):
+    config = SimpleNamespace()
+    seen = {}
+
+    def fake_build(cfg, cmd, *, reverse_forwards=None, pty=False):
+        seen["pty"] = pty
+        return ["ssh", "-t", "target", cmd]
+
+    monkeypatch.setattr(transport.shutil, "which", lambda name: "ssh")
+    monkeypatch.setattr(transport, "build_remote_exec_args", fake_build)
+    assert transport.build_ssh_command(
+        config, "agent-worktrees copilot", pty=True,
+    ) == ["ssh", "-t", "target", "agent-worktrees copilot"]
+    assert seen["pty"] is True
