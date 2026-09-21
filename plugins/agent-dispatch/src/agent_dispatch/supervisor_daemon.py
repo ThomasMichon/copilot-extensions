@@ -39,10 +39,12 @@ import contextlib
 import copy
 import json
 import logging
+import os
 import subprocess
 import time
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as _FUTURE_TIMEOUT
 from concurrent.futures import wait as _wait_futures
 from pathlib import Path
 from typing import Any
@@ -105,6 +107,20 @@ _GOVERNANCE_BACKOFF_SECONDS = 10.0
 _SHUTDOWN_GRACE_SECONDS = 15.0
 
 
+def _remaining(deadline: float) -> float:
+    """Seconds left until a ``time.monotonic()``-based deadline, never negative.
+
+    Used to share one reconcile-call budget across every companion a single
+    loop processes (see ``_poll_managed_health``/``_poll_managed_validate``/
+    ``_poll_unmanaged_health``): the first slow companion consumes part of
+    the shared window, so a later one only ever waits whatever is left of it
+    -- never the full budget again -- keeping the loop's *total* added delay
+    bounded by the budget once, not multiplied by however many companions
+    are being reconciled.
+    """
+    return max(0.0, deadline - time.monotonic())
+
+
 class SupervisorDaemon:
     """The one-per-host master that reconciles the registry into subprocesses.
 
@@ -141,6 +157,7 @@ class SupervisorDaemon:
         self_update_running_version: str | None = None,
         self_update_stale_target: Callable[[Path, str], Path | None] | None = None,
         self_update_spawn: Callable[[Any, list[str]], None] | None = None,
+        reconcile_call_budget: float = 3.0,
     ):
         self.client = client
         #: Rebuilds the coordinator client by **re-resolving** its endpoint (the
@@ -157,6 +174,15 @@ class SupervisorDaemon:
         self.clock = clock
         self.sleep = sleep
         self.poll_interval = max(0.5, float(poll_interval))
+        #: Bounded per-call wait for an off-thread health/validate probe (see
+        #: _poll_managed_health/_poll_managed_validate/_poll_unmanaged_health)
+        #: before deferring its result to a later tick. Keeps the common,
+        #: fast case (a healthy companion, an uncontended lock) behaving
+        #: exactly as a synchronous call would -- starting/reviving a unit
+        #: within the same reconcile_once() -- while still bounding how long
+        #: one stuck/contended companion can hold up reconciling every other
+        #: one, in the rare case its own check doesn't finish in time.
+        self._reconcile_call_budget = max(0.0, float(reconcile_call_budget))
         #: Monotonic count of reconcile cycles started this process lifetime --
         #: the correlation id the serve-loop heartbeat log lines share, so a
         #: "cycle N starting" with no matching "cycle N finished" (the signature
@@ -215,6 +241,62 @@ class SupervisorDaemon:
         #: the self-update handoff barrier (``_await_runtime_pool_idle``)
         #: keeps seeing it as in flight until it truly finishes.
         self._managed_runtime_inflight: set[Future] = set()
+        #: Per-managed-companion health-probe and validate()+prepare_managed()
+        #: futures. A companion's own health check or (re)launch validation
+        #: can block for a long time (a health probe subprocess, or validate()
+        #: waiting on the same interprocess lock a slow materialize() build
+        #: holds) -- routing them through the runtime pool and only checking
+        #: readiness synchronously means one stubborn companion's own check
+        #: never blocks reconciling every *other* companion in this or later
+        #: ticks. See _reconcile_managed's "one stubborn task holds up the
+        #: whole reconcile loop" fix.
+        self._managed_health_futures: dict[str, tuple[str, Future]] = {}
+        self._managed_validate_futures: dict[str, tuple[str, Future]] = {}
+        #: Same bounded-poll treatment for the _managed_uncertain selected-
+        #: state recovery path's own validate() call (recover_live()'s
+        #: precondition) -- separate from _managed_validate_futures since
+        #: recovery never calls prepare_managed() the way a (re)launch does.
+        self._managed_recovery_validate_futures: dict[str, tuple[str, Future]] = {}
+        #: Same off-thread treatment for a *non*-managed companion's health
+        #: probe (e.g. agent-ssh-dtssh-host) in reconcile_once's crash-revival
+        #: pass -- a stuck probe subprocess must not block noticing/reviving
+        #: any other unit that tick.
+        self._unmanaged_health_futures: dict[str, Future] = {}
+        #: Every health/validate probe future ever submitted, kept here until
+        #: it is actually done() -- unlike the three dicts above, a snapshot
+        #: superseding an in-flight probe (or a completed one being popped
+        #: to allow a retry) never removes it from this set early. A probe
+        #: can't be cancelled once running, so it keeps occupying a pool
+        #: worker regardless of whether anything still cares about its
+        #: result; this is what shutdown()'s grace wait actually drains, so
+        #: an abandoned probe doesn't both saturate the pool AND evade the
+        #: wait that's supposed to bound how long it can block interpreter
+        #: exit. Pruned (entries already done() removed) at each poll and at
+        #: shutdown, so it never grows unbounded over a long-running daemon.
+        self._probe_inflight: set[Future] = set()
+        #: An owned runtime executor abandoned by a failed self-update spawn
+        #: while it still had a genuinely stuck probe/validate worker (see
+        #: _maybe_self_update's failure branch): its own reference gets
+        #: replaced so _runtime_pool() can lazily rebuild a live one for
+        #: continued reconciliation, but the old (already-shutdown, still
+        #: finishing its stuck work) executor object is kept here rather
+        #: than silently discarded, so a repeated run of failed handoffs
+        #: stays visible/managed instead of accumulating untracked pools.
+        #: Its own futures remain tracked in _probe_inflight regardless of
+        #: which executor submitted them, so shutdown()'s drain wait still
+        #: covers them; this list exists for accounting/visibility, not a
+        #: second drain path.
+        self._retired_runtime_executors: list[Executor] = []
+        #: Which futures shutdown()'s grace wait has already covered, and
+        #: the running drained verdict across every shutdown() call this
+        #: process lifetime -- keyed by future identity (not executor
+        #: identity, since a retired executor still has its own futures in
+        #: _probe_inflight/_managed_runtime_inflight even after
+        #: self._runtime_executor itself becomes None), so a repeat call
+        #: only pays the grace wait for a genuinely NEW future, never a
+        #: second wait on one already accounted for.
+        self._shutdown_waited_futures: set[Future] = set()
+        self._shutdown_drained: bool = True
         self._units: dict[str, ManagedUnit] = {}
         #: Live self-update wiring (see the module-level notes above
         #: ``supervisor_lease_scope``). ``self_update_argv`` is this process's
@@ -815,37 +897,79 @@ class SupervisorDaemon:
         selected: Mapping[str, ManagedLaunchSnapshot],
         rollback: Mapping[str, ManagedLaunchSnapshot] | None,
         summary: ReconcileSummary,
+        *,
+        deadline: float,
     ) -> bool:
         restored: dict[str, ManagedLaunchSnapshot] = dict(selected)
-        for rid, snapshot in restored.items():
-            unit = self._units.get(rid)
-            current = (
-                unit.companion_resolution.managed_snapshot
-                if unit is not None and unit.companion_resolution is not None
-                else None
-            )
-            if (
-                unit is not None
-                and current is not None
+        needs_launch = {
+            rid: snapshot
+            for rid, snapshot in restored.items()
+            if not (
+                (unit := self._units.get(rid)) is not None
+                and (
+                    current := (
+                        unit.companion_resolution.managed_snapshot
+                        if unit.companion_resolution is not None
+                        else None
+                    )
+                )
+                is not None
                 and current.fingerprint == snapshot.fingerprint
                 and unit.proc is not None
                 and unit.proc.poll() is None
-            ):
-                continue
+            )
+        }
+        # Bounded and off-thread, like the forward cutover path's own
+        # validate() polling -- a rollback triggered by a contended lock
+        # (the exact failure mode this whole isolation change targets) must
+        # not itself block the reconcile thread synchronously. All members
+        # needing a (re)launch must confirm before any of them stops/
+        # relaunches, deferring the whole restore (not a partial one) to the
+        # next tick otherwise. Every member is polled unconditionally (a
+        # plain list, not any() over a generator) so a pending member never
+        # short-circuits submission of the members after it -- the same
+        # any()-short-circuit mistake already fixed once for the forward
+        # cutover path (see _reconcile_transition_groups) must not recur here.
+        validated = [
+            self._poll_managed_validate(rid, snapshot, deadline)
+            for rid, snapshot in needs_launch.items()
+        ]
+        if any(result is None for result in validated):
+            return False
+        for rid, snapshot in needs_launch.items():
+            unit = self._units.get(rid)
             if unit is not None and not self._stop(rid):
                 return False
-            self._launch_managed(snapshot, summary, bucket="revived")
+            self._launch_managed(
+                snapshot, summary, bucket="revived", precondition_confirmed=True
+            )
         self._write_transition_group(
             group_id, selected=restored, rollback=rollback, pending=None
         )
         return True
 
     def _launch_managed(
-        self, snapshot: ManagedLaunchSnapshot, summary: ReconcileSummary, *, bucket: str
+        self,
+        snapshot: ManagedLaunchSnapshot,
+        summary: ReconcileSummary,
+        *,
+        bucket: str,
+        precondition_confirmed: bool = False,
     ) -> None:
+        """Commit to launching a managed companion.
+
+        ``precondition_confirmed=True`` tells this call that prepare_managed()
+        and validate() already ran (and succeeded) moments ago in this same
+        reconcile pass via ``_poll_managed_validate`` -- so it must not
+        re-run them here synchronously, which would defeat that call's whole
+        purpose of keeping a contended-lock wait off the reconcile thread.
+        Every other caller (a fresh launch never preflighted this tick, or a
+        launch-failure fallback re-attempt) still runs them here as before.
+        """
         resolution = snapshot.resolution()
-        self._companion().prepare_managed(snapshot)
-        self._managed_runtime().validate(resolution.registration, snapshot.runtimes)
+        if not precondition_confirmed:
+            self._companion().prepare_managed(snapshot)
+            self._managed_runtime().validate(resolution.registration, snapshot.runtimes)
         launched = self._companion().launch(resolution, fingerprint=snapshot.fingerprint)
         rid = resolution.registration["id"]
         self._units[rid] = ManagedUnit(
@@ -860,7 +984,7 @@ class SupervisorDaemon:
         getattr(summary, "recovered" if launched.recovered else bucket).append(rid)
 
     def _reconcile_transition_groups(
-        self, desired: dict[str, dict], summary: ReconcileSummary
+        self, desired: dict[str, dict], summary: ReconcileSummary, *, deadline: float
     ) -> set[str]:
         grouped: dict[str, list[str]] = {}
         for rid, registration in desired.items():
@@ -913,7 +1037,9 @@ class SupervisorDaemon:
                     target = pending
                     handled.update(rids)
                 if pending is not None:
-                    if not self._restore_transition_group(group_id, selected, rollback, summary):
+                    if not self._restore_transition_group(
+                        group_id, selected, rollback, summary, deadline=deadline
+                    ):
                         summary.skipped.extend(rids)
                     continue
                 blocked = False
@@ -933,9 +1059,28 @@ class SupervisorDaemon:
                         raise CompanionError(
                             "managed transition group rollback authority changed"
                         )
-                    self._managed_runtime().validate(
-                        target[rid].resolution().registration, target[rid].runtimes
-                    )
+                # Off-thread and bounded, like _poll_managed_validate's own
+                # non-grouped counterpart -- a slow validate() (e.g. waiting
+                # on the same interprocess lock a concurrent materialize()
+                # build holds) for one group member must not block the
+                # reconcile thread. Unlike the non-grouped path, ALL members
+                # must confirm before committing (a transition group is an
+                # atomic unit): if any is still pending, defer the whole
+                # group this tick and retry next tick, rather than commit a
+                # partially-validated transition. Every member is polled
+                # unconditionally (a plain list comprehension, not `any(...)`
+                # over a generator) so a member found pending never short-
+                # circuits submission of the members after it -- otherwise
+                # those later members would never even start their own
+                # off-thread check this tick, indefinitely postponing the
+                # whole group behind whichever member happens to be checked
+                # first.
+                validated = [
+                    self._poll_managed_validate(rid, target[rid], deadline)
+                    for rid in rids
+                ]
+                if any(result is None for result in validated):
+                    continue
                 next_rollback = (
                     dict(selected)
                     if any(
@@ -972,6 +1117,7 @@ class SupervisorDaemon:
                                 if crashed
                                 else "restarted" if unit is not None else "started"
                             ),
+                            precondition_confirmed=True,
                         )
                 except (CompanionError, CompanionIndeterminate, ManagedRuntimeError, OSError) as exc:
                     delay = max(self.restart_backoff, self.poll_interval)
@@ -984,7 +1130,7 @@ class SupervisorDaemon:
                         "managed transition group %s launch failed: %s", group_id, exc
                     )
                     if not self._restore_transition_group(
-                        group_id, selected, rollback, summary
+                        group_id, selected, rollback, summary, deadline=deadline
                     ):
                         summary.skipped.extend(rids)
                     continue
@@ -1013,22 +1159,206 @@ class SupervisorDaemon:
                 summary.skipped.extend(rids)
         return handled
 
+    def _prune_probe_inflight(self) -> None:
+        self._probe_inflight = {f for f in self._probe_inflight if not f.done()}
+
+    def _poll_managed_health(
+        self, rid: str, snapshot: ManagedLaunchSnapshot, deadline: float
+    ) -> bool | None:
+        """Poll (or start) an off-thread health probe for a running managed unit.
+
+        Waits only until ``deadline`` (a shared, monotonic-clock deadline for
+        the *whole* calling loop, not a fresh budget per rid -- see
+        ``_reconcile_managed``/``reconcile_once``) for a result -- long
+        enough that the common case (a healthy companion, no contention)
+        still resolves within this same call, exactly as a direct synchronous
+        call would. Returns ``None`` once that shared deadline is reached
+        with the probe still running (or its previous result raised) -- the
+        caller must never block further, so a genuinely stuck or
+        indeterminate probe only ever delays *this* rid's own next decision
+        (plus, at most, whatever of the shared budget is still left when its
+        turn comes), never accumulating N-times-the-budget across every
+        other companion this loop still has to reconcile.
+
+        Tracked by ``(rid, snapshot.fingerprint)``, not ``rid`` alone: if the
+        registration changes while an old probe is still blocked, that stale
+        probe's eventual result must never be applied to the new snapshot
+        (a launch already superseded it) -- a fresh probe starts instead,
+        exactly mirroring ``_poll_managed_validate``'s own staleness guard.
+        A probe can't be cancelled once running, so an abandoned one (from a
+        superseded snapshot, or one whose result already propagated) is
+        still tracked in ``_probe_inflight`` until it actually finishes --
+        that is what ``shutdown()`` drains, independent of whichever rid, if
+        any, still cares about its result.
+        """
+        self._prune_probe_inflight()
+        tracked = self._managed_health_futures.get(rid)
+        if tracked is not None and tracked[0] != snapshot.fingerprint:
+            self._managed_health_futures.pop(rid, None)
+            tracked = None
+        if tracked is None:
+            future = self._runtime_pool().submit(
+                self._companion().health, snapshot.resolution()
+            )
+            self._probe_inflight.add(future)
+            self._managed_health_futures[rid] = (snapshot.fingerprint, future)
+        else:
+            future = tracked[1]
+        try:
+            result = future.result(timeout=_remaining(deadline))
+        except _FUTURE_TIMEOUT:
+            return None
+        except (CompanionError, CompanionIndeterminate, OSError) as exc:
+            self._managed_health_futures.pop(rid, None)
+            log.warning("managed companion %s health is indeterminate: %s", rid, exc)
+            return None
+        except BaseException:
+            # Any other exception still must release this rid's tracking
+            # entry before propagating -- otherwise every subsequent poll
+            # would re-raise the same cached (already-completed) future's
+            # exception forever, permanently blocking a retry.
+            self._managed_health_futures.pop(rid, None)
+            raise
+        self._managed_health_futures.pop(rid, None)
+        return result
+
+    def _poll_managed_validate(
+        self, rid: str, snapshot: ManagedLaunchSnapshot, deadline: float
+    ) -> bool | None:
+        """Poll (or start) off-thread ``prepare_managed()``/``validate()``.
+
+        Waits only until ``deadline`` (see ``_poll_managed_health``'s
+        docstring -- a shared deadline for the whole calling loop, never a
+        fresh budget per rid) for the result -- long enough that the common
+        case (an uncontended lock) still resolves within this same call,
+        exactly as a direct synchronous call would. Returns ``True`` once
+        validation has succeeded for this exact snapshot, or ``None`` once
+        the shared deadline is reached with the check still in flight (a
+        fresh check is submitted only if none is already running for this
+        snapshot's fingerprint -- a stale check for a since-superseded one is
+        dropped from this rid's own tracking, but -- like
+        ``_poll_managed_health`` -- stays in ``_probe_inflight`` until it
+        actually finishes, since it can't be cancelled and shutdown() still
+        needs to drain it). A failure re-raises the original exception once
+        the check completes (after releasing this rid's tracking entry, so a
+        retry is possible), so the caller's existing per-rid error handling
+        (backoff bookkeeping, authority invalidation) applies unchanged --
+        only *when* that handling runs is ever deferred, never *whether*.
+        This only ever routes the two potentially slow calls (validate() can
+        wait on the same interprocess lock a concurrent materialize() build
+        holds) off the reconcile thread, so one companion's own slow/stuck
+        validation never accumulates delay on top of every other companion's
+        own check in the same loop.
+        """
+        self._prune_probe_inflight()
+        tracked = self._managed_validate_futures.get(rid)
+        if tracked is not None and tracked[0] != snapshot.fingerprint:
+            self._managed_validate_futures.pop(rid, None)
+            tracked = None
+        if tracked is None:
+            def _check() -> None:
+                self._companion().prepare_managed(snapshot)
+                self._managed_runtime().validate(
+                    snapshot.resolution().registration, snapshot.runtimes
+                )
+
+            future = self._runtime_pool().submit(_check)
+            self._probe_inflight.add(future)
+            self._managed_validate_futures[rid] = (snapshot.fingerprint, future)
+        else:
+            future = tracked[1]
+        try:
+            future.result(timeout=_remaining(deadline))
+        except _FUTURE_TIMEOUT:
+            return None
+        except BaseException:
+            self._managed_validate_futures.pop(rid, None)
+            raise
+        self._managed_validate_futures.pop(rid, None)
+        return True
+
+    def _poll_managed_recovery_validate(
+        self, rid: str, previous: ManagedLaunchSnapshot, deadline: float
+    ) -> bool | None:
+        """Bounded-poll sibling of ``_poll_managed_validate`` for the
+        ``_managed_uncertain`` selected-state recovery path's own precondition
+        check (``recover_live()`` is only attempted once this validate()
+        succeeds). Kept separate from ``_managed_validate_futures`` since
+        recovery never calls ``prepare_managed()`` the way a (re)launch does
+        -- otherwise identical contract: never blocks past the shared
+        per-loop ``deadline``, drops a stale check for a superseded
+        fingerprint, and keeps every submitted future in ``_probe_inflight``
+        for ``shutdown()`` regardless of whether this rid still references it.
+        """
+        self._prune_probe_inflight()
+        tracked = self._managed_recovery_validate_futures.get(rid)
+        if tracked is not None and tracked[0] != previous.fingerprint:
+            self._managed_recovery_validate_futures.pop(rid, None)
+            tracked = None
+        if tracked is None:
+            future = self._runtime_pool().submit(
+                self._managed_runtime().validate,
+                previous.resolution().registration,
+                previous.runtimes,
+            )
+            self._probe_inflight.add(future)
+            self._managed_recovery_validate_futures[rid] = (previous.fingerprint, future)
+        else:
+            future = tracked[1]
+        try:
+            future.result(timeout=_remaining(deadline))
+        except _FUTURE_TIMEOUT:
+            return None
+        except BaseException:
+            self._managed_recovery_validate_futures.pop(rid, None)
+            raise
+        self._managed_recovery_validate_futures.pop(rid, None)
+        return True
+
     def _reconcile_managed(
         self,
         desired: dict[str, dict],
         summary: ReconcileSummary,
         *,
         skip: set[str] | None = None,
+        deadline: float | None = None,
     ) -> set[str]:
         """Keep prior launch authority separate from each prepared replacement."""
-        managed = {
+        # One shared deadline for every companion this call reconciles (not a
+        # fresh budget per rid): a slow companion's own check only ever
+        # consumes part of this one window, so a later companion in the same
+        # call waits at most whatever is left of it, never the full budget
+        # again -- the loop's total added delay is bounded by the budget
+        # once, not multiplied by however many companions are processed.
+        # Callers reconciling more than this phase alone in the same tick
+        # (see reconcile_once(), which also has an unmanaged-companion health
+        # phase) must pass the SAME deadline they use there, so the whole
+        # tick shares one budget rather than one per phase.
+        if deadline is None:
+            deadline = time.monotonic() + self._reconcile_call_budget
+        all_managed_runtime = {
             rid for rid, reg in desired.items()
             if reg.get("kind") == RegistrationKind.PLUGIN_COMPANION
             and reg.get("spec", {}).get("managed_runtime")
-            and rid not in (skip or set())
         }
-        for rid in set(self._managed_launch_failures) - managed:
+        managed = all_managed_runtime - (skip or set())
+        # Cleanup purges by the FULL managed-runtime set, not just this
+        # call's own `managed` (which excludes `skip`): a transition-group
+        # member is also a managed_runtime companion, just reconciled by
+        # _reconcile_transition_groups instead of the per-rid loop below --
+        # purging by `managed` alone would immediately wipe out the very
+        # entries that call just set moments earlier in this same tick
+        # (see _poll_managed_validate's shared tracking dicts), forcing a
+        # redundant resubmission next tick instead of reusing the in-flight
+        # check.
+        for rid in set(self._managed_launch_failures) - all_managed_runtime:
             self._managed_launch_failures.pop(rid, None)
+        for rid in set(self._managed_health_futures) - all_managed_runtime:
+            self._managed_health_futures.pop(rid, None)
+        for rid in set(self._managed_validate_futures) - all_managed_runtime:
+            self._managed_validate_futures.pop(rid, None)
+        for rid in set(self._managed_recovery_validate_futures) - all_managed_runtime:
+            self._managed_recovery_validate_futures.pop(rid, None)
         for rid in managed:
             registration = desired[rid]
             authority = companion_authority_fingerprint(registration)
@@ -1059,9 +1389,8 @@ class SupervisorDaemon:
 
                 if rid in self._managed_uncertain:
                     if unit is None and previous is not None and previous.authority == authority:
-                        self._managed_runtime().validate(
-                            previous.resolution().registration, previous.runtimes
-                        )
+                        if self._poll_managed_recovery_validate(rid, previous, deadline) is None:
+                            continue
                         recovered = self._companion().recover_live(previous)
                         if recovered is not None:
                             resolution = previous.resolution()
@@ -1081,8 +1410,12 @@ class SupervisorDaemon:
                     unit is None and previous is not None and previous.authority == authority
                     and failure is None
                 ):
+                    if self._poll_managed_recovery_validate(rid, previous, deadline) is None:
+                        continue
                     try:
-                        self._launch_managed(previous, summary, bucket="started")
+                        self._launch_managed(
+                            previous, summary, bucket="started", precondition_confirmed=True
+                        )
                     except (CompanionError, CompanionIndeterminate, ManagedRuntimeError, OSError) as exc:
                         log.error("managed companion %s selected recovery failed: %s", rid, exc)
                         failure = (
@@ -1105,10 +1438,13 @@ class SupervisorDaemon:
                     if unit.dead:
                         continue
                     if unit.proc is not None and unit.proc.poll() is None:
-                        try:
-                            healthy = self._companion().health(snapshot.resolution())
-                        except (CompanionError, CompanionIndeterminate, OSError) as exc:
-                            log.warning("managed companion %s health is indeterminate: %s", rid, exc)
+                        healthy = self._poll_managed_health(rid, snapshot, deadline)
+                        if healthy is None:
+                            # Probe still in flight (or just submitted) --
+                            # never block on it; treat as healthy for this
+                            # tick and re-check next time, so a stuck probe
+                            # only delays *this* rid's own next decision, not
+                            # reconciliation of any other companion.
                             continue
                         if healthy is not False:
                             continue
@@ -1120,9 +1456,13 @@ class SupervisorDaemon:
                         if self.clock() < unit.restart_after:
                             continue
 
-                # Both validation and immutable snapshot construction precede retirement.
-                self._companion().prepare_managed(snapshot)
-                self._managed_runtime().validate(snapshot.resolution().registration, snapshot.runtimes)
+                # Both validation and immutable snapshot construction precede
+                # retirement -- run off-thread (validate() can wait on the same
+                # interprocess lock a slow materialize() build holds) so a
+                # stuck validation only stalls this rid, never any other
+                # companion's own reconciliation this or later ticks.
+                if self._poll_managed_validate(rid, snapshot, deadline) is None:
+                    continue
                 crashed = (
                     unit is not None and unit.proc is None
                     and unit.fingerprint == snapshot.fingerprint
@@ -1135,6 +1475,7 @@ class SupervisorDaemon:
                     self._launch_managed(
                         snapshot, summary,
                         bucket="revived" if crashed else "restarted" if unit else "started",
+                        precondition_confirmed=True,
                     )
                 except (CompanionError, CompanionIndeterminate, ManagedRuntimeError, OSError) as exc:
                     self._managed_launch_failures[rid] = (
@@ -1143,7 +1484,14 @@ class SupervisorDaemon:
                     log.error("managed companion %s launch failed: %s", rid, exc)
                     summary.skipped.append(rid)
                     if previous is not None and previous.fingerprint != snapshot.fingerprint:
-                        self._launch_managed(previous, summary, bucket="revived")
+                        # Same bounded/off-thread precondition as the primary
+                        # launch above -- a rollback to the last-known-good
+                        # snapshot must not itself block the reconcile thread
+                        # on a contended lock either.
+                        if self._poll_managed_validate(rid, previous, deadline) is not None:
+                            self._launch_managed(
+                                previous, summary, bucket="revived", precondition_confirmed=True
+                            )
                     continue
                 self._managed_launch_failures.pop(rid, None)
                 launched_unit = self._units[rid]
@@ -1238,6 +1586,44 @@ class SupervisorDaemon:
         else:
             getattr(summary, bucket).append(rid)
 
+    def _poll_unmanaged_health(
+        self, rid: str, resolution: CompanionResolution | None, deadline: float
+    ) -> bool | None:
+        """Non-managed sibling of ``_poll_managed_health`` (see its docstring):
+        a stuck or indeterminate probe subprocess for one companion must never
+        block crash-revival of any other unit in this or later ticks, beyond
+        the shared per-loop deadline. Also shares its ``_probe_inflight``
+        tracking, so a probe abandoned by ``_stop()`` (unit removed/
+        restarted while its probe was still running) still gets drained by
+        ``shutdown()``.
+        """
+        self._prune_probe_inflight()
+        future = self._unmanaged_health_futures.get(rid)
+        if future is None:
+            future = self._runtime_pool().submit(self._companion().health, resolution)
+            self._probe_inflight.add(future)
+            self._unmanaged_health_futures[rid] = future
+        try:
+            result = future.result(timeout=_remaining(deadline))
+        except _FUTURE_TIMEOUT:
+            return None
+        except (
+            CompanionError,
+            CompanionIndeterminate,
+            OSError,
+            subprocess.SubprocessError,
+        ) as exc:
+            self._unmanaged_health_futures.pop(rid, None)
+            log.warning(
+                "companion %s health is indeterminate; keeping it: %s", rid, exc
+            )
+            return None
+        except BaseException:
+            self._unmanaged_health_futures.pop(rid, None)
+            raise
+        self._unmanaged_health_futures.pop(rid, None)
+        return result
+
     def _stop(self, rid: str) -> bool:
         unit = self._units.get(rid)
         if unit is None:
@@ -1270,6 +1656,10 @@ class SupervisorDaemon:
             except Exception:  # pragma: no cover -- best-effort teardown
                 log.exception("error stopping registration %s", rid)
         self._units.pop(rid, None)
+        self._unmanaged_health_futures.pop(rid, None)
+        self._managed_health_futures.pop(rid, None)
+        self._managed_validate_futures.pop(rid, None)
+        self._managed_recovery_validate_futures.pop(rid, None)
         return True
 
     # -- reconcile -----------------------------------------------------------
@@ -1285,6 +1675,14 @@ class SupervisorDaemon:
         desired = self._desired()
         summary.deduplicated = list(self._deduplicated)
         summary.conflicts = list(self._conflicts)
+        # One shared deadline for every off-thread health/validate probe this
+        # whole tick submits -- both the managed-companion phase below and
+        # the unmanaged-companion crash-revival phase further down -- so a
+        # slow companion in one phase can't add its own separate budget on
+        # top of a slow companion in the other, doubling the tick's worst
+        # case. See _reconcile_managed's own docstring for the per-call
+        # sharing rationale this extends across phases.
+        reconcile_deadline = time.monotonic() + self._reconcile_call_budget
 
         # 1. stop units no longer desired (removed or paused)
         for rid in list(self._units):
@@ -1300,8 +1698,8 @@ class SupervisorDaemon:
                         self._companion().forget_managed(rid)
 
         # 2. restart units whose definition changed
-        grouped = self._reconcile_transition_groups(desired, summary)
-        managed = self._reconcile_managed(desired, summary, skip=grouped)
+        grouped = self._reconcile_transition_groups(desired, summary, deadline=reconcile_deadline)
+        managed = self._reconcile_managed(desired, summary, skip=grouped, deadline=reconcile_deadline)
         self._cleanup_managed_runtimes()
         for rid, reg in desired.items():
             if rid in managed or rid in grouped:
@@ -1315,6 +1713,12 @@ class SupervisorDaemon:
 
         # 3. revive crashed units (backoff-gated, cap-bounded)
         now = self.clock()
+        # Shared deadline for this pass -- the SAME one computed at the top
+        # of reconcile_once(), not a fresh one: see that deadline's own
+        # comment for why a separate budget per phase would let one slow
+        # companion here compound with one slow companion in the managed
+        # phase above, doubling this tick's worst case.
+        health_deadline = reconcile_deadline
         for rid, reg in desired.items():
             if rid in managed or rid in grouped:
                 continue
@@ -1325,26 +1729,24 @@ class SupervisorDaemon:
                 unit.kind == RegistrationKind.PLUGIN_COMPANION
                 and unit.proc.poll() is None
             ):
-                try:
-                    healthy = self._companion().health(
-                        unit.companion_resolution
-                    )
-                except (
-                    CompanionError,
-                    CompanionIndeterminate,
-                    OSError,
-                    subprocess.SubprocessError,
-                ) as exc:
-                    log.warning(
-                        "companion %s health is indeterminate; keeping it: %s",
-                        rid,
-                        exc,
-                    )
-                else:
-                    if healthy is False:
-                        summary.unhealthy.append(rid)
-                        self._stop(rid)
-                        self._start(reg, summary, bucket="restarted")
+                healthy = self._poll_unmanaged_health(
+                    rid, unit.companion_resolution, health_deadline
+                )
+                if healthy is False:
+                    summary.unhealthy.append(rid)
+                    self._stop(rid)
+                    self._start(reg, summary, bucket="restarted")
+                    continue
+                if healthy is None:
+                    # Probe just submitted or still in flight -- never block;
+                    # treat as healthy for THIS tick and re-check next time --
+                    # UNLESS the process has already exited in the meantime,
+                    # since a probe that will never resolve for an already-
+                    # exited process (e.g. a socket-based check that just
+                    # hangs) must not permanently suppress crash-revival by
+                    # deferring forever. Fall through to the existing crash
+                    # handling below in that case.
+                    if unit.proc.poll() is None:
                         continue
             if unit.proc.poll() is None:
                 continue  # still running
@@ -1380,6 +1782,11 @@ class SupervisorDaemon:
                 continue  # still in backoff
             unit.restarts += 1
             self._units.pop(rid, None)
+            # Any in-flight health probe belonged to the crashed process;
+            # never let it linger and have its (stale) result silently
+            # applied to the freshly-revived one on a later tick -- it stays
+            # tracked in _probe_inflight for shutdown() regardless.
+            self._unmanaged_health_futures.pop(rid, None)
             self._start(reg, summary, bucket="revived")
             revived = self._units.get(rid)
             if revived is not None:
@@ -1457,22 +1864,85 @@ class SupervisorDaemon:
         _done, not_done = _wait_futures(pending, timeout=timeout)
         return not not_done
 
-    def shutdown(self) -> None:
-        """Wind down every running unit (best-effort)."""
+    def shutdown(self) -> bool:
+        """Wind down every running unit (best-effort).
+
+        Returns ``True`` once every tracked in-flight materialize/cleanup/
+        probe future actually finished before the bounded grace window
+        elapsed, ``False`` if any remained pending when this method
+        proceeded to the non-blocking pool shutdown below (this method's
+        own return is never itself held up past ``_SHUTDOWN_GRACE_SECONDS``
+        either way -- ``False`` only flags that a worker thread is still
+        alive doing real work). Callers that are about to let the process
+        exit and can prove nothing else depends on this daemon still being
+        up (see ``serve()``'s self-update-triggered exit path) may treat
+        ``False`` as licence to force-exit rather than let a stuck worker
+        thread delay interpreter shutdown -- see the note there for why a
+        plain ``shutdown(wait=False)`` cannot itself guarantee that: Python's
+        ``concurrent.futures.thread`` module registers a process-wide
+        ``atexit`` hook that joins every live ``ThreadPoolExecutor`` worker
+        thread at interpreter exit regardless, so a genuinely stuck health/
+        validate call (e.g. still waiting on the same interprocess lock a
+        slow materialize() build holds, up to its own multi-minute ceiling)
+        can otherwise delay actual process exit for as long as that
+        operation's own ceiling allows.
+        """
         for rid in list(self._units):
             self._stop(rid)
+        # Give any in-flight materialize()/cleanup() task -- and any
+        # in-flight health/validate probe, whether it belongs to the
+        # current owned executor or one a previous failed self-update
+        # handoff already retired (see _maybe_self_update; a retired
+        # executor's own futures stay in _probe_inflight/
+        # _managed_runtime_inflight regardless of which pool submitted
+        # them) -- ONE shared, bounded grace window (long enough for the
+        # common near-finished case), so THIS method's own return is never
+        # held up indefinitely. This runs even when no *current* executor
+        # exists (only retired ones remain): gating the whole wait on a
+        # live self._runtime_executor would silently skip draining a
+        # genuinely still-running retired worker and falsely report a
+        # clean drain. A single shared wait (not per-executor) keeps the
+        # total grace bounded by _SHUTDOWN_GRACE_SECONDS once. Self-update
+        # itself requires a *real* drain-or-defer decision (see
+        # _maybe_self_update's own _await_runtime_pool_idle call before
+        # ever reaching this method) for materialize()/cleanup()
+        # specifically, since a build still running here would otherwise
+        # race the successor it hands off to; a stuck health or validate
+        # probe never gates that decision (only its own rid's
+        # reconciliation, per _poll_managed_health/_poll_managed_validate),
+        # so it is only ever drained here, best-effort -- reflected in this
+        # method's own return value rather than a reason to defer
+        # self-update.
+        self._prune_probe_inflight()
+        pending = set(self._managed_runtime_inflight) | self._probe_inflight
+        if self._managed_cleanup_future is not None:
+            pending.add(self._managed_cleanup_future)
+        # Idempotent re-entry: a future already covered by a prior grace
+        # wait (e.g. serve()'s finally re-calling shutdown() after
+        # _maybe_self_update already did, during the same handoff) is not
+        # waited on again -- only a genuinely NEW future (never seen by an
+        # earlier shutdown() call) can still change the drained verdict, so
+        # re-waiting on the same still-stuck one twice would just double
+        # the delay for no new information.
+        new_pending = pending - self._shutdown_waited_futures
+        if new_pending:
+            _done, not_done = _wait_futures(new_pending, timeout=_SHUTDOWN_GRACE_SECONDS)
+            self._shutdown_drained = self._shutdown_drained and not not_done
+        self._shutdown_waited_futures |= pending
+        if self._retired_runtime_executors:
+            # Sweep any executor a previous failed self-update handoff
+            # retired rather than silently discarded -- their own futures
+            # are already covered by the drain above regardless of which
+            # pool submitted them; this just re-issues shutdown() on each
+            # (a no-op if already called) so a long-running daemon's own
+            # accounting never loses track of how many are still pending.
+            for retired in self._retired_runtime_executors:
+                with contextlib.suppress(Exception):
+                    retired.shutdown(wait=False, cancel_futures=True)
+            self._retired_runtime_executors.clear()
         if self._runtime_executor is not None and self._owns_runtime_executor:
-            # Give any in-flight materialize()/cleanup() task a bounded grace
-            # window (long enough for the common near-finished case), then
-            # proceed regardless -- this must never block indefinitely, since
-            # a plain daemon exit needs to actually exit. cancel_futures=True
-            # still drops anything not yet started. Self-update itself
-            # requires a *real* drain-or-defer decision (see
-            # _maybe_self_update's own _await_runtime_pool_idle call before
-            # ever reaching this method), since a build still running here
-            # would otherwise race the successor it hands off to.
-            self._await_runtime_pool_idle(_SHUTDOWN_GRACE_SECONDS)
             self._runtime_executor.shutdown(wait=False, cancel_futures=True)
+        return self._shutdown_drained
 
     def _maybe_self_update(self) -> bool:
         """Check for a newer installed version and hand off to it if found.
@@ -1538,7 +2008,7 @@ class SupervisorDaemon:
         # every managed unit and release the singleton lease *before* spawning
         # the successor, so its own `acquire_singleton()` never races this
         # daemon's still-held lock.
-        self.shutdown()
+        drained = self.shutdown()
         self.release_singleton()
         try:
             self._self_update_spawn(target, self._self_update_argv)
@@ -1557,8 +2027,15 @@ class SupervisorDaemon:
             # shutdown() above already shut down our owned runtime executor
             # in anticipation of the handoff; since we are staying up, drop
             # the dead reference so the next _runtime_pool() call lazily
-            # rebuilds a live one instead of raising on every submit().
+            # rebuilds a live one instead of raising on every submit(). If
+            # it did not fully drain (a probe/validate worker is still
+            # genuinely running), keep the old executor referenced rather
+            # than silently discard it -- an unmanaged repeated-failure loop
+            # would otherwise accumulate untracked live pools with no
+            # further shutdown() call ever accounting for them.
             if self._owns_runtime_executor:
+                if not drained and self._runtime_executor is not None:
+                    self._retired_runtime_executors.append(self._runtime_executor)
                 self._runtime_executor = None
             return False
         log.info(
@@ -1696,7 +2173,7 @@ class SupervisorDaemon:
                 except KeyboardInterrupt:
                     break
         finally:
-            self.shutdown()
+            drained = self.shutdown()
             if self._client_factory is not None:
                 close = getattr(self.client, "close", None)
                 if callable(close):
@@ -1704,6 +2181,27 @@ class SupervisorDaemon:
                         close()
             if single_instance:
                 self.release_singleton()
+            if self.self_update_triggered and not drained:
+                # A successor is already spawned and live (see
+                # _maybe_self_update); this process's only remaining job is
+                # to vanish. A plain return here still runs Python's normal
+                # interpreter-exit machinery, which joins every live
+                # ThreadPoolExecutor worker thread (see shutdown()'s
+                # docstring) -- so a genuinely stuck probe/validate call
+                # would otherwise delay this process's exit for as long as
+                # its own underlying operation's ceiling allows, well after
+                # the successor has already taken over. os._exit() bypasses
+                # that atexit join entirely; safe specifically here since
+                # every unit was already asked to stop above and nothing
+                # else in this process depends on a cooperative return from
+                # serve().
+                log.warning(
+                    "supervisor self-update: a probe/validate worker was "
+                    "still running past the shutdown grace window; forcing "
+                    "process exit rather than wait on it (the successor is "
+                    "already up)",
+                )
+                os._exit(SELF_UPDATE_EXIT_CODE)
         if self.self_update_triggered:
             return SELF_UPDATE_EXIT_CODE
         return 0

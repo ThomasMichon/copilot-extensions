@@ -327,6 +327,7 @@ def test_first_launch_waits_for_materialization_and_records_ready_snapshot(harne
     assert h.daemon.reconcile_once().started == []
     assert h.processes == []
     h.executor.complete()
+    h.executor.defer = False  # materialize is done; let validate() run inline too
     summary = h.daemon.reconcile_once()
     assert summary.started == [h.rid]
     snapshot = h.unit.companion_resolution.managed_snapshot
@@ -372,6 +373,7 @@ def test_prepare_and_validate_before_stopping_healthy_predecessor(harness):
     assert old.poll() is None
     assert not any(event[0] == "stop" for event in h.events)
     h.executor.complete()
+    h.executor.defer = False  # materialize is done; let validate() run inline too
     summary = h.daemon.reconcile_once()
     assert summary.restarted == [h.rid]
     kinds = [event[0] for event in h.events]
@@ -573,6 +575,7 @@ def test_declaration_churn_discards_stale_materialization(harness):
     h.change()
     h.daemon.reconcile_once()
     h.executor.complete()
+    h.executor.defer = False  # materialize is done; let validate() run inline too
     summary = h.daemon.reconcile_once()
     assert summary.started == [h.rid]
     assert len(h.processes) == 1
@@ -1017,6 +1020,159 @@ def test_transition_group_restart_mid_cutover_rolls_back_pair_atomically(
     assert record["selected"][h.service_id]["runtimes"][0]["version"] == "2.0.0"
     assert h.daemon._units[h.engine_id].companion_resolution.managed_snapshot.runtimes[0].version == "engine-v1"
     assert h.daemon._units[h.service_id].companion_resolution.managed_snapshot.runtimes[0].version == "2.0.0"
+
+
+def test_transition_group_restore_validate_is_bounded(transition_group_harness):
+    """_restore_transition_group()'s own relaunch precondition must be
+    bounded and off-thread too -- a rollback triggered by a contended lock
+    (the exact failure this whole change targets) must not itself block
+    the reconcile thread, and must not partially restore the group."""
+    h = transition_group_harness
+    h.daemon._reconcile_call_budget = 0.05
+    assert set(h.daemon.reconcile_once().started) == {h.engine_id, h.service_id}
+    h.daemon.reconcile_once()
+    selected, rollback, _pending = h.daemon._read_transition_group(h.group_id)
+
+    h.change(
+        service_version="3.0.0",
+        service_mode="service-new",
+        engine_version="engine-v2",
+        engine_mode="engine-new",
+    )
+    desired = h.daemon._desired()
+    target = {
+        rid: h.daemon._desired_managed_snapshot(rid, desired[rid])
+        for rid in (h.engine_id, h.service_id)
+    }
+    target = {rid: snapshot for rid, snapshot in target.items() if snapshot is not None}
+    h.daemon._write_transition_group(
+        h.group_id, selected=selected, rollback=rollback, pending=target
+    )
+    # Simulate a mid-cutover crash: BOTH members already stopped, neither
+    # relaunched yet -- exactly the state _restore_transition_group must
+    # repair. Stopping both (not just one) is what would have caught an
+    # any()-short-circuit bug: with only one member needing a relaunch,
+    # a short-circuiting check can't skip polling "the member after it".
+    assert h.daemon._stop(h.engine_id)
+    assert h.daemon._stop(h.service_id)
+
+    h.controller = h.make_controller()
+    h.daemon = h.make_daemon()
+    h.daemon._reconcile_call_budget = 0.05
+    h.executor.defer = True
+
+    h.daemon.reconcile_once()
+
+    # Deferred: the restore must not have partially committed, and BOTH
+    # members must have been polled (submitted) this same tick -- a
+    # short-circuiting any() would leave the second member's check never
+    # even submitted until some later tick.
+    record = h.group_record()
+    assert record["pending"] is not None
+    assert record["selected"][h.engine_id]["runtimes"][0]["version"] == "engine-v1"
+    assert h.engine_id in h.daemon._managed_validate_futures
+    assert h.service_id in h.daemon._managed_validate_futures
+
+    h.executor.complete()
+    h.executor.defer = False
+    h.daemon.reconcile_once()
+
+    record = h.group_record()
+    assert record["pending"] is None
+    assert record["selected"][h.engine_id]["runtimes"][0]["version"] == "engine-v1"
+    assert record["selected"][h.service_id]["runtimes"][0]["version"] == "2.0.0"
+
+
+
+def test_transition_group_validate_is_bounded_and_does_not_partially_commit(
+    transition_group_harness,
+):
+    """A slow validate() for one group member must not block the reconcile
+    thread, and must not let the group partially commit -- both members'
+    validate() must be confirmed (off-thread, within the shared budget)
+    before either one is stopped/relaunched."""
+    h = transition_group_harness
+    h.daemon._reconcile_call_budget = 0.05
+    assert set(h.daemon.reconcile_once().started) == {h.engine_id, h.service_id}
+    h.daemon.reconcile_once()
+    engine_process = h.daemon._units[h.engine_id].proc
+    service_process = h.daemon._units[h.service_id].proc
+
+    h.change(
+        service_version="3.0.0",
+        service_mode="service-new",
+        engine_version="engine-v2",
+        engine_mode="engine-new",
+    )
+    h.executor.defer = True
+    summary = h.daemon.reconcile_once()
+
+    # Deferred: neither member committed to the transition this tick
+    # (materialize() for the new versions is still queued).
+    assert summary.started == summary.restarted == summary.revived == []
+    assert h.daemon._units[h.engine_id].proc is engine_process
+    assert h.daemon._units[h.service_id].proc is service_process
+    record = h.group_record()
+    assert record["pending"] is None
+
+    # Let the queued materialize() calls finish (still deferred) so the next
+    # tick's desired snapshots resolve and reconciliation reaches the
+    # per-member validate() polling stage.
+    h.executor.complete()
+    summary = h.daemon.reconcile_once()
+
+    assert summary.started == summary.restarted == summary.revived == []
+    record = h.group_record()
+    assert record["pending"] is None
+    # Both members must have been polled (submitted) this same tick, not
+    # just whichever one happens to be checked first -- a short-circuiting
+    # any() over the poll generator would leave a later member's check never
+    # even submitted until some later tick, needlessly extending how long
+    # the whole group stays un-cutover.
+    assert h.engine_id in h.daemon._managed_validate_futures
+    assert h.service_id in h.daemon._managed_validate_futures
+
+    h.executor.complete()
+    h.executor.defer = False
+    summary = h.daemon.reconcile_once()
+
+    assert set(summary.restarted) == {h.engine_id, h.service_id}
+    record = h.group_record()
+    assert record["pending"] is None
+    assert record["selected"][h.engine_id]["runtimes"][0]["version"] == "engine-v2"
+    assert record["selected"][h.service_id]["runtimes"][0]["version"] == "3.0.0"
+
+
+def test_selected_state_recovery_validate_is_bounded(harness):
+    """The 'Recover selected state' branch (a fresh daemon, e.g. after a
+    restart, finding a persisted previously-selected snapshot for a rid it
+    has no in-memory unit for) must run its precondition validate() off-
+    thread and bounded, like every other launch path -- a contended lock
+    here must not block reconciling any other companion."""
+    from time import monotonic
+
+    h = harness
+    h.daemon.reconcile_once()
+    # Simulate a daemon restart: a fresh instance reusing the same
+    # persisted controller state, with no in-memory unit for the rid.
+    h.controller = h.make_controller()
+    h.daemon = h.make_daemon()
+
+    h.executor.defer = True
+    summary = h.daemon.reconcile_once()
+
+    assert summary.started == []  # deferred: validate() still pending
+    assert h.rid in h.daemon._managed_recovery_validate_futures
+
+    # Resolve the deferred check directly through the same bounded-poll
+    # helper the recovery branch itself calls -- proving this path routes
+    # through it (rather than a raw synchronous validate() call) without
+    # depending on the rest of the real launch chain (materializer/
+    # subprocess-adjacent companion.launch()) also completing within a
+    # fixed number of ticks, which is more sensitive to CI runner speed.
+    h.executor.complete()
+    previous = h.controller.selected_managed(h.rid)
+    assert h.daemon._poll_managed_recovery_validate(h.rid, previous, monotonic() + 1) is True
 
 
 def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatch):
