@@ -1072,5 +1072,5 @@ the Phase 0 runbook, picked up as capacity allows.
   global `--help`, `status-monitor --help`, `reconcile-sessions --help`,
   `status-monitor-restart --help`, plain `reconcile-sessions` JSON output, the
   no-project bare help fallback, and the Worktree Manager install trigger.
-  Version bump for this slice: `agent-worktrees` **`1.5.5-dev221`** and
-  marketplace `metadata.version` **`1.7.7-dev189`**.
+  Version bump for this slice: `agent-worktrees` **`1.5.5-dev223`** and
+  marketplace `metadata.version` **`1.7.7-dev191`**.
