@@ -490,6 +490,29 @@ scenarios.
 
 ## Journal
 
+### 2026-09-21 - Reconciled and completed the stale reservations extraction (PR #2578 superseded)
+
+Investigated a week-stale, worktree-orphaned PR #2578 ("extract
+producers_cli.py from __main__.py"). Its worktree had been finalized+pruned
+(content safely pushed) while the PR itself sat unreviewed. Reconciliation
+found: main had independently gained a *partial* extraction in the interim
+(`schedule`/`emitter`/`webhook` only, via a different session/PR after
+#2578 branched) -- so #2578's diff no longer applied cleanly, but its
+*additional* scope (the `reservations` command family: `_cmd_reservations`,
+`_parse_label_max_attempts`) was never done and still lived in
+`__main__.py`. Re-implemented that specific remaining piece directly against
+current `main` rather than resurrecting the stale diff: extracted
+`_cmd_reservations`/`_parse_label_max_attempts`/`register_reservations_command`
+into the existing `producers_cli.py` (no test monkeypatches on either name;
+`supervise_cli.py`'s existing `_proxy()` re-export pattern keeps working
+since `__main__.py` re-exports the moved names, same as for
+schedule/emitter/webhook). `__main__.py`: 4912 -> 4827 lines (module-size
+baseline tightened to match); full agent-dispatch suite green (2,953 passed,
+24 skipped, 2 pre-existing-and-unrelated Windows bash-path failures
+confirmed via `git stash` to reproduce identically without this change).
+Bumped `agent-dispatch` 0.1.2-dev125 -> dev126. Landing this as a fresh PR
+and closing #2578 as superseded, referencing this entry.
+
 ### 2026-09-12 - Componentize __main__.py: extract recipes_cli.py
 
 - Continuing the operator's standing componentization instruction. Picked
