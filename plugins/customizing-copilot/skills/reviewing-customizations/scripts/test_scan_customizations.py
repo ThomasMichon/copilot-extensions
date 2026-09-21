@@ -2436,7 +2436,6 @@ def test_context_budget_splits_hooks_without_executing(
     source = scan.PluginSource(
         skills_root=plugin / "skills", origin="market/plugin",
     )
-
     budget = scan.build_context_budget(repo, [source], home=home)
     hooks = budget["hook_registrations"]
     context_hooks = hooks["additional_context_capable"]
@@ -2800,3 +2799,303 @@ def test_json_without_context_budget_preserves_default_shape(
     payload = json.loads(capsys.readouterr().out)
 
     assert "context_budget" not in payload
+
+
+# ---------------------------------------------------------------------------
+# _plugin_commit / resolve_pinned_commits (immutable-pin resolver, effort
+# ambient-guidance-navigability, issue #3132)
+# ---------------------------------------------------------------------------
+
+
+def _run_git(cwd: Path, *args: str) -> None:
+    import subprocess
+
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def _git_available() -> bool:
+    import shutil
+
+    return shutil.which("git") is not None
+
+
+def _clean_git_checkout(repo: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    _run_git(repo, "init", "-q")
+    _run_git(repo, "config", "user.email", "test@example.com")
+    _run_git(repo, "config", "user.name", "Test")
+    (repo / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.0"}), encoding="utf-8"
+    )
+    _run_git(repo, "add", "-A")
+    _run_git(repo, "commit", "-q", "-m", "initial")
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_plugin_commit_resolves_head_inside_a_git_checkout(tmp_path: Path):
+    repo = tmp_path / "repo"
+    _clean_git_checkout(repo)
+
+    sha = scan._plugin_commit(repo)
+
+    assert len(sha) == 40
+    assert all(ch in "0123456789abcdef" for ch in sha)
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_plugin_commit_empty_with_a_modified_tracked_file(tmp_path: Path):
+    repo = tmp_path / "repo"
+    _clean_git_checkout(repo)
+    (repo / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.1"}), encoding="utf-8"
+    )
+
+    # A modified tracked file means the payload on disk no longer matches
+    # HEAD -- pinning it would be a false claim of reproducibility.
+    assert scan._plugin_commit(repo) == ""
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_plugin_commit_empty_with_an_untracked_file(tmp_path: Path):
+    repo = tmp_path / "repo"
+    _clean_git_checkout(repo)
+    (repo / "extra.json").write_text("{}", encoding="utf-8")
+
+    # An untracked file within the payload is exactly as unproven as a
+    # modification -- HEAD alone does not describe it.
+    assert scan._plugin_commit(repo) == ""
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_plugin_commit_ignores_ambient_git_dir_override(
+    tmp_path: Path, monkeypatch
+):
+    import subprocess
+
+    repo = tmp_path / "repo"
+    _clean_git_checkout(repo)
+    other_repo = tmp_path / "other"
+    _clean_git_checkout(other_repo)
+
+    # An inherited GIT_DIR/GIT_WORK_TREE pointing at a DIFFERENT repository
+    # must never redirect this probe away from the `-C <footprint>` target.
+    monkeypatch.setenv("GIT_DIR", str(other_repo / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other_repo))
+
+    sha = scan._plugin_commit(repo)
+    clean_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    expected = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        env=clean_env,
+    ).stdout.strip()
+
+    assert sha == expected
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_plugin_commit_empty_with_an_ignored_file(tmp_path: Path):
+    repo = tmp_path / "repo"
+    _clean_git_checkout(repo)
+    (repo / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+    _run_git(repo, "add", "-A")
+    _run_git(repo, "commit", "-q", "-m", "add gitignore")
+    (repo / "ignored.txt").write_text("stray content\n", encoding="utf-8")
+
+    # An ignored file inside the payload is exactly as unproven against
+    # HEAD as an untracked one -- the projection scanner does not consult
+    # .gitignore, so plain `git status --porcelain` (which omits ignored
+    # entries) would wrongly report this payload as clean.
+    assert scan._plugin_commit(repo) == ""
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_plugin_commit_detects_untracked_file_despite_local_config(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    _clean_git_checkout(repo)
+    _run_git(repo, "config", "status.showUntrackedFiles", "no")
+    (repo / "extra.json").write_text("{}", encoding="utf-8")
+
+    # `status.showUntrackedFiles=no` would otherwise hide a genuinely new,
+    # uncommitted payload file from even the default untracked reporting --
+    # --untracked-files=all must force full enumeration regardless.
+    assert scan._plugin_commit(repo) == ""
+
+
+def test_plugin_commit_empty_when_head_moves_during_the_check(
+    tmp_path: Path, monkeypatch
+):
+    # The clean check and rev-parse are two separate subprocesses with no
+    # shared lock -- if HEAD moves between the "before" and "after" reads
+    # (a concurrent commit/checkout), the payload's provenance is no longer
+    # certain and must not be pinned.
+    repo = tmp_path / "repo"
+    calls = {"n": 0}
+
+    def fake_head(_git, _footprint):
+        calls["n"] += 1
+        return "a" * 40 if calls["n"] == 1 else "b" * 40
+
+    monkeypatch.setattr(scan, "_git_head", fake_head)
+    monkeypatch.setattr(scan, "_payload_is_clean", lambda _git, _footprint: True)
+    monkeypatch.setattr(scan.shutil, "which", lambda _name: "git")
+
+    assert scan._plugin_commit(repo) == ""
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_assemble_never_pins_an_uncontrolled_directory_marketplace_source(
+    tmp_path: Path,
+):
+    # A plain `directory` marketplace source is an arbitrary local path --
+    # it could point at a payload copied into a subdirectory of some
+    # entirely unrelated git repository (as it does here). footprint being
+    # non-None alone must not be treated as trusted checkout provenance:
+    # only `controlled` (this reviewing repo's own tree) or an
+    # `agent-worktrees-repo` resolution qualify.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    unrelated_checkout = tmp_path / "unrelated"
+    plugin = unrelated_checkout / "payloads" / "cap"
+    (plugin / "skills").mkdir(parents=True)
+    _skill(plugin / "skills", "cap")
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.0"}), encoding="utf-8"
+    )
+    _marketplace(
+        unrelated_checkout,
+        "outside-plugins",
+        plugin_root="payloads",
+        entries=[{"name": "cap", "source": "cap"}],
+    )
+    _run_git(unrelated_checkout, "init", "-q")
+    _run_git(unrelated_checkout, "config", "user.email", "test@example.com")
+    _run_git(unrelated_checkout, "config", "user.name", "Test")
+    _run_git(unrelated_checkout, "add", "-A")
+    _run_git(unrelated_checkout, "commit", "-q", "-m", "add payload")
+    _settings(
+        repo,
+        {"cap@outside-plugins": True},
+        {
+            "outside-plugins": {
+                "source": {
+                    "source": "directory",
+                    "path": str(unrelated_checkout),
+                },
+            },
+        },
+    )
+
+    sources = scan.assemble_enabled_plugins(
+        repo, installed_root=tmp_path / "none", home=tmp_path / "home"
+    )
+
+    assert len(sources) == 1
+    assert sources[0].controlled is False
+    assert sources[0].is_local_checkout is False
+    assert sources[0].commit == ""
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_assemble_never_pins_an_installed_root_footprint(tmp_path: Path):
+    # A plain installed-plugins footprint is a copied external payload with
+    # no source-commit provenance of its own -- even when the installed
+    # root happens to live inside an unrelated git checkout (as it does
+    # here), assemble_enabled_plugins must never call _plugin_commit()
+    # against it.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    installed = tmp_path / "installed"
+    _clean_git_checkout(installed)
+    _installed_plugin(installed, "some-market", "cap")
+    _run_git(installed, "add", "-A")
+    _run_git(installed, "commit", "-q", "-m", "add plugin payload")
+    _settings(repo, {"cap@some-market": True}, {})
+
+    sources = scan.assemble_enabled_plugins(
+        repo, installed_root=installed, home=tmp_path / "home"
+    )
+
+    assert len(sources) == 1
+    assert sources[0].commit == ""
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_sources_from_raw_dir_never_pins_a_copied_payload(tmp_path: Path):
+    installed = tmp_path / "installed"
+    _clean_git_checkout(installed)
+    _installed_plugin(installed, "some-market", "cap")
+    _run_git(installed, "add", "-A")
+    _run_git(installed, "commit", "-q", "-m", "add plugin payload")
+
+    sources = scan._sources_from_raw_dir(installed)
+
+    assert len(sources) == 1
+    assert sources[0].commit == ""
+
+
+def test_plugin_commit_empty_outside_a_git_checkout(tmp_path: Path):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.0"}), encoding="utf-8"
+    )
+
+    assert scan._plugin_commit(plain) == ""
+
+
+def test_plugin_commit_empty_when_git_unavailable(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(scan.shutil, "which", lambda _name: None)
+
+    assert scan._plugin_commit(tmp_path) == ""
+
+
+@pytest.mark.skipif(not _git_available(), reason="git is not installed")
+def test_resolve_pinned_commits_re_probes_fresh_not_the_stale_field(
+    tmp_path: Path,
+):
+    # resolve_pinned_commits must NOT trust PluginSource.commit (captured at
+    # discovery time) -- it re-probes fresh, so a checkout that advanced
+    # since discovery (e.g. across a `refresh`) is reflected correctly.
+    checkout = tmp_path / "checkout"
+    _clean_git_checkout(checkout)
+    stale_sha = scan._plugin_commit(checkout)
+    (checkout / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.1"}), encoding="utf-8"
+    )
+    _run_git(checkout, "add", "-A")
+    _run_git(checkout, "commit", "-q", "-m", "advance")
+    fresh_sha = scan._plugin_commit(checkout)
+    assert fresh_sha != stale_sha
+
+    local = scan.PluginSource(
+        skills_root=checkout / "skills",
+        origin="copilot-extensions/cap",
+        commit=stale_sha,  # deliberately stale
+        is_local_checkout=True,
+    )
+
+    result = scan.resolve_pinned_commits([local])
+
+    assert result == {"cap@copilot-extensions": fresh_sha}
+
+
+def test_resolve_pinned_commits_never_pins_a_non_local_checkout_source(
+    tmp_path: Path,
+):
+    # is_local_checkout=False (the default) must never be re-probed or
+    # pinned, regardless of what its (informational-only) commit field or
+    # payload_root on disk look like.
+    unpinned = scan.PluginSource(
+        skills_root=Path("/y/skills"),
+        origin="third-party-marketplace/some-plugin",
+        commit="a" * 40,
+        is_local_checkout=False,
+    )
+
+    result = scan.resolve_pinned_commits([unpinned])
+
+    assert result == {}

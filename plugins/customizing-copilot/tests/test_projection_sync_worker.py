@@ -22,9 +22,15 @@ if str(_SCRIPTS) not in sys.path:
 import instruction_projections as projections  # noqa: E402
 import projection_reflect_consent  # noqa: E402
 import projection_sync_worker as worker  # noqa: E402
+import scan_plugin_sources  # noqa: E402
 
 
-def _write_consent(repo: Path, *, trusted_marketplaces: list[str]) -> None:
+def _write_consent(
+    repo: Path,
+    *,
+    trusted_marketplaces: list[str],
+    require_immutable_pin: bool = False,
+) -> None:
     consent_path = repo.joinpath(*projection_reflect_consent.CONSENT_PATH_PARTS)
     consent_path.parent.mkdir(parents=True, exist_ok=True)
     consent_path.write_text(
@@ -36,6 +42,7 @@ def _write_consent(repo: Path, *, trusted_marketplaces: list[str]) -> None:
                 "reconcilerAgent": "projection-reconciler",
                 "dispatchLabel": "projection-reflect-conflict",
                 "trustedMarketplaces": trusted_marketplaces,
+                "requireImmutablePin": require_immutable_pin,
             }
         ),
         encoding="utf-8",
@@ -226,6 +233,89 @@ def test_refresh_callback_runs_before_the_pass(tmp_path: Path) -> None:
     assert calls == ["refreshed"]
 
 
+def test_resolve_pins_runs_after_refresh_and_inside_the_lock(
+    tmp_path: Path,
+) -> None:
+    # resolve_pins must be called AFTER refresh and INSIDE the held lock --
+    # resolving any earlier would leave a window where a refresh changes
+    # the payload after its commit was captured, letting a stale-but-
+    # well-formed SHA pass bypass_decision's pin conjunct even though it no
+    # longer describes what this pass renders.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    root = projections.validate_repository_root(repo)
+    _plugin, source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+    calls: list[str] = []
+
+    def resolve_pins(sources):
+        calls.append("resolved")
+        # The repository lock must already be held when this runs -- a
+        # second acquisition attempt must fail.
+        second = projections.repository_sync_lock(root)
+        try:
+            second.__enter__()
+            calls.append("lock_was_free")
+        except (BlockingIOError, OSError):
+            calls.append("lock_was_held")
+        else:
+            second.__exit__(None, None, None)
+        return {"policy@copilot-extensions": "a" * 40}
+
+    outcome = worker.run_sync_pass(
+        repo,
+        [source],
+        trusted_marketplaces=["copilot-extensions"],
+        resolve_pins=resolve_pins,
+        refresh=lambda: calls.append("refreshed"),
+    )
+
+    assert calls == ["refreshed", "resolved", "lock_was_held"]
+    assert outcome.bypass_eligible
+
+
+def test_resolve_pins_takes_precedence_over_pinned_commits(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+
+    outcome = worker.run_sync_pass(
+        repo,
+        [source],
+        trusted_marketplaces=["copilot-extensions"],
+        pinned_commits={},  # would reject if actually used
+        resolve_pins=lambda sources: {"policy@copilot-extensions": "a" * 40},
+    )
+
+    assert outcome.bypass_eligible
+
+
+def test_resolve_pins_returning_none_fails_closed_not_open(
+    tmp_path: Path,
+) -> None:
+    # A resolver that returns None (a transient failure, or simply nothing
+    # resolved) must NOT be treated as "pinned_commits was never supplied"
+    # -- that would silently disable the pin conjunct for a caller that
+    # explicitly opted into it via resolve_pins. It must normalize to an
+    # empty map: the conjunct stays active and rejects the unpinned source.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+
+    outcome = worker.run_sync_pass(
+        repo,
+        [source],
+        trusted_marketplaces=["copilot-extensions"],
+        resolve_pins=lambda sources: None,
+    )
+
+    assert not outcome.bypass_eligible
+    assert any(
+        "immutable commit pin" in reason for reason in outcome.bypass.reasons
+    )
+
+
 # ---- regression coverage for the review findings on PR #3139 ----------------
 
 
@@ -352,6 +442,115 @@ def test_cli_happy_path_with_consent(
     assert payload["needsPr"] is True
     assert payload["bypassEligible"] is True
     assert payload["needsConflictDispatch"] is False
+
+
+def _real_source(
+    plugin: Path,
+    marketplace: str,
+    name: str,
+    *,
+    commit: str = "",
+    is_local_checkout: bool = False,
+) -> object:
+    return scan_plugin_sources.PluginSource(
+        skills_root=plugin / "skills",
+        origin=f"{marketplace}/{name}",
+        controlled=False,
+        source="",
+        version="",
+        commit=commit,
+        is_local_checkout=is_local_checkout,
+    )
+
+
+def _git_init_and_commit(repo: Path) -> None:
+    import subprocess
+
+    for args in (
+        ["init", "-q"],
+        ["config", "user.email", "test@example.com"],
+        ["config", "user.name", "Test"],
+        ["add", "-A"],
+        ["commit", "-q", "-m", "initial"],
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+def test_cli_ignores_pin_requirement_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    # requireImmutablePin absent (default False): an unpinned source must
+    # still be bypass-eligible -- unaffected by the resolver's existence.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_consent(repo, trusted_marketplaces=["copilot-extensions"])
+    plugin, source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+    unpinned = _real_source(plugin, "copilot-extensions", "policy", commit="")
+    monkeypatch.setattr(
+        worker.projections, "discover_enabled_sources", lambda *a, **kw: [unpinned]
+    )
+
+    exit_code = worker.main([str(repo), "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["bypassEligible"] is True
+
+
+def test_cli_require_immutable_pin_blocks_unpinned_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    # requireImmutablePin=true: an unpinned source must NOT be bypass-
+    # eligible, even though it's from a trusted marketplace.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_consent(
+        repo,
+        trusted_marketplaces=["copilot-extensions"],
+        require_immutable_pin=True,
+    )
+    plugin, _source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+    unpinned = _real_source(plugin, "copilot-extensions", "policy", commit="")
+    monkeypatch.setattr(
+        worker.projections, "discover_enabled_sources", lambda *a, **kw: [unpinned]
+    )
+
+    exit_code = worker.main([str(repo), "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["bypassEligible"] is False
+    assert any("immutable commit pin" in reason for reason in payload["bypassReasons"])
+
+
+def test_cli_require_immutable_pin_permits_pinned_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    import shutil
+
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_consent(
+        repo,
+        trusted_marketplaces=["copilot-extensions"],
+        require_immutable_pin=True,
+    )
+    plugin, _source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+    _git_init_and_commit(plugin)
+    pinned = _real_source(
+        plugin, "copilot-extensions", "policy", is_local_checkout=True
+    )
+    monkeypatch.setattr(
+        worker.projections, "discover_enabled_sources", lambda *a, **kw: [pinned]
+    )
+
+    exit_code = worker.main([str(repo), "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["bypassEligible"] is True
 
 
 def test_cli_json_error_for_invalid_root(tmp_path: Path, capsys) -> None:

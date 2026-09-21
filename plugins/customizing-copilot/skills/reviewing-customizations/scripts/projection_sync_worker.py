@@ -66,6 +66,7 @@ from typing import Callable, Iterable, Mapping
 import instruction_projections as projections
 import projection_reflect as reflect
 import projection_reflect_consent
+import scan_plugin_sources
 
 
 def _policy_relevant_destinations(
@@ -169,6 +170,7 @@ def run_sync_pass(
     *,
     trusted_marketplaces: Iterable[str],
     pinned_commits: Mapping[str, str] | None = None,
+    resolve_pins: Callable[[list[object]], Mapping[str, str] | None] | None = None,
     refresh: Callable[[], None] | None = None,
 ) -> SyncOutcome:
     """Run one complete sync -> scan -> decide pass; return the one outcome.
@@ -184,6 +186,26 @@ def run_sync_pass(
     ``instruction_projections`` and ``projection_reflect``, so re-running it
     on an unchanged repo is idempotent and produces the same (empty)
     outcome, never an accumulating side effect.
+
+    ``resolve_pins`` (preferred over a precomputed ``pinned_commits``) is
+    called with the same ``sources`` list *after* ``refresh`` and *inside*
+    the held lock, immediately before the locked sync -- resolving pins any
+    earlier (e.g. before ``refresh``, or entirely outside this function)
+    leaves a window where a refresh or a concurrent update changes a
+    directory-marketplace payload after its commit was captured, so the
+    stale-but-well-formed SHA in a precomputed map would still pass
+    ``bypass_decision``'s pin conjunct even though it no longer describes
+    what this pass actually renders. When both ``resolve_pins`` and
+    ``pinned_commits`` are given, ``resolve_pins`` wins for this call (a
+    caller doing fresh resolution should not also pass a possibly-stale
+    map); ``pinned_commits`` alone remains for callers (tests, or a
+    resolver-free scheduler) that accept a caller-supplied map without this
+    revalidation. A ``resolve_pins`` call that returns ``None`` is
+    normalized to an empty map, never treated as "no ``pinned_commits`` was
+    ever supplied": a resolver failure must still leave the pin conjunct
+    active (fail-closed, review-only for every changed source), not
+    silently disable pin enforcement for a caller that explicitly opted
+    into it.
     """
     if refresh is not None:
         refresh()
@@ -227,6 +249,18 @@ def run_sync_pass(
             bypass=decision,
         )
     try:
+        if resolve_pins is not None:
+            # A resolver that returns None (a transient failure, or simply
+            # "nothing resolved") must NOT be treated as "no pinned_commits
+            # was ever supplied" -- bypass_decision() reads pinned_commits
+            # is None as the opt-out/default path, which would silently
+            # disable the pin conjunct entirely for a caller that
+            # explicitly opted into it via resolve_pins. Normalize to an
+            # empty map instead: the conjunct stays active, and an empty
+            # map correctly treats every changed source as unpinned
+            # (fail-closed, review-only) rather than vacuously trusted.
+            resolved = resolve_pins(sources)
+            pinned_commits = resolved if resolved is not None else {}
         entries_before = projections.load_lock_entries(root)
         sync_result = projections.sync_repository_locked(root, sources)
         scan_result = projections.scan_repository(root, sources)
@@ -333,8 +367,28 @@ def main(argv: list[str] | None = None) -> int:
         _emit_error(str(exc), as_json=args.json)
         return 2
 
+    # Only resolve/enforce pins when this repo's consent explicitly opts
+    # in (require_immutable_pin, default False): most adopters sync
+    # externally-installed marketplace plugins, which today's resolver
+    # cannot pin at all -- enforcing it unconditionally would silently
+    # disable the bypass path entirely for that common case. A source the
+    # resolver can't pin is simply absent from the map, so
+    # bypass_decision's pin conjunct correctly treats it as unpinned
+    # (fail-closed, review-only) rather than silently exempting it.
+    # Passed as resolve_pins (not a precomputed pinned_commits map) so
+    # run_sync_pass resolves it after refresh and inside its held lock --
+    # never against a payload snapshot taken before either.
+    resolve_pins = (
+        scan_plugin_sources.resolve_pinned_commits
+        if consent.require_immutable_pin
+        else None
+    )
+
     outcome = run_sync_pass(
-        root, sources, trusted_marketplaces=consent.trusted_marketplaces
+        root,
+        sources,
+        trusted_marketplaces=consent.trusted_marketplaces,
+        resolve_pins=resolve_pins,
     )
     if args.json:
         print(json.dumps(outcome.to_dict(), indent=2, sort_keys=True))
