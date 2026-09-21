@@ -16,10 +16,8 @@ from typing import TYPE_CHECKING, Any, Iterator
 import yaml
 
 from .client_worktree_restart import WorktreeRestartMixin
-
 if TYPE_CHECKING:
     from collections.abc import Callable
-
 DEFAULT_RESTART_GRACE = 30.0
 DEFAULT_SESSION_SETTLE_GRACE = 5.0
 
@@ -1026,15 +1024,12 @@ class BridgeClient(WorktreeRestartMixin):
     ) -> dict[str, Any]:
         """POST /api/v1/sessions
 
-        ``worktree_id`` targets an *existing* worktree (a session roll). When it
-        is set, the server enforces the session-lifecycle head guard: a create
+        ``worktree_id`` targets an *existing* worktree (a session roll). When
+        set, the server enforces the session-lifecycle head guard: a create
         into a worktree whose ground-layer head is active or whose numbered
         handoff is pending is refused (409 ``worktree_head_active`` /
-        ``worktree_head_pending``) with no break-glass of its own
-        (agent-bridge-cold-resume Phase 3). ``resume_worktree(reclaim=True)``
-        already resumes-or-creates that worktree's owned session and claims
-        the head -- use the session id it returns directly; a subsequent
-        ``create`` with the same ``worktree_id`` just hits this guard again.
+        ``worktree_head_pending``) with no break-glass of its own (Phase 3)
+        -- ``resume_worktree(reclaim=True)`` resumes-or-creates it instead.
 
         ``env`` sets per-session environment overrides merged onto the resolved
         agent's declared env and applied to the spawned Copilot CLI -- e.g. BYOK

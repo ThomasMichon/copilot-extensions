@@ -286,10 +286,11 @@ def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch):
         worktree_id="wt-1", reclaim=True, wait=False,
     )
     assert result.returncode == 0
-    assert len(calls) == 2
-    assert calls[0] == ["/usr/bin/agent-bridge", "--json", "resume", "wt-1"]
-    assert calls[1][:4] == ["/usr/bin/agent-bridge", "send", "resumed-9", "--prompt-file"]
-    assert "--no-wait" in calls[1]
+    assert len(calls) == 3
+    assert calls[0][1:4] == ["--json", "agent-show", "task-worker"]
+    assert calls[1] == ["/usr/bin/agent-bridge", "--json", "resume", "wt-1"]
+    assert calls[2][:4] == ["/usr/bin/agent-bridge", "send", "resumed-9", "--prompt-file"]
+    assert "--no-wait" in calls[2]
 
 
 def test_spawn_worker_reclaim_requires_worktree_id(monkeypatch):
