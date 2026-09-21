@@ -35,6 +35,7 @@ Copilot CLI sessions (multiple)
 |--------|------|---------|
 | FastAPI app | `app.py` | HTTP server, routing, auth middleware |
 | Session manager | `session_manager.py` | Session lifecycle, turn tracking |
+| Recovery dormancy | `session_recovery_dormancy.py` | Explicit-stop dormancy, reconnect backoff, idle auto-dormancy (mixin) |
 | Transport | `transport.py` | Local + SSH subprocess spawning |
 | SSH carrier | `carrier.py` + vendored `ssh-manager` | One bounded, reconnecting framed stdio carrier per normalized SSH connection identity |
 | ACP agent | `acp_agent.py` | Upstream ACP agent interface (stdio mode) |
