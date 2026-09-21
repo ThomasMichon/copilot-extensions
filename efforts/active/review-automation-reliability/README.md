@@ -506,12 +506,16 @@ current `main` rather than resurrecting the stale diff: extracted
 into the existing `producers_cli.py` (no test monkeypatches on either name;
 `supervise_cli.py`'s existing `_proxy()` re-export pattern keeps working
 since `__main__.py` re-exports the moved names, same as for
-schedule/emitter/webhook). `__main__.py`: 4912 -> 4827 lines (module-size
-baseline tightened to match); full agent-dispatch suite green (2,953 passed,
-24 skipped, 2 pre-existing-and-unrelated Windows bash-path failures
-confirmed via `git stash` to reproduce identically without this change).
-Bumped `agent-dispatch` 0.1.2-dev125 -> dev126. Landing this as a fresh PR
-and closing #2578 as superseded, referencing this entry.
+schedule/emitter/webhook). `__main__.py`: 4970 -> 4886 lines (module-size
+baseline tightened to match, verified via the tool's own measured count,
+not a text-editor line count -- PowerShell's `Get-Content | Measure-Object
+-Line` was found to silently undercount this large file); full
+agent-dispatch suite green (3,152 passed, 28 skipped, 2
+pre-existing-and-unrelated Windows bash-path failures confirmed via `git
+stash` to reproduce identically without this change).
+Bumped `agent-dispatch` 0.1.2-dev154 -> dev155 (the worktree was 158+
+commits behind `main`; rebased before opening the PR). Landed as PR #3155
+and closed #2578 as superseded, referencing this entry.
 
 ### 2026-09-12 - Componentize __main__.py: extract recipes_cli.py
 
