@@ -800,6 +800,24 @@ to `machine` only when the mismatch is machine-wide.
 > that was reverted -- `visions/plugins/agent-bridge`'s
 > *resolve-by-any-origin-reference* feature is the one shared primitive).
 
+> **The reverse direction: an arbitrary session id -> its worktree + task
+> history.** `find-by-session <session-id>` is the reverse of the durable
+> attachment history above: given a session id (an agent-bridge escrow id or
+> a durable ACP UUID), it lists every task on **this host's coordinator**
+> that session has ever attached to, newest first, each with the
+> `worktree_id`/`machine` it ran in and its attach/detach timestamps. An
+> empty list means the session id never attached to a task here -- not an
+> error, since (unlike a task id) a session id has no single owning task to
+> 404 against. This is a full-table scan over `task_attachments` (no
+> `session_id` index; the table is keyed for the forward direction), fine for
+> the ad-hoc diagnostic/CLI use this exists for. Local to this machine's
+> coordinator only -- no cross-machine peer-browse yet (see `list --machine`
+> for that pattern on other read verbs).
+>
+> ```bash
+> <agent-dispatch catalog argv[0]> find-by-session <session-id>
+> ```
+
 > **`consume` is the handoff-pickup shortcut -- in two flavors.**
 >
 > - **Baton (default `consume <id>`):** rolls the whole

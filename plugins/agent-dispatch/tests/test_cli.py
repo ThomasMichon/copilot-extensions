@@ -1664,6 +1664,47 @@ def test_parser_claimant():
     assert args.task_id == "task-123"
 
 
+def test_parser_find_by_session():
+    args = build_parser().parse_args(["find-by-session", "sess-abc"])
+    assert args.command == "find-by-session"
+    assert args.session_id == "sess-abc"
+
+
+def test_find_by_session_forwards_to_client(monkeypatch):
+    """find-by-session is a _simple() handler: it forwards the session id to
+    client.tasks_for_session and emits the result verbatim."""
+    import argparse
+    import contextlib
+    import io
+    import json
+
+    from agent_dispatch import __main__
+
+    class _FakeClient:
+        def tasks_for_session(self, session_id):
+            assert session_id == "sess-shared"
+            return [
+                {"task_id": "t2", "worktree_id": "wt-2", "machine": "m2",
+                 "attached_at": 2000.0, "detached_at": None, "detach_reason": None},
+                {"task_id": "t1", "worktree_id": "wt-1", "machine": "m1",
+                 "attached_at": 1000.0, "detached_at": 1500.0, "detach_reason": "reset"},
+            ]
+
+    @contextlib.contextmanager
+    def _fake_client(args, **kw):
+        yield _FakeClient()
+
+    monkeypatch.setattr(__main__, "_client", _fake_client)
+    handler = __main__._simple("tasks_for_session", "session_id")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = handler(argparse.Namespace(session_id="sess-shared"))
+    assert rc == 0
+    out = json.loads(buf.getvalue())
+    assert [entry["task_id"] for entry in out] == ["t2", "t1"]
+    assert out[0]["worktree_id"] == "wt-2"
+
+
 def test_split_owner():
     from agent_dispatch.__main__ import _split_owner
 

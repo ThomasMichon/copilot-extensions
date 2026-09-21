@@ -2117,6 +2117,16 @@ def create_app(
         _require(queue.get(task_id))
         return [asdict(record) for record in queue.attachment_history(task_id)]
 
+    @app.get("/sessions/{session_id}/tasks")
+    def get_tasks_for_session(session_id: str) -> list[dict]:
+        """The reverse of ``/tasks/{task_id}/attachments``: every task this
+        session id has ever attached to on *this host's* coordinator, newest
+        first. Backs the reverse-lookup CLI (an arbitrary session id ->
+        worktree + task-assignment history) -- no ``_require`` here since a
+        session id, unlike a task id, has no single owning task to 404
+        against; an empty list means "never attached to a task here."""
+        return [asdict(entry) for entry in queue.tasks_for_session(session_id)]
+
     @app.get("/tasks/{task_id}/payload")
     def get_payload(task_id: str) -> dict:
         task = _require(queue.get(task_id))

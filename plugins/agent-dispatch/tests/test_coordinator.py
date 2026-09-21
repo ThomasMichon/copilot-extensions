@@ -846,6 +846,31 @@ def test_attachment_history_missing_task_is_404(api):
     assert api.get("/tasks/nope/attachments").status_code == 404
 
 
+def test_tasks_for_session_reverse_lookup_over_http(api):
+    """The reverse of test_attachment_history_over_http: given a session id,
+    GET /sessions/{id}/tasks finds the task(s) it attached to."""
+    r = api.post("/tasks", json={"title": "reviewed"})
+    tid = r.json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    api.post(
+        f"/tasks/{tid}/owner-session",
+        json={"worker_id": "w1", "owner_session_id": "session-a"},
+    )
+    found = api.get("/sessions/session-a/tasks").json()
+    assert len(found) == 1
+    assert found[0]["task_id"] == tid
+    assert found[0]["detached_at"] is None
+
+
+def test_tasks_for_session_unknown_session_is_empty_not_404(api):
+    """A session id with no attachment anywhere is an empty list -- there is
+    no single task to 404 against, unlike /tasks/{id}/attachments."""
+    r = api.get("/sessions/never-seen-session/tasks")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
 def test_claim_empty_returns_null(api):
     assert api.post(
         "/claim", json={"worker_id": "w1", "repo": TEST_REPO}
@@ -1043,6 +1068,42 @@ def test_client_round_trip(client):
     assert done["status"] == Status.COMPLETED
     trail = [e["to_status"] for e in client.events(t["id"])]
     assert trail == [Status.QUEUED, Status.CLAIMED, Status.STARTED, Status.COMPLETED]
+
+
+def test_client_tasks_for_session_round_trip(client):
+    """DispatchClient.tasks_for_session against the real HTTP route (not just
+    the fake client the CLI test exercises, and not just the raw route the
+    coordinator test exercises) -- the actual production path the CLI uses."""
+    t = client.create("via client")
+    client.claim("w1", repo=TEST_REPO)
+    client.start(t["id"], "w1")
+    client.bind_owner_session(t["id"], "w1", "session-via-client")
+
+    found = client.tasks_for_session("session-via-client")
+    assert len(found) == 1
+    assert found[0]["task_id"] == t["id"]
+    assert found[0]["detached_at"] is None
+
+    assert client.tasks_for_session("session-never-seen") == []
+
+
+def test_client_tasks_for_session_url_encodes_reserved_characters(client):
+    """Regression: a session id containing a URL-reserved character (``?``,
+    ``#``) must round-trip correctly, not be mis-parsed as query/fragment
+    syntax when interpolated into the request URL. (A literal ``/`` in a
+    path segment is a separate, ASGI-level limitation -- routers decode
+    ``%2F`` back to ``/`` before matching -- out of scope here.)"""
+    t = client.create("via client")
+    client.claim("w1", repo=TEST_REPO)
+    client.start(t["id"], "w1")
+    reserved_session_id = "sess-with#reserved?chars"
+    client.bind_owner_session(t["id"], "w1", reserved_session_id)
+
+    found = client.tasks_for_session(reserved_session_id)
+    assert len(found) == 1
+    assert found[0]["task_id"] == t["id"]
+    # A DIFFERENT session id must not incidentally match the encoded one.
+    assert client.tasks_for_session("sess-with") == []
 
 
 def test_client_error_maps_to_dispatch_error(client):

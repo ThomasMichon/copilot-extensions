@@ -4055,6 +4055,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("task_id")
     p.set_defaults(func=_cmd_claimant)
 
+    p = sub.add_parser(
+        "find-by-session",
+        help="session -> task/worktree history: the reverse of `show --history` "
+        "-- given an arbitrary session id (an agent-bridge escrow id or a "
+        "durable ACP UUID), list every task on THIS HOST's coordinator it has "
+        "ever attached to, newest first, with the worktree/machine it ran in. "
+        "Empty (not an error) means the session id never attached to a task here.",
+    )
+    p.add_argument("session_id")
+    p.set_defaults(func=_simple("tasks_for_session", "session_id"))
+
     p = sub.add_parser("events", help="show a task's audit trail")
     p.add_argument("task_id")
     p.set_defaults(func=_simple("events", "task_id"))
