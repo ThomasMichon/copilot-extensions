@@ -1363,3 +1363,27 @@ own probe now boots and waits for it exactly as a real caller would.
    own daemon-boot experience instead of a bare snapshot; the effort
    README's journal (this file) is the durable record of that change.
 
+### 2026-09-21 — PR #3206 review round 2: 1 more real bug
+The stale-lock dial fix from round 1 was confirmed resolved. One
+further genuine issue, in code the round-1 fix hadn't touched:
+
+1. **The post-probe rendezvous snapshot didn't apply the same liveness
+   check as the dial step.** After `status_with_boot` returns (having
+   correctly rejected a stale lock at dial time and fallen back),
+   `check_daemon_liveness` re-read the lock to report
+   `lock_present`/`rendezvous_present` -- but that re-read only parsed
+   the rendezvous fields, without checking `lock_is_live`. A dead
+   monitor's leftover lock (still carrying old, well-formed endpoint
+   data) would therefore report `rendezvous_present=True` alongside
+   `responsive=False`, contradicting the no-probe static-read branch a
+   few lines above, which already gates `rendezvous_present` on
+   liveness. Fixed by adding the identical `locks.lock_is_live(data_after)`
+   check to the post-probe read.
+
+Added 1 new regression test
+(`test_daemon_liveness_stale_lock_with_probe_reports_unresponsive_not_rendezvous`)
+covering a stale lock with valid-looking rendezvous fields under a real
+probe: confirms `ensure_monitor` is still invoked, and that
+`responsive`/`rendezvous_present` land consistently (both false), not
+the previous `rendezvous_present=True`/`responsive=False` contradiction.
+

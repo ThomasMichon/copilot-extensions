@@ -365,6 +365,35 @@ def test_daemon_liveness_ensure_monitor_boot_is_picked_up_within_the_wait(tmp_pa
         server.close()
 
 
+def test_daemon_liveness_stale_lock_with_probe_reports_unresponsive_not_rendezvous(tmp_path):
+    """Copilot review round 2 on PR #3206: a stale (dead-owner) lock that
+    still carries old, syntactically valid rendezvous fields must not be
+    reported as `rendezvous_present=True` just because the boot-and-wait
+    dial step correctly rejected it and fell back -- the post-probe
+    snapshot re-read has to apply the exact same `lock_is_live` check the
+    no-probe static-read branch already applies, or a dead monitor's
+    leftover lock would look like a live, reachable rendezvous that
+    merely failed to answer this one request."""
+    from agent_worktrees import locks
+
+    lock_path = tmp_path / "status-monitor.lock"
+    # An implausible pid that's essentially guaranteed dead/never existed,
+    # but with otherwise well-formed rendezvous fields.
+    locks.write_lock(
+        lock_path, pid=2**30 - 1,
+        extra={"worktree_status_endpoint": "127.0.0.1:1", "worktree_status_token": "x"},
+    )
+    ensure_monitor_calls = []
+    liveness = wsa.check_daemon_liveness(
+        lock_path, probe=("proj", "wt1"),
+        ensure_monitor=lambda: ensure_monitor_calls.append(1) or True,
+    )
+    assert ensure_monitor_calls == [1]
+    assert liveness.responsive is False
+    assert liveness.lock_present is True
+    assert liveness.rendezvous_present is False
+
+
 # -- run_audit / report_to_dict / telemetry log --------------------------
 
 def test_run_audit_writes_a_telemetry_log_line(tmp_path, monkeypatch):

@@ -450,6 +450,7 @@ def check_daemon_liveness(
     lock_present = data_after is not None
     rendezvous_present = (
         lock_present
+        and locks.lock_is_live(data_after)
         and worktree_status_daemon.endpoint_from_rendezvous(data_after) is not None
     )
     return DaemonLiveness(
