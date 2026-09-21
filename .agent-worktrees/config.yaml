@@ -73,11 +73,14 @@ pr:
   # implicit "codename" default (codename-attribution-by-default) --
   # source_attribution is deliberately OMITTED, not set explicitly to
   # "codename": an explicit codename value sets
-  # source_attribution_configured=True, which (per the round-22 publish-time
-  # gate) would authorize ANY codename_source to publish, including an
-  # unknown/legacy one this repo has never manually verified. Omitting the
-  # key keeps every WorktreeRecord's own persisted codename_source
-  # authoritative and fail-closed, exactly as before this key was removed.
+  # source_attribution_configured=True, which (per may_publish_codename's
+  # round-32 rule) permits a KNOWN "custom" codename_source to publish --
+  # a legacy/unrecognized codename_source still never publishes either way.
+  # Explicit "codename" would still authorize a custom-vocabulary codename
+  # this repo has never manually verified; omitting the key keeps this
+  # repo's fail-closed posture even for that narrower case. Every
+  # WorktreeRecord's own persisted codename_source stays authoritative,
+  # exactly as before this key was removed.
   strategy: detach
   # PR-flow legibility matrix (surfaced as reminders by the pr-* verbs) -->
   # classifies this repo as `pr-self-merge`.
