@@ -265,7 +265,7 @@ private paths).
       plugin) generalizing `config-reflect`'s `conflict_dispatch.py` pattern
       -- domain-scoped dedup key, compact descriptor, async `agent-dispatch
       create` call -- parameterized so it isn't config-reflect-specific.
-- [ ] **`projection-reconciler` agent template**: modeled on
+- [x] **`projection-reconciler` agent template**: modeled on
       `config-reconciler`, but narrower -- the sync manager already refuses
       to overwrite a locally hand-edited managed projection outright (a
       deliberate existing safety property), so the reconciler must not try
@@ -564,3 +564,25 @@ _Pending._
   the `projection-reconciler` agent template this primitive names but does
   not yet define, the `setting-up-instruction-sync-worker` skill, and the
   immutable-pin verification gap already flagged in slice 1.
+
+### 2026-09-20 (cont.) -- Phase 2 slice 3: the `projection-reconciler` agent template
+- Landed `plugins/customizing-copilot/skills/reviewing-customizations/references/projection-reconciler-agent-template.md`:
+  a scaffolding template (not a live agent -- deliberately kept off any path
+  the mechanical scan treats as a real agent) modeled on the private
+  `config-reconciler` prior art, narrowed exactly as the Plan specifies:
+  **report-only** on a hand-edited managed projection (never force-
+  overwrites, files/comments a tracked finding, stops); resolves an
+  ordinary git-level conflict only by re-deriving the canonical render
+  fresh (never blends two candidate truths); never self-merges.
+- Unlike the private prior art, ships with **no bespoke MCP servers** --
+  PR/issue tooling is repo-specific (Gitea vs. GitHub, etc.), so a generic
+  template cannot assume a fixed transport; the not-yet-built
+  `setting-up-instruction-sync-worker` skill is documented as the intended
+  installer that adapts it per adopting repo.
+- Documented the template's role in `reviewing-customizations`' `SKILL.md`.
+- Bumped `customizing-copilot`'s version and the marketplace metadata
+  version (content changed).
+- Still open in Phase 2: the worker script/scheduler wiring, the
+  `setting-up-instruction-sync-worker` skill itself (which this template
+  depends on for actual installation), and the immutable-pin verification
+  gap.
