@@ -635,17 +635,37 @@ export async function plainGitSync(cwd) {
   }
   let defaultBranch;
   try {
-    // `origin/HEAD` is the standard local pointer to the remote's default
-    // branch, set by `git clone`/`git remote set-head`. Resolved via
-    // `rev-parse --abbrev-ref` rather than `symbolic-ref` so a missing
-    // local origin/HEAD symref still has one more (network) chance below.
+    // Authoritative: ask the REMOTE directly via `ls-remote --symref` (a
+    // review finding: the local `origin/HEAD` symref below is a CACHE --
+    // it can remain pointed at the remote's OLD default branch after the
+    // remote changes it, silently fetching/rebasing onto the wrong branch
+    // while reporting success). This is already a network round-trip, so
+    // it costs nothing extra over the fetch this function performs anyway,
+    // and matches the authoritative resolver's own ordering
+    // (agent-worktrees' `status_bar_cli.py`'s `_resolve_remote_default_branch`).
     const { stdout } = await execFileAsync(
-      "git", ["rev-parse", "--abbrev-ref", "origin/HEAD"],
-      { cwd, encoding: "utf-8", timeout: 5000, env },
+      "git", ["ls-remote", "--symref", "origin", "HEAD"],
+      { cwd, encoding: "utf-8", timeout, env },
     );
-    defaultBranch = stdout.trim().replace(/^origin\//, "");
+    const match = stdout.match(/^ref:\s*refs\/heads\/(\S+)\s+HEAD/m);
+    defaultBranch = match ? match[1] : null;
   } catch {
     defaultBranch = null;
+  }
+  if (!defaultBranch) {
+    try {
+      // The remote query above failed outright (network issue, or a
+      // remote that doesn't answer symref queries) -- fall back to the
+      // local `origin/HEAD` pointer, set by `git clone`/`git remote
+      // set-head`, before trying `git remote show origin` as a last resort.
+      const { stdout } = await execFileAsync(
+        "git", ["rev-parse", "--abbrev-ref", "origin/HEAD"],
+        { cwd, encoding: "utf-8", timeout: 5000, env },
+      );
+      defaultBranch = stdout.trim().replace(/^origin\//, "");
+    } catch {
+      defaultBranch = null;
+    }
   }
   if (!defaultBranch) {
     try {

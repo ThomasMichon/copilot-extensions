@@ -1991,3 +1991,29 @@ rounds-16-through-20 chain:
   already-exited child process, rather than relying on age alone). `node
   --test`: 154 tests, 152 pass (2 pre-existing skips), no regressions. All
   guards pass. No version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 21: authoritative remote-default-branch resolution
+
+Round 21 confirmed round 20's root-cause fix resolved and surfaced 1
+"previously missed" MEDIUM finding on otherwise-unchanged code -- the
+first round with zero new HIGH findings, suggesting the review is nearing
+convergence:
+
+- **Plain-git fallback trusted a possibly-stale local `origin/HEAD`
+  cache:** that local symref is set once at clone time (or by `git remote
+  set-head`) and can remain pointed at the remote's OLD default branch
+  after the remote renames/changes it -- this fallback could then silently
+  fetch/rebase onto the wrong branch while still reporting a successful
+  sync. Reordered to query the remote directly FIRST via `git ls-remote
+  --symref origin HEAD` (authoritative, matching the ordering
+  `agent-worktrees`' own `status_bar_cli.py`
+  `_resolve_remote_default_branch` resolver uses when network access is
+  allowed) -- costs nothing extra since this function already performs a
+  network fetch regardless. The local `origin/HEAD` cache and `git remote
+  show origin` remain as fallbacks only if the direct remote query itself
+  fails outright (e.g. a network hiccup).
+- 1 new test (renames the "remote"'s default branch after cloning, so the
+  clone's cached `origin/HEAD` stays stale, and confirms the sync still
+  correctly follows the new name). `node --test`: 155 tests, 153 pass (2
+  pre-existing skips), no regressions. All guards pass. No version bump
+  needed (still `0.1.1-dev36`).
