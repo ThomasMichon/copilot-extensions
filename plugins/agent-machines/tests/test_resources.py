@@ -14,6 +14,7 @@ import pytest
 
 from agent_machines import resources as R
 from agent_machines import self_update as SU
+from agent_machines import self_update_tasks
 from agent_machines.manifest import ManifestError, load_package
 from agent_machines.resources import (
     ResourceContext,
@@ -2279,3 +2280,37 @@ def test_self_update_resource_absent_on_unsupported_platform(tmp_path):
         dry_run=False,
     )
     assert results == []
+
+
+def test_self_update_resource_dry_run_queries_systemd_timer_on_linux(tmp_path, monkeypatch):
+    # Regression: apply()'s dry-run path called query_scheduled_task() (always
+    # the Windows PowerShell/Scheduled Task probe) directly, unconditionally,
+    # instead of dispatching by platform the way reconcile_scheduled_task()
+    # does -- so a Linux/WSL dry-run tried to run pwsh/Get-ScheduledTask (or
+    # errored) instead of reporting the systemd --user timer's real state.
+    # Mirrors the identical fix/test for fleet-update
+    # (test_fleet_update_resource_dry_run_queries_systemd_timer_on_linux).
+    from agent_machines.resources import RunOutcome
+
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "linux")
+    monkeypatch.setattr(SU, "shutil_which", lambda _b: "/usr/bin/systemctl")
+
+    class LinuxRunner:
+        def __call__(self, argv):
+            if "is-system-running" in argv:
+                return RunOutcome(0, "running\n", "")
+            return RunOutcome(0, "", "")
+
+    pkg = _pkg(tmp_path, "acme/watchdog", [{"type": "self-update", "tier": "watchdog"}])
+    results = apply_resources(
+        [pkg],
+        "box-1",
+        "linux",
+        _ctx(tmp_path, LinuxRunner(), plat="linux"),
+        dry_run=True,
+    )
+    res = results[0]
+    assert res.type == "self-update"
+    assert res.action == "install"
+    assert res.changed is True
+    assert "Scheduled Task" in res.detail

@@ -156,6 +156,41 @@ def query_scheduled_task(
     )
 
 
+def query_task_state(
+    tier: str,
+    *,
+    machine: str | None = None,
+    runner: Callable[..., CommandResult] | None = None,
+    home: Path | None = None,
+) -> ScheduledTaskSnapshot:
+    """Platform-dispatching query for the declarative resource's dry-run path.
+
+    Unlike ``query_scheduled_task()`` above (always the Windows Scheduled
+    Task query -- correct for the Windows-only register/reconcile call sites
+    that use it directly), this mirrors ``reconcile_scheduled_task()``'s own
+    internal ``sys.platform`` dispatch so a platform-agnostic caller (the
+    resource handler's ``apply(dry_run=True)``) gets the systemd --user timer
+    state on Linux/WSL instead of unconditionally probing for `pwsh`/
+    `Get-ScheduledTask`. Mirrors the identical fix in fleet_update.py.
+    """
+    resolved_runner = runner or default_command_runner
+    if sys.platform == "linux":
+        return _tasks.query_systemd_timer(
+            tier,
+            machine=machine,
+            runner=resolved_runner,
+            resolve_binary=shutil_which,
+            home=home,
+        )
+    return _query_scheduled_task(
+        tier,
+        machine=machine,
+        runner=resolved_runner,
+        resolve_binary=shutil_which,
+        home=home,
+    )
+
+
 def reconcile_scheduled_task(
     tier: str,
     *,
