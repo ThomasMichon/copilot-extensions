@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from agent_logger._peer_launch import ContextRefused
-from agent_logger.sync import compact
+from agent_logger.sync import compact, origin
 
 
 @pytest.fixture
@@ -190,3 +190,87 @@ class TestResolveHubTrackedPaths:
         anywhere"."""
         monkeypatch.setattr(compact, "tracked_worktree_paths", lambda: None)
         assert compact.resolve_hub_tracked_paths(True) == (None, True)
+
+
+@pytest.fixture
+def origin_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """Mirrors ``owner`` above for origin's ``_bound_knowledge_repo_cached``,
+    which resolves ``agent-worktrees state-root`` rather than ``list``."""
+    origin._bound_knowledge_repo_cached.cache_clear()
+    cell = tmp_path / "marketplaces" / "test-cell"
+    root = cell / "plugins" / "agent-logger"
+    root.mkdir(parents=True)
+    (cell / "plugins" / "agent-worktrees").mkdir()
+    own = {"cellRoot": str(cell), "pluginRoot": str(root)}
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
+    monkeypatch.setattr(origin, "home_dir", lambda: root)
+    monkeypatch.setattr(origin._peer_launch, "validate_owner", lambda *args: own)
+    monkeypatch.setattr("shutil.which", lambda _: pytest.fail("ambient PATH selected"))
+    yield own
+    origin._bound_knowledge_repo_cached.cache_clear()
+
+
+def test_bound_knowledge_repo_uses_native_same_cell_prefix(
+    origin_owner: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefix = origin._peer_launch.launch_prefix(
+        "agent-logger", Path(origin_owner["pluginRoot"]),
+        str(Path(origin_owner["pluginRoot"]) / "install.json"), "agent-worktrees",
+    )
+    repo = tmp_path / "some-repo"
+    repo.mkdir()
+    knowledge = tmp_path / "dotfiles"
+    knowledge.mkdir()
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert argv == [*prefix, "state-root", "--json"]
+        assert kwargs["cwd"] == repo
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            "source": "knowledge_repo", "bound": True, "state_root": str(knowledge),
+        }), "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert origin._bound_knowledge_repo(repo) == knowledge
+
+
+def test_bound_knowledge_repo_no_peer_returns_none(
+    origin_owner: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "marketplaces" / "test-cell" / "plugins" / "agent-worktrees").rmdir()
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: pytest.fail("peer launch attempted"),
+    )
+    repo = tmp_path / "some-repo"
+    repo.mkdir()
+    assert origin._bound_knowledge_repo(repo) is None
+
+
+@pytest.mark.parametrize("error", [OSError("cannot launch"), subprocess.TimeoutExpired("peer", 10)])
+def test_bound_knowledge_repo_probe_failure_returns_none(
+    origin_owner: dict[str, str], tmp_path: Path, error: Exception,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unlike compact's protective tracked-worktree lookup, this best-effort
+    forwarding hop folds every same-cell failure into ``None`` (see
+    :func:`agent_logger.sync.origin._bound_knowledge_repo_same_cell`)."""
+    def run(*args: object, **kwargs: object) -> None:
+        raise error
+
+    monkeypatch.setattr(subprocess, "run", run)
+    repo = tmp_path / "some-repo"
+    repo.mkdir()
+    assert origin._bound_knowledge_repo(repo) is None
+
+
+def test_bound_knowledge_repo_invalid_owner_context_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    origin._bound_knowledge_repo_cached.cache_clear()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "{")
+    monkeypatch.setattr(origin._peer_launch, "validate_owner", lambda *a: (_ for _ in ()).throw(
+        ValueError("bad receipt")
+    ))
+    repo = tmp_path / "some-repo"
+    repo.mkdir()
+    assert origin._bound_knowledge_repo(repo) is None
+    origin._bound_knowledge_repo_cached.cache_clear()
