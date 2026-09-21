@@ -7,6 +7,11 @@ realizes the agent-dispatch vision's recipe, scheduled-production,
 pools-as-filters, headless-worker, steering, and recorded-outcome intent; it
 does not add a second task or policy store.
 
+Adopting one from scratch? Start with
+[`repository-issue-loop-adoption.md`](repository-issue-loop-adoption.md) --
+the declaration schema reference, the available worker identities, and a
+worked example. This doc covers the recipe's internal behavior instead.
+
 ## Declaration and occurrence model
 
 The adopter owns the complete active declaration under the canonical
