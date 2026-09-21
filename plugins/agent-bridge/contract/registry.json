@@ -32,7 +32,8 @@
           "0.4.0-dev435",
           "0.4.0-dev447",
           "0.4.0-dev500",
-          "0.4.0-dev502"
+          "0.4.0-dev502",
+          "0.4.0-dev529"
         ]
       },
       "capability_versions": {
@@ -61,7 +62,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "3246d4120e1237a948c92ff2ef316cb399b9b20eb8737805fe9da34560554fad",
+          "sha256": "a26c11618b75062cb0ccd89f54ea2f70a46cef53ca67147b2516bc1ed16c59be",
           "semantic": false,
           "non_semantic_reason": "Installation-scoped runtime defaults do not alter the representative session-create wire shape."
         },
@@ -73,7 +74,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "c6e104c7658c76e7eca0dff7b251e687fe991c0d91ae3fd273a46949001cce87",
+          "sha256": "4fc15929f5fdd839de31c7443e53205115f5d137c002b513de1fa86d6a2a7bdd",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -111,7 +112,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-request.json",
-          "sha256": "c12313ad80ddb5cfcc6b8670c9c3a46a4fac60eed473945ce531e59d43a7f0c9",
+          "sha256": "c392d7d3eb58e013f10ec9def50f9f0715dc64f340c9593273736f2664c481fa",
           "role": "current session-create request with unknown-field tolerance",
           "generation": 14
         },
@@ -123,7 +124,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "4fc665dc1ea6b31c96dec68cab47034fb52d343e4c3dc407cc970911e335b9e0",
+          "sha256": "165b101f7e98f081f6568f2c9221553721e5c15c55ccd1b6e6b651a53b431214",
           "role": "current representative FastAPI error",
           "generation": 15
         },
@@ -364,6 +365,22 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
           "source_git_blob": "ed270918b1813d8552fd42848b73984de0dc3852",
           "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response; re-attested after adding the cold-store -provider session-lookup fallback (Phase 2b, session-worktree-archive-linkout effort), which does not touch this code path."
+        },
+        {
+          "commit": "6417c8c23c6b31bf7167ea1eadc7a95b2bd70ad6",
+          "plugin_version": "0.4.0-dev529",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "d77b3fb8a1bfb3f06b5f26df1fbb9301b4c545ee",
+          "capture_method": "Validate and serialize representative session-create request and response models; re-attested after removing StartSessionRequest.reclaim (agent-bridge-cold-resume Phase 3, #6744) -- create's own break-glass was removed, which drops an accepted-but-ignorable field rather than altering the representative session-create wire shape's required fields."
+        },
+        {
+          "commit": "6417c8c23c6b31bf7167ea1eadc7a95b2bd70ad6",
+          "plugin_version": "0.4.0-dev529",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "3c98f938f36319f57514c9795c95045d670eca2d",
+          "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response; re-attested after removing the create-time reclaim bypass of the session-lifecycle head guard (agent-bridge-cold-resume Phase 3, #6744), which does not touch this code path."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 15 supported; evidence currently exercises generations 9 through 15.",
