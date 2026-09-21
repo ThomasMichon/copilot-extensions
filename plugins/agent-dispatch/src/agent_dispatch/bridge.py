@@ -109,6 +109,133 @@ def worker_prompt(task_id: str, *, worker_id: str, route: str = "") -> str:
     )
 
 
+def _record_is_direct_spawn_target(record: dict | None) -> bool:
+    """Whether an agent-bridge metadata record is a first-class direct target."""
+    if not isinstance(record, dict):
+        return True
+    return bool(record.get("spawnable_as_target", True))
+
+
+def _spawn_worker_via_worktree(
+    *,
+    exe: list[str],
+    task_id: str,
+    agent: str,
+    worker_id: str,
+    prompt: str,
+    route: str,
+    project: str | None,
+    target_dir: str | None,
+    worktree_id: str | None,
+    reclaim: bool,
+    wait: bool,
+    json_output: bool,
+    timeout: float | None,
+) -> subprocess.CompletedProcess:
+    """Embody a bound-charter worker by worktree handle, not by charter target.
+
+    Phase 4 of agent-bridge-worktree-native-agents: a charter is a spawn
+    *profile*, not a direct target. The worktree is created/resolved first
+    (binding ``--agent <charter>`` at the ground layer), then agent-bridge is
+    addressed by the **worktree handle** so the bound charter's spawn shape is
+    auto-applied by Phase 3's ``_apply_bound_charter()`` path.
+    """
+    from . import embody
+
+    if worktree_id:
+        ensured_worktree_id = worktree_id
+    else:
+        if not project:
+            raise BridgeUnavailable(
+                f"headless agent profile {agent!r} requires a project/worktree "
+                "context so agent-dispatch can create a bound worktree first"
+            )
+        created = embody.create_worktree(
+            project=project,
+            interface="bridge",
+            task_id=task_id,
+            reservation_key=f"bridge:{worker_id}",
+            attempt=1,
+            driver="agent-dispatch",
+            supervisor="bridge",
+            timeout=timeout,
+            agent=agent,
+        )
+        ensured_worktree_id = str(created["worktree"])
+
+    resume_cmd = [*exe, "resume", ensured_worktree_id]
+    if reclaim:
+        resume_cmd.append("--force")
+    resumed = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
+        resume_cmd,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **no_window_kwargs(),
+    )
+    if resumed.returncode != 0:
+        return resumed
+
+    send_cmd = [*exe, "send", ensured_worktree_id, "--prompt-file", "-", "--caller"]
+    send_cmd.append(f"agent-dispatch:{worker_id}")
+    if not wait:
+        send_cmd.append("--no-wait")
+    sent = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
+        send_cmd,
+        input=prompt,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **no_window_kwargs(),
+    )
+    if sent.returncode != 0 or not json_output:
+        return sent
+
+    resolved = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
+        [
+            *exe,
+            "--json",
+            "live-sessions",
+            "resolve",
+            "--handle",
+            ensured_worktree_id,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **no_window_kwargs(),
+    )
+    if resolved.returncode == 0:
+        try:
+            live = json.loads((resolved.stdout or "").strip() or "{}")
+        except (ValueError, TypeError):
+            live = {}
+        if isinstance(live, dict):
+            session_id = live.get("session_id")
+            if session_id:
+                return subprocess.CompletedProcess(
+                    args=sent.args,
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "session_id": session_id,
+                            "worktree": ensured_worktree_id,
+                            "reused": False,
+                        }
+                    ),
+                    stderr=sent.stderr,
+                )
+    return subprocess.CompletedProcess(
+        args=sent.args,
+        returncode=0,
+        stdout=json.dumps({"worktree": ensured_worktree_id}),
+        stderr=sent.stderr,
+    )
+
+
 def spawn_worker(
     task_id: str,
     *,
@@ -116,6 +243,7 @@ def spawn_worker(
     worker_id: str,
     prompt: str | None = None,
     route: str = "",
+    project: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
     reclaim: bool = False,
@@ -125,9 +253,17 @@ def spawn_worker(
 ) -> subprocess.CompletedProcess:
     """Spawn a worker agent via agent-bridge to claim + execute ``task_id``.
 
-    Runs ``agent-bridge [--json] create <agent> "<prompt>" --caller <id>
-    [--no-wait]``. Raises :class:`BridgeUnavailable` if the agent-bridge CLI is
-    not on PATH; the caller degrades by leaving the task queued.
+    Runs either:
+
+    - ``agent-bridge [--json] create <agent> "<prompt>" --caller <id>
+      [--no-wait]`` for a **venue/direct target**; or
+    - for a hidden worktree-bound charter profile, creates/resolves the
+      target worktree first and then routes through ``resume <worktree>`` +
+      ``send <worktree>`` so agent-bridge applies the bound charter's spawn
+      shape from the worktree.
+
+    Raises :class:`BridgeUnavailable` if the needed CLI/runtime is unavailable;
+    the caller degrades by leaving the task queued.
 
     ``prompt`` overrides the default worker seed (:func:`worker_prompt`). A caller
     embodying a task headlessly with richer semantics -- e.g. the supervisor's
@@ -169,6 +305,31 @@ def spawn_worker(
         raise BridgeUnavailable("agent-bridge CLI not found on PATH")
     if prompt is None:
         prompt = worker_prompt(task_id, worker_id=worker_id, route=route)
+    record = _resolve_agent_record(
+        agent,
+        timeout=min(timeout, 8.0) if timeout is not None else 8.0,
+        include_unaddressable=True,
+    )
+    if (
+        record not in (None, _AGENT_NOT_FOUND)
+        and isinstance(record, dict)
+        and not _record_is_direct_spawn_target(record)
+    ):
+        return _spawn_worker_via_worktree(
+            exe=exe,
+            task_id=task_id,
+            agent=agent,
+            worker_id=worker_id,
+            prompt=prompt,
+            route=route,
+            project=project,
+            target_dir=target_dir,
+            worktree_id=worktree_id,
+            reclaim=reclaim,
+            wait=wait,
+            json_output=json_output,
+            timeout=timeout,
+        )
     cmd = [*exe]
     if json_output:
         cmd.append("--json")
@@ -197,6 +358,7 @@ def spawn_or_resume_worker(
     prompt: str,
     prior_session_id: str | None = None,
     liveness_fn: Callable[[str], str] | None = None,
+    project: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
     wait: bool = True,
@@ -240,6 +402,7 @@ def spawn_or_resume_worker(
         agent=agent,
         worker_id=worker_id,
         prompt=prompt,
+        project=project,
         target_dir=target_dir,
         worktree_id=worktree_id,
         wait=wait,
@@ -762,7 +925,12 @@ class _Unsupported:
 _AGENT_SHOW_UNSUPPORTED = _Unsupported()
 
 
-def registered_agent(name: str, *, timeout: float = 8.0) -> dict | _NotFound | _Unsupported | None:
+def registered_agent(
+    name: str,
+    *,
+    timeout: float = 8.0,
+    include_unaddressable: bool = False,
+) -> dict | _NotFound | _Unsupported | None:
     """Best-effort single-agent record via agent-bridge's fast ``agent-show``
     lookup -- a static/topology-only lookup that never enumerates namespace
     resolvers (CodeSpaces, containers), unlike :func:`registered_agents`.
@@ -793,13 +961,22 @@ def registered_agent(name: str, *, timeout: float = 8.0) -> dict | _NotFound | _
         return None
     try:
         proc = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved above
-            [*exe, "--json", "agent-show", name],
+            [
+                *exe,
+                "--json",
+                "agent-show",
+                name,
+                *(["--include-unaddressable"] if include_unaddressable else []),
+            ],
             check=False, capture_output=True, text=True, timeout=timeout,
             **no_window_kwargs(),
         )
     except (subprocess.SubprocessError, OSError):
         return None
-    if proc.returncode == 2 and "agent-show" in (proc.stderr or ""):
+    stderr = proc.stderr or ""
+    if proc.returncode == 2 and (
+        "agent-show" in stderr or "--include-unaddressable" in stderr
+    ):
         return _AGENT_SHOW_UNSUPPORTED
     if proc.returncode == 1:
         return _AGENT_NOT_FOUND
@@ -816,7 +993,11 @@ def registered_agent(name: str, *, timeout: float = 8.0) -> dict | _NotFound | _
 
 
 def _resolve_agent_record(
-    name: str, *, timeout: float, fallback_timeout: float = 20.0,
+    name: str,
+    *,
+    timeout: float,
+    fallback_timeout: float = 20.0,
+    include_unaddressable: bool = False,
 ) -> dict | _NotFound | None:
     """Resolve one agent's record, preferring the fast single-agent lookup
     and transparently falling back to the full listing when the fast path
@@ -833,7 +1014,11 @@ def _resolve_agent_record(
     the fast path exists specifically to avoid.
     """
     if ":" not in name:
-        row = registered_agent(name, timeout=timeout)
+        row = registered_agent(
+            name,
+            timeout=timeout,
+            include_unaddressable=include_unaddressable,
+        )
         if row is not _AGENT_SHOW_UNSUPPORTED:
             return row
     rows = registered_agents(timeout=max(timeout, fallback_timeout))
@@ -845,13 +1030,17 @@ def _resolve_agent_record(
     return _AGENT_NOT_FOUND
 
 
-def agent_is_registered(name: str, *, timeout: float = 8.0) -> bool | None:
+def agent_is_registered(
+    name: str, *, timeout: float = 8.0, include_unaddressable: bool = False
+) -> bool | None:
     """Best-effort "is ``name`` a registered agent?" -- prefers the fast
     single-agent path, falling back to the full listing for namespace-
     prefixed names or an agent-bridge CLI that predates ``agent-show`` (see
     :func:`_resolve_agent_record`). Returns ``None`` (indeterminate) when the
     registry could not be read at all."""
-    row = _resolve_agent_record(name, timeout=timeout)
+    row = _resolve_agent_record(
+        name, timeout=timeout, include_unaddressable=include_unaddressable
+    )
     if row is None:
         return None
     return row is not _AGENT_NOT_FOUND
@@ -887,7 +1076,9 @@ def registered_agent_project(
     for; a fallback to the full listing uses a more generous timeout of its
     own regardless.
     """
-    row = _resolve_agent_record(agent, timeout=timeout)
+    row = _resolve_agent_record(
+        agent, timeout=timeout, include_unaddressable=True
+    )
     if row is None:
         if strict:
             raise BridgeUnavailable(
@@ -933,7 +1124,7 @@ def preflight_headless_agent(
     accordingly (was 20s, sized for the full listing this no longer calls in
     the common case).
     """
-    checks: list[tuple[str, set[str] | None]] = []
+    checks: list[tuple[str, dict | _NotFound | None]] = []
     if pool:
         from . import embody
 
@@ -942,20 +1133,35 @@ def preflight_headless_agent(
             if not h:
                 continue
             checks.append(
-                (h, embody.remote_registered_agent_names(h, timeout=remote_timeout))
+                (
+                    h,
+                    embody.remote_registered_agent_record(
+                        h, agent, timeout=remote_timeout
+                    ),
+                )
             )
     else:
-        state = agent_is_registered(agent, timeout=local_timeout)
-        names = None if state is None else ({agent} if state else set())
-        checks.append(("this host", names))
+        row = _resolve_agent_record(
+            agent,
+            timeout=local_timeout,
+            include_unaddressable=True,
+        )
+        checks.append(("this host", row))
     warnings: list[str] = []
-    for where, names in checks:
-        if names is not None and agent not in names:
+    for where, record in checks:
+        if record is _AGENT_NOT_FOUND:
             warnings.append(
                 f"agent-dispatch supervise: WARNING -- headless embody agent "
                 f"{agent!r} is not registered with agent-bridge on {where}; "
                 f"headless spawns for this lane will fail ({agent!r} is not a known "
                 f"agent name) and dead-letter. Register it (e.g. add a body to "
                 f"acp-agents.json) or set --headless-agent to a registered agent."
+            )
+        elif isinstance(record, dict) and bool(record.get("managed")):
+            warnings.append(
+                f"agent-dispatch supervise: WARNING -- headless embody agent "
+                f"{agent!r} resolves on {where} but is managed (non-spawnable as a "
+                "bound charter); headless spawns for this lane will fail. Use a "
+                "non-managed charter profile or a venue target instead."
             )
     return warnings

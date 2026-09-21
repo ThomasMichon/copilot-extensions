@@ -25,7 +25,11 @@ async def list_agents(request: Request):
 
 
 @router.get("/api/v1/agents/{agent_name}")
-async def get_agent(agent_name: str, request: Request):
+async def get_agent(
+    agent_name: str,
+    request: Request,
+    include_unaddressable: bool = False,
+):
     """Get agent profile detail."""
     resolver = getattr(request.app.state, "resolver", None)
     if not resolver:
@@ -39,6 +43,8 @@ async def get_agent(agent_name: str, request: Request):
     )
     if not config:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
+    if not include_unaddressable and not getattr(config, "spawnable_as_target", True):
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
 
     return {
         "name": config.name,
@@ -47,7 +53,8 @@ async def get_agent(agent_name: str, request: Request):
         "description": config.description or "",
         "icon": config.icon,
         "managed": config.managed,
-        "spawnable": not config.managed,
+        "spawnable_as_target": getattr(config, "spawnable_as_target", True),
+        "spawnable": (not config.managed) and getattr(config, "spawnable_as_target", True),
         "target_type": (
             "local"
             if (not config.host or resolver._is_local_loopback_agent(config))

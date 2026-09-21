@@ -24,7 +24,7 @@ class _FakeClient:
         self._raise_status = raise_status
         self.requested: list[str] = []
 
-    def get_agent(self, name):
+    def get_agent(self, name, **_kwargs):
         self.requested.append(name)
         if self._raise_status is not None:
             raise BridgeClientError(self._raise_status, "not found")

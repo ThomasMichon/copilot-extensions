@@ -321,10 +321,16 @@ invalidate either profile.
 | `copilot_path` | No | Path to the `copilot` binary (default: `copilot` on PATH) |
 | `copilot_args` | No | Extra args for `copilot` (e.g., `["--allow-all"]`) |
 | `managed` | No | If `true`, agent is non-spawnable (external lifecycle) |
+| `spawnable_as_target` | No | If `false`, hide this entry from `agent-bridge agents` / `agent-show`; it remains a registry-only **spawn profile** (for example a worktree-bound charter) rather than a first-class direct target. Defaults off automatically for entries that set `project` and opt out of `worktree_discovery`. |
 | `description` | No | Human-readable description |
 | `display_name` | No | Display name (defaults to the agent key) |
 | `env` | No | Environment variables to set: `{"KEY": "value"}` |
 | `project` | No | agent-worktrees project name (binstub) for remote spawning |
+
+`agent-bridge agents` and the default `agent-show <name>` surface only
+**addressable first-class targets**. A worktree-bound charter profile can stay
+in the registry (so a worktree's `bound_agent` still resolves) while opting out
+of those public listings.
 
 ### Local vs SSH Agents
 

@@ -149,6 +149,58 @@ def test_spawn_worker_invokes_agent_bridge_create(monkeypatch):
     assert cmd[-1] == "--no-wait"  # wait=False -> --no-wait
 
 
+def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkeypatch):
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        if cmd[1:3] == ["--json", "live-sessions"]:
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout='{"session_id":"sid-123","worktree_id":"wt-1"}',
+                stderr="",
+            )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_resolve_agent_record",
+        lambda name, **_kw: {
+            "name": name,
+            "managed": False,
+            "spawnable_as_target": False,
+        },
+    )
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+
+    result = bridge.spawn_worker(
+        "task42",
+        agent="task-worker",
+        worker_id="w1",
+        worktree_id="wt-1",
+        wait=False,
+        json_output=True,
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["session_id"] == "sid-123"
+    assert calls[0][0] == ["/usr/bin/agent-bridge", "resume", "wt-1"]
+    assert calls[1][0][:4] == ["/usr/bin/agent-bridge", "send", "wt-1", "--prompt-file"]
+    assert calls[1][1]["input"]
+    assert calls[2][0] == [
+        "/usr/bin/agent-bridge",
+        "--json",
+        "live-sessions",
+        "resolve",
+        "--handle",
+        "wt-1",
+    ]
+
+
 def test_spawn_worker_passes_caller_for_picker_origin(monkeypatch):
     """copilot-extensions#2202: without --caller, the spawned worktree has no
     caller_worktree stamped, so agent-worktrees' resolved_origin falls through
@@ -897,7 +949,7 @@ def test_agent_is_registered_tri_state(monkeypatch):
 
 
 def test_preflight_local_warns_when_agent_absent(monkeypatch):
-    monkeypatch.setattr(bridge, "agent_is_registered", lambda name, **_kw: False)
+    monkeypatch.setattr(bridge, "_resolve_agent_record", lambda name, **_kw: bridge._AGENT_NOT_FOUND)
     warnings = bridge.preflight_headless_agent("task-worker")
     assert len(warnings) == 1
     w = warnings[0]
@@ -905,14 +957,27 @@ def test_preflight_local_warns_when_agent_absent(monkeypatch):
 
 
 def test_preflight_local_silent_when_agent_present(monkeypatch):
-    monkeypatch.setattr(bridge, "agent_is_registered", lambda name, **_kw: True)
+    monkeypatch.setattr(
+        bridge, "_resolve_agent_record", lambda name, **_kw: {"name": name, "managed": False}
+    )
     assert bridge.preflight_headless_agent("sweep-worker") == []
 
 
 def test_preflight_local_silent_when_indeterminate(monkeypatch):
     # None registry (couldn't check) must never produce a false warning.
-    monkeypatch.setattr(bridge, "agent_is_registered", lambda name, **_kw: None)
+    monkeypatch.setattr(bridge, "_resolve_agent_record", lambda name, **_kw: None)
     assert bridge.preflight_headless_agent("task-worker") == []
+
+
+def test_preflight_local_warns_when_agent_is_managed(monkeypatch):
+    monkeypatch.setattr(
+        bridge,
+        "_resolve_agent_record",
+        lambda name, **_kw: {"name": name, "managed": True},
+    )
+    warnings = bridge.preflight_headless_agent("task-worker")
+    assert len(warnings) == 1
+    assert "managed" in warnings[0]
 
 
 def test_preflight_local_uses_full_listing_fallback_for_namespaced_agent(monkeypatch):
@@ -941,12 +1006,12 @@ def test_preflight_fleet_probes_each_pool_host(monkeypatch):
         probed.append(host)
         # present on the first host, absent on the second, indeterminate on third
         return {
-            "pool-a": {"sweep-worker"},
-            "pool-b": {"other"},
+            "pool-a": {"name": "sweep-worker", "managed": False},
+            "pool-b": bridge._AGENT_NOT_FOUND,
             "pool-c": None,
         }[host]
 
-    monkeypatch.setattr(embody, "remote_registered_agent_names", fake_remote)
+    monkeypatch.setattr(embody, "remote_registered_agent_record", fake_remote)
     warnings = bridge.preflight_headless_agent(
         "sweep-worker", pool=["pool-a", "pool-b", "pool-c"]
     )

@@ -3354,6 +3354,14 @@ def test_make_headless_spawn_resolves_allocation_project_lazily(monkeypatch):
     ]
 
 
+def test_make_headless_spawn_exposes_allocation_agent():
+    from agent_dispatch.supervisor import make_headless_spawn
+
+    spawn = make_headless_spawn(agent="review-worker")
+
+    assert spawn.allocation_agent == "review-worker"
+
+
 @pytest.mark.parametrize(
     "stderr",
     [

@@ -2041,7 +2041,12 @@ def _cmd_agent_show(args: argparse.Namespace) -> None:
     from .client import BridgeClientError
 
     try:
-        agent = client.get_agent(args.name)
+        agent = client.get_agent(
+            args.name,
+            include_unaddressable=bool(
+                getattr(args, "include_unaddressable", False)
+            ),
+        )
     except BridgeClientError as exc:
         if exc.status == 404:
             agent = {}
@@ -6213,6 +6218,11 @@ def build_parser() -> argparse.ArgumentParser:
              "lookup only, never enumerates namespace/CodeSpace/container providers)",
     )
     agent_show_p.add_argument("name", help="Agent name to look up")
+    agent_show_p.add_argument(
+        "--include-unaddressable",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     agent_show_p.set_defaults(func=_cmd_agent_show)
 
     agents_p = sub.add_parser("agents", help="List registered agents")

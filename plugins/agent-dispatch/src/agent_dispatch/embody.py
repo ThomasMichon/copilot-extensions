@@ -120,6 +120,7 @@ def create_worktree(
     driver: str,
     supervisor: str,
     timeout: float | None = None,
+    agent: str | None = None,
 ) -> dict[str, str | None]:
     """Create a worktree without launching Copilot and return its id/path.
 
@@ -154,6 +155,8 @@ def create_worktree(
         supervisor,
         "--json",
     ]
+    if agent:
+        cmd += ["--agent", agent]
     result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
         cmd,
         check=False,
@@ -233,6 +236,7 @@ def prepare_reusable_worktree(
     driver: str,
     supervisor: str,
     timeout: float | None = None,
+    agent: str | None = None,
 ) -> dict[str, object]:
     """Resolve or create the worktree carried by an exclusive reservation.
     A successful lookup reuses the existing checkout. A positively missing
@@ -259,6 +263,7 @@ def prepare_reusable_worktree(
                 driver=driver,
                 supervisor=supervisor,
                 timeout=timeout,
+                agent=agent,
             )
             path = created.get("path")
             if not isinstance(path, str) or not path:
@@ -292,6 +297,7 @@ def prepare_reusable_worktree(
         driver=driver,
         supervisor=supervisor,
         timeout=timeout,
+        agent=agent,
     )
     path = created.get("path")
     if not isinstance(path, str) or not path:
@@ -717,6 +723,79 @@ def remote_registered_agent_names(host: str, *, timeout: float = 15.0) -> set[st
     from .bridge import parse_agent_names
 
     return parse_agent_names(proc.stdout)
+
+
+def remote_registered_agent_record(
+    host: str,
+    agent: str,
+    *,
+    timeout: float = 15.0,
+) -> dict | object | None:
+    """Best-effort single-agent metadata probe on a remote pool host.
+
+    Mirrors :func:`agent_dispatch.bridge._resolve_agent_record`'s purpose for a
+    fleet host reached only over SSH. The fast path uses ``agent-show
+    --include-unaddressable`` so worktree-bound charter profiles remain
+    resolvable for preflight even after ordinary ``agents`` / ``agent-show``
+    listings hide them as non-addressable targets. A namespaced target, or an
+    older remote bridge that lacks this flag/subcommand, falls back to the full
+    ``agents`` JSON listing.
+    """
+    from . import bridge
+
+    exe = shutil.which("ssh")
+    if exe is None:
+        return None
+
+    def _run(remote_argv: list[str]) -> subprocess.CompletedProcess | None:
+        remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
+        cmd = [exe, "-o", "BatchMode=yes", host.strip().lower(), remote_cmd]
+        try:
+            return run_ssh_command(cmd, timeout=timeout)
+        except (subprocess.SubprocessError, OSError):
+            return None
+
+    if ":" not in agent:
+        proc = _run(
+            [
+                "agent-bridge",
+                "--json",
+                "agent-show",
+                agent,
+                "--include-unaddressable",
+            ]
+        )
+        if proc is None:
+            return None
+        stderr = proc.stderr or ""
+        if proc.returncode == 1:
+            return bridge._AGENT_NOT_FOUND
+        if proc.returncode == 0:
+            try:
+                data = json.loads((proc.stdout or "").strip() or "null")
+            except (ValueError, TypeError):
+                return None
+            if data is None:
+                return bridge._AGENT_NOT_FOUND
+            return data if isinstance(data, dict) else None
+        if proc.returncode != 2 or (
+            "agent-show" not in stderr and "--include-unaddressable" not in stderr
+        ):
+            return None
+
+    proc = _run(["agent-bridge", "--json", "agents"])
+    if proc is None or proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout or "[]")
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, list):
+        return None
+    for row in data:
+        if isinstance(row, dict) and row.get("name") == agent:
+            return row
+    return bridge._AGENT_NOT_FOUND
 
 
 def parse_fleet_body_session(result: subprocess.CompletedProcess) -> str | None:

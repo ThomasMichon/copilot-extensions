@@ -636,9 +636,14 @@ class BridgeClient:
         errors = [str(e) for e in resp.get("topology_errors", [])]
         return resp.get("agents", []), errors
 
-    def get_agent(self, name: str) -> dict[str, Any]:
+    def get_agent(
+        self, name: str, *, include_unaddressable: bool = False
+    ) -> dict[str, Any]:
         """GET /api/v1/agents/{name}"""
-        return self._request("GET", f"/api/v1/agents/{name}") or {}
+        path = f"/api/v1/agents/{name}"
+        if include_unaddressable:
+            path += "?include_unaddressable=true"
+        return self._request("GET", path) or {}
 
     def list_machines(self) -> list[dict[str, Any]]:
         """GET /api/v1/machines"""

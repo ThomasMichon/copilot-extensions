@@ -1434,6 +1434,7 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
             prompt=prompt,
             prior_session_id=prior_session,
             liveness_fn=embody.local_body_verdict,
+            project=embody.project_for_task(task),
             target_dir=task.get("spawn_worktree_path"),
             worktree_id=task.get("spawn_worktree"),
             wait=not args.run_async,
