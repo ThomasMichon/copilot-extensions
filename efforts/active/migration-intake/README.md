@@ -163,7 +163,7 @@ retain only genuinely unclassified general-purpose work here.
 
 ## Journal
 
-### 2026-09-20 — Phase 3: published 3 issues, found 1 addressed by an open PR, 2 still blocked on Draft owners
+### 2026-09-20 — Phase 3: published 2 issues, 1 published-but-unaccepted, 1 addressed by an open PR, 2 blocked on Draft owners
 
 - Worked through the 6 routed candidates left after the post-merge
   correction pass (#3, #5, #9, #14, #15, #16), checking each against Phase 3's
@@ -179,16 +179,22 @@ retain only genuinely unclassified general-purpose work here.
   `closed-obsolete`) pending its merge, per Copilot review feedback on this
   PR that flagged the original wording as prematurely treating open work as
   delivered.
-- Published public issues for #5
-  ([#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115),
-  under `agent-machines-declarative-control-plane`'s umbrella #1418) and #9 /
-  #16 ([#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113)
-  and [#3114](https://github.com/ThomasMichon/copilot-extensions/issues/3114),
-  both under `worktree-finality-and-obligations`'s umbrella #1312). Each issue
-  body is a self-contained, repository-neutral restatement of the routed Plan
-  bullet with Summary/Scope/Validation sections, matching this repo's existing
-  issue convention -- no reference to this ledger, any session, or any
-  originating context.
+- Published public issues for #9 and #16
+  ([#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113)
+  and [#3114](https://github.com/ThomasMichon/copilot-extensions/issues/3114))
+  under `worktree-finality-and-obligations`'s live umbrella #1312.
+- Drafted a public issue for #5
+  ([#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115))
+  citing `agent-machines-declarative-control-plane`'s umbrella #1418, then
+  found on review that #1418 and all seven of that effort's listed
+  sub-issues are closed -- there is currently no live umbrella to accept new
+  work. Edited #3115 to drop the false "Part of #1418" claim and stand alone;
+  the candidate stays `routed`-but-unaccepted (not "published") until that
+  effort has a live umbrella again, the same fail-closed treatment as #14/#15
+  below. Each issue body is a self-contained, repository-neutral restatement
+  of the routed Plan bullet with Summary/Scope/Validation sections, matching
+  this repo's existing issue convention -- no reference to this ledger, any
+  session, or any originating context.
 - Left #14 (`account-aware-operations`) and #15
   (`review-automation-reliability`) unpublished: both owning efforts are
   still `Draft` status with no umbrella issue, so there is no accepting

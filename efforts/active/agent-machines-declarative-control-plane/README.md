@@ -151,7 +151,12 @@ fleet, topology, or operating environment.
   resource: define and apply an equivalent unattended self-update scheduling
   mechanism on POSIX hosts, matching the Windows Scheduled Task tier model.
   Tracked in
-  [#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115).
+  [#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115),
+  currently a standalone issue: this effort's own umbrella
+  ([#1418](https://github.com/ThomasMichon/copilot-extensions/issues/1418))
+  and all listed sub-issues are closed, so there is no active umbrella to
+  attach it to yet -- needs a live umbrella issue for this effort before
+  Phase 3 acceptance is complete.
 - [ ] Keep examples synthetic and repository-neutral.
 
 ## Validation Plan

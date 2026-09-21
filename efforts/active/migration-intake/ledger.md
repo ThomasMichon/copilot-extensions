@@ -105,7 +105,7 @@ lack an umbrella to attach a sub-issue to.
 
 | # | Disposition | Owner | Tracker outcome | What changed vs. prior pass |
 |---|-------------|-------|------------------|-------------------------------|
-| 5 | routed | agent-machines-declarative-control-plane | published [#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115) | Phase 3 publication completed |
+| 5 | routed | agent-machines-declarative-control-plane | standalone issue [#3115](https://github.com/ThomasMichon/copilot-extensions/issues/3115), not yet formally accepted -- the effort's own umbrella (#1418) and all sub-issues are closed | Phase 3 publication incomplete: no active umbrella currently exists to accept it; fail-closed per Intake Contract §3 until one does |
 | 9 | routed | worktree-finality-and-obligations | published [#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113) | Phase 3 publication completed |
 | 14 | routed | account-aware-operations | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per Intake Contract §3 until the effort is both `Active` and has an umbrella issue |
 | 15 | routed | review-automation-reliability | publication pending -- owning effort is `Draft` with no umbrella issue | no change; fail-closed per Intake Contract §3 until the effort is both `Active` and has an umbrella issue |
@@ -114,9 +114,14 @@ lack an umbrella to attach a sub-issue to.
 
 
 *(Phase 3 publication, 2026-09-20: of the 6 routed candidates not already
-resolved by an earlier ledger pass, 3 were published as new public issues
-under their Active owning effort's umbrella issue (#5 -> #1418, #9 and #16 ->
-#1312), 1 was found already covered by an in-flight, not-yet-merged PR under
+resolved by an earlier ledger pass, 2 were published as new public issues
+under their Active owning effort's live umbrella issue (#9 and #16 -> #1312),
+1 (#5) was drafted as a public issue but found on review to have no live
+umbrella to accept it -- `agent-machines-declarative-control-plane`'s own
+umbrella #1418 and all seven listed sub-issues are closed -- so #3115 stays
+open standalone and the candidate stays `routed`-but-unaccepted until that
+effort has a live umbrella again, 1 was found already covered by an
+in-flight, not-yet-merged PR under
 a different effort and needed no new issue (#3, stays `routed` pending that
 PR's merge), and 2 remain `routed`-but-unpublished because their owning
 effort is still `Draft` with no umbrella issue to attach a sub-issue to
