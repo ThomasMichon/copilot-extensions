@@ -129,6 +129,25 @@ def test_satellite_status_snapshot_deduplicates_by_worktree_keeping_first_row(mo
     assert status["wt-a"]["session_id"] == "sess-new"
 
 
+def test_satellite_status_snapshot_newest_stopped_row_suppresses_older_live_row(monkeypatch):
+    # The newest row is authoritative: if it is stopped, an older ("live"-
+    # looking) row for the same worktree further down the newest-first list
+    # must NOT be resurrected and advertised as active.
+    sessions = [
+        {"worktree_id": "wt-a", "session_id": "sess-new", "status": "stopped"},
+        {
+            "worktree_id": "wt-a",
+            "session_id": "sess-old",
+            "status": "running",
+            "liveness": "active",
+        },
+    ]
+    monkeypatch.setattr(tracking, "list_local_body_sessions", lambda **_: sessions)
+    worktrees, status = tracking.satellite_status_snapshot()
+    assert worktrees == []
+    assert status == {}
+
+
 # -- federation_runner: gate + status wiring ----------------------------------
 
 
@@ -172,6 +191,45 @@ def test_satellite_withdraws_promptly_when_gate_closes_mid_session(monkeypatch, 
     state = runner.tick()
     assert state["gate_state"] == "closed"
     assert directory.discover_peers() == []
+
+
+def test_satellite_retries_deregister_after_a_transient_failure(monkeypatch, directory):
+    """Regression test: if deregister() itself raises when the gate closes
+    (a transient directory error), the runner must NOT give up and mark
+    itself deregistered anyway -- it must retry on the next tick, since the
+    whole point of the gate-close path is prompt withdrawal, not a single
+    best-effort attempt."""
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "open")
+    monkeypatch.setattr(tracking, "satellite_status_snapshot", lambda: ([], {}))
+    runner = FederationRunner(directory, "book2", role="satellite")
+    runner.tick()
+    assert len(directory.discover_peers()) == 1
+
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_GATE", "closed")
+    real_deregister = directory.deregister
+    calls = []
+
+    def flaky_deregister(instance):
+        calls.append(instance)
+        if len(calls) == 1:
+            raise RuntimeError("transient directory failure")
+        return real_deregister(instance)
+
+    monkeypatch.setattr(directory, "deregister", flaky_deregister)
+
+    # First closed-gate tick: deregister fails -> must propagate (so the
+    # runner's own run() loop retries) and NOT silently mark _registered
+    # False. The entry must still be live in the directory.
+    with pytest.raises(RuntimeError):
+        runner.tick()
+    assert len(directory.discover_peers()) == 1
+    assert runner._registered is True
+
+    # Second closed-gate tick: deregister succeeds this time.
+    runner.tick()
+    assert directory.discover_peers() == []
+    assert runner._registered is False
+    assert len(calls) == 2
 
 
 def test_peer_role_unaffected_by_satellite_gate_and_pushes_no_status(monkeypatch, directory):

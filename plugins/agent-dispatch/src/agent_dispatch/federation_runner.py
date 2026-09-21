@@ -159,10 +159,13 @@ class FederationRunner:
             # directory's own TTL reap (see the satellite-agent-exposure
             # effort's security steer: exposure is opt-in, never ambient).
             if self._registered:
-                try:
-                    self._rv.deregister(self._instance)
-                finally:
-                    self._registered = False
+                # Clear the flag only on success: if deregister raises (a
+                # transient directory failure), we must still believe we're
+                # registered so the NEXT tick retries the withdrawal instead
+                # of silently giving up and leaving the entry stranded until
+                # TTL reap -- the opposite of "withdraw promptly".
+                self._rv.deregister(self._instance)
+                self._registered = False
             return {
                 "instance": self._instance,
                 "role": self._role,

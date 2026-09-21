@@ -255,12 +255,19 @@ def satellite_status_snapshot(
     """
     worktrees: list[str] = []
     status: dict[str, dict[str, Any]] = {}
+    seen: set[str] = set()
     for session in list_local_body_sessions(timeout=timeout):
         worktree_id = session.get("worktree_id")
         if not isinstance(worktree_id, str) or not worktree_id:
             continue
-        if worktree_id in status:
+        if worktree_id in seen:
             continue
+        # Mark seen BEFORE the terminal-status filter: the newest row for a
+        # worktree is authoritative regardless of whether it passes the
+        # live-status filter -- if the newest row is stopped/ended/failed, an
+        # OLDER (and possibly still "live"-looking) row for the same worktree
+        # must not be resurrected from further down the list.
+        seen.add(worktree_id)
         session_status = str(session.get("status") or "").lower()
         if session_status in _TERMINAL_SESSION_STATUSES:
             continue
