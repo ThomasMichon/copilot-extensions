@@ -234,7 +234,7 @@ function persistState() {
 }
 
 // Format handoff data as a markdown document suitable for continuation.
-function formatHandoffMarkdown(handoffData, scope, syncResult) {
+function formatHandoffMarkdown(handoffData, scope) {
   const lines = [
     `# Session Handoff`,
     "",
@@ -283,18 +283,6 @@ function formatHandoffMarkdown(handoffData, scope, syncResult) {
     lines.push(`## Next Steps`, handoffData.agentNextSteps, "");
   }
 
-  if (syncResult) {
-    lines.push(
-      "## Worktree Sync",
-      syncResult.synced
-        ? "Synced onto the latest default branch before this handoff was drafted."
-        : `Not synced (${syncResult.reason}). The successor should sync onto ` +
-          "the latest default branch as its first action, in case any " +
-          "relevant fixes landed upstream since this worktree's tip.",
-      "",
-    );
-  }
-
   // This formatter has no agent composition step (force-tier auto-drafts
   // without the agent), so it cannot discover background flows/external
   // state itself. Per the schema, that must be an explicit open item, never
@@ -340,22 +328,20 @@ async function onPermissionRequest(request, invocation) {
 // Auto-draft, store, and trigger a handoff without agent involvement. Fire-
 // and-forget from the session.usage_info handler (below); reports its own
 // outcome via session.log/session.send rather than being awaited there.
+//
+// Capture happens FIRST, with no sync/network dependency at all: the force
+// tier is explicitly the last chance before the runtime's own auto-
+// compaction destroys the conversation, so nothing may delay getting a
+// baton stored. The worktree sync (same principle as the agent-guided
+// skill flow -- an un-synced tip hands the successor stale plugin/
+// instruction code too) runs strictly AFTER the handoff is already safely
+// stored, as pure best-effort: it can never block or delay the capture
+// itself, only report its own outcome via session.log once it settles.
 async function autoForceHandoff(sid, cwd) {
-  // Sync before drafting, same principle as the agent-guided skill flow: the
-  // successor inherits this exact on-disk worktree, so an un-synced tip means
-  // stale plugin/instruction code reaches it too. No agent judgment is in the
-  // loop here, so this never commits anything -- see attemptWorktreeSync.
-  // Awaited (not fired synchronously): attemptWorktreeSync is fully async
-  // end to end, so this yields immediately to the event loop rather than
-  // blocking it for the length of the underlying git/CLI calls -- this
-  // function is itself invoked fire-and-forget (never awaited) from
-  // session.usage_info, so a synchronous call here would have frozen the SDK
-  // event loop for as long as the sync took.
-  const syncResult = await attemptWorktreeSync(cwd);
   let markdown;
   try {
     const { data } = collectHandoffData(sid);
-    markdown = formatHandoffMarkdown(data, null, syncResult);
+    markdown = formatHandoffMarkdown(data, null);
   } catch (error) {
     session.log(
       `[Context Handoff] Force-tier auto-draft failed: ${error.message}. ` +
@@ -403,6 +389,30 @@ async function autoForceHandoff(sid, cwd) {
       session.log(`[Context Handoff] Force-tier manual-instructions send failed: ${e.message}`, { level: "warning" })
     );
   }
+  // Best-effort, strictly after the capture above -- never awaited by the
+  // critical path, so a slow or unreachable remote cannot delay or defeat
+  // the force-tier guarantee. Its outcome is only ever logged, never folded
+  // back into the already-stored baton (there is no update path for a
+  // handoff that has already been triggered).
+  attemptWorktreeSync(cwd)
+    .then((syncResult) => {
+      if (syncResult.synced) {
+        session.log(
+          "[Context Handoff] Force-tier: worktree synced onto the latest " +
+          "default branch after the handoff above was already captured.",
+          { level: "info" },
+        );
+      } else {
+        session.log(
+          `[Context Handoff] Force-tier: worktree sync ` +
+          `${syncResult.attempted ? "failed" : "was skipped"} after the ` +
+          `handoff above was already captured (${syncResult.reason}). The ` +
+          "successor should sync onto the latest default branch itself.",
+          { level: "warning" },
+        );
+      }
+    })
+    .catch(() => {});
 }
 
 // --- Extension ---
