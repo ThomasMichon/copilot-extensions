@@ -18,19 +18,19 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.4.0-dev532",
+      "version": "0.4.0-dev533",
       "source": "plugins/agent-bridge"
     },
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev148",
+      "version": "0.4.0-dev149",
       "source": "plugins/agent-codespaces"
     },
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
-      "version": "0.1.2-dev149",
+      "version": "0.1.2-dev150",
       "source": "plugins/agent-containers"
     },
     {
@@ -78,7 +78,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.2-dev156",
+      "version": "0.1.2-dev157",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -108,7 +108,7 @@
     {
       "name": "agent-machines",
       "description": "Portable machine setup and restore for Copilot CLI. Derives setup from declared topology, enabled capabilities, and in-repo requirement packages, then converges the current machine through Copilot settings, resources, and repo-local modules. Organization policy and per-machine values remain downstream while the engine and conductor stay generic.",
-      "version": "0.1.0-dev130",
+      "version": "0.1.0-dev131",
       "source": "plugins/agent-machines"
     },
     {
