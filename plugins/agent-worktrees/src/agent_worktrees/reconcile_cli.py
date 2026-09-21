@@ -55,7 +55,7 @@ def run_reconcile(argv: list[str]) -> int:
         return 1
 
     tracking_path = cfg.tracking_dir()
-    if args.worktree_id:
+    if args.worktree_id is not None:
         if _UNSAFE_COMPONENT.search(args.worktree_id):
             message = f"invalid --worktree-id: {args.worktree_id!r}"
             if args.json:

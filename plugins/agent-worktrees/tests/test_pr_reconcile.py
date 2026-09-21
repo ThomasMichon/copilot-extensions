@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+
 from agent_worktrees import config as cfg
 from agent_worktrees import pr_reconcile, reconcile_cli, tracking
 
@@ -205,6 +207,22 @@ class TestReconcileCli:
         rc = reconcile_cli.run_reconcile(["--worktree-id", "no-such-wt", "--json"])
         assert rc == 1
         assert "no-such-wt" in capsys.readouterr().out
+
+    def test_reconcile_empty_worktree_id_takes_single_record_path(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        # --worktree-id "" must NOT be treated as if the option was omitted
+        # (a truthiness check would silently fall through to a full sweep
+        # over every tracked record -- an unintended, surprising provider
+        # sweep instead of a clear single-record error).
+        monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+        monkeypatch.setattr(cfg, "load_config", lambda: _config())
+        _record(tmp_path, monkeypatch, "wt-k")
+        rc = reconcile_cli.run_reconcile(["--worktree-id", "", "--json"])
+        assert rc == 1
+        out = json.loads(capsys.readouterr().out)
+        assert "error" in out
+        assert "No tracking record found" in out["error"]
 
     def test_reconcile_rejects_path_traversal_worktree_id(
         self, tmp_path, monkeypatch, capsys
