@@ -399,10 +399,18 @@ So, reading a launch's entries in this file (if any):
 - `exit: code=0` alone, nothing else -- an intentional, non-error exit (for
   example the bootstrap's own parent-liveness check exiting early).
 - **No entry at all for a launch whose own harness log shows it reached
-  `ready` and then stopped** -- something bypassed Node's own signal/exit
-  handling entirely (`SIGKILL`, an external whole-process-tree kill).
-  Registering a handler for a given event cannot help when the process
-  never gets to run any more JS at all.
+  `ready` and then stopped** -- two distinct possibilities, not just one:
+  either something bypassed Node's own signal/exit handling entirely
+  (`SIGKILL`, an external whole-process-tree kill -- registering a handler
+  for a given event cannot help when the process never gets to run any more
+  JS at all), **or** `createEmergencyLog()`'s own open/write attempt failed
+  and was silently swallowed (its own defensive contract: diagnostic logging
+  must never itself become a second crash cause) -- for example the crash
+  log's directory is missing, the disk is full, or the pre-existing-file
+  ownership/mode check rejected an untrusted file at that path (see the
+  private-file-creation note above). A missing entry does not, by itself,
+  distinguish these; check that the log's parent directory exists and is
+  writable by this user before concluding it must have been a force-kill.
 
 ## Payload-local CLI fallback
 

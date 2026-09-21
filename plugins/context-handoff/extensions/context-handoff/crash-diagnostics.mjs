@@ -28,19 +28,28 @@ export const DEFAULT_CRASH_LOG = join(tmpdir(), "context-handoff-extension-crash
 
 // `os.tmpdir()` is commonly a shared, world-writable directory on POSIX
 // (`/tmp`), so a predictable filename there is both readable by other local
-// users and open to a pre-created-symlink attack redirecting the write
-// somewhere else entirely. `O_NOFOLLOW` makes the kernel itself refuse to
-// open through an existing symlink (atomic, not a check-then-open race);
-// mode 0o600 keeps a freshly created file private to this user. `O_NOFOLLOW`
-// does not exist on Windows (no POSIX symlink-attack surface there in the
-// same shape) -- fall back to a plain create/append flag set on that
-// platform, since the flag is simply absent from `fs.constants`, not merely
-// disabled.
+// users and open to several pre-creation attacks redirecting or blocking
+// the write. `O_NOFOLLOW` makes the kernel itself refuse to open through an
+// existing symlink (atomic, not a check-then-open race); `O_NONBLOCK` keeps
+// an open against a pre-created FIFO from blocking indefinitely waiting for
+// a reader (an `O_WRONLY` open of a FIFO with no reader would otherwise
+// hang forever -- fatal for code that runs from a crash/signal handler,
+// since the process would never get to exit or record anything) and instead
+// fails immediately (`ENXIO`) so the regular-file check below still gets a
+// chance to run and reject it through the ordinary open-failure path; mode
+// 0o600 keeps a freshly created file private to this user. `O_NONBLOCK` has
+// no effect on a genuine regular file's later reads/writes, so leaving it
+// set on the fd for the writes below is harmless once the check confirms
+// it really is one. Neither flag exists on Windows (no POSIX FIFO/symlink
+// attack surface there in the same shape) -- fall back to a plain
+// create/append flag set on that platform, since both are simply absent
+// from `fs.constants`, not merely disabled.
 const OPEN_FLAGS =
   fsConstants.O_CREAT |
   fsConstants.O_WRONLY |
   fsConstants.O_APPEND |
-  (fsConstants.O_NOFOLLOW ?? 0);
+  (fsConstants.O_NOFOLLOW ?? 0) |
+  (fsConstants.O_NONBLOCK ?? 0);
 
 /**
  * True only if the already-opened `fd` is a regular file, owned by this

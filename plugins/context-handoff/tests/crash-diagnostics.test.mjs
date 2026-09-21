@@ -6,7 +6,14 @@
 // the shared `node --test` runner process, since these handlers call
 // process.exit() by design.
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,6 +91,59 @@ test(
       const after = statSync(logPath);
       assert.equal(readFileSync(logPath, "utf-8"), "not ours\n");
       assert.equal(after.mode, before.mode);
+    });
+  },
+);
+
+// A pre-created symlink at the predictable log path could otherwise
+// redirect this process's own stack traces to an attacker-chosen file
+// elsewhere on disk. O_NOFOLLOW is what is supposed to prevent this (the
+// kernel refuses to open through an existing symlink at all); this test
+// actually exercises that guarantee rather than merely asserting the flag
+// is present in source.
+test(
+  "a pre-existing symlink at the log path is never followed or written through",
+  { skip: process.platform === "win32" },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      const dir = dirname(logPath);
+      const target = join(dir, "attacker-target.log");
+      writeFileSync(target, "untouched\n");
+      symlinkSync(target, logPath);
+      const result = spawnSync(process.execPath, [harness, "uncaught-exception", logPath], {
+        encoding: "utf-8",
+      });
+      // The crash-log write is refused (O_NOFOLLOW makes the open() call
+      // itself fail), but the process's own crash handling is otherwise
+      // unaffected.
+      assert.equal(result.status, 1);
+      assert.equal(readFileSync(target, "utf-8"), "untouched\n");
+    });
+  },
+);
+
+// A different local user could pre-create the predictable log path as a
+// FIFO (named pipe) instead of a regular file or symlink. Opening a FIFO
+// for writing with no reader attached blocks indefinitely under a plain
+// O_WRONLY open -- fatal here, since this code runs from a crash/signal
+// handler: the process would hang forever instead of exiting and recording
+// anything. O_NONBLOCK is what is supposed to make that open fail
+// immediately instead; this test actually opens a real FIFO to prove it,
+// bounded by node:test's own default per-test timeout so a regression hangs
+// this test rather than the whole suite indefinitely.
+test(
+  "a pre-existing FIFO at the log path does not block the crash handler",
+  { skip: process.platform === "win32" },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      const mkfifo = spawnSync("mkfifo", [logPath]);
+      assert.equal(mkfifo.status, 0, "mkfifo must be available on this POSIX host for this test");
+      const result = spawnSync(process.execPath, [harness, "uncaught-exception", logPath], {
+        encoding: "utf-8",
+        timeout: 10_000,
+      });
+      assert.notEqual(result.status, null, "the harness must exit, not hang, on a FIFO");
+      assert.equal(result.status, 1);
     });
   },
 );
