@@ -173,22 +173,66 @@ def run_sync_pass(
 ) -> SyncOutcome:
     """Run one complete sync -> scan -> decide pass; return the one outcome.
 
-    ``sync_repository`` is the only mutation this function performs (it
-    writes/locks whatever it can safely resolve); ``scan_repository`` then
-    validates the result and reports everything sync could not resolve.
-    Both run exactly once per call -- this function is otherwise a pure
-    composition of ``instruction_projections`` and ``projection_reflect``,
-    so re-running it on an unchanged repo is idempotent and produces the
-    same (empty) outcome, never an accumulating side effect.
+    ``sync_repository_locked`` is the only mutation this function performs
+    (it writes/locks whatever it can safely resolve); ``scan_repository``
+    then validates the result and reports everything sync could not
+    resolve. Both run exactly once per call, **inside the same held
+    per-repository lock** as the before/after lock-entry reads -- so a
+    concurrent worker's own sync can never interleave between this pass's
+    sync and its scan/lock-read and get misattributed to this call's
+    outcome. This function is otherwise a pure composition of
+    ``instruction_projections`` and ``projection_reflect``, so re-running it
+    on an unchanged repo is idempotent and produces the same (empty)
+    outcome, never an accumulating side effect.
     """
     if refresh is not None:
         refresh()
 
     sources = list(sources)
-    entries_before = projections.load_lock_entries(repo_root)
-    sync_result = projections.sync_repository(repo_root, sources)
-    scan_result = projections.scan_repository(repo_root, sources)
-    entries_after = projections.load_lock_entries(repo_root)
+    try:
+        root = projections.validate_repository_root(repo_root)
+    except ValueError as exc:
+        result = projections.Result(operation="sync")
+        result.add(projections.BLOCKING, "projection-root", repo_root, str(exc))
+        decision = reflect.bypass_decision(
+            findings=result.findings,
+            changed_lock_entries=[],
+            trusted_marketplaces=trusted_marketplaces,
+            pinned_commits=pinned_commits,
+        )
+        return SyncOutcome(
+            changed=(), lock_updated=False, findings=tuple(result.findings),
+            bypass=decision,
+        )
+
+    with_lock = projections.repository_sync_lock(root)
+    try:
+        with_lock.__enter__()
+    except (BlockingIOError, OSError) as exc:
+        result = projections.Result(operation="sync")
+        result.add(
+            projections.BLOCKING,
+            "projection-sync-lock",
+            root,
+            f"cannot acquire repository synchronization lock: {exc}",
+        )
+        decision = reflect.bypass_decision(
+            findings=result.findings,
+            changed_lock_entries=[],
+            trusted_marketplaces=trusted_marketplaces,
+            pinned_commits=pinned_commits,
+        )
+        return SyncOutcome(
+            changed=(), lock_updated=False, findings=tuple(result.findings),
+            bypass=decision,
+        )
+    try:
+        entries_before = projections.load_lock_entries(root)
+        sync_result = projections.sync_repository_locked(root, sources)
+        scan_result = projections.scan_repository(root, sources)
+        entries_after = projections.load_lock_entries(root)
+    finally:
+        with_lock.__exit__(None, None, None)
 
     # Policy-relevant destinations are `sync`'s own changed-content list
     # *plus* any destination whose lock entry differs before vs. after --
@@ -229,20 +273,22 @@ def run_sync_pass(
     )
 
 
+def _emit_error(message: str, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps({"error": message}, indent=2, sort_keys=True))
+    else:
+        print(f"error: {message}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", nargs="?", default=".")
-    parser.add_argument(
-        "--installed-root",
-        type=Path,
-        help="override the installed plugin payload root",
-    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
     root = Path(args.root).expanduser()
     if not root.is_dir():
-        print(f"error: {root} is not a directory", file=sys.stderr)
+        _emit_error(f"{root} is not a directory", as_json=args.json)
         return 2
 
     # The CLI is the consent-gated scheduled-worker entry point: it must
@@ -252,34 +298,29 @@ def main(argv: list[str] | None = None) -> int:
     # setting-up-instruction-sync-worker skill). `run_sync_pass()` itself
     # stays a general-purpose library function that any caller (including a
     # test) may drive with an explicit trusted_marketplaces value; this gate
-    # belongs at the CLI boundary, not inside the pure composition.
+    # belongs at the CLI boundary, not inside the pure composition. There is
+    # deliberately no `--installed-root`-style override here: allowing the
+    # bypass-eligible path to source projections from a caller-chosen
+    # payload root (rather than the repo's own settings-resolved,
+    # consent-trusted marketplaces) would let a substituted, unverified
+    # payload tree ride the same auto-merge surface a real trusted source
+    # gets.
     consent = projection_reflect_consent.load_consent(root)
     if consent is None:
         consent_path = "/".join(projection_reflect_consent.CONSENT_PATH_PARTS)
-        message = (
+        _emit_error(
             f"no live projection-reflect consent found ({consent_path}); "
             "refusing to sync -- see the setting-up-instruction-sync-worker "
-            "skill"
+            "skill",
+            as_json=args.json,
         )
-        if args.json:
-            print(json.dumps({"error": message}, indent=2, sort_keys=True))
-        else:
-            print(f"error: {message}", file=sys.stderr)
         return 2
 
     try:
         projections.validate_repository_root(root)
-        sources = projections.discover_enabled_sources(
-            root,
-            installed_root=(
-                args.installed_root.expanduser().resolve()
-                if args.installed_root is not None
-                else None
-            ),
-            require_trust=False,
-        )
+        sources = projections.discover_enabled_sources(root, require_trust=False)
     except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _emit_error(str(exc), as_json=args.json)
         return 2
 
     outcome = run_sync_pass(

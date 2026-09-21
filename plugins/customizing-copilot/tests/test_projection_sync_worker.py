@@ -20,7 +20,26 @@ _SCRIPTS = (
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 import instruction_projections as projections  # noqa: E402
+import projection_reflect_consent  # noqa: E402
 import projection_sync_worker as worker  # noqa: E402
+
+
+def _write_consent(repo: Path, *, trusted_marketplaces: list[str]) -> None:
+    consent_path = repo.joinpath(*projection_reflect_consent.CONSENT_PATH_PARTS)
+    consent_path.parent.mkdir(parents=True, exist_ok=True)
+    consent_path.write_text(
+        json.dumps(
+            {
+                "schema": projection_reflect_consent.CONSENT_SCHEMA,
+                "version": projection_reflect_consent.CONSENT_VERSION,
+                "enabled": True,
+                "reconcilerAgent": "projection-reconciler",
+                "dispatchLabel": "projection-reflect-conflict",
+                "trustedMarketplaces": trusted_marketplaces,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def _source(plugin: Path, marketplace: str, name: str) -> SimpleNamespace:
@@ -263,7 +282,7 @@ def test_sync_findings_are_not_dropped_when_scan_is_clean(
     )
     fake_scan_result = SimpleNamespace(findings=[])
     monkeypatch.setattr(
-        worker.projections, "sync_repository", lambda *a, **kw: fake_sync_result
+        worker.projections, "sync_repository_locked", lambda *a, **kw: fake_sync_result
     )
     monkeypatch.setattr(
         worker.projections, "scan_repository", lambda *a, **kw: fake_scan_result
@@ -306,3 +325,26 @@ def test_cli_json_error_without_consent_never_mutates(
     assert exit_code != 0
     lock_path = repo / ".github" / "copilot" / "context-projections.json"
     assert not lock_path.exists()
+
+
+def test_cli_happy_path_with_consent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    # A live, valid committed consent file plus a discoverable trusted
+    # source must let the CLI run, derive trust from consent (not a CLI
+    # flag -- there is none), and emit a bypass-eligible JSON outcome.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_consent(repo, trusted_marketplaces=["copilot-extensions"])
+    _plugin, source = _write_plugin(tmp_path, "copilot-extensions", "policy")
+    monkeypatch.setattr(
+        worker.projections, "discover_enabled_sources", lambda *a, **kw: [source]
+    )
+
+    exit_code = worker.main([str(repo), "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["needsPr"] is True
+    assert payload["bypassEligible"] is True
+    assert payload["needsConflictDispatch"] is False
