@@ -599,19 +599,22 @@ session **by default** (`--embody-backend headless`) — the right body for a
 dispatched/supervised task, which is a self-contained, autonomous unit that needs
 no human attach. Headless also sidesteps the **CLI-start-prompt** path entirely (a
 seeded CLI/mux session can *race the input-prompt caret and never deliver its
-seed*, deadlocking at 0%). `--headless-agent AGENT` names the agent-bridge agent
-used (default `task-worker`).
+seed*, deadlocking at 0%). `--headless-agent AGENT` names the **spawn profile**
+used (default `task-worker`): a direct venue target still spawns directly, but a
+worktree-bound charter is first bound onto the worker worktree and then resumed
+by worktree handle so agent-bridge applies the charter's launch shape from the
+worktree rather than treating the charter name as a first-class target.
 
 > **Preflight (fail-loud, best-effort).** At loop startup a headless lane checks
 > that its `--headless-agent` is actually registered with agent-bridge on the host
 > where the body will spawn — the local registry, or each `--pool` host over SSH
 > for a fleet lane — and prints a one-line **WARNING** for any host where the agent
 > is provably absent (the classic trap being the bogus `task-worker` default naming
-> an agent nobody registered, which otherwise fails as `'task-worker' is not a
-> known agent name`, retries, and dead-letters *silently*). The check never blocks
-> the lane and stays silent when the registry can't be read (bridge absent,
-> unreachable, timeout) — it only warns on a confirmed miss. It is skipped for
-> `--once` so hot one-shot/cron polls stay cheap.
+> a charter nobody registered), or where it resolves only to a `managed: true`
+> entry that cannot be borrowed as a charter profile. The check never blocks the
+> lane and stays silent when the registry can't be read (bridge absent,
+> unreachable, timeout) — it only warns on a confirmed miss / managed guard. It
+> is skipped for `--once` so hot one-shot/cron polls stay cheap.
 
 When a task *does* want an attachable **mux-wrapped CLI autopilot**
 (`agent-worktrees embody`) — standalone/durable work a human may take over — opt
@@ -913,7 +916,7 @@ for the same tri-state verdict: a **confirmed-live** body is heartbeated
 released (`recover_gone`) so the next cycle re-embodies it — resuming from the
 task's `progress_log`. As always, an `unknown` probe (ssh/bridge unreachable,
 lagging reconcile) is never treated as death, so recovery cannot double-spawn a
-live body. `--headless-agent AGENT` names the agent-bridge agent
+live body. `--headless-agent AGENT` names the headless spawn profile
 (default `task-worker`).
 
 For local headless bodies, a settled ACP turn is an implicit suspension

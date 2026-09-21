@@ -512,6 +512,7 @@ class Supervisor:
         project = self._spawn_attribute(
             task, "allocation_project", embody.project_for_task(task) or ""
         )
+        agent = self._spawn_attribute(task, "allocation_agent", "")
         prepared = embody.prepare_reusable_worktree(
             task,
             reservation,
@@ -519,6 +520,7 @@ class Supervisor:
             interface=interface,
             driver=driver,
             supervisor=self.supervisor_id,
+            agent=agent or None,
         )
         worktree = str(prepared["worktree"])
         replaced = bool(prepared.get("replaced"))

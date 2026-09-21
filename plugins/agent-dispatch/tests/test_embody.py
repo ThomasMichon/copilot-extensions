@@ -436,6 +436,36 @@ def test_create_worktree_returns_id_and_path(monkeypatch):
     ]
 
 
+def test_create_worktree_binds_headless_agent_profile(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout='{"worktree": {"id": "wt-new", "path": "/tmp/wt-new"}}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    embody.create_worktree(
+        project="widgets",
+        interface="acp",
+        task_id="task-1",
+        reservation_key="dispatch-task:task-1:1",
+        attempt=1,
+        driver="agent-dispatch",
+        supervisor="supervisor-1",
+        agent="task-worker",
+    )
+
+    assert captured["cmd"][-2:] == ["--agent", "task-worker"]
+
+
 def test_prepare_reusable_worktree_replaces_confirmed_missing(monkeypatch):
     monkeypatch.setattr(
         embody,
@@ -928,6 +958,29 @@ def test_remote_registered_agent_names_parses_over_ssh(monkeypatch):
     assert seen["cmd"][0] == "/usr/bin/ssh"
     assert "pool-a" in seen["cmd"]
     assert seen["cmd"][-1] == "agent-bridge --json agents"
+
+
+def test_remote_registered_agent_record_uses_hidden_lookup_flag(monkeypatch):
+    from agent_dispatch import bridge
+
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(
+            cmd, 0, '{"name":"task-worker","managed":false}', ""
+        )
+
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(embody, "run_ssh_command", fake_run)
+
+    record = embody.remote_registered_agent_record("Pool-A", "task-worker")
+
+    assert record == {"name": "task-worker", "managed": False}
+    assert seen["cmd"][-1] == (
+        "agent-bridge --json agent-show task-worker --include-unaddressable"
+    )
+    assert bridge._AGENT_NOT_FOUND is not record
 
 
 def test_spawn_embodied_worker_scrubs_env(monkeypatch):

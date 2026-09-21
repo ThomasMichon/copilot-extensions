@@ -198,6 +198,12 @@ class AgentConfig:
     worktree_root: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     project: str | None = None  # agent-worktrees project (binstub name)
+    # Whether this config is a first-class **addressable target** (listed by
+    # ``agents`` / ``agent-show`` and accepted as a direct ``create <agent>``
+    # target). Worktree-bound charters remain valid registry entries for
+    # bound-charter resolution, but opt out here so venue/machine identities
+    # stay the only first-class spawn targets.
+    spawnable_as_target: bool = True
     # Whether this agent is enumerated as a worktree-discovery *lane* (its
     # machine's worktrees listed under it in /api/v1/worktrees). Default True for
     # a machine/repo lane. Set False for a **spawn body** that legitimately needs
@@ -784,6 +790,18 @@ def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
             raise ValueError(
                 f"agent {name!r} mcp_servers must be a list of objects"
             )
+        raw_worktree_discovery = bool(config.get("worktree_discovery", True))
+        raw_spawnable_as_target = config.get("spawnable_as_target")
+        if raw_spawnable_as_target is None:
+            # Existing spawn-body charters are already distinguished today by
+            # needing ``project`` while opting out of worktree-discovery: they
+            # share a venue lane's host/root and are embodied *into* a
+            # worktree, not addressed as a first-class target themselves.
+            spawnable_as_target = not (
+                bool(config.get("project")) and not raw_worktree_discovery
+            )
+        else:
+            spawnable_as_target = bool(raw_spawnable_as_target)
         registry[name] = AgentConfig(
             name=name,
             host=config.get("host"),
@@ -800,7 +818,8 @@ def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
             worktree_root=config.get("worktree_root"),
             env={str(k): str(v) for k, v in config.get("env", {}).items()},
             project=config.get("project"),
-            worktree_discovery=bool(config.get("worktree_discovery", True)),
+            spawnable_as_target=spawnable_as_target,
+            worktree_discovery=raw_worktree_discovery,
             setup_script=config.get("setup_script"),
             requires_admin=bool(config.get("requires_admin")),
             mcp_servers=[dict(spec) for spec in raw_mcp_servers],
@@ -2781,7 +2800,7 @@ class AgentResolver:
 
     def _agent_to_dict(self, config: AgentConfig) -> dict[str, Any]:
         """Convert an AgentConfig to API-ready dict."""
-        spawnable = not config.managed
+        spawnable = not config.managed and config.spawnable_as_target
         if config.spawn_command:
             target_type = "command"
         elif config.host and not self._is_local_loopback_agent(config):
@@ -2795,6 +2814,7 @@ class AgentResolver:
             "description": config.description or "",
             "icon": config.icon,
             "managed": config.managed,
+            "spawnable_as_target": config.spawnable_as_target,
             "spawnable": spawnable,
             "target_type": target_type,
             "host": config.host or "",
@@ -2821,6 +2841,8 @@ class AgentResolver:
         """
         result = []
         for config in self._agents.values():
+            if not config.spawnable_as_target:
+                continue
             result.append(self._agent_to_dict(config))
 
         return result
@@ -2918,6 +2940,7 @@ class AgentResolver:
                         f"{prefix}:{a}" for a in getattr(agent, "aliases", [])
                     ],
                     "managed": False,
+                    "spawnable_as_target": True,
                     "spawnable": True,
                     "target_type": "command",
                     "host": "",
