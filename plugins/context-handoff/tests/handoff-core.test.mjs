@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { join, dirname } from "node:path";
 import {
   mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, unlinkSync,
-  utimesSync, existsSync,
+  existsSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 import {
   HANDOFF_META_PREFIX,
@@ -1580,12 +1580,22 @@ test("attemptWorktreeSync skips when another sync attempt already holds the work
   }
 });
 
+function deadPid() {
+  // A PID guaranteed to no longer be running: spawn a trivial child and
+  // wait for it to exit (spawnSync blocks until then), then reuse its now-
+  // terminated pid -- more reliable than guessing an arbitrary unused
+  // number, which could in rare cases collide with a real live process.
+  const result = spawnSync(process.execPath, ["-e", ""]);
+  return result.pid;
+}
+
 test("attemptWorktreeSync reclaims a stale worktree lock left by a crashed process", async () => {
   // Real regression this guards: if the process is killed after acquiring
   // the lock (openSync succeeds) but before the finally block runs (e.g.
   // mid-fetch), the lock file would otherwise remain forever, permanently
-  // skipping every future sync for this worktree. An old-enough lock file
-  // must be treated as abandoned and reclaimed rather than honored forever.
+  // skipping every future sync for this worktree. A lock recording a
+  // confirmed-dead holder pid must be treated as abandoned and reclaimed
+  // rather than honored forever.
   const dir = initGitRepo();
   try {
     const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
@@ -1593,10 +1603,7 @@ test("attemptWorktreeSync reclaims a stale worktree lock left by a crashed proce
     }).trim();
     const lockPath = join(dir, gitDir);
     mkdirSync(dirname(lockPath), { recursive: true });
-    writeFileSync(lockPath, "");
-    // Back-date the lock well past the staleness threshold (5 minutes).
-    const staleTime = new Date(Date.now() - 10 * 60 * 1000);
-    utimesSync(lockPath, staleTime, staleTime);
+    writeFileSync(lockPath, `${deadPid()}-0-deadholder`);
     const result = await attemptWorktreeSync(dir);
     // Reclaimed and proceeded past the lock -- this throwaway repo isn't an
     // adopted agent-worktrees project, so the actual sync attempt fails
@@ -1649,9 +1656,7 @@ test("attemptWorktreeSync exactly one of several concurrent attempts proceeds pa
     }).trim();
     const lockPath = join(dir, gitDir);
     mkdirSync(dirname(lockPath), { recursive: true });
-    writeFileSync(lockPath, "");
-    const staleTime = new Date(Date.now() - 10 * 60 * 1000);
-    utimesSync(lockPath, staleTime, staleTime);
+    writeFileSync(lockPath, `${deadPid()}-0-deadholder`);
     const results = await Promise.all(
       Array.from({ length: 5 }, () => attemptWorktreeSync(dir)),
     );
@@ -1792,6 +1797,32 @@ test("attemptWorktreeSyncLocked disables rebase.autoStash and repo hooks for the
     callCount >= 2,
     `expected withUnattendedSyncGitConfig to wrap env for both delegated exec branches, saw ${callCount} call(s)`,
   );
+});
+
+test("attemptWorktreeSync never reclaims a lock recording a genuinely LIVE holder, no matter its age", async () => {
+  // Real regression this guards (the round-16-through-20 root cause): a
+  // reclaim scheme based purely on age can reclaim a holder that is merely
+  // slow (a suspended process, a very slow network) but still very much
+  // alive -- which is exactly what forces the whole chain of release-side
+  // races those rounds kept surfacing. Gating reclaim on confirmed
+  // liveness instead means a live holder is NEVER reclaimed, however old
+  // its lock file is.
+  const dir = initGitRepo();
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-path", "context-handoff-sync.lock"], {
+      cwd: dir, encoding: "utf-8",
+    }).trim();
+    const lockPath = join(dir, gitDir);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    // This test process's own pid is unambiguously alive.
+    writeFileSync(lockPath, `${process.pid}-0-liveholder`);
+    const result = await attemptWorktreeSync(dir);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /already in progress/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("acquireLock treats a failed stat on lock contention as contention, not as reclaimable", () => {

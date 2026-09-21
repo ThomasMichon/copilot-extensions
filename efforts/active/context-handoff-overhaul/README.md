@@ -1953,3 +1953,41 @@ HIGH findings plus 1 "previously missed" finding, all fixed:
   parity). `node --test`: 153 tests, 151 pass (2 pre-existing skips), no
   regressions. All guards pass. No version bump needed (still
   `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 20: gate lock reclaim on process liveness, not just age
+
+Round 20 confirmed both of round 19's fixes resolved and surfaced 1 new
+HIGH finding that turned out to be the true root cause of the whole
+rounds-16-through-20 chain:
+
+- **The reclaim scheme itself could still race with a live replacement
+  holder:** the reviewer traced through the full release sequence and
+  found that `releaseLock`'s own claim step (`renameSync(lockPath,
+  claimedPath)`) removes WHATEVER is at the path -- including a live
+  replacement holder's active lock -- leaving a brief empty-path window
+  before the no-clobber `linkSync` restore. A third invocation's
+  `acquireLock` could `openSync(lockPath, "wx")` successfully into that
+  empty window, running concurrently with the (temporarily displaced,
+  soon-to-be-restored) replacement holder. Patching this specific window
+  again would just move the same fundamental problem one level further
+  (as rounds 17-19 already demonstrated). The reviewer's own suggested
+  alternative -- "avoid reclaiming live holders" -- is the actual fix: age
+  alone can never distinguish a genuinely crashed holder from one that is
+  merely slow (a suspended process, a very slow network) but still very
+  much alive, and reclaiming the LATTER is what forces every subsequent
+  release-side race in this whole chain. Replaced the time-only reclaim
+  criterion with **liveness-gated reclaim**: the lock's content now leads
+  with the holder's own pid, and `acquireLock` only ever reclaims a lock
+  whose recorded pid is confirmed NOT running (`isProcessAlive()`, via
+  `process.kill(pid, 0)`) -- a live holder is now NEVER reclaimed no matter
+  how long it has been running. `STALE_LOCK_MS` (bumped to an hour) is
+  demoted to an ultimate last-resort fallback used only when the pid can't
+  even be parsed (a corrupt/legacy lock). This removes the ROOT scenario
+  that necessitated the entire chain of release-side fixes: a genuinely
+  dead process can never resume and race on its own release.
+- 2 new tests (a genuinely live holder -- this test process's own pid --
+  is never reclaimed no matter its lock's age; updated the existing
+  stale-reclaim tests to record a confirmed-dead pid via a spawned,
+  already-exited child process, rather than relying on age alone). `node
+  --test`: 154 tests, 152 pass (2 pre-existing skips), no regressions. All
+  guards pass. No version bump needed (still `0.1.1-dev36`).

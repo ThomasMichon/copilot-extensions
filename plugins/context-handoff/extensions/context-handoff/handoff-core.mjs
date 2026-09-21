@@ -331,22 +331,40 @@ async function rebaseInProgress(cwd) {
 // agent-worktrees-itself gap is why rebaseInProgress() is still rechecked
 // immediately before the sync exec even while this lock is held.
 //
-// STALE_LOCK_MS: a process killed between `openSync(..., "wx")` succeeding
-// and the `finally` block running (e.g. the extension host or the whole
-// process is terminated mid-fetch) would otherwise leave the lock file
-// forever, silently skipping every future sync for this worktree until a
-// human manually deletes it. Any lock older than this is treated as
-// abandoned and reclaimed -- generous relative to attemptWorktreeSync's own
-// ~30s worst-case duration, but still self-heals within a bounded time
-// rather than requiring manual intervention.
-const STALE_LOCK_MS = 5 * 60 * 1000;
+// STALE_LOCK_MS: an ultimate, last-resort fallback threshold ONLY for when
+// the recorded holder's liveness genuinely cannot be determined (its PID
+// can't be parsed from the lock, or querying process liveness itself
+// errors) -- see `isProcessAlive` below. The PRIMARY reclaim criterion is
+// liveness, not age: an aged-but-still-running holder (a slow network, a
+// suspended process -- not crashed) must never be reclaimed out from under
+// itself, because that is exactly what forced the whole chain of
+// release-side races rounds 16-20 kept surfacing (a resumed live holder
+// finding its lock already replaced). Gating reclaim on confirmed death
+// removes the scenario that necessitates any of that entirely: a genuinely
+// dead process can never resume and race on release.
+const STALE_LOCK_MS = 60 * 60 * 1000;
+
+// True if `pid` is still running. `process.kill(pid, 0)` sends no signal
+// (POSIX) / merely checks accessibility (Windows via Node's libuv layer) --
+// it only tests existence. Fails OPEN (reports alive) on any inability to
+// tell (e.g. EPERM for a pid owned by another user), matching this whole
+// lock's fail-closed philosophy: never reclaim on ambiguous evidence.
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code !== "ESRCH";
+  }
+}
 
 function acquireLock(lockPath) {
   // Ownership token written into the lock file's content, not just its
   // presence at a path -- see the release-time check in
   // withWorktreeSyncLock's finally block for why path-only ownership isn't
-  // enough (a suspended/very slow holder resuming after being reclaimed as
-  // stale must not delete whoever reclaimed it).
+  // enough. Leads with this process's own pid (parsed back out below to
+  // gate reclaim on liveness) followed by a random suffix for uniqueness.
   const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   try {
     const fd = openSync(lockPath, "wx");
@@ -354,30 +372,49 @@ function acquireLock(lockPath) {
     return { fd, token };
   } catch (error) {
     if (error?.code !== "EEXIST") throw error;
-    let ageMs;
+    let holderPid = null;
     try {
-      ageMs = Date.now() - statSync(lockPath).mtimeMs;
+      const content = readFileSync(lockPath, "utf-8");
+      const match = content.match(/^(\d+)-/);
+      if (match) holderPid = Number(match[1]);
     } catch {
-      // Could not stat the lock we just failed to create exclusively --
-      // NOT necessarily gone (a permission error, a transient FS issue, or
-      // it vanishing between the failed open and this stat all look the
-      // same here). Treating that ambiguity as reclaimable would risk
-      // unlinking a lock another process re-created a moment ago, letting
-      // both processes run concurrently. Fail closed as contention instead
-      // -- a lock that is genuinely gone will simply succeed to acquire on
-      // the NEXT attempt.
-      throw error;
+      // Couldn't read the existing lock's content at all -- fall through
+      // to the age-only fallback below rather than guessing a pid.
     }
-    if (ageMs <= STALE_LOCK_MS) throw error;
-    // Stale -- reclaim it, but atomically: renaming lockPath AWAY (not
-    // unlinking it) is the only step here the OS actually guarantees
-    // single-winner semantics for. If two processes race to reclaim the
-    // SAME stale lock, only one `renameSync` can succeed (the source path
-    // stops existing the instant the first one wins); the loser's rename
-    // throws ENOENT and it must NOT proceed to acquire -- an unconditional
-    // unlink+open here (the prior approach) let a second reclaimer delete
-    // the FIRST reclaimer's fresh lock and acquire its own, letting both
-    // run concurrently and defeating the whole point of the lock.
+    if (holderPid !== null) {
+      // Liveness is the primary signal: a live holder is NEVER reclaimed,
+      // no matter how long it has been running -- only a confirmed-dead
+      // one (this holder's own recorded pid no longer exists) is.
+      if (isProcessAlive(holderPid)) throw error;
+    } else {
+      // No parseable pid (a corrupt/legacy lock, or it vanished before this
+      // read) -- fall back to the age-only heuristic as a last resort so a
+      // genuinely unreadable abandoned lock can still self-heal eventually.
+      let ageMs;
+      try {
+        ageMs = Date.now() - statSync(lockPath).mtimeMs;
+      } catch {
+        // Could not stat the lock we just failed to create exclusively --
+        // NOT necessarily gone (a permission error, a transient FS issue,
+        // or it vanishing between the failed open and this stat all look
+        // the same here). Treating that ambiguity as reclaimable would
+        // risk unlinking a lock another process re-created a moment ago.
+        // Fail closed as contention instead -- a lock that is genuinely
+        // gone will simply succeed to acquire on the NEXT attempt.
+        throw error;
+      }
+      if (ageMs <= STALE_LOCK_MS) throw error;
+    }
+    // Confirmed dead (or unreadable-and-old) -- reclaim it, but atomically:
+    // renaming lockPath AWAY (not unlinking it) is the only step here the
+    // OS actually guarantees single-winner semantics for. If two processes
+    // race to reclaim the SAME stale lock, only one `renameSync` can
+    // succeed (the source path stops existing the instant the first one
+    // wins); the loser's rename throws ENOENT and it must NOT proceed to
+    // acquire -- an unconditional unlink+open here (an earlier approach)
+    // let a second reclaimer delete the FIRST reclaimer's fresh lock and
+    // acquire its own, letting both run concurrently and defeating the
+    // whole point of the lock.
     const graveyardPath = `${lockPath}.stale-${process.pid}-${Date.now()}`;
     try {
       renameSync(lockPath, graveyardPath);
@@ -441,6 +478,14 @@ async function withWorktreeSyncLock(cwd, fn) {
 // ever inspects content this invocation has already exclusively taken
 // possession of; nothing else can be racing over the SAME bytes by the time
 // it runs.
+//
+// The "claimed content isn't ours" branch below is now structurally rare:
+// acquireLock only ever reclaims a CONFIRMED-DEAD holder (by pid liveness),
+// or an unreadable/corrupt lock as a last resort -- a genuinely live holder
+// (however long it has been running) is never reclaimed out from under
+// itself, so this invocation reaching its own release after being displaced
+// should no longer happen in normal operation. It remains as defense in
+// depth for the corrupt-lock fallback path.
 function releaseLock(lockPath, token) {
   const claimedPath = `${lockPath}.release-${process.pid}-${Date.now()}`;
   try {
