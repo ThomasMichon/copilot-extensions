@@ -204,7 +204,14 @@ def _parse_split_at(value: str) -> datetime:
     _parse_launch_time); comparing them against a naive datetime raises
     TypeError. A bare `--split-at 2026-09-21T05:00:00` is valid ISO-8601 and
     a reasonable thing to pass, so normalize instead of rejecting it.
+
+    `datetime.fromisoformat()` does not accept a trailing `Z` UTC designator
+    on this repository's supported Python versions (added only in 3.11+);
+    normalize it to `+00:00` first so `--split-at ...Z` -- also valid
+    ISO-8601, and the form most people reach for -- works everywhere.
     """
+    if value.endswith("Z") or value.endswith("z"):
+        value = value[:-1] + "+00:00"
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)

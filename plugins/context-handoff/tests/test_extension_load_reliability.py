@@ -196,6 +196,14 @@ def test_parse_split_at_preserves_explicit_offset():
     assert parsed == datetime(2026, 9, 21, 5, 0, 0, tzinfo=timezone.utc)
 
 
+def test_parse_split_at_accepts_trailing_z():
+    # datetime.fromisoformat() does not accept a trailing "Z" on this
+    # repository's supported Python versions (added only in 3.11+); a
+    # Z-suffixed timestamp is standard ISO-8601 and must not raise.
+    parsed = reliability._parse_split_at("2026-09-21T05:00:00Z")
+    assert parsed == datetime(2026, 9, 21, 5, 0, 0, tzinfo=timezone.utc)
+
+
 def test_main_accepts_naive_split_at_without_raising(tmp_path, capsys):
     now = datetime.now(timezone.utc)
     now_ms = int(now.timestamp() * 1000)
