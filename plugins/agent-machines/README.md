@@ -49,7 +49,7 @@ actions) and per-machine data stay in the consuming repo.
   sessions: an hourly `watchdog` tier (dtssh launcher liveness plus a dtssh
   mesh refresh -- re-discover live tunnel ids, re-emit this machine's SSH
   profile, and verify reachability to every known alias) and a daily
-  `sweep` tier (repo fast-forward + plugin reconcile + full restore). Both
+  `sweep` tier (repo fast-forward + full repo `update` + full restore). Both
   defer around a live session and are a clean no-op when not opted in. See the
   `agent-machines-setup` skill's *Enable a regular unattended maintenance
   schedule* section and [`docs/resources.md`](docs/resources.md#self-update).
@@ -275,7 +275,9 @@ requested. `self-update install` resolves the declarative `self-update`
 resources first and only attempts Scheduled Task registration for tiers whose
 resolved state is `present`; the registered task/timer invokes the stable
 `agent-machines` binstub so runtime slot cutovers do not strand it on an old
-interpreter. `restore --apply` reconciles the same task presence
+interpreter. The sweep tier likewise drives the owning repo's `update`
+command, then runs `restore --apply` through the same stable `agent-machines`
+binstub. `restore --apply` reconciles the same task presence
 declaratively, including removing tasks that have since been opted out.
 `--verbose`, and always present in `--json`.
 
