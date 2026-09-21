@@ -494,21 +494,37 @@ async def _run_local(
     return stdout
 
 
+def _resolve_local_binstub(project: str) -> str:
+    """Resolve *project*'s binstub to a directly-executable path.
+
+    ``asyncio.create_subprocess_exec`` (unlike a shell) never consults
+    Windows' ``PATHEXT`` -- an extensionless name like ``aperture-labs``
+    cannot resolve to the installed ``aperture-labs.cmd``/``.ps1`` shim, and
+    raises ``FileNotFoundError: [WinError 2]`` even though the shim exists
+    and runs fine from an interactive shell. This silently zeroed every
+    LOCAL Windows worktree-discovery crawl (WSL/Linux agents were unaffected
+    -- POSIX shims need no extension) -- see
+    aperture-labs efforts/active/agent-bridge-worktree-native-agents.
+
+    :func:`shutil.which` performs the same PATHEXT-aware resolution a shell
+    would, on every platform, so it is used unconditionally rather than
+    hand-rolling a Windows-only extension list.
+    """
+    import shutil
+    from pathlib import Path
+
+    home = Path.home()
+    explicit = home / ".local" / "bin" / project
+    resolved = shutil.which(str(explicit)) or shutil.which(project)
+    return resolved or project
+
+
 async def _run_local_ex(
     project: str, args: list[str] | None = None, *, timeout: float | None = None,
 ) -> tuple[str | None, str]:
     """Like :func:`_run_local`, also returning stderr (empty on success) so
     a caller can distinguish a timeout/crash from a rejected flag."""
-    from pathlib import Path
-
-    home = Path.home()
-    binstub = home / ".local" / "bin" / project
-    if not binstub.exists():
-        # Fall back to PATH
-        binstub_str = project
-    else:
-        binstub_str = str(binstub)
-
+    binstub_str = _resolve_local_binstub(project)
     cmd = [binstub_str, *(args if args is not None else ["list", "--json"])]
     return await _exec_ex(cmd, timeout=timeout)
 
