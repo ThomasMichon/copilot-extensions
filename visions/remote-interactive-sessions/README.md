@@ -3,12 +3,13 @@
 - **Subject:** How a human-attended, muxed, interactive Copilot CLI session
   running in a remote venue (a CodeSpace, a trusted container, or any
   agent-ssh-reachable machine) becomes a first-class, coordinated peer of a
-  locally-hosted session — bound to its Session Host through explicit
-  discovery rather than ambient self-registration, and launched symmetrically
-  by any venue provider.
+  locally-hosted session — durably registered in the same discovery index a
+  directly-spawned Session Host session uses, through explicit reservation
+  rather than ambient self-registration, and launched symmetrically by any
+  venue provider.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-19
+- **Last revised:** 2026-09-20
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -54,18 +55,33 @@ does not depend on it.
 
 ## Concepts & Components
 
-### Session Host CLI mode
+### CLI mode needs no Session Host process — mux and the extension already do its jobs
 
-A **mode** of the existing Session Host (see
-[session-hosting](../session-hosting/README.md) § *Session-host provider*),
-not a second host type. In its ordinary mode, a Session Host spawns and owns a
-`copilot --acp` child directly. In CLI mode, the coordination layer allocates
-and prepares a Session Host **first**, then leaves it waiting to be claimed by
-an independently launched, muxed, interactive CLI process rather than spawning
-that process itself. The two modes share every downstream mechanic —
-reattachable transport, connect-nonce identity, process survival, retirement —
-so a CLI-mode-bound session and a directly-spawned one are indistinguishable to
-every consumer above the host boundary.
+A Session Host exists to give a headless `copilot --acp` child two things it
+cannot provide itself: **survival** across daemon restarts/reconnects, and an
+**ACP transport surface** so the daemon can drive a child with no human
+attached. A muxed, interactive CLI session already has both, from different
+owners: the multiplexer (tmux/psmux) keeps the `copilot` process alive across
+detach/reattach — that is a mux's entire purpose — and the coordination
+layer's own CLI extension, already loaded inside that real interactive
+process, already registers and participates directly with the daemon (proven
+by the existing `send`-admission and inbox-polling mechanics). Spawning a
+Session Host to wrap a process two other owners already keep alive and
+already speak for would be a second, redundant lifecycle manager — precisely
+what this vision's non-goals rule out.
+
+What CLI mode actually still needs, and does not yet have, is Session Host's
+**third** job: durable discoverability. A directly-spawned session is durably
+findable and reattachable through `host_index` — the daemon's own map of
+"where is this session's process and how do I reach it again." A CLI-mode
+session must be findable and reattachable the exact same durable way, through
+the exact same index — not a separate, bespoke correlation mechanism — even
+though *how* to reach it differs fundamentally: an ACP-mode record's endpoint
+is "dial this local port"; a CLI-mode record's endpoint is "attach to this mux
+session" (locally: `tmux`/`psmux attach-session`; remotely: reach the venue
+over its existing transport, then attach). One index, two honest record
+shapes for two different reattach mechanisms — not a second host type, and
+not a second discovery mechanism.
 
 ### Worktree-keyed reservation, not ambient self-registration
 
@@ -77,7 +93,9 @@ starts. This is sound specifically because the fabric already guarantees
 *[single-current-session-per-worktree](../agent-fabric/README.md#single-current-session-per-worktree)*
 — at most one current session per worktree — so a worktree-keyed reservation
 is never ambiguous. Correlating a registering session against a pending
-reservation is the daemon's own responsibility at registration time; an
+reservation, and **promoting that reservation into a real `host_index`
+registration** (a CLI-mode-shaped record, not a boolean flag), is the
+daemon's own responsibility at registration time; an
 extension that already resolves and sends its worktree identity needs no
 separate lookup step to participate. Only once a *remote* venue's own local
 daemon differs from the host machine's does an explicit, client-read
@@ -90,8 +108,10 @@ Creating a muxed, interactive Copilot CLI session is not a capability
 exclusive to the local worktree/mux launch path. Any venue provider —
 `agent-codespaces`, `agent-containers`, or a future `agent-ssh`-reachable
 machine — can offer the same launch shape: prepare the venue, allocate the
-paired CLI-mode Session Host, and start a standard muxed CLI process bound to
-it. This rides the single SSH transport and auth-relay back-channel
+paired CLI-mode reservation, and start a standard muxed CLI process bound to
+it, registering into the same `host_index` with a reattach descriptor that
+knows how to reach that venue. This rides the single SSH transport and
+auth-relay back-channel
 [venue-parity](../venue-parity/README.md) already establishes for headless
 dispatch; it does not require or invent a second, venue-specific transport for
 the interactive case.
@@ -119,12 +139,14 @@ to carry this over a network boundary.
 
 A registering session's binding to its CLI-mode designation is resolved from
 an explicit reservation keyed by worktree identity, correlated at
-registration time, not inferred from an ambient default.
+registration time and promoted into the same durable `host_index` every
+Session Host-backed session is found through — not inferred from an ambient
+default, and not tracked in a second, parallel discovery mechanism.
 
 ### symmetric-muxed-venue-launch
 
 `agent-codespaces` and `agent-containers` can create a standard, muxed
-interactive Copilot CLI session bound to a pre-allocated Session Host, the same
+interactive Copilot CLI session bound to a pre-allocated reservation, the same
 way the local worktree/mux launch path already does, as thin transports over
 one shared SSH substrate.
 
@@ -174,10 +196,10 @@ the extension-host locking its own plugin directory.
 
 ### no-duplicate-lifecycle-machinery
 
-A CLI-mode-bound session reuses the exact reattach, observation, and
-retirement machinery any other Session Host-hosted session uses. Reaching it
-from a remote venue is a matter of transport and discovery, never a forked
-protocol.
+A CLI-mode-bound session reuses the exact `host_index` registration, reattach,
+observation, and retirement machinery any other durably-registered session
+uses — a second, honestly-different record shape (mux-reattach instead of a
+dialable port) in the same index, never a second index or a forked protocol.
 
 ### opt-in-not-ambient-default
 
@@ -201,9 +223,12 @@ headless session's mechanics do not actually extend to an attended one.
   parallel raw-terminal replay format, a separate writer/observer protocol, or
   a competing execution-identity model alongside the one session-hosting
   already defines.
-- **Not a second Session Host implementation.** CLI mode is a mode of the one
-  Session Host, sharing its every downstream mechanic — not a new host type
-  with its own lifecycle.
+- **Not a second Session Host process or discovery mechanism.** CLI mode
+  spawns no wrapping host process — the multiplexer and the already-loaded
+  extension already provide a Session Host's survival and daemon-facing
+  duties — but it registers into the exact same `host_index` any Session
+  Host-backed session uses, as a second, honest record shape (mux-reattach,
+  not a dialable port), never a parallel index or lifecycle.
 - **Not reaching local capabilities from the remote session.** Whether and how
   a CLI-mode session reaches locally-provided resources (a browser profile,
   local configuration, etc.) is
@@ -243,6 +268,29 @@ headless session's mechanics do not actually extend to an attended one.
 
 ## Provenance
 
+- **2026-09-20** — Course-corrected "Session Host CLI mode" after operator
+  challenge to a hypothetical "always spawn a real Session Host, even
+  locally" reading of Phase 2/3's implementation gap. Neither extreme is
+  right: Session Host's two other jobs (survival across
+  reconnect/restart, and an ACP transport surface so the daemon can drive a
+  headless child) are already fully provided, for a CLI-mode session, by its
+  two real owners — the multiplexer (survival) and the already-loaded CLI
+  extension (direct daemon participation, proven since Phase 1). Spawning a
+  Session Host to wrap a process two other owners already keep alive and
+  already speak for would itself be the redundant "second host type" this
+  vision's non-goals rule out. What Phase 2/3 actually left missing was
+  Session Host's *third* job — durable discoverability through `host_index` —
+  which CLI mode instead reimplemented as a bespoke, parallel
+  `cli_mode_reservations`-only correlation. Corrected the concept: CLI mode
+  spawns no host process, but a claimed reservation is promoted into a real
+  `host_index` registration (a second, honest record shape — mux-reattach
+  instead of a dialable port — in the *same* index), so discovery is unified
+  across ACP and CLI mode, and across every venue, without a second index or
+  a redundant process. Implementation follow-up (extending `HostRecord`/
+  `host_index.py` with a CLI-mode record shape and mux-liveness check, and
+  promoting the Phase 2 reservation-claim into a real registration) is
+  tracked in the realizing effort, reopening parts of already-merged Phase 2/3
+  work rather than treating them as closed.
 - **2026-09-19** — Refined "cwd-keyed discovery" to **worktree-id-keyed
   reservation + server-side correlation** after implementing Phase 2: the
   fabric's own `single-current-session-per-worktree` identity unit is the
