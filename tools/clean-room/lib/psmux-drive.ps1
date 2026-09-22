@@ -72,8 +72,19 @@ function Start-CrPsmux {
     # session out from under it ("psmux: no server running"). Append a long
     # hold so the pane -- and therefore the session -- outlives copilot's own
     # exit; Stop-CrPsmux tears it down explicitly once the caller is done.
-    $cmdLine = "copilot -i `"$Prompt`" $argLine; Start-Sleep -Seconds 300"
-    & psmux new-session -d -s $Session -c $Cwd -- powershell -NoProfile -Command $cmdLine
+    # Write the invocation to a temp .ps1 FILE rather than handing a
+    # pre-quoted command STRING through `psmux new-session ... -- powershell
+    # -Command $cmdLine`: confirmed on a real container that PowerShell's own
+    # native-argv quoting mangles embedded double-quotes across that many
+    # process hops (psmux.exe re-assembling a child command line), so
+    # `copilot` ended up receiving the prompt as bare, unquoted, word-split
+    # tokens ("Invalid command format ... prompt was not quoted"). A file has
+    # no argv-splitting to lose -- the quoting is resolved once, here, when
+    # the file is written.
+    $scriptPath = Join-Path $env:TEMP ("cr-psmux-" + $Session + ".ps1")
+    $scriptBody = "copilot -i `"$Prompt`" $argLine; Start-Sleep -Seconds 300"
+    Set-Content -LiteralPath $scriptPath -Value $scriptBody -Encoding utf8
+    & psmux new-session -d -s $Session -c $Cwd -- powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath
 }
 
 function Send-CrPsmuxKeys {
