@@ -1548,6 +1548,74 @@ class TestWorktreeRoutes:
         assert data["acp_session_id"] == "acp-fresh-1"
         mgr.start_session.assert_awaited_once()
 
+    def test_reservation_race_409_names_the_live_holder_not_resuming_session(
+        self, client, app,
+    ) -> None:
+        """When ``reserve_worktree_ownership`` refuses (a live CLI raced the
+        reservation), the 409's session_id must be the ACTUAL live CLI
+        holder -- never the resuming session's own id. A reclaim caller
+        fences on this id to confirm a stopped holder is really gone before
+        forcing; the resuming session's id would trivially "match" every
+        time and silently defeat that safety check."""
+        wt_id = "anomalous-potato-wsl-20250101-190000-racedholder"
+        self._seed_worktree("test-agent", wt_id)
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        stopped = Session("sess-resuming-1", "quiet-marsh", target, "test-agent")
+        stopped.status = SessionStatus.STOPPED
+        mgr._sessions[stopped.session_id] = stopped
+
+        db = app.state.db
+        db.reserve_worktree_ownership = lambda *a, **k: False
+        db.register_live_session(
+            "cli-real-holder", machine="test-agent", cwd=None,
+            worktree_id=wt_id, repo=None, branch=None, pid=None, role=None,
+            now=time.time(),
+        )
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["reason"] == "live_cli_holds_worktree"
+        assert detail["session_id"] == "cli-real-holder"
+        assert detail["session_id"] != stopped.session_id
+
+    def test_reservation_conflict_without_live_cli_reports_distinct_reason(
+        self, client, app,
+    ) -> None:
+        """``reserve_worktree_ownership`` also refuses when another active
+        ACP reservation owns the worktree, entirely without a live CLI. That
+        must NOT be reported as ``live_cli_holds_worktree`` -- a reclaim
+        caller treats that reason as "stop-and-force through the interactive
+        CLI", which does nothing for an ACP ownership conflict and would
+        otherwise run a pointless (and unfenced, since there is no CLI
+        holder id) restart."""
+        wt_id = "anomalous-potato-wsl-20250101-190100-acpowned"
+        self._seed_worktree("test-agent", wt_id)
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        stopped = Session("sess-resuming-2", "still-pond", target, "test-agent")
+        stopped.status = SessionStatus.STOPPED
+        mgr._sessions[stopped.session_id] = stopped
+
+        db = app.state.db
+        db.reserve_worktree_ownership = lambda *a, **k: False
+        # No live_session registered at all -- the refusal is purely an ACP
+        # ownership conflict. Seed the reservation row directly.
+        db.execute_write(
+            "INSERT INTO worktree_ownership (worktree_id, session_id, "
+            "reserved_at, updated_at) VALUES (?, ?, ?, ?)",
+            (wt_id, "acp-other-owner", time.time(), time.time()),
+        )
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["reason"] == "worktree_owned_by_another_session"
+        assert detail["session_id"] == "acp-other-owner"
+
     def test_resume_worktree_does_not_bypass_provider_refresh_failure(
         self, client, app,
     ) -> None:
@@ -2199,6 +2267,44 @@ class TestWorktreeRoutes:
         assert db.list_pending_live_messages("cli-live") == []
         assert db.list_fresh_live_sessions(wt_id, now=now) == []
 
+    def test_restart_reports_failure_when_invalidation_raises(
+        self, client, app,
+    ) -> None:
+        """The CLI was actually stopped (ok:true, had_session:true), but if
+        the server-side live-session invalidation itself raises, the
+        response must report failure (ok:false) rather than silently
+        swallow it -- a caller trusting ok:true would force-resume past a
+        registration that is still 'live'."""
+        import time
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "anomalous-potato-wsl-20250101-193310-invalidatefail"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        db = app.state.db
+        now = time.time()
+        db.register_live_session(
+            "cli-live", machine="test-agent", cwd=None, worktree_id=wt_id,
+            repo=None, branch=None, pid=None, role=None, now=now,
+        )
+        db.expire_live_sessions_for_worktree = lambda *a, **k: (_ for _ in ()).throw(
+            RuntimeError("db write failed")
+        )
+
+        payload = (
+            '{"worktree_id": "%s", "had_session": true, '
+            '"method": "graceful", "ok": true}' % wt_id
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ):
+            resp = client.post(f"/api/v1/worktrees/{wt_id}/restart")
+
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is False
+
     def test_restart_failure_keeps_live_session(
         self, client, app,
     ) -> None:
@@ -2230,6 +2336,82 @@ class TestWorktreeRoutes:
 
         assert resp.status_code == 200
         assert db.get_live_session("cli-live")["status"] == "live"
+
+    def test_restart_ok_no_session_keeps_live_registration(
+        self, client, app,
+    ) -> None:
+        """``ok:true, had_session:false`` is a no-op (no mux session existed
+        to stop) -- it is NOT proof that whatever registered
+        live_cli_holds_worktree (possibly a bare, un-muxed CLI) was actually
+        terminated, so the live registration must be left intact."""
+        import time
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "anomalous-potato-wsl-20250101-193420-bare"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        db = app.state.db
+        now = time.time()
+        db.register_live_session(
+            "cli-bare", machine="test-agent", cwd=None, worktree_id=wt_id,
+            repo=None, branch=None, pid=None, role=None, now=now,
+        )
+
+        payload = (
+            '{"worktree_id": "%s", "had_session": false, '
+            '"method": "none", "ok": true}' % wt_id
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ):
+            resp = client.post(f"/api/v1/worktrees/{wt_id}/restart")
+
+        assert resp.status_code == 200
+        assert db.get_live_session("cli-bare")["status"] == "live"
+
+    def test_restart_expected_holder_fences_invalidation(
+        self, client, app,
+    ) -> None:
+        """``?expected_holder=`` scopes the invalidate-on-take-over to only
+        that session id -- a different, genuinely live registration for the
+        same worktree (a claimant that raced in) is left untouched (#2906
+        race hardening)."""
+        import time
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "anomalous-potato-wsl-20250101-193450-fenced"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        db = app.state.db
+        now = time.time()
+        db.register_live_session(
+            "cli-original", machine="test-agent", cwd=None, worktree_id=wt_id,
+            repo=None, branch=None, pid=None, role=None, now=now,
+        )
+        db.register_live_session(
+            "cli-new-claimant", machine="test-agent", cwd=None,
+            worktree_id=wt_id, repo=None, branch=None, pid=None, role=None,
+            now=now + 0.5,
+        )
+
+        payload = (
+            '{"worktree_id": "%s", "had_session": true, '
+            '"method": "graceful", "ok": true}' % wt_id
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ):
+            resp = client.post(
+                f"/api/v1/worktrees/{wt_id}/restart?expected_holder=cli-original"
+            )
+
+        assert resp.status_code == 200
+        assert db.get_live_session("cli-original")["status"] == "taken-over"
+        assert db.get_live_session("cli-new-claimant")["status"] == "live"
 
     def test_resume_worktree_no_session_starts_fresh(self, client, app) -> None:
         """A worktree with no prior bridge session (e.g. just taken over, its
@@ -2263,6 +2445,60 @@ class TestWorktreeRoutes:
         assert spawned_target.worktree_id == wt_id
         assert spawned_target.cwd == f"/wt/{wt_id}"
         assert mgr.start_session.call_args.kwargs["caller_id"] == wt_id
+
+    def test_resume_worktree_fresh_session_reports_conflict_when_reservation_fails(
+        self, client, app,
+    ) -> None:
+        """The pre-spawn live-holder recheck does not cover the spawn itself
+        (mgr.start_session is the slow, awaited step) -- a genuinely
+        different claimant can register during it. The post-spawn
+        reservation attempt's result must be checked: a False result must
+        surface as a 409 (with the raced-in fresh session cleaned up, not
+        leaked), never silently return the fresh session as if it were
+        safely owned (that would recreate the duplicate-controller
+        race)."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from agent_bridge.transport import SpawnTarget
+
+        wt_id = "anomalous-potato-wsl-20250101-193510-freshraced"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+        app.state.resolver.resolve = MagicMock(
+            return_value=SpawnTarget(type="local")
+        )
+
+        mgr = app.state.session_manager
+        target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id)
+        fresh = Session("fresh-sess-raced", "amber-loop", target, "test-agent")
+        fresh.status = SessionStatus.IDLE
+
+        db = app.state.db
+
+        async def _start_session_races_in_a_claimant(*a, **k):
+            # Simulate a different interactive CLI registering WHILE the
+            # spawn is in flight (after the pre-spawn holder recheck, before
+            # this returns) -- the exact window the fixed post-spawn
+            # reservation check exists to catch.
+            db.register_live_session(
+                "cli-raced-in", machine="test-agent", cwd=None,
+                worktree_id=wt_id, repo=None, branch=None, pid=None,
+                role=None, now=time.time(),
+            )
+            return fresh
+
+        mgr.start_session = AsyncMock(side_effect=_start_session_races_in_a_claimant)
+        mgr.end_session = AsyncMock()
+        db.reserve_worktree_ownership = lambda *a, **k: False
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["reason"] == "live_cli_holds_worktree"
+        assert detail["session_id"] == "cli-raced-in"
+        # The raced-in fresh session must not be leaked -- it's cleaned up
+        # rather than left running unreserved alongside the real holder.
+        mgr.end_session.assert_awaited_once_with("fresh-sess-raced", force=True)
 
     def test_resume_worktree_unknown_still_404s(self, client, app) -> None:
         """A worktree that is not discoverable at all (no session, not on disk)

@@ -70,6 +70,59 @@ def test_end_stop_thread_force_query_param(cfg_dir: Path, monkeypatch):
     ]
 
 
+def test_restart_worktree_force_query_param(cfg_dir: Path, monkeypatch):
+    """`restart_worktree` maps `force` to POST .../restart?force=true (#6744
+    Phase 3 -- the reclaim sequence's stop half)."""
+    client = BridgeClient.from_config()
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        client, "_request",
+        lambda method, path, **kw: calls.append((method, path, kw)) or None,
+    )
+    monkeypatch.setattr(client, "daemon_supports", lambda min_version: True)
+    client.restart_worktree("wt-1")
+    client.restart_worktree("wt-2", force=True)
+    client.restart_worktree("wt-3", expected_holder="sess-a")
+    client.restart_worktree("wt-4", force=True, expected_holder="sess-b")
+    assert calls == [
+        ("POST", "/api/v1/worktrees/wt-1/restart", {"params": None, "request_timeout": None}),
+        (
+            "POST", "/api/v1/worktrees/wt-2/restart",
+            {"params": {"force": "true"}, "request_timeout": None},
+        ),
+        (
+            "POST", "/api/v1/worktrees/wt-3/restart",
+            {"params": {"expected_holder": "sess-a"}, "request_timeout": None},
+        ),
+        (
+            "POST", "/api/v1/worktrees/wt-4/restart",
+            {
+                "params": {"force": "true", "expected_holder": "sess-b"},
+                "request_timeout": None,
+            },
+        ),
+    ]
+
+
+def test_restart_worktree_expected_holder_fails_closed_on_old_daemon(
+    cfg_dir: Path, monkeypatch,
+):
+    """``expected_holder`` is protocol-16 behavior -- a daemon that doesn't
+    advertise it would silently ignore the query param and run its old
+    unfenced restart, so this refuses the call outright rather than sending
+    an unfenced restart the daemon can't honor (#2906 race hardening)."""
+    client = BridgeClient.from_config()
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        client, "_request",
+        lambda method, path, **kw: calls.append((method, path, kw)) or None,
+    )
+    monkeypatch.setattr(client, "daemon_supports", lambda min_version: False)
+    result = client.restart_worktree("wt-1", expected_holder="sess-a")
+    assert result["ok"] is False
+    assert calls == []  # never even sent
+
+
 def test_explicit_base_url_env_wins(cfg_dir: Path, monkeypatch):
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
     routing.publish_active(cfg_dir, bind="127.0.0.1", port=9290, version="v")

@@ -43,8 +43,8 @@ class _FakeClient:
         return self._worktree_resume
 
 
-def _args(target, *, force=False):
-    return argparse.Namespace(session_id=target, force=force)
+def _args(target, *, force=False, json=False):
+    return argparse.Namespace(session_id=target, force=force, json=json)
 
 
 def _patch_client(monkeypatch, client):
@@ -125,3 +125,56 @@ def test_unknown_target_reports_neither(monkeypatch, capsys):
     assert "neither a bridge-owned session nor a recognized worktree" in (
         capsys.readouterr().err
     )
+
+
+class TestResumeJsonOutput:
+    """#6744 Phase 3: --json is the sole headless take-over primitive now
+    that `create --reclaim` is gone -- a caller (agent-dispatch) needs the
+    session id back machine-readably, not scraped from a human summary line.
+    """
+
+    def test_force_take_over_emits_json_session_id(self, monkeypatch, capsys):
+        client = _FakeClient(
+            worktree_resume={"status": "idle", "session_id": "owned-9"},
+        )
+        _patch_client(monkeypatch, client)
+
+        m._cmd_resume(_args("wt-6b68", force=True, json=True))
+
+        import json as _json
+
+        out = _json.loads(capsys.readouterr().out)
+        assert out == {
+            "session_id": "owned-9", "status": "idle",
+            "verb": "took over", "worktree_id": "wt-6b68",
+        }
+
+    def test_live_holder_refusal_emits_json_error(self, monkeypatch, capsys):
+        client = _FakeClient(
+            session_resume=BridgeClientError(404, "not found"),
+            worktree_resume=BridgeClientError(
+                409, {"reason": "live_cli_holds_worktree", "session_id": "live-7"}
+            ),
+        )
+        _patch_client(monkeypatch, client)
+
+        with pytest.raises(SystemExit) as ei:
+            m._cmd_resume(_args("wt-6b68", json=True))
+        assert ei.value.code == 1
+
+        import json as _json
+
+        out = _json.loads(capsys.readouterr().out)
+        assert out["reason"] == "live_cli_holds_worktree"
+        assert out["session_id"] == "live-7"
+
+    def test_resumed_owned_session_emits_json(self, monkeypatch, capsys):
+        client = _FakeClient(session_resume={"status": "idle"})
+        _patch_client(monkeypatch, client)
+
+        m._cmd_resume(_args("sess-1", json=True))
+
+        import json as _json
+
+        out = _json.loads(capsys.readouterr().out)
+        assert out == {"session_id": "sess-1", "status": "idle", "verb": "resumed"}

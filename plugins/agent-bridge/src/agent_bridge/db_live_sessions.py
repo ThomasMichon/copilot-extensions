@@ -225,7 +225,7 @@ class _LiveSessionsMixin:
         )
 
     def expire_live_sessions_for_worktree(
-        self, worktree_id: str, *, now: float
+        self, worktree_id: str, *, now: float, expected_session_id: str | None = None
     ) -> int:
         """Immediately demote every ``live`` registration for a worktree to the
         **terminal ``taken-over``** state and drop its undelivered inbox
@@ -241,12 +241,27 @@ class _LiveSessionsMixin:
         never flip its own row back to ``live`` after take-over (#2912). Returns
         how many registrations were demoted. Idempotent: a worktree with no live
         row is a no-op.
+
+        ``expected_session_id``, when given, fences this demotion to *only*
+        that exact ``session_id`` -- a caller that stopped one specific
+        interactive CLI and knows its session id (the refusal's holder) should
+        pass it, so a genuinely different CLI that registered for this
+        worktree in the gap between the stop returning and this call (a fresh,
+        never-confirmed-dead claimant) is left untouched rather than
+        collaterally demoted (#2906 race hardening).
         """
-        cur = self.execute_write(
-            "UPDATE live_sessions SET status='taken-over', updated_at=? "
-            "WHERE worktree_id=? AND status='live'",
-            (now, worktree_id),
-        )
+        if expected_session_id is not None:
+            cur = self.execute_write(
+                "UPDATE live_sessions SET status='taken-over', updated_at=? "
+                "WHERE worktree_id=? AND status='live' AND session_id=?",
+                (now, worktree_id, expected_session_id),
+            )
+        else:
+            cur = self.execute_write(
+                "UPDATE live_sessions SET status='taken-over', updated_at=? "
+                "WHERE worktree_id=? AND status='live'",
+                (now, worktree_id),
+            )
         n = cur.rowcount
         if n:
             self.execute_write(

@@ -27,6 +27,10 @@ from ..session_manager import (
     ProviderTargetRefreshError,
     SessionManager,
 )
+from .worktree_holders import (
+    chosen_holder_id as _chosen_holder_id,
+    reservation_conflict_detail as _reservation_conflict_detail,
+)
 from .worktree_probe import (
     owning_agent as _owning_agent,
     probe_archived_owner as _probe_archived_owner,
@@ -972,13 +976,12 @@ async def _start_fresh_worktree_session(
                     # A live CLI registered during discovery -- return the same
                     # structured 409 the top-of-resume guard uses (consumers map
                     # it to "represent read-only"), not a misleading 404.
-                    chosen = max(holders, key=lambda r: r.get("updated_at") or 0)
                     raise HTTPException(
                         status_code=409,
                         detail={
                             "reason": "live_cli_holds_worktree",
                             "worktree_id": worktree_id,
-                            "session_id": chosen["session_id"],
+                            "session_id": _chosen_holder_id(holders),
                         },
                     )
 
@@ -1026,13 +1029,19 @@ async def _start_fresh_worktree_session(
                 ),
             )
         # Claim the per-worktree ownership reservation for the fresh owned
-        # session (#2912) so a later live-CLI registration respects it. Under
-        # the per-worktree lock + post-crawl live-holder recheck above, so it
-        # cannot race a live holder here.
+        # session (#2912). The pre-spawn live-holder recheck above doesn't
+        # cover mgr.start_session's own (slow, awaited) window, so this
+        # result must be checked, not assumed.
         db = getattr(request.app.state, "db", None)
-        if db is not None:
-            db.reserve_worktree_ownership(
-                worktree_id, fresh.session_id, now=time.time(), reclaim=reclaim
+        if db is not None and not db.reserve_worktree_ownership(
+            worktree_id, fresh.session_id, now=time.time(), reclaim=reclaim
+        ):
+            try:  # 'fresh' already started -- best-effort cleanup, don't leak it.
+                await mgr.end_session(fresh.session_id, force=True)
+            except Exception:
+                log.warning("resume_worktree %s: fresh cleanup failed", worktree_id, exc_info=True)
+            raise HTTPException(
+                status_code=409, detail=_reservation_conflict_detail(db, worktree_id)
             )
         return fresh
 
@@ -1069,18 +1078,18 @@ async def resume_worktree(
     if not reclaim and db is not None:
         holders = db.list_fresh_live_sessions(worktree_id, now=time.time())
         if holders:
-            chosen = max(holders, key=lambda r: r.get("updated_at") or 0)
+            chosen_id = _chosen_holder_id(holders)
             log.info(
                 "resume_worktree %s refused: fresh live CLI %s holds it "
                 "(represent read-only)",
-                worktree_id, chosen["session_id"],
+                worktree_id, chosen_id,
             )
             raise HTTPException(
                 status_code=409,
                 detail={
                     "reason": "live_cli_holds_worktree",
                     "worktree_id": worktree_id,
-                    "session_id": chosen["session_id"],
+                    "session_id": chosen_id,
                 },
             )
 
@@ -1103,29 +1112,21 @@ async def resume_worktree(
         )
 
     # Ownership reservation (#2912): take the per-worktree ACP-ownership
-    # reservation before resuming, so a live-CLI registration must respect it
-    # (registration and ownership cannot both win a worktree). Atomic against a
-    # concurrent register even across processes; ``reclaim`` force-takes it. A
-    # False result means a fresh live CLI claimed the worktree in the race
-    # window -- surface the same read-only 409 the top guard uses.
+    # reservation before resuming, so a live-CLI registration must respect
+    # it. Atomic across processes; ``reclaim`` force-takes it. A False
+    # result means either a fresh live CLI raced it, or another active ACP
+    # reservation owns it -- see worktree_holders.reservation_conflict_detail.
     if db is not None:
         reserved = db.reserve_worktree_ownership(
             worktree_id, session.session_id, now=time.time(), reclaim=reclaim
         )
         if not reserved:
+            detail = _reservation_conflict_detail(db, worktree_id)
             log.info(
-                "resume_worktree %s refused: a live CLI raced the ownership "
-                "reservation (represent read-only)",
-                worktree_id,
+                "resume_worktree %s refused: %s (session %s)",
+                worktree_id, detail["reason"], detail["session_id"],
             )
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "reason": "live_cli_holds_worktree",
-                    "worktree_id": worktree_id,
-                    "session_id": session.session_id,
-                },
-            )
+            raise HTTPException(status_code=409, detail=detail)
 
     if await _resolve_already_live(mgr, worktree_id, session):  # live-checked, #6744
         return _session_info(session)
@@ -1525,16 +1526,17 @@ async def get_worktree_session_transcript(
 @router.post("/api/v1/worktrees/{worktree_id}/restart")
 async def restart_worktree_copilot(
     worktree_id: str, request: Request, force: bool = False,
+    expected_holder: str | None = None,
 ) -> dict[str, Any]:
     """Restart a worktree's interactive (mux-launched) Copilot in place.
-
     Shells to ``<project> restart <id> --json`` on the owning machine:
     graceful double Ctrl-C then a hard mux ``kill-session`` fallback,
     keeping the worktree **on disk** for a later relaunch/ACP-resume.
-    ``force=true`` skips the graceful quit.
-
-    Returns ``{worktree_id, had_session, method, ok}`` (``method``: none |
-    graceful | hard | failed).
+    ``force=true`` skips the graceful quit. ``expected_holder``, when given,
+    fences the invalidate-on-take-over below to that live-session id (#2906
+    race hardening; see ``db.expire_live_sessions_for_worktree``). Returns
+    ``{worktree_id, had_session, method, ok}`` (``method``: none | graceful |
+    hard | failed).
     """
     cache = get_cache()
     await cache.crawl_if_empty()
@@ -1568,19 +1570,17 @@ async def restart_worktree_copilot(
 
     method = data.get("method", "unknown")
     ok = bool(data.get("ok", False))
+    had_session = bool(data.get("had_session", False))
 
-    # Invalidate-on-take-over (#2906): a successful restart has just terminated
-    # the interactive CLI, so immediately demote any live-session registration
-    # for this worktree and drop its queued inbox messages. This closes the
-    # window where a racing steer could land on the CLI that was just killed,
-    # and ensures the subsequent reclaim resume is never blocked by the atomic
-    # ownership guard (#2879) waiting on a not-yet-heartbeat-reaped row.
-    if ok:
+    # Invalidate-on-take-over (#2906): demote the live registration (fenced
+    # to expected_holder), only when had_session -- a no-op is never proof
+    # a bare claimant was terminated.
+    if ok and had_session:
         db = getattr(request.app.state, "db", None)
         if db is not None:
             try:
                 n = db.expire_live_sessions_for_worktree(
-                    worktree_id, now=time.time()
+                    worktree_id, now=time.time(), expected_session_id=expected_holder
                 )
                 if n:
                     log.info(
@@ -1588,15 +1588,15 @@ async def restart_worktree_copilot(
                         worktree_id, n,
                     )
             except Exception:
-                log.warning(
-                    "restart_worktree %s: live-session invalidation failed",
-                    worktree_id, exc_info=True,
-                )
+                # CLI stopped, but its registration may still be 'live' --
+                # report failure so a caller never forces past that row.
+                log.warning("restart_worktree %s: invalidation failed", worktree_id, exc_info=True)
+                ok = False
 
     return {
         "worktree_id": data.get("worktree_id", worktree_id),
         "agent_name": agent_name,
-        "had_session": bool(data.get("had_session", False)),
+        "had_session": had_session,
         "method": method,
         "ok": ok,
     }
