@@ -16,7 +16,7 @@ This plugin ships four cooperating payload pieces:
 | **continuity guidance hook** | Declarative `sessionStart` hook | Writes the full owner-marked continuity contract to the exact session folder and emits only `{}` |
 | **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard/**force** thresholds (55% / 70% / 79% by default) with optional repository overrides, delivered on the next idle -- the automatic nudges, the force tier's auto-draft/store/trigger + mutating-tool-call denial, and `trigger_handoff`'s live-cutover signaling are all opt-in (`mode: auto` in `.context-handoff/config.yaml`; the default, `manual-only`, always still stores/seeds a handoff on request, see § Thresholds); provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
 | **context-handoff skill** | Skill | Owns the `/handoff` workflow: compose the continuation prompt from the extension's structured facts and the agent's live context, decide when to store it, and decide whether to ask or trigger |
-| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, and a safe `retry-cutover` remediation for a superseded session. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
+| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, a safe `retry-cutover` remediation for a superseded session, and a lock/rebase-safe `sync-worktree` (shared with the force-tier path). Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
 
 ## The boundary
 
@@ -95,8 +95,8 @@ intentionally does **not** emit a user-visible "Session started" breadcrumb.
 
 ### 1. Compose and store early
 
-When the session reaches a natural stopping point, or when the monitor nudges
-you because context pressure is rising:
+When the session reaches a natural stopping point and you are not yet ready to
+trigger (no pickup needed right now):
 
 1. call `generate_handoff_prompt`,
 2. compose the full markdown brief,
@@ -104,13 +104,20 @@ you because context pressure is rising:
 
 That is the routine, safe, non-committal step. It preserves the baton before
 context gets tighter, but it does **not** arm pickup or request that any
-external system create a successor.
+external system create a successor. **This sequence is not the
+context-pressure-driven trigger path** -- when context pressure is rising and
+you intend to trigger a handoff now, see section 2 below instead, which syncs
+*before* composing so the stored baton reflects the synced state.
 
 ### 2. Context-pressure-driven handoff: trigger directly
 
 If the reason for the handoff is **context pressure** and the objective still
-has more work left to do, the agent should call `trigger_handoff` directly
-after saving the baton. This path does **not** ask for confirmation first.
+has more work left to do, the agent should sync the worktree onto the latest
+default branch first (see "Sync before triggering" in the `context-handoff`
+skill -- never blanket-commits, and skips cleanly rather than blocking if
+anything looks unsafe), *then* compose/save the brief so it reflects the
+synced (or un-synced/conflicted) state, then call `trigger_handoff`. This
+path does **not** ask for confirmation first.
 
 ### 3. Turn-end follow-ups ask before triggering
 
@@ -119,7 +126,11 @@ listing follow-up ideas or questions, the flow is different:
 
 - **compose + save** the baton,
 - **ask the user** whether to continue via handoff,
-- only after a brief yes (for example, "sure") call `trigger_handoff`.
+- only after a brief yes (for example, "sure"), **sync the worktree** (same
+  rule as above), then **always recompose and re-save** the baton -- even if
+  the sync looked like a no-op, since a WIP commit or a failed sync still
+  changes what the successor needs to know -- so it reflects the post-sync
+  state, then call `trigger_handoff`.
 
 Only this turn-end follow-up path is skipped by autopilot mode or prior user
 pre-authorization.
@@ -340,6 +351,7 @@ CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 node "$CH" facts --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" check-heads --json --cwd "$PWD"
 node "$CH" retry-cutover --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" sync-worktree --json --cwd "$PWD"
 node "$CH" save --title "<topic>" --prompt-file "<handoff.md>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" trigger --title "<topic>" --prompt-file "<handoff.md>" \
@@ -369,6 +381,7 @@ if (-not (Test-Path -LiteralPath $ch -PathType Leaf)) { throw 'context-handoff p
 node $ch facts --json --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch check-heads --json --cwd $PWD
 node $ch retry-cutover --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch sync-worktree --json --cwd $PWD
 node $ch save --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --handoff-token '<HANDOFF_TOKEN>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD

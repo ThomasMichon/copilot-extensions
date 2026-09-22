@@ -38,6 +38,7 @@ import { joinSession } from "@github/copilot-sdk/extension";
 import {
   agentDispatchAvailable,
   agentWorktreesGet,
+  attemptWorktreeSync,
   buildResumePrompt,
   buildSeedForStored,
   collectAdvisoryGitFacts,
@@ -53,6 +54,7 @@ import {
   runCli,
   storeHandoff,
   triggerHandoff,
+  waitForWorktreeSyncToSettle,
 } from "./handoff-core.mjs";
 import { extractRecoveryLocatorFromPrompt, recoveryLocatorFor } from "./cutover-seed.mjs";
 import { defaultConfig, loadContextHandoffConfigAsync } from "./config.mjs";
@@ -324,9 +326,49 @@ async function onPermissionRequest(request, invocation) {
   return approveAll(request, invocation);
 }
 
+// Ceiling on how long the force-tier trigger will wait for the post-store
+// worktree sync to settle before arming live pickup (see autoForceHandoff's
+// beforeArmPickup comment for the round-12/26/27/28/29 tension this
+// bounds), and how long consume_handoff (below) will defensively wait at
+// successor startup in case pickup was armed while a sync was still
+// settling. Comfortably shorter than triggerHandoff's own default 30s
+// pickup-wait window, so this can never itself become the dominant source
+// of the force-tier trigger's total latency, while still covering a
+// healthy, reachable remote's typical fetch+rebase duration in the common
+// case.
+const FORCE_TIER_SYNC_ARM_TIMEOUT_MS = 15000;
+
+// Only autoForceHandoff's beforeArmPickup can claim "a sync attempt was
+// just dispatched a moment ago" -- it fires attemptWorktreeSync itself,
+// synchronously, right before calling this. That certainty is what
+// justifies giving waitForWorktreeSyncToSettle's own startup race (the
+// lock file does not exist for the first few async steps of a genuinely
+// in-flight sync) a full grace period there (see its own doc comment).
+const FORCE_TIER_SYNC_START_GRACE_MS = 2000;
+
+// consume_handoff has no certainty a sync is in flight at all, and must
+// stay fast in the overwhelmingly common case where nothing is -- but a
+// residual startup race remains even after acquireLock's own
+// placeholder-write reorder (round 31): resolving the lock path itself
+// still spawns a `git rev-parse` subprocess before the lock file can
+// exist at that path at all. A small grace narrows that specific,
+// already-much-smaller residual window (round-31 finding: "use a durable
+// start marker or a bounded successor grace") without meaningfully
+// slowing the common case.
+const CONSUME_HANDOFF_START_GRACE_MS = 500;
+
 // Auto-draft, store, and trigger a handoff without agent involvement. Fire-
 // and-forget from the session.usage_info handler (below); reports its own
 // outcome via session.log/session.send rather than being awaited there.
+//
+// Capture happens FIRST, with no sync/network dependency at all: the force
+// tier is explicitly the last chance before the runtime's own auto-
+// compaction destroys the conversation, so nothing may delay getting a
+// baton stored. The worktree sync (same principle as the agent-guided
+// skill flow -- an un-synced tip hands the successor stale plugin/
+// instruction code too) runs strictly AFTER the handoff is already safely
+// stored, as pure best-effort: it can never block or delay the capture
+// itself, only report its own outcome via session.log once it settles.
 async function autoForceHandoff(sid, cwd) {
   let markdown;
   try {
@@ -342,12 +384,74 @@ async function autoForceHandoff(sid, cwd) {
   }
   let result;
   try {
+    // syncPromise is assigned inside afterStore -- started ONLY once
+    // triggerHandoff has confirmed the baton is durably stored (a round-13
+    // review finding: starting the sync before the store was even
+    // attempted meant a store failure could still leave a sync running,
+    // contradicting the "post-capture only" contract). It runs regardless
+    // of mode -- a worktree sync benefits a manual-only handoff too (a
+    // human resuming it later still wants the latest code), not just an
+    // auto-mode live pickup.
+    //
+    // beforeArmPickup below polls the SAME shared worktree-sync lock via
+    // waitForWorktreeSyncToSettle (not syncPromise directly), bounded to
+    // FORCE_TIER_SYNC_ARM_TIMEOUT_MS -- resolving a genuine tension
+    // between prior findings rather than picking one side over the other:
+    //   - round 12: arming pickup with NO regard for the sync at all let a
+    //     fast live monitor launch a successor before the sync had even
+    //     begun (or, per round 27/28's re-statement of the same concern,
+    //     while it was still mid-fetch/rebase), handing the successor a
+    //     stale or momentarily-inconsistent worktree.
+    //   - round 26: awaiting the sync's FULL completion (multiple 20s+
+    //     network/CLI timeouts stacked) could hold the last-chance/fire-
+    //     and-forget trigger long enough for compaction to happen,
+    //     defeating the guarantee this path exists for.
+    // Polling the lock's own liveness (via waitForWorktreeSyncToSettle,
+    // not the promise below) gets both AND settles faster than a blind
+    // wait whenever the sync finishes early: a healthy, reachable
+    // remote's lock clears well inside the timeout, so pickup is armed
+    // immediately once it does; an unreachable/slow remote still cannot
+    // block the trigger past a small, fixed ceiling. consume_handoff
+    // below performs the SAME bounded wait defensively at successor
+    // startup, in case pickup was armed (by this path or a manual
+    // /consume-handoff) while the lock was still held. The sync keeps
+    // running in the background regardless of which side stops waiting
+    // first -- its outcome is only ever logged, never folded back into
+    // the already-stored baton (there is no update path for a handoff
+    // that has already been triggered).
     result = await triggerHandoff({
       promptText: markdown,
       sid,
       cwd,
       title: "Force-threshold auto-handoff",
       mode: handoffConfig.mode,
+      afterStore: () => {
+        attemptWorktreeSync(cwd)
+          .then((syncResult) => {
+            if (syncResult.synced) {
+              session.log(
+                "[Context Handoff] Force-tier: worktree synced onto the " +
+                "latest default branch.",
+                { level: "info" },
+              );
+            } else {
+              session.log(
+                `[Context Handoff] Force-tier: worktree sync ` +
+                `${syncResult.attempted ? "failed" : "was skipped"} ` +
+                `(${syncResult.reason}). The successor should sync onto ` +
+                "the latest default branch itself.",
+                { level: "warning" },
+              );
+            }
+            return syncResult;
+          })
+          .catch(() => {});
+      },
+      beforeArmPickup: () =>
+        waitForWorktreeSyncToSettle(cwd, {
+          timeoutMs: FORCE_TIER_SYNC_ARM_TIMEOUT_MS,
+          startGraceMs: FORCE_TIER_SYNC_START_GRACE_MS,
+        }),
     });
   } catch (error) {
     session.log(
@@ -482,23 +586,51 @@ const session = await joinSession({
             "   peer-agent coordination this session owns -- carry each forward",
             "   as resumable or as an explicit open item; write \"none\" only",
             "   when genuinely none exist.",
-            "2. Call save_handoff_prompt with the composed markdown as `prompt_text`",
-            "   (and an optional short `title`). It stores the handoff — as an",
-            "   agent-dispatch task when a coordinator is reachable, else a",
-            "   one-time worktree-state file — and returns the short handoff",
-            "   prompt plus its exact HANDOFF_SEED/HANDOFF_TOKEN identifiers.",
-            "3. Distinguish the trigger:",
+            "2. Distinguish the trigger BEFORE saving:",
             "   - If context pressure is the reason for the handoff and work",
-            "     remains, call trigger_handoff directly after saving. Do NOT ask",
-            "     for confirmation first; continuity is the point.",
+            "     remains: sync the worktree onto the latest default branch",
+            "     NOW, before saving. First inspect the tree -- never",
+            "     blanket-commit (`git add -A`/`git commit -a`); stage and",
+            "     commit only paths you recognize as your own reviewed,",
+            "     intentional changes this session. If anything looks",
+            "     unfamiliar, untracked, or possibly sensitive, or you are",
+            "     unsure it is safe to commit, skip the sync entirely and",
+            "     note in the brief that the worktree may be behind the",
+            "     default branch. Otherwise commit local WIP, then run the",
+            "     payload-local `handoff-cli.mjs sync-worktree` command (NOT",
+            "     a bare `agent-worktrees git sync`) -- see the",
+            "     context-handoff skill's 'Sync before triggering' section",
+            "     for the exact invocation; it shares the same lock and",
+            "     rebase guard as the force-tier path. Note any conflict in",
+            "     the brief rather than blocking on it. ALWAYS call",
+            "     generate_handoff_prompt again after the sync (even if it",
+            "     looked like a no-op) so the Git Status you compose from is",
+            "     current -- a WIP commit or a failed sync attempt both change",
+            "     what the successor needs to know, whether or not the branch",
+            "     itself moved. Then call save_handoff_prompt, then call",
+            "     trigger_handoff immediately. Do NOT ask for confirmation",
+            "     first; continuity is the point.",
             "   - If you are otherwise done with the requested work and would end",
-            "     the turn by listing follow-up ideas/questions, store the baton",
-            "     and replace that list with one short offer to continue via",
-            "     handoff. Only after the user says yes should you call",
-            "     trigger_handoff, unless autopilot or prior authorization",
-            "     already covers that turn-end follow-up path.",
-            "Do NOT paste the handoff contents, commit anything, or claim the",
-            "handoff auto-loads on restart (it does not).",
+            "     the turn by listing follow-up ideas/questions: call",
+            "     save_handoff_prompt now (a not-yet-approved handoff has no",
+            "     sync to reflect yet), replace that list with one short offer",
+            "     to continue via handoff. Only after the user says yes: sync",
+            "     the worktree, then ALWAYS call generate_handoff_prompt and",
+            "     save_handoff_prompt again -- even if the sync looked like a",
+            "     no-op -- so the stored baton reflects the post-sync state;",
+            "     trigger_handoff otherwise reuses the pre-sync brief and",
+            "     silently omits a WIP commit, a failed sync, or a conflict",
+            "     outcome. Then call trigger_handoff. Never sync or commit",
+            "     before the user has agreed, unless autopilot or prior",
+            "     authorization already covers that turn-end follow-up path.",
+            "save_handoff_prompt stores the handoff — as an agent-dispatch task",
+            "when a coordinator is reachable, else a one-time worktree-state",
+            "file — and returns the short handoff prompt plus its exact",
+            "HANDOFF_SEED/HANDOFF_TOKEN identifiers.",
+            "Do NOT paste the handoff contents or claim the handoff auto-loads",
+            "on restart (it does not). The one exception to \"do not commit\" is",
+            "the deliberate WIP-commit-then-sync step above -- never commit for",
+            "any other reason as part of handling a handoff.",
           ].join("\n"),
           resultType: "success",
         };
@@ -587,10 +719,19 @@ const session = await joinSession({
           `Handoff stored (${stored.storage}: ${stored.id}). This preserves the ` +
           "baton without arming the pickup flow.\n\n" +
           "If this handoff exists because context pressure is rising and work " +
-          "still remains, call `trigger_handoff` directly now.\n\n" +
+          "still remains: you should already have synced the worktree onto the " +
+          "latest default branch before calling generate_handoff_prompt (see " +
+          "the context-handoff skill's 'Sync before triggering' section) -- " +
+          "call `trigger_handoff` directly now.\n\n" +
           "If this is a turn-end follow-up handoff, ask the user whether to " +
-          "continue via handoff and call `trigger_handoff` only after they say " +
-          "yes, unless autopilot or prior authorization already covers that path.\n\n" +
+          "continue via handoff. Only after they say yes: sync the worktree " +
+          "(inspect the tree first -- never blanket-commit; skip the sync " +
+          "entirely if anything looks unfamiliar or unsafe to commit), then " +
+          "ALWAYS re-run generate_handoff_prompt and save_handoff_prompt again " +
+          "-- even if the sync looked like a no-op -- so the stored baton " +
+          "reflects the post-sync state before calling trigger_handoff. Never " +
+          "sync or commit before the user has agreed, unless autopilot or " +
+          "prior authorization already covers that turn-end follow-up path.\n\n" +
           "If you later need manual continuation, open the successor session and " +
           "run `/consume-handoff`; if that command is unavailable, use the " +
           "payload-local context-handoff CLI with the recovery locator embedded " +
@@ -648,6 +789,37 @@ const session = await joinSession({
         const handoffId = (args?.handoff_id ?? "").toString().trim();
         const path = (args?.path ?? "").toString().trim();
         const deferComplete = Boolean(args?.defer_complete);
+
+        // Defensive: if the predecessor's own bounded wait (autoForceHandoff's
+        // beforeArmPickup) already elapsed while its sync was still running,
+        // or pickup was armed via a path with no such gate at all (a manual
+        // /consume-handoff run right after cutover), this worktree could
+        // still be mid-fetch/rebase right now. Poll the SAME shared lock
+        // once more here, bounded the same way, before reading anything --
+        // never blocking indefinitely, just narrowing the window where a
+        // successor reads a momentarily-inconsistent tree.
+        const settleResult = await waitForWorktreeSyncToSettle(cwd, {
+          timeoutMs: FORCE_TIER_SYNC_ARM_TIMEOUT_MS,
+          startGraceMs: CONSUME_HANDOFF_START_GRACE_MS,
+        });
+        if (settleResult.waited && !settleResult.settled) {
+          session.log(
+            "[Context Handoff] consume_handoff: the predecessor's worktree " +
+            "sync still appears to be in progress after the wait window; " +
+            "proceeding anyway -- verify the worktree yourself if anything " +
+            "looks unexpectedly stale or mid-rebase.",
+            { level: "warning" },
+          );
+        } else if (settleResult.needsInspection) {
+          session.log(
+            "[Context Handoff] consume_handoff: the predecessor's worktree " +
+            "sync lock recorded a holder that is no longer running, AND an " +
+            "in-progress rebase was found -- the predecessor may have " +
+            "crashed mid-sync. Inspect the worktree before trusting it; a " +
+            "conflicted rebase may need `git rebase --abort` before continuing.",
+            { level: "warning" },
+          );
+        }
 
         let result;
         if (taskId) {
@@ -842,11 +1014,24 @@ const session = await joinSession({
         await session.send({
           prompt:
             "Perform a handoff now (the operator invoked /handoff-continue, " +
-            "which is explicit authorization). Steps: (1) call " +
-            "generate_handoff_prompt to collect session facts; (2) compose " +
+            "which is explicit authorization). Steps: (1) sync the worktree " +
+            "onto the latest default branch first -- inspect the tree before " +
+            "committing anything (never blanket-commit via `git add -A`/" +
+            "`git commit -a`; stage and commit only paths you recognize as " +
+            "your own reviewed, intentional changes this session; if " +
+            "anything looks unfamiliar, untracked, or possibly sensitive, or " +
+            "you are unsure it is safe to commit, skip the sync entirely and " +
+            "note in the brief that the worktree may be behind the default " +
+            "branch), then run the payload-local `handoff-cli.mjs " +
+            "sync-worktree` command (NOT a bare `agent-worktrees git " +
+            "sync`) -- see the context-handoff skill's 'Sync before " +
+            "triggering' section for the exact invocation; it shares the " +
+            "same lock and rebase guard as the force-tier path; note any " +
+            "conflict in the brief rather than blocking on it); (2) call " +
+            "generate_handoff_prompt to collect session facts; (3) compose " +
             "continuation markdown per the context-handoff skill -- use its " +
             "compact effort-backed shape when a valid open active effort exists, " +
-            "otherwise the full standalone shape; (3) call trigger_handoff with " +
+            "otherwise the full standalone shape; (4) call trigger_handoff with " +
             "that markdown as `prompt_text` and a short specific `title`. " +
             "trigger_handoff always stores/refreshes the baton and ends with " +
             "the final short handoff prompt/seed; it only signals pending " +

@@ -1461,6 +1461,1186 @@ gate land._
   confirmation that `agent-bridge`'s fix (the dominant contributor)
   resolves the operator's original live symptom.
 
+### 2026-09-21 -- Successor-prompt race investigation + sync-before-trigger fix
+
+- Investigated a distinct, narrower symptom: a successor spawned via
+  `--interactive "<prompt>"` can attempt a tool call in its very first turn
+  before that tool's extension has actually finished registering, and the
+  turn stalls. Traced the actual gate in the CLI's own source
+  (`envLoadingComplete`, an `extensions` participant wired to
+  `embeddedServer.onExtensionsLoaded`) and confirmed live, via a throwaway
+  psmux pane probe, that extension readiness tracking is active for our
+  sessions (Worktree Manager and `agent-worktrees` force-enable the
+  experimental flag this gate depends on) -- so this narrower race is not
+  fully closed out, but isn't as wide-open as first suspected either.
+- Separately confirmed (same probe) that `/env`'s Skills panel only lists
+  project-sourced skills, never plugin-sourced ones -- a genuine display gap
+  in the CLI upstream, but not a functional one: directly asked a probe
+  session whether a plugin-sourced skill (`playwright-cli`) was available,
+  and it was. No action taken here since the fix is outside this repo.
+- **Actioned:** regardless of exactly how tight the extension-readiness race
+  is, a successor always inherits the *same on-disk worktree* as its
+  predecessor -- so if that worktree is behind the repo's default branch,
+  the successor starts on stale plugin code and stale instructions even
+  when the CLI's own readiness gate works perfectly. Added a "Sync before
+  triggering" step to both trigger flows in the `context-handoff` skill:
+  before calling `trigger_handoff`, commit local WIP and sync the worktree
+  onto the latest default branch (`agent-worktrees git sync` when
+  available, conflict-safe by construction), noting an unresolved conflict
+  in the handoff brief rather than blocking on it. Bumped
+  `plugin.json`/`marketplace.json` to `0.1.1-dev35` across several review
+  rounds (dev33 collided with a concurrent main merge).
+
+### 2026-09-21 (cont.) -- PR #3167 round 9: dirty-check gap, TOCTOU narrowing, stale task-backed re-save
+
+Continuing automated review response on PR #3167 (`context-handoff: sync
+worktree onto latest default branch before triggering a handoff`); round 9
+surfaced three new HIGH-severity findings, all fixed in this pass:
+
+- **`git status --porcelain` dirty-check gap:** the default invocation can
+  report a clean tree even with real untracked content present, if the
+  worktree's local git config sets `status.showUntrackedFiles=no` --
+  masking exactly the kind of untracked/secret-adjacent file a sync should
+  never risk touching. Added `--untracked-files=all`, matching this repo's
+  own established dirty-check convention already used in
+  `agent-worktrees/scripts/service-utils.ps1`. New regression test sets
+  that config explicitly, confirms bare `--porcelain` really is fooled by
+  it (so the fix is meaningfully exercised), then confirms
+  `attemptWorktreeSync` correctly skips.
+- **Rebase-check/sync TOCTOU:** the in-progress-rebase check and the actual
+  `agent-worktrees git sync` call were not atomic -- another process could
+  start a rebase in the gap between them, and the sync helper's own
+  failure-path `git rebase --abort` could then cancel a rebase this
+  session never started. A cross-process worktree lock is out of scope
+  (not something this plugin owns), so the check (extracted into a
+  `rebaseInProgress()` helper) is now re-run a second time immediately
+  before each sync exec call, right after the last other `await` --
+  narrowing the unavoidable race to the true minimum rather than pretending
+  a single check makes it airtight. Structural test confirms the recheck
+  call site exists (no DI seam for the underlying git calls, matching this
+  file's existing pattern for such checks).
+- **Stale task-backed baton on re-save:** `save_handoff_prompt`'s
+  agent-dispatch path (`dispatchHandoff`) used a fixed dedup key
+  (`handoff-${sid}`) -- `agent-dispatch create --dedup-key K` is idempotent
+  per K, so a repeat call with the SAME key silently returns the existing
+  nonterminal task **unchanged**, even with different payload content. This
+  meant round 7's "always re-save after post-approval sync" fix was a
+  no-op for the task-backed storage path specifically: a successor could
+  still receive the stale pre-sync brief. Fixed by folding a short content
+  hash into the dedup key (`handoffDedupKey()`, new, pure/exported for
+  testability): identical content still maps to the same key (a true
+  accidental duplicate call still dedupes as before), but genuinely
+  different content now earns a fresh task -- and the existing
+  `abandonSupersededHandoffs()` call (already wired in, worktree-scoped,
+  not dedup-key-scoped) correctly retires whatever it superseded, with no
+  further changes needed there. 4 new unit tests cover stability,
+  content-sensitivity, session-scoping, and the key's debuggable shape.
+- Re-verified the review's other 6 "carried over" items against current
+  file state -- all genuinely already resolved in rounds 5-8 (the known
+  re-flagging pattern for this repo's automated reviewer), no action
+  needed.
+- `node --test`: 128 tests, 126 pass (2 pre-existing skips), no
+  regressions -- confirmed the 3 bash-dependent `test_emit_guidance.py`
+  failures are baseline-identical (same failure on the pre-change commit
+  via a stash/restore check), not new. All guards
+  (`check-marketplace-isolation`, `check-skills`, `check-docs-consistency`,
+  `check-no-internal-identifiers`, `check-version-bump`) pass. Bumped
+  `plugin.json`/`marketplace.json` to `0.1.1-dev36`.
+
+### 2026-09-21 (cont.) -- PR #3167 round 10: sanitized Git env, real lock,
+### review-safety wording carried into every trigger surface
+
+Round 10 review (against the round-9 commit) surfaced 2 new HIGH findings
+and reconfirmed 2 of round 9's fixes as still insufficient per the
+reviewer's bar; all fixed in this pass:
+
+- **Ignored files still not covered:** round 9 added
+  `--untracked-files=all` but not `--ignored` -- plain `--porcelain` omits
+  ignored files entirely regardless. Found the repo's own precedent using
+  BOTH flags together
+  (`customizing-copilot/skills/reviewing-customizations/scripts/
+  scan_plugin_sources.py`'s `_payload_is_clean`, scoped to a narrow
+  footprint and explicitly documented as "deliberately over-rejects").
+  Added `--ignored` to `attemptWorktreeSync`'s dirty-check, accepting the
+  same over-reject tradeoff (an ordinary ignored build artifact also blocks
+  a sync attempt) as consistent with this function's already-documented
+  fail-closed philosophy.
+- **Rebase-check/sync TOCTOU still open:** round 9's "recheck immediately
+  before exec" narrows but does not close the race the reviewer flagged.
+  Added a per-worktree advisory lock (`withWorktreeSyncLock`, filesystem
+  exclusive-create under `.git/context-handoff-sync.lock`) around the
+  entire rebase-check-through-sync-exec window, serializing this plugin's
+  own concurrent sync attempts (the realistic risk: the force-tier and
+  skill-guided paths racing on the same worktree). Documented honestly that
+  no lock this plugin creates can compel an external actor (a human running
+  `git rebase` by hand) to honor it -- the recheck-immediately-before-exec
+  mitigation stays in place for that residual gap.
+- **(New) Unsanitized Git environment variables:** the new Git probes and
+  the delegated sync inherit `process.env` unmodified, so an inherited
+  `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`/`GIT_COMMON_DIR`/etc. could
+  silently redirect the safety checks (or the sync itself) to a different
+  repository than the one `cwd` names. Ported `agent-worktrees`' own
+  `repository_identity_env()` (`git_ops.py`) as `sanitizedGitEnv()`
+  (new/exported), used for every git probe and the sync child process; also
+  sets `GIT_TERMINAL_PROMPT=0` so an unattended sync can never block on a
+  credential prompt.
+- **(New) WIP-commit safety condition not carried into tool-response
+  prompts:** `SKILL.md` requires inspecting the tree and committing only
+  reviewed paths before any sync-related commit, but the emitted
+  `generate_handoff_prompt`/`/handoff-continue` tool-response text just
+  said "commit local WIP" without that condition -- an agent following the
+  tool's own output literally could blanket-commit unrelated edits or
+  secrets. Made the inspect/only-reviewed/skip-if-unsafe rule explicit in
+  both prompt surfaces (both occurrences in `extension.mjs`).
+- Also fixed a genuine gap `save_handoff_prompt`'s own response text had:
+  it told the agent to ask-then-trigger for the turn-end path without
+  mentioning the sync+re-save step that must happen between "yes" and
+  `trigger_handoff` -- an agent following ONLY that tool's own text could
+  skip the sync entirely. Added the missing step.
+- Corrected the emitted kernel guidance's (`emit-guidance.sh`/`.ps1`)
+  ordering: it previously implied "compose and store the baton" happens
+  before syncing for the pressure-driven path, backwards from the
+  canonical flow. Rewrote (byte-neutral, -1 byte) so sync precedes
+  compose/store; hand-verified byte-identical wording between both
+  platform scripts, both still within budget (2014/2048 kernel,
+  672/700 aggregate). The aggregate string's ordering was already correct
+  from round 7 -- that specific re-flagged item was stale.
+- Updated the PR description to match the actual shipped diff (was still
+  describing an earlier, narrower version of the change and the wrong dev
+  number).
+- Re-verified round 9's dedup-key fix (`handoffDedupKey`) is NOT actually
+  stale-flagged content -- the review comment was pinned to unchanged
+  `SKILL.md` text and didn't reflect that the underlying `handoff-core.mjs`
+  fix had already landed; left as-is, expecting the next round to clear it.
+- 9 new tests (ignored-file detection, lock-serialization, 3
+  `sanitizedGitEnv` unit tests, 1 emit-guidance ordering assertion).
+  `node --test`: 133 tests, 131 pass (2 pre-existing skips), no
+  regressions. All guards pass. No version bump needed (still `0.1.1-dev36`
+  from round 9 -- these fixes are additional commits within the same
+  unreleased dev version).
+
+### 2026-09-21 (cont.) -- PR #3167 round 11: shared sync entry point, force-tier trigger-race narrowing
+
+Round 11 confirmed all 4 of round 10's fixes resolved and surfaced 2 new
+HIGH findings plus 1 "previously missed" (unchanged-code) finding, all
+addressed in this pass:
+
+- **Skill-guided sync bypassed the force-tier's own safety machinery:**
+  `attemptWorktreeSync`'s lock/rebase-check/sanitized-env only protected the
+  JS force-tier path -- the agent-guided skill flow called
+  `agent-worktrees git sync` directly, so a force-tier sync and a
+  skill-guided sync could still race and rebase the same worktree
+  concurrently, and the manual path had no rebase-in-progress check of its
+  own at all. Fixed by exposing `attemptWorktreeSync` as a new
+  `handoff-cli.mjs sync-worktree` command -- ONE shared, lock-aware entry
+  point both paths now go through (the skill's "Sync before triggering"
+  step 2 now calls this instead of a bare `agent-worktrees git sync`). The
+  skill still owns committing reviewed WIP itself before calling it, which
+  matches `attemptWorktreeSync`'s existing already-clean-tree precondition.
+- **Force-tier: sync started only after the live trigger signal, not before
+  or during it:** `autoForceHandoff` awaited `triggerHandoff` (which arms
+  the live-cutover signal a fast monitor could act on) BEFORE starting the
+  fire-and-forget sync, so a successor could plausibly be launched before
+  the sync had even begun. Fully serializing sync-before-trigger would
+  reintroduce the exact regression rounds 6/8 already fixed (a slow/
+  unreachable remote delaying or defeating the force-tier's capture
+  guarantee), so the fix taken is a middle ground: the sync is now kicked
+  off (still fire-and-forget, still un-awaited) immediately before
+  `triggerHandoff` rather than after it returns, so the two run
+  concurrently and the sync gets a real chance to progress or finish during
+  triggerHandoff's own network calls and pickup-wait window, instead of
+  only starting once that window has already closed. This narrows the race
+  meaningfully without reintroducing the delayed-capture regression;
+  documented in-code as a deliberate tradeoff.
+- Re-verified round 9's `handoffDedupKey` stale re-flag: confirmed (again)
+  the review comment is pinned to unchanged `SKILL.md` prose, not the
+  actual (already fixed) `handoff-core.mjs` dedup logic -- expect this to
+  clear once the reviewer re-scans the referenced code path.
+- 2 new tests (`sync-worktree` CLI command exists and reaches the real
+  `attemptWorktreeSync` logic; help text lists it). `node --test`: 134
+  tests, 132 pass (2 pre-existing skips), no regressions. All guards pass
+  (one transient `bare-agent-command` marketplace-isolation finding from
+  the new skill wording was fixed with the established
+  `<!-- marketplace-isolation: allow ... -->` marker, back to the 702
+  baseline). No version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 12: crash-safe lock, plain-git fallback, real trigger gating
+
+Round 12 confirmed round 11's rebase-check fix resolved and surfaced 5 new
+HIGH findings plus 1 "previously missed" finding, all addressed:
+
+- **Crash leaves the sync lock permanently stale (previously missed):** the
+  lock was removed only by a `finally` block -- a process killed between
+  acquiring it and that block running (e.g. mid-fetch) would leave the lock
+  file forever, silently skipping every future sync for that worktree.
+  Added a staleness check (`STALE_LOCK_MS` = 5 minutes, generous relative
+  to the sync's own ~30s worst case): an `EEXIST` on acquire now stats the
+  existing lock's mtime and reclaims (unlink + retry the exclusive create)
+  anything older than that, rather than honoring an abandoned lock forever.
+- **Skill-guided tool-response prompts still said bare `agent-worktrees git
+  sync`:** round 11 added the shared `sync-worktree` CLI command but the
+  `generate_handoff_prompt` tool response and the `/handoff-continue`
+  slash-command prompt (both in `extension.mjs`) still told the agent to
+  run the bare command directly, bypassing the lock/rebase-guard/sanitized
+  env entirely if followed literally. Repointed both at the exact
+  `handoff-cli.mjs sync-worktree` invocation.
+- **`sync-worktree` exited 0 on a real sync failure:** the JSON branch
+  returned before any exit handling, and the non-JSON branch only exited
+  nonzero for a *skipped* sync, not an *attempted-and-failed* one. A caller
+  using this as a gate could proceed past a real failure. Fixed: exits
+  nonzero for every non-`synced` outcome, in both output modes (documented
+  in SKILL.md as expected/non-blocking, not itself a stop condition).
+- **No plain-Git fallback when the sibling agent-worktrees payload is
+  absent:** a payload-only context-handoff installation had no working sync
+  at all -- `attemptWorktreeSync` just reported "unavailable" outright, even
+  though the PR description already promised a plain-Git fallback path.
+  Added `plainGitSync()` (new, exported for direct testability since
+  `resolveSystemCliDescriptor` always resolves the real on-disk sibling
+  plugin in this monorepo checkout, making the fallback otherwise
+  unreachable in-repo): determines the remote's default branch
+  (`origin/HEAD`, falling back to `git remote show origin`), fetches and
+  rebases under the same sanitized environment, and aborts cleanly on
+  conflict -- same conflict-safety contract as agent-worktrees' own helper.
+- **Force-tier: concurrent-start sync still wasn't enough:** round 11's fix
+  (start the sync concurrently with `triggerHandoff` rather than after it)
+  was judged insufficient -- a fast live-pickup monitor could still launch
+  a successor before the sync had even begun. Added a `beforeArmPickup`
+  hook to `triggerHandoff` (default no-op, so every other caller is
+  unaffected), awaited strictly between the baton being durably stored and
+  the live-pickup signal being armed -- and ONLY when a live signal can
+  actually fire (manual-only mode, the default, never calls it, so those
+  handoffs pay no extra latency). `autoForceHandoff` now passes the SAME
+  sync promise it already started (not a second sync attempt) as this
+  hook, so auto-mode handoffs genuinely gate the live signal on the sync
+  settling, while manual-only handoffs keep the original fire-and-forget
+  behavior.
+- Updated the README fallback command blocks (bash + PowerShell) and the
+  durable `instructions/handoff-fallback.instructions.md` to include
+  `sync-worktree`, closing the last surface that still omitted it.
+- 6 new/changed tests (stale-lock reclaim, `plainGitSync` success against a
+  real local "remote" and honest failure with no origin, updated
+  assertions for the now-real agent-worktrees invocation in this
+  checkout). `node --test`: 137 tests, 135 pass (2 pre-existing skips), no
+  regressions. All guards pass. No version bump needed (still
+  `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 13: lock-stat safety, fallback rebase recheck, honest sync ordering, exit-code truncation
+
+Round 13 confirmed 5 of round 12's fixes resolved and surfaced 4 new HIGH
+findings, all fixed:
+
+- **Failed lock stat could remove an active replacement lock:** `acquireLock`
+  treated ANY `statSync` failure on an `EEXIST` as "the lock is gone,
+  reclaim it" -- but a failed stat doesn't prove that; it could be a
+  permission error, a transient FS hiccup, or another process re-creating
+  the lock in the exact instant between the failed open and this stat.
+  Reclaiming in that ambiguous case could unlink an active replacement lock
+  another process just created, letting both run concurrently. Fixed: a
+  failed stat now rethrows the original contention error (fails closed)
+  instead of falling through to reclaim.
+- **Plain-git fallback could abort a rebase it did not start:**
+  `plainGitSync` is reached after `attemptWorktreeSyncLocked`'s own earlier
+  rebase check, but the remote-discovery + fetch awaits inside it are
+  exactly the kind of gap another process could start a rebase in -- and
+  the catch block's unconditional `git rebase --abort` could then cancel
+  that unrelated rebase. Added the same immediate-before-exec
+  `rebaseInProgress` recheck this file's other sync path already used,
+  skipping (never touching, never aborting) rather than proceeding.
+- **Sync could start before a successful store, and delayed live triggering
+  unconditionally:** round 12's fix started the sync promise BEFORE calling
+  `triggerHandoff` at all, so a store failure inside `triggerHandoff` still
+  left an orphaned sync running -- contradicting the "post-capture only"
+  contract. Added a new `afterStore` hook to `triggerHandoff` (default
+  no-op), called exactly once the baton is durably stored (right after
+  `store()`/`writeSessionState()` both succeed) -- the correct place to
+  KICK OFF the side task. `autoForceHandoff` now assigns its sync promise
+  inside `afterStore`, and `beforeArmPickup` awaits that SAME (already
+  running) promise only in auto mode. This also incidentally documents the
+  actual contract precisely: sync starts after store, gates live pickup
+  only when live pickup can fire, never delays or depends on anything else.
+- **`sync-worktree --json` could truncate its own output:** `process.exit(1)`
+  called immediately after a stdout JSON write can terminate the process
+  before that write drains to a pipe on some platforms. Switched to
+  `process.exitCode = 1` (matching every other JSON-emitting command path
+  in this CLI, which never call `process.exit()` directly) so Node lets
+  the write flush naturally before exiting with that code.
+- 8 new/changed tests (lock stat-failure fail-closed via a structural
+  check, `plainGitSync`'s pre-rebase-exec recheck with a real pre-existing
+  `rebase-merge` dir left untouched, 3 `triggerHandoff` ordering tests for
+  `afterStore`/`beforeArmPickup`, a CLI exit-code assertion). `node --test`:
+  142 tests, 140 pass (2 pre-existing skips), no regressions. All guards
+  pass. No version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 14: plain-git fallback detached-HEAD guard
+
+Round 14 confirmed 4 of round 13's fixes resolved and surfaced 1 new HIGH
+finding:
+
+- **Plain-git fallback could rebase a detached worktree:**
+  `agent-worktrees`' own managed sync explicitly skips a detached worktree,
+  but `plainGitSync`'s `git rebase origin/<branch>` is itself perfectly
+  valid while HEAD is detached -- it just moves the detached HEAD, not any
+  branch, which is not what a "sync onto the default branch" caller
+  expects and can leave commits unreachable once HEAD moves again. Added a
+  `git symbolic-ref -q HEAD` guard (throws exactly when detached, no output
+  parsing needed) before the fetch/rebase, matching the managed path's own
+  precondition rather than just mirroring its conflict-safety contract.
+- Re-verified the review's other 8 "carried over" items against current
+  file/PR state -- all genuinely already resolved in earlier rounds (the
+  known re-flagging pattern for this repo's automated reviewer): the
+  shared `sync-worktree` entry point (round 11), the `handoffDedupKey`
+  content-hash fix (round 9), the README/instructions fallback mentions
+  (round 12), the aggregate guidance ordering (already correct since round
+  7), and the PR description's documentation-impact section and dev36
+  version reference (round 10's rewrite) -- no action needed.
+- 1 new test (detached-HEAD checkout: confirms `plainGitSync` skips with a
+  `"detached"` reason and HEAD is provably unchanged afterward). `node
+  --test`: 143 tests, 141 pass (2 pre-existing skips), no regressions. All
+  guards pass. No version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 15: serialize the dirty-tree check with the sync lock
+
+Round 15 confirmed the detached-HEAD fix resolved and surfaced 1
+"previously missed" HIGH finding on otherwise-unchanged code:
+
+- **Dirty-tree check ran before the worktree sync lock, not inside it:**
+  `attemptWorktreeSync`'s clean-tree probe ran before
+  `withWorktreeSyncLock` was even acquired, so the advertised
+  check-through-sync serialization was never actually atomic against a
+  file becoming dirty in that gap; the plain-git fallback also never
+  rechecked cleanliness at all, so a local `rebase.autoStash` config could
+  let `git rebase` silently stash/pop unreviewed content instead of
+  refusing to run. Extracted the check into `worktreeIsDirty()` and moved
+  it to run FIRST inside the now-lock-wrapped `attemptWorktreeSyncLocked`
+  (the lock is acquired before ANY check now, not just before the rebase
+  check), and added the same immediate-recheck-before-exec pattern to
+  `plainGitSync`'s own rebase call.
+- 3 new/changed tests (an intentionally-dirty tree behind a held lock
+  proves the dirty check now runs after lock acquisition, not before; a
+  dirtied clone proves `plainGitSync`'s pre-rebase recheck catches it;
+  updated the not-a-git-checkout test for the new failure-order). `node
+  --test`: 145 tests, 143 pass (2 pre-existing skips), no regressions. All
+  guards pass. No version bump needed (still `0.1.1-dev36`).
+
+Re-verified the review's other 7 "carried over" items again against
+current file/PR state -- all still genuinely resolved from earlier rounds
+(the same known re-flagging pattern); none required action this round.
+
+### 2026-09-21 (cont.) -- PR #3167 round 16: atomic stale-lock reclaim
+
+Round 16 surfaced 1 new HIGH finding, fixed in this pass:
+
+- **Stale-lock reclaim was not concurrency-safe:** round 12's reclaim
+  (`unlinkSync` the stale lock, then `openSync(..., "wx")`) let two
+  processes racing to reclaim the SAME stale lock both pass the staleness
+  check, then one's `unlinkSync` could delete the OTHER's freshly-created
+  replacement lock, letting both acquire and run concurrently -- defeating
+  the entire point of the lock. Replaced the unlink step with an atomic
+  `renameSync(lockPath, <unique graveyard path>)`: only one racing renamer
+  can ever succeed (the source stops existing the instant the first one
+  wins), so only the single winner ever reaches the subsequent
+  `openSync(lockPath, "wx")`; a loser's own final open (if it still somehow
+  raced there) simply hits the winner's fresh lock and correctly reports
+  contention via the existing generic catch, rather than crashing.
+- 2 new tests (a structural check that the reclaim path uses `renameSync`,
+  not a bare unlink; a best-effort concurrency integration test firing 5
+  real concurrent `attemptWorktreeSync` calls at the same stale lock and
+  confirming exactly one ever proceeds past it). `node --test`: 147 tests,
+  145 pass (2 pre-existing skips), no regressions. All guards pass. No
+  version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 17: ownership-token lock release, PR description drift
+
+Round 17 surfaced 2 new findings, both fixed:
+
+- **(HIGH) Lock release used path-only ownership:** round 16's atomic
+  reclaim closed the concurrent-reclaimer race, but the RELEASE side
+  (`withWorktreeSyncLock`'s `finally` block) still unlinked the lock
+  unconditionally by path. If a holder ran longer than `STALE_LOCK_MS`
+  (suspended, an extremely slow network -- not necessarily crashed) and
+  another invocation reclaimed the path as stale while the first was still
+  running, the first invocation's eventual (unconditional) release would
+  delete the SECOND invocation's active lock, letting a THIRD invocation
+  acquire while the second was still mid-sync. Fixed: `acquireLock` now
+  returns an ownership token written into the lock file's own content (not
+  just its presence at a path), and release reads the lock back and only
+  unlinks it if the content still matches this invocation's own token --
+  otherwise it has already been reclaimed by someone else and is no longer
+  this invocation's to remove.
+- **(LOW) PR description validation counts were stale:** the description's
+  Validation section still reported round-9's 133/131 test counts; updated
+  to the final 149/147.
+- 2 new tests (a real acquire+release cycle proves a foreign live lock at
+  the shared path is never touched when this invocation never acquired it;
+  a structural check that `acquireLock` returns a token and release
+  compares it before unlinking -- reliably forcing the actual
+  suspended-holder timing scenario isn't practical in a fast unit test).
+  `node --test`: 149 tests, 147 pass (2 pre-existing skips), no
+  regressions. All guards pass. No version bump needed (still
+  `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 18: atomic lock release, disable rebase.autoStash
+
+Round 18 confirmed 2 of round 17's fixes resolved (including the aggregate
+guidance ordering, finally cleared) and surfaced 2 new HIGH findings:
+
+- **Lock release itself was a TOCTOU:** round 17's fix (read the lock's
+  content, compare to this invocation's token, then unlink) is still two
+  separate filesystem operations -- another invocation could reclaim and
+  replace the path after the read but before the unlink, and this
+  invocation's unlink would then delete the NEW holder's active lock.
+  Replaced with `releaseLock()`: `renameSync(lockPath, claimedPath)`
+  atomically CLAIMS whatever is at the path first (the same single-winner
+  guarantee `acquireLock`'s own reclaim step already relies on), and only
+  THEN reads/compares the content it has already exclusively taken
+  possession of -- nothing else can be racing over those same bytes by the
+  time the check runs. A claimed-but-foreign lock (this invocation ran long
+  enough that someone else reclaimed and is using it) is renamed back
+  rather than destroyed.
+- **Plain-git fallback didn't disable `rebase.autoStash`:** the dirty-tree
+  recheck immediately before `plainGitSync`'s own rebase narrows but cannot
+  fully close that TOCTOU (a file can still become dirty in the instant
+  between the check and the exec) -- a repository or user
+  `rebase.autoStash=true` config would otherwise let git silently
+  stash/pop that content instead of failing, contradicting the whole
+  clean-tree safety gate's intent. Added `--no-autostash` to the rebase
+  invocation so a residual race fails loudly instead of moving unreviewed
+  local content.
+- Also fixed the PR description's stale validation counts (already
+  addressed in round 17, but round 18 confirmed it cleanly).
+- 2 new tests (structural checks: `releaseLock` claims via `renameSync`
+  BEFORE reading content, ordering asserted directly; the rebase
+  invocation includes `--no-autostash`). `node --test`: 150 tests, 148 pass
+  (2 pre-existing skips), no regressions. All guards pass. No version bump
+  needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 19: no-clobber lock restore, unattended-sync git config parity
+
+Round 19 confirmed both of round 18's fixes resolved and surfaced 2 new
+HIGH findings plus 1 "previously missed" finding, all fixed:
+
+- **Lock restore could silently overwrite a newer lock:** round 18's
+  restore step (`renameSync(claimedPath, lockPath)`) assumed rename would
+  fail if the destination already existed -- but on POSIX, `renameSync`
+  REPLACES an existing destination unconditionally. If a third invocation
+  created a fresh lock at `lockPath` in the window since this invocation's
+  claim, the restore would silently clobber it, defeating serialization
+  entirely (the exact outcome the lock exists to prevent). Replaced with
+  `linkSync(claimedPath, lockPath)`, which fails with `EEXIST` if the
+  destination already exists, so the restore only ever lands in a
+  genuinely empty slot.
+- **Delegated agent-worktrees sync had no dirty recheck or autostash/hooks
+  protection of its own:** the only `worktreeIsDirty` check runs before the
+  runtime-resolution await; the delegated `agent-worktrees git sync`'s own
+  clean-tree probe uses bare `git status --porcelain` (not this file's
+  stricter check) and its rebase does not disable `rebase.autoStash`.
+  Content created in that gap could be silently stashed/rebased, bypassing
+  this path's own fail-closed safety. Added the same
+  recheck-immediately-before-exec pattern used elsewhere, plus a new
+  `withUnattendedSyncGitConfig()` env overlay (ephemeral
+  `rebase.autoStash=false` + `core.hooksPath=/dev/null` via the
+  `GIT_CONFIG_*` env protocol) applied to both the delegated exec and
+  `plainGitSync`'s own rebase (belt-and-braces alongside its existing
+  `--no-autostash` flag).
+- **(Previously missed) Plain-git fallback left repository hooks
+  enabled:** unlike agent-worktrees' own established `core.hooksPath`
+  convention for trusted mechanical plumbing, a client-side `pre-rebase`
+  hook could otherwise block or mutate this unattended sync. Covered by
+  the same `withUnattendedSyncGitConfig()` fix above.
+- 3 new tests (a real behavioral proof that a `pre-rebase` hook configured
+  to fail-and-mark never runs during `plainGitSync`; structural checks for
+  the no-clobber `linkSync` restore and the delegated-path git-config
+  parity). `node --test`: 153 tests, 151 pass (2 pre-existing skips), no
+  regressions. All guards pass. No version bump needed (still
+  `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 20: gate lock reclaim on process liveness, not just age
+
+Round 20 confirmed both of round 19's fixes resolved and surfaced 1 new
+HIGH finding that turned out to be the true root cause of the whole
+rounds-16-through-20 chain:
+
+- **The reclaim scheme itself could still race with a live replacement
+  holder:** the reviewer traced through the full release sequence and
+  found that `releaseLock`'s own claim step (`renameSync(lockPath,
+  claimedPath)`) removes WHATEVER is at the path -- including a live
+  replacement holder's active lock -- leaving a brief empty-path window
+  before the no-clobber `linkSync` restore. A third invocation's
+  `acquireLock` could `openSync(lockPath, "wx")` successfully into that
+  empty window, running concurrently with the (temporarily displaced,
+  soon-to-be-restored) replacement holder. Patching this specific window
+  again would just move the same fundamental problem one level further
+  (as rounds 17-19 already demonstrated). The reviewer's own suggested
+  alternative -- "avoid reclaiming live holders" -- is the actual fix: age
+  alone can never distinguish a genuinely crashed holder from one that is
+  merely slow (a suspended process, a very slow network) but still very
+  much alive, and reclaiming the LATTER is what forces every subsequent
+  release-side race in this whole chain. Replaced the time-only reclaim
+  criterion with **liveness-gated reclaim**: the lock's content now leads
+  with the holder's own pid, and `acquireLock` only ever reclaims a lock
+  whose recorded pid is confirmed NOT running (`isProcessAlive()`, via
+  `process.kill(pid, 0)`) -- a live holder is now NEVER reclaimed no matter
+  how long it has been running. `STALE_LOCK_MS` (bumped to an hour) is
+  demoted to an ultimate last-resort fallback used only when the pid can't
+  even be parsed (a corrupt/legacy lock). This removes the ROOT scenario
+  that necessitated the entire chain of release-side fixes: a genuinely
+  dead process can never resume and race on its own release.
+- 2 new tests (a genuinely live holder -- this test process's own pid --
+  is never reclaimed no matter its lock's age; updated the existing
+  stale-reclaim tests to record a confirmed-dead pid via a spawned,
+  already-exited child process, rather than relying on age alone). `node
+  --test`: 154 tests, 152 pass (2 pre-existing skips), no regressions. All
+  guards pass. No version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 21: authoritative remote-default-branch resolution
+
+Round 21 confirmed round 20's root-cause fix resolved and surfaced 1
+"previously missed" MEDIUM finding on otherwise-unchanged code -- the
+first round with zero new HIGH findings, suggesting the review is nearing
+convergence:
+
+- **Plain-git fallback trusted a possibly-stale local `origin/HEAD`
+  cache:** that local symref is set once at clone time (or by `git remote
+  set-head`) and can remain pointed at the remote's OLD default branch
+  after the remote renames/changes it -- this fallback could then silently
+  fetch/rebase onto the wrong branch while still reporting a successful
+  sync. Reordered to query the remote directly FIRST via `git ls-remote
+  --symref origin HEAD` (authoritative, matching the ordering
+  `agent-worktrees`' own `status_bar_cli.py`
+  `_resolve_remote_default_branch` resolver uses when network access is
+  allowed) -- costs nothing extra since this function already performs a
+  network fetch regardless. The local `origin/HEAD` cache and `git remote
+  show origin` remain as fallbacks only if the direct remote query itself
+  fails outright (e.g. a network hiccup).
+- 1 new test (renames the "remote"'s default branch after cloning, so the
+  clone's cached `origin/HEAD` stays stale, and confirms the sync still
+  correctly follows the new name). `node --test`: 155 tests, 153 pass (2
+  pre-existing skips), no regressions. All guards pass. No version bump
+  needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 22: pid-reuse ceiling, releaseLock error handling, remove the stale-cache fallback entirely
+
+Round 22 surfaced 3 new findings, all fixed:
+
+- **(HIGH) A crashed holder's reused pid would permanently disable sync for
+  a worktree:** round 20's liveness-gated reclaim closed the "reclaim a
+  merely-slow live holder" problem, but `process.kill(pid, 0)` can only
+  observe whether SOME process holds that pid right now -- it cannot tell
+  whether the ORIGINAL holder crashed and the OS later reused its pid for
+  an unrelated live process. Without a bound, that reused pid would look
+  permanently "alive" and this worktree could never self-heal again. Added
+  `ABSOLUTE_STALE_LOCK_MS` (24h, deliberately far longer than the everyday
+  `STALE_LOCK_MS` fallback) as a hard ceiling that overrides even a
+  "confirmed alive" verdict -- a bounded, rare-but-real safety net
+  specifically for pid reuse, not a normal reclaim path.
+- **(HIGH) `releaseLock`'s restore step treated every `linkSync` failure as
+  benign:** swallowing any error (not just the expected `EEXIST`) and
+  unconditionally deleting the claimed copy meant an unexpected failure
+  (permissions, an unsupported filesystem, transient I/O) would still
+  destroy the only remaining copy of a still-active replacement holder's
+  lock content, leaving the path empty for a third invocation to acquire
+  into. Now branches explicitly on `error?.code === "EEXIST"` (the
+  expected "already re-acquired" case, safe to drop) versus any other
+  failure (fails closed -- leaves the orphaned copy in place rather than
+  guessing).
+- **(MEDIUM) The local `origin/HEAD` cache fallback was itself removed:**
+  round 21 still fell back to the possibly-stale local cache if BOTH direct
+  remote queries (`ls-remote --symref`, `remote show origin`) failed
+  outright. Removed that fallback entirely -- if neither authoritative
+  network query succeeds, `plainGitSync` now reports `synced: false`
+  ("could not confirm the remote's default branch") rather than ever
+  guessing from a value that cannot be confirmed current.
+- 4 new tests (an old-but-genuinely-reused-pid-standin lock is reclaimed
+  once past the absolute ceiling; a structural check that only `EEXIST` is
+  treated as benign in `releaseLock`'s restore catch; a real unreachable-
+  remote scenario proving the cache fallback is never consulted). `node
+  --test`: 158 tests, 156 pass (2 pre-existing skips), no regressions. All
+  guards pass. No version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 23: process-identity (pid + start time) replaces age-based reclaim entirely
+
+Round 23 surfaced 1 new HIGH finding that correctly identified a real
+tension in round 22's own fix:
+
+- **The pid-reuse safety net (round 22) reintroduced the exact race it was
+  meant to fix:** `ABSOLUTE_STALE_LOCK_MS` overrode even a "confirmed
+  alive" verdict once a lock exceeded 24h -- but a live pid can genuinely
+  belong to the SAME original holder for longer than that (a suspended
+  process, an extremely slow network), and reclaiming it then reintroduces
+  the very race this whole scheme exists to prevent. Bare pid liveness
+  alone cannot resolve this: `process.kill(pid, 0)` only proves SOME
+  process holds that pid right now, not that it is the SAME process that
+  created the lock. Replaced the age-based override entirely with
+  **process-identity comparison**: the lock now records the holder's pid
+  AND its OS-reported start time (queried via `Get-Process
+  ...StartTime.ToFileTimeUtc()` on Windows, `ps -o lstart=` on POSIX --
+  both write and read sides use the SAME query function for measurement
+  parity, since comparing Node's own `process.uptime()`-derived estimate
+  against the OS's official answer for someone else's pid would not
+  reliably match even for the exact same process). A live pid whose
+  CURRENT start time matches the recorded one is the SAME process --
+  NEVER reclaimed, no matter its age; a mismatch proves it is a DIFFERENT
+  process now recycling that pid -- reclaimed immediately, no age wait
+  needed at all; a live pid with no recorded start time (an
+  older/corrupt lock) fails closed (never reclaimed) rather than guessing
+  from age. `acquireLock` is now async (queries its own start time at
+  acquire) -- `withWorktreeSyncLock` awaits it.
+- 3 new/changed tests (a genuine pid-reuse-standin lock -- alive pid,
+  deliberately wrong recorded start time -- is reclaimed immediately
+  regardless of age; a genuinely matching recorded start time is never
+  reclaimed regardless of age, using a REAL queried value not just a
+  placeholder; a no-recorded-start-time lock still fails closed). `node
+  --test`: 159 tests, 157 pass (2 pre-existing skips), no regressions. All
+  guards pass. No version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 24: acquire-side reclaim race, diagnostic redaction, configurable remote
+
+Round 24 surfaced 2 new HIGH findings plus 3 "previously missed" findings
+on otherwise-unchanged code; the 2 new HIGH ones and 2 of the 3 previously-
+missed ones were fixed:
+
+- **(HIGH) The acquire-side reclaim itself had the same TOCTOU releaseLock
+  already had to close:** an atomic `renameSync` only guarantees ONE
+  winner among contenders racing on the SAME source -- it says nothing
+  about WHAT was actually there. Two contenders can both read the same
+  stale lock and both independently decide "reclaimable" before either
+  acts; if contender A wins its rename+recreate first, contender B's
+  rename (reached later) would then claim A's brand-new ACTIVE lock
+  instead of the original stale one, and B would proceed to acquire
+  concurrently with A. `acquireLock` now verifies the claimed content
+  still matches what its decision was based on before proceeding; a
+  mismatch means someone else already won, so it restores the claim
+  (`linkSync`, no-clobber, the same technique `releaseLock` already uses)
+  and reports contention instead.
+- **(HIGH) Raw Git diagnostics could leak credentials:** a fetch/rebase
+  failure's stderr can include the remote URL verbatim (with embedded
+  userinfo credentials) or an `Authorization` header, which flowed
+  straight into the returned `reason` string (and from there, the
+  extension log and CLI output) unredacted. Added `redactGitDiagnostics()`
+  (mirrors `agent-worktrees`' own URL-userinfo/auth-header redaction in
+  `repos.py`'s `_redact`), applied inside `describeSyncError()` so every
+  returned/logged diagnostic string in this file is covered uniformly.
+- **(Previously missed) Plain-git fallback hardcoded `origin`:** a
+  checkout whose tracking remote is configured under a different name
+  (e.g. `upstream`) would report "cannot determine a default branch" and
+  never sync. Now resolves the CURRENT branch's configured tracking remote
+  (`git config branch.<branch>.remote`), falling back to `origin` only
+  when none is configured -- matching the managed path's own
+  `RepoConfig.remote` default.
+- **(Previously missed) PR description's doc-impact statement omitted the
+  durable fallback instructions file:** `instructions/handoff-fallback.instructions.md`
+  (updated back in round 12) wasn't listed among the authoritative sources
+  in the Documentation impact section. Added it, and refreshed the
+  Validation section's test counts to match.
+- **(Deferred, not fixed) "Move exhaustive process tests out of required PR
+  CI":** a real, legitimate testing-infrastructure concern (the real-git/
+  child-process/timing-sensitive lock matrix runs unconditionally in the
+  required `node --test` CI lane) -- but properly tiering CI test lanes
+  (contract-vs-exhaustive, path-gated or scheduled) is a distinct
+  test-infrastructure change, not a correctness fix, and the current suite
+  runs in ~46s with no observed flakiness. Deferred as a reasonable
+  follow-up rather than rushed alongside this PR's substantial lock-safety
+  work; noted here for visibility if it resurfaces.
+- 5 new/changed tests (structural check that acquire's reclaim verifies
+  claimed-vs-observed content before proceeding, and restores via
+  `linkSync` on mismatch; `redactGitDiagnostics` URL-credential redaction,
+  built via string concatenation to avoid tripping this environment's own
+  secret-scanning guardrail on the test fixture itself; the auth-header
+  branch covered structurally, since a live "Authorization: Bearer
+  <token>"-shaped round-trip is itself caught and masked by that same
+  guardrail before reaching this session; a real differently-named-remote
+  scenario proving the sync still resolves it correctly). `node --test`:
+  163 tests, 161 pass (2 pre-existing skips), no regressions. All guards
+  pass. No version bump needed (still `0.1.1-dev36`).
+
+### 2026-09-21 (cont.) -- PR #3167 round 25: shared lock-restore helper, instructions ordering fix, CI test-lane split
+
+Round 25 surfaced 2 new HIGH findings, both fixed, plus a re-flag of the
+round-24 deferred CI-lane item -- this time actually implemented instead of
+deferred again:
+
+- **(HIGH) linkSync-restore-on-mismatch error handling was duplicated and
+  inconsistent between acquireLock and releaseLock:** each had its own
+  copy of the restore-via-no-clobber-linkSync logic, discriminating EEXIST
+  (benign) from any other failure (fail closed, keep the orphaned copy),
+  and the two copies had drifted slightly out of sync across rounds 18-24.
+  Extracted a single shared restoreClaimedLock(claimedPath, lockPath)
+  helper; both call sites now delegate to it, so the discrimination logic
+  only needs to be correct -- and tested -- once.
+- **(HIGH) `handoff-fallback.instructions.md` referenced `$CH` before it was
+  ever defined:** the Preparing a brief section used `$CH` several
+  paragraphs before the variable's actual resolution later in the file, so
+  a reader following it top-to-bottom would hit an undefined reference.
+  Fixed by inlining the resolution directly into that section instead of
+  relying on a forward reference.
+- **(Actually implemented this time) Moved the exhaustive real-git/
+  child-process/lock-race test matrix out of the required CI lane:** split
+  plugins/context-handoff/tests/handoff-core.test.mjs (2321 lines, 163
+  tests) into a fast contract file (44 pure-logic tests, ~0.3s, unchanged
+  path/name, still covered by the checks job's node --test
+  plugins/*/tests/*.test.mjs glob) and a new
+  plugins/context-handoff/tests/exhaustive/handoff-lock-process-matrix.test.mjs
+  (the real-git-repo/subprocess/timing-sensitive lock-race matrix, ~1094
+  lines, 36 tests). The extra directory level means Node's default test
+  glob (a single * does not recurse into subdirectories) naturally
+  excludes it from the required lane with no separate ignore mechanism
+  needed. Added a new context-handoff-exhaustive job to ci.yml, gated on
+  workflow_dispatch or a new weekly schedule trigger (Monday 06:00 UTC) --
+  never blocks a PR/push. Several of the moved file's structural tests
+  (which readFileSync the handoff-core.mjs source to assert on function
+  bodies) needed their relative path depth corrected for the new
+  location, and two tests that inspected releaseLock's/acquireLock's
+  inline restore logic directly were rewritten to inspect the
+  newly-extracted restoreClaimedLock helper instead (the logic they guard
+  moved there).
+- Bumped plugin.json/marketplace.json to 0.1.1-dev37 (content changed).
+  node --test: fast suite 163 tests/161 pass (2 pre-existing skips,
+  unchanged); exhaustive suite 36/36 pass. Full guard suite
+  (version-consistency, version-bump, module-size, marketplace-isolation,
+  skills, docs-consistency, runbook-references) all pass -- no new
+  findings beyond the pre-existing report-only marketplace-isolation
+  baseline and skill-length warnings on unrelated plugins.
+
+### 2026-09-21 (cont.) -- PR #3167 round 26: unreadable-lock fail-closed, restore-fallback never leaves the canonical path empty, decouple pickup arm from sync completion
+
+Round 26 surfaced 3 new findings (2 HIGH, 1 MEDIUM), all fixed, plus a LOW
+PR-metadata finding (fixed) and 6 re-flagged carryovers -- all 6 confirmed
+already resolved in earlier rounds (verified against current file state,
+not re-fixed):
+
+- **(HIGH) Unreadable locks were reclaimed by age like unparseable ones:**
+  acquireLock treated "could not read the existing lock at all" the same
+  as "read it fine but found no parseable pid" -- both fell through to
+  the age-only heuristic. An unreadable-but-genuinely-live lock (a
+  permission error, transient I/O, an unsupported filesystem) has no
+  evidence its holder is gone, so folding it into the age fallback could
+  reclaim a live holder purely because the lock happened to be old. Now
+  tracks a distinct readFailed flag: an unreadable lock fails closed
+  immediately (never reclaimed by age); only a readable-but-unparseable
+  one still reaches the age-only fallback.
+- **(HIGH) restoreClaimedLock's fail-closed branch left the canonical
+  path empty:** when linkSync failed for any reason OTHER than EEXIST,
+  the prior code preserved only the orphaned claimedPath, leaving
+  lockPath (the canonical path) missing entirely -- a third invocation's
+  exclusive acquireLock could then succeed there and run concurrently
+  with the holder whose content survived only at the orphan. Since
+  EEXIST is the ONLY "already occupied" signal linkSync gives, any OTHER
+  failure means lockPath is presumably empty, so restoreClaimedLock now
+  falls back to a direct renameSync there (no clobber risk reasoned from
+  that same exclusion), only truly failing closed (preserving the
+  orphan) if that fallback ALSO fails.
+- **(MEDIUM) Arming live pickup awaited the full worktree sync, not just
+  its start:** the force-tier path's beforeArmPickup hook awaited the
+  ENTIRE sync promise (network/CLI work with multiple 20s timeouts)
+  before arming pickup, in auto mode. A slow or unreachable remote could
+  hold the last-chance/fire-and-forget trigger long enough for
+  compaction to happen -- defeating the very guarantee this path exists
+  for. The round-12 finding this hook was built for only needed the sync
+  to have STARTED before a live monitor could race ahead of it -- which
+  calling attemptWorktreeSync already guarantees synchronously, before
+  its first await (proven by an existing elapsed-time regression test).
+  Removed the beforeArmPickup gating from the force-tier caller entirely;
+  triggerHandoff's hook itself remains a generic DI seam other callers
+  could still use.
+- **(LOW, PR metadata) PR description reported the version as dev36/dev35
+  after later rounds bumped it further:** updated the PR body's version
+  bullet and validation test counts (127 fast + 37 exhaustive = 164
+  total) to match current dev37 (later dev38 once this round's own fixes
+  needed a bump too), and added Changes-section bullets summarizing the
+  restoreClaimedLock/readFailed/pickup-decoupling fixes and the CI
+  test-lane split so the PR description stays a faithful summary of the
+  shipped diff.
+- **Carryovers re-verified as already resolved, not re-fixed:** dedup-key
+  content-hash (round 9) already prevents a stale post-sync baton from
+  surviving a re-save; emitted `generate_handoff_prompt`/`save_handoff_prompt`
+  tool-response text and the `/handoff-continue` prompt already reference
+  the sync step (round 10-12); `scripts/emit-guidance.sh`/`.ps1` already
+  sequence sync before compose/store; `README.md`'s fallback command block
+  and `instructions/handoff-fallback.instructions.md` already include
+  `sync-worktree`; and the PR description already carries a
+  "Documentation impact" section. All confirmed against current file
+  content, not assumed from memory.
+- 4 new/changed exhaustive-suite tests (readFailed-vs-unparseable
+  structural check; renameSync-fallback structural check replacing the
+  now-outdated "never renameSync" assertion). `node --test`: fast suite
+  127 tests/125 pass (2 pre-existing skips, unchanged), exhaustive suite
+  37/37 pass (164 total, no regressions). Bumped plugin.json/marketplace.json
+  to `0.1.1-dev38` (content changed again after dev37's own bump). All
+  guards pass.
+
+### 2026-09-21 (cont.) -- PR #3167 round 27: exclusive-create restore fallback, releaseLock read-failure restore, bounded pickup-arm reintroduced
+
+Round 27 surfaced 4 new findings (3 HIGH, 1 LOW PR-metadata) plus the same 6
+carryovers re-flagged again (all re-verified against current file state as
+already resolved, not re-fixed -- see round 26's entry for the detailed
+per-item confirmation, unchanged since):
+
+- **(HIGH) Round 26's own `renameSync` restore fallback was unsafe on
+  filesystems without hard-link support:** `linkSync` can fail with
+  `ENOTSUP`/`EPERM` even when `lockPath` genuinely IS occupied (not only
+  when it's empty, as round 26 assumed) -- a `renameSync` there would
+  silently replace a still-active lock, letting two holders run
+  concurrently. Replaced the `renameSync` fallback with a read +
+  exclusive-create write (`openSync(lockPath, "wx")`, atomic on both
+  POSIX and Windows): its own `EEXIST` is a reliable "already occupied"
+  signal regardless of hard-link support, closing the gap round 26's fix
+  left open.
+- **(HIGH) `releaseLock` still didn't restore when it couldn't even read
+  the just-claimed content:** the read-failure branch simply `return`ed,
+  leaving `lockPath` (the canonical path) empty with the only surviving
+  content at the orphaned `claimedPath` -- exactly the "canonical path
+  left empty" bug round 26 fixed elsewhere in this same function, just
+  missed at this one call site. Now restores via `restoreClaimedLock`
+  instead of returning.
+- **(Re-flagged, addressed with reasoning rather than a literal fix) "Wait
+  for worktree sync before starting successor handoff":** round 26's
+  complete removal of `beforeArmPickup` (to stop it blocking on the
+  sync's full completion) reintroduced the exact race round 12 built that
+  hook to close -- pickup could now be armed before the sync had even
+  started. Reintroduced `beforeArmPickup`, but bounded to a fixed 10s
+  ceiling (`FORCE_TIER_SYNC_ARM_TIMEOUT_MS`) via `Promise.race` rather
+  than an unbounded await: a healthy, reachable remote settles well
+  inside the ceiling (satisfying round 12/27's concern in the common
+  case), while an unreachable/slow remote still cannot block the trigger
+  past a small fixed bound (satisfying round 26's concern). Resolves the
+  tension between the two prior findings instead of re-litigating one
+  side of it.
+- **(LOW, PR metadata) PR description's final Changes bullet still said
+  dev37 after this round's fixes needed dev38:** updated the version
+  bullet and added a Changes-section summary of this round's three fixes.
+- **(Reviewed but NOT changed) "Restore claimed lock when unlink fails"
+  (releaseLock's own-token release branch):** examined carefully and
+  concluded the suggested "restore on non-ENOENT unlink failure" would be
+  actively WRONG here, not merely unneeded -- this branch is the
+  legitimate self-release path (content genuinely matches this
+  invocation's own token), so `lockPath` is SUPPOSED to end up empty
+  after it; restoring would reintroduce a zombie lock nobody currently
+  holds, blocking future acquisitions until staleness eventually reclaims
+  it. `lockPath` is already correctly vacated by the earlier
+  `renameSync` claim regardless of whether this cleanup `unlinkSync`
+  succeeds -- a failure here only leaves harmless orphaned garbage, never
+  a live or ambiguous lock. Left the swallow-all-errors behavior as is,
+  but clarified the comment to explicitly distinguish this branch's
+  "intentional vacate" semantics from `restoreClaimedLock`'s "must
+  restore" semantics, so a future reader (or reviewer) doesn't need to
+  re-derive the same reasoning from scratch.
+- 4 new/changed exhaustive-suite tests (exclusive-create fallback
+  structural checks replacing the outdated renameSync-fallback assertion;
+  releaseLock's read-failure restore). `node --test`: fast suite 127
+  tests/125 pass (2 pre-existing skips, unchanged), exhaustive suite
+  39/39 pass (166 total, no regressions). No version bump needed for the
+  code fixes themselves (still `0.1.1-dev38`, bumped last round) --
+  guards all pass.
+
+### 2026-09-21 (cont.) -- PR #3167 round 28: shared liveness-aware wait replaces the fixed-delay pickup gate, defends consume_handoff too
+
+Round 28 re-flagged "Wait for worktree sync before starting successor
+handoff" for the THIRD time -- round 27's bounded-but-fixed 10s
+`Promise.race` compromise did not satisfy either of the finding's two
+suggested remedies ("gate live pickup on sync completion" or "make
+successor startup wait on the same completion marker"), and the reviewer
+kept it open with an unchanged body pointing at the same call site. All 5
+other re-flagged carryovers (dedup baton, fallback workflow sync, emitted
+guidance, and the 3 PR-metadata version-number threads) were confirmed
+already resolved again, unchanged from round 26/27's verification --
+including confirming "Restore claimed lock when unlink fails" is now
+marked resolved (round 27's reasoning-only comment fix, not a functional
+change, satisfied it).
+
+Rather than tightening the fixed-delay compromise further, implemented
+the review's second suggested remedy properly -- a genuine shared,
+liveness-aware wait usable from BOTH ends of a handoff:
+
+- **New `waitForWorktreeSyncToSettle(cwd, { timeoutMs, pollMs })`**
+  (`handoff-core.mjs`, exported): polls the SAME shared worktree-sync
+  lock `attemptWorktreeSync` itself acquires -- WITHOUT ever trying to
+  acquire it, purely observational -- returning as soon as the lock is
+  absent or its recorded holder is confirmed dead (reusing the existing
+  `isProcessAlive` check, now exported), or once `timeoutMs` elapses,
+  whichever comes first. Extracted `resolveWorktreeSyncLockPath()` out of
+  `withWorktreeSyncLock` so both the acquire path and this new read-only
+  observer resolve the lock location identically.
+- **`extension.mjs`'s `autoForceHandoff`:** `beforeArmPickup` now calls
+  `waitForWorktreeSyncToSettle` directly instead of racing a bare
+  `syncPromise` against a fixed timer -- this settles the INSTANT the
+  lock actually clears (a healthy, reachable remote's common case is now
+  faster than the old fixed 10s wait, not slower), while still bounded to
+  a fixed ceiling (`FORCE_TIER_SYNC_ARM_TIMEOUT_MS`, raised to 15s now
+  that it is a real completion signal rather than a guess) for an
+  unreachable/slow remote.
+- **`extension.mjs`'s `consume_handoff` tool handler:** now performs the
+  SAME bounded wait defensively at successor startup, before reading
+  anything -- covering the case the reviewer specifically called out
+  (pickup armed, or a manual `/consume-handoff` run, while the
+  predecessor's sync might still be settling), which the predecessor-side
+  gate alone can never fully close given the fire-and-forget/last-chance
+  constraint on that side.
+- 4 new real-git-repo exhaustive tests for `waitForWorktreeSyncToSettle`
+  (no-lock, confirmed-dead-holder, genuinely-alive-holder-times-out, and a
+  genuine poll-loop proof via mid-wait lock release) plus the existing
+  suite's own regressions. `node --test`: fast suite 127 tests/125 pass
+  (2 pre-existing skips, unchanged), exhaustive suite 43/43 pass (170
+  total, no regressions). Bumped plugin.json/marketplace.json to
+  `0.1.1-dev39`. All guards pass.
+
+### 2026-09-21 (cont.) -- PR #3167 round 29: real start-barrier for waitForWorktreeSyncToSettle, exhaustive suite moved to its own workflow file
+
+Round 29 confirmed round 28's `waitForWorktreeSyncToSettle` genuinely
+resolved the round-12/26/27/28 pickup-arm tension, and surfaced 2 new
+MEDIUM findings, both fixed:
+
+- **CI schedule trigger applied to every job, not just the exhaustive
+  suite:** a top-level `schedule:` trigger on `ci.yml` applies to EVERY
+  job in that workflow -- `checks`, Windows hooks, runner tests, the
+  `discover`/`smoke`/`worktrees-smoke` matrix, and the manual `full` job
+  would ALL have started running weekly, not just the one exhaustive job
+  that needed it, silently multiplying CI cost. Moved the exhaustive job
+  (and its `workflow_dispatch`/weekly-`schedule` triggers) into its OWN
+  dedicated workflow file, `.github/workflows/context-handoff-exhaustive.yml`
+  -- `ci.yml` itself reverts to its original `pull_request`/`push`/
+  `workflow_dispatch` triggers only.
+- **`waitForWorktreeSyncToSettle`'s lock-visibility could race with the
+  sync's own startup:** `attemptWorktreeSync` has several async steps of
+  its own (resolving the lock path, querying the holder's start time)
+  before the lock file exists on disk at all -- a caller invoking the
+  wait function at roughly the same moment a sync begins could observe
+  "no lock yet" and wrongly conclude "already settled" before the sync
+  had a chance to register itself, letting `autoForceHandoff` arm pickup
+  while a successor could still read stale or mid-rebase files. Added an
+  opt-in `startGraceMs` parameter: during that grace window, an absent or
+  unparseable reading is NOT trusted as settled -- only once genuine
+  evidence of a live holder is observed (no further grace needed from
+  then on), or the grace window itself elapses with no evidence at all,
+  is "settled" concluded. Deliberately opt-in (defaults to 0): only
+  `autoForceHandoff`'s `beforeArmPickup` -- the one caller that KNOWS a
+  sync was just dispatched a moment ago -- passes a nonzero
+  `FORCE_TIER_SYNC_START_GRACE_MS` (2000ms); `consume_handoff`'s
+  defensive successor-side check has no such certainty and must stay
+  fast in the overwhelmingly common case where nothing is in flight at
+  all, so it keeps the zero-grace default.
+- 2 new/changed exhaustive-suite tests proving the grace-window trade-off
+  both ways (a lock that appears late is missed with the default 0ms
+  grace; the same lock is caught with a nonzero grace configured), plus
+  reason-string updates on 2 existing tests to reflect the richer
+  before/after-observed-live distinction. `node --test`: fast suite 127
+  tests/125 pass (2 pre-existing skips, unchanged), exhaustive suite
+  45/45 pass (172 total; one transient Windows `EPERM` on an unrelated
+  test's cleanup, confirmed non-reproducing on immediate re-run -- the
+  same known flake documented earlier in this journal). Bumped
+  plugin.json/marketplace.json to `0.1.1-dev40`. All guards pass,
+  including `check-trusted-ci.py` on the new workflow file.
+
+### 2026-09-21 (cont.) -- PR #3167 round 30: fail-closed on non-ENOENT lock-read errors in waitForWorktreeSyncToSettle
+
+Round 30 confirmed both round-29 fixes (the dedicated exhaustive-suite
+workflow file, and the startGraceMs start barrier) resolved -- the "still
+open" listing for those two carried a null line anchor, consistent with
+this session's established pattern of stale carryovers the bot cannot
+re-anchor after a structural change, confirmed resolved by direct
+inspection of both files. One new HIGH finding, fixed:
+
+- **`waitForWorktreeSyncToSettle`'s `readFileSync` catch treated every
+  failure as "no lock present":** conflating a genuinely absent lock
+  (`ENOENT`, safe to treat as settled) with a read failure that proves
+  NOTHING either way (permissions, a sharing violation, transient I/O)
+  meant the function could report `settled: true` while an active lock
+  was actually still there, just unreadable to that one read attempt --
+  the exact "fail open on ambiguous evidence" mistake this whole lock
+  epic has repeatedly had to close elsewhere. Now only `ENOENT`
+  is treated as a genuinely absent lock; any other read error is skipped
+  as an inconclusive reading for that iteration (neither absent nor live)
+  rather than trusted either way, so the overall `timeoutMs` alone bounds
+  how long a persistently-unreadable lock can be waited out -- it is
+  never silently reported "settled".
+- 1 new exhaustive-suite test: a directory placed AT the lock path forces
+  a portable, reliably-reproducible non-`ENOENT` failure (`EISDIR`) on
+  every read attempt, proving the function times out (never falsely
+  settles) rather than treating it as absent. `node --test`: fast suite
+  127 tests/125 pass (2 pre-existing skips, unchanged), exhaustive suite
+  46/46 pass (173 total, no regressions). Bumped
+  plugin.json/marketplace.json to `0.1.1-dev41`. All guards pass.
+
+### 2026-09-21 (cont.) -- PR #3167 round 31: placeholder-first lock creation, fail-closed unparseable content, rebase-consistency check, CLI consume parity
+
+Round 31 surfaced 4 new findings (3 HIGH, 1 MEDIUM), all fixed -- the
+deepest round yet into the pickup-arm/successor-startup race family:
+
+- **(HIGH) Zero successor grace still permitted consumption before the
+  sync lock even opened:** `consume_handoff`'s `startGraceMs: 0` meant it
+  could read "lock-absent" during the genuine async gap between
+  `attemptWorktreeSync` dispatching and `acquireLock`'s own `openSync`
+  actually creating the file. Root-caused and fixed at the SOURCE rather
+  than tuning another grace window: `acquireLock` now writes a
+  synchronous PID-only placeholder into the lock file IMMEDIATELY upon a
+  successful exclusive create, BEFORE awaiting `processStartTimeMs` (a
+  subprocess spawn) -- the file exists and is non-empty the instant the
+  create succeeds, closing the gap this round's finding was really about.
+  Extracted this into a shared `writeLockToken(fd)` helper used by both
+  the fresh-create and reclaim-success paths (each an independent act of
+  becoming the new holder, each gets its own freshly-computed token).
+  One residual, smaller gap remains -- resolving the lock's PATH itself
+  still spawns a `git rev-parse` subprocess before any file can exist at
+  all -- deliberately not closed by reimplementing git's own path
+  resolution by hand (high risk, marginal gain given the much narrower
+  remaining window); `consume_handoff` instead got a small
+  `CONSUME_HANDOFF_START_GRACE_MS` (500ms) to cover exactly that residual
+  case without meaningfully slowing the common "nothing in flight" path.
+- **(HIGH) `handoff-cli.mjs`'s `cmdConsume` skipped the settling check
+  entirely:** the extension-free successor path (Bare-resumed sessions,
+  or an agent invoking the CLI directly) called the consume helpers with
+  no wait at all, unlike the extension handler's bounded check. Made
+  `cmdConsume` async, added the SAME `waitForWorktreeSyncToSettle` call
+  (mirroring `consume_handoff`'s reasoning and constants), and awaited it
+  from the command dispatcher.
+- **(HIGH) Present-but-unparseable lock content fails open:** with
+  `startGraceMs: 0`, a lock briefly showing non-final content (the
+  placeholder-write window above, or genuinely corrupt/legacy data) was
+  treated as settled immediately -- exactly the fail-open mistake this
+  whole lock epic keeps having to close. `waitForWorktreeSyncToSettle` now
+  treats present-but-unparseable content as ALWAYS inconclusive (never
+  settled), regardless of any grace window, bounded only by the overall
+  `timeoutMs` -- only a genuinely ABSENT lock (`ENOENT`) can ever be
+  trusted quickly.
+- **(MEDIUM) A confirmed-dead lock holder doesn't prove a consistent
+  worktree:** a process can crash mid-rebase and leave `.git/rebase-merge`
+  behind; reporting a plain `settled: true` from a dead-holder reading let
+  `consume_handoff` skip its own warning and trust a possibly-broken tree.
+  `waitForWorktreeSyncToSettle` now checks `rebaseInProgress` when
+  concluding via the dead-holder path and returns a new `needsInspection`
+  flag; both `consume_handoff` and the CLI's `cmdConsume` log a distinct
+  warning (mentioning `git rebase --abort`) when it's set.
+- The 2 round-29 findings still listed "Open" this round (schedule-trigger
+  scope, lock-visibility race) carried `null` line anchors -- re-confirmed
+  resolved by direct file inspection, same stale-carryover pattern noted
+  in round 30's entry.
+- **Fixed a self-inflicted bug during this round's own work:** the
+  placeholder-first reorder initially moved `token`'s declaration inside
+  the try block, making it unreachable from the reclaim-success path's
+  own final `return` -- caught immediately by the exhaustive suite (every
+  reclaim-path test failing) before this was ever pushed; fixed by
+  extracting the shared `writeLockToken` helper described above.
+- 3 new/changed exhaustive-suite tests (a `needsInspection` true/false
+  pair for the dead-holder+rebase case; the non-ENOENT fail-closed test
+  already added last round continues to pass unchanged) plus loosened
+  timing margins on 2 pre-existing timing-sensitive tests that proved
+  too tight under this session's own heavy concurrent test-suite load
+  (confirmed passing reliably in isolation both before and after -- not a
+  logic regression). `node --test`: fast suite 127 tests/125 pass (2
+  pre-existing skips, unchanged) plus `cli-parity`/`cli-timeouts` still
+  green; exhaustive suite 47/47 pass (174 total, no regressions). Bumped
+  plugin.json/marketplace.json to `0.1.1-dev42`. All guards pass.
+
+### 2026-09-21 (cont.) -- PR #3167 round 32: parseable lock placeholder, cleanup on token-init failure, revalidate dead-holder lock after await
+
+Round 32 confirmed round 31's 4 fixes AND the round-29 "lock visibility can
+race with sync startup" finding all resolved (5 total, the most in a single
+round). It surfaced 3 new HIGH findings, all in the round-31 placeholder-
+first reorder itself -- each closes a gap left by that fix rather than
+undoing it:
+
+- **(HIGH) The placeholder was unparseable, so acquireLock's own age-only
+  reclaim fallback could reclaim it:** `${pid}-pending` did not match the
+  `pid-startTime-` shape, so a process merely SUSPENDED right after
+  writing it (before `processStartTimeMs` resolves) for longer than
+  `STALE_LOCK_MS` could have its own in-progress lock reclaimed out from
+  under it -- then still finish writing its "final" token on resume,
+  running concurrently with the replacement holder. Changed the
+  placeholder to `${pid}-unknown-pending`: parseable (a real pid,
+  deliberately unknown start time), which the EXISTING contention logic
+  already treats as "no basis for identity comparison -- fail closed,
+  never reclaim" for a confirmed-LIVE pid, regardless of age. A truly
+  DEAD placeholder-holder is still reclaimed immediately via the ordinary
+  liveness check, unaffected.
+- **(HIGH) A `writeLockToken` failure after a successful exclusive create
+  leaked the fd and left a permanently-stuck lock:** if any of
+  `writeLockToken`'s own steps failed post-create, `acquireLock` rejected
+  without ever returning `{fd, token}`, so `withWorktreeSyncLock` never
+  reached its own release `finally` -- the fd leaked and the lock file
+  (now with placeholder content, parseable-but-alive per the fix above)
+  blocked every future sync on that worktree, potentially permanently.
+  Wrapped the post-create `writeLockToken` call in its own try/catch that
+  closes the fd and removes the lock this invocation itself just created
+  before rethrowing the real error.
+- **(HIGH) The dead-holder branch's own `rebaseInProgress` await could go
+  stale:** after observing a dead holder, awaiting `rebaseInProgress`
+  gives another contender time to reclaim that SAME dead lock and start a
+  genuinely NEW, live sync -- returning `settled: true` from the now-stale
+  original reading would let a successor consume while the replacement
+  sync is actually running. Re-reads the lock content immediately after
+  that await and compares it against what the decision was originally
+  based on; a mismatch falls through to the poll loop instead of
+  returning, so the next iteration re-evaluates the CURRENT state
+  properly.
+- 4 new exhaustive-suite tests (a placeholder-format structural check; a
+  full behavioral test proving a fellow invocation's still-writing
+  placeholder is never reclaimed; a structural check for the
+  cleanup-on-failure branch; a structural check for the post-await
+  revalidation). `node --test`: fast suite 127 tests/125 pass (2
+  pre-existing skips, unchanged), exhaustive suite 51/51 pass (178 total,
+  no regressions). Bumped plugin.json/marketplace.json to `0.1.1-dev43`.
+  All guards pass.
+
+### 2026-09-21 (cont.) -- PR #3167 round 33: reclaim-path lock cleanup, clean-room manifest realignment
+
+Round 33 confirmed all 3 round-32 fixes resolved and surfaced one
+"previously missed" MEDIUM finding plus one new LOW finding (unrelated to
+the lock-safety work, on a clean-room scenario file this same session had
+been separately iterating on in this worktree), both fixed:
+
+- **(MEDIUM, previously missed) The reclaim-success path had the SAME
+  token-init-failure leak round 32 only fixed on the fresh-create path:**
+  `acquireLock`'s reclaim-success branch called `openSync` +
+  `writeLockToken` directly, with no cleanup wrapper -- a failure there
+  would leak the descriptor and leave the (now-parseable-but-alive, per
+  round 32's OWN fix) placeholder blocking every future sync attempt on
+  that worktree, this time with no age-based escape hatch at all. Fixed
+  by extracting a single shared `createLockWithToken(lockPath)` helper
+  (exclusive create + `writeLockToken` + cleanup-on-failure) used by BOTH
+  the fresh-create and reclaim-success paths, so the guarantee only needs
+  proving once.
+- **(LOW, unrelated) `tools/clean-room/scenarios/context-handoff-connection-race/manifest.json`
+  described a different mechanism than its own `scenario.sh`:** this
+  scenario file (tracking a separate runtime-bug investigation this
+  session had going in the same worktree, unrelated to the lock-safety
+  work itself) had its manifest and script drift out of sync after the
+  script was substantially rewritten to a same-session double-discovery
+  mechanism. Realigned the manifest's description, config, expected
+  artifacts, and stage list with the script's actual 5 phases (0-4).
+- 1 new/changed exhaustive-suite test (verifies `createLockWithToken`'s
+  cleanup-on-failure guarantee AND that both `acquireLock` call sites
+  delegate to it, replacing the round-32 test that only checked the
+  fresh-create path inline). `node --test`: fast suite 127 tests/125
+  pass (2 pre-existing skips, unchanged), exhaustive suite 51/51 pass
+  (178 total, no regressions). Bumped plugin.json/marketplace.json to
+  `0.1.1-dev44`. All guards pass, including `check-feed-neutrality.py`
+  on the new manifest content.
+
+### 2026-09-21 (cont.) -- PR #3167 round 34: restoreClaimedLock's write-failure path no longer escapes uncaught
+
+Round 34 surfaced 1 new MEDIUM finding, fixed; the round-33 clean-room
+manifest fix and the long-carried emitted-guidance/README carryover both
+re-confirmed already resolved against current file content (unchanged
+since prior rounds' verification):
+
+- **(MEDIUM) `restoreClaimedLock`'s exclusive-create fallback let a
+  post-create write failure escape uncaught:** the `writeFileSync(fd,
+  content)` call was wrapped only in a `finally` (which closes the fd but
+  does not catch), so a write failure after the exclusive create already
+  succeeded propagated straight out of the function -- violating its
+  documented true/false-only contract and risking an unhandled exception
+  in whichever caller invoked it (`acquireLock`'s mismatch-restore branch
+  or `releaseLock`'s foreign-content branch), rather than the fail-closed
+  `false` every other failure branch in this function already returns.
+  Added a dedicated catch for the write itself: closes the fd, does NOT
+  delete `claimedPath` (the only trustworthy remaining copy), and returns
+  `false`, matching the EEXIST-on-open branch's own established pattern.
+- 1 new exhaustive-suite structural test verifying the write has its own
+  catch (not just a `finally`) that preserves `claimedPath` and returns
+  `false`. `node --test`: fast suite 127 tests/125 pass (2 pre-existing
+  skips, unchanged), exhaustive suite 52/52 pass (179 total, no
+  regressions). Bumped plugin.json/marketplace.json to `0.1.1-dev45`.
+  All guards pass.
+
 ### 2026-09-21 — Stale guidance correction: `agent-bridge create --reclaim` removed
 
 - This effort's Phase 3-slice-2 entry above (2026-09-15/16) documented
@@ -1489,4 +2669,3 @@ gate land._
   single-attempt fence are unaffected; only the historical journal
   entry's implementation description above is now stale, corrected here
   rather than rewritten in place.
-
