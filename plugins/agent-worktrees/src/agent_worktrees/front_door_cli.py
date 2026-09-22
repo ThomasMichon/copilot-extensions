@@ -271,6 +271,7 @@ _NO_PROJECT_COMMANDS = {
     "conclude-disposable",
     "link-succession",
     "config-migrate",
+    "session-tail",
     "session-lock",
     "machine-context",
     "reconcile-binstubs",

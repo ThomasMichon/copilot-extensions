@@ -801,6 +801,24 @@ def test_all_project_session_listing_runs_without_project(monkeypatch, capsys):
     assert "Could not resolve a project" not in capsys.readouterr().err
 
 
+def test_session_tail_runs_without_project(monkeypatch, capsys):
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
+    seen = {}
+
+    def _ran(args):
+        seen["session_id"] = args.session_id
+        return 0
+
+    monkeypatch.setitem(m.COMMAND_MAP, "session-tail", _ran)
+
+    rc = m.main(["session-tail", "sess-1", "--json"])
+
+    assert rc == 0
+    assert seen["session_id"] == "sess-1"
+    assert "Could not resolve a project" not in capsys.readouterr().err
+
+
 def test_project_scoped_session_listing_still_requires_project(monkeypatch, capsys):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
@@ -1583,6 +1601,16 @@ def test_claimant_liveness_parser_and_registration():
     assert args.json is True
     assert m.COMMAND_MAP["claimant-liveness"] is m.cmd_claimant_liveness
     assert m._WORKTREE_VERBS.get("claimant-liveness") == "claimant-liveness"
+
+
+def test_session_tail_parser_and_registration():
+    args = m.build_parser().parse_args(["session-tail", "sess-1", "--limit", "4", "--json"])
+    assert args.command == "session-tail"
+    assert args.session_id == "sess-1"
+    assert args.limit == 4
+    assert args.json is True
+    assert m.COMMAND_MAP["session-tail"] is m.cmd_session_tail
+    assert "session-tail" in m._NO_PROJECT_COMMANDS
 
 
 def test_claimant_liveness_json_output(monkeypatch, capfd):

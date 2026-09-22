@@ -7251,6 +7251,7 @@ cmd_conclude_session = session_tracking_cli.cmd_conclude_session
 cmd_conclude_disposable = session_tracking_cli.cmd_conclude_disposable
 cmd_link_succession = session_tracking_cli.cmd_link_succession
 cmd_session_transcript = session_tracking_cli.cmd_session_transcript
+cmd_session_tail = session_tracking_cli.cmd_session_tail
 cmd_recent_messages = session_tracking_cli.cmd_recent_messages
 terminal_conclusion = session_tracking_cli.terminal_conclusion
 _resolve_worktree_for_read = session_metadata_cli._resolve_worktree_for_read
@@ -7568,12 +7569,10 @@ dispatch_bare_invocation = front_door_cli.dispatch_bare_invocation
 socket = _socket
 svc = _svc
 
-
 def cmd_handoff_trace(args):
     return handoff_diagnostics.cmd_handoff_trace(
         args, json_output=_json_output, json_error=_json_error
     )
-
 COMMAND_MAP = {
     "resolve": cmd_resolve,
     "execution-leg": cmd_execution_leg,
@@ -7667,6 +7666,7 @@ COMMAND_MAP = {
     "conclude-disposable": cmd_conclude_disposable,
     "link-succession": cmd_link_succession,
     "session-transcript": cmd_session_transcript,
+    "session-tail": cmd_session_tail,
     "recent-messages": cmd_recent_messages,
     "anchor-check": cmd_anchor_check,
     "activity": activity.cmd_activity,

@@ -21,6 +21,7 @@ from agent_worktrees.sessions import (
     mux_seed_pane,
     mux_session_index,
     mux_session_name,
+    session_message_tail,
     worktree_id_from_mux_session,
     recent_worktree_messages,
     scan_sessions_fast,
@@ -899,15 +900,42 @@ class TestValidateSessionId:
         assert validate_session_id(None) is None
         assert validate_session_id("") is None
 
+    def test_none_for_path_traversal_input(self, tmp_session_state_dir: Path):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            assert validate_session_id("../escape") is None
+            assert validate_session_id("nested/session") is None
+
 
 # ---------------------------------------------------------------------------
 # recent_worktree_messages (read-side companion to the disposition summary)
 # ---------------------------------------------------------------------------
 
-def _conv_event(kind: str, content: str, ts: str) -> str:
+def _conv_event(kind: str, content: str, ts: str, *, turn_id: str | None = None) -> str:
     """A real-shaped user/assistant message event line (text under data.content)."""
     import json
-    return json.dumps({"type": kind, "data": {"content": content}, "timestamp": ts})
+    data = {"content": content}
+    if turn_id is not None:
+        data["turnId"] = turn_id
+    return json.dumps({"type": kind, "data": data, "timestamp": ts})
+
+
+def _assistant_turn_event(kind: str, turn_id: str, ts: str) -> str:
+    import json
+    return json.dumps({"type": kind, "data": {"turnId": turn_id}, "timestamp": ts})
+
+
+def _tool_start_event(turn_id: str, tool: str, ts: str) -> str:
+    import json
+    return json.dumps(
+        {
+            "type": "tool.execution_start",
+            "data": {"turnId": turn_id, "toolName": tool},
+            "timestamp": ts,
+        }
+    )
 
 
 class TestRecentWorktreeMessages:
@@ -991,7 +1019,127 @@ class TestRecentWorktreeMessages:
             return_value=tmp_session_state_dir,
         ):
             out = recent_worktree_messages(rec, limit=3)
-        assert out == {"session_id": None, "messages": [], "count": 0}
+        assert out["session_id"] is None
+        assert out["messages"] == []
+        assert out["count"] == 0
+        assert out["ending"]["cut_off_mid_turn"] is False
+        assert out["ending"]["ended_on_unanswered_offer"] is False
+
+    def test_carries_tool_names_and_mid_turn_signal(self, tmp_session_state_dir: Path):
+        wt_path = "/tmp/wt-tail"
+        make_session_dir(
+            tmp_session_state_dir, "sess-tail", wt_path,
+            events_lines=[
+                _conv_event("user.message", "ship it", "2026-06-01T10:00:00Z"),
+                _assistant_turn_event("assistant.turn_start", "7", "2026-06-01T10:00:01Z"),
+                _tool_start_event("7", "view", "2026-06-01T10:00:02Z"),
+                _tool_start_event("7", "bash", "2026-06-01T10:00:03Z"),
+                _conv_event(
+                    "assistant.message",
+                    "Running checks now.",
+                    "2026-06-01T10:00:04Z",
+                    turn_id="7",
+                ),
+            ],
+        )
+        rec = _make_record("wt-tail", wt_path,
+                           sessions=[SessionEntry("sess-tail", "2026-06-01T10:00:00")])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            out = recent_worktree_messages(rec, limit=3)
+        assert out["count"] == 2
+        assert out["messages"][-1]["tool_names"] == ["view", "bash"]
+        assert out["ending"]["state"] == "assistant_turn_in_progress"
+        assert out["ending"]["cut_off_mid_turn"] is True
+
+
+class TestSessionMessageTail:
+    def test_returns_last_n_turns_with_tool_names(self, tmp_session_state_dir: Path):
+        make_session_dir(
+            tmp_session_state_dir, "sess-turns", "/tmp/wt-turns",
+            events_lines=[
+                _conv_event("user.message", "first ask", "2026-06-01T10:00:00Z"),
+                _assistant_turn_event("assistant.turn_start", "1", "2026-06-01T10:00:01Z"),
+                _tool_start_event("1", "view", "2026-06-01T10:00:02Z"),
+                _conv_event(
+                    "assistant.message",
+                    "first answer",
+                    "2026-06-01T10:00:03Z",
+                    turn_id="1",
+                ),
+                _assistant_turn_event("assistant.turn_end", "1", "2026-06-01T10:00:04Z"),
+                _conv_event("user.message", "second ask", "2026-06-01T10:00:05Z"),
+                _assistant_turn_event("assistant.turn_start", "2", "2026-06-01T10:00:06Z"),
+                _tool_start_event("2", "bash", "2026-06-01T10:00:07Z"),
+                _conv_event(
+                    "assistant.message",
+                    "second answer",
+                    "2026-06-01T10:00:08Z",
+                    turn_id="2",
+                ),
+                _assistant_turn_event("assistant.turn_end", "2", "2026-06-01T10:00:09Z"),
+            ],
+        )
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            out = session_message_tail("sess-turns", limit=3)
+        assert [turn["text"] for turn in out["turns"]] == [
+            "first answer", "second ask", "second answer"]
+        assert out["turns"][-1]["tool_names"] == ["bash"]
+        assert out["ending"]["state"] == "complete"
+
+    def test_flags_clean_unanswered_offer(self, tmp_session_state_dir: Path):
+        make_session_dir(
+            tmp_session_state_dir, "sess-offer", "/tmp/wt-offer",
+            events_lines=[
+                _conv_event("user.message", "What next?", "2026-06-01T10:00:00Z"),
+                _assistant_turn_event("assistant.turn_start", "1", "2026-06-01T10:00:01Z"),
+                _conv_event(
+                    "assistant.message",
+                    "Phase 6 is now unblocked — say the word if you want me to keep going.",
+                    "2026-06-01T10:00:02Z",
+                    turn_id="1",
+                ),
+                _assistant_turn_event("assistant.turn_end", "1", "2026-06-01T10:00:03Z"),
+            ],
+        )
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            out = session_message_tail("sess-offer", limit=3)
+        assert out["turns"][-1]["role"] == "assistant"
+        assert out["ending"]["state"] == "assistant_offer_pending"
+        assert out["ending"]["ended_on_unanswered_offer"] is True
+
+    def test_handles_no_id_assistant_events_as_one_turn(self, tmp_session_state_dir: Path):
+        make_session_dir(
+            tmp_session_state_dir, "sess-noid", "/tmp/wt-noid",
+            events_lines=[
+                '{"type":"assistant.turn_start","timestamp":"2026-06-01T10:00:00Z"}',
+                '{"type":"tool.execution_start","data":{"toolName":"bash"},"timestamp":"2026-06-01T10:00:01Z"}',
+                _conv_event("assistant.message", "done", "2026-06-01T10:00:02Z"),
+                '{"type":"assistant.turn_end","timestamp":"2026-06-01T10:00:03Z"}',
+            ],
+        )
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            out = session_message_tail("sess-noid", limit=3)
+        assert out["turns"] == [
+            {
+                "role": "assistant",
+                "text": "done",
+                "timestamp": "2026-06-01T10:00:00Z",
+                "tool_names": ["bash"],
+            }
+        ]
+        assert out["ending"]["state"] == "complete"
 
 
 # ---------------------------------------------------------------------------
