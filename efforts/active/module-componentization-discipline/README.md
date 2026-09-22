@@ -1477,13 +1477,13 @@ the Phase 0 runbook, picked up as capacity allows.
   touch those seams now resolve them back through the live
   `agent_bridge.session_manager` module, mirroring the compatibility discipline
   from the earlier `agent-bridge/__main__.py` split.
-- Result: `session_manager.py` shrank **6,282 -> 785** lines in the live file,
+- Result: `session_manager.py` shrank **6,282 -> 771** lines in the live file,
   and every extracted sibling stayed under the 1,000-line cap (`session_start.py`
-  878, `session_core.py` 872, `session_host_connection.py` 787,
-  `session_host_recovery.py` 724, `session_prompts.py` 521,
-  `session_resume.py` 473, `session_lifecycle.py` 376,
+  892, `session_core.py` 871, `session_host_connection.py` 788,
+  `session_host_recovery.py` 723, `session_prompts.py` 522,
+  `session_resume.py` 474, `session_lifecycle.py` 383,
   `session_handoff.py` 377, `session_parity.py` 358, `session_monitoring.py`
-  354).
+  355).
 - Validation matched the stricter post-`db.py` discipline: the full
   `python tools/run-plugin-tests.py agent-bridge` run reached the same two
   pre-existing Windows `bash.exe` path failures in

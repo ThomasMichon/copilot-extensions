@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+from typing import Any
 
 from .models import SessionStatus
 from .session_manager import DaemonDrainingError, Session, _workspace_key, log
@@ -78,15 +79,23 @@ class _SessionHandoffMixin:
             log.warning("Auto-handoff of %s failed: %s", session_id, exc)
             return
         for row in pending:
-            with contextlib.suppress(Exception):
+            try:
                 await self.submit_or_queue_prompt(
                     successor.session_id,
                     row["prompt"],
                     caller_id=row.get("caller_id"),
                 )
-        if pending:
+            except Exception as exc:
+                log.warning(
+                    "Auto-handoff could not transfer queued prompt %s from %s to %s: %s",
+                    row.get("id"),
+                    session_id,
+                    successor.session_id,
+                    exc,
+                )
+                continue
             with contextlib.suppress(Exception):
-                self._db.clear_pending_prompts(session_id)
+                self._db.remove_pending_prompt(session_id, row["id"])
 
     @staticmethod
     def _build_handoff_prompt(session: Session) -> str:
@@ -171,8 +180,17 @@ class _SessionHandoffMixin:
         self._db.update_session_status(
             session.session_id, SessionStatus.RUNNING.value, now
         )
+        result: dict[str, Any] | None = None
         try:
             result = await session.client.send_prompt(prompt)
+        except Exception as exc:
+            self._db.update_turn(
+                session.session_id,
+                turn_index,
+                stop_reason=f"error: {exc}",
+                completed_at=time.time(),
+            )
+            raise
         finally:
             session.status = SessionStatus.IDLE
             self._db.update_session_status(

@@ -218,7 +218,11 @@ class _SessionStartMixin:
         # just `session.mcp_servers`) so every downstream spawn call below
         # -- which reads this same local, not the Session attribute -- also
         # picks up the resolved value on this, the very first spawn.
-        mcp_servers = mcp_servers or target.mcp_servers or []
+        mcp_servers = (
+            list(target.mcp_servers or [])
+            if mcp_servers is None
+            else list(mcp_servers)
+        )
         session.mcp_servers = [dict(server) for server in mcp_servers]
         session.event_log = EventLog(
             db=self._db,
