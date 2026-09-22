@@ -213,9 +213,25 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
             bare_orphan_wts = None
     from . import delegate_cli
 
-    fast_rows = [to_dict(rec, None) for rec in records]
-    delegate_cli.annotate_delegate_graph(fast_rows)
-    for wt in fast_rows:
+    delegate_overlay = delegate_cli.delegate_graph_overlays([
+        {
+            "id": rec.worktree_id,
+            "machine": rec.machine,
+            "platform": rec.platform,
+            "repo": rec.repo,
+            "path": rec.worktree_path,
+            "status": rec.status,
+            **(
+                {"caller_worktree": rec.caller_worktree}
+                if rec.caller_worktree
+                else {}
+            ),
+        }
+        for rec in records
+    ])
+    for rec in records:
+        wt = to_dict(rec, None)
+        wt.update(delegate_overlay.get(rec.worktree_id, {}))
         emit({"type": "worktree", "phase": "fast", "wt": wt})
     if getattr(args, "classify", False):
         config = cfg.load_config()
@@ -223,16 +239,13 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
         active_paths = _build_active_paths(records, session_ctx)
         from .picker_support.data_local import _stamp_from_raw
 
-        classified_rows = []
         for rec in records:
             info = _classify_one_record(
                 rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx
             )
             wt = to_dict(rec, info)
             _stamp_from_raw(rec, wt, session_ctx)
-            classified_rows.append(wt)
-        delegate_cli.annotate_delegate_graph(classified_rows)
-        for wt in classified_rows:
+            wt.update(delegate_overlay.get(rec.worktree_id, {}))
             emit({"type": "worktree", "phase": "classified", "wt": wt})
     emit({"type": "done", "count": len(records)})
     return 0

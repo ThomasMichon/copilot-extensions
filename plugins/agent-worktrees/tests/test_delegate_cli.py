@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from contextlib import redirect_stdout
 from types import SimpleNamespace
 
@@ -147,6 +148,29 @@ def test_annotate_delegate_graph_marks_missing_reachable_host_gone():
     assert delegate["delegate_finalizable_reason"] == "host-gone"
 
 
+def test_annotate_delegate_graph_normalizes_windows_platform_token():
+    delegate = _row(
+        "wheatley-linux-20260101-delegate",
+        machine="wheatley",
+        platform="linux",
+        status="active",
+        caller_worktree="lambda-core-win-20260101-host",
+    )
+
+    delegate_cli.annotate_delegate_graph(
+        [delegate],
+        reachable_hosts={
+            ("lambda-core", "windows"): True,
+            ("wheatley", "linux"): True,
+        },
+    )
+
+    assert delegate["caller_state"]["state"] == "gone"
+    assert delegate["caller_state"]["machine"] == "lambda-core"
+    assert delegate["caller_state"]["platform"] == "windows"
+    assert delegate["delegate_finalizable"] is True
+
+
 def test_build_list_json_payload_adds_delegate_annotations(monkeypatch):
     args = SimpleNamespace(
         mux_details=False,
@@ -240,6 +264,43 @@ def test_run_fleet_json_annotates_delegate_graph(monkeypatch):
 
     assert delegate["caller_state"]["state"] == "resolved"
     assert delegate["delegate_finalizable"] is True
+
+
+def test_cmd_list_stream_emits_classified_rows_progressively(monkeypatch):
+    args = SimpleNamespace(
+        mux_details=False,
+        classify=True,
+        profile_assignment_history=False,
+    )
+    records = [
+        _record("wt-a", machine="m1", platform="wsl", status="active"),
+        _record("wt-b", machine="m1", platform="wsl", status="active"),
+    ]
+    monkeypatch.setattr(
+        list_cli.sessions,
+        "scan_sessions_fast",
+        lambda records: sessions.SessionContext(),
+    )
+    monkeypatch.setattr(list_cli.cfg, "load_config", lambda: SimpleNamespace(default_repo=SimpleNamespace()))
+    monkeypatch.setattr(list_cli, "_build_active_paths", lambda records, session_ctx: {})
+    monkeypatch.setattr(list_cli, "_worktree_to_dict", lambda rec, **kwargs: {"id": rec.worktree_id})
+    monkeypatch.setattr(
+        list_cli,
+        "_classify_one_record",
+        lambda rec, **kwargs: None if rec.worktree_id == "wt-a" else (_ for _ in ()).throw(RuntimeError("stop")),
+    )
+
+    with io.StringIO() as capture:
+        monkeypatch.setattr(sys, "__stdout__", capture)
+        try:
+            list_cli._cmd_list_stream(args, records)
+        except RuntimeError as exc:
+            assert str(exc) == "stop"
+        lines = [json.loads(line) for line in capture.getvalue().splitlines()]
+
+    assert [line["type"] for line in lines[:3]] == ["begin", "worktree", "worktree"]
+    assert lines[3]["phase"] == "classified"
+    assert lines[3]["wt"]["id"] == "wt-a"
 
 
 def test_run_delegates_execute_finalizes_only_eligible(monkeypatch):

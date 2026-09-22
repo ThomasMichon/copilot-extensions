@@ -28,6 +28,11 @@ from . import tracking
 _HOST_TERMINAL_STATUSES = frozenset({"complete", "completed", "finalized"})
 
 
+def _platform_token(platform: str) -> str:
+    """Map a stored platform name to its worktree-id token."""
+    return "win" if platform == "windows" else platform
+
+
 def _parse_json_object(raw: str) -> dict[str, Any] | None:
     """Extract one top-level JSON object, tolerating banner noise."""
     if not raw:
@@ -64,7 +69,8 @@ def _expected_host_key(
     """Infer the host machine/environment from a machine-stamped worktree id."""
     matches: list[tuple[int, tuple[str, str]]] = []
     for machine, platform in reachable_hosts:
-        prefix = f"{machine}-{platform}-" if platform else f"{machine}-"
+        token = _platform_token(platform)
+        prefix = f"{machine}-{token}-" if token else f"{machine}-"
         if worktree_id.startswith(prefix):
             matches.append((len(prefix), (machine, platform)))
     if not matches:
@@ -197,6 +203,34 @@ def annotate_delegate_graph(
         row["caller_state"] = caller_state
 
     return worktrees
+
+
+def delegate_graph_overlays(
+    worktrees: list[dict[str, Any]],
+    *,
+    reachable_hosts: dict[tuple[str, str], bool] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Return only the additive delegate/caller overlay keyed by worktree id."""
+    rows = [dict(row) for row in worktrees]
+    annotate_delegate_graph(rows, reachable_hosts=reachable_hosts)
+    overlays: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        worktree_id = row.get("id")
+        if not isinstance(worktree_id, str) or not worktree_id:
+            continue
+        overlay = {
+            key: row[key]
+            for key in (
+                "caller_state",
+                "delegate_finalizable",
+                "delegate_finalizable_reason",
+                "delegates",
+            )
+            if key in row
+        }
+        if overlay:
+            overlays[worktree_id] = overlay
+    return overlays
 
 
 def _fleet_snapshot(
