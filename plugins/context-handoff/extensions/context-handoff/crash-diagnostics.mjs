@@ -472,12 +472,14 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
               // process's live, freshly-written entry" -- and unlinking the
               // latter would destroy exactly the diagnostic this module
               // exists to preserve. Instead, purgeOldStaleSidecars() below
-              // only removes sidecars whose mtime already proves they are
-              // long-settled (see its own doc comment), always excluding
-              // the sidecar this same call just created (whether or not its
-              // mtime re-stamp above succeeded) -- bounding the
-              // *cumulative* disk usage those permanent sidecars would
-              // otherwise leave unbounded, without reintroducing that race.
+              // only removes sidecars whose *own filename* already proves
+              // they are long-settled (the rotation timestamp embedded in
+              // it by the renameSync() call above, never mtime -- see its
+              // own doc comment and STALE_SIDECAR_NAME_PATTERN's for why),
+              // always excluding the sidecar this same call just created --
+              // bounding the *cumulative* disk usage those permanent
+              // sidecars would otherwise leave unbounded, without
+              // reintroducing that race.
               purgeOldStaleSidecars(logPath, justCreatedSidecar);
             }
           } else {
