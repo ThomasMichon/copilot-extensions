@@ -1293,3 +1293,201 @@ this effort. Two genuine issues:
 Added 1 new regression test
 (`test_select_sample_never_raises_on_a_non_positive_sample_size`).
 
+### 2026-09-21 — post-merge: daemon-liveness redesigned to boot-and-wait like a real caller
+After PR #3186 merged and deployed (dev219), an hourly scheduled run of
+`worktree-status-audit --sample 15` fired twice and both times reported
+`daemon.responsive: false` / `cache_row_count: 0`, with a manual retry
+immediately after each firing showing `responsive: true`. Investigated
+rather than dismissing the second occurrence as a fluke: the resident
+status-monitor's PID and lock `created_at` differed on each check --
+confirming the monitor idle-exits between infrequent callers (its own
+empty-strike logic, see `cmd_status_monitor`) and only comes back up when
+something actually demands it via `ensure_monitor`. The audit's original
+`check_daemon_liveness` only ever did a bare, non-booting snapshot read
+(parse the lock, check the owner PID, resolve the rendezvous fields) --
+exactly the probe that will see this idle-exited resting state and
+misreport it as an outage, even though every real caller
+(`worktree-status-bundle`'s own fallback path) already tolerates it by
+booting the monitor and waiting.
+
+Redesigned `check_daemon_liveness` to route its probe through
+`worktree_status_daemon.status_with_boot` -- the same dial/boot/wait/
+fallback path every real production caller uses -- instead of the old
+bare `status_via_daemon` snapshot. Threaded an `ensure_monitor` callable
+through `run_audit` and `cmd_worktree_status_audit`, resolved from
+`core._ensure_status_monitor` (only when `core._status_monitor_enabled()`
+is true, mirroring `session_tracking_cli.cmd_worktree_status_bundle`'s
+own opt-out check exactly -- an operator who's disabled the resident
+monitor via `AGENT_WORKTREES_STATUS_MONITOR=0` should never have the
+audit spawn one anyway). When no real `(project, worktree_id)` probe
+pair exists (empty sample), the check still degrades to the old static
+read rather than guessing. Added 2 new regression tests covering the
+boot-wait path: one confirming `ensure_monitor` is invoked when nothing
+is currently reachable, and one confirming a lock write that lands
+*during* the wait window is picked up before the boot-wait limit expires
+(not just a before/after snapshot). Updated the 4 existing CLI-level
+tests' fake `core` stand-ins to supply `_status_monitor_enabled`/
+`_ensure_status_monitor` now that `cmd_worktree_status_audit` always
+resolves them.
+
+This is expected to eliminate the two false-positive firings above once
+deployed: after this change, `responsive` should reliably read `true`
+even when the monitor was resting between callers, because the audit's
+own probe now boots and waits for it exactly as a real caller would.
+
+### 2026-09-21 — PR #3206 review round 1: 1 real bug, 1 weak test tightened
+1. **A stale (dead-owner) lock would never trigger `ensure_monitor`.**
+   `status_with_boot`'s own dial step treats any syntactically parseable
+   rendezvous as reachable -- it doesn't check whether the lock's owner
+   PID is still alive. Passing `locks.read_lock` straight through as
+   `read_lock_data` meant a monitor that crashed without cleaning up its
+   own lock file would look "dialable" forever: the probe would keep
+   trying (and failing) to reach the dead process and report
+   `responsive: false` instead of ever booting a live replacement --
+   regressing the `lock_is_live` guard the audit's own non-probe static
+   read branch already applies. Fixed by wrapping the reader
+   (`_read_live_lock`) to reject a non-live lock owner before it ever
+   reaches `status_with_boot`'s dial step, treating a stale lock exactly
+   like no lock at all.
+2. **The delayed-readiness boot-wait test wrote its lock synchronously.**
+   `test_daemon_liveness_ensure_monitor_boot_is_picked_up_within_the_wait`
+   had `ensure_monitor` write the lock immediately, before
+   `status_with_boot`'s poll loop even ran once -- it would have passed
+   even if the poll loop didn't exist at all. Tightened to publish the
+   lock from a background thread after a real ~0.3s delay, so the test
+   actually exercises the poll loop picking up a lock that lands *during*
+   the wait window, not merely before it starts.
+3. This PR body's own doc-impact note: no user-facing documentation
+   changes are needed -- the only behavior visible to a human is the
+   audit's exit code/telemetry now reliably reflecting a real caller's
+   own daemon-boot experience instead of a bare snapshot; the effort
+   README's journal (this file) is the durable record of that change.
+
+### 2026-09-21 — PR #3206 review round 2: 1 more real bug
+The stale-lock dial fix from round 1 was confirmed resolved. One
+further genuine issue, in code the round-1 fix hadn't touched:
+
+1. **The post-probe rendezvous snapshot didn't apply the same liveness
+   check as the dial step.** After `status_with_boot` returns (having
+   correctly rejected a stale lock at dial time and fallen back),
+   `check_daemon_liveness` re-read the lock to report
+   `lock_present`/`rendezvous_present` -- but that re-read only parsed
+   the rendezvous fields, without checking `lock_is_live`. A dead
+   monitor's leftover lock (still carrying old, well-formed endpoint
+   data) would therefore report `rendezvous_present=True` alongside
+   `responsive=False`, contradicting the no-probe static-read branch a
+   few lines above, which already gates `rendezvous_present` on
+   liveness. Fixed by adding the identical `locks.lock_is_live(data_after)`
+   check to the post-probe read.
+
+Added 1 new regression test
+(`test_daemon_liveness_stale_lock_with_probe_reports_unresponsive_not_rendezvous`)
+covering a stale lock with valid-looking rendezvous fields under a real
+probe: confirms `ensure_monitor` is still invoked, and that
+`responsive`/`rendezvous_present` land consistently (both false), not
+the previous `rendezvous_present=True`/`responsive=False` contradiction.
+
+### 2026-09-21 — PR #3206 review round 3: 1 real gap (version bump), 1 stale carryover
+1. **Round 1/2's runtime-payload changes hadn't bumped the version.**
+   Each of the two prior commits changed `worktree_status_audit.py`'s
+   actual behavior but left `plugin.json`/`pyproject.toml`/
+   `marketplace.json` at the version bumped for the original redesign
+   commit -- an installed client would treat those fixes as already
+   applied and skip the update. Bumped to `1.5.5-dev224` /
+   `1.7.7-dev192`.
+2. **No CLI-level regression test for the `ensure_monitor` opt-out
+   wiring.** `cmd_worktree_status_audit` resolves `ensure_monitor` from
+   `core._ensure_status_monitor` only when `core._status_monitor_enabled()`
+   is true, but nothing asserted what `run_audit` actually received --
+   a regression that always booted (or never did, regardless of the
+   opt-out) would still have passed every existing CLI test. Added two
+   tests spying on `run_audit`'s `ensure_monitor` kwarg: one confirming
+   the real callable is passed through when enabled, one confirming
+   `None` when disabled.
+3. The "Add regression test for stale lock with live probe" finding was
+   re-flagged again this round -- confirmed still a stale carryover (the
+   test from round 2 was already present and passing).
+
+### 2026-09-21 — PR #3206 review round 4: 1 real bug (the original motivating scenario itself), rest stale carryovers
+The three "Open" findings this round (version bump, CLI opt-out test,
+stale-lock-with-probe test) were all re-flagged stale carryovers,
+confirmed already fixed. One genuine "previously missed" finding, and
+an important one -- it's the *exact* scenario that started this whole
+redesign:
+
+1. **The no-probe path could still fail an audit for an idle-exited
+   monitor.** `run_audit` passes `probe=None` whenever its sample is
+   empty (an empty cache -- `cache_row_count: 0`, precisely what the two
+   original false-positive hourly firings reported). The no-probe
+   branch's *success* path already reported the conservative
+   `responsive=None` ("nothing to probe with, don't guess"), but every
+   one of its *failure* sub-paths (no lock, stale lock, no endpoint)
+   still reported `responsive=False` -- and `cmd_worktree_status_audit`
+   turns any `responsive=False` into a failing exit code. So the
+   original bug this whole PR set out to fix was still fully reachable
+   through the empty-sample path, even after the probed path was fixed.
+   Fixed by making the no-probe branch always report `responsive=None`
+   (never `False`) regardless of outcome -- since there is no real
+   request in flight, there is nothing that actually *failed*, only "no
+   one to ask" -- while still giving an idle-exited monitor the same
+   boot-and-wait chance a real probe would get (via `ensure_monitor`)
+   before taking its final snapshot, so `lock_present`/
+   `rendezvous_present` still reflect a freshly-booted monitor when one
+   is available.
+
+Added 2 new regression tests: one confirming a bare no-lock/no-probe
+read now reports `responsive=None` (not `False`), one confirming the
+no-probe path also boots-and-waits via `ensure_monitor` when given one.
+Updated the two existing no-probe-failure-path tests
+(`test_daemon_liveness_no_lock_file`,
+`test_daemon_liveness_stale_lock_reports_not_live`) to assert
+`responsive is None` instead of the previous (incorrect)
+`responsive is False`.
+
+### 2026-09-21 — PR #3206 review round 5: 2 real gaps (test rigor + test speed), rest stale carryovers
+All 3 "Open" findings this round (version bump, CLI opt-out test,
+stale-lock-with-probe test) were re-flagged stale carryovers again,
+confirmed already fixed and passing. Two genuine issues from the
+review's own headline text (not itemized as discrete findings, but
+real):
+
+1. **The new no-probe boot-wait test never verified the poll loop
+   itself.** `test_daemon_liveness_no_probe_boots_and_waits_when_ensure_
+   monitor_given` only asserted `ensure_monitor` was called -- it never
+   published a lock during the wait window, so it couldn't have told a
+   working poll loop from a broken one (same gap the probed-path test
+   had already closed in round 1). Added a companion test that
+   publishes the lock from a background thread after a real delay and
+   asserts the poll loop actually observes it.
+2. **Two tests paid an avoidable ~4s wait.** `check_daemon_liveness` had
+   no way to override the boot-wait window, so
+   `test_daemon_liveness_calls_ensure_monitor_when_nothing_is_reachable`
+   (a never-boots probe path) and
+   `test_cmd_worktree_status_audit_passes_ensure_monitor_when_enabled`
+   (an empty-sample CLI run whose sentinel `ensure_monitor` never
+   publishes a lock) each ran the real default `BOOT_WAIT_S` (4.0s) to
+   completion. Added a `boot_wait_s` override parameter to
+   `check_daemon_liveness` (threaded to both the no-probe poll loop and
+   `status_with_boot`'s own `boot_wait_s` kwarg -- a pure testability
+   knob, production callers never pass it) and used it (or a stubbed
+   `check_daemon_liveness`, for the CLI wiring-only test) to bring both
+   down to well under a second. Whole-module test time dropped from
+   ~36s to ~24s.
+
+### 2026-09-21 — PR #3206 review round 6: 1 more real gap, rest stale carryovers
+All 4 "Open" findings from round 5 were re-flagged again this round --
+3 confirmed stale carryovers (already fixed), plus 1 genuine miss the
+round-5 fix left behind:
+
+1. **The round-2 stale-lock-with-probe test still paid the full 4s
+   wait.** `test_daemon_liveness_stale_lock_with_probe_reports_
+   unresponsive_not_rendezvous` supplies an `ensure_monitor` that never
+   publishes a replacement lock -- round 5's speed pass only touched
+   the two tests explicitly named in that review's headline text and
+   missed this one, which has the identical shape. Added the same
+   `boot_wait_s=0.2` override used everywhere else.
+
+Whole-module test time held at ~22-24s (this test's own 4s was already
+counted in the "before" figure from round 5's entry, since it wasn't
+fixed until now).
+

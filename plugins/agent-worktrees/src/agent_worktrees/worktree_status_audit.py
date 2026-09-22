@@ -36,6 +36,7 @@ import json
 import random
 import sqlite3
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -367,40 +368,81 @@ def audit_one(
 
 
 def check_daemon_liveness(
-    lock_path: Path, *, probe: tuple[str, str] | None = None
+    lock_path: Path,
+    *,
+    probe: tuple[str, str] | None = None,
+    ensure_monitor: Callable[[], bool] | None = None,
+    boot_wait_s: float | None = None,
 ) -> DaemonLiveness:
-    """Whether the resident status-monitor's worktree-status daemon is up
-    and actually answers a request -- not just that a lock file with
-    rendezvous fields exists on disk (a wedged monitor could leave those
-    fields behind from before it hung, or a stale lock could survive its
-    owner's crash).
+    """Whether the resident status-monitor's worktree-status daemon
+    answers a request the way a real consumer actually experiences it --
+    not a bare "is a resident daemon already up right now" snapshot.
 
-    Checks, in order: the lock file parses, its recorded owner pid is
-    actually alive (:func:`locks.lock_is_live` -- catches a stale lock a
-    crashed monitor left behind), and its rendezvous fields parse into a
-    real endpoint. ``probe``, when given a real ``(project, worktree_id)``
-    pair, then sends one genuine request through the daemon (the same wire
-    path any real consumer uses) and reports whether it actually answered
-    rather than falling through to the caller's fallback. Without one
-    (nothing to probe with -- an empty population), liveness stops at
-    "rendezvous fields parse", reported as ``responsive=None`` rather than
-    guessing.
+    Every real caller (``worktree-status-bundle``'s own direct-compute
+    fallback path, a future cross-venv consumer) reaches the daemon
+    through :func:`worktree_status_daemon.status_with_boot`: dial, and if
+    nothing is currently publishing a worktree-status endpoint, trigger
+    ``ensure_monitor`` and wait up to its own ``BOOT_WAIT_S`` before giving
+    up. The resident monitor idle-exits when nothing has demanded it
+    recently (see `cmd_status_monitor`'s own empty-strike logic) -- a bare
+    probe with no boot path would then report "unresponsive" for a
+    perfectly healthy accelerator that simply hasn't been asked about
+    anything in a while, which is not a fault; it is *this exact system's
+    own resting state* between callers, and every real caller already
+    tolerates it via ``ensure_monitor``. Using the same path here means a
+    finding actually means what it says: the accelerator failed a real
+    consumer's own request, not merely "no one had asked recently".
+
+    ``probe``, when given a real ``(project, worktree_id)`` pair, is what
+    makes this call meaningfully answerable at all -- without one (nothing
+    to probe with, an empty population), this still gives an idle-exited
+    monitor the same boot-and-wait chance to come back (when
+    ``ensure_monitor`` is available) before taking a static snapshot, but
+    never reports ``responsive=False`` for it: without a real request
+    there is nothing to have actually failed, only "no one to ask", so
+    this always reports ``responsive=None`` rather than treating an
+    absent/resting monitor as an outage.
+
+    ``boot_wait_s``, when given, overrides the wait window used for both
+    branches above (default: ``worktree_status_daemon.BOOT_WAIT_S``) --
+    a pure testability knob so a test can exercise a real poll loop
+    without paying the full production wait; production callers never
+    need to pass it.
     """
     # Lazy import: see `_check_freshness`'s own comment -- keeps this
     # module importable without the vendored `work_coalescing_singleton`
     # package installed.
     from . import worktree_status_daemon
 
-    data = locks.read_lock(lock_path)
-    if data is None:
-        return DaemonLiveness(lock_present=False, rendezvous_present=False, responsive=False)
-    if not locks.lock_is_live(data):
-        return DaemonLiveness(lock_present=True, rendezvous_present=False, responsive=False)
-    endpoint = worktree_status_daemon.endpoint_from_rendezvous(data)
-    if endpoint is None:
-        return DaemonLiveness(lock_present=True, rendezvous_present=False, responsive=False)
+    def _live_endpoint(data: dict | None) -> tuple[str, int, str] | None:
+        if data is None or not locks.lock_is_live(data):
+            return None
+        return worktree_status_daemon.endpoint_from_rendezvous(data)
+
+    effective_boot_wait_s = (
+        worktree_status_daemon.BOOT_WAIT_S if boot_wait_s is None else boot_wait_s
+    )
+
     if probe is None:
-        return DaemonLiveness(lock_present=True, rendezvous_present=True, responsive=None)
+        data = locks.read_lock(lock_path)
+        endpoint = _live_endpoint(data)
+        if endpoint is None and ensure_monitor is not None:
+            # Boot-only wait: give an idle-exited monitor the same chance
+            # to come back that a real caller's `status_with_boot` would
+            # give it -- but skip issuing an actual coalesced request,
+            # since there is no real (project, worktree_id) pair to ask
+            # about. Mirrors that function's own poll loop/timeout.
+            started = time.time()
+            ensure_monitor()
+            while endpoint is None and time.time() - started < effective_boot_wait_s:
+                time.sleep(0.1)
+                data = locks.read_lock(lock_path)
+                endpoint = _live_endpoint(data)
+        return DaemonLiveness(
+            lock_present=data is not None,
+            rendezvous_present=endpoint is not None,
+            responsive=None,
+        )
 
     project, worktree_id = probe
     reached_fallback = False
@@ -410,15 +452,41 @@ def check_daemon_liveness(
         reached_fallback = True
         return {}
 
-    worktree_status_daemon.status_via_daemon(
-        data,
+    def _read_live_lock() -> dict | None:
+        # `status_with_boot`'s own dial step treats any syntactically
+        # parseable rendezvous as reachable -- it does not check whether
+        # the lock's owner PID is still alive. A crashed monitor that
+        # never cleaned up its own lock file would otherwise look
+        # "dialable" forever, so this probe would keep trying (and
+        # failing) to reach a dead process instead of ever triggering
+        # `ensure_monitor` to boot a live replacement. Reject a non-live
+        # owner here (same `lock_is_live` guard `check_daemon_liveness`'s
+        # own static-read branch already applies) so a stale lock is
+        # treated exactly like no lock at all.
+        data = locks.read_lock(lock_path)
+        if data is not None and not locks.lock_is_live(data):
+            return None
+        return data
+
+    worktree_status_daemon.status_with_boot(
+        read_lock_data=_read_live_lock,
+        ensure_monitor=ensure_monitor,
         key=worktree_status_daemon.coalescing_key(project, worktree_id),
         payload={"project": project, "worktree_id": worktree_id},
         fallback=_fallback,
-        request_deadline_s=2.0,
+        boot_wait_s=effective_boot_wait_s,
+    )
+    data_after = locks.read_lock(lock_path)
+    lock_present = data_after is not None
+    rendezvous_present = (
+        lock_present
+        and locks.lock_is_live(data_after)
+        and worktree_status_daemon.endpoint_from_rendezvous(data_after) is not None
     )
     return DaemonLiveness(
-        lock_present=True, rendezvous_present=True, responsive=not reached_fallback
+        lock_present=lock_present,
+        rendezvous_present=rendezvous_present,
+        responsive=not reached_fallback,
     )
 
 
@@ -465,10 +533,16 @@ def run_audit(
     sample_size: int = DEFAULT_SAMPLE_SIZE,
     log_path: Path | None = None,
     rng: random.Random | None = None,
+    ensure_monitor: Callable[[], bool] | None = None,
 ) -> AuditReport:
     """Run one full audit pass: snapshot the cache, sample it, diff each
     sampled entry against a fresh recompute, probe the daemon, and
     (best-effort) append a telemetry line to ``log_path``.
+
+    ``ensure_monitor``, when given, is threaded straight through to
+    :func:`check_daemon_liveness` -- see that function's own docstring for
+    why booting (not just snapshotting) reflects what a real caller
+    actually experiences.
 
     Never raises: every internal step already degrades on its own failure
     (an unreadable cache -> empty snapshot; a per-worktree compute
@@ -481,7 +555,9 @@ def run_audit(
     sample = select_sample(cache_rows, sample_size=sample_size, rng=rng)
     audits = [audit_one(project, wt_id, entry, now=now) for project, wt_id, entry in sample]
     probe = (audits[0].project, audits[0].worktree_id) if audits else None
-    daemon = check_daemon_liveness(runtime_home / "status-monitor.lock", probe=probe)
+    daemon = check_daemon_liveness(
+        runtime_home / "status-monitor.lock", probe=probe, ensure_monitor=ensure_monitor
+    )
     report = AuditReport(
         timestamp=now, sampled=audits, daemon=daemon, cache_row_count=len(cache_rows)
     )
@@ -543,11 +619,20 @@ def cmd_worktree_status_audit(args: argparse.Namespace) -> int:
     seed = getattr(args, "seed", None)
     rng = random.Random(seed) if seed is not None else random.Random()
 
+    # Mirror `session_tracking_cli.cmd_worktree_status_bundle`'s own
+    # daemon-first opt-out check exactly: this audit's daemon probe uses
+    # the same production boot path, so it must honor the same opt-out
+    # (`AGENT_WORKTREES_STATUS_MONITOR=0`) that disables the resident
+    # monitor -- an operator who's turned it off deliberately should never
+    # have this audit spawn one anyway.
+    ensure_monitor = core._ensure_status_monitor if core._status_monitor_enabled() else None
+
     report = run_audit(
         runtime_home=runtime_home,
         sample_size=getattr(args, "sample", DEFAULT_SAMPLE_SIZE),
         log_path=log_path,
         rng=rng,
+        ensure_monitor=ensure_monitor,
     )
     core._json_output(report_to_dict(report))
     daemon_failed = report.daemon.responsive is False

@@ -257,9 +257,14 @@ def test_audit_one_never_diffs_against_a_cold_entry(monkeypatch):
 # -- check_daemon_liveness -------------------------------------------------
 
 def test_daemon_liveness_no_lock_file(tmp_path):
+    """No probe, no ensure_monitor, no lock at all: without a real
+    request there is nothing that actually failed -- only "no one to
+    ask" -- so this must never be reported as `responsive=False` (which
+    `cmd_worktree_status_audit` would otherwise turn into a failing exit
+    code for the accelerator's own healthy idle-exited resting state)."""
     liveness = wsa.check_daemon_liveness(tmp_path / "status-monitor.lock")
     assert liveness.lock_present is False
-    assert liveness.responsive is False
+    assert liveness.responsive is None
 
 
 def test_daemon_liveness_stale_lock_reports_not_live(tmp_path):
@@ -271,7 +276,58 @@ def test_daemon_liveness_stale_lock_reports_not_live(tmp_path):
     liveness = wsa.check_daemon_liveness(lock_path)
     assert liveness.lock_present is True
     assert liveness.rendezvous_present is False
-    assert liveness.responsive is False
+    assert liveness.responsive is None
+
+
+def test_daemon_liveness_no_probe_boots_and_waits_when_ensure_monitor_given(tmp_path):
+    """Copilot review round 4 on PR #3206: `run_audit` passes `probe=None`
+    whenever the sample is empty (e.g. an empty cache) -- exactly the
+    `cache_row_count: 0` scenario that originally motivated this whole
+    redesign. The no-probe path must still give an idle-exited monitor
+    the same boot-and-wait chance a real probe would, when `ensure_monitor`
+    is available, instead of taking an immediate empty snapshot."""
+    lock_path = tmp_path / "status-monitor.lock"
+    calls = []
+    liveness = wsa.check_daemon_liveness(
+        lock_path, probe=None, ensure_monitor=lambda: calls.append(1) or True,
+        boot_wait_s=0.2,
+    )
+    assert calls == [1]
+    assert liveness.responsive is None
+    assert liveness.lock_present is False
+
+
+def test_daemon_liveness_no_probe_boot_wait_observes_a_delayed_lock(tmp_path):
+    """Copilot review round 5 on PR #3206: the prior no-probe boot-wait
+    test only checked that `ensure_monitor` was invoked -- it never
+    actually verified the poll loop itself observes a lock that lands
+    *during* the wait window (the same gap the probed-path test already
+    closed for that side of the fix). Publish the lock from a background
+    thread after a real delay so this exercises the poll loop, not just
+    the call to `ensure_monitor`."""
+    import threading
+
+    from agent_worktrees import locks
+
+    lock_path = tmp_path / "status-monitor.lock"
+
+    def _write_lock_after_delay():
+        time.sleep(0.1)
+        locks.write_lock(lock_path, extra={
+            "worktree_status_endpoint": "127.0.0.1:1", "worktree_status_token": "tok",
+        })
+
+    def _ensure_monitor():
+        threading.Thread(target=_write_lock_after_delay, daemon=True).start()
+        return True
+
+    assert not lock_path.exists()
+    liveness = wsa.check_daemon_liveness(
+        lock_path, probe=None, ensure_monitor=_ensure_monitor, boot_wait_s=1.0,
+    )
+    assert liveness.lock_present is True
+    assert liveness.rendezvous_present is True
+    assert liveness.responsive is None
 
 
 def test_daemon_liveness_no_probe_reports_unknown_responsiveness(tmp_path):
@@ -311,6 +367,89 @@ def test_daemon_liveness_probe_reports_unresponsive_when_daemon_is_down(tmp_path
     liveness = wsa.check_daemon_liveness(lock_path, probe=("proj", "wt1"))
     assert liveness.lock_present is False
     assert liveness.responsive is False
+
+
+def test_daemon_liveness_calls_ensure_monitor_when_nothing_is_reachable(tmp_path):
+    """Copilot review-driven redesign: a real caller always reaches the
+    daemon via `status_with_boot`, which triggers `ensure_monitor` and
+    waits when no endpoint is currently reachable -- an idle-exited
+    resident monitor (this system's own resting state between infrequent
+    callers) is not a fault a bare, never-boots probe would otherwise
+    misreport as `responsive: false`."""
+    lock_path = tmp_path / "status-monitor.lock"
+    calls = []
+    wsa.check_daemon_liveness(
+        lock_path, probe=("proj", "wt1"), ensure_monitor=lambda: calls.append(1) or True,
+        boot_wait_s=0.2,
+    )
+    assert calls == [1]
+
+
+def test_daemon_liveness_ensure_monitor_boot_is_picked_up_within_the_wait(tmp_path, monkeypatch):
+    """The full boot-and-wait path: `ensure_monitor` starts a real server
+    but only publishes the lock after a short delay on a background
+    thread (simulating a resident monitor's real spawn latency, not an
+    immediate write that would pass even without any actual polling) --
+    `status_with_boot`'s own poll loop must still pick it up before its
+    wait expires, exactly as any real caller's first request after an
+    idle-exit would."""
+    import threading
+
+    from agent_worktrees import locks
+
+    lock_path = tmp_path / "status-monitor.lock"
+    server = worktree_status_daemon.start_server(
+        lambda kind, payload: {"worktree_id": payload["worktree_id"]}
+    )
+    server.start()
+    try:
+        def _write_lock_after_delay():
+            time.sleep(0.3)
+            locks.write_lock(lock_path, extra=worktree_status_daemon.rendezvous_fields(server))
+
+        def _ensure_monitor():
+            threading.Thread(target=_write_lock_after_delay, daemon=True).start()
+            return True
+
+        assert not lock_path.exists()
+        liveness = wsa.check_daemon_liveness(
+            lock_path, probe=("proj", "wt1"), ensure_monitor=_ensure_monitor,
+        )
+        assert liveness.responsive is True
+        assert liveness.lock_present is True
+        assert liveness.rendezvous_present is True
+    finally:
+        server.close()
+
+
+def test_daemon_liveness_stale_lock_with_probe_reports_unresponsive_not_rendezvous(tmp_path):
+    """Copilot review round 2 on PR #3206: a stale (dead-owner) lock that
+    still carries old, syntactically valid rendezvous fields must not be
+    reported as `rendezvous_present=True` just because the boot-and-wait
+    dial step correctly rejected it and fell back -- the post-probe
+    snapshot re-read has to apply the exact same `lock_is_live` check the
+    no-probe static-read branch already applies, or a dead monitor's
+    leftover lock would look like a live, reachable rendezvous that
+    merely failed to answer this one request."""
+    from agent_worktrees import locks
+
+    lock_path = tmp_path / "status-monitor.lock"
+    # An implausible pid that's essentially guaranteed dead/never existed,
+    # but with otherwise well-formed rendezvous fields.
+    locks.write_lock(
+        lock_path, pid=2**30 - 1,
+        extra={"worktree_status_endpoint": "127.0.0.1:1", "worktree_status_token": "x"},
+    )
+    ensure_monitor_calls = []
+    liveness = wsa.check_daemon_liveness(
+        lock_path, probe=("proj", "wt1"),
+        ensure_monitor=lambda: ensure_monitor_calls.append(1) or True,
+        boot_wait_s=0.2,
+    )
+    assert ensure_monitor_calls == [1]
+    assert liveness.responsive is False
+    assert liveness.lock_present is True
+    assert liveness.rendezvous_present is False
 
 
 # -- run_audit / report_to_dict / telemetry log --------------------------
@@ -389,6 +528,8 @@ def test_cmd_worktree_status_audit_exit_code_clean(tmp_path, monkeypatch):
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
         _json_output=lambda payload: None,
+        _status_monitor_enabled=lambda: True,
+        _ensure_status_monitor=lambda: True,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     bundle = _bundle("p", "wt1", git_state={"state": "clean"})
@@ -396,7 +537,7 @@ def test_cmd_worktree_status_audit_exit_code_clean(tmp_path, monkeypatch):
     monkeypatch.setattr(wsa.worktree_status_compute, "compute", lambda project, wt_id: bundle)
     monkeypatch.setattr(
         wsa, "check_daemon_liveness",
-        lambda lock_path, probe=None: wsa.DaemonLiveness(
+        lambda lock_path, probe=None, ensure_monitor=None: wsa.DaemonLiveness(
             lock_present=True, rendezvous_present=True, responsive=True,
         ),
     )
@@ -406,10 +547,79 @@ def test_cmd_worktree_status_audit_exit_code_clean(tmp_path, monkeypatch):
     assert rc == 0
 
 
+def test_cmd_worktree_status_audit_passes_ensure_monitor_when_enabled(tmp_path, monkeypatch):
+    """Copilot review round 3 on PR #3206: the `ensure_monitor` opt-out
+    wiring itself (resolved from `core._status_monitor_enabled()`/
+    `core._ensure_status_monitor`) had no CLI-level regression coverage --
+    a regression that always boots, or never does regardless of the
+    opt-out, would still pass every other CLI test here since none of
+    them inspect what `run_audit` actually received."""
+    sentinel_ensure_monitor = lambda: True  # noqa: E731 -- identity marker
+    fake_core = types.SimpleNamespace(
+        _aw_runtime_home=lambda: tmp_path,
+        _json_output=lambda payload: None,
+        _status_monitor_enabled=lambda: True,
+        _ensure_status_monitor=sentinel_ensure_monitor,
+    )
+    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    captured = {}
+    real_run_audit = wsa.run_audit
+
+    def _spy_run_audit(**kwargs):
+        captured["ensure_monitor"] = kwargs.get("ensure_monitor")
+        return real_run_audit(**kwargs)
+
+    monkeypatch.setattr(wsa, "run_audit", _spy_run_audit)
+    # This test only asserts wiring (what `run_audit` received) -- stub
+    # out the actual daemon probe so it doesn't pay the real boot-wait
+    # window (the sample is empty here, so `probe=None`, and a sentinel
+    # `ensure_monitor` that never publishes a lock would otherwise make
+    # the real no-probe wait loop run to its full timeout).
+    monkeypatch.setattr(
+        wsa, "check_daemon_liveness",
+        lambda lock_path, probe=None, ensure_monitor=None, boot_wait_s=None: wsa.DaemonLiveness(
+            lock_present=False, rendezvous_present=False, responsive=None,
+        ),
+    )
+    wsa.cmd_worktree_status_audit(
+        argparse.Namespace(sample=1, log_path=None, no_log=True, seed=1, json=True)
+    )
+    assert captured["ensure_monitor"] is sentinel_ensure_monitor
+
+
+def test_cmd_worktree_status_audit_omits_ensure_monitor_when_disabled(tmp_path, monkeypatch):
+    """The opt-out's other half: when the resident monitor is disabled
+    (``AGENT_WORKTREES_STATUS_MONITOR=0``, surfaced here as
+    ``_status_monitor_enabled() -> False``), `run_audit` must receive
+    ``ensure_monitor=None`` -- never the real boot callable -- so the
+    audit can't spawn a monitor an operator deliberately turned off."""
+    fake_core = types.SimpleNamespace(
+        _aw_runtime_home=lambda: tmp_path,
+        _json_output=lambda payload: None,
+        _status_monitor_enabled=lambda: False,
+        _ensure_status_monitor=lambda: True,
+    )
+    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    captured = {}
+    real_run_audit = wsa.run_audit
+
+    def _spy_run_audit(**kwargs):
+        captured["ensure_monitor"] = kwargs.get("ensure_monitor")
+        return real_run_audit(**kwargs)
+
+    monkeypatch.setattr(wsa, "run_audit", _spy_run_audit)
+    wsa.cmd_worktree_status_audit(
+        argparse.Namespace(sample=1, log_path=None, no_log=True, seed=1, json=True)
+    )
+    assert captured["ensure_monitor"] is None
+
+
 def test_cmd_worktree_status_audit_exit_code_nonzero_on_mismatch(tmp_path, monkeypatch):
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
         _json_output=lambda payload: None,
+        _status_monitor_enabled=lambda: False,
+        _ensure_status_monitor=lambda: True,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     cached = _bundle("p", "wt1", git_state={"state": "clean"})
@@ -426,6 +636,8 @@ def test_cmd_worktree_status_audit_respects_no_log(tmp_path, monkeypatch):
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
         _json_output=lambda payload: None,
+        _status_monitor_enabled=lambda: False,
+        _ensure_status_monitor=lambda: True,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     monkeypatch.setattr(
@@ -441,6 +653,8 @@ def test_cmd_worktree_status_audit_uses_explicit_log_path(tmp_path, monkeypatch)
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
         _json_output=lambda payload: None,
+        _status_monitor_enabled=lambda: False,
+        _ensure_status_monitor=lambda: True,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     monkeypatch.setattr(
