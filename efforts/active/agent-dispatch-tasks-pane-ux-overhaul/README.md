@@ -895,7 +895,7 @@ the "agent-dispatch-side consumer" this phase also needs: Phase 5's
 `artifacts_summary` is a second reader of that same relay file (see Phase
 8's own numbered design above, step 5) — no separate poll mechanism to
 design here.
-- [ ] Land `artifacts_summary` computation in `board_cli.py` (or wherever
+- [x] Land `artifacts_summary` computation in `board_cli.py` (or wherever
       agent-dispatch tracks claims) and the drill-in claims viewer content
       for the Worktree Status card. (Not duplicated with Phase 3 — Phase 3
       only lands the column plumbing/manifest; the actual claims-tracking
@@ -912,7 +912,7 @@ design here.
       (e.g. task-level, not worktree-level), name and scope that as an
       explicitly different concept before implementing it, rather than
       reusing the word for two different ownership boundaries.
-- [ ] Implement against the same relay file Phase 8 populates (see Phase
+- [x] Implement against the same relay file Phase 8 populates (see Phase
       8's numbered design) — do not stand up a second poller.
 
 ### Phase 6 — Source-repo grouping/filtering
@@ -939,7 +939,7 @@ no lifecycle-control logic invented at this layer.
       backend work beyond the Phase 1 concurrency-fencing requirement.
 
 ### Phase 8 — Worktree Status card (implementation)
-- [ ] Populate `worktree_status.body` from real session-lineage/claims/
+- [x] Populate `worktree_status.body` from real session-lineage/claims/
       commit data instead of the preview's fixed fixture. **Operator
       feedback 2026-09-20:** confirmed against the live coordinator, every
       Worktree Status card currently comes up empty beyond its title — this
@@ -1120,7 +1120,7 @@ no lifecycle-control logic invented at this layer.
       specifically are Phase 5's own field** (see that phase's 2026-09-20
       note) — Phase 8 renders whatever Phase 5 exposes rather than
       computing claims itself.
-- [ ] Implement the relay poller in the coordinator service (step 1-2 above),
+- [x] Implement the relay poller in the coordinator service (step 1-2 above),
       the render-path reader in `board_cli`/`__main__.py`'s `inbox --board`
       (step 3), the cold-start prewarm hook (step 4), and the three
       regression tests (step 6 — render-path no-subprocess, freshness/
@@ -2407,3 +2407,98 @@ Reworded to state plainly that the relay key uses the canonical `repo`
 while the `--project` argument uses the separately-resolved local name —
 no remaining sentence conflates the two.
 
+### 2026-09-21 — Phase 8 + Phase 5 implemented: coordinator-local relay, board consumption, claims reuse
+Implemented the design above as one cohesive `agent-dispatch` change.
+
+- **Coordinator-local relay:** added a new rebuildable SQLite relay store
+  keyed by canonical `(repo, worktree_id)` plus a new
+  `worktree_status_relay` background loop in `coordinator.py`/
+  `coordinator_loops.py`, wired exactly like the existing periodic loops
+  with its own `LoopHealth` entry and shutdown cancellation. The loop only
+  polls worktrees from `Status.OWNED` tasks whose owning machine is the
+  local coordinator itself; it resolves `task.repo` through
+  `identity.name_for_repo()` as the local adoption gate before invoking
+  `agent-worktrees worktree-status-bundle --worktree <id> --json`,
+  skipping unadopted repos rather than probing a repo this machine does not
+  track. Cold start is immediate (the loop's first pass prewarms current owned tasks),
+  and `claim`/`resume`/steer-driven suspended-task resumes now signal the
+  loop immediately through a process-local notifier instead of waiting for
+  the next periodic tick.
+- **Transport + render path:** exposed the relay through a new coordinator
+  HTTP route and `DispatchClient.worktree_status_relay()`. Both
+  `board_cli.py` and `__main__.py`'s `inbox --board` path now read only
+  through that coordinator API, never shelling out to `agent-worktrees` on
+  the render path. The board builds a real `worktree_status` card body from
+  the relayed bundle (git state, liveness, session lineage, claims, and
+  disposition) and treats a missing/stale relay entry as stale/unknown
+  instead of presenting old data as current or blocking the render.
+- **Phase 5 reuse:** `artifacts_summary` now reads the relayed `claims`
+  fact from that same `(repo, worktree_id)` projection; there is no second
+  poller or second cache.
+- **Validation:** added the three scoped regression tests from the design:
+  a board-render no-subprocess test, a relay staleness test, and a
+  cross-machine ownership test. Targeted coverage for the touched surfaces:
+  `run-plugin-tests.py agent-dispatch -k "board_cli or coordinator or inbox"`
+  passed (**193 passed** after the follow-ups below). Full plugin suite:
+  `run-plugin-tests.py agent-dispatch` reached **751 passed, 2 skipped**;
+  the only failures were the pre-existing Windows bash-path tests
+  `test_bootstrap_check_reconcile_opt_in.py::{test_sh_skips_spawn_without_opt_in,test_sh_proceeds_with_opt_in}`,
+  reproduced unchanged on a stashed clean tree (the same `/bin/bash:
+  C:Users...bootstrap-check.sh: No such file or directory` failure), so
+  they remain unrelated baseline noise rather than regressions from this
+  slice.
+
+### 2026-09-21 — PR #3234 review round 1: bound relay work to prevent overlapping scans
+Copilot's first review found a real concurrency gap in the initial relay
+poller: a single supervised cycle walked every owned worktree serially while
+each `agent-worktrees worktree-status-bundle` call could take up to 60
+seconds. If enough worktrees stalled, the outer supervised cycle could time
+out while its worker thread kept scanning, and the next periodic pass could
+start a second full scan on top of it.
+
+Fixed by turning the loop into a bounded work queue: each cycle now processes
+exactly one queued `(repo, worktree_id)` relay refresh with a timeout sized
+for one `worktree-status-bundle` call, while startup and subsequent trigger/
+periodic snapshots still prewarm the whole owned set by draining that queue
+back-to-back without waiting for another cadence tick. Added a focused test
+proving the helper can limit one worktree per cycle; targeted validation for
+the touched surfaces re-ran green at **190 passed**.
+
+### 2026-09-21 — PR #3234 review round 2: batch relay reads per board refresh + version rebump
+The next Copilot review found a real render-path performance problem: the
+board still fetched relay entries one row at a time, so a large Tasks pane
+refresh could add hundreds of serial coordinator round-trips even though the
+task list itself already arrives in one request. Fixed by adding a batched
+relay HTTP route/client method and switching both `board_cli.py` and
+`__main__.py`'s `inbox --board` path to prefetch every needed
+`(repo, worktree_id)` relay entry once per refresh, then render from that
+single batch result (with a one-shot failure degrading every card to
+stale/unknown rather than retrying per row). Added route coverage and updated
+the no-subprocess board test to assert the batched read shape. Because this
+follow-up changed plugin content after the first version bump, bumped
+`agent-dispatch` again to `0.1.2-dev167` so marketplace deployment remains
+version-triggered and not stale-gated. Targeted validation re-ran green at
+**191 passed**.
+
+### 2026-09-21 — PR #3234 review round 3: fixed real relay-caller/cleanup gaps
+The next Copilot review surfaced another batch of real issues, several of
+which were stale carryovers from the pre-`dev167` head but some of which were
+new and substantive:
+
+- the initial batch-read change still left the old `test_main_reads_local_coordinator`
+  double too brittle for an added relay request shape;
+- `worktree-status-bundle` does **not** actually accept `--project`, so the
+  relay caller's mapped-name argument would have kept every fetch cold;
+- draining a previously-snapshotted ref list could poll a worktree after local
+  ownership was gone, so explicit refs now revalidate against the current
+  locally-owned set before fetching; and
+- the relay store had no cleanup path, so a long-lived coordinator would have
+  accumulated stale bundles indefinitely despite the cache being documented as
+  transient.
+
+Fixed all four: dropped the unsupported `--project` argument while still using
+`identity.name_for_repo()` as the adoption gate, revalidated explicit refs
+against current ownership, added a bounded relay-prune pass, and updated the
+board/local-coordinator tests accordingly. Because those follow-ups again
+changed plugin payload, bumped `agent-dispatch` to `0.1.2-dev168`. Targeted
+validation re-ran green at **193 passed**.
