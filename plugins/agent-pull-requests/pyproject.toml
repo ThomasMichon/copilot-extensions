@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-pull-requests"
+version = "0.1.0-dev1"
+description = "Cross-repository pull-request CLI with agent-worktrees-mediated GitHub auth."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[project.scripts]
+agent-pull-requests = "agent_pull_requests.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

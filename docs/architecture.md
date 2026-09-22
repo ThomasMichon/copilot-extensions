@@ -1,7 +1,7 @@
 # Architecture Overview
 
-How the 21 copilot-extensions plugins fit together — install topology,
-runtimes, ports, and the credential relay. **Twelve ship a runtime** (currently
+How the 22 copilot-extensions plugins fit together — install topology,
+runtimes, ports, and the credential relay. **Thirteen ship a runtime** (currently
 a `uv`-built venv under a plugin-owned root such as `~/.agent-*` or
 `~/.budget-guidance`, deployed by the plugin's own installer) plus generated
 payload-local agent commands and session command glossaries; compatibility
@@ -22,6 +22,7 @@ section.
 | Plugin | Kind | Legacy runtime home | Global command surface (legacy wrapper / project binstubs) | Lifecycle |
 |--------|------|--------------|---------|-----------|
 | [agent-worktrees](../plugins/agent-worktrees/) | Session plugin (skills + `sessionStart` hook) | `~/.agent-worktrees/` | `~/.local/bin/agent-worktrees` + per-project binstubs | Per session (launched by binstub); runtime auto-updates on session start |
+| [agent-pull-requests](../plugins/agent-pull-requests/) | Cross-repo PR CLI (no deployed binstub yet) | — | `python -m agent_pull_requests` (after `pip install -e plugins/agent-pull-requests`) | On-demand CLI; current scaffold shells through `agent-worktrees repos gh <owner/repo> -- ...` for GitHub account/token resolution and does not require a local checkout. Marketplace install only vendors the payload today -- no install script deploys a `~/.local/bin/agent-pull-requests` binstub yet; that lands in a follow-up slice of the staged rollout |
 | [agent-bridge](../plugins/agent-bridge/) | Persistent HTTP service | `~/.agent-bridge/` | `~/.local/bin/agent-bridge` | Always-on daemon (Windows scheduled task / Linux systemd user unit) |
 | [agent-codespaces](../plugins/agent-codespaces/) | CLI + credential relay | `~/.agent-codespaces/` | `~/.local/bin/agent-codespaces` | On-demand CLI; self-registers a `codespace:` namespace **provider** (+ credential relay) with the agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest — the daemon drives its binstub over a process boundary |
 | [agent-containers](../plugins/agent-containers/) | CLI + `container:` provider | `~/.agent-containers/` | `~/.local/bin/agent-containers` | On-demand CLI; self-registers a `container:` namespace **provider** with the agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest (process-boundary binstub invocation) |
