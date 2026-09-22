@@ -58,7 +58,7 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees __main__.py` status/front-door slice)
+### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees tracking.py` obligations/lifecycle/session-registry slice)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
 — re-run before starting a phase, this list moves; it already has once per
@@ -72,7 +72,7 @@ table):
 | 8,140 | +7,140 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
 | 6,972 | +5,972 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
 | 6,751 | +5,751 | `plugins/agent-bridge/src/agent_bridge/session_manager.py` | |
-| 5,872 | +4,872 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | |
+| 3,946 | +2,946 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | Partial split landed: the claim/follow-up/orphanage ledger now lives in `tracking_claims.py`, asserted head/handoff/create primitives in `tracking_lifecycle.py`, and the hook/session-registry + repo-freshness helpers in `tracking_session_registry.py`. What's left is the persistence-heavy core: `WorktreeRecord`, YAML load/save/merge, locking/stamp-queue machinery, and the remaining parse/serialize compatibility helpers. |
 | 5,145 | +4,145 | `plugins/agent-index/scripts/cell-runtime.py` | |
 | 4,902 | +3,902 | `plugins/agent-dispatch/src/agent_dispatch/__main__.py` | Already partially split (`producers_cli.py` et al. extracted) — still a strong model for how far a CLI-registration split can continue |
 | 4,693 | +3,693 | `plugins/agent-codespaces/src/agent_codespaces/__main__.py` | CLI registration surface |
@@ -88,18 +88,15 @@ table):
 | 2,195 | +1,195 | `plugins/agent-worktrees/src/agent_worktrees/reconcile.py` | |
 | 2,124 | +1,124 | `plugins/agent-worktrees/src/agent_worktrees/session_projection.py` | |
 
-**Suggested next pick (Phase 2, next slice):** pivot away from
-`agent-worktrees/__main__.py`'s command-surface campaign. After this slice,
-the remaining `cmd_*` bodies in `__main__.py` are the true launch / execution
-core (`cmd_launch`, `cmd_execution_leg`), the explicitly-excluded
-`cmd_copilot`, and thin wrappers (`cmd_resolve`, `cmd_handoff_trace`). In
-other words: the clean command-handler seams are exhausted, and any further
-split would be a weaker internal-helper carve rather than the strong
-command-family/module seam the first ten slices used. If the next priority is
-the biggest remaining production offender overall, take the canonical
-`libs/installation-context/installation_context.py`; if the operator wants to
-stay in `agent-worktrees`, pivot to `tracking.py` (or `pr_ops.py`) instead of
-forcing `__main__.py` past this point.
+**Suggested next pick (Phase 2, next slice):** if the priority is still the
+largest remaining production offender overall, take the canonical
+`libs/installation-context/installation_context.py`. If the operator wants to
+stay in `agent-worktrees`, `tracking.py` is now a **partially**-resolved
+target with one clear remaining seam: split the persistence/serialization
+core (`load_record`, `_save_record_unlocked`, locking, stamp queue, and the
+record/PR parse-merge helpers) away from the still-large composition root.
+If the operator prefers a fresh file instead of another pass on the same one,
+`pr_ops.py` is the next best `agent-worktrees` target.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
 margin of their own ceiling (most likely to tip over next from unrelated
@@ -1123,3 +1120,60 @@ the Phase 0 runbook, picked up as capacity allows.
   kind of thing the watchdog/decomposer mechanism (not this PR-time gate, and
   not this campaign's own agent-worktrees-focused slices) exists to pick up.
   Noted here rather than fixed in scope of this tooling PR.
+
+### 2026-09-21 — Phase 2 continued: `agent-worktrees/tracking.py` obligations + lifecycle + session-registry slice
+- Pivoted the campaign away from the now-exhausted `agent-worktrees/__main__.py`
+  command-family work and into `plugins/agent-worktrees/src/agent_worktrees/tracking.py`.
+  Read the full file first, then split along its real responsibility seams rather
+  than forcing a midpoint cut. The result is a partial but clean extraction:
+  `tracking_claims.py` now owns the claim/follow-up/orphanage ledger (data
+  models plus mutation helpers), `tracking_lifecycle.py` owns the asserted
+  head/handoff/create primitives, and `tracking_session_registry.py` owns the
+  hook/session-registry runtime helpers (`register_session` /
+  `deregister_session`, activation history, repo freshness, and fsmonitor
+  cleanup). `tracking.py` stays the compatibility/composition root for the
+  persistence-heavy core and re-exports the moved surfaces so existing callers
+  and tests keep their import/monkeypatch targets.
+- Net result for the parent module: `tracking.py` dropped from **5,872** lines
+  at slice start to **3,946** by `tools/rank-module-size.py`'s accounting
+  (still over cap, but materially smaller). The three new sibling modules land
+  at **624** (`tracking_claims.py`), **493** (`tracking_lifecycle.py`), and
+  **396** (`tracking_session_registry.py`) lines respectively. The remaining
+  `tracking.py` bulk is now much more sharply defined: `WorktreeRecord`, YAML
+  load/save/merge logic, record locking + stamp-queue persistence helpers, and
+  the PR/controller/session-backend parse/serialize compatibility machinery.
+- Validation caught two compatibility regressions created by the first pass,
+  both caused by moved internals bypassing established public seams. First, the
+  initial split hid `_derive_initial_controller_relations` from
+  `create_new_record()`'s compatibility path, which the `claim_handoffs` and
+  broader tracking tests surfaced immediately; fixed by having the extracted
+  lifecycle module import the controller-relation helpers directly rather than
+  reaching back through a no-longer-re-exported private alias. Second, the
+  orphanage tests still monkeypatch `agent_worktrees.tracking.orphanage_path`;
+  the moved `rehome_abandoned_obligations()` / `remove_orphaned_obligations()`
+  initially called the sibling module's local helper directly, bypassing that
+  public seam. Fixed by routing those calls back through the re-exported
+  `tracking.orphanage_path` / `tracking.load_orphaned_obligations_strict`
+  surface so tests and downstream monkeypatching keep working exactly as before.
+- Final validation for the slice: Ruff (`--select F,E9`) passes on
+  `tracking.py` and all three new sibling modules. The first full
+  `python tools/run-plugin-tests.py agent-worktrees` run flushed out the two
+  real regressions above; after those fixes, the second full run again stops
+  only at the same independently-confirmed unrelated `tests/test_doctor.py`
+  cluster (**551 passed, 10 failed, 1 skipped**). To ensure every touched area
+  still had direct coverage despite that early stop, ran a focused
+  `python tools/run-plugin-tests.py agent-worktrees -k "tracking or claimant or
+  claim_handoffs or obligation or orphanage or follow_up or repo_freshness or
+  register_session or session_lifecycle or terminal_conclusion"` sweep, which
+  passed **638** tests with **4,489** deselected. `python tools/check-module-size.py`
+  and `python tools/check-module-size.py --refresh-baseline` pass, lowering
+  `tools/module-size-baseline.json`'s ceiling for
+  `agent_worktrees/tracking.py` to match the new post-slice size. `python
+  tools/check-install-contract.py` and `python tools/check-version-consistency.py`
+  both pass. Dogfooded the moved live/read paths through read-only CLI usage:
+  `agent-worktrees register-session --help`, `deregister-session --help`,
+  `claimant-liveness --help`, `claimant-liveness anomalous-potato/proj/wt-1`,
+  `anchor-check --help`, `hygiene --help`, and the generic top-level
+  `agent-worktrees --help`.
+- Version bump for this slice: `agent-worktrees` **`1.5.5-dev228`** and
+  marketplace `metadata.version` **`1.7.7-dev196`**.
