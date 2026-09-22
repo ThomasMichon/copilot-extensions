@@ -2274,6 +2274,19 @@ def test_multi_command_shim_dispatches_its_own_module(tmp_path: Path) -> None:
     assert result.stdout.strip() == "-m agent_example.helper two words"
 
 
+def test_multi_command_traces_use_manifest_plugin_identity(tmp_path: Path) -> None:
+    manifest = _multi_manifest(tmp_path)
+
+    generated = generator.expected_files(manifest)
+
+    posix = generated[manifest.parent / "bin" / "example-helper"]
+    powershell = generated[manifest.parent / "bin" / "example-helper.ps1"]
+    assert '_plugin="agent-example"' in posix
+    assert 'COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN="$_plugin"' in posix
+    assert "$_plugin = 'agent-example'" in powershell
+    assert "$env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = $_plugin" in powershell
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
 def test_posix_shim_ignores_a_different_plugins_copilot_plugin_root(
     tmp_path: Path,

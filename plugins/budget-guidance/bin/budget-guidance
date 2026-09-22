@@ -3,6 +3,7 @@
 set -eu
 
 export PYTHONUTF8=1
+_plugin="budget-guidance"
 _command="budget-guidance"
 _module="budget_guidance"
 _self_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
@@ -41,11 +42,11 @@ _boot_trace() {
     _bt_extra="${2-}"
     if [ -n "$_bt_extra" ]; then
         printf '::boot-trace:: plugin=%s phase=%s t=%s %s\n' \
-            "${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-$_command}" \
+            "${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-$_plugin}" \
             "$1" "$(_boot_trace_ms)" "$_bt_extra" >&2
     else
         printf '::boot-trace:: plugin=%s phase=%s t=%s\n' \
-            "${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-$_command}" \
+            "${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-$_plugin}" \
             "$1" "$(_boot_trace_ms)" >&2
     fi
 }
@@ -70,7 +71,7 @@ _resolver="$_payload_root/scripts/resolve-runtime.sh"
 _resolve_runtime() {
     AGENT_RT_PY=""
     if [ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ]; then
-        export COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN="$_command"
+        export COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN="$_plugin"
     fi
     if [ -f "$_resolver" ]; then
         AGENT_RT_ROOT="$_runtime_root"
