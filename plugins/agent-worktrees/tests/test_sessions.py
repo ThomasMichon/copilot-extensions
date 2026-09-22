@@ -1116,6 +1116,31 @@ class TestSessionMessageTail:
         assert out["ending"]["state"] == "assistant_offer_pending"
         assert out["ending"]["ended_on_unanswered_offer"] is True
 
+    def test_handles_no_id_assistant_events_as_one_turn(self, tmp_session_state_dir: Path):
+        make_session_dir(
+            tmp_session_state_dir, "sess-noid", "/tmp/wt-noid",
+            events_lines=[
+                '{"type":"assistant.turn_start","timestamp":"2026-06-01T10:00:00Z"}',
+                '{"type":"tool.execution_start","data":{"toolName":"bash"},"timestamp":"2026-06-01T10:00:01Z"}',
+                _conv_event("assistant.message", "done", "2026-06-01T10:00:02Z"),
+                '{"type":"assistant.turn_end","timestamp":"2026-06-01T10:00:03Z"}',
+            ],
+        )
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            out = session_message_tail("sess-noid", limit=3)
+        assert out["turns"] == [
+            {
+                "role": "assistant",
+                "text": "done",
+                "timestamp": "2026-06-01T10:00:00Z",
+                "tool_names": ["bash"],
+            }
+        ]
+        assert out["ending"]["state"] == "complete"
+
 
 # ---------------------------------------------------------------------------
 # mux_seed_pane — hardened readiness + echo-verify (issue: replay debounce)

@@ -19,17 +19,16 @@ _OFFER_HINTS = (
 )
 
 
-def _read_session_events(session_id: str) -> list[dict]:
-    """Return every parsed event recorded for a single Copilot session."""
+def _iter_session_events(session_id: str):
+    """Yield parsed events recorded for a single Copilot session."""
     valid_session_id = sessions.validate_session_id(session_id)
     if valid_session_id is None:
-        return []
+        return
     session_dir = sessions._session_state_dir()
     events_file = session_dir / valid_session_id / "events.jsonl"
     if not events_file.is_file():
-        return []
+        return
 
-    events: list[dict] = []
     try:
         with open(events_file, encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -41,10 +40,9 @@ def _read_session_events(session_id: str) -> list[dict]:
                 except json.JSONDecodeError:
                     continue
                 if isinstance(ev, dict):
-                    events.append(ev)
+                    yield ev
     except OSError:
-        return []
-    return events
+        return
 
 
 def _event_data(ev: dict) -> dict:
@@ -73,18 +71,25 @@ def session_message_tail(session_id: str, *, limit: int = 3) -> dict:
     tail: deque[dict] = deque(maxlen=lim)
     assistant_turns: dict[str, dict] = {}
     assistant_seq = 0
+    anonymous_turn_key: str | None = None
     last_event_type: str | None = None
     last_event_timestamp: str = ""
 
-    def _assistant_key(turn_id: object) -> str:
-        nonlocal assistant_seq
+    def _assistant_key(turn_id: object, *, create: bool, standalone: bool = False) -> str | None:
+        nonlocal assistant_seq, anonymous_turn_key
         if isinstance(turn_id, str) and turn_id.strip():
             return turn_id
-        assistant_seq += 1
-        return f"assistant:{assistant_seq}"
+        if anonymous_turn_key is None and create:
+            assistant_seq += 1
+            key = f"assistant:{assistant_seq}"
+            if not standalone:
+                anonymous_turn_key = key
+            return key
+        return anonymous_turn_key
 
-    def _ensure_assistant_turn(turn_id: object, timestamp: str) -> dict:
-        key = _assistant_key(turn_id)
+    def _ensure_assistant_turn(turn_id: object, timestamp: str, *, standalone: bool = False):
+        key = _assistant_key(turn_id, create=True, standalone=standalone)
+        assert key is not None
         turn = assistant_turns.get(key)
         if turn is None:
             turn = {
@@ -100,9 +105,9 @@ def session_message_tail(session_id: str, *, limit: int = 3) -> dict:
             assistant_turns[key] = turn
         elif timestamp and not turn["timestamp"]:
             turn["timestamp"] = timestamp
-        return turn
+        return key, turn
 
-    for ev in _read_session_events(session_id):
+    for ev in _iter_session_events(session_id):
         typ = str(ev.get("type", ""))
         data = _event_data(ev)
         ts = str(ev.get("timestamp", ""))
@@ -128,7 +133,10 @@ def session_message_tail(session_id: str, *, limit: int = 3) -> dict:
             continue
 
         if typ == "assistant.message":
-            turn = _ensure_assistant_turn(data.get("turnId"), ts)
+            standalone = anonymous_turn_key is None and not (
+                isinstance(data.get("turnId"), str) and data.get("turnId").strip()
+            )
+            key, turn = _ensure_assistant_turn(data.get("turnId"), ts, standalone=standalone)
             text = sessions._event_text(ev)
             if text:
                 parts = turn["text_parts"]
@@ -137,10 +145,13 @@ def session_message_tail(session_id: str, *, limit: int = 3) -> dict:
                 if not turn["materialized"]:
                     tail.append(turn)
                     turn["materialized"] = True
+            if standalone:
+                turn["closed"] = True
+                assistant_turns.pop(key, None)
             continue
 
         if typ == "tool.execution_start":
-            turn = _ensure_assistant_turn(data.get("turnId"), ts)
+            _, turn = _ensure_assistant_turn(data.get("turnId"), ts)
             name = data.get("toolName") or data.get("tool_name")
             if isinstance(name, str) and name and name not in turn["tool_seen"]:
                 turn["tool_names"].append(name)
@@ -148,11 +159,13 @@ def session_message_tail(session_id: str, *, limit: int = 3) -> dict:
             continue
 
         if typ == "assistant.turn_end":
-            key = _assistant_key(data.get("turnId"))
+            key = _assistant_key(data.get("turnId"), create=False)
             turn = assistant_turns.get(key)
             if turn is not None:
                 turn["closed"] = True
                 assistant_turns.pop(key, None)
+            if key is not None and key == anonymous_turn_key:
+                anonymous_turn_key = None
 
     turns: list[dict] = []
     for turn in tail:
