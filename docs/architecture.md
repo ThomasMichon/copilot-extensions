@@ -297,15 +297,18 @@ exit-code contract: `0` = found (stdout is `{"session": {...}, "events":
 [...]}`, with `session.session_id` required and matched against the request),
 `3` = not found (a legitimate miss, never an error), anything else = a
 provider error that is logged and treated as "this provider could not
-answer" — never raised to the caller. `GET /api/v1/sessions/{id}` and
-`GET /api/v1/worktrees/{id}/sessions/{session_id}/transcript` both fall
+answer" — never raised to the caller. `GET /api/v1/sessions/{id}`,
+`GET /api/v1/sessions/{id}/transcript`, and
+`GET /api/v1/worktrees/{id}/sessions/{session_id}/transcript` all fall
 through to a registered `session-fetch` provider once their live answer has
-nothing for the requested session — the bare route when the live ledger
-misses, the worktree-scoped transcript route when there is no live owning
-agent for the worktree at all *or* the owning agent's own local
-session-state has nothing for that session (its `session-transcript` verb
-answers an absent session with an empty list, not an error). Both mark the
-cold-store answer `read_only`/`at_rest` in their existing response shape.
+nothing for the requested session — the bare metadata/transcript routes
+when the live ledger misses (a bare session may have no `worktree_id` at
+all, so there is no owning agent to resolve through in the first place),
+the worktree-scoped transcript route when there is no live owning agent for
+the worktree at all *or* the owning agent's own local session-state has
+nothing for that session (its `session-transcript` verb answers an absent
+session with an empty list, not an error). All three mark the cold-store
+answer `read_only`/`at_rest` in their existing response shape.
 `GET /api/v1/worktrees/{id}/sessions` (the worktree-scoped *listing*) does
 **not** fall through to a cold-store provider yet — the cold-store contract
 is session-ID-keyed (`session-fetch <id>`), not worktree-keyed, so there is
