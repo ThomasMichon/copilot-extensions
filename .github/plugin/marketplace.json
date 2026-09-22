@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.7-dev205"
+    "version": "1.7.7-dev206"
   },
   "plugins": [
     {
@@ -16,21 +16,28 @@
       "source": "plugins/agent-worktrees"
     },
     {
+      "name": "agent-pull-requests",
+      "description": "Cross-repository pull-request CLI for API-driven status/create/merge/wait flows (status implemented; others staged), initially mediated through agent-worktrees account resolution. Payload-only for now -- no install script deploys a binstub yet; invoke via 'python -m agent_pull_requests' after 'pip install -e'.",
+      "version": "0.1.0-dev1",
+      "source": "plugins/agent-pull-requests",
+      "defaultEnabled": false
+    },
+    {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.4.0-dev542",
+      "version": "0.4.0-dev543",
       "source": "plugins/agent-bridge"
     },
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev156",
+      "version": "0.4.0-dev157",
       "source": "plugins/agent-codespaces"
     },
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
-      "version": "0.1.2-dev153",
+      "version": "0.1.2-dev155",
       "source": "plugins/agent-containers"
     },
     {
@@ -54,7 +61,7 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a session-start continuity kernel plus a Copilot CLI extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and always makes a manual continuation available; automatic nudging and live pending-handoff pickup signaling are opt-in (mode: auto) and never perform process management",
-      "version": "0.1.1-dev46",
+      "version": "0.1.1-dev47",
       "source": "plugins/context-handoff"
     },
     {
@@ -78,7 +85,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.2-dev173",
+      "version": "0.1.2-dev177",
       "source": "plugins/agent-dispatch"
     },
     {

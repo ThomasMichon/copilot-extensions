@@ -10,9 +10,17 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import sys
 import threading
 from collections.abc import Callable
+
+# Mirrors __main__._BUSY_EXIT / __main__._COORDINATION_EXIT exactly (kept as a
+# separate copy, not an import, to preserve this module's existing no-
+# circular-import-with-__main__ constraint -- see cmd_copilot's own docstring
+# on interactive_ssh being injected for the same reason).
+_BUSY_EXIT = 75
+_COORDINATION_EXIT = 78
 
 
 def add_copilot_subparser(sub) -> None:
@@ -59,6 +67,20 @@ def add_copilot_subparser(sub) -> None:
         "--no-relay", action="store_true",
         help="Skip the credential-relay reverse forward",
     )
+    copilot_parser.add_argument(
+        "--effort", default=None,
+        help="Explicit claim-owner worktree id (for a dispatched invocation "
+             "whose cwd is not the caller's own worktree). Forwarded to the "
+             "same exclusive-claim resolution `agent-codespaces ssh` uses.",
+    )
+    copilot_parser.add_argument(
+        "--force-claim", dest="force_claim", action="store_true",
+        help="Take over this CodeSpace's exclusive claim even if a different, "
+             "still-live worktree holds it -- evicts that owner's claim; its "
+             "in-flight work may be disrupted. Without this, a live claim "
+             "held by another worktree/machine refuses the connect (matches "
+             "`agent-codespaces ssh`'s own claim enforcement).",
+    )
 
 
 def _resolve_anchor_identity(name: str, config) -> str:  # noqa: ANN001
@@ -90,19 +112,33 @@ def _resolve_anchor_identity(name: str, config) -> str:  # noqa: ANN001
 
 def _ensure_agent_bridge_plugin(name: str) -> None:
     """Implicit CLI-mode preflight: install the ``agent-bridge`` Copilot
-    plugin on the venue if it's missing, before ever opening the interactive
+    plugin on the venue if it's missing, and provision the daemon's own
+    registration credentials there, all before ever opening the interactive
     connection.
 
-    Without this plugin loaded in the *remote* Copilot process, that process
-    never self-registers back to the host daemon -- the interactive session
-    runs perfectly normally but its CLI-mode reservation is never claimed,
-    silently (confirmed live: a real CodeSpace session ran for 5+ minutes
-    with zero registration, purely because this was missing). This is a
-    precondition of the `copilot` verb's own contract, not a project policy
-    choice, so it's applied unconditionally here -- no `--fix`/opt-in needed,
-    unlike `agent-codespaces doctor`'s other remediations. Best-effort: a
-    probe/install failure here is reported but never blocks the connection
-    attempt (the operator may still want to attach and diagnose by hand).
+    Two distinct gaps, closed in the same round trip:
+
+    1. Without the ``agent-bridge`` plugin loaded in the *remote* Copilot
+       process, that process never even attempts to self-register (confirmed
+       live: a real CodeSpace session ran for 5+ minutes with zero
+       registration, purely because this was missing).
+    2. Even with the plugin loaded, the interactive extension's own
+       ``resolveToken()``/``resolveBaseUrl()`` (``extension.mjs``) read
+       ``~/.agent-bridge/auth.yaml``/``active.json`` -- files that exist only
+       on the machine actually running the daemon. A remote venue never has
+       them, so the extension logs "no local agent-bridge auth token found;
+       not registering (ok)" and silently never calls the registration
+       endpoint at all -- confirmed live (agent-bridge-cli-mode-sessions
+       Phase 4 follow-up): a real CodeSpace session loaded the extension,
+       reached a ready prompt, and still never registered, for exactly this
+       reason (a distinct bug from #1, and layered underneath it -- fixing
+       only #1 still leaves CLI-mode registration silently broken).
+
+    Both are preconditions of the `copilot` verb's own contract, not a
+    project policy choice, so both are applied unconditionally here -- no
+    `--fix`/opt-in needed. Best-effort throughout: any probe/install/
+    provisioning failure is reported but never blocks the connection attempt
+    (the operator may still want to attach and diagnose by hand).
     """
     import asyncio
 
@@ -121,24 +157,52 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
             readiness = await venue_check.check_remote_venue(
                 manager.exec_command, name,
             )
-            if readiness.agent_bridge_plugin:
-                return
-            print(
-                f"[PREP] agent-bridge plugin missing on '{name}' -- "
-                "installing (CLI-mode sessions can't self-register without "
-                "it) ...",
-                file=sys.stderr,
-            )
-            remediation = await venue_check.remediate_remote_venue(
-                manager.exec_command, name, readiness,
-            )
-            if "install agent-bridge plugin" in remediation.succeeded:
-                print("[PREP] agent-bridge plugin installed.", file=sys.stderr)
-            else:
+            if not readiness.agent_bridge_plugin:
                 print(
-                    "[PREP] Could not install agent-bridge plugin "
-                    f"automatically -- CLI-mode registration may not work. "
-                    f"Run `agent-codespaces doctor {name} --fix` to retry.",
+                    f"[PREP] agent-bridge plugin missing on '{name}' -- "
+                    "installing (CLI-mode sessions can't self-register "
+                    "without it) ...",
+                    file=sys.stderr,
+                )
+                remediation = await venue_check.remediate_remote_venue(
+                    manager.exec_command, name, readiness,
+                )
+                if "install agent-bridge plugin" in remediation.succeeded:
+                    print("[PREP] agent-bridge plugin installed.", file=sys.stderr)
+                else:
+                    print(
+                        "[PREP] Could not install agent-bridge plugin "
+                        f"automatically -- CLI-mode registration may not "
+                        f"work. Run `agent-codespaces doctor {name} --fix` "
+                        "to retry.",
+                        file=sys.stderr,
+                    )
+
+            from venue_copilot import resolve_daemon_port, resolve_local_auth_token
+
+            daemon_port = resolve_daemon_port()
+            token = resolve_local_auth_token()
+            if daemon_port is None or not token:
+                print(
+                    "[PREP] Could not resolve the host agent-bridge daemon's "
+                    "live port/token -- skipping remote registration-"
+                    "credential provisioning (CLI-mode registration may not "
+                    "work).",
+                    file=sys.stderr,
+                )
+                return
+            script = (
+                "mkdir -p ~/.agent-bridge && "
+                f"printf 'token: %s\\n' {shlex.quote(token)} "
+                "> ~/.agent-bridge/auth.yaml && "
+                f"printf '{{\"active\": {{\"port\": {int(daemon_port)}}}}}' "
+                "> ~/.agent-bridge/active.json"
+            )
+            result = await manager.exec_command(name, f"bash -lc {shlex.quote(script)}")
+            if getattr(result, "exit_code", 1) != 0:
+                print(
+                    f"[PREP] Could not provision registration credentials on "
+                    f"'{name}' -- CLI-mode registration may not work.",
                     file=sys.stderr,
                 )
         finally:
@@ -187,7 +251,49 @@ def cmd_copilot(
     a single-shot prep step so an operator/caller never has to run
     ``agent-codespaces doctor --fix`` by hand before their first CLI-mode
     session on a given CodeSpace.
+
+    Also enforces the SAME exclusive, worktree-keyed CodeSpace claim
+    ``agent-codespaces ssh`` already does (via the shared
+    ``lease.claim_for_connect`` choke point) before ever attempting to
+    connect. Previously this verb never claimed at all: a live claim held by
+    one worktree/machine was silently bypassable simply by using `copilot`
+    instead of `ssh` to drive the same CodeSpace -- confirmed live
+    (agent-bridge-cli-mode-sessions Phase 4 follow-up): a CLI-mode session
+    was driven successfully on a CodeSpace a different, still-live worktree
+    on another machine had legitimately claimed, disrupting its in-flight
+    work.
     """
+    from .lease import ClaimConflict, CoordinationRejected, claim_for_connect
+    from .worktrees import ContextRefused
+
+    try:
+        claim_for_connect(
+            args.name,
+            force=getattr(args, "force_claim", False),
+            effort=getattr(args, "effort", None),
+        )
+    except ClaimConflict as exc:
+        print(
+            f"[BUSY] {exc}\n"
+            f"       A CodeSpace is fronted by a single bridge, so a second "
+            f"worktree cannot drive it concurrently. Options:\n"
+            f"       - let the owner finish, or dispatch to a different "
+            f"CodeSpace; or\n"
+            f"       - take over with --force-claim (evicts the current "
+            f"owner's claim -- its in-flight work may be disrupted).",
+            file=sys.stderr,
+        )
+        return _BUSY_EXIT
+    except (CoordinationRejected, ContextRefused) as exc:
+        print(
+            f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
+            file=sys.stderr,
+        )
+        return _COORDINATION_EXIT
+    except RuntimeError as exc:
+        # Never let a claim-bookkeeping error block a connect.
+        print(f"[WARN] CodeSpace claim skipped: {exc}", file=sys.stderr)
+
     _ensure_agent_bridge_plugin(args.name)
 
     from venue_copilot import VenueCopilotError, resolve_daemon_port, run_venue_copilot

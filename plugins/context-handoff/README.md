@@ -331,6 +331,258 @@ being a real contributor, not only a given plugin's own synchronous work.
 Compare against a sibling plugin's rate over the same window before
 attributing a change in rate to a specific fix.
 
+### Post-readiness crash diagnostics
+
+The launch log above records only a terminal disposition and exit code --
+if the extension reaches `ready` and then stops with no further harness
+output (observed and diagnosed on at least one host, with no root cause
+identified yet), the launch log alone cannot say *why*, or even *whether it
+was actually a crash at all* -- see "interpreting an entry" below.
+`extension.mjs` registers `process.on('uncaughtException'
+/'unhandledRejection'/'exit'/'SIGTERM'/'SIGINT'/'SIGHUP')` handlers (added
+directly above the `--- State ---` section) that write a synchronous,
+durable diagnostic line the instant anything goes wrong to
+`<os.tmpdir()>/context-handoff-extension-crash.log` (e.g.
+`/tmp/context-handoff-extension-crash.log` on Linux/macOS,
+`%TEMP%\context-handoff-extension-crash.log` on Windows). Read this file
+after a suspected crash.
+
+Each log entry begins with a line stamped `<ISO timestamp> pid=<pid>
+<label>: <detail>`. For an `uncaughtException`/`unhandledRejection` entry,
+`<detail>` is produced by `describeFailure()`: a multi-line `Error.stack`
+when the thrown/rejected value has one (only that first, stamped line
+carries the timestamp/pid/label prefix -- the stack's own trailing `at ...`
+lines that follow are not individually stamped, so correlate by that first
+line); a single-line `String(value)` when it does not (a thrown value is
+not required to be an `Error`); or the fixed fallback string
+`<failure detail unavailable: describing it threw>` if even that extraction
+itself throws (a hostile/buggy `.stack` getter or `Symbol.toPrimitive`/
+`toString`). `<detail>` for the exit/exception/rejection/signal handlers
+always includes `ready=true`/`ready=false` -- an in-memory-only flag (never
+itself written on its own) set once `joinSession()` actually resolves, so a
+captured failure's line says whether it happened before or after this
+instance reached readiness.
+
+This file is:
+
+- **Created privately, symlink-safe.** `os.tmpdir()` is commonly a shared,
+  world-writable directory on POSIX (`/tmp`); a predictable filename there
+  is both world-readable by default and a symlink-attack target. The first
+  write opens it with `O_CREAT|O_WRONLY|O_APPEND|O_NOFOLLOW|O_NONBLOCK` and
+  mode `0o600` -- private to this user, and the kernel itself refuses to
+  open through a pre-existing symlink rather than following it (and refuses
+  to block indefinitely against a pre-created FIFO with no reader). Neither
+  flag exists on Windows (no equivalent local-multi-user attack surface
+  there in the same shape); the file descriptor, once opened, is reused for
+  every subsequent write in the same process. **On POSIX**, a pre-existing
+  file that this user does not own, or that grants group/other any access,
+  is refused outright rather than written to or "fixed in place" -- **this
+  check does not run on Windows** (no POSIX uid/mode model there, and no
+  `process.getuid`), so a pre-existing file at this path on Windows is
+  accepted regardless of its ownership or permissions.
+- **Only records the interesting cases, by design.** A routine `code=0`
+  exit is never logged: this extension's own module is dynamically
+  re-imported many times over a machine's lifetime (once per discovery
+  pass, plus once per reconnect/resume), and logging every uneventful fork
+  would make this file rotate away its own history far more often than it
+  otherwise would (see the size-rotation bullet below) -- the existing
+  lifecycle-logging pattern
+  (`docs/patterns/lifecycle-activity-logging.md`) deliberately bounds or
+  reboot-volatilizes every tier it defines, and this file has neither
+  property beyond its coarse size trigger, so it must not record routine
+  events at all. Only an
+  `uncaughtException`/`unhandledRejection` (+ non-zero `exit`), a caught
+  `SIGTERM`/`SIGINT`/`SIGHUP`, or a genuinely non-zero exit for some other
+  reason produces an entry.
+- **Size-rotated at a coarse 1 MiB threshold, no other retention.** No
+  scheduled or calendar-based cleanup exists beyond that size trigger;
+  treat it as a manually-cleared scratch file for anything the size-based
+  rotation described below does not already handle. `SIGTERM`
+  specifically is the Copilot CLI's own **routine** mechanism for `/clear`
+  and foreground-session replacement (see "Interpreting an entry" below),
+  so -- unlike the suppressed `code=0` exit path above -- ordinary,
+  expected signal churn alone still appends a line every time, with no
+  natural ceiling on a long-lived, handoff-heavy host. Rather than stop
+  recording a legitimate signal (which would defeat the entire "distinguish
+  a routine stop from a crash" purpose of this file), each process checks
+  the file's size once, at its own first write: if it has grown to 1 MiB or
+  more, it is **rotated** -- renamed aside to a per-process, uniquely-named
+  `.stale-<pid>-<timestamp>-<uuid>` sidecar **in its own dedicated
+  `context-handoff-crash-sidecars/` subdirectory** (created on demand next
+  to the log file itself, and re-validated on every rotation and purge as
+  a real, non-symlink, privately-owned-and-permissioned (0700 on POSIX)
+  directory before anything is ever renamed into or purged from it -- a
+  plain "create if missing" call alone would otherwise treat an
+  attacker-planted symlink, or a pre-existing directory with permissive
+  group/other bits, as fine to use, silently redirecting rotations
+  elsewhere or exposing sidecars to another local user; a directory that
+  fails this check simply means rotation is skipped for that call, not
+  that diagnostic logging itself fails), with a fresh file opened at the original path --
+  rather than truncated in place. This matters because the file is shared
+  by every extension instance on the machine (see the next bullet): an
+  in-place reset is not serialized across processes, so a second process's
+  own reset could otherwise erase the crash entry a first process just
+  finished appending moments earlier. The rename is guarded by an identity
+  check first (the file currently at this path must still have the same
+  device+inode this process actually opened and measured as oversized --
+  empirically confirmed reliable on both POSIX and Windows) -- a *blind*
+  rename of whatever currently sits at the path, with no such check, could
+  otherwise rename a different process's already-rotated, already-live
+  fresh file into this process's own sidecar, silently detaching that
+  process's diagnostics from the well-known path.
+  Immediately after a rotation, the same process also opportunistically
+  purges old sidecars from that same dedicated subdirectory (never the
+  shared parent directory the log file itself lives in -- see below for
+  why), by age -- **read from the rotation timestamp embedded directly in
+  the sidecar's own filename** (`.stale-<pid>-<timestamp>-<uuid>`), never
+  the filesystem's mtime -- older than 24 hours. mtime was tried first, but
+  is observable (and mutable) by every other process on the host from the
+  instant a rename completes: a concurrent process's own purge could run
+  against a brand-new sidecar before this process got a chance to
+  separately re-stamp its mtime, see the oversized source file's old,
+  pre-rotation mtime, and delete it immediately -- a genuine cross-process
+  race. Baking the timestamp into the name atomically, in the very same
+  `renameSync()` call that creates the sidecar, removes that window
+  entirely: there is no longer a separate step (and therefore no race)
+  between "this sidecar exists" and "its age is correctly and immutably
+  knowable" by any process that reads its name. The dedicated subdirectory
+  matters for a second, independent reason: this purge is bounded to a
+  fixed number of directory entries read per call (see the module's own
+  comments for why), since it can run synchronously inside a
+  signal-handling path with a hard termination deadline -- but a bounded
+  scan of the log's own *shared parent* directory (commonly `os.tmpdir()`,
+  populated by every other application on the host too) could keep landing
+  on the same leading, unrelated entries every single call and never reach
+  this log's own sidecars at all, no matter how many rotations ever ran. A
+  directory that holds nothing but this log's own sidecars has no such
+  adversarial population ahead of them, so the same bounded scan is
+  actually guaranteed to make progress. This age gate bounds the
+  *cumulative* disk usage many rotations over a long-lived host would
+  otherwise leave unbounded, without reintroducing the destructive race a
+  blind/unconditional delete would risk. This bounds growth across
+  the many separate short-lived processes that are the actual growth vector
+  (though not a single pathological process logging in a tight loop -- not
+  a real shape here, since at most a handful of entries are ever logged per
+  process lifetime). A rotation discards nothing at the moment it happens
+  -- the oversized content survives under its sidecar name until that
+  sidecar eventually ages out -- but the live path itself becomes a rolling
+  window, not a permanent record; any sidecar an operator needs to inspect
+  sooner than its own 24-hour purge is still a manually-cleared scratch
+  file like the log itself.
+- **A failed file write falls back to a best-effort line on stderr, not
+  silence.** Since these listeners suppress Node's own default
+  uncaught-exception report, a log write that fails for any reason
+  (missing directory, full disk, an untrusted pre-existing path, ...) would
+  otherwise leave neither a file entry nor any stderr output -- exactly the
+  original silent-exit symptom this module exists to diagnose, just moved
+  one layer down. Look for a
+  `context-handoff emergency diagnostics (log write failed): <label>: ...`
+  line on stderr in that case; it covers every failure path here,
+  including a plain non-zero `process.exit()` with no preceding
+  exception/rejection/signal, and is deliberately printed at most once per
+  process (a later handler -- e.g. the `exit` event that always follows an
+  `uncaughtException` handler's own `process.exit(1)` -- does not repeat
+  the same underlying failure as a second, redundant line).
+- **Shared by every extension instance on the machine -- correlate by `pid=`
+  and timestamp before drawing a conclusion.** This is one fixed,
+  machine-global path, and multiple `context-handoff` processes (across
+  different worktrees, sessions, or simply overlapping discovery/reconnect
+  forks) can each append to it independently, interleaved in whatever order
+  they actually wrote. A `signal: ...` line followed somewhere later in the
+  file by an `exit: code=...` line does **not** by itself mean that exit
+  belongs to the same process that received the signal -- it can belong to
+  an unrelated instance, or (rarely) a later instance that reused the same
+  PID after the first exited. Always check that the `pid=` value matches
+  between the lines you are comparing, and that their timestamps are close
+  enough in sequence to plausibly be the same launch, before concluding
+  whether a given signal was followed by an exit or not.
+
+**Interpreting an entry -- a `SIGTERM`/`SIGINT`/`SIGHUP` line does not by
+itself mean a crash.** The Copilot CLI's own documented extension lifecycle
+stops and reloads every extension process "on `/clear` (or if the
+foreground session is replaced)" via SIGTERM (then SIGKILL after 5s if it
+doesn't exit) -- a routine, expected event, not a bug. A signal handler here
+logs, then **removes its own listener and re-sends the identical signal to
+itself**, so the OS's default disposition genuinely terminates the process
+by that signal -- Node then reports the same `(code=null,
+signal="SIGTERM"/"SIGINT"/"SIGHUP")` shape a parent observes with no
+diagnostics installed at all (deliberately *not* converted into
+`process.exit(128 + signum)`, which would silently change that contract for
+any host code that distinguishes a signal-terminated child from a normal
+exit). Because the re-raised signal kills the process before Node's own
+`exit` event gets a chance to run, **a `signal: <name>` line with no
+following `exit: code=...` line is the *expected* shape for this legitimate,
+host-initiated stop** -- not evidence of a crash.
+
+**On Windows, this same routine host-initiated stop leaves no entry in this
+file at all.** `child_process`/`process.kill()`-delivered `SIGTERM` on
+Windows terminates the target process unconditionally at the OS level,
+bypassing any registered `process.on('SIGTERM', ...)` JS listener entirely
+(empirically confirmed against this repo's actual Node/Windows runtime --
+see the tests) -- so the signal handler above never runs, and a routine
+`/clear`/foreground-session-replacement stop on this platform is
+indistinguishable, from this file alone, from the "no entry at all" cases
+below. This is a genuine platform gap, not a bug in this module: Windows
+gives a JS process no hook into a routine external `SIGTERM` in the first
+place.
+
+So, reading a launch's entries in this file (if any) -- **always match `pid=`
+between the lines being compared first** (see the correlation bullet
+above):
+
+- `signal: SIGTERM`/`SIGINT`/`SIGHUP`, no `exit` line **for that same
+  `pid=`** -- an expected, host-initiated stop (`/clear`, foreground session
+  replaced, or a real Ctrl+C/HUP). Given how handoff/session-switch-heavy
+  some workflows are, this may explain a large share of historical `exit
+  code=1 disposition=stopped-normally` launch-log entries that were never
+  actually crashes. **POSIX only** -- see the Windows note above.
+- `uncaughtException`/`unhandledRejection` (with a stack), followed by
+  `exit: code=1` **for that same `pid=`** -- a genuine bug, but not
+  necessarily in this extension's own code: these handlers observe the
+  entire process, so the stack can equally point into the bundled SDK, the
+  CLI's own harness/runtime, or another dependency loaded into the same
+  process. Read the stack itself to identify the actual source rather than
+  assuming this extension's code is always at fault; the trailing
+  `ready=true`/`ready=false` on both lines says whether the failure hit
+  before or after this instance reached readiness. If the crash log's own
+  write also failed (missing directory, full disk, an untrusted
+  pre-existing path, ...), look for a
+  `context-handoff emergency diagnostics (log write failed): ...` line on
+  stderr instead -- a best-effort fallback specifically so a logging
+  failure never reproduces the original silent-exit symptom this module
+  exists to diagnose.
+- A **standalone** `exit: code=1 ready=...` line, **with no preceding**
+  `uncaughtException`/`unhandledRejection`/`signal` line for that same
+  `pid=` -- the process reached the exit handler with a non-zero code
+  through some other path entirely (a bare `process.exit(1)` elsewhere in
+  the code, for instance), without ever raising a captured exception,
+  rejection, or signal here. There is no stack to inspect for this shape;
+  correlate the timestamp/`pid=` against whatever other logs this host
+  keeps (the harness's own launch log, application logs, etc.) to find
+  what actually called `process.exit(1)`.
+- **No entry at all for a launch whose own harness log shows it reached
+  `ready` and then stopped** -- four distinct possibilities, not just one:
+  the ordinary case is simply a routine `code=0` exit, which is never logged
+  by design (see above); on Windows specifically, a routine `SIGTERM`
+  host-initiated stop is *also* never logged, since the signal never reaches
+  the JS handler at all (see the Windows note above) -- check the stderr
+  fallback described just above before assuming a missing entry means
+  something worse. Beyond those two routine cases, either something
+  bypassed Node's own signal/exit handling entirely (`SIGKILL`, an external
+  whole-process-tree kill -- registering a handler for a given event cannot
+  help when the process never gets to run any more JS at all), **or**
+  `createEmergencyLog()`'s own open/write attempt failed *and* its stderr
+  fallback was unavailable, itself failed, or was simply uncaptured by
+  whatever is holding this process's stderr (its own defensive contract:
+  diagnostic logging must never itself become a second crash cause) -- for
+  example the crash log's directory is missing, the disk is full, or the
+  pre-existing-file ownership/mode check rejected an untrusted file at that
+  path (see the private-file-creation note above), *and* stderr 2 was
+  itself closed/broken or not being captured anywhere. A missing entry does
+  not, by itself, distinguish these; check that the log's parent directory
+  exists and is writable by this user, and check for a captured stderr
+  fallback line, before concluding it must have been a force-kill.
+
 ## Payload-local CLI fallback
 
 When the extension does not resolve or fails to load, the plugin's payload

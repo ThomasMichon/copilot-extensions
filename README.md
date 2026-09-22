@@ -50,6 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 | Plugin | Type | What it gives you |
 |--------|------|-------------------|
 | [agent-worktrees](plugins/agent-worktrees/) | Session tool | Each Copilot CLI session runs in its own git worktree — no branch conflicts, no stale state. Install this first. |
+| [agent-pull-requests](plugins/agent-pull-requests/) | Cross-repo PR CLI (payload-only for now) | Query and eventually drive pull requests by explicit `owner/repo`, even when no local checkout exists. This first slice ships a standalone `status` verb and stages the broader extraction from `agent-worktrees`; marketplace install vendors the payload only until a binstub-deploying installer lands. |
 | [agent-bridge](plugins/agent-bridge/) | Persistent service | Converse with and steer live agents across worktree, repository, machine, CodeSpace, and container boundaries. |
 | [agent-codespaces](plugins/agent-codespaces/) | CLI + relay | Create/manage GitHub Codespaces, address them as bridge agents (`codespace:<name>`), and forward git/GitHub/Azure credentials into them. |
 | [agent-containers](plugins/agent-containers/) | CLI + resolver | Manage a fleet of local Docker dev containers, borrow/release them per effort, and address them as bridge agents (`container:<name>`). |
@@ -77,7 +78,7 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 
 ## Architecture at a glance
 
-21 plugins, one marketplace. **Twelve ship a runtime** (a `uv`-built venv under
+22 plugins, one marketplace. **Thirteen ship a runtime** (a `uv`-built venv under
 a plugin-owned runtime root such as `~/.agent-*` or `~/.budget-guidance`, plus a
 `~/.local/bin` binstub, deployed by the plugin's own installer); **nine are
 payload-only** — `efforts` (skills), `visions` (skills),
@@ -218,7 +219,7 @@ copilot plugin install delegation-guidance@copilot-extensions # optional — coo
 ```
 
 Each `copilot plugin install` only vendors the plugin's **payload** (source,
-skills, hooks, extensions). The twelve runtime plugins (every plugin except the
+skills, hooks, extensions). The thirteen runtime plugins (every plugin except the
 payload-only `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
 `copilot-extensions-harness`, `wsl-setup`, `harness-knowledge`, and
 `ai-attribution` and `delegation-guidance`) then need their runtime deployed once — that's Step 2,

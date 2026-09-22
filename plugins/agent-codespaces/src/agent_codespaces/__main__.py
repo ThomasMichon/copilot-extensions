@@ -1101,95 +1101,41 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
 
     # Reusing a box (an explicit ssh connect) clears any prune-lifecycle marker
     # -- it is active work again, not a recovered/prunable reclaim candidate.
-    # Exclusive, worktree-keyed claim (#897). A CodeSpace is fronted by exactly
-    # one agent-bridge Session Host, so only one worktree may control it at a
-    # time. Resolve the owning worktree -- an explicit ``--effort`` (used by a
-    # dispatched ``ssh`` whose cwd is the daemon's, not the caller's worktree),
-    # else the calling worktree via agent-worktrees -- then acquire the claim,
-    # sweeping existing claims and BOUNCING a live different owner (unless
-    # ``--force``). A claim held by a gone/finalized worktree is auto-released and
-    # taken over. Degrade-safe: when no worktree resolves (not a worktree,
-    # agent-worktrees absent), we skip claiming and connect exactly as before.
-    from .lease import (
-        ClaimConflict,
-        CoordinationRejected,
-        active_worktree_ids,
-        claim,
-        resolve_owner_worktree,
-    )
+    # Exclusive, worktree-keyed claim (#897), enforced through the single
+    # shared choke point every connect path must go through
+    # (`lease.claim_for_connect` -- see its docstring for why this must never
+    # be duplicated/bypassed per-verb again).
+    from .lease import ClaimConflict, CoordinationRejected, claim_for_connect
 
-    # Escape hatch: an operator (or a unit test) can disable exclusive-control
-    # enforcement entirely. --force remains the per-call takeover.
-    if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
-        claim_owner = None
-    else:
-        claim_owner = resolve_owner_worktree(
-            explicit=getattr(args, "effort", None),
+    fence_holder_ref = None
+    try:
+        fence_holder_ref = claim_for_connect(
+            args.name,
+            force=getattr(args, "force_claim", False),
+            effort=getattr(args, "effort", None),
             session_id=getattr(args, "session_id", None),
         )
-    # Resolve the qualified holder ClaimRef once, for BOTH the cross-machine L2
-    # claim (below) and the cross-harness in-CodeSpace fence (in _run). It is the
-    # marker's holder identity even when L1/L2 claiming is disabled, so hoist it
-    # out of the claim block. Degrade-safe: None when not in a worktree.
-    from . import coordination
-    fence_holder_ref = coordination.owner_ref(
-        session_id=getattr(args, "session_id", None),
-    )
-    if not claim_owner and fence_holder_ref:
-        readiness = coordination.preflight(fence_holder_ref)
-        if readiness.rejected:
-            print(
-                "[BLOCKED] CodeSpace operation requires durable coordination: "
-                f"{readiness.code}: {readiness.detail}",
-                file=sys.stderr,
-            )
-            return _COORDINATION_EXIT
-    if claim_owner:
-        holder_ref = fence_holder_ref
-        try:
-            claim(
-                args.name, claim_owner,
-                force=getattr(args, "force_claim", False),
-                active=active_worktree_ids(),
-                holder_ref=holder_ref,
-            )
-        except ClaimConflict as exc:
-            print(
-                f"[BUSY] {exc}\n"
-                f"       A CodeSpace is fronted by a single bridge, so a second "
-                f"worktree cannot drive it concurrently. Options:\n"
-                f"       - let the owner finish, or dispatch to a different "
-                f"CodeSpace; or\n"
-                f"       - take over with --force-claim (evicts the current "
-                f"owner's claim -- its in-flight work may be disrupted).",
-                file=sys.stderr,
-            )
-            return _BUSY_EXIT
-        except (CoordinationRejected, ContextRefused) as exc:
-            print(
-                f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
-                file=sys.stderr,
-            )
-            return _COORDINATION_EXIT
-        except RuntimeError as exc:
-            # Never let a claim-bookkeeping error block a connect.
-            print(f"[WARN] CodeSpace claim skipped: {exc}", file=sys.stderr)
-
-        # Journal the CodeSpace as an outbound obligation on the BORROWING
-        # worktree so its finalize gate holds it accountable
-        # (resource-obligation-settlement Ph3b-wiring/2). Best-effort +
-        # degrade-safe: resolves the owner by its qualified holder-ref (not the
-        # caller's cwd -- a dispatched ssh runs in the daemon's cwd). Settled to
-        # at-rest on a clean disconnect (below). A missing holder-ref / binstub /
-        # cross-machine owner is a silent no-op. Journaled for any claimed
-        # connect (a clean disconnect immediately settles it to at-rest, so an
-        # ephemeral probe leaves only harmless at-rest provenance).
-        if fence_holder_ref:
-            if coordination.journal_obligation(args.name, fence_holder_ref):
-                log.info(
-                    "Journaled CodeSpace %s as an obligation on %s",
-                    args.name, fence_holder_ref,
-                )
+    except ClaimConflict as exc:
+        print(
+            f"[BUSY] {exc}\n"
+            f"       A CodeSpace is fronted by a single bridge, so a second "
+            f"worktree cannot drive it concurrently. Options:\n"
+            f"       - let the owner finish, or dispatch to a different "
+            f"CodeSpace; or\n"
+            f"       - take over with --force-claim (evicts the current "
+            f"owner's claim -- its in-flight work may be disrupted).",
+            file=sys.stderr,
+        )
+        return _BUSY_EXIT
+    except (CoordinationRejected, ContextRefused) as exc:
+        print(
+            f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
+            file=sys.stderr,
+        )
+        return _COORDINATION_EXIT
+    except RuntimeError as exc:
+        # Never let a claim-bookkeeping error block a connect.
+        print(f"[WARN] CodeSpace claim skipped: {exc}", file=sys.stderr)
 
     # Reusing a box clears any prune-lifecycle marker only after coordination
     # has allowed the operation to proceed.
