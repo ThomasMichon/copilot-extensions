@@ -151,33 +151,6 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         )
     return _core()._emit(payload)
 
-def _board_group(task: dict) -> str:
-    """The display group for a task on the picker board (see ``_BOARD_GROUPS``).
-
-    A **terminal** status (completed / abandoned / dead_letter) wins first -- a
-    task can carry a stale ``awaiting_steer`` flag after being abandoned while
-    blocked, and a finished task is never "Blocked". Otherwise ``awaiting_steer``
-    (a live task needing the operator's steer) wins over the raw lifecycle state,
-    then proposed/queued/suspended, else any other owned in-flight state reads
-    as *Started*."""
-    st = task.get("status")
-    if st == "completed":
-        return "Completed"
-    if st in ("abandoned", "dead_letter"):
-        return "Abandoned"
-    if task.get("awaiting_steer"):
-        return "Blocked"
-    if st == "proposed":
-        return "Proposed"
-    if st == "queued":
-        return "Queued"
-    if st == "suspended":
-        return "Suspended"
-    return "Started"
-
-
-_BOARD_ACTIVITY_TTL_SECONDS = 90.0
-
 def _board_activity(task: dict, *, now: float | None = None) -> str | None:
     """Independent live-execution badge for the picker task board.
 
