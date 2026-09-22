@@ -394,26 +394,47 @@ def check_daemon_liveness(
 
     ``probe``, when given a real ``(project, worktree_id)`` pair, is what
     makes this call meaningfully answerable at all -- without one (nothing
-    to probe with, an empty population), this degrades to a static read
-    (lock parses, owner pid alive via :func:`locks.lock_is_live`,
-    rendezvous fields resolve), reported as ``responsive=None`` rather
-    than guessing whether a boot-and-wait would have succeeded.
+    to probe with, an empty population), this still gives an idle-exited
+    monitor the same boot-and-wait chance to come back (when
+    ``ensure_monitor`` is available) before taking a static snapshot, but
+    never reports ``responsive=False`` for it: without a real request
+    there is nothing to have actually failed, only "no one to ask", so
+    this always reports ``responsive=None`` rather than treating an
+    absent/resting monitor as an outage.
     """
     # Lazy import: see `_check_freshness`'s own comment -- keeps this
     # module importable without the vendored `work_coalescing_singleton`
     # package installed.
     from . import worktree_status_daemon
 
+    def _live_endpoint(data: dict | None) -> tuple[str, int, str] | None:
+        if data is None or not locks.lock_is_live(data):
+            return None
+        return worktree_status_daemon.endpoint_from_rendezvous(data)
+
     if probe is None:
         data = locks.read_lock(lock_path)
-        if data is None:
-            return DaemonLiveness(lock_present=False, rendezvous_present=False, responsive=False)
-        if not locks.lock_is_live(data):
-            return DaemonLiveness(lock_present=True, rendezvous_present=False, responsive=False)
-        endpoint = worktree_status_daemon.endpoint_from_rendezvous(data)
-        if endpoint is None:
-            return DaemonLiveness(lock_present=True, rendezvous_present=False, responsive=False)
-        return DaemonLiveness(lock_present=True, rendezvous_present=True, responsive=None)
+        endpoint = _live_endpoint(data)
+        if endpoint is None and ensure_monitor is not None:
+            # Boot-only wait: give an idle-exited monitor the same chance
+            # to come back that a real caller's `status_with_boot` would
+            # give it -- but skip issuing an actual coalesced request,
+            # since there is no real (project, worktree_id) pair to ask
+            # about. Mirrors that function's own poll loop/timeout.
+            started = time.time()
+            ensure_monitor()
+            while (
+                endpoint is None
+                and time.time() - started < worktree_status_daemon.BOOT_WAIT_S
+            ):
+                time.sleep(0.1)
+                data = locks.read_lock(lock_path)
+                endpoint = _live_endpoint(data)
+        return DaemonLiveness(
+            lock_present=data is not None,
+            rendezvous_present=endpoint is not None,
+            responsive=None,
+        )
 
     project, worktree_id = probe
     reached_fallback = False

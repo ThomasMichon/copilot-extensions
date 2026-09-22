@@ -257,9 +257,14 @@ def test_audit_one_never_diffs_against_a_cold_entry(monkeypatch):
 # -- check_daemon_liveness -------------------------------------------------
 
 def test_daemon_liveness_no_lock_file(tmp_path):
+    """No probe, no ensure_monitor, no lock at all: without a real
+    request there is nothing that actually failed -- only "no one to
+    ask" -- so this must never be reported as `responsive=False` (which
+    `cmd_worktree_status_audit` would otherwise turn into a failing exit
+    code for the accelerator's own healthy idle-exited resting state)."""
     liveness = wsa.check_daemon_liveness(tmp_path / "status-monitor.lock")
     assert liveness.lock_present is False
-    assert liveness.responsive is False
+    assert liveness.responsive is None
 
 
 def test_daemon_liveness_stale_lock_reports_not_live(tmp_path):
@@ -271,7 +276,27 @@ def test_daemon_liveness_stale_lock_reports_not_live(tmp_path):
     liveness = wsa.check_daemon_liveness(lock_path)
     assert liveness.lock_present is True
     assert liveness.rendezvous_present is False
-    assert liveness.responsive is False
+    assert liveness.responsive is None
+
+
+def test_daemon_liveness_no_probe_boots_and_waits_when_ensure_monitor_given(
+    tmp_path, monkeypatch,
+):
+    """Copilot review round 4 on PR #3206: `run_audit` passes `probe=None`
+    whenever the sample is empty (e.g. an empty cache) -- exactly the
+    `cache_row_count: 0` scenario that originally motivated this whole
+    redesign. The no-probe path must still give an idle-exited monitor
+    the same boot-and-wait chance a real probe would, when `ensure_monitor`
+    is available, instead of taking an immediate empty snapshot."""
+    monkeypatch.setattr(worktree_status_daemon, "BOOT_WAIT_S", 0.5)
+    lock_path = tmp_path / "status-monitor.lock"
+    calls = []
+    liveness = wsa.check_daemon_liveness(
+        lock_path, probe=None, ensure_monitor=lambda: calls.append(1) or True,
+    )
+    assert calls == [1]
+    assert liveness.responsive is None
+    assert liveness.lock_present is False
 
 
 def test_daemon_liveness_no_probe_reports_unknown_responsiveness(tmp_path):

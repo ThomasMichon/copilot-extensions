@@ -1387,3 +1387,60 @@ probe: confirms `ensure_monitor` is still invoked, and that
 `responsive`/`rendezvous_present` land consistently (both false), not
 the previous `rendezvous_present=True`/`responsive=False` contradiction.
 
+### 2026-09-21 — PR #3206 review round 3: 1 real gap (version bump), 1 stale carryover
+1. **Round 1/2's runtime-payload changes hadn't bumped the version.**
+   Each of the two prior commits changed `worktree_status_audit.py`'s
+   actual behavior but left `plugin.json`/`pyproject.toml`/
+   `marketplace.json` at the version bumped for the original redesign
+   commit -- an installed client would treat those fixes as already
+   applied and skip the update. Bumped to `1.5.5-dev224` /
+   `1.7.7-dev192`.
+2. **No CLI-level regression test for the `ensure_monitor` opt-out
+   wiring.** `cmd_worktree_status_audit` resolves `ensure_monitor` from
+   `core._ensure_status_monitor` only when `core._status_monitor_enabled()`
+   is true, but nothing asserted what `run_audit` actually received --
+   a regression that always booted (or never did, regardless of the
+   opt-out) would still have passed every existing CLI test. Added two
+   tests spying on `run_audit`'s `ensure_monitor` kwarg: one confirming
+   the real callable is passed through when enabled, one confirming
+   `None` when disabled.
+3. The "Add regression test for stale lock with live probe" finding was
+   re-flagged again this round -- confirmed still a stale carryover (the
+   test from round 2 was already present and passing).
+
+### 2026-09-21 — PR #3206 review round 4: 1 real bug (the original motivating scenario itself), rest stale carryovers
+The three "Open" findings this round (version bump, CLI opt-out test,
+stale-lock-with-probe test) were all re-flagged stale carryovers,
+confirmed already fixed. One genuine "previously missed" finding, and
+an important one -- it's the *exact* scenario that started this whole
+redesign:
+
+1. **The no-probe path could still fail an audit for an idle-exited
+   monitor.** `run_audit` passes `probe=None` whenever its sample is
+   empty (an empty cache -- `cache_row_count: 0`, precisely what the two
+   original false-positive hourly firings reported). The no-probe
+   branch's *success* path already reported the conservative
+   `responsive=None` ("nothing to probe with, don't guess"), but every
+   one of its *failure* sub-paths (no lock, stale lock, no endpoint)
+   still reported `responsive=False` -- and `cmd_worktree_status_audit`
+   turns any `responsive=False` into a failing exit code. So the
+   original bug this whole PR set out to fix was still fully reachable
+   through the empty-sample path, even after the probed path was fixed.
+   Fixed by making the no-probe branch always report `responsive=None`
+   (never `False`) regardless of outcome -- since there is no real
+   request in flight, there is nothing that actually *failed*, only "no
+   one to ask" -- while still giving an idle-exited monitor the same
+   boot-and-wait chance a real probe would get (via `ensure_monitor`)
+   before taking its final snapshot, so `lock_present`/
+   `rendezvous_present` still reflect a freshly-booted monitor when one
+   is available.
+
+Added 2 new regression tests: one confirming a bare no-lock/no-probe
+read now reports `responsive=None` (not `False`), one confirming the
+no-probe path also boots-and-waits via `ensure_monitor` when given one.
+Updated the two existing no-probe-failure-path tests
+(`test_daemon_liveness_no_lock_file`,
+`test_daemon_liveness_stale_lock_reports_not_live`) to assert
+`responsive is None` instead of the previous (incorrect)
+`responsive is False`.
+
