@@ -374,6 +374,12 @@ class _SessionHostRecoveryMixin:
                         and session.target.container.get("name")
                         else None
                     )
+                    codespace_target = (
+                        session.target.codespace
+                        if isinstance(session.target.codespace, dict)
+                        and session.target.codespace.get("name")
+                        else None
+                    )
                     if container_target is not None:
                         try:
                             self._acquire_container_lock(
@@ -391,6 +397,29 @@ class _SessionHostRecoveryMixin:
                                 exc_info=True,
                             )
                             continue
+                    elif codespace_target is not None:
+                        # Same-machine mirror of the container reclaim above
+                        # (claim-consistency sweep): the daemon's own in-memory
+                        # TargetLock bookkeeping is lost across a restart, so a
+                        # live remote host recovered here must re-acquire its
+                        # CodeSpace's same-machine lock too, not just the
+                        # container's.
+                        try:
+                            self._acquire_codespace_lock(
+                                session.session_id,
+                                codespace_target["name"],
+                            )
+                        except Exception:
+                            self._remote_recovery_inconclusive.add(
+                                session.session_id
+                            )
+                            log.warning(
+                                "Live CodeSpace Session Host authority for %s "
+                                "could not reclaim target ownership",
+                                session.session_id,
+                                exc_info=True,
+                            )
+                            continue
                     self._remote_recovery_inconclusive.discard(session.session_id)
                     self._remote_recovery_skipped.discard(session.session_id)
                     if existing is not None:
@@ -400,6 +429,7 @@ class _SessionHostRecoveryMixin:
                         recovered += 1
                 elif status == "dead":
                     self._release_container_lock(session.session_id)
+                    self._release_codespace_lock(session.session_id)
                     self._set_container_launch_pending(
                         session.session_id,
                         False,
@@ -421,6 +451,7 @@ class _SessionHostRecoveryMixin:
                     self._remote_recovery_inconclusive.add(session.session_id)
                 elif status == "missing":
                     self._release_container_lock(session.session_id)
+                    self._release_codespace_lock(session.session_id)
                     self._set_container_launch_pending(
                         session.session_id,
                         False,
@@ -669,45 +700,57 @@ class _SessionHostRecoveryMixin:
             return None
         from .relay_state import get_live_relay_port
         from .session_host.codespace_transport import build_codespace_spawner
+        from .session_host.spawner import RemoteSpawnCleanupPendingError
 
-        core = _core()
-        relay_prelude, relay_port = core._resolve_relay_launch_env(
-            cs_target["name"],
-            get_live_relay_port(),
-        )
-        acp_command = cs_target["acp_command"]
-        spawner = build_codespace_spawner(
-            cs_target["name"],
-            cs_target.get("repo") or "",
-            relay_port=relay_port,
-            unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
-            active_reap_seconds=self._session_host_active_reap_seconds,
-        )
-        ai_plugin_dirs = await core._resolve_remote_ai_plugin_dirs(
-            spawner.transport,
-            f"codespace:{cs_target['name']}",
-            cs_target.get("workspace_folder") or None,
-        )
-        acp_command = _append_plugin_dirs(acp_command, ai_plugin_dirs)
-        tracker = ConnectTracker(
-            session.event_log.append,
-            session_id=session.session_id,
-        )
-        client, acp_sid = await self._connect_via_session_host(
-            target,
-            tracker=tracker,
-            session_id=session.session_id,
-            on_acp_event=on_acp_event,
-            permission_callback=permission_callback,
-            mcp_servers=session.mcp_servers,
-            spawner=spawner,
-            remote_child_argv=["bash", "-lc", relay_prelude + acp_command],
-            remote_cwd=cs_target.get("workspace_folder") or None,
-            load_session_id=(session.acp_session_id if load_existing else None),
-            model=session.model_override,
-            effort=session.effort_override,
-        )
-        return client, acp_sid
+        # Same-machine mirror of the container lock reclaim above
+        # (claim-consistency sweep): a resumed codespace Session Host must
+        # also re-acquire its CodeSpace's same-machine TargetLock.
+        already_held = session.session_id in self._codespace_lock_sessions
+        self._acquire_codespace_lock(session.session_id, cs_target["name"])
+        try:
+            core = _core()
+            relay_prelude, relay_port = core._resolve_relay_launch_env(
+                cs_target["name"],
+                get_live_relay_port(),
+            )
+            acp_command = cs_target["acp_command"]
+            spawner = build_codespace_spawner(
+                cs_target["name"],
+                cs_target.get("repo") or "",
+                relay_port=relay_port,
+                unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
+                active_reap_seconds=self._session_host_active_reap_seconds,
+            )
+            ai_plugin_dirs = await core._resolve_remote_ai_plugin_dirs(
+                spawner.transport,
+                f"codespace:{cs_target['name']}",
+                cs_target.get("workspace_folder") or None,
+            )
+            acp_command = _append_plugin_dirs(acp_command, ai_plugin_dirs)
+            tracker = ConnectTracker(
+                session.event_log.append,
+                session_id=session.session_id,
+            )
+            return await self._connect_via_session_host(
+                target,
+                tracker=tracker,
+                session_id=session.session_id,
+                on_acp_event=on_acp_event,
+                permission_callback=permission_callback,
+                mcp_servers=session.mcp_servers,
+                spawner=spawner,
+                remote_child_argv=["bash", "-lc", relay_prelude + acp_command],
+                remote_cwd=cs_target.get("workspace_folder") or None,
+                load_session_id=(session.acp_session_id if load_existing else None),
+                model=session.model_override,
+                effort=session.effort_override,
+            )
+        except Exception as exc:
+            if isinstance(exc, RemoteSpawnCleanupPendingError):
+                self._set_container_launch_pending(session.session_id, True)
+            elif not already_held:
+                self._release_codespace_lock(session.session_id)
+            raise
 
     async def _codespace_host_available(
         self,

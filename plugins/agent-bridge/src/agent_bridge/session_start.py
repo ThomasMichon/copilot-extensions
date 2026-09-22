@@ -512,6 +512,19 @@ class _SessionStartMixin:
                         cs_target["name"], claim_owner or "", _claim_detail
                     )
 
+                # Same-machine mirror of the container lock acquired below (see
+                # ``_codespace_locks``'s docstring in ``session_core``): guards
+                # the shared credential-relay reverse-forward this Session-Host
+                # transport is about to open against a concurrent local
+                # ``agent-codespaces ssh``/``copilot`` invocation (or a second
+                # daemon dispatch) against the SAME CodeSpace on this machine.
+                if replace_session_id:
+                    self._transfer_codespace_lock(
+                        replace_session_id, session_id, cs_target["name"],
+                    )
+                else:
+                    self._acquire_codespace_lock(session_id, cs_target["name"])
+
 
                 # path injects, so a detached copilot on the CS has working
                 # ADO/git auth over the credential relay (the daemon owns the
@@ -617,6 +630,7 @@ class _SessionStartMixin:
                         claim_key = _codespace_claim_key(session.target)
                         if claim_key is not None:
                             core._release_codespace_claim(*claim_key)
+                        self._release_codespace_lock(session_id)
                     raise
             elif self._is_codespace_target(target):
                 # A CodeSpace target MUST run under a Session Host: only then does
@@ -865,6 +879,7 @@ class _SessionStartMixin:
             claim_key = _codespace_claim_key(session.target)
             ownership_retained = (
                 session.session_id in self._container_lock_sessions
+                or session.session_id in self._codespace_lock_sessions
                 or claim_key is not None
             )
             result.update({
@@ -895,12 +910,16 @@ class _SessionStartMixin:
             })
             return result
         self._release_container_lock(session_id)
+        self._release_codespace_lock(session_id)
         await self.end_session(session_id, force=True)
         host_index_removed = (
             self._host_index is None
             or self._host_index.get(session_id) is None
         )
-        target_lock_removed = session_id not in self._container_lock_sessions
+        target_lock_removed = (
+            session_id not in self._container_lock_sessions
+            and session_id not in self._codespace_lock_sessions
+        )
         result.update({
             "session_row_removed": self._db.get_session(session_id) is None,
             "session_memory_removed": session_id not in self._sessions,

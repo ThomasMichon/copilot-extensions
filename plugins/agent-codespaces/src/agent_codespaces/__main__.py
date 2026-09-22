@@ -549,11 +549,22 @@ def main(argv: list[str] | None = None) -> int:
         "release-claim",
         help="Release this worktree's exclusive claim on a CodeSpace (#897)",
     )
-    release_claim_p.add_argument("codespace", help="CodeSpace name")
+    release_claim_p.add_argument(
+        "codespace", nargs="?", default=None,
+        help="CodeSpace name (omit with --all to release every claim the "
+             "owner holds)",
+    )
     release_claim_p.add_argument(
         "--owner", dest="owner", default=None,
         help="Owning worktree (defaults to the calling worktree). Only releases "
              "if the claim is owned by this worktree.",
+    )
+    release_claim_p.add_argument(
+        "--all", dest="release_all", action="store_true",
+        help="Release EVERY CodeSpace claim held by the owner, not just one "
+             "named CodeSpace -- the safety-net form used by "
+             "`agent-worktrees finalize` so a worktree never leaves a stray "
+             "claim behind, even if it forgot which CodeSpace(s) it held.",
     )
 
     # --- pool (finite, budget-bounded pool view: disposition + budget) ---
@@ -4033,8 +4044,15 @@ def _cmd_claim(args: argparse.Namespace) -> int:
 
 @_context_admitted
 def _cmd_release_claim(args: argparse.Namespace) -> int:
-    """Release this worktree's exclusive claim on a CodeSpace (#897)."""
-    from .lease import release_claim, resolve_owner_worktree
+    """Release this worktree's exclusive claim on a CodeSpace (#897), or --all
+    of them -- the safety-net bulk form (worst-case backstop invoked by
+    `agent-worktrees finalize`) so a worktree that forgot exactly which
+    CodeSpace(s) it claimed still releases every one it actually holds,
+    rather than leaking a claim past the worktree's own lifetime. Better to
+    over-release (idempotent no-op on an already-clear claim) than under-
+    release and leave a stale claim blocking a legitimate future dispatch.
+    """
+    from .lease import release_claim, release_worktree_claims, resolve_owner_worktree
 
     if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
         print("[OK] Claim disabled (AGENT_CODESPACES_DISABLE_CLAIM); skipped.")
@@ -4044,6 +4062,22 @@ def _cmd_release_claim(args: argparse.Namespace) -> int:
         print("[WARN] No owning worktree resolved; nothing to release.",
               file=sys.stderr)
         return 0
+    if getattr(args, "release_all", False):
+        released = release_worktree_claims(owner)
+        if released:
+            print(
+                f"[OK] Released {len(released)} claim(s) owned by {owner}: "
+                f"{', '.join(released)}"
+            )
+        else:
+            print(f"No claims owned by {owner}.")
+        return 0
+    if not args.codespace:
+        print(
+            "[FAIL] Either a CodeSpace name or --all is required.",
+            file=sys.stderr,
+        )
+        return 2
     if release_claim(args.codespace, owner):
         print(f"[OK] Released claim on {args.codespace} (owner {owner})")
     else:

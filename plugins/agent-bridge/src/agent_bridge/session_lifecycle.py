@@ -414,6 +414,11 @@ class _SessionLifecycleMixin:
             if claim_key is not None:
                 core = _core()
                 core._release_codespace_claim(*claim_key)
+        # Same-machine mirror of the container lock release above (claim-
+        # consistency sweep, agent-bridge-cli-mode-sessions Phase 4
+        # follow-up): idempotent no-op if this session never held one.
+        with contextlib.suppress(Exception):
+            self._release_codespace_lock(session_id)
         with contextlib.suppress(Exception):
             self._db.update_session_status(
                 session_id, SessionStatus.ENDED.value, time.time()
