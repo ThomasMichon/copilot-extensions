@@ -418,6 +418,8 @@ class TestSessionRoutes:
         assert body["session_id"] == "archived-2"
         assert body["events"] == [{"type": "message", "text": "hi"}]
         assert body["meta"]["worktree_id"] == "wt-2"
+        assert body["meta"]["read_only"] is True
+        assert body["meta"]["at_rest"] is True
 
     def test_get_session_transcript_404s_when_no_cold_store_answer(
         self, client, app

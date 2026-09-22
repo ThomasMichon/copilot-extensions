@@ -28,7 +28,7 @@ The daemon advertises both on ``/health``; ``BridgeClient`` reads them (see
 from __future__ import annotations
 
 # Current HTTP wire-contract version this build speaks.
-HTTP_PROTOCOL_VERSION = 16
+HTTP_PROTOCOL_VERSION = 17
 
 # First version that exposes the harness-owned relay interruption capability.
 RELAY_INTERRUPT_PROTOCOL_VERSION = 2
@@ -88,6 +88,13 @@ DISPATCH_TASK_SESSION_PROTOCOL_VERSION = 15
 # is POST /worktrees/{id}/resume?reclaim=true. No new capability constant is
 # exported for this (nothing to *gain*-detect) -- the generation bump alone
 # signals the behavior change to a version-aware client.
+
+# First version that exposes a bare (non-worktree-scoped) session transcript
+# route -- GET /api/v1/sessions/{id}/transcript -- letting a solo session
+# (one with no worktree_id) retire a direct archival-provider dependency in
+# favor of agent-bridge's own cold-store fallback (session-worktree-archive
+# -linkout Phase 2d follow-up, aperture-labs).
+BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION = 17
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

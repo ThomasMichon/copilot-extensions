@@ -64,6 +64,13 @@ def test_conditional_idle_end_capability_is_advertised() -> None:
     assert CONDITIONAL_IDLE_END_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
+def test_bare_session_transcript_capability_is_advertised() -> None:
+    from agent_bridge.protocol import BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION
+
+    assert BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION == 17
+    assert BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
+
+
 def _app(tmp_path):
     cfg = ServiceConfig(
         port=0,

@@ -826,9 +826,9 @@ async def get_session_transcript(session_id: str, request: Request) -> dict[str,
     Unlike the worktree-scoped transcript route, there's no worktree to
     resolve an owning agent through -- a solo session may have no
     `worktree_id` at all. The only viable path is the registered
-    cold-store provider, which already resolves a still-live local
-    session in preference to an archived one, so this naturally renders
-    current content for a live session too, not only an archived one.
+    cold-store provider, so `meta.read_only`/`at_rest` are always `True`
+    here (mirroring the worktree-scoped route's cold-store branch), even
+    though the provider itself may answer from a still-live local session.
     Lets a bare-session consumer (e.g. Neuron Forge's `/sessions/:sid`
     route) retire its direct Permanent Record transcript dependency.
     """
@@ -842,6 +842,8 @@ async def get_session_transcript(session_id: str, request: Request) -> dict[str,
         "meta": {
             "worktree_id": cold.worktree_id,
             "status": cold.status,
+            "read_only": True,
+            "at_rest": True,
         },
     }
 
@@ -919,9 +921,7 @@ async def get_session_status(
             session.client.pending_ask_user() if session.client else []
         ),
         "progress": dict(session.progress),
-        "updated_at": datetime.fromtimestamp(
-            session.updated_at, tz=timezone.utc
-        ).isoformat(),
+        "updated_at": datetime.fromtimestamp(session.updated_at, tz=timezone.utc).isoformat(),
     }
 
 
