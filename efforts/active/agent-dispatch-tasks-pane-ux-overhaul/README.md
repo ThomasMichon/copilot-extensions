@@ -2439,7 +2439,7 @@ Implemented the design above as one cohesive `agent-dispatch` change.
   a board-render no-subprocess test, a relay staleness test, and a
   cross-machine ownership test. Targeted coverage for the touched surfaces:
   `run-plugin-tests.py agent-dispatch -k "board_cli or coordinator or inbox"`
-  passed (**191 passed** after the follow-ups below). Full plugin suite:
+  passed (**193 passed** after the follow-ups below). Full plugin suite:
   `run-plugin-tests.py agent-dispatch` reached **751 passed, 2 skipped**;
   the only failures were the pre-existing Windows bash-path tests
   `test_bootstrap_check_reconcile_opt_in.py::{test_sh_skips_spawn_without_opt_in,test_sh_proceeds_with_opt_in}`,
@@ -2479,3 +2479,26 @@ follow-up changed plugin content after the first version bump, bumped
 `agent-dispatch` again to `0.1.2-dev167` so marketplace deployment remains
 version-triggered and not stale-gated. Targeted validation re-ran green at
 **191 passed**.
+
+### 2026-09-21 — PR #3234 review round 3: fixed real relay-caller/cleanup gaps
+The next Copilot review surfaced another batch of real issues, several of
+which were stale carryovers from the pre-`dev167` head but some of which were
+new and substantive:
+
+- the initial batch-read change still left the old `test_main_reads_local_coordinator`
+  double too brittle for an added relay request shape;
+- `worktree-status-bundle` does **not** actually accept `--project`, so the
+  relay caller's mapped-name argument would have kept every fetch cold;
+- draining a previously-snapshotted ref list could poll a worktree after local
+  ownership was gone, so explicit refs now revalidate against the current
+  locally-owned set before fetching; and
+- the relay store had no cleanup path, so a long-lived coordinator would have
+  accumulated stale bundles indefinitely despite the cache being documented as
+  transient.
+
+Fixed all four: dropped the unsupported `--project` argument while still using
+`identity.name_for_repo()` as the adoption gate, revalidated explicit refs
+against current ownership, added a bounded relay-prune pass, and updated the
+board/local-coordinator tests accordingly. Because those follow-ups again
+changed plugin payload, bumped `agent-dispatch` to `0.1.2-dev168`. Targeted
+validation re-ran green at **193 passed**.
