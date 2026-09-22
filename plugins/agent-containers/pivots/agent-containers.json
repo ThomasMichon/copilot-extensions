@@ -27,6 +27,23 @@
       "verb": "open-venue"
     },
     {
+      "key": "jump-driving-worktree",
+      "label": "View driving worktree",
+      "kind": "internal",
+      "verb": "jump-host",
+      "when": {"has_driving_worktree": "true"}
+    },
+    {
+      "key": "worktree-status",
+      "label": "Worktree status",
+      "kind": "card",
+      "title_from": "worktree_status.title",
+      "status_from": "worktree_status.status",
+      "link_from": "worktree_status.link",
+      "body_from": "worktree_status.body",
+      "when": {"has_driving_worktree": "true"}
+    },
+    {
       "label": "Stop",
       "run": ["agent-containers", "stop", "{id}"],
       "when": {"state": "running"},

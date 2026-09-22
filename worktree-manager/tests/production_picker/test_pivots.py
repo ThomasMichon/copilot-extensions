@@ -231,6 +231,38 @@ def test_internal_action_without_verb_is_skipped(tmp_path):
     assert [p.name for p in pivots.discover_pivots(tmp_path)] == ["ok"]
 
 
+def test_driving_worktree_actions_gate_on_explicit_flag(tmp_path):
+    _write(
+        tmp_path,
+        "venues",
+        {
+            "label": "Venues",
+            "list": ["agent-example", "list", "--json"],
+            "entry": {"id": "id", "title": "title", "worktree": "worktree"},
+            "actions": [
+                {
+                    "key": "jump-driving-worktree",
+                    "label": "View driving worktree",
+                    "kind": "internal",
+                    "verb": "jump-host",
+                    "when": {"has_driving_worktree": "true"},
+                },
+                {
+                    "key": "worktree-status",
+                    "label": "Worktree status",
+                    "kind": "card",
+                    "when": {"has_driving_worktree": "true"},
+                },
+            ],
+        },
+    )
+    [p] = pivots.discover_pivots(tmp_path)
+    visible = [a.label for a in p.actions if pivots.entry_matches(a.when, {"has_driving_worktree": "true"})]
+    hidden = [a.label for a in p.actions if pivots.entry_matches(a.when, {"has_driving_worktree": "false"})]
+    assert visible == ["View driving worktree", "Worktree status"]
+    assert hidden == []
+
+
 def test_malformed_manifest_is_skipped_not_fatal(tmp_path):
     _write(tmp_path, "good", {"label": "Good", "list": ["x"]})
     (tmp_path / "broken.json").write_text("{ not json", encoding="utf-8")

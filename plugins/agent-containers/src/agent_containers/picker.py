@@ -25,6 +25,105 @@ from typing import Any
 _LIVE_TURN_LIVENESS = frozenset({"active", "stalled"})
 
 
+def _driving_worktree_record(worktree_id: str | None) -> Any | None:
+    """The agent-worktrees record for ``worktree_id``, or ``None`` when that
+    token is empty, unresolvable, or agent-worktrees isn't installed
+    alongside. Containers leases are effort-scoped; this only resolves the
+    Phase 4 drill-in actions when the lease token actually names a worktree."""
+    if not worktree_id:
+        return None
+    try:
+        from agent_worktrees import tracking
+    except ImportError:
+        return None
+    try:
+        return tracking.load_record_by_id(worktree_id)
+    except Exception:
+        return None
+
+
+def driving_worktree_id_for(worktree_id: str | None) -> str:
+    """The full driving worktree id suitable for in-picker drill-in actions,
+    else ``""`` when the lease token doesn't resolve to a tracked worktree."""
+    record = _driving_worktree_record(worktree_id)
+    return str(record.worktree_id) if record is not None else ""
+
+
+def _driving_worktree_mark(*, has_driving_worktree: bool) -> str:
+    """The reserved line-two mark for a row backed by the current driving
+    worktree."""
+    return "\u2192" if has_driving_worktree else ""
+
+
+def _prefixed_subtitle(subtitle: str, *, has_driving_worktree: bool) -> str:
+    """Apply the reserved driving-worktree mark to the durable title/activity
+    line when appropriate."""
+    mark = _driving_worktree_mark(has_driving_worktree=has_driving_worktree)
+    if mark and subtitle:
+        return f"{mark} {subtitle}"
+    return subtitle
+
+
+def worktree_status_for_worktree(worktree_id: str | None) -> dict[str, Any]:
+    """A read-only Worktree Status card payload for the driving worktree, or
+    an explicit unavailable card when this row isn't backed by a resolvable
+    tracked worktree."""
+    unavailable = {
+        "title": "Worktree status unavailable",
+        "status": "unknown",
+        "link": None,
+        "body": "No tracked driving worktree is recorded for this container.",
+    }
+    record = _driving_worktree_record(worktree_id)
+    if record is None:
+        return unavailable
+    try:
+        from agent_worktrees import claim_kinds_registry, claims_rank, status_bar_cli
+    except ImportError:
+        return unavailable
+    try:
+        payload = status_bar_cli._status_segment_json(record.path)
+    except Exception:
+        payload = None
+    try:
+        claims = claims_rank.summarize_claims(
+            record.resources,
+            pecking_order=claim_kinds_registry.effective_pecking_order(),
+            label_overrides=claim_kinds_registry.effective_label_overrides(),
+        )
+    except Exception:
+        claims = ""
+    state = str((payload or {}).get("state") or "unknown")
+    closure = (payload or {}).get("closure") or {}
+    git_bits = [
+        f"ahead {payload.get('ahead', 0)}" if payload is not None else None,
+        f"behind {payload.get('behind', 0)}" if payload is not None else None,
+        "dirty" if payload and payload.get("dirty") else "clean" if payload else None,
+    ]
+    git_summary = ", ".join(bit for bit in git_bits if bit)
+    live = (
+        "mux live" if record.mux_live is True else
+        "bound live" if record.bound_live is True else
+        "idle"
+    )
+    body = "\n".join([
+        f"- Repo: `{record.repo}`",
+        f"- Worktree: `{record.worktree_id}`",
+        f"- Branch: `{record.branch}`",
+        f"- Turns: {(payload or {}).get('turn_count', 0)}",
+        f"- Live: {live}",
+        f"- Git: {state}" + (f" ({git_summary})" if git_summary else ""),
+        f"- Closure: {closure.get('label', 'unknown')}",
+        f"- Claims: {claims or 'none'}",
+    ])
+    return {
+        "title": f"Worktree {record.worktree_id} ({record.repo})",
+        "status": closure.get("style") or state,
+        "link": None,
+        "body": body,
+    }
+
+
 def subtitle_for(container_name: str, lease_effort: str | None) -> str:
     """The durable-title half of line two: ``"claimed by {effort}"`` when
     leased, else ``""`` (graceful-absence -- a free container has nothing to
@@ -158,17 +257,28 @@ def activity_from_live_session(live_session: dict[str, Any] | None) -> str:
     return f"{phase}: {summary}" if phase else str(summary)
 
 
-def picker_fields(container_name: str, lease_effort: str | None) -> dict[str, str]:
+def picker_fields(container_name: str, lease_effort: str | None) -> dict[str, Any]:
     """The three picker-only fields a Containers fleet row adds to its
     existing ``fleet --json`` shape: ``subtitle``, ``claims_summary``,
-    ``sess``. One entry point so `__main__._cmd_fleet` stays a thin caller."""
+    ``sess``, and the Phase 4 drill-in metadata (`worktree_id`,
+    `has_driving_worktree`, `worktree_status`). One entry point so
+    `__main__._cmd_fleet` stays a thin caller."""
     live_session = live_session_for_venue("container", container_name)
+    driving_worktree_id = driving_worktree_id_for(lease_effort)
+    has_driving_worktree = bool(driving_worktree_id)
     subtitle = subtitle_for(container_name, lease_effort)
     activity = activity_from_live_session(live_session)
     if activity:
         subtitle = f"{subtitle} - {activity}" if subtitle else f"{container_name} - {activity}"
+    subtitle = _prefixed_subtitle(
+        subtitle,
+        has_driving_worktree=has_driving_worktree,
+    )
     return {
         "subtitle": subtitle,
         "claims_summary": claims_summary_for_worktree(lease_effort),
         "sess": sess_column(live_session, lease_effort),
+        "worktree_id": driving_worktree_id,
+        "has_driving_worktree": "true" if has_driving_worktree else "false",
+        "worktree_status": worktree_status_for_worktree(driving_worktree_id),
     }

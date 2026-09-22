@@ -79,7 +79,8 @@ def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
         "configured_security_profile", "security_policy_current",
         "security_policy_errors", "network", "environment_names",
         "host_credentials", "lifecycle_hold", "rescue",
-        "subtitle", "claims_summary", "sess",
+        "subtitle", "claims_summary", "sess", "worktree_id",
+        "has_driving_worktree", "worktree_status",
     }
     assert row["name"] == "aperture-1"
     assert row["state"] == "running"
@@ -117,7 +118,19 @@ def test_fleet_json_wires_picker_fields_from_lease(monkeypatch, capsys):
 
     def fake_picker_fields(name, lease_effort):
         seen.append((name, lease_effort))
-        return {"subtitle": "claimed by 3bac", "claims_summary": "PR #2481", "sess": "LIVE"}
+        return {
+            "subtitle": "→ claimed by 3bac",
+            "claims_summary": "PR #2481",
+            "sess": "LIVE",
+            "worktree_id": "host-win-20260922-111111-a1c4",
+            "has_driving_worktree": "true",
+            "worktree_status": {
+                "title": "Worktree a1c4",
+                "status": "active",
+                "link": None,
+                "body": "- Claims: PR #2481",
+            },
+        }
 
     import agent_containers.picker as picker
     monkeypatch.setattr(picker, "picker_fields", fake_picker_fields)
@@ -125,9 +138,12 @@ def test_fleet_json_wires_picker_fields_from_lease(monkeypatch, capsys):
     cli._cmd_fleet(argparse.Namespace(json=True))
     row = json.loads(capsys.readouterr().out)[0]
     assert seen == [("aperture-1", "3bac")]
-    assert row["subtitle"] == "claimed by 3bac"
+    assert row["subtitle"] == "→ claimed by 3bac"
     assert row["claims_summary"] == "PR #2481"
     assert row["sess"] == "LIVE"
+    assert row["worktree_id"] == "host-win-20260922-111111-a1c4"
+    assert row["has_driving_worktree"] == "true"
+    assert row["worktree_status"]["title"] == "Worktree a1c4"
 
 
 def test_fleet_json_picker_fields_blank_when_unclaimed_and_no_dependencies():
@@ -136,7 +152,17 @@ def test_fleet_json_picker_fields_blank_when_unclaimed_and_no_dependencies():
     raising."""
     from agent_containers.picker import picker_fields
     assert picker_fields("free-1", None) == {
-        "subtitle": "", "claims_summary": "", "sess": "",
+        "subtitle": "",
+        "claims_summary": "",
+        "sess": "",
+        "worktree_id": "",
+        "has_driving_worktree": "false",
+        "worktree_status": {
+            "title": "Worktree status unavailable",
+            "status": "unknown",
+            "link": None,
+            "body": "No tracked driving worktree is recorded for this container.",
+        },
     }
 
 

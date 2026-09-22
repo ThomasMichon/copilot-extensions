@@ -350,6 +350,8 @@ def test_picker_payload_shape_and_summary():
     assert by["held"]["repo"] == "web-cs"          # short repo (trailing segment)
     assert by["held"]["cores"] == "8"
     assert by["held"]["id"] == "held"              # id mirrors name for the pivot
+    assert by["held"]["has_driving_worktree"] == "false"
+    assert by["held"]["worktree_id"] == ""
     # free/stopped entry: no holder, health=stopped, use=free.
     assert by["free"]["holder"] == ""
     assert by["free"]["health"] == "stopped"
@@ -433,6 +435,8 @@ def test_orphaned_claim_flagged_when_worktree_path_gone(tmp_path):
     assert e["occupancy"] == "orphan"    # -> the magenta ORPHAN palette cell
     assert e["disposition"] == IN_USE    # unchanged: Release verb still gates on
     assert e["worktree"] == "example-cloud1-win-DEAD-9f3a"  # which lock is stale
+    assert e["has_driving_worktree"] == "true"
+    assert e["worktree_id"] == "example-cloud1-win-DEAD-9f3a"
 
 
 def test_live_claim_not_flagged_orphaned(tmp_path):
@@ -453,6 +457,8 @@ def test_live_claim_not_flagged_orphaned(tmp_path):
     assert e["orphaned"] is False
     assert e["occupancy"] == IN_USE      # mirrors disposition when not orphaned
     assert e["worktree"] == "example-cloud1-win-LIVE-1a2b"
+    assert e["has_driving_worktree"] == "true"
+    assert e["worktree_id"] == "example-cloud1-win-LIVE-1a2b"
 
 
 def test_advisory_borrow_never_orphaned():
@@ -654,6 +660,136 @@ def test_picker_payload_live_session_join_wires_sess_and_activity(monkeypatch):
     assert e["sess"] == "LIVE"
     assert e["subtitle"].endswith("impl: wiring")
     assert "claimed by 3bac on dev6" in e["subtitle"]  # durable half preserved
+
+
+def test_driving_worktree_mark_added_for_claim_owned_rows(tmp_path):
+    import time as _t
+    from agent_codespaces.pool import picker_payload
+    now = _t.time()
+    live = tmp_path / "worktrees" / "example-cloud1-win-LIVE-1a2b"
+    live.mkdir(parents=True)
+    claim = Lease(codespace="held", effort="", pid=1, host="dev6",
+                  acquired_at=now, heartbeat_at=now, worktree=str(live))
+    held = CodespaceInfo(name="held", display_name="held", repository="o/web-cs",
+                         branch="main", state="Available", machine="premiumLinux",
+                         account="a", last_used_at="")
+    members, budget = build_pool(now=now, codespaces=[held], leases=[claim], markers={})
+    e = picker_payload(members, budget)["entries"][0]
+    assert e["subtitle"].startswith("→ ")
+
+
+def test_worktree_status_card_present_for_resolved_driving_worktree(tmp_path):
+    import time as _t
+    from agent_codespaces.pool import picker_payload
+    now = _t.time()
+    live = tmp_path / "worktrees" / "example-cloud1-win-LIVE-1a2b"
+    live.mkdir(parents=True)
+    claim = Lease(codespace="held", effort="", pid=1, host="dev6",
+                  acquired_at=now, heartbeat_at=now, worktree=str(live))
+    held = CodespaceInfo(name="held", display_name="held", repository="o/web-cs",
+                         branch="main", state="Available", machine="premiumLinux",
+                         account="a", last_used_at="")
+    members, budget = build_pool(now=now, codespaces=[held], leases=[claim], markers={})
+    from agent_codespaces import pool as pool_mod
+    original = pool_mod._worktree_status_for_worktree
+    pool_mod._worktree_status_for_worktree = lambda worktree_id: {
+        "title": f"Worktree {worktree_id}",
+        "status": "active",
+        "link": None,
+        "body": "- Claims: PR #2481",
+    }
+    try:
+        e = picker_payload(members, budget)["entries"][0]
+    finally:
+        pool_mod._worktree_status_for_worktree = original
+    assert e["worktree_status"]["title"].startswith("Worktree example-cloud1-win-LIVE-1a2b")
+    assert e["worktree_status"]["status"]
+
+
+def test_worktree_status_card_unavailable_without_resolved_worktree():
+    import time as _t
+    from agent_codespaces.pool import picker_payload
+    now = _t.time()
+    held = CodespaceInfo(name="held", display_name="held", repository="o/web-cs",
+                         branch="main", state="Available", machine="premiumLinux",
+                         account="a", last_used_at="")
+    lease = Lease(codespace="held", effort="3bac", pid=1, host="dev6",
+                  acquired_at=now, heartbeat_at=now)
+    members, budget = build_pool(now=now, codespaces=[held], leases=[lease], markers={})
+    e = picker_payload(members, budget)["entries"][0]
+    assert e["has_driving_worktree"] == "false"
+    assert "No tracked driving worktree" in e["worktree_status"]["body"]
+
+
+def test_ado_remote_ref_parses_ssh_and_https_variants():
+    from agent_codespaces.pool import _ado_remote_ref
+    ssh = _ado_remote_ref("ssh://git@ssh.dev.azure.com/v3/OneDrive/StorageWeb/odsp-web")
+    https = _ado_remote_ref("https://dev.azure.com/OneDrive/StorageWeb/_git/odsp-web")
+    legacy = _ado_remote_ref("https://onedrive.visualstudio.com/StorageWeb/_git/odsp-web")
+    assert ssh and ssh.organization == "OneDrive" and ssh.project == "StorageWeb"
+    assert https and https.repository == "odsp-web"
+    assert legacy and legacy.host == "onedrive.visualstudio.com"
+
+
+def test_auto_claim_odsp_web_pr_journals_existing_claim_ledger(monkeypatch):
+    from agent_codespaces.pool import _auto_claim_odsp_web_pr
+    import sys
+    import types
+
+    class _Record:
+        owner_ref = "machine/project/worktree#session"
+
+    fake_tracking = types.ModuleType("agent_worktrees.tracking")
+    fake_tracking.load_record_by_id = lambda worktree_id: _Record()
+    fake_pkg = types.ModuleType("agent_worktrees")
+    fake_pkg.tracking = fake_tracking
+    monkeypatch.setitem(sys.modules, "agent_worktrees", fake_pkg)
+    monkeypatch.setitem(sys.modules, "agent_worktrees.tracking", fake_tracking)
+    monkeypatch.setattr(
+        "agent_codespaces.pool._odsp_web_pr_ref",
+        lambda codespace_name, branch: "https://dev.azure.com/OneDrive/StorageWeb/_git/odsp-web/pullrequest/2481",
+    )
+    seen = []
+    monkeypatch.setattr(
+        "agent_codespaces.coordination.journal_claim",
+        lambda kind, ref, owner_ref: seen.append((kind, ref, owner_ref)) or True,
+    )
+
+    ref = _auto_claim_odsp_web_pr("cs-1", "microsoft/odsp-web", "users/alex/topic", "host-win-20260922-111111-a1c4")
+    assert ref and ref.endswith("/2481")
+    assert seen == [(
+        "pr",
+        "https://dev.azure.com/OneDrive/StorageWeb/_git/odsp-web/pullrequest/2481",
+        "machine/project/worktree#session",
+    )]
+
+
+def test_picker_payload_auto_claimed_pr_reads_like_existing_claim(monkeypatch, tmp_path):
+    import time as _t
+    from agent_codespaces.pool import picker_payload
+
+    now = _t.time()
+    live = tmp_path / "worktrees" / "host-win-20260922-111111-a1c4"
+    live.mkdir(parents=True)
+    claim = Lease(codespace="held", effort="", pid=1, host="dev6",
+                  acquired_at=now, heartbeat_at=now, worktree=str(live))
+    held = CodespaceInfo(name="held", display_name="held", repository="microsoft/odsp-web",
+                         branch="users/alex/topic", state="Available", machine="premiumLinux",
+                         account="a", last_used_at="")
+    members, budget = build_pool(now=now, codespaces=[held], leases=[claim], markers={})
+    ledger: dict[str, str] = {}
+
+    def fake_auto_claim(_name, _repo, _branch, worktree_id):
+        ledger[worktree_id] = "PR #2481"
+        return "https://dev.azure.com/OneDrive/StorageWeb/_git/odsp-web/pullrequest/2481"
+
+    monkeypatch.setattr("agent_codespaces.pool._auto_claim_odsp_web_pr", fake_auto_claim)
+    monkeypatch.setattr(
+        "agent_codespaces.pool._claims_summary_for_worktree",
+        lambda worktree_id: ledger.get(worktree_id, ""),
+    )
+    e = picker_payload(members, budget)["entries"][0]
+    assert e["claims_summary"] == "PR #2481"
 
 
 def test_picker_payload_sess_blank_and_no_activity_when_no_live_session():
