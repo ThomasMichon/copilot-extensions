@@ -351,6 +351,22 @@ class PRProvider(Protocol):
         """Return the numbers of every open PR on ``repo`` (for the sweep mode)."""
         ...
 
+    def find_pull_by_head(
+        self, repo: str, head: str, *, api_base: str = "", token: str | None = None
+    ) -> PullResult | None:
+        """Look up a PR by its head (source) branch name.
+
+        The fleet-flows Phase 2 healing path (#2146): a tracked record whose
+        active PR has no ``number`` (the local record never observed the PR
+        object -- e.g. an interrupted ``create_pr``) can't be reconciled by
+        :func:`PRProvider.get_pull` alone. This resolves the PR by the branch
+        that *is* known (``pr_ops.feature_branch_name`` -- deterministic per
+        worktree), across every state (open/closed/merged) so a since-merged
+        PR heals too. Returns ``None`` when no PR exists for that head, or the
+        provider can't search by head (best-effort; never guesses).
+        """
+        ...
+
 
 def _unsupported_snapshot(name: str) -> PRSnapshot:
     raise ProviderError(

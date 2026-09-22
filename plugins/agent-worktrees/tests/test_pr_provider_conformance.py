@@ -279,3 +279,22 @@ class TestMockProviderLifecycle:
 
         open_numbers = provider.list_open_pulls(scope.repo)
         assert open_numbers == (second.number,)
+
+    def test_find_pull_by_head_matches_head_branch(self, provider, scope):
+        created = provider.create_pull(scope)
+        found = provider.find_pull_by_head(scope.repo, scope.head)
+        assert found is not None
+        assert found.number == created.number
+
+    def test_find_pull_by_head_finds_merged_pr(self, provider, scope):
+        # #2146: a since-merged PR must still heal, not just an open one.
+        created = provider.create_pull(scope)
+        provider.merge_pull(scope.repo, created.number)
+        found = provider.find_pull_by_head(scope.repo, scope.head)
+        assert found is not None
+        assert found.number == created.number
+        assert found.merged is True
+
+    def test_find_pull_by_head_no_match_returns_none(self, provider, scope):
+        provider.create_pull(scope)
+        assert provider.find_pull_by_head(scope.repo, "no-such-branch") is None

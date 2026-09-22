@@ -69,6 +69,11 @@ class GiteaProvider:
 
     name = "gitea"
 
+    # find_pull_by_head's state=all pagination bound (#2146 healing): caps the
+    # worst case (a very old/prolific repo with no match) rather than paging
+    # forever.
+    _HEAD_SEARCH_MAX_PAGES = 20
+
     def authority_endpoint(self, api_base: str = "") -> str:
         return (api_base or "").rstrip("/")
 
@@ -752,6 +757,60 @@ class GiteaProvider:
                 break
             page += 1
         return tuple(numbers)
+
+    def find_pull_by_head(
+        self, repo: str, head: str, *, api_base: str = "", token: str | None = None
+    ) -> PullResult | None:
+        """Resolve a PR by its head branch name across every state (paginated).
+
+        fleet-flows Phase 2 (#2146): heals a tracked record whose active PR has
+        no ``number``. Gitea's list endpoint has no head-branch filter, so this
+        paginates ``state=all`` and matches ``head.ref`` client-side -- bounded
+        by ``_HEAD_SEARCH_MAX_PAGES`` so a very old/prolific repo can't spin
+        forever. Returns the newest match (Gitea sorts newest-first by
+        default), or ``None`` when nothing matches.
+        """
+        if not token:
+            raise ProviderError("Gitea provider needs a token to find a PR by head.")
+        page_size = 50
+        for page in range(1, self._HEAD_SEARCH_MAX_PAGES + 1):
+            status, body = self._curl_with_retry(
+                "GET",
+                self._api(api_base,
+                          f"/repos/{repo}/pulls?state=all&limit={page_size}&page={page}"),
+                token,
+            )
+            if status != 200:
+                raise ProviderError(
+                    f"Gitea PR search by head failed (HTTP {status}) on page "
+                    f"{page} for {repo}",
+                    transient=_is_transient(status),
+                )
+            try:
+                batch = json.loads(body)
+            except json.JSONDecodeError as exc:
+                raise ProviderError(f"Gitea returned non-JSON PR list: {exc}") from exc
+            if not isinstance(batch, list) or not batch:
+                break
+            for p in batch:
+                if not isinstance(p, dict):
+                    continue
+                if (p.get("head") or {}).get("ref") == head:
+                    merged = bool(p.get("merged"))
+                    state = str(p.get("state", "")) or "open"
+                    if merged:
+                        state = "merged"
+                    return PullResult(
+                        url=str(p.get("html_url", "")),
+                        number=int(p["number"]),
+                        state=state,
+                        merged=merged,
+                        head_sha=str((p.get("head") or {}).get("sha", "")),
+                        base_ref=str((p.get("base") or {}).get("ref", "")),
+                    )
+            if len(batch) < page_size:
+                break
+        return None
 
     def request_auto_complete(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,

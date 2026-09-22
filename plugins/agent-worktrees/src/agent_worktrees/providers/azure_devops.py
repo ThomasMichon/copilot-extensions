@@ -470,6 +470,53 @@ class AzureDevOpsProvider:
             if isinstance(p, dict) and p.get("pullRequestId") is not None
         )
 
+    def find_pull_by_head(
+        self, repo: str, head: str, *, api_base: str = "", token: str | None = None
+    ) -> PullResult | None:
+        """Resolve a PR by its source branch across every status (#2146).
+
+        Heals a tracked record whose active PR has no ``number``. ``az repos
+        pr list --source-branch`` filters server-side by the exact ref;
+        ``--status all`` covers active/completed/abandoned so a since-merged
+        PR heals too. Returns ``None`` when nothing matches.
+        """
+        if not api_base:
+            raise ProviderError("Azure DevOps provider needs the org URL (api_base).")
+        project, name = self._split_repo(repo)
+        proc = run_cli(
+            [
+                "az", "repos", "pr", "list",
+                "--organization", api_base,
+                "--project", project,
+                "--repository", name,
+                "--source-branch", head,
+                "--status", "all",
+                "--output", "json",
+            ],
+            env=self._env(token),
+        )
+        if proc.returncode != 0:
+            raise ProviderError(
+                f"az repos pr list --source-branch {head} failed for {repo}: "
+                f"{proc.stderr.strip()}"
+            )
+        try:
+            data = json.loads(proc.stdout or "[]")
+        except json.JSONDecodeError as exc:
+            raise ProviderError(f"az returned non-JSON PR list: {exc}") from exc
+        if not isinstance(data, list) or not data:
+            return None
+        p = data[0]
+        status = str(p.get("status", "active")).lower()
+        merged = (status == "completed")
+        state = {"completed": "merged", "abandoned": "closed"}.get(status, "open")
+        return PullResult(
+            url=self._web_url(api_base, project, name, int(p["pullRequestId"])),
+            number=int(p["pullRequestId"]),
+            state=state,
+            merged=merged,
+        )
+
     # ── First-class comment threads (ADO REST; AAD bearer or PAT Basic) ────
 
     def _rest_base(self, api_base: str, repo: str, number: int) -> str:

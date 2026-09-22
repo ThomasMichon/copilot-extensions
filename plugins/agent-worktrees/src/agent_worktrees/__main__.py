@@ -8058,26 +8058,23 @@ def main(argv: list[str] | None = None) -> int:
             print("\nCancelled.")
             return 130
 
-    # lease -- Git-ref resource lease store (atomic cross-machine, same-harness).
-    # Manual dispatch: its own argparse subcommands (acquire/renew/release/
-    # inspect/list) with resource kind+key positionals.
-    if args_list[0] == "lease":
-        from . import lease_cli
-
+    # lease/fleet/reconcile -- self-contained argparse verbs manually
+    # dispatched here (each owns its own module: lease_cli/list_views_cli/
+    # reconcile_cli) rather than growing this already-at-ceiling argparse
+    # tree. lease: Git-ref resource lease store. fleet: aggregate `list
+    # --json` across every reachable machine x environment (fleet-flows
+    # Phase 1, #2740). reconcile: out-of-band PR-state refresh incl.
+    # 'finalized' worktrees (fleet-flows Phase 2, #2740).
+    _manual_verb_modules = {
+        "lease": ("lease_cli", "run_lease"),
+        "fleet": ("list_views_cli", "run_fleet"),
+        "reconcile": ("reconcile_cli", "run_reconcile"),
+    }
+    if args_list[0] in _manual_verb_modules:
+        mod_name, func_name = _manual_verb_modules[args_list[0]]
+        mod = __import__(f"{__package__}.{mod_name}", fromlist=[mod_name])
         try:
-            return lease_cli.run_lease(args_list[1:])
-        except KeyboardInterrupt:
-            print("\nCancelled.")
-            return 130
-
-    # fleet -- aggregate `list --json` across every reachable machine x
-    # environment (agent-worktrees-fleet-flows Phase 1, aperture-labs #2740).
-    # Manual dispatch: its own argparse, self-contained SSH fan-out.
-    if args_list[0] == "fleet":
-        from . import list_views_cli
-
-        try:
-            return list_views_cli.run_fleet(args_list[1:])
+            return getattr(mod, func_name)(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
