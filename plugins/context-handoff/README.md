@@ -421,15 +421,23 @@ This file is:
   already-live fresh file into this process's own sidecar, silently
   detaching that process's diagnostics from the well-known path.
   Immediately after a rotation, the same process also opportunistically
-  purges any of this log's own sidecars whose *modification time* is older
-  than 24 hours: a sidecar is written to exactly once, at the moment of its
-  own rotation, and never touched again afterward, so its mtime is a
-  reliable, race-safe proxy for "how long ago was this rotation" -- a
-  sidecar genuinely still involved in a concurrent rotation race is, at
-  most, a few seconds old, nowhere near that threshold, so this age gate
-  bounds the *cumulative* disk usage many rotations over a long-lived host
-  would otherwise leave unbounded, without reintroducing the destructive
-  race a blind/unconditional delete would risk. This bounds growth across
+  purges any of this log's own sidecars whose age -- **read from the
+  rotation timestamp embedded directly in the sidecar's own filename**
+  (`.stale-<pid>-<timestamp>-<uuid>`), never the filesystem's mtime -- is
+  older than 24 hours. mtime was tried first, but is observable (and
+  mutable) by every other process on the host from the instant a rename
+  completes: a concurrent process's own purge could run against a
+  brand-new sidecar before this process got a chance to separately
+  re-stamp its mtime, see the oversized source file's old, pre-rotation
+  mtime, and delete it immediately -- a genuine cross-process race. Baking
+  the timestamp into the name atomically, in the very same `renameSync()`
+  call that creates the sidecar, removes that window entirely: there is no
+  longer a separate step (and therefore no race) between "this sidecar
+  exists" and "its age is correctly and immutably knowable" by any process
+  that reads its name. This age gate bounds the *cumulative* disk usage
+  many rotations over a long-lived host would otherwise leave unbounded,
+  without reintroducing the destructive race a blind/unconditional delete
+  would risk. This bounds growth across
   the many separate short-lived processes that are the actual growth vector
   (though not a single pathological process logging in a tight loop -- not
   a real shape here, since at most a handful of entries are ever logged per

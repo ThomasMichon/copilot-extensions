@@ -30,7 +30,6 @@ import {
   renameSync,
   statSync,
   unlinkSync,
-  utimesSync,
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,57 +38,69 @@ import { randomUUID } from "node:crypto";
 
 export const DEFAULT_CRASH_LOG = join(tmpdir(), "context-handoff-extension-crash.log");
 
-// A rotated-away `.stale-*` sidecar is written to exactly once, at the
-// moment of its own rotation, and never touched again by any process
-// afterward (see the "never delete" rotation rationale below) -- so its
-// mtime is a reliable, race-safe proxy for "how long ago was this
-// rotation." Purging sidecars older than this age bounds the *cumulative*
-// disk usage those permanent sidecars would otherwise leave unbounded (a
-// single rotation event only ever bounds the *live* path's own size, not
-// the growing pile of sidecars it leaves behind over the lifetime of a
-// long-running host) without reintroducing the destructive-delete race
-// this design was built to avoid: a sidecar genuinely still "in flight"
-// from a concurrent rotation is, at most, a few seconds old, nowhere near
-// this threshold.
+// A rotated-away `.stale-*` sidecar's rotation timestamp is embedded
+// directly in its own filename (`.stale-<pid>-<timestamp>-<uuid>`, baked
+// in atomically by the single `renameSync()` call that creates it -- see
+// the rotation site below) rather than read from the filesystem's mtime.
+// mtime was tried first, but is observable -- and mutable -- by every
+// other process on the host from the moment the rename completes: a
+// concurrent process's own purge call could run purgeOldStaleSidecars()
+// against this brand-new sidecar before this process ever got a chance to
+// separately re-stamp its mtime (or if that re-stamp failed), and would
+// see the oversized source file's old, pre-rotation mtime and delete it
+// immediately -- a genuine cross-process TOCTOU race. Encoding the
+// timestamp in the name itself instead means there is no separate step,
+// and therefore no window, between "this sidecar exists" and "its age is
+// correctly knowable" -- any process reading the name (never mind which
+// process created it) sees the exact same, immutable rotation timestamp
+// from the instant the rename call returns.
+const STALE_SIDECAR_NAME_PATTERN = /\.stale-\d+-(\d+)-[0-9a-f-]+$/;
+
+// Purging sidecars older than this age bounds the *cumulative* disk usage
+// permanently-kept sidecars would otherwise leave unbounded (a single
+// rotation event only ever bounds the *live* path's own size, not the
+// growing pile of sidecars it leaves behind over the lifetime of a
+// long-running host).
 const STALE_SIDECAR_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // Bounds the worst-case syscall cost of a single purge call. This runs
 // synchronously in the same call path as a SIGTERM/SIGINT/SIGHUP handler,
 // which must log and re-raise the signal within the CLI's own documented
 // five-second SIGKILL grace period (see the signal rationale below) -- an
-// unbounded readdir()+stat() sweep over a directory that accumulated many
-// sidecars could otherwise delay that re-raise past the deadline and lose
-// the very lifecycle diagnostic this path exists to preserve. Capping the
-// number of candidates examined per call still clears the whole backlog
-// over enough separate rotation events; it just never risks doing all of
-// it in one.
-const MAX_SIDECARS_PURGED_PER_CALL = 20;
+// unbounded readdir() sweep over a directory that accumulated many entries
+// (`os.tmpdir()` is commonly large and shared across every application on
+// the host, not just this log's own sidecars) could otherwise delay that
+// re-raise past the deadline and lose the very lifecycle diagnostic this
+// path exists to preserve. This caps the number of directory *entries*
+// actually read via `readSync()` -- not merely the number of matching
+// sidecars found -- so a directory containing few or no matches still
+// cannot be scanned without bound; reaching either cap just stops early
+// for this call. The whole sidecar backlog still clears over enough
+// separate rotation events; it just never risks doing all of it -- or
+// scanning an unrelated, much larger directory in full -- in one call.
+const MAX_DIR_ENTRIES_SCANNED_PER_CALL = 200;
 
 /**
  * Best-effort removal of this log's own `.stale-*` sidecars older than
- * {@link STALE_SIDECAR_MAX_AGE_MS}, bounded to at most
- * {@link MAX_SIDECARS_PURGED_PER_CALL} candidates examined per call (see its
- * own doc comment). Uses `opendirSync()`'s synchronous, one-entry-at-a-time
- * `readSync()` rather than `readdirSync()`, which unconditionally
- * materializes *every* entry in the directory (`os.tmpdir()` is commonly a
- * large, shared directory with entries from every application on the host)
- * before this function's own cap could ever apply -- since this whole call
- * can run synchronously inside a signal handler that must re-raise within
- * the CLI's five-second SIGKILL grace period, that unconditional full scan
- * was itself the unbounded cost, independent of the candidate cap.
- * Iterating the directory stream instead means a sufficiently early match
- * (or the cap being reached) genuinely stops touching the directory further,
- * rather than merely stopping the in-memory loop after the full listing was
- * already read. `justCreatedSidecar` -- the sidecar path *this specific
- * rotation* just produced -- is always skipped outright, regardless of its
- * mtime: if the earlier `utimesSync()` re-stamp attempt failed, this sidecar
- * could still carry the oversized source file's old, possibly already-stale
- * mtime, and this exclusion is what stops that from getting the sidecar
- * this very rotation just created purged in the same call that created it.
- * Every other failure (missing directory, permissions, a sidecar vanishing
- * between listing and unlinking, ...) is swallowed -- this is a bounded
- * courtesy cleanup, never a correctness requirement, and it must never
- * itself become a crash-handler failure mode.
+ * {@link STALE_SIDECAR_MAX_AGE_MS} (per the rotation timestamp embedded in
+ * each sidecar's own filename -- see {@link STALE_SIDECAR_NAME_PATTERN} --
+ * never the filesystem mtime, which is racy across processes). Uses
+ * `opendirSync()`'s synchronous, one-entry-at-a-time `readSync()` rather
+ * than `readdirSync()`, which unconditionally materializes *every* entry in
+ * the directory before any cap could apply, and stops after at most
+ * {@link MAX_DIR_ENTRIES_SCANNED_PER_CALL} entries are read regardless of
+ * how many (if any) actually match this log's own sidecar naming pattern
+ * (see that constant's own doc comment for why counting only matches is not
+ * enough). `justCreatedSidecar` -- the sidecar path *this specific
+ * rotation* just produced -- is always skipped outright as an extra guard
+ * against a same-process, same-call self-purge, though the name-based
+ * timestamp alone already makes that essentially impossible (a sidecar
+ * this fresh cannot itself be older than the purge threshold). Every other
+ * failure (missing directory, permissions, a sidecar vanishing between
+ * listing and unlinking, an unparseable name that doesn't match the
+ * expected pattern, ...) is swallowed -- this is a bounded courtesy
+ * cleanup, never a correctness requirement, and it must never itself
+ * become a crash-handler failure mode.
  */
 function purgeOldStaleSidecars(logPath, justCreatedSidecar) {
   let dirHandle;
@@ -97,21 +108,25 @@ function purgeOldStaleSidecars(logPath, justCreatedSidecar) {
     const dir = dirname(logPath);
     const prefix = `${basename(logPath)}.stale-`;
     const now = Date.now();
-    let examined = 0;
+    let scanned = 0;
     dirHandle = opendirSync(dir);
     let entry;
-    while (examined < MAX_SIDECARS_PURGED_PER_CALL && (entry = dirHandle.readSync()) !== null) {
+    while (scanned < MAX_DIR_ENTRIES_SCANNED_PER_CALL && (entry = dirHandle.readSync()) !== null) {
+      scanned += 1;
       const name = entry.name;
       if (!name.startsWith(prefix)) continue;
       const candidate = join(dir, name);
       if (candidate === justCreatedSidecar) continue;
-      examined += 1;
+      const match = name.match(STALE_SIDECAR_NAME_PATTERN);
+      if (!match) continue; // Not a name this version of the module produced; leave it alone.
+      const rotatedAtMs = Number(match[1]);
+      if (!Number.isFinite(rotatedAtMs)) continue;
       try {
-        if (now - statSync(candidate).mtimeMs > STALE_SIDECAR_MAX_AGE_MS) {
+        if (now - rotatedAtMs > STALE_SIDECAR_MAX_AGE_MS) {
           unlinkSync(candidate);
         }
       } catch {
-        // This one sidecar failed to stat/unlink; move on to the rest.
+        // This one sidecar failed to unlink; move on to the rest.
       }
     }
   } catch {
@@ -314,42 +329,27 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
                 stillTheSameOversizedFile = false;
               }
               // Hoisted so the purge call below can exclude this exact
-              // sidecar (if one was actually created) regardless of
-              // whether its mtime re-stamp below succeeded -- see that
-              // call's own comment.
+              // sidecar (if one was actually created) as an extra guard
+              // against a same-process, same-call self-purge -- see that
+              // call's own doc comment.
               let justCreatedSidecar;
               if (stillTheSameOversizedFile) {
-                // pid+timestamp alone could theoretically collide (two
-                // rotations from the same pid in the same millisecond, or a
-                // pid reused across an implausibly tight window); a
-                // randomUUID() suffix makes each sidecar name unique
-                // regardless, so a name collision can never overwrite an
-                // earlier, still-undeleted sidecar's diagnostics.
+                // pid+timestamp+uuid: the timestamp is embedded here so
+                // purgeOldStaleSidecars() can read this sidecar's true
+                // rotation age directly from its own name -- atomically
+                // baked in by this same renameSync() call, with no separate
+                // step (and therefore no window) in which a concurrent
+                // process's own purge could observe a stale age before it
+                // was corrected (see STALE_SIDECAR_NAME_PATTERN's own doc
+                // comment for the full rationale: mtime was tried first and
+                // had exactly this cross-process race). The uuid suffix
+                // guards against a same-pid, same-millisecond name
+                // collision, which a bare pid+timestamp could theoretically
+                // hit.
                 const staleSidecar = `${logPath}.stale-${process.pid}-${Date.now()}-${randomUUID()}`;
                 try {
                   renameSync(logPath, staleSidecar);
                   justCreatedSidecar = staleSidecar;
-                  // renameSync() preserves the moved file's own mtime --
-                  // the timestamp of its *last write*, which reflects when
-                  // the oversized file was last appended to, not when this
-                  // rotation happened. A log that grew slowly could easily
-                  // have gone unwritten for well over 24h before finally
-                  // crossing the threshold, in which case the sidecar
-                  // purgeOldStaleSidecars() below would treat as "old" and
-                  // immediately purge would be the one THIS rotation just
-                  // created, seconds ago. Stamp it to the current time so
-                  // its mtime actually reflects rotation age, the semantic
-                  // the purge logic depends on.
-                  const now = new Date();
-                  try {
-                    utimesSync(staleSidecar, now, now);
-                  } catch {
-                    // Best-effort; a failed re-stamp is exactly why the
-                    // purge call below also excludes justCreatedSidecar by
-                    // path outright, not just by mtime -- so this sidecar
-                    // is never purged in the same call that created it,
-                    // regardless of whether the re-stamp above succeeded.
-                  }
                 } catch {
                   // Lost a narrower race against a concurrent rotation
                   // between the stat check just above and this rename --

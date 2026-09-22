@@ -42,7 +42,6 @@ import {
   rmSync,
   statSync,
   symlinkSync,
-  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -294,26 +293,31 @@ test(
 // purgeOldStaleSidecars() bounds the *cumulative* disk usage many rotations
 // over a long-lived host would otherwise leave unbounded, without risking
 // the destructive-delete race an unconditional cleanup would reintroduce:
-// a sidecar's mtime is fixed the moment it is created and never touched
-// again, so age-gating on mtime is safe -- a sidecar genuinely mid-rotation
-// is at most a few seconds old, nowhere near the 24h threshold. This test
-// backdates a fake old sidecar with utimesSync() (rather than waiting 24h)
+// each sidecar's own filename embeds its rotation timestamp atomically
+// (baked in by the same renameSync() call that creates it), so age-gating
+// on that embedded timestamp is safe even across concurrent processes --
+// see STALE_SIDECAR_NAME_PATTERN's own doc comment for why the filesystem
+// mtime was tried first and had exactly the cross-process race this design
+// avoids. This test creates a fake old sidecar with an old timestamp baked
+// into its *name* (rather than waiting 24h, or relying on mtime at all)
 // and confirms it is purged by the next rotation, while a fresh one from
 // that same rotation survives.
 test(
-  "a rotation purges old sidecars (by mtime) but keeps its own fresh one",
+  "a rotation purges old sidecars (by embedded name timestamp) but keeps its own fresh one",
   { skip: !RUN_STRESS_CASES },
   async () => {
     await withCrashLog(async (logPath) => {
       const oneMiB = 1_048_576;
       writeFileSync(logPath, "x".repeat(oneMiB + 10));
       chmodSync(logPath, 0o600);
-      // A pre-existing sidecar, backdated well past the 24h purge
-      // threshold -- simulates one left behind by a rotation long ago.
-      const oldSidecar = `${logPath}.stale-99999-0-old`;
+      // A pre-existing sidecar whose *name* claims a rotation timestamp
+      // well past the 24h purge threshold -- simulates one left behind by
+      // a rotation long ago. Its actual mtime (whatever writeFileSync()
+      // gives it, i.e. right now) is deliberately left alone/untouched, to
+      // prove the purge decision is made from the name, not the mtime.
+      const twoDaysAgoMs = Date.now() - 2 * 24 * 60 * 60 * 1000;
+      const oldSidecar = `${logPath}.stale-99999-${twoDaysAgoMs}-00000000-0000-0000-0000-000000000000`;
       writeFileSync(oldSidecar, "ancient rotated content\n");
-      const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
-      utimesSync(oldSidecar, twoDaysAgo, twoDaysAgo);
 
       const emergencyLog = createEmergencyLog(logPath);
       emergencyLog("signal", "SIGTERM ready=true");
@@ -326,30 +330,40 @@ test(
         1,
         `expected the ancient sidecar purged and exactly one fresh one left, found: ${JSON.stringify(sidecars)}`,
       );
-      assert.notEqual(sidecars[0], `${base}.stale-99999-0-old`, "the ancient sidecar should have been purged");
+      assert.notEqual(
+        sidecars[0],
+        `${base}.stale-99999-${twoDaysAgoMs}-00000000-0000-0000-0000-000000000000`,
+        "the ancient sidecar should have been purged",
+      );
     });
   },
 );
 
-// Regression: renameSync() preserves the moved file's own mtime -- the
-// timestamp of its *last write*, not of the rotation itself. A log that
-// grows slowly can easily go unwritten for well over 24h before finally
-// crossing the 1 MiB threshold; without re-stamping the sidecar's mtime at
-// rotation time, purgeOldStaleSidecars() would immediately purge the
-// sidecar THIS rotation just created, seconds old, because it inherited an
-// already-stale mtime from before the rotation. Backdates the oversized
-// source file itself (not a fake pre-existing sidecar) to simulate this.
+// Regression for the cross-process race the mtime-based design had: mtime
+// is observable (and, from another process's perspective, indistinguishable
+// from "old") the instant a rename completes, before this process could
+// ever separately re-stamp it -- a concurrent process's own purge call
+// could delete a sidecar this process just created, using its own,
+// unrelated mtime-based judgment. Proves the current, name-based design is
+// immune: this sidecar's *actual* mtime is deliberately made to look very
+// recent (freshly written, same as any real rotation would produce) while
+// its *name* claims an old rotation timestamp -- if the purge were still
+// reading mtime at all, this sidecar would survive; since it reads the
+// name instead, it must still be purged.
 test(
-  "a rotation's own fresh sidecar survives even if the source file's mtime was already old",
+  "purge decides by the embedded name timestamp even when the sidecar's actual mtime looks fresh",
   { skip: !RUN_STRESS_CASES },
   async () => {
     await withCrashLog(async (logPath) => {
+      const twoDaysAgoMs = Date.now() - 2 * 24 * 60 * 60 * 1000;
+      const oldByNameSidecar = `${logPath}.stale-12345-${twoDaysAgoMs}-11111111-1111-1111-1111-111111111111`;
+      // writeFileSync() gives this file a real, current mtime -- freshly
+      // written, same as any genuine rotation's sidecar would have.
+      writeFileSync(oldByNameSidecar, "old-by-name, fresh-by-mtime\n");
+
       const oneMiB = 1_048_576;
       writeFileSync(logPath, "x".repeat(oneMiB + 10));
       chmodSync(logPath, 0o600);
-      const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
-      utimesSync(logPath, twoDaysAgo, twoDaysAgo);
-
       const emergencyLog = createEmergencyLog(logPath);
       emergencyLog("signal", "SIGTERM ready=true");
 
@@ -359,7 +373,7 @@ test(
       assert.equal(
         sidecars.length,
         1,
-        `expected this rotation's own sidecar to survive despite the source's old mtime, found: ${JSON.stringify(sidecars)}`,
+        `expected the name-old sidecar purged despite its fresh mtime, found: ${JSON.stringify(sidecars)}`,
       );
     });
   },
