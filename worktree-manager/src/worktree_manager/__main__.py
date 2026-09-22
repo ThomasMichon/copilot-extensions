@@ -666,6 +666,13 @@ def _cmd_picker(rest: list[str]) -> int:
     )
 
 
+def _remote_machine_env(decision: dict) -> tuple[str | None, str | None]:
+    """(machine, environment) for a remote decision, else (None, None) for local."""
+    if decision.get("is_local", True):
+        return None, None
+    return decision.get("machine") or None, decision.get("env") or None
+
+
 def _run_production_picker(project: str) -> int:
     """Run the transplanted production UX and act on its launch decision."""
     from . import picker_app
@@ -690,6 +697,7 @@ def _run_production_picker(project: str) -> int:
         if not decision.get("is_local", True) and opts.get("ahp"):
             print("error: AHP is supported only for same-machine launches.")
             return 1
+        machine, environment = _remote_machine_env(decision)
         return _run_launch(picker_app.LaunchRequest(
             project=project,
             worktree_id=str(worktree_id),
@@ -697,14 +705,8 @@ def _run_production_picker(project: str) -> int:
             title=str(decision.get("title") or "") or None,
             no_mux=bool(opts.get("no_mux")),
             ahp=bool(opts.get("ahp")),
-            machine=(
-                None if decision.get("is_local", True)
-                else str(decision.get("machine") or "") or None
-            ),
-            environment=(
-                None if decision.get("is_local", True)
-                else str(decision.get("env") or "") or None
-            ),
+            machine=machine,
+            environment=environment,
         ))
     if action == "restore":
         worktree_id = decision.get("worktree_id")
@@ -760,23 +762,21 @@ def _run_production_picker(project: str) -> int:
         if not decision.get("is_local", True) and opts.get("ahp"):
             print("error: AHP is supported only for same-machine launches.")
             return 1
+        machine, environment = _remote_machine_env(decision)
         return _run_launch(picker_app.LaunchRequest(
             project=project,
             worktree_id=None,
             mode="base" if opts.get("anchor") else "new",
             no_mux=bool(opts.get("no_mux")),
             ahp=bool(opts.get("ahp")),
-            machine=(
-                None if decision.get("is_local", True)
-                else str(decision.get("machine") or "") or None
-            ),
-            environment=(
-                None if decision.get("is_local", True)
-                else str(decision.get("env") or "") or None
-            ),
+            machine=machine,
+            environment=environment,
         ))
     if action == "refresh":
         return _cmd_update(["--project", project])
+    if action == "open-venue":
+        from . import launcher
+        return launcher.open_venue(decision.get("provider", ""), decision.get("venue", ""))
     print(f"error: Picker returned an unsupported decision: {action!r}")
     return 1
 

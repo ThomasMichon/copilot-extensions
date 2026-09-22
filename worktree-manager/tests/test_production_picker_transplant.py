@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from worktree_manager import __main__ as entrypoint
+from worktree_manager import launcher
 from worktree_manager.production_picker import runner
 from worktree_manager.production_picker import _engine_runtime as engine_runtime
 
@@ -473,6 +474,50 @@ def test_manager_acts_on_production_picker_refresh_decision(monkeypatch):
 
     assert entrypoint._run_production_picker("demo") == 0
     assert calls == [["--project", "demo"]]
+
+
+def test_manager_acts_on_production_picker_open_venue_decision(monkeypatch):
+    """picker-venue-pivots Phase 3: the "open-venue" decision hands the
+    provider/venue straight to ``launcher.open_venue`` and returns its exit
+    code -- the Codespaces/Containers pivots' Open action."""
+    monkeypatch.setattr(
+        runner,
+        "run",
+        lambda project: {
+            "action": "open-venue",
+            "provider": "agent-codespaces",
+            "venue": "my-codespace",
+        },
+    )
+    calls = []
+    monkeypatch.setattr(
+        launcher,
+        "open_venue",
+        lambda provider, venue: calls.append((provider, venue)) or 42,
+    )
+
+    assert entrypoint._run_production_picker("demo") == 42
+    assert calls == [("agent-codespaces", "my-codespace")]
+
+
+def test_manager_open_venue_decision_missing_fields_delegates_to_launcher(monkeypatch):
+    """A missing provider/venue is still handed to `launcher.open_venue` as
+    `""` -- that function (not this dispatch) owns validating/reporting it,
+    per its own docstring."""
+    monkeypatch.setattr(
+        runner,
+        "run",
+        lambda project: {"action": "open-venue", "venue": "my-codespace"},
+    )
+    calls = []
+    monkeypatch.setattr(
+        launcher,
+        "open_venue",
+        lambda provider, venue: calls.append((provider, venue)) or 1,
+    )
+
+    assert entrypoint._run_production_picker("demo") == 1
+    assert calls == [("", "my-codespace")]
 
 
 def test_manager_restores_local_session_then_uses_common_launch_gate(monkeypatch):

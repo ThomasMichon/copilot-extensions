@@ -4,19 +4,18 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Phase 0+1 landed via
   `worktree/tmichon-cloud1-win-20260921-183442-d733` (merged,
-  `ThomasMichon/copilot-extensions#3219`); Phase 2 (Containers) is
-  in `worktree/tmichon-cloud1-win-20260922-002606-0a9a`. Each remaining
-  phase gets its own fresh worktree off `main` (Tasks-pane precedent).
+  `ThomasMichon/copilot-extensions#3219`); Phase 2 (Containers) landed via
+  `worktree/tmichon-cloud1-win-20260922-002606-0a9a` (merged,
+  `ThomasMichon/copilot-extensions#3268`); Phase 3 (Open action) is in
+  `worktree/tmichon-cloud1-win-20260922-022834-a59b`. Each remaining phase
+  gets its own fresh worktree off `main` (Tasks-pane precedent).
 - **Created:** 2026-09-21
-- **Status:** Active — Phase 0 and Phase 1 fully complete and merged
-  (design, operator-approved committed screenshots, the shared
-  claims-pecking-order module, and the Codespaces pivot's
-  claims/subtitle/live-session wiring). Phase 2 (Containers
-  implementation) complete, pending its own PR.
+- **Status:** Active — Phase 0, Phase 1, and Phase 2 fully complete and
+  merged. Phase 3 (Open into a muxed session) complete, pending its own PR.
 - **Vision:** [`visions/venue-pivots-ux`](../../../visions/venue-pivots-ux/README.md)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#3253`
 - **Sub-issues:** Phase 1 `ThomasMichon/copilot-extensions#3254` (closed),
-  Phase 2 `ThomasMichon/copilot-extensions#3255`, Phase 3
+  Phase 2 `ThomasMichon/copilot-extensions#3255` (closed), Phase 3
   `ThomasMichon/copilot-extensions#3256`, Phase 4
   `ThomasMichon/copilot-extensions#3257`, Phase 5
   `ThomasMichon/copilot-extensions#3258`.
@@ -98,56 +97,50 @@ realization.
 
 **Read this section FIRST in any new session picking up this effort.**
 
-- **Worktree:** Phase 0+1 landed via
-  `copilot-extensions.worktrees/tmichon-cloud1-win-20260921-183442-d733`
-  (merged, PR #3219). This session is in a **fresh** worktree
-  (`tmichon-cloud1-win-20260922-002606-0a9a`) for Phase 2, per the
+- **Worktree:** Phase 0+1 (`tmichon-cloud1-win-20260921-183442-d733`, PR
+  #3219) and Phase 2 (`tmichon-cloud1-win-20260922-002606-0a9a`, PR #3268)
+  are merged. This session is in a **fresh** worktree
+  (`tmichon-cloud1-win-20260922-022834-a59b`) for Phase 3, per the
   per-phase-worktree convention (Tasks-pane precedent) -- each remaining
   phase gets another fresh worktree off `main`.
-- **Current phase:** Phase 0 and Phase 1 are **fully complete and merged**.
-  **Phase 2 (Containers) is fully complete, not yet landed/PR'd.**
+- **Current phase:** Phase 0, 1, and 2 are **fully complete and merged**.
+  **Phase 3 (Open action) is fully complete, not yet landed/PR'd.**
 - **Umbrella + sub-issues filed** (2026-09-21):
-  `ThomasMichon/copilot-extensions#3253` (umbrella), `#3254` (closed --
-  Phase 1 landed), `#3255`-`#3258` (Phase 2-5, open).
-- **Phase 1 complete and merged (2026-09-21, PR #3219):** wired
-  `pool.picker_payload`'s `claims_summary` entry field to the shared
-  `agent_worktrees.claims_rank` module (via a new
-  `_claims_summary_for_worktree` helper, lazy-imported the same way
-  `config._registered_repo_paths` already does — degrades to `""` when
-  agent-worktrees isn't installed alongside, never raises); wired
-  `pivots/agent-codespaces.json`'s `entry.subtitle` + a new `claims_summary`
-  column (matching the approved `agent-codespaces.proposed.json` preview
-  manifest's width/priority); added the agent-bridge live-session join
-  (`_bridge_client_from_env`/`_live_session_for_venue`/`_sess_column`/
-  `_activity_from_live_session` in `pool.py`, a silent hand-rolled variant
-  of `BridgeClient.from_config()` since that classmethod prints + exits on
-  a missing auth token) wiring the `sess` column and the transient-activity
-  half of the subtitle; resolved the New-codespace entry point as
-  design-only with a named pivot-registry gap (see "Design note: New-venue
-  entry point"). 78 pool tests pass (16 new across the phase); full
-  agent-codespaces suite is green apart from 2 pre-existing, unrelated
-  `test_bootstrap_check_reconcile_opt_in.py` failures (a Windows bash
-  path-translation issue, confirmed present on `main` too via `git stash`).
-- **Phase 2 complete (2026-09-22), pending its own PR:** brought
-  `pivots/agent-containers.json` + `agent_containers/__main__.py`'s
-  `_cmd_fleet` up to the CodeSpaces pivot's fidelity — full detail in the
-  Plan's own Phase 2 checklist and the Journal below. New
-  `agent_containers/picker.py` module + `stop`/`remove` single-container CLI
-  subcommands. 12 new tests; full agent-containers suite green apart from 7
-  pre-existing, unrelated Windows-POSIX-permission/bash failures (confirmed
-  via `git stash`).
-- **Immediate next step:** open Phase 2's own PR from
-  `tmichon-cloud1-win-20260922-002606-0a9a` (create-pr, mirror #3219's
-  flow), close sub-issue `#3255` on landing, then start Phase 3 (Open into
-  a muxed session over SSH) in a fresh worktree. If any implementation-phase
-  session changes a row/menu's visual shape, re-run the render script
-  (`worktree-manager\.venv\Scripts\python.exe
-  worktree-manager\scripts\picker-snapshot\venue-preview\render_venue_preview.py
-  --out-dir worktree-manager\scripts\picker-snapshot\venue-preview\out`,
-  both venvs already built in this worktree) and diff the fresh output
-  against the committed `design-previews/*.png` — a deliberate difference
-  is fine (update the committed copies + note why in the Journal); an
-  unnoticed one is exactly the drift this comparison exists to catch.
+  `ThomasMichon/copilot-extensions#3253` (umbrella), `#3254`/`#3255`
+  (closed -- Phase 1/2 landed), `#3256`-`#3258` (Phase 3-5, open).
+- **Phase 1 complete and merged (PR #3219):** wired `claims_summary`/
+  `entry.subtitle` into the Codespaces pivot and added the agent-bridge
+  live-session join (`sess` column + transient-activity subtitle half).
+  See the Plan's own Phase 1 checklist for full detail.
+- **Phase 2 complete and merged (PR #3268):** brought the Containers pivot
+  to the same fidelity (columns/group/worktree cross-link/subtitle/claims/
+  live-session join, gated Stop/Remove actions) via a new
+  `agent_containers/picker.py` module. See the Plan's own Phase 2
+  checklist for full detail.
+- **Phase 3 complete (2026-09-22), pending its own PR:** added the
+  picker-engine `open-venue` internal action (worktree-manager) backing
+  both pivots' new Open action -- see the Plan's own Phase 3 checklist and
+  the Journal below for the full grounding (the real gap was
+  picker-engine-side: no existing action kind could hand off a genuine
+  interactive TTY to a remote venue). 12 new tests; full worktree-manager
+  suite green (1 pre-existing unrelated flake confirmed by isolated
+  re-run) plus the real-manifest contract test.
+- **Immediate next step:** open Phase 3's own PR from
+  `tmichon-cloud1-win-20260922-022834-a59b` (create-pr, mirror #3219/
+  #3268's flow), close sub-issue `#3256` on landing, then start Phase 4
+  (driving-worktree navigation + odsp-web PR auto-claim) in a fresh
+  worktree. If any implementation-phase session changes a row/menu's
+  visual shape, re-run the render script (`worktree-manager\.venv\Scripts\
+  python.exe worktree-manager\scripts\picker-snapshot\venue-preview\
+  render_venue_preview.py --out-dir worktree-manager\scripts\picker-snapshot
+  \venue-preview\out`) and diff the fresh output against the committed
+  `design-previews/*.png` — a deliberate difference is fine (update the
+  committed copies + note why in the Journal); an unnoticed one is exactly
+  the drift this comparison exists to catch. Note: this fresh worktree's
+  `worktree-manager/.venv` and its `svg2png.mjs` node deps are **not**
+  pre-built here (unlike the Phase 0 worktree) -- run `uv sync --extra dev`
+  and `npm install` under `worktree-manager/scripts/picker-snapshot/`
+  first if you need to actually render, not just validate manifests.
 
 ## Context
 
@@ -558,10 +551,53 @@ trying to scope it as a manifest change.
       (confirmed present pre-change via `git stash`/`git stash pop`).
 
 ### Phase 3 — Open into a muxed session over SSH
-- [ ] Add an Open action to both pivots (neither has one today), wired to
+- [x] Add an Open action to both pivots (neither has one today), wired to
       the existing `mux_session_name` reattach mechanics for a live row.
-- [ ] Confirm behavior parity with the Worktrees pane's own Open/resume
+      **Done (2026-09-22):** grounded against the newly-built
+      `agent-codespaces copilot <name>` / `agent-containers copilot <name>`
+      verbs (`copilot_venue.py` + the shared vendored `venue_copilot` lib) --
+      these already implement reserve/ensure-mux/attach-or-embody uniformly
+      for a live *or* dormant venue, so no new remote-side plumbing was
+      needed. The real gap was **picker-engine-side**: a plain manifest
+      `run` action executes its subprocess in a background thread and
+      captures output (no real TTY), and the existing `open-cli` internal
+      action explicitly rejects any row whose `source_kind` isn't
+      `"machine-ssh"` (a local/SSH worktree only) -- neither could carry an
+      interactive remote Copilot session. Added a new picker-engine
+      internal action, `open-venue` (worktree-manager, not
+      agent-codespaces/agent-containers): `_task_action_ctx` now derives
+      `ctx["provider"]` from the registered pivot's own `list` argv[0]
+      (`"agent-codespaces"`/`"agent-containers"` -- no hardcoded provider
+      list); `_internal_pivot_action`'s new `_open_venue` builds an
+      `{"action": "open-venue", "provider", "venue", "title"}` decision and
+      exits the picker (the same exit-and-launch plumbing `open-cli` uses);
+      `worktree_manager/__main__.py`'s `_run_production_picker` maps it onto
+      a new `launcher.open_venue(provider, venue)` (resolves the provider
+      binstub via `PATH`, then `subprocess.run([binstub, "copilot", venue])`
+      with inherited stdio -- the real-TTY handoff). Wired
+      `{"label": "Open", "kind": "internal", "verb": "open-venue"}` into
+      both `pivots/agent-codespaces.json` and `pivots/agent-containers.json`
+      -- **ungated** (no `when` clause): the venue's own `copilot` verb
+      already handles a live-or-dormant venue uniformly, so there is no
+      separate "live-only" case to gate on. `worktree_manager/__main__.py`
+      was already at its own module-size-baseline ceiling (zero headroom,
+      same class of constraint Phase 2 hit in agent-containers) --
+      extracted a genuinely duplicated `machine`/`environment` resolution
+      (the "resume"/"new" branches built the identical pair inline) into a
+      new `_remote_machine_env` helper to make real room, rather than
+      widening the baseline from this PR's own diff. 12 new tests across
+      `test_picker_tui.py`/`test_production_picker_transplant.py`/
+      `test_launcher.py`; full worktree-manager suite green (1093 tests,
+      1 pre-existing unrelated flake confirmed by isolated re-run) plus
+      `test_plugin_contracts.py::test_real_checkout_manifests_match_contract`
+      (validates both real manifests against the pivot-registry contract).
+- [x] Confirm behavior parity with the Worktrees pane's own Open/resume
       action for a row with no live session (resumable but dormant venue).
+      **Confirmed by design, not just observation:** `venue_copilot
+      .run_venue_copilot` reserves + ensures the mux + attaches-or-embodies
+      unconditionally -- there is no live/dormant branch in the verb itself,
+      so parity is structural (the same command runs either way), not a
+      coincidence of testing.
 
 ### Phase 4 — Driving-worktree navigation + odsp-web PR auto-claim
 - [ ] Implement the reserved driving-worktree mark on both pivots (stat
@@ -623,6 +659,41 @@ trying to scope it as a manifest change.
 
 ## Journal
 
+- **2026-09-22 (latest+10)** — Merged PR #3268 (Phase 2), closed `#3255`,
+  and started Phase 3 in a fresh worktree after the operator reported
+  `agent-codespaces copilot`/`agent-containers copilot` were now built.
+  Grounded them against `copilot_venue.py` + the vendored `venue_copilot`
+  lib: both already implement reserve/ensure-mux/attach-or-embody
+  uniformly for a live *or* dormant venue -- confirming the vision's
+  "behavior parity with a dormant venue" requirement structurally, not
+  just by testing. The real gap for Phase 3 turned out to be
+  **picker-engine-side**, not remote-side: a plain manifest `run` action
+  executes in a background thread with captured output (no real TTY), and
+  the existing `open-cli` internal action explicitly rejects any row whose
+  `source_kind` isn't `"machine-ssh"` -- neither mechanism could hand off
+  an interactive remote Copilot session. Added a new internal action,
+  `open-venue`, to **worktree-manager** (not agent-codespaces/
+  agent-containers): `_task_action_ctx` derives `ctx["provider"]` from the
+  registered pivot's own `list` argv[0] (no hardcoded provider list);
+  `_open_venue` builds an `{"action": "open-venue", "provider", "venue"}`
+  decision and exits the picker (`open-cli`'s own exit-and-launch
+  plumbing); `worktree_manager/__main__.py` maps it onto a new
+  `launcher.open_venue(provider, venue)` (resolve the binstub via `PATH`,
+  `subprocess.run([binstub, "copilot", venue])` with inherited stdio for
+  the real-TTY handoff). Wired `{"kind": "internal", "verb": "open-venue"}`
+  as an **ungated** "Open" action into both real pivot manifests (no
+  `when` clause needed -- the venue command already handles live-or-dormant
+  uniformly). Hit the same module-size-baseline-at-zero-headroom wall
+  Phase 2 hit, this time in `worktree_manager/__main__.py`: extracted a
+  genuinely duplicated `machine`/`environment`-resolution block (identical
+  inline in both the "resume" and "new" decision branches) into a new
+  `_remote_machine_env` helper, made real room instead of widening the
+  baseline. 12 new tests (`test_picker_tui.py`/
+  `test_production_picker_transplant.py`/`test_launcher.py`); full
+  worktree-manager suite green (1093 tests, 1 pre-existing unrelated flake
+  confirmed passing in isolation) plus
+  `test_plugin_contracts.py::test_real_checkout_manifests_match_contract`
+  validating both edited real manifests. Not yet landed as its own PR.
 - **2026-09-22 (latest+9)** — Merged PR #3219 (Phase 0 + Phase 1) after
   resolving version-field merge conflicts with `origin/main` (agent-worktrees
   had independently advanced past this branch's own Phase 0 bump; a
