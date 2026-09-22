@@ -260,13 +260,13 @@ Verbatim from the operator:
             existing monkeypatch-heavy test seams remain behavior-identical.
             Bumped every consuming plugin:
             `agent-bridge` `0.4.0-dev537`, `agent-codespaces`
-            `0.4.0-dev150`, `agent-containers` `0.1.2-dev151`,
+            `0.4.0-dev151`, `agent-containers` `0.1.2-dev152`,
             `agent-dispatch` `0.1.2-dev164`, `agent-index` `0.1.0-dev195`,
             `agent-logger` `0.1.2-dev30`, `agent-machines`
             `0.1.0-dev132`, `agent-mcp` `0.2.0-dev133`, `agent-ssh`
             `0.1.0-dev100`, `agent-vault` `0.1.0-dev111`, and
-            `agent-worktrees` `1.5.5-dev229` (with marketplace
-            `metadata.version` `1.7.7-dev197`).
+            `agent-worktrees` `1.5.5-dev230` (with marketplace
+            `metadata.version` `1.7.7-dev198`).
 
 ### Phase 3 — cross-language cap
 - [ ] Design what "module size" means for `.sh`/`.ps1`/`.ts` (line count vs.
