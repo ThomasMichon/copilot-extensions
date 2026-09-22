@@ -239,3 +239,49 @@ def test_release_claim_cmd_disabled_env_is_noop(monkeypatch, capsys):
     assert rc == 0
     assert called["release"] is False
     assert "disabled" in capsys.readouterr().out.lower()
+
+
+def test_leases_json_filters_by_owner(monkeypatch, capsys):
+    """The read-only query surface a caller (e.g. `agent-worktrees finalize`'s
+    claim-WARNING step) uses to discover which CodeSpaces a worktree still
+    holds -- never releases anything itself."""
+    leases = [
+        _fake_lease("cs-a", "/wt/a"),
+        _fake_lease("cs-b", "/wt/b"),
+    ]
+    monkeypatch.setattr(lease_mod, "list_leases", lambda: leases)
+
+    rc = main(["leases", "--owner", "/wt/a", "--json"])
+
+    assert rc == 0
+    import json
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == [
+        {"codespace": "cs-a", "owner": "/wt/a", "kind": "claim", "host": "h", "pid": 1},
+    ]
+
+
+def test_leases_json_without_owner_lists_everything(monkeypatch, capsys):
+    leases = [_fake_lease("cs-a", "/wt/a"), _fake_lease("cs-b", "/wt/b")]
+    monkeypatch.setattr(lease_mod, "list_leases", lambda: leases)
+
+    rc = main(["leases", "--json"])
+
+    assert rc == 0
+    import json
+
+    payload = json.loads(capsys.readouterr().out)
+    assert {p["codespace"] for p in payload} == {"cs-a", "cs-b"}
+
+
+def test_leases_json_empty(monkeypatch, capsys):
+    monkeypatch.setattr(lease_mod, "list_leases", lambda: [])
+
+    rc = main(["leases", "--owner", "/wt/nonexistent", "--json"])
+
+    assert rc == 0
+    import json
+
+    assert json.loads(capsys.readouterr().out) == []
+

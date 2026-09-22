@@ -516,7 +516,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     release_p.add_argument("target", help="CodeSpace name or effort name")
 
-    sub.add_parser("leases", help="Show active CodeSpace leases")
+    leases_p = sub.add_parser("leases", help="Show active CodeSpace leases")
+    leases_p.add_argument(
+        "--owner", dest="owner", default=None,
+        help="Only show leases/claims owned by this worktree/effort",
+    )
+    leases_p.add_argument(
+        "--json", dest="json_output", action="store_true",
+        help="Emit machine-readable JSON instead of the human table",
+    )
 
     # --- claim / release-claim (#897: exclusive, worktree-keyed control) ------
     # The process-to-process seam the agent-bridge daemon shells out to (it
@@ -919,7 +927,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "release":
             return _cmd_release(args)
         if args.command == "leases":
-            return _cmd_leases()
+            return _cmd_leases(args)
         if args.command == "claim":
             return _cmd_claim(args)
         if args.command == "release-claim":
@@ -3936,11 +3944,37 @@ def _hold_is_self(owner: str | None, l2_holder: str | None,
     return False
 
 
-def _cmd_leases() -> int:
-    """Show active CodeSpace leases (advisory borrows and #897 claims)."""
+def _cmd_leases(args: argparse.Namespace | None = None) -> int:
+    """Show active CodeSpace leases (advisory borrows and #897 claims).
+
+    ``--owner`` filters to one worktree/effort's own leases/claims; ``--json``
+    emits a machine-readable list instead of the human table -- the read-only
+    query surface a caller (e.g. ``agent-worktrees finalize``'s claim-warning
+    step) uses to discover exactly which CodeSpaces a worktree still has
+    claimed, WITHOUT releasing anything itself.
+    """
     from .lease import list_leases
 
     leases = list_leases()
+    owner_filter = getattr(args, "owner", None) if args is not None else None
+    if owner_filter:
+        leases = [
+            lease for lease in leases
+            if (lease.worktree or lease.effort) == owner_filter
+        ]
+    json_output = bool(getattr(args, "json_output", False)) if args is not None else False
+    if json_output:
+        print(json.dumps([
+            {
+                "codespace": lease.codespace,
+                "owner": lease.worktree or lease.effort,
+                "kind": "claim" if lease.worktree else "borrow",
+                "host": lease.host,
+                "pid": lease.pid,
+            }
+            for lease in leases
+        ]))
+        return 0
     if not leases:
         print("No active leases.")
         return 0
