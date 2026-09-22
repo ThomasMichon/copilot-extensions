@@ -26,6 +26,8 @@ import {
   constants as fsConstants,
   fstatSync,
   openSync,
+  renameSync,
+  unlinkSync,
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -131,47 +133,72 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
             fd = candidate;
             if (fstatSync(fd).size >= MAX_LOG_BYTES) {
               // See MAX_LOG_BYTES above: bound growth from routine,
-              // expected signal churn (not just crashes) by resetting an
-              // overgrown file back to empty before this process's first
-              // write. A plain ftruncateSync() on this already-open
-              // O_APPEND descriptor fails with EPERM on Windows
-              // (empirically confirmed: Windows refuses to truncate a
-              // handle opened in append mode) -- so instead, close it,
-              // reopen the same path to reset it, then reopen again in the
-              // normal append mode this function keeps for every later
-              // write. Both reset-path opens keep the exact same
-              // O_NOFOLLOW/O_NONBLOCK protective flags as the very first
-              // open above (closing the original fd reopens a TOCTOU
-              // window: `logPath` could have been replaced with a symlink
-              // or FIFO in between), and each new fd is independently
-              // revalidated with `isPrivateRegularFile()` -- a reset must
-              // not silently downgrade to writing through an
-              // attacker-substituted path just because the *original*
-              // open already proved trustworthy. `fd` is cleared first so
-              // that if any step here throws (propagating to the catch
-              // below, which marks this process as given up on
-              // diagnostics), a later call never risks reusing an
-              // already-closed descriptor.
+              // expected signal churn (not just crashes) by rotating an
+              // overgrown file out of the way before this process's first
+              // write. This is a rotate (rename the oversized file aside,
+              // then create a fresh one), not an in-place truncate, for two
+              // independent reasons:
+              //
+              // 1. Safety: a plain ftruncateSync() on this already-open
+              //    O_APPEND descriptor fails with EPERM on Windows
+              //    (empirically confirmed), and a naive close+reopen-with-
+              //    O_TRUNC-on-the-same-path sequence reopens a TOCTOU
+              //    window where `logPath` could be replaced with a symlink
+              //    or FIFO between the close and the reopen.
+              // 2. Concurrency: this file is machine-global and multiple
+              //    context-handoff processes can each independently decide
+              //    it is oversized at nearly the same time. An in-place
+              //    reset (truncate, or open-with-O_TRUNC on the SAME path)
+              //    is not serialized across processes -- a second process's
+              //    reset can erase the crash entry a first process just
+              //    finished appending after its own reset, silently losing
+              //    the very diagnostic this module exists to capture.
+              //    `renameSync()` is atomic on both POSIX and Windows
+              //    (empirically verified on both): whichever process's
+              //    rename actually succeeds detaches the oversized file
+              //    from `logPath` entirely and instantly, so a second
+              //    process's own rename attempt either loses the race
+              //    (`ENOENT` -- the path is already gone; it just falls
+              //    through to creating a fresh file at `logPath`, the same
+              //    outcome as if it had never needed to reset at all) or
+              //    wins it and gets its own fresh file to append into --
+              //    there is no window where one process's completed reset
+              //    can be clobbered by another's.
+              //
+              // `fd` is cleared first so that if any step here throws
+              // (propagating to the catch below, which marks this process
+              // as given up on diagnostics), a later call never risks
+              // reusing an already-closed descriptor.
               closeSync(fd);
               fd = undefined;
-              const resetFlags =
-                fsConstants.O_CREAT |
-                fsConstants.O_WRONLY |
-                fsConstants.O_TRUNC |
-                (fsConstants.O_NOFOLLOW ?? 0) |
-                (fsConstants.O_NONBLOCK ?? 0);
-              const truncater = openSync(logPath, resetFlags, 0o600);
-              if (process.platform !== "win32" && !isPrivateRegularFile(truncater)) {
-                closeSync(truncater);
-                throw new Error("crash log path is no longer trustworthy after reset");
+              const staleSidecar = `${logPath}.stale-${process.pid}-${Date.now()}`;
+              try {
+                renameSync(logPath, staleSidecar);
+              } catch {
+                // ENOENT (a concurrent process already rotated this path
+                // away) is expected and fine -- either way, the open below
+                // creates or reuses whatever now exists at `logPath` with
+                // the same protective flags and validation as the very
+                // first open, never trusting the rename to have happened.
               }
-              closeSync(truncater);
+              // Same OPEN_FLAGS (O_NOFOLLOW/O_NONBLOCK included) as the
+              // very first open above -- the reset path must not downgrade
+              // protection just because the *original* open already proved
+              // trustworthy.
               const reopened = openSync(logPath, OPEN_FLAGS, 0o600);
               if (process.platform !== "win32" && !isPrivateRegularFile(reopened)) {
                 closeSync(reopened);
-                throw new Error("crash log path is no longer trustworthy after reopen");
+                throw new Error("crash log path is no longer trustworthy after reset");
               }
               fd = reopened;
+              try {
+                unlinkSync(staleSidecar);
+              } catch {
+                // Best-effort cleanup only -- an orphaned `.stale-*`
+                // sidecar (e.g. if the rename above lost its race and this
+                // process never actually created one) must never block the
+                // diagnostic write that follows.
+              }
             }
           } else {
             closeSync(candidate);
@@ -266,17 +293,35 @@ export function installEmergencyDiagnostics(emergencyLog) {
   // diagnostic logging itself can never become a second crash cause -- but
   // installing these listeners at all suppresses Node's own default
   // uncaught-exception report to stderr. Put those two together and a
-  // logging failure on an uncaughtException/unhandledRejection would leave
-  // NEITHER a file entry NOR any stderr output: the exact silent-exit
-  // symptom this module exists to diagnose, just moved one layer down. This
-  // wrapper checks emergencyLog()'s own success/failure return and, only on
-  // failure, falls back to a best-effort synchronous stderr write (itself
-  // wrapped in try/catch, so a failing stderr write -- e.g. a closed/broken
-  // fd 2 -- still cannot crash the handler that is already mid-failure).
+  // logging failure would leave NEITHER a file entry NOR any stderr output:
+  // the exact silent-exit symptom this module exists to diagnose, just
+  // moved one layer down. This wrapper checks emergencyLog()'s own
+  // success/failure return and, only on failure, falls back to a
+  // best-effort write straight to fd 2 (itself wrapped in try/catch, so a
+  // failing write -- e.g. a closed/broken stderr -- still cannot crash the
+  // handler that is already mid-failure). `writeSync(2, ...)` is used
+  // rather than `process.stderr.write()`: the latter is not guaranteed to
+  // complete synchronously when fd 2 is a pipe (as it is when the CLI
+  // captures this extension's stderr) -- every caller here terminates
+  // immediately afterward (`process.exit()` or a re-raised signal), so an
+  // async-buffered write could still be lost, reproducing the exact
+  // silent-failure this fallback exists to prevent.
+  //
+  // `alreadyFellBack` suppresses a second, redundant stderr line: once the
+  // log file itself has failed to open/write for this process,
+  // `emergencyLog()` short-circuits to the same failure for every
+  // subsequent call too (see `openFailed` above) -- so the `exit` handler
+  // below (which always fires after an uncaughtException/unhandledRejection
+  // handler's own `process.exit()`) would otherwise print its own duplicate
+  // fallback for the same underlying failure.
+  let alreadyFellBack = false;
   const logOrFallback = (label, detail) => {
     if (emergencyLog(label, detail)) return;
+    if (alreadyFellBack) return;
+    alreadyFellBack = true;
     try {
-      process.stderr.write(
+      writeSync(
+        2,
         `context-handoff emergency diagnostics (log write failed): ${label}: ${detail}\n`,
       );
     } catch {
@@ -291,24 +336,32 @@ export function installEmergencyDiagnostics(emergencyLog) {
     logOrFallback("unhandledRejection", `ready=${ready} ${describeFailure(reason)}`);
     process.exit(1);
   };
-  // Only a non-zero exit is logged. This module's own extension.mjs is
-  // dynamically re-imported many times over a machine's lifetime -- once
-  // per discovery pass, plus once per reconnect/resume -- and the ordinary
-  // outcome of nearly all of those forks is a routine `process.exit(0)`.
-  // Logging every one of them would make this fixed, unrotated,
-  // machine-global scratch file grow without bound over a long-lived host
-  // (the existing lifecycle-logging pattern -- see
-  // docs/patterns/lifecycle-activity-logging.md -- deliberately bounds or
-  // reboot-volatilizes every tier it defines; this file has neither
+  // A routine `code=0` exit is never logged (see the rationale above the
+  // module's own `code !== 0` check inside `emergencyLog`'s callers): this
+  // module's own extension.mjs is dynamically re-imported many times over a
+  // machine's lifetime -- once per discovery pass, plus once per
+  // reconnect/resume -- and the ordinary outcome of nearly all of those
+  // forks is a routine `process.exit(0)`. Logging every one of them would
+  // make this fixed, unrotated, machine-global scratch file grow without
+  // bound over a long-lived host (the existing lifecycle-logging pattern --
+  // see docs/patterns/lifecycle-activity-logging.md -- deliberately bounds
+  // or reboot-volatilizes every tier it defines; this file has neither
   // property, so it must not record routine, uninteresting events at all).
   // A normal exit carries no diagnostic value on its own here: the
   // interesting signal is the *presence* of an uncaughtException/
-  // unhandledRejection/signal line, not the routine absence of one. Not
-  // itself routed through logOrFallback(): a routine, uninteresting event
-  // has no fallback message worth ever printing to stderr, unlike an actual
-  // failure above.
+  // unhandledRejection/signal line, not the routine absence of one.
+  //
+  // A *non-zero* exit IS routed through the same `logOrFallback()` as every
+  // other failure path above: a process can terminate with a non-zero code
+  // via some path this module never intercepts (a bare `process.exit(1)`
+  // elsewhere, for instance) without ever raising an exception or signal --
+  // if the log write also fails on that path, it must not go completely
+  // silent either. `alreadyFellBack` (see above) keeps this from ever
+  // printing a second, redundant fallback line when an
+  // uncaughtException/unhandledRejection handler already reported the same
+  // underlying log-write failure moments earlier in this same process.
   const onExit = (code) => {
-    if (code !== 0) emergencyLog("exit", `code=${code} ready=${ready}`);
+    if (code !== 0) logOrFallback("exit", `code=${code} ready=${ready}`);
   };
   const signalHandlers = new Map();
   for (const signal of SIGNALS) {

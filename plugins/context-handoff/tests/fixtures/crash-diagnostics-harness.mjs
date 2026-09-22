@@ -17,6 +17,15 @@ switch (scenario) {
   case "clean-exit":
     process.exit(0);
     break;
+  case "exit-1-directly":
+    // Regression case: a process can terminate with a non-zero code
+    // without ever raising an exception, rejection, or signal (e.g. a bare
+    // process.exit(1) elsewhere in the real extension). onExit() must still
+    // route this through the same log-or-stderr-fallback path as every
+    // other failure case, not silently allow the file to go unwritten with
+    // no fallback either.
+    process.exit(1);
+    break;
   case "uncaught-exception":
     setImmediate(() => {
       throw new Error("boom-uncaught");

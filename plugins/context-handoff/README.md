@@ -395,13 +395,39 @@ This file is:
   recording a legitimate signal (which would defeat the entire "distinguish
   a routine stop from a crash" purpose of this file), each process checks
   the file's size once, at its own first write: if it has grown to 1 MiB or
-  more, it is truncated back to empty before that write proceeds. This
-  bounds growth across the many separate short-lived processes that are
-  the actual growth vector (though not a single pathological process
-  logging in a tight loop -- not a real shape here, since at most a
-  handful of entries are ever logged per process lifetime). A truncation
-  discards whatever history preceded it; treat this file as a rolling
-  window, not a permanent record.
+  more, it is **rotated** -- renamed aside to a per-process, uniquely-named
+  sidecar and immediately deleted again once a fresh file is safely opened
+  in its place -- rather than truncated in place. This matters because the
+  file is shared by every extension instance on the machine (see the next
+  bullet): an in-place reset is not serialized across processes, so a
+  second process's own reset could otherwise erase the crash entry a first
+  process just finished appending moments earlier. Renaming is atomic on
+  both POSIX and Windows, so whichever process's rename actually succeeds
+  detaches the oversized file from this path instantly; a second process's
+  own rename attempt then either loses the race (the path is already gone,
+  so it just opens/creates a fresh file, the same outcome as if it had
+  never needed to reset at all) or wins it and gets its own fresh file --
+  there is no window where one process's completed reset can be clobbered
+  by another's. This bounds growth across the many separate short-lived
+  processes that are the actual growth vector (though not a single
+  pathological process logging in a tight loop -- not a real shape here,
+  since at most a handful of entries are ever logged per process lifetime).
+  A rotation discards whatever history preceded it; treat this file as a
+  rolling window, not a permanent record.
+- **A failed file write falls back to a best-effort line on stderr, not
+  silence.** Since these listeners suppress Node's own default
+  uncaught-exception report, a log write that fails for any reason
+  (missing directory, full disk, an untrusted pre-existing path, ...) would
+  otherwise leave neither a file entry nor any stderr output -- exactly the
+  original silent-exit symptom this module exists to diagnose, just moved
+  one layer down. Look for a
+  `context-handoff emergency diagnostics (log write failed): <label>: ...`
+  line on stderr in that case; it covers every failure path here,
+  including a plain non-zero `process.exit()` with no preceding
+  exception/rejection/signal, and is deliberately printed at most once per
+  process (a later handler -- e.g. the `exit` event that always follows an
+  `uncaughtException` handler's own `process.exit(1)` -- does not repeat
+  the same underlying failure as a second, redundant line).
 - **Shared by every extension instance on the machine -- correlate by `pid=`
   and timestamp before drawing a conclusion.** This is one fixed,
   machine-global path, and multiple `context-handoff` processes (across

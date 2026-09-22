@@ -232,6 +232,39 @@ test(
       assert.equal(readFileSync(logPath, "utf-8"), "not ours\n");
       assert.equal(after.mode, before.mode);
       assert.match(result.stderr, /emergency diagnostics \(log write failed\): uncaughtException/);
+      // The 'exit' event still fires after uncaughtException's own
+      // process.exit(1) call, and its own emergencyLog("exit", ...) would
+      // also fail here (the file write is refused for this whole process,
+      // not just once) -- alreadyFellBack must suppress a second, redundant
+      // fallback line for the same underlying failure.
+      const fallbackLines = result.stderr
+        .split("\n")
+        .filter((line) => line.includes("emergency diagnostics (log write failed)"));
+      assert.equal(fallbackLines.length, 1, `expected exactly one fallback line, got: ${JSON.stringify(fallbackLines)}`);
+    });
+  },
+);
+
+// A plain non-zero process.exit(1) with no preceding exception/rejection/
+// signal is a real path onExit() must still cover: nothing else logs or
+// falls back for this process before onExit() itself runs, so if the log
+// write also fails here, the failure would otherwise be completely silent
+// (neither a file entry nor stderr) -- the exact symptom this module exists
+// to diagnose. Reuses the same untrusted-pre-existing-file setup as the
+// case above to force the log write to fail.
+test(
+  "a non-zero exit with no preceding failure still falls back to stderr when the log write fails",
+  { skip: process.platform === "win32" || !RUN_STRESS_CASES },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      writeFileSync(logPath, "not ours\n", { mode: 0o644 });
+      chmodSync(logPath, 0o644);
+      const result = spawnSync(process.execPath, [harness, "exit-1-directly", logPath], {
+        encoding: "utf-8",
+      });
+      assert.equal(result.status, 1);
+      assert.equal(readFileSync(logPath, "utf-8"), "not ours\n");
+      assert.match(result.stderr, /emergency diagnostics \(log write failed\): exit: code=1/);
     });
   },
 );
