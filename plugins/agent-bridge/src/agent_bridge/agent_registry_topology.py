@@ -75,6 +75,8 @@ def load_agent_registry(
     path: str | Path, *, strict: bool = False,
 ) -> dict[str, AgentConfig]:
     """Load and parse an agent registry file (acp-agents.json)."""
+    from . import agent_registry as compat
+
     registry_path = Path(path).expanduser()
     if not registry_path.exists():
         message = f"agent registry not found at {registry_path}"
@@ -84,7 +86,7 @@ def load_agent_registry(
         return {}
     try:
         data = json.loads(registry_path.read_text(encoding="utf-8")) or {}
-        registry = parse_agent_registry(data)
+        registry = compat.parse_agent_registry(data)
         log.info("Loaded %d agents from %s", len(registry), registry_path)
         return registry
     except (OSError, json.JSONDecodeError, AttributeError, TypeError, ValueError) as exc:
@@ -415,6 +417,8 @@ def derive_topology_agents(
     default_env: dict[str, str] | None = None,
 ) -> dict[str, AgentConfig]:
     """Synthesize the agent roster from topology (machines × repos × envs)."""
+    from . import agent_registry as compat
+
     out: dict[str, AgentConfig] = {}
 
     def _machine_metadata(machine: MachineConfig) -> str:
@@ -435,7 +439,7 @@ def derive_topology_agents(
             for env in machine.ssh_environments:
                 if not (_is_loopback(machine, env) or machine.ssh_ready):
                     continue
-                name = _short_machine_agent_name(machine, env)
+                name = compat._short_machine_agent_name(machine, env)
                 if name in out:
                     name = f"{name}-{(env.name or '').lower()}"
                 out[name] = AgentConfig(
@@ -457,7 +461,7 @@ def derive_topology_agents(
         if delegate != "agent-bridge":
             continue
         for short in repo_machines:
-            machine = _match_machine_shortname(machines, short)
+            machine = compat._match_machine_shortname(machines, short)
             if not machine:
                 continue
             if local_machine and machine.key == local_machine.key:

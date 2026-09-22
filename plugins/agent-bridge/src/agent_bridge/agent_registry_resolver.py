@@ -20,7 +20,6 @@ from .agent_registry_namespace import (
     NamespaceResolver,
     RestrictedCliNamespaceResolver,
 )
-from .agent_registry_topology import _split_repo_venue
 from .cold_store_sources import ColdStoreProviderRegistry
 from .provider_sources import ProviderManifest, scan_provider_registry
 from .topology import MachineConfig, SshEnvironment
@@ -299,6 +298,8 @@ class AgentResolver:
         self, agent_name: str, sender_repo: str | None = None,
     ) -> SpawnTarget:
         """Resolve an agent name to a SpawnTarget (async path)."""
+        from . import agent_registry as compat
+
         self.refresh_provider_resolvers()
         ns = self._parse_namespaced_agent(agent_name)
         if ns:
@@ -313,7 +314,7 @@ class AgentResolver:
             await resolver.ensure_ready(name)
             return await self._resolve_with_plugins(resolver, name)
 
-        repo, venue = _split_repo_venue(agent_name)
+        repo, venue = compat._split_repo_venue(agent_name)
         if repo is not None:
             static_name = self.canonical_agent_name(agent_name)
             if static_name:
