@@ -1584,7 +1584,7 @@ the Phase 0 runbook, picked up as capacity allows.
   (`health`, `installer-readiness`, `print-endpoint`), while leaving
   `__main__.py` as the composition root plus the compatibility surface the
   existing tests and sibling modules import/monkeypatch. Net result for the
-  parent module: `__main__.py` shrank **5,046 -> 4,357** lines, and the new
+  parent module: `__main__.py` shrank **5,050 -> 4,357** lines, and the new
   sibling stays comfortably under the 1,000-line cap.
 - The key design constraint was the same one this effort already learned in
   `agent-bridge/__main__.py` and `agent-worktrees/__main__.py`: **moved

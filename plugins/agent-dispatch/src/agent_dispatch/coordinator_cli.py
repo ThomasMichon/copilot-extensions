@@ -37,6 +37,8 @@ def _proxy(name: str):
 
 
 _emit = _proxy("_emit")
+_ORIGINAL_CLIENT_TOKEN = _config.client_token
+_ORIGINAL_CONFIG_CLASS = _config.Config
 
 
 def _live_local_coordinator(**kwargs) -> bool:
@@ -57,11 +59,31 @@ def _core_helper(name: str, local):
 
 
 def _client_token_value() -> str | None:
-    """Honor ``agent_dispatch.__main__.client_token`` monkeypatches."""
+    """Honor both config-level and ``__main__``-level client-token patches."""
 
     cli = _resolve_cli_module()
-    provider = getattr(cli, "client_token", _config.client_token)
-    return provider()
+    provider = getattr(cli, "client_token", None)
+    if (
+        callable(provider)
+        and provider is not _ORIGINAL_CLIENT_TOKEN
+        and provider is not _config.client_token
+    ):
+        return provider()
+    return _config.client_token()
+
+
+def _config_class():
+    """Honor an explicit ``agent_dispatch.__main__.Config`` compatibility patch."""
+
+    cli = _resolve_cli_module()
+    candidate = getattr(cli, "Config", None)
+    if (
+        callable(candidate)
+        and candidate is not _ORIGINAL_CONFIG_CLASS
+        and candidate is not _config.Config
+    ):
+        return candidate
+    return _config.Config
 
 
 def _federation_rendezvous(args: argparse.Namespace):
@@ -168,7 +190,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         )
         return 2
     _reroot_serve_cwd()
-    cfg = _config.Config(
+    cfg = _config_class()(
         host=_resolve_serve_host(args, base),
         port=args.port or base.port,
         db_path=args.db or base.db_path,
