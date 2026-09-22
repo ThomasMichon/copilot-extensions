@@ -99,6 +99,32 @@ def test_run_tick_is_idempotent():
     assert ids_second <= ids_first
 
 
+def test_run_tick_forwards_payload_fields():
+    client = FakeClient()
+    spec = {
+        "default_repo": "example.com/acme/widget",
+        "schedules": [
+            {
+                "id": "maintenance",
+                "title": "Maintenance",
+                "interval_seconds": 3600,
+                "payload_inline": '{"script":{"path":"C:\\\\tick.py"}}',
+                "payload_ref": "payload:maintenance",
+                "labels": ["maintenance"],
+            }
+        ],
+    }
+
+    result = schedule.run_tick(client, spec, now=7200.0)
+
+    assert result["errors"] == []
+    assert result["created"]
+    task = result["created"][0]
+    assert task["payload_inline"] == '{"script":{"path":"C:\\\\tick.py"}}'
+    assert task["payload_ref"] == "payload:maintenance"
+    assert task["labels"] == ["maintenance"]
+
+
 def test_run_tick_reports_missing_lane_and_bad_cadence():
     client = FakeClient()
     spec = {

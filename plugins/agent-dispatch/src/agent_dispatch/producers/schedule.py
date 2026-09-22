@@ -34,6 +34,14 @@ Spec shape (JSON)::
           "id": "hourly-health",
           "title": "Sweep service health",
           "interval_seconds": 3600
+        },
+        {
+          "id": "agent-index-maintenance",
+          "title": "Run the agent-index maintenance tick",
+          "repo": "github.com/example/harness",
+          "interval_seconds": 1800,
+          "labels": ["agent-index-maintenance"],
+          "payload_inline": "{\"path\":\"C:\\\\Users\\\\me\\\\.copilot\\\\installed-plugins\\\\copilot-extensions\\\\agent-index\\\\scripts\\\\maintenance_tick.py\"}"
         }
       ]
     }
@@ -146,6 +154,8 @@ def _create_kwargs(schedule: dict[str, Any], repo: str, occ: float) -> dict[str,
     return {
         "repo": repo,
         "prompt": schedule.get("prompt", ""),
+        "payload_ref": schedule.get("payload_ref"),
+        "payload_inline": schedule.get("payload_inline"),
         "proposed": bool(schedule.get("proposed", False)),
         "requires": schedule.get("require", []),
         "affinity": schedule.get("affinity", {}),
