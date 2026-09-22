@@ -51,3 +51,55 @@ def test_parse_missing_host_raises():
     import pytest
     with pytest.raises(RuntimeError, match="Could not parse Host"):
         _CCS._parse_ssh_config("User vscode\n")
+
+
+def test_fetch_gh_config_retries_transient_tunnel_reset(tmp_path, monkeypatch):
+    # A dev-tunnel reset surfaces as rc!=0 with a "forcibly closed" marker; it
+    # must be retried (not raised) so a single reset can't fail the connect.
+    import ssh_manager.codespace_source as mod
+
+    class _R:
+        def __init__(self, returncode, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    calls = []
+
+    def fake_run(args, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            return _R(1, stderr="wsarecv: An existing connection was forcibly closed by the remote host.")
+        return _R(0, stdout=_RAW)
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+    src = _CCS("cs-x", config_dir=tmp_path)
+    raw = src._fetch_gh_config()
+    assert raw == _RAW
+    assert len(calls) == 2  # retried once past the reset
+
+
+def test_fetch_gh_config_raises_on_genuine_error(tmp_path, monkeypatch):
+    import ssh_manager.codespace_source as mod
+    import pytest
+
+    class _R:
+        def __init__(self, returncode, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    calls = []
+
+    def fake_run(args, **kw):
+        calls.append(1)
+        return _R(1, stderr="unknown codespace: not-a-real-cs")
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+    src = _CCS("cs-x", config_dir=tmp_path)
+    with pytest.raises(RuntimeError, match="gh codespace ssh --config failed"):
+        src._fetch_gh_config()
+    assert len(calls) == 1  # a genuine error is not retried
+

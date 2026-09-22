@@ -18,6 +18,7 @@ import logging
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .config_sources import SSHConfig
@@ -105,9 +106,31 @@ class CodespaceConfigSource:
                 )
                 continue
             if result.returncode != 0:
+                # A transient dev-tunnel reset (the ~10% "forcibly closed" /
+                # "error getting tunnel" class) surfaces here as rc!=0 with a
+                # reset marker in stderr -- NOT a genuine config error. Retry it
+                # the same way a cold-start timeout is retried, so a single reset
+                # cannot fail the whole native connect before the ControlMaster
+                # even establishes. Reuses the canonical transient signatures.
+                from .manager import _TRANSIENT_SSH_STDERR
+
+                stderr = (result.stderr or "").strip()
+                if attempt < len(_FETCH_TIMEOUTS) and _TRANSIENT_SSH_STDERR.search(stderr):
+                    log.info(
+                        "gh codespace ssh --config attempt %d/%d hit a transient "
+                        "tunnel reset for %s; retrying: %s",
+                        attempt, len(_FETCH_TIMEOUTS), self._codespace_name,
+                        stderr[:200],
+                    )
+                    last_error = RuntimeError(
+                        f"gh codespace ssh --config failed "
+                        f"(rc={result.returncode}): {stderr}"
+                    )
+                    time.sleep(2.0 * attempt)
+                    continue
                 raise RuntimeError(
                     f"gh codespace ssh --config failed "
-                    f"(rc={result.returncode}): {result.stderr.strip()}"
+                    f"(rc={result.returncode}): {stderr}"
                 )
             return result.stdout
         raise last_error  # type: ignore[misc]
