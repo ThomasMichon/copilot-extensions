@@ -62,9 +62,9 @@
       "key": "open-cli",
       "label": "Open into a CLI session",
       "kind": "internal",
-      "verb": "open-cli",
+      "verb": "embody-cli",
       "when": {"cli_openable": "true"},
-      "description": "PROPOSED — semantics not yet implemented. Opens (or, for Proposed/Queued, creates) this task's worktree into an interactive Copilot CLI session, seeded via --interactive with a succinct prompt: the task's charter, current phase, and its own tooling to move the task's state (complete/abandon/reset-to-proposed/re-queue) as the operator wraps up. The operator drives; the agent's job is to advance the task toward its next phase and keep the task's recorded state honest when the operator is done — never to keep working unattended after the session ends. Never spawns through the pool or a dedicated worker identity — those apply rails (a fixed acting theme/focus/rules) to keep an unattended headless agent on target, which is exactly what the operator does NOT want here: this is deliberately direct, open-ended, user-driven control. Never offered for an embodied task with a LIVE headless agent (Blocked/Started) — CLI and ACP cannot co-drive one session — nor for a Queued task already claimed by a pool."
+      "description": "Runs the task's interactive-embodiment transaction (`agent-dispatch embody --interactive`): Proposed/Queued tasks create or claim a worktree first, Suspended tasks rebind their existing one, then the picker exits into that worktree's normal CLI resume flow. The operator drives; the agent's job is to advance the task toward its next phase and keep the task's recorded state honest when the operator is done — never to keep working unattended after the session ends."
     },
     {
       "key": "kick",

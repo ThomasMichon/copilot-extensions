@@ -101,7 +101,14 @@ def _mock_spawn_ok(monkeypatch, session_id="cli-session-1", worktree_id="wt-inte
 
     def fake_spawn(task_id, *, worker_id, driver, project, worktree_id: str | None = None,
                    seed=None, timeout=None, **kwargs):
-        calls.append({"task_id": task_id, "worktree_id": worktree_id, "seed": seed})
+        calls.append(
+            {
+                "task_id": task_id,
+                "project": project,
+                "worktree_id": worktree_id,
+                "seed": seed,
+            }
+        )
 
         class _Proc:
             returncode = 0
@@ -134,7 +141,7 @@ def _mock_spawn_fail(monkeypatch, *, returncode=1, stderr="boom"):
 
 
 def test_queued_task_claims_launches_and_starts(q, client, monkeypatch):
-    t = q.create("work")
+    t = q.create("work", repo="github.com/example/repo")
     _mock_prepare(monkeypatch)
     calls = _mock_spawn_ok(monkeypatch)
 
@@ -143,6 +150,8 @@ def test_queued_task_claims_launches_and_starts(q, client, monkeypatch):
     assert result["worktree"] == "wt-interactive-1"
     assert result["session"] == "cli-session-1"
     assert result["worker_id"] == "m/wt-interactive-1"
+    assert result["project"] == "repo"
+    assert calls[0]["project"] == "repo"
     back = q.get(t.id)
     assert back.status == Status.STARTED
     assert back.owner == "m/wt-interactive-1"
@@ -164,6 +173,19 @@ def test_proposed_task_is_approved_first(q, client, monkeypatch):
     launch_interactive_embodiment(client, t.id, machine="m")
 
     assert q.get(t.id).status == Status.STARTED
+
+
+def test_explicit_project_override_is_returned(q, client, monkeypatch):
+    t = q.create("work", repo="github.com/example/repo")
+    _mock_prepare(monkeypatch)
+    calls = _mock_spawn_ok(monkeypatch)
+
+    result = launch_interactive_embodiment(
+        client, t.id, machine="m", project="custom-project"
+    )
+
+    assert result["project"] == "custom-project"
+    assert calls[0]["project"] == "custom-project"
 
 
 @pytest.mark.parametrize("status_setter", ["claimed", "started", "completed", "abandoned"])

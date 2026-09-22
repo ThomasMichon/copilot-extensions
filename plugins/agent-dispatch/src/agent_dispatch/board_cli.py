@@ -153,6 +153,27 @@ def _repo_name(value: object) -> str | None:
     return text.rsplit("/", 1)[-1].removesuffix(".git") if text else None
 
 
+def _cli_openable(task: dict) -> bool:
+    """Whether the task is eligible for Phase 7's interactive embodiment.
+
+    Keep this aligned with ``interactive_embody.py``'s own contract:
+    ``proposed`` is implicitly approved first, then only a plain unpooled
+    ``queued`` task and ``suspended`` remain eligible. Anything already
+    embodied (``claimed`` / ``started``), Blocked/awaiting-steer, terminal, or a
+    queued task already assigned to a pool stays false.
+    """
+    if task.get("hold_reason"):
+        return False
+    status = task.get("status")
+    if status == "proposed":
+        return True
+    if status == "suspended":
+        return False if task.get("awaiting_steer") else True
+    if status == "queued":
+        return not task.get("awaiting_steer") and not task.get("pool")
+    return False
+
+
 def _sort_timestamp(task: dict) -> float:
     try:
         return float(task.get("updated_at") or task.get("created_at") or 0)
@@ -256,23 +277,11 @@ def _build(
         # would be offered on a task with no live session to stop.
         row["embodied"] = task.get("status") == "started"
         row["held"] = bool(task.get("hold_reason"))
-        # `cli_openable` is deliberately hard-`False` for now: the manifest's
-        # `open-cli` action is `kind: internal, verb: open-cli`, which the
-        # Picker dispatches to `_open_worktree_cli` -- the GENERIC Worktrees
-        # open-into-CLI handler. That handler assumes an already-existing
-        # worktree row and has no idea about Phase 1 item 3's ownership
-        # transaction (`launch_interactive_embodiment` / `agent-dispatch
-        # embody --interactive`): a Proposed/Queued task has no
-        # `target_worktree` yet (nothing for the generic handler to find),
-        # and a Suspended task's re-embodiment needs the fenced
-        # claim/adopt-owner-session dance the generic handler bypasses
-        # entirely. Wiring a dedicated internal verb that calls
-        # `agent-dispatch embody --interactive` is Phase 7's own scope
-        # ("pure UI wiring, no new backend logic") -- until that lands,
-        # keeping this `False` keeps the action schema-visible (a reviewer
-        # or operator can see it's designed-for) but never actually
-        # reachable, rather than reachable-and-wrong.
-        row["cli_openable"] = False
+        # Phase 7 open-cli wiring: the Picker's dedicated `embody-cli`
+        # internal verb now shells out to `agent-dispatch embody
+        # --interactive`, so this row-level gate can finally mirror the
+        # transaction's own status contract instead of staying hard-false.
+        row["cli_openable"] = _cli_openable(task)
         # `has_charter` similarly stays `False`: nothing today populates a
         # real `charter.*` object (title/status/link/body), so leaving the
         # action ungated would render an empty card. Gating it behind this

@@ -76,89 +76,57 @@ session never has to re-derive "what's already done" from the Journal alone.
   this effort — never run `git stash pop`/`git stash apply` without an
   explicit `stash@{N}` naming the entry you intend, and never clear the
   stash list.
-- **Current phase:** **Phases 0-4 are done.** Phases 0-3 merged to `main`
-  (PR #2913). The Tasks-pivot-freeze bug (filed during #2913 review) is
-  **fully FIXED** end-to-end — PR #2932 plus two same-day follow-ups
-  (`worktree-manager` PRs #2970, #2972) that closed a prewarm-ordering gap
-  and, finally, `_machine_key_map()`'s own uncached `load_config()` call (a
-  real ~7s freeze on the operator's machine) — see the Bug entry and
-  Journal below for the full chain. **Phase 4 (Worktree cross-link) is
-  COMPLETE and MERGED to `main`** (PR #2979, squash-merged 2026-09-20).
+- **Current phase:** **Phases 0-5 and 8 are now done.** Phases 0-3 landed in
+  PR #2913, Phase 4 in PR #2979, the Tasks-pivot-freeze bug was fixed via
+  PRs #2932 / #2970 / #2972, and the accelerator/relay-backed Worktree Status
+  + claims work landed in PRs #3222 and #3234 on 2026-09-21. The operator's
+  2026-09-20 feedback items 1-2 also landed (Started now sorts ahead of
+  Queued; the WT column is styled `bold cyan` so claimed worktrees read at a
+  glance). Item (3) -- "every observed Started task is CLI-embodied" -- was
+  investigated and closed as **not a bug**; the still-open follow-on is a real
+  `embodiment_kind` backend field/badge if the operator still wants the UI
+  distinction.
 
-  **Operator feedback items 1-2 LANDED 2026-09-20** (see "Findings (filed,
-  unscheduled)" right after Phase 4, and the same-dated Journal entry): (1)
-  swapped the Started/Queued group order in both `board_cli.py`'s `GROUPS`
-  tuple and `__main__.py`'s byte-identical `_BOARD_GROUPS`; (2) added a
-  `wt_badge` field, then fixed on Copilot review to instead style the WT
-  column directly (`"style": "bold cyan"`) since this pivot uses `columns`
-  (table mode), where `entry.badges` never renders — so a worktree-bearing
-  Started task is unmistakable at a glance.
-  Item (3) (why every observed Started task is CLI-embodied, none
-  headless-worker-embodied) was **investigated and closed as NOT a bug** —
-  see the Journal entry below for the live-coordinator evidence: headless
-  spawn reservations for review-inbox tasks exist and do reach `started`,
-  but cycle out of it far more readily (card-post -> `suspended`,
-  liveness-`gone` -> requeued to `queued`) than an operator's own
-  interactively-driven CLI session, which stays `started` for the session's
-  whole life — a real snapshot-timing effect, not a spawn-path defect. The
-  follow-on CLI-vs-headless-vs-unknown badge itself remains **unimplemented**
-  (needs a real backend field: today's task list has no per-task signal
-  distinguishing the two without a `spawn_reservations` join, which is Phase
-  1/3/4-sized work of its own — see the Journal for the concrete next step).
-  **Phase 8 (Worktree Status card) is BLOCKED on real architecture work,
-  not a quick fix** — investigated 2026-09-20 (see the Journal entry): a
-  `kind:"card"` action and the Tasks-board's own render path (dispatched
-  through `board_cli.py`) are both documented subprocess-free (or
-  probe-free) on their hot paths, and agent-dispatch tracks only
-  task-scoped liveness signals (`last_liveness`, `activity`/
-  `activity_updated_at`) — it has no worktree/session/git-state/claims
-  authority. Resolved direction (operator decision, same date):
-  `agent-worktrees`'s resident accelerator becomes the coalesced,
-  cached-projection read path for this data — now recorded in its own
-  vision (`visions/plugins/agent-worktrees/README.md`'s new
-  *external-status-consumer-contract* Feature) — but agent-dispatch's own
-  consumer of that cache is still undesigned. **The accelerator itself is
-  now BUILT and landed** (`efforts/active/agent-worktrees-external-status-
-  accelerator/README.md`, all six phases done 2026-09-20): a resident
-  `worktree_status_daemon` (SQLite/WAL-backed cache, background sweep,
-  per-worktree coalescing) is wired into `cmd_status_monitor`, with an
-  in-process reference consumer (`agent-worktrees worktree-status-bundle
-  --worktree <id> [--force-refresh]`) proving the design end-to-end. The cross-venv
-  wire contract (rendezvous discovery via the existing `hook_client.py`/
-  `registry_root.py` precedent + the plain JSON-over-socket protocol) is
-  documented in `docs/patterns/work-coalescing-singleton.md`'s new
-  "Cross-venv consumers" section — read that before designing
-  agent-dispatch's own client. **Next step for whoever picks
-  this up:** design agent-dispatch's own read side against that documented
-  contract (a small stdlib-only client in `board_cli.py`, mirroring its
-  existing HTTP-client-to-agent-dispatch's-own-coordinator pattern); it must
-  stay a
-  non-authoritative, transient view (never a persisted task-row copy of
-  worktree state — a real ownership conflict a Copilot review already
-  flagged once). Do not start Phase 8 by reaching for a per-render
-  subprocess (a socket call to the resident accelerator is fine; a spawned
-  subprocess is not). **Phase 5 (Artifacts/claims) is now BLOCKED on the same
-  prerequisite** (its own claims computation must consume this same
-  not-yet-built projection, per its 2026-09-20 reconciliation note) — it is
-  no longer simply "next in Plan order" until that lands; Phase 6 (Repo
-  filter, independent of claims) is the next unblocked phase if Phase 5
-  can't proceed. The CLI-vs-headless badge, Phase 6, and (once unblocked)
-  Phase 5/Phase 8 are the operator's stated priority — triage/sequence
-  them explicitly with the
-  operator rather than silently defaulting to strict Plan order.
+  **What actually remains is narrower than the stale checklist below made it
+  look.** By live inspection on 2026-09-22, most of Phase 7 had already landed
+  earlier: `worktree-status` already renders a real card, and the
+  Pause/Unpause/Force-stop/Reset-to-Proposed/Abandon actions were already wired
+  to Phase 2's real CLI verbs. The one genuine Phase 7 backend/UI gap was
+  **Open into a CLI session**, because the manifest still pointed at the
+  generic Worktrees `open-cli` internal verb while `board_cli.py` hard-gated
+  `cli_openable` to `False`. That gap is what this session is landing now via a
+  dedicated picker-side `embody-cli` internal verb that shells out to
+  `agent-dispatch embody --interactive`, then exits into the resulting
+  worktree's standard CLI resume flow. Two separate items still remain after
+  that:
+  1. the `charter` card action is **still not live** (`board_cli.py` still
+     populates `has_charter = False`, so the card remains intentionally hidden);
+     and
+  2. the user-pause hold is wired as a control, but **not yet surfaced as its
+     own distinct visible/filterable phase or badge** -- that display work was
+     overspecified in the original Phase 7 bullet and is still open.
 - **Build/test commands** (agent-dispatch package):
   ```powershell
   cd plugins\agent-dispatch
   uv venv .venv                                            # one-time
   uv pip install --python .venv\Scripts\python.exe -e ".[dev]"  # one-time
   .venv\Scripts\python.exe -m pytest tests\test_queue.py -q      # fast, targeted
-  .venv\Scripts\python.exe -m pytest tests -q                    # full suite, ~15-20 min
+  .venv\Scripts\python.exe -m pytest tests -q                    # full suite, ~30 min on this machine
   ```
-  The full suite has 2 known, PRE-EXISTING, unrelated failures on this
-  Windows machine (`test_bootstrap_check_reconcile_opt_in.py::test_sh_*` —
-  a Windows-path-into-bash mangling issue in an unrelated bootstrap-check
-  script test, not touched by this effort). 2879 passed / 2 failed / 8
-  skipped is the expected baseline; anything else is a real regression.
+  **Current verified baseline (2026-09-22):** 3325 passed / 13 skipped / 1
+  warning. The older Windows/bash `test_bootstrap_check_reconcile_opt_in.py`
+  failures noted in prior entries did **not** reproduce under the current
+  `.venv` run, so do not assume they are still the ambient baseline without
+  re-checking.
+
+  **Build/test commands** (worktree-manager package):
+  ```powershell
+  cd worktree-manager
+  uv sync --extra dev                        # one-time / when deps change
+  .venv\Scripts\python.exe -m pytest -q      # full suite
+  ```
+  **Current verified baseline (2026-09-22):** 1088 passed / 1 skipped.
+
   Two other tests were each independently seen to fail exactly once under
   full-suite load and pass consistently otherwise, in isolation and as
   part of their own file: `test_supervisor.py::test_requeued_task_is_not_
@@ -924,19 +892,32 @@ design here.
 ### Phase 7 — Task menu: wire lifecycle controls to Phase 2's APIs
 Everything here is UI wiring against the ALREADY-BUILT Phase 1/2 contracts —
 no lifecycle-control logic invented at this layer.
-- [ ] Land the `charter`/`worktree-status` `kind:"card"` actions (no backend
-      dependency — read-only, can land any time after Phase 3).
-- [ ] Wire "Open into a CLI session" to Phase 2's `embody --interactive`.
+- [ ] Land the `charter` `kind:"card"` action. **Still NOT done** as of
+      2026-09-22: the picker-side card machinery is fine, but
+      `board_cli.py` still intentionally publishes `has_charter = False`, so
+      no real `charter.*` payload reaches the card yet.
+- [x] Land the `worktree-status` `kind:"card"` action (read-only). This
+      ended up landing with the Phase 5/8 relay work once
+      `worktree_status.body` was populated from the real accelerator-backed
+      projection rather than the preview fixture.
+- [x] Wire "Open into a CLI session" to Phase 2's `embody --interactive`.
       `cli_openable` (Phase 1) gates visibility; the action itself performs
       no logic beyond invoking the coordinator transaction and launching the
       returned session. For Proposed/Queued (no existing worktree) the
       transaction creates one; for Suspended it resumes the existing one.
-- [ ] Wire Pause/Unpause, Force-stop, and Reset-to-Proposed to Phase 2's
-      corresponding verbs. Render the user-pause hold as its own distinct,
-      visible, filterable phase/badge — never conflated with system-Suspended
-      or Blocked/awaiting-steer (Phase 1's hold design).
-- [ ] Force-abandon (already declared in the preview manifest) needs no new
-      backend work beyond the Phase 1 concurrency-fencing requirement.
+      **Landed 2026-09-22** via the dedicated picker-side `embody-cli`
+      internal verb plus a real `cli_openable` predicate in `board_cli.py`.
+- [x] Wire Pause/Unpause, Force-stop, and Reset-to-Proposed to Phase 2's
+      corresponding verbs. This was already landed earlier (PRs #2913/#3008);
+      the stale checklist here was overcounting it as still undone.
+- [ ] Render the user-pause hold as its own distinct, visible, filterable
+      phase/badge — never conflated with system-Suspended or
+      Blocked/awaiting-steer (Phase 1's hold design). **Still open** as of
+      2026-09-22: the control wiring exists, but the Tasks pane does not yet
+      surface Pause as its own display state.
+- [x] Force-abandon (already declared in the preview manifest) needs no new
+      backend work beyond the Phase 1 concurrency-fencing requirement. This was
+      already landed before 2026-09-22; only the checklist lagged behind.
 
 ### Phase 8 — Worktree Status card (implementation)
 - [x] Populate `worktree_status.body` from real session-lineage/claims/
@@ -2559,3 +2540,62 @@ this tool today -- so no other contributor or CI can currently perform this
 diff; only the operator running the tool locally can. Refreshed the
 operator's own reference set with today's fresh, manifest-fixed capture,
 superseding the 2026-09-17 one.
+
+### 2026-09-22 — Phase 7 re-grounded: most items were already landed; open-cli was the real gap
+Fresh worktree, fresh read of the effort, and a direct re-grounding against the
+real shipped code rather than the stale checklist. The headline finding: **the
+Phase 7 Plan text had drifted further than the implementation.**
+
+- **Already landed before this session (confirmed in code, not assumed from the
+  stale checklist):**
+  - `worktree-status` was already a real card surface once Phase 8/5's relay
+    work landed in PRs #3222/#3234.
+  - Pause/Unpause/Force-stop/Reset-to-Proposed/Abandon were already wired to
+    real CLI verbs in the pivot manifest (`agent-dispatch pause/unpause/force-
+    stop/reset/abandon --help` matches the manifest argv shapes).
+- **Not actually landed despite the earlier claim:** the `charter` card still is
+  NOT live. `board_cli.py` still intentionally sets `has_charter = False`, so
+  the card action remains hidden with no real `charter.*` payload. Updated the
+  Phase 7 checklist to say this plainly instead of retroactively marking it done.
+- **The one real remaining Phase 7 gap was `open-cli`.** The manifest still
+  named the generic Worktrees `open-cli` internal verb while `board_cli.py`
+  hard-coded `cli_openable = False`. That generic verb only opens an already-
+  loaded worktree row; it cannot create a Proposed/Queued task's worktree and
+  it bypasses the Suspended-task ownership rebind that
+  `interactive_embody.launch_interactive_embodiment()` exists to perform.
+
+**What landed in this session:**
+
+1. **Dedicated picker verb:** `worktree-manager` now has a new internal
+   `embody-cli` action. It shells out off-thread to `agent-dispatch embody
+   --interactive --machine <task-machine>`, parses the returned JSON, and on
+   success exits the picker into the resulting worktree's standard resume flow.
+   Post-launch attachment deliberately reuses the same launch-decision plumbing
+   as Worktrees `open-cli`: if the worktree row is already loaded, it reuses the
+   real row; if the embody transaction just created the worktree and the picker
+   has not reloaded yet, it synthesizes the minimal resume decision from the
+   returned worktree id plus the row's machine/env so `worktree-manager
+   __main__` can still launch it correctly.
+2. **Failure behavior:** an `InteractiveEmbodimentError` now surfaces as the
+   action's own stderr / nonzero exit message on the picker status line instead
+   of escaping through internal-action dispatch. No crash path.
+3. **Real `cli_openable` gate:** `board_cli.py` now computes `cli_openable`
+   from the interactive-embodiment transaction's status contract: `proposed`
+   (implicitly approved), `queued`, or `suspended`; never `claimed`, `started`,
+   or terminal.
+4. **Manifest/docs sync:** the real pivot manifest's `open-cli` action now
+   points at `embody-cli` with an accurate description, the preview manifest was
+   updated to match this one changed behavior, and the Phase 7 checklist/Runbook
+   now distinguish "already landed earlier", "landed now", and "still open"
+   instead of leaving everything marked undone.
+
+**Validation (2026-09-22):**
+
+- `worktree-manager`: targeted `test_picker_tui.py -k "embody_cli_internal_action or open_worktree_cli"` passed (4/4), then the full suite passed at **1088 passed / 1 skipped**.
+- `agent-dispatch`: targeted `test_board_cli.py` passed (11/11), then the full
+  plugin suite passed at **3325 passed / 13 skipped / 1 warning** using the
+  package's own `.venv` + direct `pytest tests -q`. The repo-level
+  `tools/run-plugin-tests.py agent-dispatch` runner was also tried, but its
+  contained 300s per-sub-suite wall clock budget expired mid-run despite the
+  underlying tests continuing to pass; treated as a runner-budget limit, not a
+  product failure, and the native full suite above was the authoritative check.
