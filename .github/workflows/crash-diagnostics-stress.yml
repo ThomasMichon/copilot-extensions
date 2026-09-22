@@ -1,0 +1,60 @@
+name: context-handoff crash-diagnostics stress
+
+# Runs the full crash-diagnostics.test.mjs subprocess suite (every case,
+# including the world-readable-file/symlink/FIFO attack simulations and the
+# 1 MiB rotation fixture -- not just the always-run smoke tier) on a
+# schedule and on manual dispatch, regardless of what any given PR touched.
+# The required `guards + lint` CI lane (ci.yml) runs `node --test` on this
+# whole monorepo's `plugins/*/tests/*.test.mjs` glob unconditionally, for
+# every PR -- but that lane never sets CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS,
+# so it only exercises this file's small, always-run smoke subset (cheap
+# subprocess cases with no external tools) regardless of whether a PR
+# touches context-handoff or not; the stress-gated cases stay skipped there
+# unconditionally. This workflow is what actually runs the full suite,
+# on both ubuntu-latest and windows-latest (two separate jobs, not a
+# templated `runs-on`, which this repo's check-trusted-ci.py guard forbids
+# as a "dynamic runner route") so the Windows-specific branches in
+# crash-diagnostics.mjs (the non-POSIX file-validation skip, and the
+# rotation/reopen path) are exercised too, not just the POSIX-only attack
+# simulations that already skip there.
+
+on:
+  schedule:
+    - cron: "37 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stress-linux:
+    name: full subprocess suite (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Run the full crash-diagnostics subprocess suite
+        env:
+          CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS: "1"
+        run: >-
+          node --test
+          plugins/context-handoff/tests/crash-diagnostics.test.mjs
+
+  stress-windows:
+    name: full subprocess suite (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Run the full crash-diagnostics subprocess suite
+        env:
+          CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS: "1"
+        run: >-
+          node --test
+          plugins/context-handoff/tests/crash-diagnostics.test.mjs

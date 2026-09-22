@@ -205,6 +205,19 @@ jobs:
         # plugins/<name>/tests/*.test.mjs -- there is no pytest suite to carry
         # them. Run any that exist; a clean no-op when there are none, so this
         # step costs nothing until a plugin adds JS tests.
+        #
+        # context-handoff's crash-diagnostics.test.mjs deliberately keeps its
+        # own required-CI footprint to a small, always-run smoke contract
+        # (cheap subprocess cases only); its POSIX-toolchain-dependent attack
+        # simulations and its 1 MiB rotation fixture self-gate behind
+        # CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS (unset here, so those cases
+        # skip unconditionally in this lane) and only run in the
+        # scheduled/dispatch `crash-diagnostics-stress.yml` workflow -- never
+        # in required PR CI, regardless of what any given PR touches (an
+        # earlier revision of this step instead set that env var whenever a
+        # PR's diff touched plugins/context-handoff/, but per review that
+        # still put a subprocess-heavy matrix in the required lane instead of
+        # using a focused/scheduled split).
         run: |
           shopt -s nullglob
           suites=(plugins/*/tests/*.test.mjs)
