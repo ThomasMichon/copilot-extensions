@@ -59,7 +59,7 @@ test("resolveMetadataAsync runs its four spawns concurrently, not sequentially",
   // (~800-1000ms here); sequential would land around 4x that (~3200ms+).
   const SLEEP_MS = 700;
   write("git", SLEEP_MS, "main");
-  write("agent-worktrees", SLEEP_MS, "/tmp/some-worktree");
+  write("agent-worktrees", SLEEP_MS, "some-worktree");
 
   // resolveMetadataAsync hardcodes the binary names "git"/"agent-worktrees";
   // point PATH at our fake bin dir so those resolve to the slow stubs above,
@@ -82,8 +82,29 @@ test("resolveMetadataAsync runs its four spawns concurrently, not sequentially",
   );
   assert.equal(meta.branch, "main");
   assert.equal(meta.worktree_id, "some-worktree");
-  assert.equal(meta.machine, "/tmp/some-worktree"); // stub returns the same fixed string for every `get` call
+  assert.equal(meta.machine, "some-worktree"); // stub returns the same fixed string for every `get` call
   assert.equal(typeof meta.pid, "number");
+});
+
+// agent-bridge-cli-mode-sessions Phase 4 follow-up: an anchor-mode CLI
+// session (`agent-worktrees embody/copilot --anchor`) has no worktree-dir at
+// all, so `session-scope-id` -- not a basename-of-worktree-dir derivation --
+// is what supplies `worktree_id` for self-registration. Confirms the
+// resolved identity is passed through verbatim, with no path manipulation
+// applied on this side (that responsibility now lives entirely in
+// `agent-worktrees get session-scope-id` itself).
+test("resolveMetadataAsync passes an anchor session-scope-id through verbatim", async (t) => {
+  const { dir, write } = makeFakeBinDir();
+  write("git", 0, "main");
+  write("agent-worktrees", 0, "anchor-odsp-web");
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${dir}${process.platform === "win32" ? ";" : ":"}${originalPath}`;
+  t.after(() => { process.env.PATH = originalPath; });
+
+  const meta = await resolveMetadataAsync({ cwd: dir, env: {} });
+
+  assert.equal(meta.worktree_id, "anchor-odsp-web");
 });
 
 // Sanity check that the fake-binary harness itself is exercising a real
@@ -96,3 +117,4 @@ test("fake bin harness sanity: the stub script really does sleep", () => {
   const out = execFileSync(bin, [], { cwd: dir, encoding: "utf-8", shell: process.platform === "win32" }).trim();
   assert.equal(out, "ok");
 });
+
