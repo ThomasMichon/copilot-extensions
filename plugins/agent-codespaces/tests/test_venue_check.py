@@ -30,6 +30,7 @@ PYTHON3=yes
 UV=yes
 APT=yes
 SUDO_NOPASSWD=yes
+AGENT_BRIDGE_PLUGIN=yes
 AGENT_WORKTREES_STATE=full
 AGENT_WORKTREES_VERSION=agent-worktrees 1.5.5-dev229  commit unknown  branch unknown
 """
@@ -41,6 +42,7 @@ PYTHON3=yes
 UV=yes
 APT=yes
 SUDO_NOPASSWD=yes
+AGENT_BRIDGE_PLUGIN=no
 AGENT_WORKTREES_STATE=lean
 """
 
@@ -51,6 +53,7 @@ PYTHON3=no
 UV=no
 APT=no
 SUDO_NOPASSWD=no
+AGENT_BRIDGE_PLUGIN=no
 AGENT_WORKTREES_STATE=absent
 """
 
@@ -133,6 +136,7 @@ class TestRemediateRemoteVenue:
         readiness = venue_check.parse_probe_output(_LEAN_PROBE_OUTPUT)
         readiness.sudo_nopasswd = False
         readiness.agent_worktrees_state = "full"  # isolate the tmux remediation
+        readiness.agent_bridge_plugin = True  # isolate the tmux remediation
 
         async def fake_exec_command(host: str, command: str) -> _FakeResult:
             raise AssertionError("should not attempt a remote command")
@@ -186,6 +190,49 @@ class TestRemediateRemoteVenue:
         )
         assert any(
             "install agent-worktrees" in s for s in result.skipped
+        )
+
+    @pytest.mark.asyncio
+    async def test_installs_agent_bridge_plugin_when_missing(self) -> None:
+        readiness = venue_check.parse_probe_output(_READY_PROBE_OUTPUT)
+        readiness.agent_bridge_plugin = False  # isolate this one remediation
+        calls: list[str] = []
+
+        async def fake_exec_command(host: str, command: str) -> _FakeResult:
+            calls.append(command)
+            return _FakeResult(exit_code=0)
+
+        result = await venue_check.remediate_remote_venue(
+            fake_exec_command, "cs-target", readiness,
+        )
+        assert "install agent-bridge plugin" in result.succeeded
+        assert any("copilot plugin install agent-bridge@" in c for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_reports_agent_bridge_plugin_install_failure(self) -> None:
+        readiness = venue_check.parse_probe_output(_READY_PROBE_OUTPUT)
+        readiness.agent_bridge_plugin = False
+
+        async def fake_exec_command(host: str, command: str) -> _FakeResult:
+            return _FakeResult(exit_code=1, stderr="marketplace unreachable")
+
+        result = await venue_check.remediate_remote_venue(
+            fake_exec_command, "cs-target", readiness,
+        )
+        assert "install agent-bridge plugin" in result.failed
+
+    @pytest.mark.asyncio
+    async def test_skips_agent_bridge_plugin_install_without_copilot(self) -> None:
+        readiness = venue_check.parse_probe_output(_ABSENT_PROBE_OUTPUT)
+
+        async def fake_exec_command(host: str, command: str) -> _FakeResult:
+            raise AssertionError("no copilot CLI to install a plugin into")
+
+        result = await venue_check.remediate_remote_venue(
+            fake_exec_command, "cs-target", readiness,
+        )
+        assert any(
+            "install agent-bridge plugin" in s for s in result.skipped
         )
 
     @pytest.mark.asyncio

@@ -13,11 +13,25 @@ running the binstub once to trigger self-provisioning, then ``update``).
 
 ``check`` is read-only (safe to run repeatedly, never mutates the venue).
 ``doctor <name>`` runs the same probe and, opt-in via ``--fix``, applies the
-two safely-idempotent remediations this module knows how to do: installing
-``tmux`` via the venue's own package manager, and nudging ``agent-worktrees``
-to (re)provision/update itself. Anything it cannot safely fix (no ``copilot``
-binary, no package manager, no passwordless sudo) is reported, never guessed
-at.
+safely-idempotent remediations this module knows how to do: installing
+``tmux`` via the venue's own package manager, nudging ``agent-worktrees`` to
+(re)provision/update itself, and installing the ``agent-bridge`` Copilot
+plugin itself. Anything it cannot safely fix (no ``copilot`` binary, no
+package manager, no passwordless sudo) is reported, never guessed at.
+
+The ``agent-bridge`` plugin gap is a deliberate, narrow exception to "never
+install a plugin on the operator's behalf": unlike ``agent-worktrees``
+(a project-level policy choice this generic, project-agnostic command has
+no business making), ``agent-bridge`` is the exact mechanism the CLI-mode
+`copilot` verb exists to serve -- without it loaded in the remote Copilot
+process, that process can never self-register back to the host daemon, so
+every CLI-mode session silently never claims its own reservation (confirmed
+live, agent-bridge-cli-mode-sessions Phase 4: a real CodeSpace ran the
+interactive session correctly for 5+ minutes with zero registration, purely
+because the plugin was never installed there). Because this is a precondition
+of the verb's own contract rather than a project preference, ``cmd_copilot``
+applies this one fix **implicitly**, with no ``--fix`` needed -- see its own
+docstring.
 """
 from __future__ import annotations
 
@@ -38,6 +52,7 @@ echo "PYTHON3=$(command -v python3 >/dev/null 2>&1 && echo yes || echo no)"
 echo "UV=$(command -v uv >/dev/null 2>&1 && echo yes || echo no)"
 echo "APT=$(command -v apt-get >/dev/null 2>&1 && echo yes || echo no)"
 echo "SUDO_NOPASSWD=$(sudo -n true >/dev/null 2>&1 && echo yes || echo no)"
+echo "AGENT_BRIDGE_PLUGIN=$(command -v copilot >/dev/null 2>&1 && copilot plugin list 2>/dev/null | grep -q "agent-bridge@" && echo yes || echo no)"
 aw=$(command -v agent-worktrees || true)
 if [ -z "$aw" ]; then
   echo "AGENT_WORKTREES_STATE=absent"
@@ -63,6 +78,7 @@ class VenueReadiness:
     uv: bool = False
     apt_available: bool = False
     sudo_nopasswd: bool = False
+    agent_bridge_plugin: bool = False
     agent_worktrees_state: str = "absent"  # absent | lean | full
     agent_worktrees_version: str | None = None
     raw_stdout: str = ""
@@ -80,7 +96,10 @@ class VenueReadiness:
     @property
     def ready(self) -> bool:
         """Every precondition the venue `copilot` verb actually needs."""
-        return self.copilot_present and self.tmux and self.agent_worktrees_full
+        return (
+            self.copilot_present and self.tmux and self.agent_worktrees_full
+            and self.agent_bridge_plugin
+        )
 
     @property
     def gaps(self) -> list[str]:
@@ -93,6 +112,11 @@ class VenueReadiness:
             gaps.append("agent-worktrees not installed")
         elif self.agent_worktrees_state == "lean":
             gaps.append("agent-worktrees is only lean-staged (not fully provisioned)")
+        if not self.agent_bridge_plugin:
+            gaps.append(
+                "agent-bridge Copilot plugin not installed (CLI-mode session "
+                "would never self-register)"
+            )
         return gaps
 
     def to_dict(self) -> dict[str, Any]:
@@ -105,6 +129,7 @@ class VenueReadiness:
             "uv": self.uv,
             "apt_available": self.apt_available,
             "sudo_nopasswd": self.sudo_nopasswd,
+            "agent_bridge_plugin": self.agent_bridge_plugin,
             "agent_worktrees_state": self.agent_worktrees_state,
             "agent_worktrees_version": self.agent_worktrees_version,
             "gaps": self.gaps,
@@ -138,6 +163,8 @@ def parse_probe_output(stdout: str, *, exit_code: int = 0, stderr: str = "") -> 
             readiness.apt_available = _parse_bool(value)
         elif key == "SUDO_NOPASSWD":
             readiness.sudo_nopasswd = _parse_bool(value)
+        elif key == "AGENT_BRIDGE_PLUGIN":
+            readiness.agent_bridge_plugin = _parse_bool(value)
         elif key == "AGENT_WORKTREES_STATE":
             readiness.agent_worktrees_state = value or "absent"
         elif key == "AGENT_WORKTREES_VERSION":
@@ -187,10 +214,10 @@ async def remediate_remote_venue(
     *,
     timeout: float = 240.0,
 ) -> RemediationResult:
-    """Best-effort, idempotent-safe fixes for the two gaps this module can
-    safely close without any project-specific context: a missing ``tmux``
-    and an ``agent-worktrees`` binstub that exists but never provisioned (or
-    is still lean-staged).
+    """Best-effort, idempotent-safe fixes for the gaps this module can safely
+    close without any project-specific context: a missing ``tmux``, an
+    ``agent-worktrees`` binstub that exists but never provisioned (or is
+    still lean-staged), and a missing ``agent-bridge`` Copilot plugin.
 
     Never attempts to install the ``copilot`` CLI itself or the
     ``agent-worktrees`` **plugin** (that needs a marketplace registration
@@ -199,6 +226,12 @@ async def remediate_remote_venue(
     to the latest marketplace version should still run
     ``agent-worktrees --project <name> update`` themselves -- this only
     nudges the binstub's own documented first-use self-provisioning path.
+
+    ``agent-bridge`` itself is the one deliberate exception: it is not a
+    project policy choice but a precondition of the CLI-mode `copilot` verb's
+    own contract (see this module's docstring), so installing it is always
+    safe and always attempted when missing -- including implicitly, from
+    `cmd_copilot` itself, not just an explicit `doctor --fix`.
     """
     result = RemediationResult()
 
@@ -237,6 +270,22 @@ async def remediate_remote_venue(
             "install agent-worktrees (no binstub -- install the plugin first)"
         )
 
+    if not readiness.agent_bridge_plugin:
+        if readiness.copilot_present:
+            result.attempted.append("install agent-bridge plugin")
+            probe = await exec_command(
+                host,
+                "bash -lc 'copilot plugin install agent-bridge@copilot-extensions 2>&1'",
+            )
+            if getattr(probe, "exit_code", 1) == 0:
+                result.succeeded.append("install agent-bridge plugin")
+            else:
+                result.failed.append("install agent-bridge plugin")
+        else:
+            result.skipped.append(
+                "install agent-bridge plugin (no copilot CLI to install it into)"
+            )
+
     return result
 
 
@@ -251,6 +300,8 @@ def format_report(readiness: VenueReadiness, *, remediation: RemediationResult |
     lines.append(f"  agent-worktrees:  {readiness.agent_worktrees_state}"
                  + (f" ({readiness.agent_worktrees_version})"
                     if readiness.agent_worktrees_version else ""))
+    lines.append(f"  agent-bridge:     "
+                 f"{'installed' if readiness.agent_bridge_plugin else 'MISSING'}")
     lines.append(f"  node/python3/uv:  "
                  f"{'yes' if readiness.node else 'no'}/"
                  f"{'yes' if readiness.python3 else 'no'}/"
