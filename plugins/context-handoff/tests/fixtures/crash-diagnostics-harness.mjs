@@ -60,6 +60,33 @@ switch (scenario) {
       };
     });
     break;
+  case "throw-non-error-string":
+    // Regression case for describeFailure()'s OTHER branch: a thrown value
+    // with no .stack property at all (string, number, plain object, ...)
+    // falls through to String(value) instead of Error.stack -- this must
+    // actually be exercised, not just the hostile-.stack-getter path above.
+    setImmediate(() => {
+      throw "boom-plain-string";
+    });
+    break;
+  case "throw-hostile-tostring":
+    // Regression case: an object with NO .stack property (so
+    // describeFailure() falls through past the .stack branch) but a
+    // hostile Symbol.toPrimitive/toString that itself throws when
+    // String(value) tries to coerce it -- describeFailure()'s own outer
+    // try/catch must still produce the fixed fallback string rather than
+    // crashing the handler, distinct from the .stack-getter scenario above.
+    setImmediate(() => {
+      throw {
+        [Symbol.toPrimitive]() {
+          throw new Error("bad toPrimitive");
+        },
+        toString() {
+          throw new Error("bad toString");
+        },
+      };
+    });
+    break;
   case "wait-for-signal":
     // The parent test sends the signal via child.kill(). A bare
     // process.on(signal, ...) registration does NOT by itself keep the

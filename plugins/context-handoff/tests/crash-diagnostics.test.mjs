@@ -191,6 +191,39 @@ test("a hostile throwing .stack getter does not itself crash the handler", async
   });
 });
 
+// describeFailure()'s OTHER branch: a thrown value with no .stack property
+// at all falls through to String(value), not Error.stack. The
+// hostile-.stack-getter test above never exercises this path (it always
+// has a .stack property, just a throwing one).
+test("a thrown non-Error value with no .stack is logged via String(value)", async () => {
+  await withCrashLog(async (logPath) => {
+    const result = spawnSync(process.execPath, [harness, "throw-non-error-string", logPath], {
+      encoding: "utf-8",
+    });
+    assert.equal(result.status, 1);
+    const log = readLogSafe(logPath);
+    assert.match(log, /uncaughtException: ready=false boom-plain-string/);
+    assert.match(log, /\bexit: code=1\b/);
+  });
+});
+
+// A distinct hostile-value shape from the .stack-getter test: no .stack
+// property at all (so describeFailure() falls through past that branch),
+// but a Symbol.toPrimitive/toString that itself throws when String(value)
+// tries to coerce it -- describeFailure()'s own outer try/catch must still
+// produce the fixed fallback string, not crash the handler.
+test("a hostile throwing Symbol.toPrimitive/toString does not itself crash the handler", async () => {
+  await withCrashLog(async (logPath) => {
+    const result = spawnSync(process.execPath, [harness, "throw-hostile-tostring", logPath], {
+      encoding: "utf-8",
+    });
+    assert.equal(result.status, 1);
+    const log = readLogSafe(logPath);
+    assert.match(log, /uncaughtException: ready=false <failure detail unavailable: describing it threw>/);
+    assert.match(log, /\bexit: code=1\b/);
+  });
+});
+
 // markReady() is purely in-memory (see installEmergencyDiagnostics() in
 // crash-diagnostics.mjs) -- it must never write a durable line on its own,
 // but a failure captured *after* it was called must reflect ready=true, not
@@ -573,13 +606,27 @@ test(
 test("production extension.mjs calls markReady() only after joinSession() resolves", () => {
   const extensionPath = join(here, "..", "extensions", "context-handoff", "extension.mjs");
   const extension = readFileSync(extensionPath, "utf-8");
-  assert.match(
-    extension,
-    /const emergencyDiagnostics = installEmergencyDiagnostics\(emergencyLog\);/,
+  const installIndex = extension.indexOf(
+    "const emergencyDiagnostics = installEmergencyDiagnostics(emergencyLog);",
+  );
+  assert.notEqual(
+    installIndex,
+    -1,
     "extension.mjs must capture installEmergencyDiagnostics()'s return value",
   );
   const callStart = extension.indexOf("const session = await joinSession(");
   assert.notEqual(callStart, -1, "expected to find the joinSession() call");
+  // Diagnostics must be installed *before* joinSession() is even called,
+  // not merely present somewhere in the file: joinSession() itself can
+  // fail or throw, and the whole point of installing these handlers first
+  // is to capture exactly that class of pre-readiness failure (the
+  // ready=false cases this instrumentation exists for). Installing it
+  // after the awaited call would still satisfy every other check in this
+  // test while leaving a failure during the join itself uninstrumented.
+  assert.ok(
+    installIndex < callStart,
+    "installEmergencyDiagnostics() must be called before joinSession(), not after it",
+  );
   // Merely checking markReady() appears somewhere after the *opening* text
   // of the joinSession() call (or that some "});" anywhere in the file
   // precedes it) is not enough: a regression that moved the call to inside

@@ -53,22 +53,45 @@ export const DEFAULT_CRASH_LOG = join(tmpdir(), "context-handoff-extension-crash
 // this threshold.
 const STALE_SIDECAR_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+// Bounds the worst-case syscall cost of a single purge call. This runs
+// synchronously in the same call path as a SIGTERM/SIGINT/SIGHUP handler,
+// which must log and re-raise the signal within the CLI's own documented
+// five-second SIGKILL grace period (see the signal rationale below) -- an
+// unbounded readdir()+stat() sweep over a directory that accumulated many
+// sidecars could otherwise delay that re-raise past the deadline and lose
+// the very lifecycle diagnostic this path exists to preserve. Capping the
+// number of candidates examined per call still clears the whole backlog
+// over enough separate rotation events; it just never risks doing all of
+// it in one.
+const MAX_SIDECARS_PURGED_PER_CALL = 20;
+
 /**
  * Best-effort removal of this log's own `.stale-*` sidecars older than
- * {@link STALE_SIDECAR_MAX_AGE_MS}. Every failure (missing directory,
- * permissions, a sidecar vanishing between listing and unlinking, ...) is
- * swallowed -- this is a bounded courtesy cleanup, never a correctness
- * requirement, and it must never itself become a crash-handler failure
- * mode.
+ * {@link STALE_SIDECAR_MAX_AGE_MS}, bounded to at most
+ * {@link MAX_SIDECARS_PURGED_PER_CALL} candidates examined per call (see its
+ * own doc comment). `justCreatedSidecar` -- the sidecar path *this specific
+ * rotation* just produced -- is always skipped outright, regardless of its
+ * mtime: if the earlier `utimesSync()` re-stamp attempt failed, this sidecar
+ * could still carry the oversized source file's old, possibly already-stale
+ * mtime, and this exclusion is what stops that from getting the sidecar
+ * this very rotation just created purged in the same call that created it.
+ * Every other failure (missing directory, permissions, a sidecar vanishing
+ * between listing and unlinking, ...) is swallowed -- this is a bounded
+ * courtesy cleanup, never a correctness requirement, and it must never
+ * itself become a crash-handler failure mode.
  */
-function purgeOldStaleSidecars(logPath) {
+function purgeOldStaleSidecars(logPath, justCreatedSidecar) {
   try {
     const dir = dirname(logPath);
     const prefix = `${basename(logPath)}.stale-`;
     const now = Date.now();
+    let examined = 0;
     for (const name of readdirSync(dir)) {
+      if (examined >= MAX_SIDECARS_PURGED_PER_CALL) break;
       if (!name.startsWith(prefix)) continue;
       const candidate = join(dir, name);
+      if (candidate === justCreatedSidecar) continue;
+      examined += 1;
       try {
         if (now - statSync(candidate).mtimeMs > STALE_SIDECAR_MAX_AGE_MS) {
           unlinkSync(candidate);
@@ -270,6 +293,11 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
                 // which creates a fresh file either way.
                 stillTheSameOversizedFile = false;
               }
+              // Hoisted so the purge call below can exclude this exact
+              // sidecar (if one was actually created) regardless of
+              // whether its mtime re-stamp below succeeded -- see that
+              // call's own comment.
+              let justCreatedSidecar;
               if (stillTheSameOversizedFile) {
                 // pid+timestamp alone could theoretically collide (two
                 // rotations from the same pid in the same millisecond, or a
@@ -280,6 +308,7 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
                 const staleSidecar = `${logPath}.stale-${process.pid}-${Date.now()}-${randomUUID()}`;
                 try {
                   renameSync(logPath, staleSidecar);
+                  justCreatedSidecar = staleSidecar;
                   // renameSync() preserves the moved file's own mtime --
                   // the timestamp of its *last write*, which reflects when
                   // the oversized file was last appended to, not when this
@@ -295,9 +324,11 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
                   try {
                     utimesSync(staleSidecar, now, now);
                   } catch {
-                    // Best-effort; a failed re-stamp only risks this one
-                    // sidecar being purged earlier than ideal, never a
-                    // correctness problem for the write that follows.
+                    // Best-effort; a failed re-stamp is exactly why the
+                    // purge call below also excludes justCreatedSidecar by
+                    // path outright, not just by mtime -- so this sidecar
+                    // is never purged in the same call that created it,
+                    // regardless of whether the re-stamp above succeeded.
                   }
                 } catch {
                   // Lost a narrower race against a concurrent rotation
@@ -325,10 +356,12 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
               // latter would destroy exactly the diagnostic this module
               // exists to preserve. Instead, purgeOldStaleSidecars() below
               // only removes sidecars whose mtime already proves they are
-              // long-settled (see its own doc comment) -- bounding the
+              // long-settled (see its own doc comment), always excluding
+              // the sidecar this same call just created (whether or not its
+              // mtime re-stamp above succeeded) -- bounding the
               // *cumulative* disk usage those permanent sidecars would
               // otherwise leave unbounded, without reintroducing that race.
-              purgeOldStaleSidecars(logPath);
+              purgeOldStaleSidecars(logPath, justCreatedSidecar);
             }
           } else {
             closeSync(candidate);
