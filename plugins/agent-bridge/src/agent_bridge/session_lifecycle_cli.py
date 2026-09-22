@@ -128,34 +128,33 @@ def _cmd_handoff_request(args: argparse.Namespace) -> None:
 
 
 def _agent_bridge_owner_root() -> Path:
-    from .install_paths import install_dir
-
-    return install_dir()
+    return _core().install_dir()
 
 
 def _agent_worktrees_launch_prefix() -> list[str] | None:
+    core = _core()
     explicit_context = os.environ.get(_peer_launch.CONTEXT_ENV, "")
     if not explicit_context:
         exe = shutil.which("agent-worktrees")
         return [exe] if exe else None
     try:
-        own = _peer_launch.validate_owner("agent-bridge", _agent_bridge_owner_root(), explicit_context)
+        own = core._peer_launch.validate_owner("agent-bridge", _agent_bridge_owner_root(), explicit_context)
     except (OSError, ValueError, ImportError) as error:
-        raise _peer_launch.ContextRefused(f"agent-bridge installation context refused: {error}") from error
+        raise core._peer_launch.ContextRefused(f"agent-bridge installation context refused: {error}") from error
     peer_root = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
     if not peer_root.exists() and not peer_root.is_symlink():
         return None
     try:
-        return _peer_launch.launch_prefix("agent-bridge", Path(own["pluginRoot"]), explicit_context, "agent-worktrees")
+        return core._peer_launch.launch_prefix("agent-bridge", Path(own["pluginRoot"]), explicit_context, "agent-worktrees")
     except (OSError, ValueError, ImportError) as error:
-        raise _peer_launch.ContextRefused(f"same-cell agent-worktrees resolution failed: {error}") from error
+        raise core._peer_launch.ContextRefused(f"same-cell agent-worktrees resolution failed: {error}") from error
 
 
 def _cmd_handoff_check(args: argparse.Namespace) -> None:
     core = _core()
     try:
-        prefix = _agent_worktrees_launch_prefix()
-    except _peer_launch.ContextRefused as error:
+        prefix = core._agent_worktrees_launch_prefix()
+    except core._peer_launch.ContextRefused as error:
         print(f"[FAIL] {error}", file=sys.stderr)
         sys.exit(1)
     if not prefix:

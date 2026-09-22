@@ -22,11 +22,19 @@ from agent_procutil import (
     windowless_daemon_kwargs as _windowless_daemon_kwargs,
 )
 
+from . import _peer_launch as _peer_launch_module
 from . import __version__
-from .install_paths import effective_config_dir, scheduled_task_name, systemd_unit_name
+from .install_paths import (
+    effective_config_dir,
+    install_dir as _install_dir,
+    scheduled_task_name,
+    systemd_unit_name,
+)
 
 no_window_kwargs = _no_window_kwargs
 windowless_daemon_kwargs = _windowless_daemon_kwargs
+_peer_launch = _peer_launch_module
+install_dir = _install_dir
 
 if __name__ == "__main__":
     sys.modules.setdefault("agent_bridge.__main__", sys.modules[__name__])
