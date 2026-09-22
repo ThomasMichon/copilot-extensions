@@ -23,7 +23,7 @@ from typing import Any
 from . import __version__
 from . import config as _config
 from .client import DispatchClient
-from .config import Config, client_token, has_live_local_coordinator, load_config, routing_dir
+from .config import has_live_local_coordinator
 from .loop_commands import _resolve_cli_module
 
 
@@ -63,7 +63,7 @@ def _federation_rendezvous(args: argparse.Namespace):
 
     url = getattr(args, "url", None)
     if url:
-        return build_rendezvous(url, token=getattr(args, "token", None) or client_token())
+        return build_rendezvous(url, token=getattr(args, "token", None) or _config.client_token())
     rv = hosted_rendezvous()
     if rv is None:
         print(
@@ -146,7 +146,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     passive = bool(getattr(args, "passive", False))
     force = bool(getattr(args, "force", False))
-    base = load_config()
+    base = _config.load_config()
     effective_token = args.token or base.token
     if not passive and not force and _live_local_coordinator(token=effective_token):
         print(
@@ -160,7 +160,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         )
         return 2
     _reroot_serve_cwd()
-    cfg = Config(
+    cfg = _config.Config(
         host=_resolve_serve_host(args, base),
         port=args.port or base.port,
         db_path=args.db or base.db_path,
@@ -218,11 +218,10 @@ def _reap_superseded_coordinators(result: Any) -> None:
     try:
         from zdd.routing import read_table
 
-        from .config import routing_dir
         from .reap import reap_superseded_coordinators
 
         new_port = getattr(result, "new_port", None)
-        table = read_table(routing_dir()) or {}
+        table = read_table(_config.routing_dir()) or {}
         active = table.get("active") if isinstance(table, dict) else None
         keep = {os.getpid()}
         if (
@@ -256,11 +255,10 @@ def _reap_abandoned_passive_impl(
     record: dict | None, *, grace_seconds: float | None = None,
 ) -> dict:
     """Retire a passive daemon stranded by an abandoned cutover (#5195)."""
-    from .config import routing_dir
     from .reap import reap_abandoned_passive_backstop
 
     return reap_abandoned_passive_backstop(
-        routing_dir(), record=record, grace_seconds=grace_seconds,
+        _config.routing_dir(), record=record, grace_seconds=grace_seconds,
     )
 
 
@@ -305,8 +303,8 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     core_time = getattr(cli, "time", time)
     reap_abandoned = _core_helper("_reap_abandoned_passive", _reap_abandoned_passive)
     reap_superseded = _core_helper("_reap_superseded_coordinators", _reap_superseded_coordinators)
-    cfg = load_config()
-    token = client_token()
+    cfg = _config.load_config()
+    token = _config.client_token()
     wildcard_v4 = ".".join(("0", "0", "0", "0"))
     host = cfg.host if cfg.host not in (wildcard_v4, "", "::", "[::]") else "127.0.0.1"
     if cfg.host in ("::", "[::]"):
@@ -374,7 +372,7 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
 
     from .single_instance import SingleInstance, read_holder_pid
 
-    routing_lock_path = routing_dir() / "serve-start.lock"
+    routing_lock_path = _config.routing_dir() / "serve-start.lock"
     routing_lock = SingleInstance(routing_lock_path)
     acquired = routing_lock.acquire()
     if not acquired:
@@ -399,9 +397,9 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         return 2
     try:
         recovery = breadcrumb.recover_stale_cutover(
-            routing_dir(), make_client, health_check=liveness_check
+            _config.routing_dir(), make_client, health_check=liveness_check
         )
-        _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(routing_dir())
+        _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(_config.routing_dir())
         passive_reap = reap_abandoned(_pre_recovery_breadcrumb)
         if getattr(args, "recover", False):
             recovery["passive_reap"] = passive_reap
@@ -416,7 +414,7 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
             )
 
         orch = CutoverOrchestrator(
-            routing_dir(),
+            _config.routing_dir(),
             bind=routing_bind,
             version=__version__,
             spawn_passive=spawn_passive,
@@ -447,7 +445,7 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
-def _resolve_serve_host(args: argparse.Namespace, base: Config) -> str:
+def _resolve_serve_host(args: argparse.Namespace, base: _config.Config) -> str:
     """The host the coordinator binds when ``agent-dispatch serve`` runs."""
     if args.host:
         return args.host
@@ -541,7 +539,12 @@ def register_coordinator_commands(sub) -> None:
             "Cut over to the code installed in this interpreter's venv: spawns "
             "a new coordinator on a fresh port, waits for it to report healthy, "
             "flips the routing table so clients follow it, drains the old "
-            "coordinator's in-flight claim, then retires it."
+            "coordinator's in-flight claim, then retires it. Run this after "
+            "installing new code (e.g. `install.ps1 update` on Windows / "
+            "`install.sh update` on POSIX) -- either by hand, "
+            "or it is invoked automatically by a running coordinator's own "
+            "self-update loop once it notices a newer version has been "
+            "published (opt-in via AGENT_DISPATCH_SELF_UPDATE=1)."
         ),
     )
     _add_cutover_flags(p)
