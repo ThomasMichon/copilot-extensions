@@ -89,10 +89,10 @@ def _cmd_send(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     caller_id = core._caller_id_for(args)
-    session_id = _resolve_target(client, target, force=getattr(args, "force", False))
+    session_id = core._resolve_target(client, target, force=getattr(args, "force", False))
     if not getattr(args, "full_history", False):
         _mark_resume_if_behind(client, session_id, caller_id=caller_id)
-    _submit_and_stream(client, args, session_id, prompt, caller_id=caller_id)
+    core._submit_and_stream(client, args, session_id, prompt, caller_id=caller_id)
 
 
 def _caller_worktree_handle() -> str | None:
@@ -460,7 +460,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
             print(f"[OK] Session {session_id} created -- send work with: agent-bridge send {session_id} \"<prompt>\"")
         return
 
-    _submit_and_stream(client, args, session_id, prompt, caller_id=caller_id)
+    core._submit_and_stream(client, args, session_id, prompt, caller_id=caller_id)
 
 
 def _write_session_id_file(path_value: str, session_id: str) -> None:

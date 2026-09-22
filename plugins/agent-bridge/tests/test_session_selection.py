@@ -302,6 +302,49 @@ def test_cmd_send_rejects_new_flag():
     assert ei.value.code == 2
 
 
+def test_cmd_send_uses_main_resolve_target_compatibility_seam(monkeypatch):
+    class _Client:
+        def resolve_live_session(self, _target):
+            return {}
+
+    client = _Client()
+    seen = {}
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_caller_id_for", lambda _args: "caller-A")
+    monkeypatch.setattr(
+        m,
+        "_resolve_target",
+        lambda _client, _target, force=False: seen.setdefault("resolved", "sess-compat"),
+    )
+    monkeypatch.setattr(
+        m,
+        "_submit_and_stream",
+        lambda _client, _args, session_id, prompt, *, caller_id: seen.update(
+            {"session_id": session_id, "prompt": prompt, "caller_id": caller_id}
+        ),
+    )
+    args = argparse.Namespace(
+        target="agent-x",
+        prompt="hello",
+        prompt_file=None,
+        new=False,
+        force=False,
+        full_history=False,
+        json=False,
+        queue=False,
+        no_wait=True,
+    )
+
+    m._cmd_send(args)
+
+    assert seen == {
+        "resolved": "sess-compat",
+        "session_id": "sess-compat",
+        "prompt": "hello",
+        "caller_id": "caller-A",
+    }
+
+
 class _ReadRenderer:
     def render_events(self, _events):
         return ""
