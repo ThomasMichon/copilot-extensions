@@ -1644,6 +1644,47 @@ class TestWorktreeRoutes:
         assert resp.json()["detail"] == ProviderTargetRefreshError.public_message
         mgr.start_session.assert_not_awaited()
 
+    def test_resume_singleton_anchor_no_session_starts_fresh(
+        self, client, app
+    ) -> None:
+        """A singleton repo key (`<repo>@anchor`) reuses the worktree-keyed
+        resume ladder and starts a fresh session in the anchor checkout."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from agent_bridge.singleton_anchor import SingletonRepo
+        from agent_bridge.transport import SpawnTarget
+
+        wt_id = "llama.cpp@anchor"
+        app.state.resolver = MagicMock(agents={})
+        app.state.resolver.agents["repo-agent"] = AgentConfig(
+            name="repo-agent", project="llama.cpp",
+        )
+        app.state.resolver._is_local_loopback_agent = lambda cfg: True
+        app.state.resolver.resolve = MagicMock(return_value=SpawnTarget(type="local"))
+
+        mgr = app.state.session_manager
+        fresh = Session(
+            "fresh-singleton-1",
+            "quiet-anvil",
+            SpawnTarget(type="local", cwd="/src/llama.cpp", worktree_id=wt_id),
+            "repo-agent",
+        )
+        fresh.status = SessionStatus.IDLE
+        mgr.start_session = AsyncMock(return_value=fresh)
+
+        with patch(
+            "agent_bridge.routes.worktree_probe.find_singleton_repo",
+            return_value=SingletonRepo(name="llama.cpp", path="/src/llama.cpp"),
+        ):
+            resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+
+        assert resp.status_code == 200
+        assert resp.json()["session_id"] == "fresh-singleton-1"
+        spawned_target = mgr.start_session.call_args.args[0]
+        assert spawned_target.worktree_id == wt_id
+        assert spawned_target.cwd == "/src/llama.cpp"
+        assert mgr.start_session.call_args.kwargs["agent_name"] == "repo-agent"
+
     # -- Worktree-scoped session reading (proxied to agent-worktrees) ------
 
     def _register_agent(self, app, agent_name: str) -> None:

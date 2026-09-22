@@ -32,6 +32,7 @@ from .worktree_holders import (
     reservation_conflict_detail as _reservation_conflict_detail,
 )
 from .worktree_probe import (
+    find_worktree_entry as _find_cached_worktree_entry,
     owning_agent as _owning_agent,
     probe_archived_owner as _probe_archived_owner,
     probe_live_worktree as _probe_live_worktree,
@@ -833,29 +834,6 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
             for name, worktrees in groups.items()
         },
     }
-
-async def _find_cached_worktree_entry(
-    worktree_id: str, resolver: Any,
-) -> tuple[str, "_WorktreeEntry"] | tuple[None, None]:
-    """Resolve a worktree id to its owning agent name + cache entry.
-
-    Shared by both the fresh-spawn path and the resume-failed-restart path
-    so charter resolution (:func:`_apply_bound_charter`) sees the same
-    ``bound_agent`` either way. Falls back to a targeted live probe when
-    the fleet-wide crawl cache hasn't seen this worktree yet (#6744) --
-    the cache is a performance shortcut, never the authority.
-    """
-    cache = get_cache()
-    await cache.crawl_if_empty()
-    for agent_name, worktrees in cache.get_all().items():
-        match = next((wt for wt in worktrees if wt.id == worktree_id), None)
-        if match is not None:
-            return agent_name, match
-    probed = await cache.probe_live(worktree_id, resolver)
-    if probed is not None:
-        return probed
-    return None, None
-
 
 def _apply_bound_charter(
     target: Any, resolver: Any, entry: "_WorktreeEntry", worktree_id: str,
