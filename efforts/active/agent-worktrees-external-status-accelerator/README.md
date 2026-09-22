@@ -1491,3 +1491,38 @@ Whole-module test time held at ~22-24s (this test's own 4s was already
 counted in the "before" figure from round 5's entry, since it wasn't
 fixed until now).
 
+## Follow-ups (not scheduled -- captured for later)
+
+Ideas raised after PR #3206 merged/deployed, during the live-audit
+investigation that traced the daemon's ~1.5-3s per-invocation overhead
+to per-process import cost (see the 2026-09-21 session's own findings,
+not yet written up as a dedicated entry here since no code changed):
+
+1. **Fold `worktree-status-audit` into `worktree-status-bundle` as a
+   mode flag** (e.g. `--audit`/`--force`/`--compute`) instead of a
+   separate top-level verb, to reduce the CLI's already-large flat
+   subcommand surface and the chance an agent guesses at the wrong one
+   for a task. Not a trivial one-liner: `--audit` samples *N* random
+   worktrees and appends telemetry, while `worktree-status-bundle`
+   resolves exactly one worktree via its `--worktree`/`--worktree-id`
+   option (no `--project` flag -- it resolves the owning project
+   internally) -- a flag here would need to switch the command's entire output shape,
+   not just add a knob. Worth scoping as its own small design pass, and
+   worth doing alongside a broader look at separating genuinely
+   diagnostic/introspection verbs (audit, doctor, hygiene,
+   history-digest, ...) from mainline task-driving verbs, so agents
+   don't have to guess between them.
+2. **An opt-in, elevation-required `agent-machines` module to request
+   Windows Defender exclusions** for the runtime install dirs (e.g.
+   `~/.agent-worktrees/versions/**`), to eliminate the ~1.5-3s
+   per-process AV file-scan overhead observed via profiling (`_io.
+   open_code` dominating a `--version` cProfile trace despite a warm
+   `__pycache__`). Confirmed on this machine that **Tamper Protection
+   is enabled**, which blocks scripted `Add-MpPreference
+   -ExclusionPath` changes outright, even elevated -- so this module
+   could only fully automate the exclusion on unmanaged personal
+   machines; on a Tamper-Protection-enforced (e.g. corporate/EMU) box
+   it would need to detect that state and fall back to printing the
+   exact path for a human to add through the Windows Security app
+   itself. On-demand only, never run as a side effect of anything else.
+
