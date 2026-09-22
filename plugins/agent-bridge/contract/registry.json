@@ -133,7 +133,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "6b4fb71e260769fb6f085594b9a04a7b43ff9978c67b88867325c25b2ee91887",
+          "sha256": "d6cf9eacf59c790a5e43d07401cd0f32ca90643074e5ac5348c30852ecd36292",
           "role": "current representative FastAPI error",
           "generation": 17
         },
@@ -492,6 +492,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
           "source_git_blob": "30f131dc96ec5fe4c89c9bef2efbdd1428befd7d",
           "capture_method": "Re-attested after fixing the bare transcript route to resolve a live session (via get_session()/db.get_events_range()) before ever falling through to the cold-store provider, and trimming pre-existing docstrings for the module-size ceiling; the pre-resolution initialization refusal this fixture attests is unchanged."
+        },
+        {
+          "commit": "3e5a7bce51083a6ccc9ce4c518490d4575fcf849",
+          "plugin_version": "0.4.0-dev537",
+          "generation": 17,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "8faf41807a6348cc08d425d6fa75d007103e7c9f",
+          "capture_method": "Re-attested after fixing the bare transcript and events/range routes to key durable-event lookups on the resolved bridge session.session_id (not the raw, possibly-ACP-aliased path parameter); the pre-resolution initialization refusal this fixture attests is unchanged."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 17 supported; evidence currently exercises generations 9 through 17 (16 retained only via its own previous-generation health fixture, not the current generation).",
