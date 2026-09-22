@@ -96,7 +96,8 @@ def env(tmp_path: Path, monkeypatch):
             )
             helper_py.parent.mkdir(parents=True, exist_ok=True)
             if not helper_py.is_file():
-                shutil.copyfile(INSTALLATION_CONTEXT, helper_py)
+                for source in INSTALLATION_CONTEXT.parent.glob("*.py"):
+                    shutil.copyfile(source, helper_py.parent / source.name)
             helper_ps1 = helper_py.with_name("installation-context.ps1")
             if not helper_ps1.is_file():
                 shutil.copyfile(INSTALLATION_CONTEXT_PS1, helper_ps1)
@@ -137,7 +138,8 @@ def env(tmp_path: Path, monkeypatch):
         )
         helper.parent.mkdir(parents=True, exist_ok=True)
         if not helper.is_file():
-            shutil.copyfile(INSTALLATION_CONTEXT, helper)
+            for source in INSTALLATION_CONTEXT.parent.glob("*.py"):
+                shutil.copyfile(source, helper.parent / source.name)
         helper_ps1 = helper.with_name("installation-context.ps1")
         if not helper_ps1.is_file():
             shutil.copyfile(INSTALLATION_CONTEXT_PS1, helper_ps1)

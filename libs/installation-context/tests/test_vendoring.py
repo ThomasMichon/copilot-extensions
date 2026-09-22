@@ -22,6 +22,11 @@ def test_real_repo_vendored_copies_are_in_sync() -> None:
     assert module.verify() == []
 
 
+    expected_python_files = {name for name in module.FILES if name.endswith(".py")}
+    root_copy = REPO / "plugins" / "agent-worktrees" / "scripts" / "installation-context"
+    assert expected_python_files <= {path.name for path in root_copy.glob("*.py")}
+
+
 def test_sync_repairs_missing_and_drifted_copies(tmp_path: Path) -> None:
     module = _load_tool()
     canonical = tmp_path / "libs" / "installation-context"

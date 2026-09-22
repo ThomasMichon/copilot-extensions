@@ -34,6 +34,18 @@ def _load_python_module():
     return module
 
 
+
+
+def _assembled_python_source() -> str:
+    module = _load_python_module()
+    fragments = getattr(module, "_FRAGMENT_FILES", ())
+    if not fragments:
+        return (LIB / "installation_context.py").read_text(encoding="utf-8")
+    return "\n".join(
+        (LIB / fragment).read_text(encoding="utf-8") for fragment in fragments
+    )
+
+
 def _run_canonical_shell_digest(
     shell: str,
     root: Path,
@@ -264,7 +276,7 @@ def test_python_validation_cache_is_isolated_between_threads(
 
 
 def test_completion_read_stability_matches_marker_mutability() -> None:
-    python = (LIB / "installation_context.py").read_text(encoding="utf-8")
+    python = _assembled_python_source()
     posix = POSIX_SCRIPT.read_text(encoding="utf-8")
     powershell = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
 
@@ -308,7 +320,7 @@ def test_completion_read_stability_matches_marker_mutability() -> None:
 
 
 def test_digest_limits_and_scalable_sorting_are_present_everywhere() -> None:
-    python = (LIB / "installation_context.py").read_text(encoding="utf-8")
+    python = _assembled_python_source()
     posix = POSIX_SCRIPT.read_text(encoding="utf-8")
     powershell = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
     python_digest = python.split("def _snapshot_content_sha256(", 1)[1].split(
@@ -358,7 +370,7 @@ def test_digest_limits_and_scalable_sorting_are_present_everywhere() -> None:
 
 
 def test_slot_complete_reconfirms_digest_immediately_before_publication() -> None:
-    python = (LIB / "installation_context.py").read_text(encoding="utf-8")
+    python = _assembled_python_source()
     posix = POSIX_SCRIPT.read_text(encoding="utf-8")
     powershell = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
 

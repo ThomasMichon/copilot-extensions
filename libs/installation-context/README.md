@@ -4,7 +4,9 @@ Canonical, dependency-light management foundation for marketplace installation
 cells. Mutation remains explicit and non-automatic:
 
 - `installation_context.py` provides the stdlib-only management/runtime API and
-  CLI.
+  CLI composition root; its sibling `_installation_context_*.py` fragments keep
+  the canonical Python implementation componentized while the sync tool vendors
+  the same self-contained file set into every consuming plugin.
 - `installation-context.sh` plus `json-query.awk` provides a Bash bootstrap that
   does not require Python or `jq`. The Linux/WSL bootstrap requires Bash 4.4+
   plus `awk`, a SHA-256 command (`sha256sum`, `shasum`, or `openssl`), and a

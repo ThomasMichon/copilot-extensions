@@ -36,9 +36,10 @@ REGISTRY_HELPER = PLUGIN_ROOT / "scripts" / "registry_root.py"
 
 def _payload(tmp_path: Path, label: str, plugin: str = "agent-worktrees") -> Path:
     root = tmp_path / label
-    helper = root / "scripts" / "installation-context" / "installation_context.py"
-    helper.parent.mkdir(parents=True)
-    shutil.copyfile(CONTEXT_HELPER, helper)
+    helper_dir = root / "scripts" / "installation-context"
+    helper_dir.mkdir(parents=True)
+    for source in CONTEXT_HELPER.parent.glob("*.py"):
+        shutil.copyfile(source, helper_dir / source.name)
     shutil.copyfile(REGISTRY_HELPER, root / "scripts" / "registry_root.py")
     (root / "plugin.json").write_text(
         json.dumps({"name": plugin, "version": "0.0.1-dev1"}),

@@ -58,7 +58,7 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-21, post-`agent-worktrees tracking.py` obligations/lifecycle/session-registry slice)
+### Current pecking order (snapshot, 2026-09-21, post-`installation_context.py` canonical split)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
 — re-run before starting a phase, this list moves; it already has once per
@@ -68,8 +68,7 @@ table):
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
 | 9,267 | +8,267 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression); it drifted again while this slice was in flight, so the baseline was manually widened (9191 → 9267) to restore a green full-tree guard pending its own future split |
-| 9,169 | +8,169 | `libs/installation-context/installation_context.py` (+17 vendored copies) | Split the **canonical** copy only; `sync-installation-context.py` propagates to every vendored copy |
-| 8,140 | +7,140 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
+| 8,138 | +7,138 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
 | 6,972 | +5,972 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
 | 6,751 | +5,751 | `plugins/agent-bridge/src/agent_bridge/session_manager.py` | |
 | 3,946 | +2,946 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | Partial split landed: the claim/follow-up/orphanage ledger now lives in `tracking_claims.py`, asserted head/handoff/create primitives in `tracking_lifecycle.py`, and the hook/session-registry + repo-freshness helpers in `tracking_session_registry.py`. What's left is the persistence-heavy core: `WorktreeRecord`, YAML load/save/merge, locking/stamp-queue machinery, and the remaining parse/serialize compatibility helpers. |
@@ -87,16 +86,17 @@ table):
 | 2,207 | +1,207 | `plugins/agent-dispatch/src/agent_dispatch/supervisor_daemon.py` | |
 | 2,195 | +1,195 | `plugins/agent-worktrees/src/agent_worktrees/reconcile.py` | |
 | 2,124 | +1,124 | `plugins/agent-worktrees/src/agent_worktrees/session_projection.py` | |
+| 2,107 | +1,107 | `plugins/agent-worktrees/src/agent_worktrees/config.py` | |
 
 **Suggested next pick (Phase 2, next slice):** if the priority is still the
-largest remaining production offender overall, take the canonical
-`libs/installation-context/installation_context.py`. If the operator wants to
-stay in `agent-worktrees`, `tracking.py` is now a **partially**-resolved
-target with one clear remaining seam: split the persistence/serialization
-core (`load_record`, `_save_record_unlocked`, locking, stamp queue, and the
-record/PR parse-merge helpers) away from the still-large composition root.
-If the operator prefers a fresh file instead of another pass on the same one,
-`pr_ops.py` is the next best `agent-worktrees` target.
+largest remaining production offender overall, take
+`worktree-manager/.../picker_tui/engine.py`. If the operator wants to stay in
+`agent-worktrees`, `tracking.py` is still the clearest partially-resolved
+target: split the persistence/serialization core (`load_record`,
+`_save_record_unlocked`, locking, stamp queue, and the record/PR parse-merge
+helpers) away from the still-large composition root. If the operator prefers a
+fresh `agent-worktrees` file instead of another pass on the same one,
+`pr_ops.py` remains the next best candidate.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
 margin of their own ceiling (most likely to tip over next from unrelated
@@ -244,11 +244,29 @@ Verbatim from the operator:
               itself (`cmd_copilot`, especially `cmd_resolve`), and it now
               merits a dedicated design pass rather than another blind
               mechanical slice.
-      - [ ] The vendored-copy canonical
+      - [x] The vendored-copy canonical
             `libs/installation-context/installation_context.py` (9,169,
-            +14 copies) — validate `sync-installation-context.py --check`
-            and `check-vendored-libs-sync.py` as part of this one's
-            re-validation, not just the owning plugin's tests.
+            +17 vendored copies folded into one ranking row at slice start) —
+            split only the canonical source into a 37-line composition root plus
+            fourteen sibling `_installation_context_*.py` fragments (all under
+            the 1,000-line cap) and propagate that exact file set with
+            `sync-installation-context.py`. The fragment seams follow the file's
+            real responsibility bands: base helpers, file/digest I/O, source
+            normalization, receipts, snapshot provenance, runtime-slot ownership,
+            runtime-slot completion, resolution, activation, legacy attribution,
+            legacy transition, legacy retirement, maintenance, and mode/CLI.
+            The composition root now executes the fragments into one shared
+            module namespace so the vendored standalone loader contract and the
+            existing monkeypatch-heavy test seams remain behavior-identical.
+            Bumped every consuming plugin:
+            `agent-bridge` `0.4.0-dev537`, `agent-codespaces`
+            `0.4.0-dev150`, `agent-containers` `0.1.2-dev151`,
+            `agent-dispatch` `0.1.2-dev164`, `agent-index` `0.1.0-dev195`,
+            `agent-logger` `0.1.2-dev30`, `agent-machines`
+            `0.1.0-dev132`, `agent-mcp` `0.2.0-dev133`, `agent-ssh`
+            `0.1.0-dev100`, `agent-vault` `0.1.0-dev111`, and
+            `agent-worktrees` `1.5.5-dev229` (with marketplace
+            `metadata.version` `1.7.7-dev197`).
 
 ### Phase 3 — cross-language cap
 - [ ] Design what "module size" means for `.sh`/`.ps1`/`.ts` (line count vs.
@@ -1177,3 +1195,90 @@ the Phase 0 runbook, picked up as capacity allows.
   `agent-worktrees --help`.
 - Version bump for this slice: `agent-worktrees` **`1.5.5-dev228`** and
   marketplace `metadata.version` **`1.7.7-dev196`**.
+
+### 2026-09-21 — Phase 2 continued: `libs/installation-context/installation_context.py` canonical split
+- Took the effort's largest remaining vendored offender exactly as the runbook
+  requires: split only the canonical
+  `libs/installation-context/installation_context.py`, then propagated the new
+  file set with `python tools/sync-installation-context.py` rather than editing
+  any downstream copy by hand. The file's actual seams were not "one more CLI"
+  or "one giant class"; they were a long sequence of top-level responsibility
+  bands. The resulting canonical shape is a **37-line composition root** plus
+  fourteen sibling fragments, each under the 1,000-line cap:
+  `_installation_context_base.py` (352), `_installation_context_files.py`
+  (854), `_installation_context_source.py` (653),
+  `_installation_context_receipts.py` (667),
+  `_installation_context_snapshot.py` (480),
+  `_installation_context_runtime_slot_ownership.py` (636),
+  `_installation_context_runtime_slot_completion.py` (797),
+  `_installation_context_resolution.py` (553),
+  `_installation_context_activation.py` (424),
+  `_installation_context_legacy_attribution.py` (836),
+  `_installation_context_legacy_transition.py` (781),
+  `_installation_context_legacy_retirement.py` (512),
+  `_installation_context_maintenance.py` (717), and
+  `_installation_context_mode_cli.py` (900).
+- The crucial compatibility constraint was **not** just imports; it was the
+  vendored-loader and monkeypatch seam. This primitive is loaded both as a
+  standalone script and through `importlib.util.spec_from_file_location(...)`
+  from vendored `_installation_context.py` copies inside plugin packages, and
+  its tests monkeypatch root-module helper names heavily. A normal
+  `from .foo import ...` module split would have broken both shapes. The chosen
+  composition root instead executes the fragments into one shared module
+  namespace, preserving the existing single-module runtime semantics while
+  still breaking the canonical source into reviewable, capped files. Ruff's
+  `F821` undefined-name checks are suppressed **only** on the shared-namespace
+  fragments themselves, with an inline note explaining why; the composition root
+  and ordinary modules still lint normally.
+- Sync propagation now carries the whole Python fragment set, not just the one
+  root file: `tools/sync-installation-context.py` copies every
+  `_installation_context_*.py` helper into both the script vendoring surface
+  (`plugins/<plugin>/scripts/installation-context/`) and the packaged runtime
+  surface (`plugins/<plugin>/src/<pkg>/_installation_context*.py` plus
+  `worktree-manager/src/worktree_manager/`). Updated the related vendoring and
+  packaging tests so staged payloads copy the full helper set, not a lone
+  `installation_context.py`, and so byte-identity assertions cover the new
+  fragments in the packaged copies too.
+- Validation and fix-ups: the first broad adopter run flushed out one real
+  regression created by the initial cut — the receipt-state helper trio
+  (`_assert_positive_integer`, `_assert_receipt_state`,
+  `_assert_receipt_generation`) had been left behind just above the original
+  split boundary, so vendored `stamp_context()` callers raised
+  `NameError: _assert_receipt_state is not defined`. Moved those helpers into
+  the receipts fragment, re-synced all adopters, and re-ran the affected
+  installation-context-targeted suites until the new shape was green.
+- Final validation for this slice:
+  `python tools/sync-installation-context.py --check`,
+  `python tools/check-vendored-libs-sync.py`,
+  `python tools/check-module-size.py`,
+  `python tools/check-module-size.py --refresh-baseline`,
+  `python tools/check-install-contract.py`, and
+  `python tools/check-version-consistency.py` all pass. Ruff (`--select F,E9`)
+  passes across the touched/created canonical files and synced copies. Full
+  `python tools/run-plugin-tests.py <plugin>` runs were executed for every
+  vendor plugin; only `agent-index` and `agent-mcp` were fully green end to
+  end on this Windows host, while the others stopped in independently observed,
+  unrelated Windows/bash or host-specific failures already present in their
+  own suites. Per the componentization runbook's pre-existing-failure rule,
+  targeted installation-context-adjacent sweeps then passed for every affected
+  surface we changed:
+  `agent-bridge -k "handoff_cli or worktree_ownership"`,
+  `agent-codespaces -k "worktrees_peer"`,
+  `agent-containers -k "worktrees_peer or provider_ssh"`,
+  `agent-dispatch -k "procutil"`,
+  `agent-index -k "effective_config"`,
+  `agent-logger -k "worktrees_peer"`,
+  `agent-machines -k "cell_lifecycle"`,
+  `agent-mcp -k "bootstrap_stamp_selection or payload_invocation"`,
+  `agent-ssh -k "payload_invocation"`,
+  `agent-vault -k "payload_invocation"`, and
+  `agent-worktrees -k "registry_paths or reconcile"`.
+  Read-only dogfood also passed for every vendored script copy
+  (`python ...\\installation_context.py --help`) and every packaged vendored
+  module surface (loader-accurate `spec_from_file_location` import smoke for
+  the seven packaged `_installation_context.py` copies).
+- Resulting backlog shift: the canonical installation-context giant is gone
+  from the pecking order entirely. The repo's largest remaining baselined
+  offender is now `worktree-manager/.../picker_tui/engine.py` at 9,267 lines;
+  within `agent-worktrees`, the most coherent follow-up remains the
+  persistence/serialization core left in `tracking.py`.
