@@ -245,16 +245,26 @@ Tasks pivot are the baselines).
   building the Phase 0 preview.** `subtitle_field`/`_column_subtitle`
   already render one composed string; `Column`/`group_field`/
   `worktree_field` already exist. Every proposed field in the Phase 0
-  manifests (`driven`, `claims_summary`, the composed `subtitle`) is just a
+  manifests (`sess`, `claims_summary`, the composed `subtitle`) is just a
   new column/entry-mapping declaration plus a new value the real backend
   command (`pool.py`, `_cmd_fleet`) would compute — exactly the same shape
   as the existing `worktree_title` auto-injection. The preview's own
-  fixtures bake the agent-bridge join's *output* (`live`, the composed
+  fixtures bake the agent-bridge join's *output* (`sess`, the composed
   activity text) directly into the fixture rows rather than modeling a
   separate `agent-bridge live-sessions --json` fixture and a join step in
   the preview tooling — that join is real Phase 1/2 backend work
   (`pool.py`/`_cmd_fleet` calling agent-bridge), not something the picker
   engine or this preview tool needs to simulate to prove the row grammar.
+- **The Worktrees pane already has the exact column this effort needs for
+  session liveness:** a compact `sess`/`live` column (key `sess`, header
+  "live", 4 chars wide) with a multi-valued vocabulary (a pulsing "●" for a
+  live mux, `PROC`/`LOCK` otherwise) — not a boolean. An operator review of
+  the first-draft screenshots correctly flagged this effort's own `driven`
+  column as too wide for what amounts to a yes/no, and pointed at this
+  existing column as the right model. Adopted directly: same key/header/
+  width, values `LIVE`/`IDLE`/blank. The separate `driven` boolean is
+  **dropped entirely** — it was redundant with the already-present
+  `worktree` cross-link column (non-blank already means driven).
 
 ## Plan
 
@@ -283,16 +293,19 @@ Tasks pivot are the baselines).
       `worktree-manager/scripts/picker-snapshot/venue-preview/README.md`.
 - [x] Design the exact column/field mapping for the Containers parity pass
       and the Codespaces `subtitle` wiring, realized directly as the two
-      `*.proposed.json` manifests (not just a prose note): `driven` and
-      `claims` columns on both, `subtitle` composed as
+      `*.proposed.json` manifests (not just a prose note): a compact
+      `sess` (session liveness) column and a `claims` column on both,
+      `subtitle` composed as
       `"[mark] <durable title> - <transient activity>"`, a `worktree`
       cross-link on Containers via `lease`.
-- [x] Decide the driving-worktree indicator's slot: a dedicated `driven`
-      line-one stat column (not the `[mark]` glyph) — reads unambiguously
-      in the column table, leaving `[mark]` free for the line-two
-      relation semantics (→ driving link / ⚠ orphaned). "View driving
-      worktree"/"Worktree status" menu entries added to both pivots' proposed
-      manifests, gated on `driven`.
+- [x] Decide the driving-worktree indicator's slot: **dropped the
+      dedicated `driven` boolean entirely** (redundant with the already-
+      present `worktree` cross-link column) after operator review of the
+      first-draft screenshots; replaced with the Worktrees pane's own
+      compact `sess`/`live` column (same key/header/4-char width,
+      `LIVE`/`IDLE`/blank) for the one genuinely new signal — session
+      liveness. "View driving worktree"/"Worktree status" menu entries
+      gated on `sess` being `LIVE` or `IDLE`.
 - [ ] Design the shared claims-pecking-order module: its home (proposed:
       `agent-worktrees`, since it owns the ledger being ranked), its input
       shape (a worktree's claim-ledger entries) and output shape (an
@@ -408,6 +421,19 @@ Tasks pivot are the baselines).
 
 ## Journal
 
+- **2026-09-21 (latest+3)** — Operator reviewed the rendered screenshots and
+  flagged the `driven` column: too much width for a boolean, and pointed at
+  the Worktrees pane's own compact `sess`/`live` column (key `sess`, header
+  "live", 4 chars, multi-valued: pulsing "●"/`PROC`/`LOCK`) as the right
+  model. Dropped `driven` entirely — it duplicated what the already-present
+  `worktree` cross-link column signals (non-blank = driven) — and adopted
+  that same column verbatim (same key/header/width) for the one genuinely
+  new signal, session liveness: `LIVE`/`IDLE` (`IDLE` already exists in the
+  picker's own `state` palette)/blank. Updated `fake_pool.py`/
+  `fake_fleet.py` (removed `driven`+`live` fields, added one `sess` field)
+  and both proposed manifests (column + all three `when` gates), re-ran the
+  render script — all six screenshots regenerated successfully — and
+  re-synced the updated PNGs to the same dated OneDrive folder.
 - **2026-09-21 (latest+2)** — Built and ran the Phase 0 preview tooling
   (`worktree-manager/scripts/picker-snapshot/venue-preview/`): hermetic
   demo Worktrees source, `fake_pool.py`/`fake_fleet.py` fixtures (4/3 rows
@@ -421,10 +447,10 @@ Tasks pivot are the baselines).
   `subtitle_field`/`Column`/`worktree_field` mechanisms `worktree_title`
   auto-injection already proved out). Decided the driving-worktree
   indicator lives in a dedicated `driven` column (not the `[mark]` glyph),
-  freeing `[mark]` for line two's own relation semantics. The shared
-  claims-pecking-order module remains undesigned; the preview's
-  `claims_summary` values are explicit placeholders. Next: operator review
-  of the screenshots.
+  freeing `[mark]` for line two's own relation semantics — **later
+  superseded by the entry above.** The shared claims-pecking-order module
+  remains undesigned; the preview's `claims_summary` values are explicit
+  placeholders. Next: operator review of the screenshots.
 - **2026-09-21 (latest+1)** — Operator supplied a shared claims prominence
   ranking (PR > bug > effort > bridge > CodeSpace/container > child
   worktree > machine SSH > dispatch task, tunable; human-mappable/

@@ -8,12 +8,19 @@ The fixture rows already carry the fields a Phase 1-implemented ``pool.py``
 would compute: a composed line-two string (``subtitle``) in the vision's
 ``"[mark] <durable title> - <transient activity>"`` grammar, a
 ``claims_summary`` (the shared claims-pecking-order module's "1-2 prominent"
-output), and a ``driven`` stat (the reserved driving-worktree indicator). The
-**current** manifest (``agent-codespaces.current.json``, a byte-for-byte copy
-of the real ``plugins/agent-codespaces/pivots/agent-codespaces.json``) simply
-never maps most of these -- rendering the SAME rows through it is what proves
-the "dropped field" gap the effort's Phase 1 fixes. The **proposed** manifest
-(``agent-codespaces.proposed.json``) maps them all.
+output), and a compact ``sess`` stat -- **not a separate boolean "driven"
+column**: the existing ``worktree`` column already signals driving (non-blank
+= driven), so the one new signal worth a column is *session liveness*,
+mirroring the Worktrees pane's own narrow ``sess``/``live`` column exactly
+(same key, same "live" header, same 4-char width) rather than inventing a
+wider bespoke indicator. Values: ``"LIVE"`` (driven, agent-bridge reports an
+active session), ``"IDLE"`` (driven, no live session -- reuses
+``_STATE_PALETTE``'s existing ``IDLE`` entry), or ``""`` (not driven at all).
+The **current** manifest (``agent-codespaces.current.json``, a byte-for-byte
+copy of the real ``plugins/agent-codespaces/pivots/agent-codespaces.json``)
+simply never maps most of these -- rendering the SAME rows through it is what
+proves the "dropped field" gap the effort's Phase 1 fixes. The **proposed**
+manifest (``agent-codespaces.proposed.json``) maps them all.
 
 Never talks to a real CodeSpace, git remote, or agent-bridge -- accepts (and
 ignores) ``--machine``/``--picker-json`` exactly like the real CLI so the same
@@ -50,9 +57,8 @@ ROWS = [
         "health": "running",
         "occupancy": "in-use",
         "safe": "no",
-        "driven": "DRIVEN",
         "claims_summary": "PR #2481",
-        "live": "yes",
+        "sess": "LIVE",
         "worktree_status": {
             "title": "Worktree a1c4 \u2014 session status",
             "body": (
@@ -87,9 +93,8 @@ ROWS = [
         "health": "running",
         "occupancy": "in-use",
         "safe": "unknown",
-        "driven": "DRIVEN",
         "claims_summary": "PR #2477 \u00b7 bug #2410",
-        "live": "",
+        "sess": "IDLE",
         "worktree_status": {
             "title": "Worktree 88de \u2014 session status",
             "body": (
@@ -125,9 +130,8 @@ ROWS = [
         "health": "stopped",
         "occupancy": "free",
         "safe": "yes",
-        "driven": "",
         "claims_summary": "",
-        "live": "",
+        "sess": "",
     },
     {
         "id": "cs-c72e-stale",
@@ -150,9 +154,8 @@ ROWS = [
         "health": "stopped",
         "occupancy": "orphan",
         "safe": "unknown",
-        "driven": "",
         "claims_summary": "issue #118",
-        "live": "",
+        "sess": "",
     },
 ]
 

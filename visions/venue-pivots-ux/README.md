@@ -175,21 +175,34 @@ odsp-web's ADO-backed flow to start; the detection mechanism (watching for
 a push→PR transition) is new work, but the claim it produces rides the
 existing ledger unchanged.
 
-### Driving-worktree mark and navigation — a reserved slot, not just a fact
+### Driving-worktree signal — not a boolean column; the existing `worktree` cross-link already carries it
 
-Which local worktree is actively driving a venue is important enough to
-reserve a dedicated signal, not bury it as one more stat. Either a
-dedicated line-one stat slot (a compact "DRIVEN"/idle-equivalent badge
-alongside `health`/`occupancy`) or the line-two `[mark]` glyph carries this
-—design chooses whichever the Phase 0 preview shows reads best, but *one*
-of them is reserved for it specifically, not shared with an unrelated
-signal. Whichever slot it lives in, the row's action menu gains a way to
-act on that link directly: **view the driving worktree's own Worktrees-pivot
-entry**, or **open its Worktree Status card** directly — the same
-destination agent-dispatch's Tasks pane is already building toward for its
-own embodied-task→worktree drill-in (`visions/plugins/agent-dispatch/
-tasks-pane-ux`'s Worktree Status card). A venue with no driving worktree
-simply omits both the mark and the menu entries (graceful-absence).
+An early draft of this vision proposed a dedicated `driven` boolean stat
+column. Operator review correctly rejected it: it's a lot of real estate to
+spend on a yes/no, and it's **redundant** — the pivot's existing `worktree`
+cross-link column is already non-blank exactly when a worktree is driving
+the venue. No second column is needed to say the same thing twice.
+
+What *is* missing is the finer-grained signal underneath that link: is the
+driving worktree's session actually **live** right now, or just present
+but idle? The Worktrees pane already answers this exact question for
+itself with its own compact `sess`/`live` column — a narrow (4-character),
+multi-valued indicator (a pulsing "●" glyph when a mux session is live,
+`PROC`/`LOCK` for other states), not a boolean. This vision's Codespaces
+and Containers pivots reuse that **same column** — same key, same "live"
+header, same width — rather than inventing a new one: `"LIVE"` when
+agent-bridge reports an active session, `"IDLE"` when the worktree is
+driving but no session is live (`IDLE` already exists in the picker's own
+`state` palette), or blank when nothing is driving at all. One column, one
+already-established vocabulary, reused instead of duplicated.
+
+The row's action menu keys off the same signal: **view the driving
+worktree's own Worktrees-pivot entry**, or **open its Worktree Status
+card** directly — the same destination agent-dispatch's Tasks pane is
+already building toward for its own embodied-task→worktree drill-in
+(`visions/plugins/agent-dispatch/tasks-pane-ux`'s Worktree Status card) —
+offered whenever the session column reads `LIVE` or `IDLE`, omitted
+entirely (graceful-absence) when it's blank.
 
 ### Codespaces: already repo-grouped; wire the dropped subtitle, add the live-session join
 
@@ -350,12 +363,14 @@ actions, and agent-bridge live-session join needed to match the CodeSpaces
 pivot's presentation fidelity, using the same shared column vocabulary and
 lifecycle palette.
 
-### driving-worktree-mark-and-nav
-A reserved line-one stat slot or the line-two `[mark]` glyph (design
-chooses which in Phase 0) identifies which local worktree, if any, is
-actively driving the venue. The row's action menu gains "view driving
-worktree" (jump to its Worktrees-pivot entry) and "worktree status" (open
-its Worktree Status card directly) — new on both pivots, mirroring
+### driving-worktree-session-and-nav
+No separate "driven" boolean column — the existing `worktree` cross-link
+already signals that. A narrow, multi-valued session column (reusing the
+Worktrees pane's own `sess`/`live` column: `LIVE`/`IDLE`/blank) carries the
+finer-grained liveness signal underneath it. The row's action menu gains
+"view driving worktree" (jump to its Worktrees-pivot entry) and "worktree
+status" (open its Worktree Status card directly), offered whenever that
+column reads `LIVE` or `IDLE` — new on both pivots, mirroring
 agent-dispatch's own Tasks→Worktree drill-in direction.
 
 ### codespace-pr-auto-claim
@@ -478,6 +493,13 @@ demo data source, before any implementation PR — never a hand-drawn mockup.
 
 ## Provenance
 
+- **2026-09-21 (latest+2)** — Operator reviewed the rendered screenshots and
+  flagged the `driven` column as too much real estate for a boolean,
+  pointing at the Worktrees pane's own compact, multi-valued `sess`/`live`
+  column as the right model. Dropped `driven` entirely (redundant with the
+  already-present `worktree` cross-link column) and replaced it with that
+  same narrow session column (`LIVE`/`IDLE`/blank), reusing its exact
+  key/header/width rather than inventing a new indicator.
 - **2026-09-21 (latest+1)** — Operator supplied a cross-pivot claims
   prominence ranking (PR > bug > effort > bridge > CodeSpace/container >
   child worktree > machine SSH > dispatch task — human-mappable/

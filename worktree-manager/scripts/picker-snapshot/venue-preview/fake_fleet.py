@@ -7,11 +7,13 @@ before/after preview renders (``efforts/active/picker-venue-pivots``).
 Mirrors ``fake_pool.py``'s pattern: fixture rows already carry the fields a
 Phase 2-implemented ``_cmd_fleet`` would compute (a ``lease``-derived
 ``worktree`` cross-link, a composed line-two ``subtitle``, a
-``claims_summary``, a ``driven`` stat) -- rendering the SAME rows through the
-**current** manifest (``agent-containers.current.json``, a byte-for-byte copy
-of the real ``plugins/agent-containers/pivots/agent-containers.json``) proves
-today's thin badge-list shape (only ``name``/``image``/``state``/``fleet``
-ever render); rendering them through the **proposed** manifest
+``claims_summary``, a compact ``sess`` liveness stat -- see ``fake_pool.py``'s
+own docstring for why this is a narrow multi-valued column, not a "driven"
+boolean) -- rendering the SAME rows through the **current** manifest
+(``agent-containers.current.json``, a byte-for-byte copy of the real
+``plugins/agent-containers/pivots/agent-containers.json``) proves today's thin
+badge-list shape (only ``name``/``image``/``state``/``fleet`` ever render);
+rendering them through the **proposed** manifest
 (``agent-containers.proposed.json``) shows the Codespaces-parity target.
 
 Never talks to a real Docker daemon -- accepts (and ignores) ``--json``
@@ -43,9 +45,8 @@ ROWS = [
         ),
         "security_profile": "trusted",
         "network": "bridge",
-        "driven": "DRIVEN",
         "claims_summary": "PR #2481",
-        "live": "yes",
+        "sess": "LIVE",
         "worktree_status": {
             "title": "Worktree a1c4 \u2014 session status",
             "body": (
@@ -72,9 +73,8 @@ ROWS = [
         "subtitle": "sample-repo fleet \u00b7 ghcr.io/acme-org/sample-repo-dev:latest",
         "security_profile": "trusted",
         "network": "bridge",
-        "driven": "",
         "claims_summary": "",
-        "live": "",
+        "sess": "",
     },
     {
         "name": "sample-harness-1",
@@ -92,9 +92,8 @@ ROWS = [
         ),
         "security_profile": "restricted",
         "network": "none",
-        "driven": "",
         "claims_summary": "issue #118",
-        "live": "",
+        "sess": "",
     },
 ]
 

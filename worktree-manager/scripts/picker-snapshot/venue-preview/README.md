@@ -52,19 +52,18 @@ Writes eight PNGs to `--out-dir`:
 | File | What it shows |
 |------|----------------|
 | `codespaces-before.png` | The REAL current CodeSpaces pivot: repo-grouped, columnar (health/use/safe/worktree/cores/task), but **no subtitle line at all** — `pool.picker_payload`'s computed subtitle is silently dropped today. |
-| `codespaces-after.png` | The SAME fixture rows through the proposed manifest: a new `driven`/`claims` column pair (the `worktree` column drops for width — see the `+3` fit indicator, demonstrating the existing column-fit/priority algorithm working unmodified), and the row-grammar line two: `"→ Reproduce #4021 on a clean box - fixing the relay reconnect backoff..."` (declared intent + live activity), `"→ Fix agent-mcp decorator ordering regression"` (no live activity — title only, graceful-absence), a bare venue-identity fallback with no mark (no driving worktree), and `"⚠ ... - holder worktree gone (orphaned lock)"` (the orphan mark). |
+| `codespaces-after.png` | The SAME fixture rows through the proposed manifest: a new compact `sess`/`claims` column pair (the `worktree` column drops for width — see the `+3` fit indicator, demonstrating the existing column-fit/priority algorithm working unmodified). `sess` reuses the **Worktrees pane's own column** (key/header/width unchanged) rather than a wide "driven" boolean — `LIVE`/`IDLE`/blank — since the existing `worktree` column already signals driving. Row-grammar line two: `"→ Reproduce #4021 on a clean box - fixing the relay reconnect backoff..."` (declared intent + live activity), `"→ Fix agent-mcp decorator ordering regression"` (no live activity — title only, graceful-absence), a bare venue-identity fallback with no mark (no driving worktree), and `"⚠ ... - holder worktree gone (orphaned lock)"` (the orphan mark). |
 | `containers-before.png` | The REAL current Containers pivot: a flat, ungrouped badge list — `name`, `[state]`, `[fleet]` badges, and an `image`-only subtitle. No columns, no group, no worktree cross-link, no actions. |
-| `containers-after.png` | The SAME fixture rows through the proposed manifest, now at CodeSpaces' fidelity: `container`/`fleet`/`state`/`driven`/`worktree`/`profile`/`task`/`claims` columns, fleet-based grouping, and the identical row-grammar line two. |
-| `codespaces-menu-driven-live.png` | The action menu for a driven + live-session CodeSpace row (`cs-a1c4-relay`): **Open into a CLI session**, **View driving worktree**, **Worktree status**, plus the existing Release — all new actions marked `PROPOSED — semantics not yet implemented (Phase N)`. |
-| `containers-menu-driven-live.png` | The identical menu shape for a driven + live-session fleet container row (`sample-repo-1`), proving the two pivots converge on one action vocabulary. |
+| `containers-after.png` | The SAME fixture rows through the proposed manifest, now at CodeSpaces' fidelity: `container`/`fleet`/`state`/`sess`/`worktree`/`profile`/`task`/`claims` columns, fleet-based grouping, and the identical row-grammar line two. |
+| `codespaces-menu-driven-live.png` | The action menu for a `sess: LIVE` CodeSpace row (`cs-a1c4-relay`): **Open into a CLI session**, **View driving worktree**, **Worktree status**, plus the existing Release — all new actions marked `PROPOSED — semantics not yet implemented (Phase N)`. |
+| `containers-menu-driven-live.png` | The identical menu shape for a `sess: LIVE` fleet container row (`sample-repo-1`), proving the two pivots converge on one action vocabulary. |
 
 ## Files
 
 - `fake_pool.py` — fixed JSON fixture standing in for
-  `agent-codespaces pool --picker-json` (4 CodeSpaces: driven+live,
-  driven+idle, undriven, orphaned-lock), with the row-grammar fields
-  (`subtitle`, `driven`, `claims_summary`, `live`) a Phase 1 `pool.py` would
-  compute.
+  `agent-codespaces pool --picker-json` (4 CodeSpaces: live, idle,
+  undriven, orphaned-lock), with the row-grammar fields (`subtitle`,
+  `sess`, `claims_summary`) a Phase 1 `pool.py` would compute.
 - `fake_fleet.py` — the same shape standing in for
   `agent-containers fleet --json` (3 fleet containers, same four
   scenarios), matching `test_fleet_json.py`'s real field names
