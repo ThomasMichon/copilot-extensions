@@ -1502,14 +1502,16 @@ not yet written up as a dedicated entry here since no code changed):
    mode flag** (e.g. `--audit`/`--force`/`--compute`) instead of a
    separate top-level verb, to reduce the CLI's already-large flat
    subcommand surface and the chance an agent guesses at the wrong one
-   for a task. Not a trivial one-liner: `-audit` samples *N* random
+   for a task. Not a trivial one-liner: `--audit` samples *N* random
    worktrees and appends telemetry, while `-bundle` resolves exactly
-   one `--project/--worktree-id` -- a flag here would need to switch
-   the command's entire output shape, not just add a knob. Worth
-   scoping as its own small design pass, and worth doing alongside a
-   broader look at separating genuinely diagnostic/introspection verbs
-   (audit, doctor, hygiene, history-digest, ...) from mainline
-   task-driving verbs, so agents don't have to guess between them.
+   one worktree via its `--worktree`/`--worktree-id` option (no
+   `--project` flag -- it resolves the owning project internally) --
+   a flag here would need to switch the command's entire output shape,
+   not just add a knob. Worth scoping as its own small design pass, and
+   worth doing alongside a broader look at separating genuinely
+   diagnostic/introspection verbs (audit, doctor, hygiene,
+   history-digest, ...) from mainline task-driving verbs, so agents
+   don't have to guess between them.
 2. **An opt-in, elevation-required `agent-machines` module to request
    Windows Defender exclusions** for the runtime install dirs (e.g.
    `~/.agent-worktrees/versions/**`), to eliminate the ~1.5-3s
