@@ -139,7 +139,47 @@ def _call(
     return rc, seen
 
 
-class TestCmdCopilotRestrictedRefusal:
+class TestCmdCopilotAnchorDefault:
+    """Omitting --worktree-id defaults to anchor mode: a trusted container is
+    conventionally anchor-only (its fleet image already clones the repo
+    directly), matching headless ACP dispatch's own existing behavior."""
+
+    def test_no_worktree_id_resolves_anchor_identity_from_workspace_folder(
+        self, monkeypatch,
+    ) -> None:
+        seen = {}
+
+        def venue_copilot_run(identity, *, connect, anchor=False, **kwargs):
+            seen["identity"] = identity
+            seen["anchor"] = anchor
+            return connect("agent-worktrees copilot --anchor")
+
+        rc, _ = _call(
+            _args(worktree_id=None), target=_target(),
+            venue_copilot_run=venue_copilot_run, monkeypatch=monkeypatch,
+        )
+
+        assert rc == 0
+        assert seen == {"identity": "anchor-repo", "anchor": True}
+
+    def test_explicit_worktree_id_still_wins_over_anchor_default(
+        self, monkeypatch,
+    ) -> None:
+        seen = {}
+
+        def venue_copilot_run(identity, *, connect, anchor=False, **kwargs):
+            seen["identity"] = identity
+            seen["anchor"] = anchor
+            return connect("agent-worktrees copilot --worktree-id wt-A")
+
+        rc, _ = _call(
+            _args(), target=_target(), venue_copilot_run=venue_copilot_run,
+            monkeypatch=monkeypatch,
+        )
+
+        assert rc == 0
+        assert seen == {"identity": "wt-A", "anchor": False}
+
     def test_refuses_restricted_container(self, monkeypatch, capsys) -> None:
         rc, _ = _call(
             _args(), target=_target(profile=RESTRICTED_PROFILE), monkeypatch=monkeypatch,

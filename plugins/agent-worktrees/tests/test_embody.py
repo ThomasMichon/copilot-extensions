@@ -130,9 +130,11 @@ class TestMuxNewSession:
 
 # -- cmd_embody control flow ------------------------------------------------
 def _ns(**kw):
-    base = dict(worktree_id=None, new=False, seed=None, driver=None,
+    base = dict(worktree_id=None, new=False, codename=None, anchor=False,
+                seed=None, driver=None,
                 seed_ready_timeout=180.0,
-                verify_timeout=0.0, recovery=False, dry_run=False)
+                verify_timeout=0.0, recovery=False, dry_run=False,
+                ensure_mux=False)
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -495,3 +497,141 @@ class TestCmdEmbody:
         out = json.loads(capfd.readouterr().out)
         assert out["dry_run"] is True and out["would"] == "create"
         assert out["cmd"] == ["copilot"]
+
+
+# -- cmd_embody --anchor: deliver directly in the anchor, no worktree ------
+def _stub_anchor_config(monkeypatch, *, repo_name="odsp-web", anchor="/w/anchor"):
+    class _Cfg:
+        repos = {}
+        default_repo = type("Repo", (), {"anchor": anchor})()
+    _Cfg.repo_name = repo_name
+    monkeypatch.setattr(m.cfg, "load_config", lambda: _Cfg())
+    monkeypatch.setattr(m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight())
+    monkeypatch.setattr(m, "_build_launch_cmd", lambda c, a, w, **k: ["copilot"])
+    monkeypatch.setattr(m, "_build_env", lambda p, s=None, work_dir=None: {})
+    monkeypatch.setattr(m, "_repo_session_env", lambda c, w="": {})
+
+
+class TestCmdEmbodyAnchor:
+    def test_anchor_mutually_exclusive_with_worktree_id(self, capfd):
+        rc = m.cmd_embody(_ns(anchor=True, worktree_id="x"))
+        assert rc == 2
+        assert "mutually exclusive" in capfd.readouterr().out
+
+    def test_anchor_mutually_exclusive_with_new(self, capfd):
+        rc = m.cmd_embody(_ns(anchor=True, new=True))
+        assert rc == 2
+        assert "mutually exclusive" in capfd.readouterr().out
+
+    def test_anchor_requires_active_project(self, monkeypatch, capfd):
+        class _Cfg:
+            repo_name = None
+            default_repo = type("Repo", (), {"anchor": ""})()
+        monkeypatch.setattr(m.cfg, "load_config", lambda: _Cfg())
+        rc = m.cmd_embody(_ns(anchor=True))
+        assert rc == 2
+        assert "requires an active project" in capfd.readouterr().out
+
+    def test_anchor_creates_session_at_the_anchor_path_no_worktree_record(
+        self, monkeypatch, capfd,
+    ):
+        _stub_anchor_config(monkeypatch, repo_name="odsp-web", anchor="/w/odsp-web")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        spawned = {}
+
+        def _spawn(wt, wd, cmd, env, **k):
+            spawned.update(wt=wt, wd=wd, cmd=cmd)
+            return {"ok": True, "session": f"wt-{wt}", "new_pane": "%7", "error": None}
+
+        monkeypatch.setattr(sessions, "mux_new_session", _spawn)
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: pytest.fail(
+            "anchor mode must never look up a worktree tracking record"
+        ))
+
+        rc = m.cmd_embody(_ns(anchor=True))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["ok"] is True
+        assert out["anchor"] is True
+        assert out["worktree_id"] == "anchor-odsp-web"
+        assert out["session"] == "wt-anchor-odsp-web"
+        assert out["work_dir"] == "/w/odsp-web"
+        assert out["created"] is True and out["resumed"] is False
+        assert spawned == {
+            "wt": "anchor-odsp-web", "wd": "/w/odsp-web", "cmd": ["copilot"],
+        }
+
+    def test_anchor_resumes_an_already_live_session(self, monkeypatch, capfd):
+        _stub_anchor_config(monkeypatch)
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(sessions, "mux_active_pane", lambda w: "%2")
+        monkeypatch.setattr(sessions, "mux_copilot_pane", lambda w: None)
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda *a, **k: pytest.fail("must not spawn a duplicate"),
+        )
+
+        rc = m.cmd_embody(_ns(anchor=True))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["created"] is False and out["resumed"] is True
+        assert out["anchor"] is True
+        assert out["new_pane"] == "%2"
+
+    def test_anchor_seeds_the_first_turn(self, monkeypatch, capfd):
+        _stub_anchor_config(monkeypatch)
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda wt, wd, cmd, env, **k: {
+                "ok": True, "session": f"wt-{wt}", "new_pane": "%4", "error": None,
+            },
+        )
+        seeded = {}
+
+        def _seed(pane, seed, **k):
+            seeded.update(pane=pane, seed=seed)
+            return {"ok": True, "sent": True, "ready": True, "submitted": True, "reason": None}
+
+        monkeypatch.setattr(sessions, "mux_seed_pane", _seed)
+
+        rc = m.cmd_embody(_ns(anchor=True, seed="explore the repo"))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["seeded"] is True
+        assert seeded == {"pane": "%4", "seed": "explore the repo"}
+
+    def test_anchor_dry_run_reports_plan_without_spawning(self, monkeypatch, capfd):
+        _stub_anchor_config(monkeypatch)
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda *a, **k: pytest.fail("dry-run must not spawn"),
+        )
+
+        rc = m.cmd_embody(_ns(anchor=True, dry_run=True))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["dry_run"] is True
+        assert out["anchor"] is True
+        assert out["would"] == "create"
+        assert out["worktree_id"] == "anchor-odsp-web"
+
+    def test_anchor_spawn_failure_exits_4(self, monkeypatch, capfd):
+        _stub_anchor_config(monkeypatch)
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda *a, **k: {"ok": False, "session": "wt-anchor-odsp-web",
+                             "new_pane": None, "error": "boom"},
+        )
+
+        rc = m.cmd_embody(_ns(anchor=True))
+
+        assert rc == 4
+        assert "boom" in capfd.readouterr().out
+

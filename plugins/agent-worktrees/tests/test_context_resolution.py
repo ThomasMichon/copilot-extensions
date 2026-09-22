@@ -436,6 +436,39 @@ def test_get_worktree_id_empty_at_anchor(adopted_repo, active_myproj, monkeypatc
     assert out == ""
 
 
+def test_get_session_scope_id_is_worktree_id_inside_a_worktree(
+    adopted_repo, active_myproj, monkeypatch, capsys,
+):
+    """Inside a worktree, `session-scope-id` is exactly the worktree id --
+    the CLI-mode registration extension threads this straight through as
+    `worktree_id`, so it must be identical to what `get worktree-id` itself
+    reports for the ordinary (non-anchor) case."""
+    _anchor, _wt_root, wt_path, wt_id, _conf = adopted_repo
+    monkeypatch.chdir(wt_path)
+    rc = m.cmd_get(types.SimpleNamespace(key="session-scope-id"))
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert out == wt_id
+
+
+def test_get_session_scope_id_is_anchor_repo_name_at_anchor(
+    adopted_repo, active_myproj, monkeypatch, capsys,
+):
+    """At the anchor, `session-scope-id` is `anchor-<repo_name>` -- unlike
+    `worktree-id` (deliberately left empty there, an unrelated documented
+    contract), this is the new identity `agent-worktrees embody/copilot
+    --anchor` and the CLI-mode registration extension actually need: without
+    it, an anchor-mode session's self-registration reports a null
+    worktree_id and agent-bridge's CLI-mode reservation can never correlate
+    it (agent-bridge-cli-mode-sessions Phase 4 follow-up)."""
+    anchor, _wt_root, _wt_path, _wt_id, _conf = adopted_repo
+    monkeypatch.chdir(anchor)
+    rc = m.cmd_get(types.SimpleNamespace(key="session-scope-id"))
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert out == "anchor-myproj"
+
+
 def test_get_worktree_state_dir_uses_machine_local_anchor_scope(
     adopted_repo, active_myproj, monkeypatch, tmp_path, capsys,
 ):

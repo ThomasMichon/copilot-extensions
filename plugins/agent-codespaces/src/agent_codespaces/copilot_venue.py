@@ -28,9 +28,15 @@ def add_copilot_subparser(sub) -> None:
     )
     copilot_parser.add_argument("name", help="CodeSpace name")
     copilot_parser.add_argument(
-        "--worktree-id", dest="worktree_id", required=True,
+        "--worktree-id", dest="worktree_id", default=None,
         help="The worktree id to reserve/attach on the venue side (forwarded "
-             "verbatim to the remote `agent-worktrees copilot --worktree-id`).",
+             "verbatim to the remote `agent-worktrees copilot --worktree-id`). "
+             "Omit for the default: a CodeSpace is conventionally anchor-only "
+             "(the devcontainer already clones the repo directly; no worktree "
+             "exists unless an operator explicitly created one), so this "
+             "delivers a Copilot session directly in the anchor checkout "
+             "instead -- matching headless ACP dispatch's own existing "
+             "behavior of running straight in the venue's workspace_folder.",
     )
     copilot_parser.add_argument(
         "--driver", default="cli-mode",
@@ -55,6 +61,33 @@ def add_copilot_subparser(sub) -> None:
     )
 
 
+def _resolve_anchor_identity(name: str, config) -> str:  # noqa: ANN001
+    """Synthesize the CLI-mode reservation identity for anchor mode:
+    ``anchor-<repo_name>``, where ``repo_name`` is the basename of this
+    CodeSpace's resolved workspace folder (the same ``/workspaces/<repo>``
+    convention headless dispatch already resolves via
+    ``config.resolved_workspace_folder_for``).
+
+    Must match exactly what ``agent-worktrees get session-scope-id`` reports
+    when the remote ``agent-worktrees copilot --anchor`` self-registers
+    (``anchor-<config.repo_name>`` there, where that repo_name is however the
+    CodeSpace's own agent-worktrees project happens to be registered) -- by
+    convention this is the same basename, since a project is registered under
+    its checkout's own directory name. If the two ever disagree in practice,
+    the reservation is simply never claimed (a visible, diagnosable no-op,
+    never a wrong-session mix-up: the daemon only correlates on an exact
+    string match).
+    """
+    from .lifecycle import list_codespaces
+
+    repository = next(
+        (cs.repository for cs in list_codespaces() if cs.name == name), None,
+    )
+    workspace_folder = config.resolved_workspace_folder_for(repository) or ""
+    repo_name = os.path.basename(workspace_folder.rstrip("/")) or name
+    return f"anchor-{repo_name}"
+
+
 def cmd_copilot(
     args: argparse.Namespace,
     *,
@@ -72,6 +105,14 @@ def cmd_copilot(
     SSHes ``-t`` into the CodeSpace to run ``agent-worktrees copilot`` there --
     identical contract to the local verb, just dispatched remotely.
 
+    Defaults to **anchor mode** (no ``--worktree-id``): a CodeSpace is
+    conventionally anchor-only (the devcontainer already clones the repo
+    directly; no worktree exists unless an operator explicitly created one
+    with ``agent-worktrees create`` inside it), so forcing ``--worktree-id``
+    on every caller would be needless ceremony for the common case. This
+    mirrors headless ACP dispatch's own existing behavior of running
+    straight in the venue's ``workspace_folder``, never a worktree.
+
     ``interactive_ssh`` is injected (``__main__._interactive_ssh``) rather than
     imported, to avoid a circular import between this module and ``__main__``.
     """
@@ -83,6 +124,8 @@ def cmd_copilot(
     from .relay_token import token_for
 
     config = load_merged_config()
+    anchor_mode = not args.worktree_id
+    identity = args.worktree_id or _resolve_anchor_identity(args.name, config)
     tenant = f"copilot:{os.getpid()}"
 
     if not _owner.ensure_owner_running(config):
@@ -133,8 +176,9 @@ def cmd_copilot(
 
     try:
         return run_venue_copilot(
-            args.worktree_id,
+            identity,
             connect=connect,
+            anchor=anchor_mode,
             ttl_seconds=args.ttl_seconds,
             driver=args.driver,
             seed=args.seed,

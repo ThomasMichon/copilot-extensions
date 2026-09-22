@@ -134,7 +134,87 @@ def _ns(**kw):
     return argparse.Namespace(**defaults)
 
 
-class TestCmdCopilot:
+class TestCmdCopilotAnchorDefault:
+    """Omitting --worktree-id defaults to anchor mode: a CodeSpace is
+    conventionally anchor-only (the devcontainer already clones the repo
+    directly), matching headless ACP dispatch's own existing behavior of
+    running straight in the workspace_folder -- so this should be the
+    zero-ceremony default, not something an operator has to opt into."""
+
+    def test_no_worktree_id_resolves_anchor_identity_and_forwards_anchor(
+        self, store, monkeypatch,
+    ) -> None:
+        monkeypatch.setattr(owner, "ensure_owner_running", lambda config: True)
+
+        class _Config:
+            def resolved_workspace_folder_for(self, repo):
+                assert repo == "octo/example-web-codespaces"
+                return "/workspaces/example-web"
+
+        monkeypatch.setattr(config_mod, "load_merged_config", lambda: _Config())
+        monkeypatch.setattr(
+            "agent_codespaces.lifecycle.list_codespaces",
+            lambda: [
+                argparse.Namespace(name="cs-1", repository="octo/example-web-codespaces"),
+            ],
+        )
+
+        seen = {}
+
+        def fake_run_venue_copilot(identity, *, connect, anchor=False, **kwargs):
+            seen["identity"] = identity
+            seen["anchor"] = anchor
+            return connect("agent-worktrees copilot --anchor")
+
+        monkeypatch.setattr("venue_copilot.run_venue_copilot", fake_run_venue_copilot)
+        monkeypatch.setattr("venue_copilot.resolve_daemon_port", lambda: None)
+        monkeypatch.setattr(
+            "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+        )
+
+        rc = copilot_venue.cmd_copilot(
+            _ns(worktree_id=None), interactive_ssh=lambda *a, **kw: 0,
+        )
+
+        assert rc == 0
+        assert seen == {"identity": "anchor-example-web", "anchor": True}
+
+    def test_explicit_worktree_id_still_wins_over_anchor_default(
+        self, store, monkeypatch,
+    ) -> None:
+        monkeypatch.setattr(owner, "ensure_owner_running", lambda config: True)
+        monkeypatch.setattr(config_mod, "load_merged_config", lambda: object())
+        monkeypatch.setattr(
+            "agent_codespaces.lifecycle.list_codespaces",
+            lambda: (_ for _ in ()).throw(
+                AssertionError("must not resolve anchor identity when --worktree-id is given")
+            ),
+        )
+
+        seen = {}
+
+        def fake_run_venue_copilot(identity, *, connect, anchor=False, **kwargs):
+            seen["identity"] = identity
+            seen["anchor"] = anchor
+            return connect("agent-worktrees copilot --worktree-id wt-A")
+
+        monkeypatch.setattr("venue_copilot.run_venue_copilot", fake_run_venue_copilot)
+        monkeypatch.setattr("venue_copilot.resolve_daemon_port", lambda: None)
+        monkeypatch.setattr(
+            "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+        )
+
+        rc = copilot_venue.cmd_copilot(_ns(), interactive_ssh=lambda *a, **kw: 0)
+
+        assert rc == 0
+        assert seen == {"identity": "wt-A", "anchor": False}
+
     def test_places_and_releases_owner_hold_around_a_successful_run(
         self, store, monkeypatch,
     ) -> None:

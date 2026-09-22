@@ -6947,6 +6947,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Same codename resolution as `embody --codename` (local first, "
         "then a cross-machine SSH scan; fails closed on a different machine).",
     )
+    g.add_argument(
+        "--anchor", action="store_true",
+        help="Deliver a Copilot session directly in the active project's "
+        "anchor checkout instead of any worktree -- same as "
+        "`embody --anchor`, see its help for the full rationale.",
+    )
     p.add_argument(
         "--seed", default=None,
         help="Seed prompt injected as the session's first interactive turn once Copilot is ready",
