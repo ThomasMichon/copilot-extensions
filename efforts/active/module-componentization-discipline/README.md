@@ -246,7 +246,7 @@ Verbatim from the operator:
               mechanical slice.
       - [x] The vendored-copy canonical
             `libs/installation-context/installation_context.py` (9,169,
-            +17 vendored copies folded into one ranking row at slice start) —
+            +18 vendored copies elsewhere, folded into one ranking row at slice start) —
             split only the canonical source into a 37-line composition root plus
             fourteen sibling `_installation_context_*.py` fragments (all under
             the 1,000-line cap) and propagate that exact file set with

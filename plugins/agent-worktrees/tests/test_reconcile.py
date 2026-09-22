@@ -1565,7 +1565,8 @@ def test_untrusted_plugin_id_does_not_select_validator_path(
         / "installation_context.py"
     )
     helper.parent.mkdir(parents=True)
-    shutil.copyfile(INSTALLATION_CONTEXT, helper)
+    for source in INSTALLATION_CONTEXT.parent.glob("*.py"):
+        shutil.copyfile(source, helper.parent / source.name)
     context = (
         tmp_path
         / "durable"
