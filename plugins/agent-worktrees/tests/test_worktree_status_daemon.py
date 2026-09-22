@@ -103,7 +103,7 @@ def test_status_via_daemon_uses_live_daemon_when_reachable():
         server.close()
 
 
-def test_status_with_boot_uses_eight_second_default_deadline(monkeypatch):
+def test_status_with_boot_uses_default_request_deadline(monkeypatch):
     observed = {}
 
     def request(*args, **kwargs):
