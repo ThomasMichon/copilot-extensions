@@ -320,6 +320,11 @@ def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch):
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
+    monkeypatch.setattr(
+        bridge_agent_registry,
+        "_agent_bridge_launch_prefix",
+        lambda: ["/usr/bin/agent-bridge"],
+    )
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
 
     result = bridge.spawn_worker(
@@ -1064,7 +1069,7 @@ def test_preflight_fleet_probes_each_pool_host(monkeypatch):
 
     probed = []
 
-    def fake_remote(host, **_kw):
+    def fake_remote(host, agent, **_kw):
         probed.append(host)
         # present on the first host, absent on the second, indeterminate on third
         return {

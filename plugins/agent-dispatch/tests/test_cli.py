@@ -42,7 +42,7 @@ def test_should_ssh_failover_none_on_explicit_url_or_shared(monkeypatch):
 
     monkeypatch.setenv("AGENT_DISPATCH_FAILOVER_MACHINE", "peer-host")
     monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: True)
-    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: False)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda **_: False)
     assert m._should_ssh_failover(_args(["--url", "http://x:9847", "list"])) is None
     assert m._should_ssh_failover(_args(["--shared", "list"])) is None
 
@@ -52,7 +52,7 @@ def test_should_ssh_failover_none_when_local_live(monkeypatch):
 
     monkeypatch.setenv("AGENT_DISPATCH_FAILOVER_MACHINE", "peer-host")
     monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: True)
-    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: True)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda **_: True)
     assert m._should_ssh_failover(_args(["list"])) is None
 
 
@@ -61,7 +61,7 @@ def test_should_ssh_failover_none_when_not_a_peer(monkeypatch):
 
     monkeypatch.setenv("AGENT_DISPATCH_FAILOVER_MACHINE", "myself")
     monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: False)
-    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: False)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda **_: False)
     assert m._should_ssh_failover(_args(["list"])) is None
 
 
@@ -70,7 +70,7 @@ def test_should_ssh_failover_returns_peer_when_local_down(monkeypatch):
 
     monkeypatch.setenv("AGENT_DISPATCH_FAILOVER_MACHINE", "peer-host")
     monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: True)
-    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: False)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda **_: False)
     assert m._should_ssh_failover(_args(["list"])) == "peer-host"
 
 
@@ -240,7 +240,7 @@ def test_resolve_target_falls_back_to_shared_when_local_down(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://coordinator.example/dispatch")
     monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN", "shared-secret")
-    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: False)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda **_: False)
     args = _args(["list"])
     url, token = _resolve_client_target(args)
     assert url == "https://coordinator.example/dispatch"
@@ -253,7 +253,7 @@ def test_resolve_target_prefers_local_when_live(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://coordinator.example/dispatch")
     monkeypatch.setattr("agent_dispatch.netinfo.is_wsl", lambda: False)
-    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda: True)
+    monkeypatch.setattr("agent_dispatch.__main__.has_live_local_coordinator", lambda **_: True)
     args = _args(["list"])
     url, _ = _resolve_client_target(args)
     assert url == "http://127.0.0.1:9847"
@@ -1492,7 +1492,7 @@ def test_cmd_serve_reroots_cwd_to_runtime_dir(monkeypatch, tmp_path):
 
     seen = {}
 
-    def fake_serve(cfg, *, passive=False):
+    def fake_serve(cfg, *, passive=False, force=False):
         seen["cwd"] = Path.cwd()
         seen["cfg"] = cfg
         seen["passive"] = passive
@@ -1529,7 +1529,7 @@ def test_cmd_serve_runtime_dir_resolution_failure_is_nonfatal(
 
     seen = {}
 
-    def fake_serve(cfg, *, passive=False):
+    def fake_serve(cfg, *, passive=False, force=False):
         seen["cwd"] = Path.cwd()
 
     monkeypatch.setattr(server, "serve", fake_serve)
@@ -1540,6 +1540,128 @@ def test_cmd_serve_runtime_dir_resolution_failure_is_nonfatal(
     assert __main__._cmd_serve(args) == 0
     assert seen["cwd"] == fallback
     assert "could not resolve runtime cwd" in capsys.readouterr().err
+
+
+# -- non-passive serve() refuses to seize an already-live route (#3066) -----
+
+
+def test_cmd_serve_refuses_when_coordinator_already_live(monkeypatch, capsys):
+    import argparse
+
+    from agent_dispatch import __main__, server
+
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda **_: True)
+    calls = []
+    monkeypatch.setattr(server, "serve", lambda *a, **k: calls.append((a, k)))
+    args = argparse.Namespace(
+        host="127.0.0.1", port=None, db=None, token=None, passive=False, force=False,
+    )
+
+    rc = __main__._cmd_serve(args)
+
+    assert rc == 2
+    assert not calls, "serve() must never be invoked when a live coordinator exists"
+    err = capsys.readouterr().err
+    assert "already live" in err
+    assert "#3066" in err
+
+
+def test_cmd_serve_force_bypasses_live_coordinator_guard(monkeypatch, tmp_path):
+    import argparse
+
+    from agent_dispatch import __main__, runtime_version, server
+
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda **_: True)
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path / "runtime")
+    calls = []
+    monkeypatch.setattr(server, "serve", lambda *a, **k: calls.append((a, k)))
+    args = argparse.Namespace(
+        host="127.0.0.1", port=None, db=None, token=None, passive=False, force=True,
+    )
+
+    rc = __main__._cmd_serve(args)
+
+    assert rc == 0
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert kwargs.get("passive") is False
+
+
+def test_cmd_serve_force_refusal_message_does_not_suggest_force_again(
+    monkeypatch, tmp_path, capsys
+):
+    """When serve() itself raises CoordinatorAlreadyLiveError for a forced
+    start (the shared start-lock is held by a concurrent starter/transition,
+    not the liveness check --force already bypasses), the CLI must not tell
+    the operator to pass --force again -- it was already passed and never
+    bypasses this lock (review follow-up on
+    ThomasMichon/copilot-extensions#3066)."""
+    import argparse
+
+    from agent_dispatch import __main__, runtime_version, server
+
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda **_: False)
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path / "runtime")
+
+    def _fake_serve(*_a, **_k):
+        raise server.CoordinatorAlreadyLiveError(
+            "another process is concurrently starting a coordinator on this host"
+        )
+
+    monkeypatch.setattr(server, "serve", _fake_serve)
+    args = argparse.Namespace(
+        host="127.0.0.1", port=None, db=None, token=None, passive=False, force=True,
+    )
+
+    rc = __main__._cmd_serve(args)
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "#3066" in err
+    assert "pass --force" not in err
+
+
+def test_cmd_serve_passive_bypasses_live_coordinator_guard(monkeypatch, tmp_path):
+    # A passive cutover instance is intentionally spawned while the old
+    # coordinator is still live -- the orchestrator, not this guard, owns
+    # the drain/retire sequence for that case.
+    import argparse
+
+    from agent_dispatch import __main__, runtime_version, server
+
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda **_: True)
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path / "runtime")
+    calls = []
+    monkeypatch.setattr(server, "serve", lambda *a, **k: calls.append((a, k)))
+    args = argparse.Namespace(
+        host="127.0.0.1", port=None, db=None, token=None, passive=True, force=False,
+    )
+
+    rc = __main__._cmd_serve(args)
+
+    assert rc == 0
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert kwargs.get("passive") is True
+
+
+def test_cmd_serve_proceeds_when_no_coordinator_live(monkeypatch, tmp_path):
+    import argparse
+
+    from agent_dispatch import __main__, runtime_version, server
+
+    monkeypatch.setattr(__main__, "has_live_local_coordinator", lambda **_: False)
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path / "runtime")
+    calls = []
+    monkeypatch.setattr(server, "serve", lambda *a, **k: calls.append((a, k)))
+    args = argparse.Namespace(
+        host="127.0.0.1", port=None, db=None, token=None, passive=False, force=False,
+    )
+
+    rc = __main__._cmd_serve(args)
+
+    assert rc == 0
+    assert len(calls) == 1
 
 
 def test_parser_dashdash_tail_captured_for_drive_and_run():

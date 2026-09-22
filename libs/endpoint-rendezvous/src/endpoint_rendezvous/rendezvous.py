@@ -337,6 +337,17 @@ def connect_probe(ep: Endpoint, *, timeout: float = 0.5) -> bool:
     try:
         if ep.transport == "tcp":
             host, port = ep.tcp_host_port
+            # A wildcard/unspecified bind (permitted by check_bind_safety()
+            # when a token is configured) is not a dialable *destination* --
+            # connecting to it directly fails on most OSes regardless of
+            # whether anything is actually listening, so an endpoint
+            # advertised on 0.0.0.0/:: would otherwise be misclassified as
+            # stale before any caller-supplied health check even runs
+            # (review follow-up on ThomasMichon/copilot-extensions#3066).
+            if host in ("0.0.0.0", ""):
+                host = "127.0.0.1"
+            elif host in ("::", "[::]"):
+                host = "::1"
             with socket.create_connection((host, port), timeout=timeout):
                 return True
         if ep.transport == "unix" and hasattr(socket, "AF_UNIX"):
