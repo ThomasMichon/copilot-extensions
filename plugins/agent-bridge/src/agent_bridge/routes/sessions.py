@@ -75,6 +75,15 @@ def _cursor_key(caller_id: str | None) -> str:
     return caller_id if caller_id else _CURSOR_DEFAULT_KEY
 
 
+def _rows_to_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert durable event rows to the wire event-dict shape."""
+    return [
+        {"id": r["event_id"], "event": r["event_type"], "data": r["data"],
+         "timestamp": r["timestamp"]}
+        for r in rows
+    ]
+
+
 def _controlled_cursor_key(caller_id: str | None) -> str:
     """Require a distinct caller identity for continuity-qualified delivery."""
     if not caller_id:
@@ -216,10 +225,8 @@ async def _sse_event_stream(  # noqa: ANN001
     return it emits a liveness beat (tool-progress or heartbeat). It
     **closes promptly on daemon shutdown or client disconnect**: it races
     the (up to 30s) event wait against a fine poll of uvicorn's
-    ``server.should_exit`` (set on SIGTERM before uvicorn waits on
-    in-flight requests) -- without this a long-lived stream pins graceful
-    shutdown open until systemd's TimeoutStopSec SIGKILL (#1789).
-
+    ``server.should_exit`` -- without this a long-lived stream pins
+    graceful shutdown open until systemd's TimeoutStopSec SIGKILL (#1789).
     While live it counts as an active **subscriber** (#1826) via
     ``mgr.add_subscriber``/``remove_subscriber`` so the idle reaper never
     reaps a session someone is watching. The decrement is in a ``finally``.
@@ -470,9 +477,8 @@ def _persisted_session_info(
     )
 
 
-# Session states considered "alive" and therefore reusable for caller
-# affinity. Terminal/stopped states are excluded -- reusing them would
-# hand back a session with no running process.
+# Session states considered "alive"/reusable for caller affinity. Terminal
+# states are excluded -- reusing one would hand back a no-process session.
 _REUSABLE_STATES = frozenset({
     SessionStatus.CREATED,
     SessionStatus.STARTING,
@@ -500,22 +506,19 @@ def _find_reusable_session(mgr, agent_name, caller_id):
 def _enforce_worktree_head_guard(worktree_id: str, mgr=None) -> None:
     """Refuse a create into a worktree with an active head or pending handoff.
 
-    Derives the head from agent-worktrees. When occupied by a current
-    session or handoff, raises ``HTTPException`` 409 enumerating the three
-    deliberate resolutions (reuse / handoff / sunset); ``create`` has no
-    break-glass of its own -- the sole take-over mechanism is
+    Derives the head from agent-worktrees. When occupied, raises
+    ``HTTPException`` 409 enumerating the three deliberate resolutions
+    (reuse / handoff / sunset); the sole take-over mechanism is
     ``resume ... --force`` (agent-bridge-cold-resume Phase 3). Fails
-    **open**: an untracked worktree or an unreadable ground layer yields
+    **open**: an untracked worktree or unreadable ground layer yields
     ``occupied=False``.
 
-    An asserted ``active`` head naming a specific session id is additionally
-    cross-checked, when ``mgr`` is supplied, against agent-bridge's own live
-    session store. A pointer can go stale (a session ended, or never
-    existed in this store -- e.g. after a GC/compaction pass -- without the
-    ground layer being told to conclude it), leaving a phantom "active"
-    head that blocks creation forever. When the named session id is absent
-    entirely, treat the assertion as unverifiable/stale, not a conflict --
-    only a session agent-bridge *does* know about still blocks.
+    An asserted ``active`` head naming a session id is cross-checked,
+    when ``mgr`` is supplied, against agent-bridge's own live session
+    store: a pointer can go stale (a session ended or never existed
+    here, with no conclude told to the ground layer), leaving a phantom
+    "active" head blocking creation forever. Absent entirely, treat it
+    as unverifiable -- only a known session still blocks.
     """
     from ..worktree_head import resolve_head
 
@@ -608,8 +611,8 @@ async def start_session(req: StartSessionRequest, request: Request):
                 agent_name = canonical
 
     # Refuse new sessions fast while draining, before any agent resolution
-    # or spawn work, so a zero-downtime redeploy stops growing the daemon
-    # about to retire (the manager enforces the same gate as a backstop).
+    # or spawn work, so a redeploy stops growing the daemon about to
+    # retire (the manager enforces the same gate as a backstop).
     if mgr.is_draining:
         raise HTTPException(
             status_code=503,
@@ -650,10 +653,9 @@ async def start_session(req: StartSessionRequest, request: Request):
 
     # Caller-affinity reuse: if the caller supplies a caller_id (e.g. a
     # Neuron-Forge worktree GUID) and an alive session already exists for
-    # that (agent, caller_id) pair, return it instead of spawning a new one.
-    # Makes create idempotent for HTTP consumers -- a duplicate POST from a
-    # reload/double-click resolves to the same session. Pass force_new to
-    # opt out.
+    # that (agent, caller_id) pair, return it instead of spawning a new
+    # one -- makes create idempotent for HTTP consumers. Pass force_new
+    # to opt out.
     if req.caller_id and not req.force_new:
         existing = _find_reusable_session(mgr, agent_name, req.caller_id)
         if existing is not None:
@@ -666,15 +668,12 @@ async def start_session(req: StartSessionRequest, request: Request):
     # Session-lifecycle head guard (agent-fabric
     # `single-current-session-per-worktree`). Creating a session into an
     # existing worktree whose ground-layer head is still `active` would
-    # silently spawn a second, parallel session. Refuse it: the caller must
-    # reuse (preferred), hand off, or sunset the incumbent -- `create` has no
-    # break-glass of its own; the sole take-over mechanism is
-    # `resume ... --force` (agent-bridge-cold-resume Phase 3). The head is
-    # *derived* from agent-worktrees; fails open if unreadable.
-    #
-    # Sibling of the `resume_worktree` liveness guard (409
-    # `live_cli_holds_worktree`): that refuses owning a worktree a live
-    # process holds; this refuses spawning atop one an asserted head owns.
+    # silently spawn a second, parallel session -- refuse it: reuse
+    # (preferred), hand off, or sunset the incumbent (`create` has no
+    # break-glass; the sole take-over mechanism is `resume ... --force`,
+    # agent-bridge-cold-resume Phase 3). Head is *derived* from
+    # agent-worktrees; fails open if unreadable. Sibling of
+    # `resume_worktree`'s `live_cli_holds_worktree` liveness guard.
     if req.worktree_id:
         _enforce_worktree_head_guard(req.worktree_id, mgr)
 
@@ -780,9 +779,9 @@ async def list_sessions(request: Request, status: str | None = None):
     if status is not None:
         infos = [info for info in infos if info.status.value == status]
 
-    # Elevated sessions live in a separate daemon/database. The primary daemon
-    # remains their discovery surface after it idle-exits; rows already
-    # represented by a primary relay session are omitted (avoid duplicates).
+    # Elevated sessions live in a separate daemon/database; the primary
+    # daemon remains their discovery surface after it idle-exits. Rows
+    # already represented by a primary relay session are omitted.
     if not elevated.is_subdaemon():
         rows = await asyncio.to_thread(elevated.persisted_session_rows)
         if rows:
@@ -823,16 +822,27 @@ async def get_session(session_id: str, request: Request):
 async def get_session_transcript(session_id: str, request: Request) -> dict[str, Any]:
     """Return a bare (non-worktree-scoped) session's rendered transcript.
 
-    Unlike the worktree-scoped transcript route, there's no worktree to
-    resolve an owning agent through -- a solo session may have no
-    `worktree_id` at all. The only viable path is the registered
-    cold-store provider, so `meta.read_only`/`at_rest` are always `True`
-    here (mirroring the worktree-scoped route's cold-store branch), even
-    though the provider itself may answer from a still-live local session.
-    Lets a bare-session consumer (e.g. Neuron Forge's `/sessions/:sid`
-    route) retire its direct Permanent Record transcript dependency.
+    Checks agent-bridge's own live ledger first (a solo session can be a
+    live ACP session with no owning agent to shell into); falls through
+    to the registered cold-store provider only when nothing is live -- so
+    a bare-session consumer (Neuron Forge's `/sessions/:sid`) can retire
+    its direct Permanent Record dependency.
     """
     mgr: SessionManager = request.app.state.session_manager
+    session = mgr.get_session(session_id)
+    if session is not None:
+        status, at_rest, _liveness = session.public_state()
+        rows = mgr.db.get_events_range(session_id, 0, None)
+        return {
+            "session_id": session_id,
+            "events": _rows_to_events(rows),
+            "meta": {
+                "worktree_id": session.target.worktree_id,
+                "status": status.value,
+                "read_only": False,
+                "at_rest": at_rest,
+            },
+        }
     cold = await mgr.fetch_cold_store_session(session_id)
     if cold is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
@@ -880,11 +890,11 @@ async def get_session_status(
 ):
     """Compact, single-screen status for a dispatch.
 
-    Returns session state, turn count, the caller's delivery-cursor position
-    vs the head, and the *in-flight tool call with elapsed time* -- otherwise
-    only emitted as a cursor-neutral SSE ``: tool_progress`` comment
-    (invisible to ``read``), so a watcher could not tell a busy agent from a
-    hung one without dumping the whole feed (#46.1).
+    Returns session state, turn count, delivery-cursor position vs head,
+    and the *in-flight tool call with elapsed time* -- otherwise only
+    emitted as a cursor-neutral SSE ``: tool_progress`` comment (invisible
+    to ``read``), so a watcher could not tell a busy from a hung agent
+    without dumping the whole feed (#46.1).
     """
     import time as _time
     from datetime import datetime, timezone
@@ -1351,15 +1361,7 @@ async def get_events_range(
     rows = mgr.db.get_events_range(session_id, start, end)
     return {
         "session_id": session_id,
-        "events": [
-            {
-                "id": r["event_id"],
-                "event": r["event_type"],
-                "data": r["data"],
-                "timestamp": r["timestamp"],
-            }
-            for r in rows
-        ],
+        "events": _rows_to_events(rows),
     }
 
 
@@ -1460,14 +1462,13 @@ async def stop_session(
     """Stop a session, preserving state for resume.
 
     ``reap_host=true`` additionally FREES the Session-Host child immediately
-    (the same primitive the idle-reaper uses) instead of merely detaching it
-    to keep it reattachable. A caller that never reattaches over the bridge
-    (e.g. the AI reviewer, which resumes from on-disk session-state +
-    worktree via a fresh child) uses this to reclaim the ~280 MB child on
-    the spot rather than waiting out the idle-reaper TTL -- while the
-    session stays STOPPED and resumable via ``load_session`` replay.
-    Default ``false`` keeps the reattach-friendly behavior for fronts like
-    Neuron Forge.
+    (the same primitive the idle-reaper uses) instead of merely detaching
+    it. A caller that never reattaches over the bridge (e.g. the AI
+    reviewer, which resumes from on-disk session-state + worktree via a
+    fresh child) uses this to reclaim the ~280 MB child on the spot rather
+    than waiting out the idle-reaper TTL -- while the session stays
+    STOPPED and resumable via ``load_session`` replay. Default ``false``
+    keeps the reattach-friendly behavior for fronts like Neuron Forge.
     """
     mgr: SessionManager = request.app.state.session_manager
     try:
@@ -1627,13 +1628,12 @@ async def handoff_session(
 ):
     """Hand a hosted session off to a fresh successor in the SAME worktree.
 
-    The in-place, bridge-native analogue of an interactive context handoff:
-    the retiring child authors a continuation brief, a successor is spawned
-    in the same worktree/agent/caller, a ``session_handoff`` event announces
-    the changeover, and the predecessor retires (STOPPED, resumable).
-    Returns the **successor** so a caller can follow the baton.
-
-    ``reason`` is an optional free-form label (default ``context-pressure``).
+    The bridge-native analogue of an interactive context handoff: the
+    retiring child authors a continuation brief, a successor is spawned
+    in the same worktree/agent/caller, a ``session_handoff`` event
+    announces the changeover, and the predecessor retires (STOPPED,
+    resumable). Returns the **successor** to follow the baton. ``reason``
+    is an optional free-form label (default ``context-pressure``);
     ``seed=false`` skips seeding the successor's opening turn.
 
     Errors: 404 (no such session), 409 (single-checkout agent or mid-turn),

@@ -431,6 +431,38 @@ class TestSessionRoutes:
             resp = client.get("/api/v1/sessions/nowhere/transcript")
         assert resp.status_code == 404
 
+    def test_get_session_transcript_prefers_a_live_session(
+        self, client, app
+    ) -> None:
+        """A solo session can be LIVE (no owning agent to shell into), so
+        the live ledger must be checked before ever falling through to
+        cold storage -- otherwise a live bare session would 404 or read
+        stale archived content instead of its real transcript."""
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt")
+        session = Session("live-1", "calm-lake", target, "test-agent")
+        session.status = SessionStatus.IDLE
+        mgr._sessions["live-1"] = session
+        mgr.db.create_session(
+            "live-1", "calm-lake", "test-agent", "/wt", "local",
+            "idle", time.time(),
+        )
+        mgr.db.append_event(
+            "live-1", 1, "agent_message", {"text": "hi"}, time.time()
+        )
+        with patch.object(
+            mgr, "fetch_cold_store_session", AsyncMock(return_value=None)
+        ) as cold_fetch:
+            resp = client.get("/api/v1/sessions/live-1/transcript")
+        cold_fetch.assert_not_called()
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["session_id"] == "live-1"
+        assert body["events"][0]["data"] == {"text": "hi"}
+        assert body["meta"]["worktree_id"] is None
+        assert body["meta"]["read_only"] is False
+        assert body["meta"]["at_rest"] is True
+
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session(self, mock_acp_cls, mock_spawn, client) -> None:

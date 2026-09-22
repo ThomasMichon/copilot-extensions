@@ -76,7 +76,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "00de8ec5e8a28712047980de1d818002a89797c6bfc122428be7d00003d675b3",
+          "sha256": "7f21a7dd41ab211d981d1616b04a57532a0841c0a806bd0a6357795a354a1629",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -485,7 +485,7 @@
           "capture_method": "Re-attested for the generation-17 bump; installation-scoped runtime defaults do not alter the representative session-create wire shape."
         }
       ],
-      "support_window": "The daemon declares HTTP generations 1 through 16 supported; evidence currently exercises generations 9 through 16 (15 retained only via its own previous-generation health fixture, not the current generation).",
+      "support_window": "The daemon declares HTTP generations 1 through 17 supported; evidence currently exercises generations 9 through 17 (16 retained only via its own previous-generation health fixture, not the current generation).",
       "bridge_contract_rollback_window": "Retain the generation 11 fixture, the older generation 9 fixture, and a generation 10 prior-runtime fixture until the live and recoverable reference census permits retirement.",
       "mixed_version_scenarios": [
         "new-client_old-daemon",
