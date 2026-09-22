@@ -499,7 +499,7 @@ def orphanage_path(project: str | None = None) -> Path:
 
 def load_orphaned_obligations(project: str | None = None) -> list[dict]:
     try:
-        return _load_orphaned_obligations_strict_local(project)
+        return tracking.load_orphaned_obligations_strict(project)
     except Exception:
         return []
 
