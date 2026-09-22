@@ -899,9 +899,18 @@ function restoreClaimedLock(claimedPath, lockPath) {
     }
     try {
       writeFileSync(fd, content);
-    } finally {
+    } catch {
+      // Exclusive create succeeded but the write itself failed --
+      // lockPath now exists (possibly empty or partially written) while
+      // claimedPath still holds the real content. Fail closed rather
+      // than let this escape uncaught (violating this function's
+      // documented true/false contract) and preserve claimedPath as the
+      // only trustworthy remaining copy, matching every other failure
+      // branch in this function.
       try { closeSync(fd); } catch { /* already closed */ }
+      return false;
     }
+    try { closeSync(fd); } catch { /* already closed */ }
     try { unlinkSync(claimedPath); } catch { /* already gone */ }
     return true;
   }

@@ -2614,3 +2614,29 @@ been separately iterating on in this worktree), both fixed:
   (178 total, no regressions). Bumped plugin.json/marketplace.json to
   `0.1.1-dev44`. All guards pass, including `check-feed-neutrality.py`
   on the new manifest content.
+
+### 2026-09-21 (cont.) -- PR #3167 round 34: restoreClaimedLock's write-failure path no longer escapes uncaught
+
+Round 34 surfaced 1 new MEDIUM finding, fixed; the round-33 clean-room
+manifest fix and the long-carried emitted-guidance/README carryover both
+re-confirmed already resolved against current file content (unchanged
+since prior rounds' verification):
+
+- **(MEDIUM) `restoreClaimedLock`'s exclusive-create fallback let a
+  post-create write failure escape uncaught:** the `writeFileSync(fd,
+  content)` call was wrapped only in a `finally` (which closes the fd but
+  does not catch), so a write failure after the exclusive create already
+  succeeded propagated straight out of the function -- violating its
+  documented true/false-only contract and risking an unhandled exception
+  in whichever caller invoked it (`acquireLock`'s mismatch-restore branch
+  or `releaseLock`'s foreign-content branch), rather than the fail-closed
+  `false` every other failure branch in this function already returns.
+  Added a dedicated catch for the write itself: closes the fd, does NOT
+  delete `claimedPath` (the only trustworthy remaining copy), and returns
+  `false`, matching the EEXIST-on-open branch's own established pattern.
+- 1 new exhaustive-suite structural test verifying the write has its own
+  catch (not just a `finally`) that preserves `claimedPath` and returns
+  `false`. `node --test`: fast suite 127 tests/125 pass (2 pre-existing
+  skips, unchanged), exhaustive suite 52/52 pass (179 total, no
+  regressions). Bumped plugin.json/marketplace.json to `0.1.1-dev45`.
+  All guards pass.

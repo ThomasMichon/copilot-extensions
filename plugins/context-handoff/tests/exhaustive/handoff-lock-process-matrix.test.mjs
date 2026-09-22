@@ -892,6 +892,42 @@ test("restoreClaimedLock's exclusive-create fallback treats its own EEXIST as be
   assert.doesNotMatch(openCatchBody.slice(eexistBranchEnd), /unlinkSync\(claimedPath\)/);
 });
 
+test("restoreClaimedLock's exclusive-create fallback catches a post-create write failure, fails closed, and preserves the claimed copy", () => {
+  // Real regression this guards (round 34): if writeFileSync fails AFTER
+  // the exclusive create already succeeded, an earlier version only
+  // wrapped the write in a `finally` (which closes the fd but does not
+  // catch the error) -- the exception escaped uncaught, violating this
+  // function's documented true/false-only contract, and left lockPath
+  // existing (possibly empty/partial) while claimedPath -- the only
+  // trustworthy remaining copy -- got deleted regardless further down
+  // the (never-reached) success path... or, worse, propagated an
+  // unhandled exception up through acquireLock's/releaseLock's own
+  // callers. Structural check: the write must have its own catch that
+  // returns false without deleting claimedPath, distinct from the
+  // EEXIST-on-open branch above.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const restoreBody = source.slice(
+    source.indexOf("function restoreClaimedLock("),
+    source.indexOf("function releaseLock("),
+  );
+  assert.ok(restoreBody.length > 0, "could not locate restoreClaimedLock's body");
+  const writeIndex = restoreBody.indexOf("writeFileSync(fd, content)");
+  assert.ok(writeIndex >= 0, "expected the exclusive-create fallback's write");
+  const writeCatchIndex = restoreBody.indexOf("} catch {", writeIndex);
+  assert.ok(writeCatchIndex >= 0, "expected the write to have its own catch (not just a finally)");
+  const writeCatchEnd = restoreBody.indexOf("return false;", writeCatchIndex) + "return false;".length;
+  assert.ok(writeCatchEnd > writeCatchIndex, "expected the write's catch to return false");
+  const writeCatchBranch = restoreBody.slice(writeCatchIndex, writeCatchEnd);
+  assert.doesNotMatch(writeCatchBranch, /unlinkSync\(claimedPath\)/);
+  assert.match(writeCatchBranch, /closeSync\(fd\)/);
+});
+
 test("attemptWorktreeSyncLocked disables rebase.autoStash and repo hooks for the delegated agent-worktrees sync too", () => {
   // Real regression this guards: plainGitSync's own rebase passes
   // --no-autostash directly, but the AGENT-WORKTREES-delegated path has no
