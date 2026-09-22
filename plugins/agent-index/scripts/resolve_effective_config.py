@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any
 
 CONFIG_FILENAME = "config.yaml"
-CONFIG_RELATIVE = Path(".copilot-extensions") / "agent-index" / CONFIG_FILENAME
-LEGACY_CONFIG_RELATIVE = Path(".agent-index") / CONFIG_FILENAME
+BASE_CONFIG_RELATIVE = Path(".agent-index") / CONFIG_FILENAME
+OVERLAY_CONFIG_RELATIVE = Path(".copilot-extensions") / "agent-index" / CONFIG_FILENAME
 MARKETPLACE_OVERLAYS_DIR = (
     Path(".copilot-extensions") / "agent-index" / "marketplaces"
 )
@@ -484,6 +484,47 @@ def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[st
     return merged
 
 
+def _merge_sources(base: list[Any], overlay: list[Any]) -> list[Any]:
+    merged = list(base)
+    seen = {
+        item["name"].casefold()
+        for item in merged
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    }
+    for item in overlay:
+        if isinstance(item, dict) and isinstance(item.get("name"), str):
+            folded = item["name"].casefold()
+            if folded in seen:
+                continue
+            seen.add(folded)
+        merged.append(item)
+    return merged
+
+
+def _merge_repo_config_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = _deep_merge_dicts(base, override)
+    if "indexers" in override and "indexer" not in override:
+        merged.pop("indexer", None)
+        merged["indexers"] = override["indexers"]
+    if "indexer" in override and "indexers" not in override:
+        merged.pop("indexers", None)
+        merged["indexer"] = override["indexer"]
+    base_corpus = base.get("corpus")
+    override_corpus = override.get("corpus")
+    if (
+        isinstance(base_corpus, dict)
+        and isinstance(override_corpus, dict)
+        and isinstance(base_corpus.get("sources"), list)
+        and isinstance(override_corpus.get("sources"), list)
+    ):
+        corpus = dict(merged.get("corpus") or {})
+        corpus["sources"] = _merge_sources(
+            base_corpus["sources"], override_corpus["sources"]
+        )
+        merged["corpus"] = corpus
+    return merged
+
+
 def _load_installation_context() -> dict[str, Any] | None:
     raw = os.environ.get(INSTALLATION_CONTEXT_ENV, "").strip()
     if not raw:
@@ -508,12 +549,29 @@ def _installation_marketplace_id() -> str | None:
     return marketplace_id.strip()
 
 
+def _repo_base_config_path(root: Path) -> Path | None:
+    for candidate in (root / BASE_CONFIG_RELATIVE, root / OVERLAY_CONFIG_RELATIVE):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _repo_local_overlay_path(root: Path) -> Path | None:
+    base = root / BASE_CONFIG_RELATIVE
+    overlay = root / OVERLAY_CONFIG_RELATIVE
+    if base.exists() and overlay.exists():
+        return overlay
+    return None
+
+
 def _repo_config_layers(root: Path) -> list[Path]:
     layers: list[Path] = []
-    for candidate in (root / CONFIG_RELATIVE, root / LEGACY_CONFIG_RELATIVE):
-        if candidate.exists():
-            layers.append(candidate)
-            break
+    base = _repo_base_config_path(root)
+    if base is not None:
+        layers.append(base)
+    overlay = _repo_local_overlay_path(root)
+    if overlay is not None:
+        layers.append(overlay)
     marketplace_id = _installation_marketplace_id()
     if marketplace_id:
         overlay = root / MARKETPLACE_OVERLAYS_DIR / marketplace_id / CONFIG_FILENAME
@@ -534,11 +592,18 @@ def _load_repo_candidate(root: Path) -> tuple[str, Path | None, dict[str, Any] |
         state, data = _load_yaml_mapping(safe_path)
         if state != "ready" or data is None:
             return state, layer, None
-        merged = _deep_merge_dicts(merged, data)
+        merged = _merge_repo_config_dicts(merged, data)
     try:
         return "ready", layers[0].resolve(), _validate_config(merged)
     except ConfigError:
         return "invalid", layers[0], None
+
+
+def _load_external_overlay_candidate(
+    root: Path,
+) -> tuple[str, dict[str, Any] | None]:
+    path = root / BASE_CONFIG_RELATIVE
+    return _load_candidate(path, root)
 
 
 def _run_git(git: str, start: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
@@ -959,6 +1024,15 @@ def resolve(cwd: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     local_state, local_path, local = _load_repo_candidate(root)
     if local_state == "ready" and local_path is not None and local is not None:
         policy_state, requires_external = _requires_external(root)
+        if policy_state == "ready" and requires_external:
+            state, state_root = _external_state_root(root)
+            if state == "ready" and state_root is not None:
+                overlay_state, overlay = _load_external_overlay_candidate(state_root)
+                if overlay_state == "ready" and overlay is not None:
+                    local = {
+                        "indexers": list(local["indexers"]),
+                        "sources": _merge_sources(local["sources"], overlay["sources"]),
+                    }
         return _result(
             opted_in=True,
             source="repository",

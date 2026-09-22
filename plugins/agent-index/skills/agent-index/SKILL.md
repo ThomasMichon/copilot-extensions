@@ -16,10 +16,13 @@ service, or retrieval through its read CLI.
 ## Readiness
 
 - The command catalog appears only when the current repository has a valid
-`.agent-index/config.yaml`, or when a repository that requires external state
-has a valid config in its bound knowledge repo. A present invalid local config
-never falls through. Outside that scope, `status` reports `inactive` and other
-commands are refused.
+checked-in `.agent-index/config.yaml`, optionally supplemented by a repo-local
+`.copilot-extensions/agent-index/config.yaml` overlay and marketplace overlay.
+For repositories that require external state, the bound knowledge repo's
+checked-in `.agent-index/config.yaml` can add more `corpus.sources`, and still
+serves as the fail-closed fallback when no local repo config exists. A present
+invalid local config never falls through. Outside that scope, `status` reports
+`inactive` and other commands are refused.
 - Session start is non-mutating: it does not stamp or provision a runtime and
 does not start a service. After repository opt-in, an operator explicitly chooses
 `setup --single` or `setup --indexer <machine> --ssh <alias>`; that setup call
@@ -77,7 +80,7 @@ default; `--full` is explicit.
 ## Scope and fallback
 
 - The session-start scope-binding hook emits `corpus.sources` from the same
-effective config used by the CLI gate.
+layered config used by the CLI gate.
 - For a plain repo with no corpus config, the catalog command's `index`
 subcommand defaults to the
 current git checkout (`git`) and its commits.

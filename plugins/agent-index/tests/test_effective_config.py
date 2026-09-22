@@ -34,7 +34,7 @@ def _repo(path: Path, *, requires_external: bool = False) -> Path:
 
 
 def _write_active(path: Path) -> Path:
-    config = path / ".copilot-extensions" / "agent-index" / "config.yaml"
+    config = path / ".agent-index" / "config.yaml"
     config.parent.mkdir(parents=True)
     config.write_text(
         "indexers:\n"
@@ -126,7 +126,7 @@ def test_dependency_light_parser_accepts_supported_config_shape() -> None:
 def test_corpus_only_config_is_an_explicit_opt_in(tmp_path: Path) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo")
-    config = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    config = repo / ".agent-index" / "config.yaml"
     config.parent.mkdir(parents=True)
     config.write_text(
         "corpus:\n  sources:\n    - name: git:example\n",
@@ -172,7 +172,7 @@ def test_invalid_repository_config_is_inactive(
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo")
-    config = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    config = repo / ".agent-index" / "config.yaml"
     config.parent.mkdir(parents=True)
     config.write_text(content, encoding="utf-8")
 
@@ -212,7 +212,7 @@ def test_present_unsafe_local_config_blocks_external_fallback(
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
-    local = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    local = repo / ".agent-index" / "config.yaml"
     local.mkdir(parents=True)
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
@@ -494,7 +494,7 @@ def test_invalid_local_config_never_falls_through(
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
-    local = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    local = repo / ".agent-index" / "config.yaml"
     local.parent.mkdir(parents=True)
     local.write_text("indexers: [\n", encoding="utf-8")
     knowledge = tmp_path / "knowledge"
@@ -566,7 +566,7 @@ def test_legacy_repository_config_falls_back_when_canonical_absent(
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo")
-    config = repo / ".agent-index" / "config.yaml"
+    config = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
     config.parent.mkdir(parents=True)
     config.write_text("indexer:\n  machine: legacy\n", encoding="utf-8")
 
@@ -577,13 +577,13 @@ def test_legacy_repository_config_falls_back_when_canonical_absent(
     assert result["indexers"] == [{"machine": "legacy"}]
 
 
-def test_canonical_repository_config_wins_over_legacy(
+def test_shareable_base_merges_with_repo_local_overlay(
     tmp_path: Path,
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo")
-    legacy = repo / ".agent-index" / "config.yaml"
-    legacy.parent.mkdir()
+    legacy = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    legacy.parent.mkdir(parents=True)
     legacy.write_text("indexer:\n  machine: legacy\n", encoding="utf-8")
     config = _write_active(repo)
 
@@ -591,9 +591,120 @@ def test_canonical_repository_config_wins_over_legacy(
 
     assert result["opted_in"] is True
     assert Path(result["config"]) == config.resolve()
-    assert [item["machine"] for item in result["indexers"]] == [
-        "primary",
-        "secondary",
+    assert result["indexers"] == [{"machine": "legacy"}]
+    assert result["sources"] == [{"name": "git:example", "repo": "example"}]
+
+
+def test_repo_local_overlay_unions_sources_and_supplies_indexer(
+    tmp_path: Path,
+) -> None:
+    module = _module()
+    repo = _repo(tmp_path / "repo")
+    config = repo / ".agent-index" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        "corpus:\n"
+        "  sources:\n"
+        "    - name: github:gim-home/odsp-web-harness\n"
+        "      trust_domain: harness\n",
+        encoding="utf-8",
+    )
+    overlay = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text(
+        "indexer:\n"
+        "  machine: overlay-box\n"
+        "  ssh: overlay-box\n"
+        "corpus:\n"
+        "  sources:\n"
+        "    - name: github:ThomasMichon/copilot-extensions\n"
+        "      trust_domain: marketplace\n",
+        encoding="utf-8",
+    )
+
+    result = module.resolve(repo)
+
+    assert result["opted_in"] is True
+    assert Path(result["config"]) == config.resolve()
+    assert result["indexers"] == [{"machine": "overlay-box", "ssh": "overlay-box"}]
+    assert result["sources"] == [
+        {"name": "github:gim-home/odsp-web-harness", "trust_domain": "harness"},
+        {
+            "name": "github:ThomasMichon/copilot-extensions",
+            "trust_domain": "marketplace",
+        },
+    ]
+
+
+def test_duplicate_source_name_keeps_shareable_definition(
+    tmp_path: Path,
+) -> None:
+    module = _module()
+    repo = _repo(tmp_path / "repo")
+    config = repo / ".agent-index" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        "corpus:\n"
+        "  sources:\n"
+        "    - name: git:dotfiles\n"
+        "      repo: dotfiles\n"
+        "      trust_domain: shareable\n",
+        encoding="utf-8",
+    )
+    overlay = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text(
+        "corpus:\n"
+        "  sources:\n"
+        "    - name: git:dotfiles\n"
+        "      repo: override\n"
+        "      trust_domain: overlay\n",
+        encoding="utf-8",
+    )
+
+    result = module.resolve(repo)
+
+    assert result["opted_in"] is True
+    assert result["sources"] == [
+        {"name": "git:dotfiles", "repo": "dotfiles", "trust_domain": "shareable"}
+    ]
+
+
+def test_external_state_root_shareable_overlay_adds_sources(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _module()
+    repo = _repo(tmp_path / "repo", requires_external=True)
+    config = repo / ".agent-index" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        "corpus:\n"
+        "  sources:\n"
+        "    - name: github:gim-home/odsp-web-harness\n",
+        encoding="utf-8",
+    )
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    knowledge_config = knowledge / ".agent-index" / "config.yaml"
+    knowledge_config.parent.mkdir(parents=True)
+    knowledge_config.write_text(
+        "corpus:\n"
+        "  sources:\n"
+        "    - name: git:dotfiles\n"
+        "      repo: dotfiles\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        module, "_external_state_root", lambda _root: ("ready", knowledge)
+    )
+
+    result = module.resolve(repo)
+
+    assert result["opted_in"] is True
+    assert Path(result["config"]) == config.resolve()
+    assert result["sources"] == [
+        {"name": "github:gim-home/odsp-web-harness"},
+        {"name": "git:dotfiles", "repo": "dotfiles"},
     ]
 
 
