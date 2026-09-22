@@ -1,0 +1,23 @@
+name: context-handoff crash-diagnostics stress
+
+on:
+  schedule:
+    - cron: "37 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    name: attack-simulation subprocess cases
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the world-readable-file/symlink/FIFO stress cases
+        env:
+          CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS: "1"
+        run: >-
+          node --test
+          plugins/context-handoff/tests/crash-diagnostics.test.mjs

@@ -5,6 +5,21 @@
 // child process (tests/fixtures/crash-diagnostics-harness.mjs) -- never in
 // the shared `node --test` runner process, since these handlers call
 // process.exit() by design.
+//
+// The world-readable-file/symlink/FIFO pre-creation cases below are
+// attack-simulation stress cases, not core exception/signal-handling smoke
+// coverage -- and the required `guards + lint` CI lane runs every
+// `plugins/*/tests/*.test.mjs` file unconditionally, for every PR in this
+// whole monorepo (`.github/workflows/ci.yml`), not just ones that touch
+// context-handoff. Spawning several extra real subprocesses (including an
+// external `mkfifo` binary) in that shared required lane would tax every
+// unrelated PR's CI time and add a POSIX-toolchain dependency no other test
+// here needs. They run only when `CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS`
+// is set (mirroring `INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS`'s existing
+// scheduled/manual-only pattern -- see
+// `.github/workflows/installation-context-full.yml` and its context-handoff
+// counterpart, `crash-diagnostics-stress.yml`), keeping the required lane to
+// a small, always-run exception/signal smoke contract.
 import { spawn, spawnSync } from "node:child_process";
 import {
   mkdtempSync,
@@ -22,6 +37,7 @@ import assert from "node:assert/strict";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const harness = join(here, "fixtures", "crash-diagnostics-harness.mjs");
+const RUN_STRESS_CASES = Boolean(process.env.CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS);
 
 async function withCrashLog(fn) {
   const dir = mkdtempSync(join(tmpdir(), "context-handoff-crash-diag-"));
@@ -41,15 +57,20 @@ function readLogSafe(logPath) {
   }
 }
 
-test("clean exit logs only the exit event, no failure entries", async () => {
+test("clean exit records nothing at all -- routine exits are not logged", async () => {
   await withCrashLog(async (logPath) => {
     const result = spawnSync(process.execPath, [harness, "clean-exit", logPath], {
       encoding: "utf-8",
     });
     assert.equal(result.status, 0);
-    const log = readLogSafe(logPath);
-    assert.match(log, /\bexit: code=0\b/);
-    assert.doesNotMatch(log, /uncaughtException|unhandledRejection|\bsignal\b/);
+    // A routine code=0 exit is deliberately never logged (see the rationale
+    // beside onExit in crash-diagnostics.mjs): this extension is
+    // re-imported many times per machine lifetime, and logging every
+    // uneventful fork would make this fixed, unrotated file grow without
+    // bound. readLogSafe() returning "" also covers the file never having
+    // been created at all, since createEmergencyLog() only opens it lazily
+    // on first actual write.
+    assert.equal(readLogSafe(logPath), "");
   });
 });
 
@@ -90,10 +111,11 @@ test("a hostile throwing .stack getter does not itself crash the handler", async
 // (it only rejects a symlink), and O_CREAT's mode argument has no effect
 // once the file already exists -- appending straight into it would leak
 // sensitive stack traces at whatever permissions that pre-existing file
-// happened to carry. Not meaningful on Windows (no POSIX uid/mode model).
+// happened to carry. Not meaningful on Windows (no POSIX uid/mode model);
+// gated to the scheduled/manual stress lane -- see the file header comment.
 test(
   "a pre-existing world-readable file at the log path is never written to",
-  { skip: process.platform === "win32" },
+  { skip: process.platform === "win32" || !RUN_STRESS_CASES },
   async () => {
     await withCrashLog(async (logPath) => {
       writeFileSync(logPath, "not ours\n", { mode: 0o644 });
@@ -116,10 +138,11 @@ test(
 // elsewhere on disk. O_NOFOLLOW is what is supposed to prevent this (the
 // kernel refuses to open through an existing symlink at all); this test
 // actually exercises that guarantee rather than merely asserting the flag
-// is present in source.
+// is present in source. Gated to the scheduled/manual stress lane -- see
+// the file header comment.
 test(
   "a pre-existing symlink at the log path is never followed or written through",
-  { skip: process.platform === "win32" },
+  { skip: process.platform === "win32" || !RUN_STRESS_CASES },
   async () => {
     await withCrashLog(async (logPath) => {
       const dir = dirname(logPath);
@@ -146,10 +169,13 @@ test(
 // anything. O_NONBLOCK is what is supposed to make that open fail
 // immediately instead; this test actually opens a real FIFO to prove it,
 // bounded by node:test's own default per-test timeout so a regression hangs
-// this test rather than the whole suite indefinitely.
+// this test rather than the whole suite indefinitely. Requires the external
+// `mkfifo` binary, so this stays out of the always-run required lane
+// regardless of platform -- gated to the scheduled/manual stress lane, see
+// the file header comment.
 test(
   "a pre-existing FIFO at the log path does not block the crash handler",
-  { skip: process.platform === "win32" },
+  { skip: process.platform === "win32" || !RUN_STRESS_CASES },
   async () => {
     await withCrashLog(async (logPath) => {
       const mkfifo = spawnSync("mkfifo", [logPath]);

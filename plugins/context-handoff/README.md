@@ -353,20 +353,30 @@ This file is:
 - **Created privately, symlink-safe.** `os.tmpdir()` is commonly a shared,
   world-writable directory on POSIX (`/tmp`); a predictable filename there
   is both world-readable by default and a symlink-attack target. The first
-  write opens it with `O_CREAT|O_WRONLY|O_APPEND|O_NOFOLLOW` and mode
-  `0o600` -- private to this user, and the kernel itself refuses to open
-  through a pre-existing symlink rather than following it. `O_NOFOLLOW` is
-  absent on Windows (no equivalent local-multi-user attack surface there in
-  the same shape); the file descriptor, once opened, is reused for every
-  subsequent write in the same process.
-- **Append-only and unmanaged.** Nothing in this plugin rotates, caps, or
-  deletes it; it grows across every stop on the host until an operator
-  clears it manually. It is intentionally OS-temp-scoped (not under
-  `~/.copilot/`) so a stop occurring before the extension can resolve its
-  own config/session directories still has somewhere durable to write.
-- **Not itself instrumented for retention.** No log-rotation, size cap, or
-  scheduled cleanup exists yet; treat it as a manually-cleared scratch file
-  until/unless that becomes worth adding.
+  write opens it with `O_CREAT|O_WRONLY|O_APPEND|O_NOFOLLOW|O_NONBLOCK` and
+  mode `0o600` -- private to this user, and the kernel itself refuses to
+  open through a pre-existing symlink rather than following it (and refuses
+  to block indefinitely against a pre-created FIFO with no reader). Neither
+  flag exists on Windows (no equivalent local-multi-user attack surface
+  there in the same shape); the file descriptor, once opened, is reused for
+  every subsequent write in the same process. A pre-existing file that this
+  user does not own, or that grants group/other any access, is refused
+  outright rather than written to or "fixed in place."
+- **Only records the interesting cases, by design.** A routine `code=0`
+  exit is never logged: this extension's own module is dynamically
+  re-imported many times over a machine's lifetime (once per discovery
+  pass, plus once per reconnect/resume), and logging every uneventful fork
+  would make this fixed, unrotated file grow without bound on a long-lived
+  host -- the existing lifecycle-logging pattern
+  (`docs/patterns/lifecycle-activity-logging.md`) deliberately bounds or
+  reboot-volatilizes every tier it defines, and this file has neither
+  property, so it must not record routine events at all. Only an
+  `uncaughtException`/`unhandledRejection` (+ non-zero `exit`), a caught
+  `SIGTERM`/`SIGINT`/`SIGHUP`, or a genuinely non-zero exit for some other
+  reason produces an entry.
+- **Not itself instrumented for retention beyond that.** No log-rotation or
+  scheduled cleanup exists for whatever it does accumulate; treat it as a
+  manually-cleared scratch file until/unless that becomes worth adding.
 
 **Interpreting an entry -- a `SIGTERM`/`SIGINT`/`SIGHUP` line does not by
 itself mean a crash.** The Copilot CLI's own documented extension lifecycle
@@ -396,15 +406,15 @@ So, reading a launch's entries in this file (if any):
 - `uncaughtException`/`unhandledRejection` (with a stack), followed by
   `exit: code=1` -- a genuine bug in this extension's own code. The stack
   is the actual diagnostic payoff.
-- `exit: code=0` alone, nothing else -- an intentional, non-error exit (for
-  example the bootstrap's own parent-liveness check exiting early).
 - **No entry at all for a launch whose own harness log shows it reached
-  `ready` and then stopped** -- two distinct possibilities, not just one:
-  either something bypassed Node's own signal/exit handling entirely
-  (`SIGKILL`, an external whole-process-tree kill -- registering a handler
-  for a given event cannot help when the process never gets to run any more
-  JS at all), **or** `createEmergencyLog()`'s own open/write attempt failed
-  and was silently swallowed (its own defensive contract: diagnostic logging
+  `ready` and then stopped** -- three distinct possibilities, not just one:
+  the ordinary case is simply a routine `code=0` exit, which is never logged
+  by design (see above); beyond that, either something bypassed Node's own
+  signal/exit handling entirely (`SIGKILL`, an external whole-process-tree
+  kill -- registering a handler for a given event cannot help when the
+  process never gets to run any more JS at all), **or**
+  `createEmergencyLog()`'s own open/write attempt failed and was silently
+  swallowed (its own defensive contract: diagnostic logging
   must never itself become a second crash cause) -- for example the crash
   log's directory is missing, the disk is full, or the pre-existing-file
   ownership/mode check rejected an untrusted file at that path (see the

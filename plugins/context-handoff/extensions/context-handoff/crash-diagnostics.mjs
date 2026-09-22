@@ -13,11 +13,12 @@
 // `installEmergencyDiagnostics` writes a synchronous, durable diagnostic
 // line to a fixed `os.tmpdir()` path the instant anything goes wrong, so the
 // next crash leaves an actual error message/stack behind instead of a bare
-// exit code -- and the presence/absence of the `exit` line it always writes
-// pinpoints whether Node itself decided to terminate (uncaught exception,
-// rejected top-level await, natural event-loop drain) or something external
+// exit code -- and the presence/absence of a logged non-zero `exit` line
+// (routine `code=0` exits are never logged; see the rationale beside
+// `onExit` below) pinpoints whether Node itself decided to terminate
+// (uncaught exception, rejected top-level await) or something external
 // force-killed the process before Node's own exit handling could run (no
-// `exit` line is ever written in that case, since SIGKILL and an external
+// line is ever written in that case, since SIGKILL and an external
 // process-tree kill bypass it entirely).
 
 import { closeSync, constants as fsConstants, fstatSync, openSync, writeSync } from "node:fs";
@@ -183,8 +184,21 @@ export function installEmergencyDiagnostics(emergencyLog) {
     emergencyLog("unhandledRejection", describeFailure(reason));
     process.exit(1);
   };
+  // Only a non-zero exit is logged. This module's own extension.mjs is
+  // dynamically re-imported many times over a machine's lifetime -- once
+  // per discovery pass, plus once per reconnect/resume -- and the ordinary
+  // outcome of nearly all of those forks is a routine `process.exit(0)`.
+  // Logging every one of them would make this fixed, unrotated,
+  // machine-global scratch file grow without bound over a long-lived host
+  // (the existing lifecycle-logging pattern -- see
+  // docs/patterns/lifecycle-activity-logging.md -- deliberately bounds or
+  // reboot-volatilizes every tier it defines; this file has neither
+  // property, so it must not record routine, uninteresting events at all).
+  // A normal exit carries no diagnostic value on its own here: the
+  // interesting signal is the *presence* of an uncaughtException/
+  // unhandledRejection/signal line, not the routine absence of one.
   const onExit = (code) => {
-    emergencyLog("exit", `code=${code}`);
+    if (code !== 0) emergencyLog("exit", `code=${code}`);
   };
   const signalHandlers = new Map();
   for (const signal of SIGNALS) {
