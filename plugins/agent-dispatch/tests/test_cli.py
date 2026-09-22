@@ -174,6 +174,147 @@ def test_steer_never_performs_local_wake_for_old_coordinator(
     assert output["wake_status"] == "unsupported"
 
 
+def test_card_set_routes_through_root_owner_and_client(monkeypatch, capsys):
+    from agent_dispatch import __main__ as m
+
+    seen = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def set_card(self, task_id, worker_id, *, card):
+            seen.update(task_id=task_id, worker_id=worker_id, card=card)
+            return {"id": task_id, "card": card}
+
+    monkeypatch.setattr(m, "_resolve_owner", lambda args, *, verb: "m/wt-1")
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    args = _args(
+        [
+            "card",
+            "set",
+            "task-9",
+            "--title",
+            "Need review",
+            "--status",
+            "blocked",
+            "--request-input",
+            "decision:choice[Proceed,Revise]",
+        ]
+    )
+
+    assert args.func(args) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert seen["task_id"] == "task-9"
+    assert seen["worker_id"] == "m/wt-1"
+    assert seen["card"]["title"] == "Need review"
+    assert output["id"] == "task-9"
+
+
+def test_card_draft_save_routes_through_root_client(monkeypatch, capsys):
+    saved = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def save_card_draft(self, task_id, *, fields):
+            saved.update(task_id=task_id, fields=fields)
+            return {"id": task_id, "fields": fields}
+
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    args = _args(["card", "draft", "save", "task-8", "--field", "decision=revise"])
+
+    assert args.func(args) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert saved == {"task_id": "task-8", "fields": {"decision": "revise"}}
+    assert output["id"] == "task-8"
+
+
+def test_card_show_routes_through_root_client(monkeypatch, capsys):
+    seen = {"get": [], "steer_log": []}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, task_id):
+            seen["get"].append(task_id)
+            return {"card": {"title": "Need answer"}, "awaiting_steer": True, "card_draft": None}
+
+        def steer_log(self, task_id):
+            seen["steer_log"].append(task_id)
+            return [{"fields": {"decision": "revise"}}]
+
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    args = _args(["card", "show", "task-6"])
+
+    assert args.func(args) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert seen == {"get": ["task-6"], "steer_log": ["task-6"]}
+    assert output["task_id"] == "task-6"
+    assert output["card"]["title"] == "Need answer"
+    assert output["awaiting_steer"] is True
+
+
+def test_card_draft_clear_routes_through_root_client(monkeypatch, capsys):
+    cleared = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def clear_card_draft(self, task_id):
+            cleared["task_id"] = task_id
+            return {"id": task_id, "cleared": True}
+
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    args = _args(["card", "draft", "clear", "task-5"])
+
+    assert args.func(args) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert cleared == {"task_id": "task-5"}
+    assert output == {"id": "task-5", "cleared": True}
+
+
+def test_steer_take_routes_through_root_owner_and_client(monkeypatch, capsys):
+    from agent_dispatch import __main__ as m
+
+    seen = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def steer_take(self, task_id, worker_id, *, all_pending=False):
+            seen.update(task_id=task_id, worker_id=worker_id, all_pending=all_pending)
+            return [{"task_id": task_id, "worker_id": worker_id}]
+
+    monkeypatch.setattr(m, "_resolve_owner", lambda args, *, verb: "m/wt-2")
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    args = _args(["steer", "take", "task-7", "--all"])
+
+    assert args.func(args) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert seen == {"task_id": "task-7", "worker_id": "m/wt-2", "all_pending": True}
+    assert output == [{"task_id": "task-7", "worker_id": "m/wt-2"}]
+
+
 # -- coordinator target resolution: local vs shared/elected -----------------
 
 
