@@ -121,12 +121,12 @@ def test_current_repo_layers_union_sources_and_preserve_overlay_indexer(
     assert cfg.read_indexer(root) == {"machine": "boxA"}
     sources = cfg.read_corpus_sources()
     assert [s["name"] for s in sources] == [
-        "github:gim-home/odsp-web-harness",
         "github:ThomasMichon/copilot-extensions",
+        "github:gim-home/odsp-web-harness",
     ]
 
 
-def test_current_repo_duplicate_source_name_keeps_base_entry(
+def test_current_repo_duplicate_source_name_uses_higher_precedence_overlay(
     tmp_path, monkeypatch
 ) -> None:
     aw = tmp_path / ".agent-worktrees"
@@ -155,8 +155,8 @@ def test_current_repo_duplicate_source_name_keeps_base_entry(
     assert sources == [
         {
             "name": "git:dotfiles",
-            "repo": "dotfiles",
-            "trust_domain": "shareable",
+            "repo": "override",
+            "trust_domain": "overlay",
             "_repo_path": str(root),
             "_contributed_by": "effective-config",
         }

@@ -484,14 +484,15 @@ def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[st
     return merged
 
 
-def _merge_sources(base: list[Any], overlay: list[Any]) -> list[Any]:
-    merged = list(base)
+def _merge_sources_by_precedence(high: list[Any], low: list[Any]) -> list[Any]:
+    """Merge ``corpus.sources`` as the one explicit exception to list replace."""
+    merged = list(high)
     seen = {
         item["name"].casefold()
         for item in merged
         if isinstance(item, dict) and isinstance(item.get("name"), str)
     }
-    for item in overlay:
+    for item in low:
         if isinstance(item, dict) and isinstance(item.get("name"), str):
             folded = item["name"].casefold()
             if folded in seen:
@@ -502,6 +503,7 @@ def _merge_sources(base: list[Any], overlay: list[Any]) -> list[Any]:
 
 
 def _merge_repo_config_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Merge one lower-precedence layer with one higher-precedence layer."""
     merged = _deep_merge_dicts(base, override)
     if "indexers" in override and "indexer" not in override:
         merged.pop("indexer", None)
@@ -518,8 +520,8 @@ def _merge_repo_config_dicts(base: dict[str, Any], override: dict[str, Any]) -> 
         and isinstance(override_corpus.get("sources"), list)
     ):
         corpus = dict(merged.get("corpus") or {})
-        corpus["sources"] = _merge_sources(
-            base_corpus["sources"], override_corpus["sources"]
+        corpus["sources"] = _merge_sources_by_precedence(
+            override_corpus["sources"], base_corpus["sources"]
         )
         merged["corpus"] = corpus
     return merged
@@ -549,44 +551,59 @@ def _installation_marketplace_id() -> str | None:
     return marketplace_id.strip()
 
 
-def _repo_base_config_path(root: Path) -> Path | None:
+def _repo_config_layers(
+    root: Path, *, knowledge_root: Path | None = None
+) -> list[tuple[Path, Path]]:
+    """Return config layers in ordinary precedence order: low -> high.
+
+    For agent-index's repo activation, the three concrete layers map onto the
+    same precedence model documented for the rest of the ``.agent-*``
+    ecosystem:
+
+    - in-repo checked-in config: ``<repo>/.agent-index/config.yaml`` (lowest)
+    - bound knowledge overlay: ``<knowledge>/.agent-index/config.yaml``
+    - machine-local repo overlay:
+      ``<repo>/.copilot-extensions/agent-index/config.yaml`` (highest)
+
+    Marketplace overlays remain above the repo-local machine overlay when
+    present. Ordinary list values still replace wholesale; only
+    ``corpus.sources`` uses the explicit merge exception above.
+    """
+    layers: list[tuple[Path, Path]] = []
+    base = root / BASE_CONFIG_RELATIVE
+    if base.exists():
+        layers.append((root, base))
+    if knowledge_root is not None:
+        knowledge = knowledge_root / BASE_CONFIG_RELATIVE
+        if knowledge.exists():
+            layers.append((knowledge_root, knowledge))
+    overlay = root / OVERLAY_CONFIG_RELATIVE
+    if overlay.exists():
+        layers.append((root, overlay))
+    marketplace_id = _installation_marketplace_id()
+    if marketplace_id:
+        overlay = root / MARKETPLACE_OVERLAYS_DIR / marketplace_id / CONFIG_FILENAME
+        if overlay.exists():
+            layers.append((root, overlay))
+    return layers
+
+
+def _primary_repo_config_path(root: Path) -> Path | None:
     for candidate in (root / BASE_CONFIG_RELATIVE, root / OVERLAY_CONFIG_RELATIVE):
         if candidate.exists():
             return candidate
     return None
 
 
-def _repo_local_overlay_path(root: Path) -> Path | None:
-    base = root / BASE_CONFIG_RELATIVE
-    overlay = root / OVERLAY_CONFIG_RELATIVE
-    if base.exists() and overlay.exists():
-        return overlay
-    return None
-
-
-def _repo_config_layers(root: Path) -> list[Path]:
-    layers: list[Path] = []
-    base = _repo_base_config_path(root)
-    if base is not None:
-        layers.append(base)
-    overlay = _repo_local_overlay_path(root)
-    if overlay is not None:
-        layers.append(overlay)
-    marketplace_id = _installation_marketplace_id()
-    if marketplace_id:
-        overlay = root / MARKETPLACE_OVERLAYS_DIR / marketplace_id / CONFIG_FILENAME
-        if overlay.exists():
-            layers.append(overlay)
-    return layers
-
-
-def _load_repo_candidate(root: Path) -> tuple[str, Path | None, dict[str, Any] | None]:
-    layers = _repo_config_layers(root)
+def _load_repo_candidate(
+    root: Path, *, knowledge_root: Path | None = None
+) -> tuple[str, Path | None, dict[str, Any] | None]:
+    layers = _repo_config_layers(root, knowledge_root=knowledge_root)
     if not layers:
         return "absent", None, None
     merged: dict[str, Any] = {}
-    for layer in layers:
-        state, safe_path = _safe_file(layer, root)
+    for owner, layer in layers:
+        state, safe_path = _safe_file(layer, owner)
         if state != "ready" or safe_path is None:
             return state, layer, None
         state, data = _load_yaml_mapping(safe_path)
@@ -594,16 +611,11 @@ def _load_repo_candidate(root: Path) -> tuple[str, Path | None, dict[str, Any] |
             return state, layer, None
         merged = _merge_repo_config_dicts(merged, data)
     try:
-        return "ready", layers[0].resolve(), _validate_config(merged)
+        primary = _primary_repo_config_path(root) or layers[0][1]
+        return "ready", primary.resolve(), _validate_config(merged)
     except ConfigError:
-        return "invalid", layers[0], None
-
-
-def _load_external_overlay_candidate(
-    root: Path,
-) -> tuple[str, dict[str, Any] | None]:
-    path = root / BASE_CONFIG_RELATIVE
-    return _load_candidate(path, root)
+        primary = _primary_repo_config_path(root) or layers[0][1]
+        return "invalid", primary, None
 
 
 def _run_git(git: str, start: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
@@ -1027,12 +1039,11 @@ def resolve(cwd: str | os.PathLike[str] | None = None) -> dict[str, Any]:
         if policy_state == "ready" and requires_external:
             state, state_root = _external_state_root(root)
             if state == "ready" and state_root is not None:
-                overlay_state, overlay = _load_external_overlay_candidate(state_root)
-                if overlay_state == "ready" and overlay is not None:
-                    local = {
-                        "indexers": list(local["indexers"]),
-                        "sources": _merge_sources(local["sources"], overlay["sources"]),
-                    }
+                layered_state, _, layered = _load_repo_candidate(
+                    root, knowledge_root=state_root
+                )
+                if layered_state == "ready" and layered is not None:
+                    local = layered
         return _result(
             opted_in=True,
             source="repository",

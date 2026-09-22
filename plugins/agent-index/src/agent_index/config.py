@@ -113,14 +113,26 @@ def _deep_merge_dicts(base: dict, override: dict) -> dict:
     return merged
 
 
-def _merge_sources(base: list, overlay: list) -> list:
-    merged = list(base)
+def _merge_sources_by_precedence(high: list, low: list) -> list:
+    """Merge ``corpus.sources`` as the one deliberate list-merge exception.
+
+    The surrounding config follows the same precedence model documented for the
+    other ``.agent-*`` configs (see ``docs/configuration.md`` and the
+    agent-worktrees config reference): machine-local overrides win over the
+    knowledge overlay, which wins over the in-repo base, with ordinary list
+    values replaced wholesale by the higher-precedence layer.
+
+    ``corpus.sources`` is the narrow exception: it behaves like a set of
+    independent declarations, so higher-precedence layers come first and lower
+    layers contribute only source names that have not already been claimed.
+    """
+    merged = list(high)
     seen = {
         item["name"].casefold()
         for item in merged
         if isinstance(item, dict) and isinstance(item.get("name"), str)
     }
-    for item in overlay:
+    for item in low:
         if isinstance(item, dict) and isinstance(item.get("name"), str):
             folded = item["name"].casefold()
             if folded in seen:
@@ -131,6 +143,7 @@ def _merge_sources(base: list, overlay: list) -> list:
 
 
 def _merge_repo_config_dicts(base: dict, override: dict) -> dict:
+    """Merge one lower-precedence layer with one higher-precedence layer."""
     merged = _deep_merge_dicts(base, override)
     if "indexers" in override and "indexer" not in override:
         merged.pop("indexer", None)
@@ -147,8 +160,8 @@ def _merge_repo_config_dicts(base: dict, override: dict) -> dict:
         and isinstance(override_corpus.get("sources"), list)
     ):
         corpus = dict(merged.get("corpus") or {})
-        corpus["sources"] = _merge_sources(
-            base_corpus["sources"], override_corpus["sources"]
+        corpus["sources"] = _merge_sources_by_precedence(
+            override_corpus["sources"], base_corpus["sources"]
         )
         merged["corpus"] = corpus
     return merged
@@ -396,9 +409,10 @@ def read_corpus_sources() -> list[dict]:
        registry (``~/.agent-worktrees/projects.yaml`` — the set of repos that have
        a project binstub), resolving each to its checkout path via
        ``repos.yaml``.
-    2. Read each project's effective layered repo config: checked-in
-       ``<repo>/.agent-index/config.yaml`` defaults, optional repo-local
-       ``<repo>/.copilot-extensions/agent-index/config.yaml`` overlay, and
+    2. Read each project's effective layered repo config using the established
+       ``.agent-*`` precedence model: checked-in ``<repo>/.agent-index/
+       config.yaml`` in-repo defaults, then the repo-local machine overlay
+       ``<repo>/.copilot-extensions/agent-index/config.yaml``, plus the
        marketplace overlay when present. Then graft its
        ``corpus.sources`` into one list, deduped by source ``name`` (first
        contributor wins). The originating project's checkout path is attached as

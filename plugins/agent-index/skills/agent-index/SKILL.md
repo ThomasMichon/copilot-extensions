@@ -19,10 +19,13 @@ service, or retrieval through its read CLI.
 checked-in `.agent-index/config.yaml`, optionally supplemented by a repo-local
 `.copilot-extensions/agent-index/config.yaml` overlay and marketplace overlay.
 For repositories that require external state, the bound knowledge repo's
-checked-in `.agent-index/config.yaml` can add more `corpus.sources`, and still
-serves as the fail-closed fallback when no local repo config exists. A present
-invalid local config never falls through. Outside that scope, `status` reports
-`inactive` and other commands are refused.
+checked-in `.agent-index/config.yaml` is the middle **knowledge-overlay** tier.
+This follows the standard `.agent-*` precedence model documented by
+agent-worktrees — machine-local > knowledge overlay > in-repo — with one
+deliberate exception: `corpus.sources` unions by source name instead of list
+replacement so the tiers can compose. A present invalid local config never
+falls through. Outside that scope, `status` reports `inactive` and other
+commands are refused.
 - Session start is non-mutating: it does not stamp or provision a runtime and
 does not start a service. After repository opt-in, an operator explicitly chooses
 `setup --single` or `setup --indexer <machine> --ssh <alias>`; that setup call

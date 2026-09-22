@@ -132,12 +132,16 @@ The runtime belongs to this plugin; scope is data/config:
   sources from locally adopted projects plus any machine-local supplement in
   `~/.agent-index/config.yaml`.
 - Resolution selects a valid current-repository config first, layering checked-in
-  defaults, the repo-local overlay, and any marketplace overlay. Repositories
-  that declare `stateless: true` or `requires_external_state_root: true` may
-  also append shareable `corpus.sources` from the bound knowledge repo's
-  `.agent-index/config.yaml`, and still fall back to the knowledge repo's own
-  effective config when no local repo config exists. A present invalid local
-  config never falls through.
+  defaults, the conditional bound-knowledge `.agent-index/config.yaml`, the
+  repo-local overlay, and any marketplace overlay using the same precedence
+  order documented for the other `.agent-*` configs:
+  machine-local > knowledge overlay > in-repo base. The one deliberate
+  exception is `corpus.sources`: unlike ordinary list-valued keys, it unions by
+  source `name` so those layers can compose, with the higher-precedence layer
+  winning any duplicate name. Repositories that declare `stateless: true` or
+  `requires_external_state_root: true` may still fall back to the knowledge
+  repo's own effective config when no local repo config exists. A present
+  invalid local config never falls through.
 - The session-start scope-binding hook reads that effective config and tells
 agents which configured scopes are safe to prefer `agent-index search` for.
 
