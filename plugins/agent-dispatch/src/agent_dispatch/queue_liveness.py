@@ -152,13 +152,17 @@ class LivenessMixin:
         **Concurrency contract:** ``resolver``, ``headless_local_verdict``, and
         ``headless_fleet_verdict`` are invoked concurrently, on worker threads
         from a shared executor (not sequentially, and not on the calling
-        thread) -- probing N held tasks costs roughly the slowest single call,
-        not their sum. A caller-supplied callable must therefore be safe to
-        call from multiple threads at once: no thread-local state, no
-        assumptions about running on an asyncio event loop thread, and no
-        re-entrant calls back into this (or another) ``TaskQueue``'s
-        connection. The built-in defaults (subprocess-based bridge/SSH probes)
-        already satisfy this; they open no shared state across calls.
+        thread) -- probing N held tasks costs roughly the slowest single call
+        when N is at or below the shared executor's worker cap
+        (``_LIVENESS_PROBE_CONCURRENCY``); a larger backlog's wall-clock cost
+        scales in batches of that cap rather than growing with the full sum
+        of every held task's timeout. A caller-supplied callable must
+        therefore be safe to call from multiple threads at once: no
+        thread-local state, no assumptions about running on an asyncio event
+        loop thread, and no re-entrant calls back into this (or another)
+        ``TaskQueue``'s connection. The built-in defaults (subprocess-based
+        bridge/SSH probes) already satisfy this; they open no shared state
+        across calls.
 
         **Fencing:** liveness is probed **outside** the write lock, then each gone
         task is transitioned under a short transaction with a conditional update

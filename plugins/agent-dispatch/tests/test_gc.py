@@ -374,22 +374,23 @@ def test_reconcile_probes_held_tasks_concurrently_not_serially(q):
 
     Probing must therefore run concurrently. Proved deterministically (not via
     a wall-clock timing bound, which can be flaky under a slow/contended CI
-    runner) with a `threading.Barrier`: every probe call waits on the same
-    barrier, which only releases once *all* of them have arrived. A serial
-    implementation calls one probe at a time, so the barrier never fills and
-    reliably breaks on timeout; a concurrent implementation dispatches them
-    together, so the barrier fills and releases quickly.
+    runner) with a two-party `threading.Barrier`: any two probe calls racing
+    to the same barrier together proves at least 2-way concurrency, which a
+    serial implementation (one probe at a time) can never achieve. A 2-party
+    barrier (rather than one sized to ``n``) also keeps this test decoupled
+    from the exact ``_LIVENESS_PROBE_CONCURRENCY`` cap -- it still passes if
+    that cap is ever tuned, as long as probing stays non-serial.
     """
     import threading
 
     n = 6
-    barrier = threading.Barrier(n, timeout=2.0)
+    barrier = threading.Barrier(2, timeout=2.0)
     for i in range(n):
         t = q.create(f"t{i}", now=1000.0 + i)
         _claim_and_start(q, t.id, wt=f"wt{i}", session=f"S{i}", now=1001.0 + i)
 
     def barrier_resolver(wt, mc, sid):
-        barrier.wait()  # raises BrokenBarrierError if not all n arrive in time
+        barrier.wait()  # raises BrokenBarrierError if a partner never arrives
         return "live"
 
     counts = q.reconcile_liveness(barrier_resolver, now=9999.0)
