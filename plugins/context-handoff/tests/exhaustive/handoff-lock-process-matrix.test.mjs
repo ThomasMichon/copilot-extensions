@@ -725,6 +725,36 @@ test("withWorktreeSyncLock's release only removes the lock when its content stil
   }
 });
 
+test("withWorktreeSyncLock reports a non-contention acquireLock failure distinctly from routine lock contention", () => {
+  // Review finding: the catch around `acquireLock(lockPath)` used to report
+  // EVERY failure -- contention (EEXIST) as well as a genuinely different
+  // error (permissions, an unsupported filesystem, disk I/O) -- as "another
+  // sync attempt ... already in progress". That misreports a real failure
+  // as routine lock-busy noise, hiding the actual cause from anyone reading
+  // `reason`. Both cases must still skip the sync (never proceed
+  // unserialized), but only an EEXIST-rooted throw is genuine contention.
+  // Structural check (no DI seam to force a real non-EEXIST acquireLock
+  // throw deterministically, and a permission-denial repro would be
+  // unreliable in a root-run CI container): the catch must branch on
+  // `error?.code === "EEXIST"` rather than treating every failure alike.
+  const source = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "..", "extensions", "context-handoff", "handoff-core.mjs",
+    ),
+    "utf-8",
+  );
+  const body = source.slice(
+    source.indexOf("async function withWorktreeSyncLock("),
+    source.indexOf("async function withWorktreeSyncLock(") + 2000,
+  );
+  assert.ok(body.length > 0, "could not locate withWorktreeSyncLock's body");
+  assert.match(body, /error\?\.code === "EEXIST"/);
+  // Both branches must still skip the sync -- this is a reporting fix, not
+  // a behavior change in whether the sync proceeds.
+  assert.match(body, /attempted: false,\s*\n\s*synced: false,/);
+});
+
 test("acquireLock returns an ownership token, and releaseLock atomically claims the path before comparing it", () => {
   // Structural check (no DI seam for the internal fs calls, and reliably
   // forcing the real suspended-holder/concurrent-reclaimer timing scenarios

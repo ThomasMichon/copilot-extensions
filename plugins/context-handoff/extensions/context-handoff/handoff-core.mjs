@@ -664,11 +664,24 @@ async function withWorktreeSyncLock(cwd, fn) {
   let lock;
   try {
     lock = await acquireLock(lockPath);
-  } catch {
+  } catch (error) {
+    // acquireLock only ever re-throws non-EEXIST errors verbatim (see its
+    // own doc comment) -- an EEXIST-rooted throw means genuine contention
+    // (another sync attempt currently holds this lock, or holds a lock this
+    // invocation could not confidently reclaim). Anything else (a
+    // permissions error, an unsupported filesystem, disk I/O) is a
+    // DIFFERENT failure mode entirely and must not be misreported as
+    // routine contention -- that would hide the real cause from anyone
+    // reading `reason` and make a persistent, non-contention failure look
+    // like harmless lock-busy noise. Both cases still skip the sync (never
+    // proceed unserialized), but the reason now says which happened.
+    const isContention = error?.code === "EEXIST";
     return {
       attempted: false,
       synced: false,
-      reason: "another sync attempt for this worktree is already in progress; automatic sync was skipped",
+      reason: isContention
+        ? "another sync attempt for this worktree is already in progress; automatic sync was skipped"
+        : `could not acquire the worktree sync lock (${error instanceof Error ? error.message : String(error)}); automatic sync was skipped to be safe`,
     };
   }
   try {
