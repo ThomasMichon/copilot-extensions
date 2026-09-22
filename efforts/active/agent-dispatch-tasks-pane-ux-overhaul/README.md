@@ -2543,18 +2543,19 @@ engine rather than trusting five-day-old images. Diffing the two sets found:
    fields) -- flagged as its own follow-up rather than attempted as a side
    effect of a screenshot check.
 3. Cosmetic-only, not a regression: the fixture's machine/repo names
-   changed (`tmichon-cloud1`/`copilot-extensions`/`odsp-web-harness` ->
-   `build-host-1`/`sample-repo`/`sample-harness`) between the two capture
-   dates -- a positive identifier-neutrality improvement to the fixture
-   data, unrelated to engine behavior.
+   changed between the two capture dates (from real-looking internal names
+   to neutral placeholders) -- a positive identifier-neutrality improvement
+   to the fixture data, unrelated to engine behavior.
 
-**Going forward, this is the visual-regression workflow**: rerun
-`render_tasks_preview.py` and diff by eye against the latest dated reference
-set before merging any change that touches `engine.py`'s render/column-fit
-path, `pivots.py`'s manifest contract, or this pivot's own manifest -- there
-is no committed-to-git baseline (this repo's own `tasks-preview/.gitignore`
-deliberately keeps generated PNGs out of git as binary artifacts), so a
-dated local-evidence folder (outside this repo, per the operator's own
-storage convention) is the durable home for both the regression baseline
-and the vision's own visual reference. Archived today's fresh, manifest-
-fixed set as the new current reference, superseding the 2026-09-17 set.
+**Going forward, this is the visual-regression workflow -- explicitly a
+local-only, single-operator practice, not a repository-accessible or
+CI-enforced one**: rerun `render_tasks_preview.py` and diff by eye against
+the operator's own previously-saved reference set before merging any
+change that touches `engine.py`'s render/column-fit path, `pivots.py`'s
+manifest contract, or this pivot's own manifest. This repo's own
+`tasks-preview/.gitignore` deliberately keeps generated PNGs out of git as
+binary artifacts, and no shared/reproducible baseline location exists for
+this tool today -- so no other contributor or CI can currently perform this
+diff; only the operator running the tool locally can. Refreshed the
+operator's own reference set with today's fresh, manifest-fixed capture,
+superseding the 2026-09-17 one.
