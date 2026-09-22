@@ -5,6 +5,14 @@ effort (`efforts/active/picker-venue-pivots/README.md` and
 `visions/venue-pivots-ux/README.md`) for operator review, iterating before
 any implementation PR. Not shipped runtime.
 
+**This directory's own `out/` is scratch and gitignored** (regenerate any
+time). The **operator-approved** copies are committed at
+`efforts/active/picker-venue-pivots/design-previews/*.png` — the durable
+north-star reference a later session diffs a fresh re-render against to
+catch visual regression or drift from the agreed design. Update the
+committed copies (with a Journal note) whenever the design is deliberately
+revised; an unexplained difference is a regression, not an update.
+
 It drives the REAL Textual `PickerApp`/`WorktreesView`/generic column-pivot
 renderer — the actual engine, not a mockup — against:
 

@@ -7,9 +7,10 @@
   worktrees once the design below is approved (same pattern the Tasks-pane
   effort used).
 - **Created:** 2026-09-21
-- **Status:** Active — Phase 0 (grounding + preview tooling) in progress.
+- **Status:** Active — Phase 0 complete and operator-approved; Phase 1
+  (claims-pecking-order module design, then Codespaces implementation) next.
 - **Vision:** [`visions/venue-pivots-ux`](../../../visions/venue-pivots-ux/README.md)
-- **Umbrella issue:** _TBD — file once the Phase 0 previews are approved._
+- **Umbrella issue:** _TBD — file before Phase 1 implementation lands._
 - **Sub-issues:** _TBD, one per Plan phase._
 
 ## Guiding Intent
@@ -94,24 +95,26 @@ realization.
   until Phase 0 previews are captured and approved; each implementation
   phase gets its own fresh worktree off `main` afterward (Tasks-pane
   precedent).
-- **Current phase:** Phase 0 — grounding, manifest/screenshot design, and
-  the preview tooling are all done. Six screenshots rendered successfully
-  on the first attempt against the real Textual engine (see
-  `worktree-manager/scripts/picker-snapshot/venue-preview/out/` after
-  running the render script, or the venue-preview README for a full
-  description of each). **Remaining before Phase 1:** the shared
+- **Current phase:** Phase 0 — **done and operator-approved (2026-09-21).**
+  Grounding, manifest/screenshot design, and the preview tooling are all
+  complete; the operator reviewed the rendered screenshots (flagging and
+  getting the `driven`→`sess` column fix along the way — see Journal), and
+  the approved renders are committed at `design-previews/*.png` (see the
+  section above) as the durable north-star reference for future sessions
+  to diff implementation against. **Remaining before Phase 1:** the shared
   claims-pecking-order module is still only a design placeholder in the
-  preview (hand-authored `claims_summary` strings, not a real ranking), and
-  the operator has not yet reviewed/approved the screenshots.
-- **Immediate next step:** get operator sign-off on the six
-  `venue-preview/out/*.png` screenshots (or iterate on manifest/fixture
-  design per feedback — re-run
-  `worktree-manager\.venv\Scripts\python.exe
+  preview (hand-authored `claims_summary` strings, not a real ranking).
+- **Immediate next step:** design the shared claims-pecking-order module
+  (still open — see Plan Phase 0's last unchecked item) before touching the
+  real `pivots/agent-codespaces.json`, then start Phase 1. If any
+  implementation-phase session changes a row/menu's visual shape, re-run
+  the render script (`worktree-manager\.venv\Scripts\python.exe
   worktree-manager\scripts\picker-snapshot\venue-preview\render_venue_preview.py
-  --out-dir worktree-manager\scripts\picker-snapshot\venue-preview\out`
-  after any manifest edit, both venvs are already built in this worktree).
-  Once approved, Phase 1 starts with the shared claims-pecking-order module
-  design (still open) before touching the real `pivots/agent-codespaces.json`.
+  --out-dir worktree-manager\scripts\picker-snapshot\venue-preview\out`,
+  both venvs already built in this worktree) and diff the fresh output
+  against the committed `design-previews/*.png` — a deliberate difference
+  is fine (update the committed copies + note why in the Journal); an
+  unnoticed one is exactly the drift this comparison exists to catch.
 
 ## Context
 
@@ -148,6 +151,32 @@ Copilot instance over SSH — the same flow for a fresh "New
 codespace"/"New agent" against a dormant venue. Use an effort, and use the
 preview-as-we-work screenshot approach (the Worktree Picker and the new
 Tasks pivot are the baselines).
+
+## Design Previews (approved north-star)
+
+**Committed, not just filed on OneDrive** (2026-09-21 operator decision —
+the Tasks-pane-ux effort's own previews only ever lived at
+`OneDrive/2026/09.17 agent-dispatch Tasks Pane UX Overhaul Previews`, never
+in-repo; this effort corrects that so the approved design has a durable,
+version-controlled reference point future sessions can diff against for
+drift, not just a local human-reviewed folder). These six PNGs
+(`design-previews/`) are the **Phase 0-approved rendering** of the row
+grammar, session column, claims list, and action menus — regenerate them
+with `render_venue_preview.py` (see the venue-preview README) at any later
+implementation checkpoint and diff against these committed copies to catch
+visual regression or drift from the agreed design before merging. A
+deliberate difference is fine (design evolves) — an *accidental* one is
+what this comparison exists to catch. Update these files, with a Journal
+note explaining why, whenever the design is deliberately revised.
+
+| File | Shows |
+|------|-------|
+| [`design-previews/codespaces-before.png`](design-previews/codespaces-before.png) | The REAL current CodeSpaces pivot — no subtitle line, no session/claims columns. |
+| [`design-previews/codespaces-after.png`](design-previews/codespaces-after.png) | The proposed CodeSpaces pivot: `sess`/`claims` columns, the composed row-grammar line two, column-fit dropping `worktree` for width. |
+| [`design-previews/containers-before.png`](design-previews/containers-before.png) | The REAL current Containers pivot — a flat, ungrouped badge list. |
+| [`design-previews/containers-after.png`](design-previews/containers-after.png) | The proposed Containers pivot at Codespaces' fidelity — same columns, grouping, and row grammar. |
+| [`design-previews/codespaces-menu-driven-live.png`](design-previews/codespaces-menu-driven-live.png) | The action menu for a `sess: LIVE` CodeSpace row: Open into a CLI session, View driving worktree, Worktree status, Release. |
+| [`design-previews/containers-menu-driven-live.png`](design-previews/containers-menu-driven-live.png) | The identical menu shape for a `sess: LIVE` fleet container row. |
 
 ## Concepts grounded against real code (do not re-derive; cite this)
 
@@ -323,8 +352,12 @@ Tasks pivot are the baselines).
       All six ran successfully against the real Textual engine on the
       first attempt — see the venue-preview README for the full
       before/after description of each.
-- [ ] Operator review of the screenshots; resolve any design feedback here
-      before Phase 1 starts.
+- [x] Operator review of the screenshots; resolve any design feedback here
+      before Phase 1 starts. **Approved 2026-09-21** (after the
+      `driven`→`sess` column fix — see Journal); committed as
+      `design-previews/*.png` (see the section near the top of this
+      README) as the durable north-star reference for future
+      visual-regression/vision-alignment checks.
 
 ### Phase 1 — Codespaces pivot (implementation)
 - [ ] Build the shared claims-pecking-order module (per Phase 0 design) in
@@ -421,6 +454,17 @@ Tasks pivot are the baselines).
 
 ## Journal
 
+- **2026-09-21 (latest+4)** — Operator approved the Phase 0 screenshots and
+  asked that they be **committed to the repo**, not left OneDrive-only —
+  noting the Tasks-pane-ux effort's own previews never got this treatment
+  (they still live only at `OneDrive/2026/09.17 agent-dispatch Tasks Pane
+  UX Overhaul Previews`) and that a durable, version-controlled copy lets a
+  later session diff a re-render against the *actually-approved* design
+  rather than trusting memory or a local-only OneDrive folder. Copied the
+  six approved PNGs into `design-previews/` (committed alongside this
+  README, embedded/linked from the new "Design Previews" section) and
+  marked Phase 0's operator-review item done. Phase 0 is now fully
+  complete except the still-open claims-pecking-order module design.
 - **2026-09-21 (latest+3)** — Operator reviewed the rendered screenshots and
   flagged the `driven` column: too much width for a boolean, and pointed at
   the Worktrees pane's own compact `sess`/`live` column (key `sess`, header
