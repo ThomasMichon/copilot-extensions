@@ -1,26 +1,27 @@
 {
   "name": "context-handoff-connection-race",
-  "description": "Tier-P F1 repro rig for github/copilot-agent-runtime#22266: forces a SECOND extension connection to join a LIVE session already running the installed context-handoff extension, using the runtime's own bootstrap entrypoint (extension_bootstrap.mjs) with a hand-set COPILOT_EXTENSION_PARENT_PID/SESSION_ID rather than the harness's own supervised launch path. Confirms the manual-join tool-name-clash mechanism (validate_external_tools rejecting a second connection under one session_id) reproduces reliably in a fresh clean-room box, independent of the specific machine/session state that first surfaced it. Report-only repro rig, not a regression gate: it asserts the clash IS observed (proving the mechanism), and flags loudly if it stops reproducing (either fixed upstream, or the container's layout diverged from assumptions).",
+  "description": "Tier-P F1 repro rig for github/copilot-agent-runtime#22266: a single session that discovers the context-handoff plugin from TWO sources at once -- the marketplace-installed copy AND a byte-identical duplicate present as a project-level extension in the working repo -- launches BOTH as real connections under one real headed (tmux-driven) session, and the second one hits validate_external_tools' same-session tool-name clash (generate_handoff_prompt/save_handoff_prompt/consume_handoff/trigger_handoff already registered by another connection). Report-only repro rig, not a regression gate: it asserts the clash IS observed (proving the mechanism), and flags loudly if it stops reproducing (either fixed upstream, or the container's layout/log-naming assumptions diverged).",
   "tier": "P",
   "family": "F1",
   "image": "base",
-  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": ["tmux (apt, required -- extensions only load under a real headed session)"] },
   "auth": { "copilot": "required", "gh": "none", "ado": "none" },
-  "validates": "context-handoff manual-join tool-name-clash (copilot-agent-runtime#22266)",
+  "validates": "context-handoff same-session double-discovery tool-name clash (copilot-agent-runtime#22266)",
   "config": {
     "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
-    "CR_MARKETPLACE_NAME": "copilot-extensions",
-    "CR_HOLD_SECONDS": "the number of seconds the first (real, harness-launched) session is kept alive so the manual second connection has a live target to join; default 25"
+    "CR_MARKETPLACE_NAME": "copilot-extensions"
   },
   "expected_artifacts": [
-    "~/.copilot/installed-plugins/<marketplace>/context-handoff",
-    "cr-logs/manual-join.log (stderr of the manually-launched second connection)"
+    "~/.copilot/installed-plugins/<marketplace>/context-handoff (the marketplace-installed source)",
+    "~/ch-repro/.github/extensions/context-handoff (the duplicated project-level source)",
+    "cr-logs/tmux-pane.log (captured pane output of the driven headed session)",
+    "~/.copilot/logs/extensions/*context-handoff* (per-connection extension logs; asserted for the tool-name-clash text)"
   ],
   "stages": [
     { "n": 0, "title": "environment (fresh machine)" },
-    { "n": 1, "title": "install context-handoff" },
-    { "n": 2, "title": "start a real, long-lived session (context-handoff enabled) and capture its session id" },
-    { "n": 3, "title": "resolve the runtime's bootstrap entrypoint + bundled SDK path" },
-    { "n": 4, "title": "manually join the live session with a second connection; assert the clash" }
+    { "n": 1, "title": "install context-handoff (marketplace source)" },
+    { "n": 2, "title": "duplicate the extension as a project-level source in the working repo" },
+    { "n": 3, "title": "run one HEADED session against BOTH sources; both extensions launch" },
+    { "n": 4, "title": "assert the tool-name clash on the second (losing) connection" }
   ]
 }

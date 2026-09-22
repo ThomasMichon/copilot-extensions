@@ -1005,18 +1005,24 @@ test("acquireLock never reclaims a fellow invocation's still-writing placeholder
   }
 });
 
-test("acquireLock cleans up (closes the fd, removes the lock) when writeLockToken fails after the exclusive create already succeeded", () => {
-  // Real regression this guards (round 32): the exclusive create can
-  // succeed (this invocation now genuinely OWNS lockPath) before
-  // writeLockToken's own async work fails for some reason -- without
-  // cleanup, withWorktreeSyncLock never reaches its own `finally` (this
-  // function never returns a {fd, token} to release), leaking the fd and
-  // leaving a permanently-stuck lock behind for every future sync
-  // attempt on this worktree. Structural check (forcing a real
-  // ftruncateSync/writeSync failure deterministically and cross-platform
-  // isn't reliable in a fast unit test): the openSync success path must
-  // wrap writeLockToken in its own try/catch that closes the fd and
-  // unlinks lockPath before rethrowing.
+test("createLockWithToken cleans up (closes the fd, removes the lock) when writeLockToken fails after the exclusive create already succeeded", () => {
+  // Real regression this guards (round 32, extended round 33): the
+  // exclusive create can succeed (this invocation now genuinely OWNS
+  // lockPath) before writeLockToken's own async work fails for some
+  // reason -- without cleanup, the caller never gets a {fd, token} to
+  // release, leaking the fd and leaving a permanently-stuck lock behind
+  // for every future sync attempt on this worktree. Round 33's own
+  // "previously missed" finding: round 32 only added this cleanup to the
+  // fresh-create call site, leaving the reclaim-success call site
+  // (acquireLock's OTHER independent act of becoming the new holder)
+  // exposed to the exact same leak. Both now share ONE
+  // createLockWithToken helper, so this only needs verifying once here --
+  // plus a check that BOTH call sites in acquireLock actually delegate to
+  // it. Structural check (forcing a real ftruncateSync/writeSync failure
+  // deterministically and cross-platform isn't reliable in a fast unit
+  // test): createLockWithToken's openSync success path must wrap
+  // writeLockToken in its own try/catch that closes the fd and unlinks
+  // lockPath before rethrowing.
   const source = readFileSync(
     join(
       dirname(fileURLToPath(import.meta.url)),
@@ -1024,20 +1030,31 @@ test("acquireLock cleans up (closes the fd, removes the lock) when writeLockToke
     ),
     "utf-8",
   );
-  const body = source.slice(
+  const helperBody = source.slice(
+    source.indexOf("async function createLockWithToken("),
+    source.indexOf("async function acquireLock("),
+  );
+  assert.ok(helperBody.length > 0, "could not locate createLockWithToken's body");
+  const openIndex = helperBody.indexOf("openSync(lockPath, \"wx\")");
+  assert.ok(openIndex >= 0, "expected the exclusive open");
+  const writeTokenIndex = helperBody.indexOf("writeLockToken(fd)", openIndex);
+  assert.ok(writeTokenIndex >= 0, "expected writeLockToken to be called right after the exclusive create");
+  const cleanupCatchIndex = helperBody.indexOf("catch (writeError)", writeTokenIndex);
+  assert.ok(cleanupCatchIndex >= 0, "expected a dedicated catch for writeLockToken failures");
+  const cleanupBranch = helperBody.slice(cleanupCatchIndex, helperBody.indexOf("throw writeError;", cleanupCatchIndex) + "throw writeError;".length);
+  assert.match(cleanupBranch, /closeSync\(fd\)/);
+  assert.match(cleanupBranch, /unlinkSync\(lockPath\)/);
+
+  const acquireLockBody = source.slice(
     source.indexOf("async function acquireLock("),
     source.indexOf("// Resolves the shared per-worktree sync-lock path"),
   );
-  assert.ok(body.length > 0, "could not locate acquireLock's body");
-  const openIndex = body.indexOf("openSync(lockPath, \"wx\")");
-  assert.ok(openIndex >= 0, "expected the fresh-create exclusive open");
-  const writeTokenIndex = body.indexOf("writeLockToken(fd)", openIndex);
-  assert.ok(writeTokenIndex >= 0, "expected writeLockToken to be called right after the exclusive create");
-  const cleanupCatchIndex = body.indexOf("catch (writeError)", writeTokenIndex);
-  assert.ok(cleanupCatchIndex >= 0, "expected a dedicated catch for writeLockToken failures");
-  const cleanupBranch = body.slice(cleanupCatchIndex, body.indexOf("throw writeError;", cleanupCatchIndex) + "throw writeError;".length);
-  assert.match(cleanupBranch, /closeSync\(fd\)/);
-  assert.match(cleanupBranch, /unlinkSync\(lockPath\)/);
+  assert.ok(acquireLockBody.length > 0, "could not locate acquireLock's body");
+  const callCount = (acquireLockBody.match(/createLockWithToken\(lockPath\)/g) || []).length;
+  assert.ok(
+    callCount >= 2,
+    `expected BOTH the fresh-create and reclaim-success paths to delegate to createLockWithToken, saw ${callCount} call(s)`,
+  );
 });
 
 test("waitForWorktreeSyncToSettle re-validates a dead-holder lock's content after the rebaseInProgress await, rather than trusting stale information", () => {

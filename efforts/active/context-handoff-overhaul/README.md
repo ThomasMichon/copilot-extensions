@@ -2579,3 +2579,38 @@ undoing it:
   pre-existing skips, unchanged), exhaustive suite 51/51 pass (178 total,
   no regressions). Bumped plugin.json/marketplace.json to `0.1.1-dev43`.
   All guards pass.
+
+### 2026-09-21 (cont.) -- PR #3167 round 33: reclaim-path lock cleanup, clean-room manifest realignment
+
+Round 33 confirmed all 3 round-32 fixes resolved and surfaced one
+"previously missed" MEDIUM finding plus one new LOW finding (unrelated to
+the lock-safety work, on a clean-room scenario file this same session had
+been separately iterating on in this worktree), both fixed:
+
+- **(MEDIUM, previously missed) The reclaim-success path had the SAME
+  token-init-failure leak round 32 only fixed on the fresh-create path:**
+  `acquireLock`'s reclaim-success branch called `openSync` +
+  `writeLockToken` directly, with no cleanup wrapper -- a failure there
+  would leak the descriptor and leave the (now-parseable-but-alive, per
+  round 32's OWN fix) placeholder blocking every future sync attempt on
+  that worktree, this time with no age-based escape hatch at all. Fixed
+  by extracting a single shared `createLockWithToken(lockPath)` helper
+  (exclusive create + `writeLockToken` + cleanup-on-failure) used by BOTH
+  the fresh-create and reclaim-success paths, so the guarantee only needs
+  proving once.
+- **(LOW, unrelated) `tools/clean-room/scenarios/context-handoff-connection-race/manifest.json`
+  described a different mechanism than its own `scenario.sh`:** this
+  scenario file (tracking a separate runtime-bug investigation this
+  session had going in the same worktree, unrelated to the lock-safety
+  work itself) had its manifest and script drift out of sync after the
+  script was substantially rewritten to a same-session double-discovery
+  mechanism. Realigned the manifest's description, config, expected
+  artifacts, and stage list with the script's actual 5 phases (0-4).
+- 1 new/changed exhaustive-suite test (verifies `createLockWithToken`'s
+  cleanup-on-failure guarantee AND that both `acquireLock` call sites
+  delegate to it, replacing the round-32 test that only checked the
+  fresh-create path inline). `node --test`: fast suite 127 tests/125
+  pass (2 pre-existing skips, unchanged), exhaustive suite 51/51 pass
+  (178 total, no regressions). Bumped plugin.json/marketplace.json to
+  `0.1.1-dev44`. All guards pass, including `check-feed-neutrality.py`
+  on the new manifest content.

@@ -16,7 +16,16 @@
 # standalone-spawned process's stdio is not wired to any real host, so its
 # `connect` RPC just times out). Reproducing the SAME-SESSION double-discovery
 # needs no stdio trickery at all: it is the CLI's own normal extension-
-# discovery + launch flow, run against a deliberately-duplicated source.
+# discovery + launch flow, run against a deliberately-duplicated source --
+# but it DOES need a real HEADED session: `copilot -p` (headless) was tried
+# first and never launches extensions at all (only skills load headlessly --
+# confirmed by asking a headless session to call one of context-handoff's
+# tools directly: the skill surfaced, the tool did not exist). `--acp` is the
+# other candidate automation surface, but no clean-room-usable CLI-mode
+# agent-bridge driver exists for it yet (separate in-flight effort). So this
+# scenario drives a REAL interactive session via the new shared
+# lib/tmux-drive.sh helper (tmux + `-i/--interactive` + send-keys) rather
+# than `-p`.
 #
 # This is a REPRO rig, not a regression gate: a clean box is used specifically
 # so the mechanism can be shown to reproduce independent of the machine/session
@@ -33,7 +42,14 @@
 set -uo pipefail
 
 _SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${CR_LIB:-$_SELF_DIR/../../lib/clean-room-lib.sh}"
+_CR_LIB_PATH="${CR_LIB:-$_SELF_DIR/../../lib/clean-room-lib.sh}"
+source "$_CR_LIB_PATH"
+# tmux-drive.sh lives alongside clean-room-lib.sh; resolve it from wherever
+# CR_LIB actually resolved rather than re-deriving a relative path, since the
+# container mount layout (scenario/ and lib/ as siblings under
+# /home/operator) differs from the checked-out repo layout
+# (scenarios/<name>/../../lib) that the *_LIB fallback defaults assume.
+source "${CR_TMUX_LIB:-$(dirname "$_CR_LIB_PATH")/tmux-drive.sh}"
 
 MARKETPLACE_REPO="${CR_MARKETPLACE_REPO:-ThomasMichon/copilot-extensions}"
 MARKETPLACE_NAME="${CR_MARKETPLACE_NAME:-copilot-extensions}"
@@ -94,16 +110,37 @@ else
 fi
 
 # =========================================================================
-phase 3 "run one session against BOTH sources; both extensions launch"
+phase 3 "run one HEADED session against BOTH sources; both extensions launch"
 mkdir -p "$EXT_LOG_DIR"
 BEFORE_LOGS="$CR_LOGDIR/ext-logs-before.txt"
 ls -1 "$EXT_LOG_DIR" 2>/dev/null > "$BEFORE_LOGS"
 
-PLUGIN_ARG=()
-[ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
-( cd "$HOME/ch-repro" && capture "session" -- copilot -p "Reply with the single word: ready." \
-    --allow-all-tools "${PLUGIN_ARG[@]}" ) || true
-sleep 3   # let any launched extension subprocess finish writing its own log
+if ! cr_tmux_ensure; then
+    jam "tmux-unavailable" "tmux could not be installed (no apt/network?)" \
+        "extensions only load under a real headed session; without tmux this scenario cannot drive one"
+else
+    PLUGIN_ARG=()
+    [ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
+    TMUX_SESSION="cr-ch-race"
+    # Deliberately a prompt whose expected answer does NOT appear in the
+    # prompt text itself: cr_tmux_wait_for matches the FIRST occurrence in
+    # the pane, and the prompt's own on-screen echo would otherwise satisfy
+    # a self-referential wait pattern before the model ever replies.
+    cr_tmux_start "$TMUX_SESSION" "$HOME/ch-repro" "What is 19+23? Reply with only the number." \
+        --allow-all-tools "${PLUGIN_ARG[@]}"
+    # Extension subprocesses launch during session bootstrap, which precedes
+    # the first model turn, so by the time the reply lands every candidate
+    # has already had its chance to connect (or clash).
+    if cr_tmux_wait_for "$TMUX_SESSION" '\b42\b' 60; then
+        pass "headed session completed its first turn (tmux pane shows the reply)"
+    else
+        jam "headed-session-timeout" "tmux pane never showed the expected reply within 60s" \
+            "inspect cr-logs/tmux-pane.log (captured below) for a startup hang"
+    fi
+    cr_tmux_capture "$TMUX_SESSION" > "$CR_LOGDIR/tmux-pane.log" 2>/dev/null || true
+    cr_tmux_stop "$TMUX_SESSION"
+fi
+sleep 2   # let any launched extension subprocess finish writing its own log
 
 NEW_LOGS="$(comm -13 <(sort "$BEFORE_LOGS") <(ls -1 "$EXT_LOG_DIR" 2>/dev/null | sort) | grep -i "$PLUGIN" || true)"
 NEW_LOG_COUNT="$(printf '%s\n' "$NEW_LOGS" | grep -c . || true)"
@@ -115,7 +152,7 @@ elif [ "$NEW_LOG_COUNT" -eq 1 ]; then
         "check whether project-level extension discovery requires an explicit trust/add-dir step in this CLI version"
 else
     jam "no-launch" "no $PLUGIN extension logs appeared for this session at all" \
-        "check cr-logs/session.log for a plugin-load failure before extensions ever start"
+        "check cr-logs/tmux-pane.log for a plugin-load failure before extensions ever start"
 fi
 
 # =========================================================================

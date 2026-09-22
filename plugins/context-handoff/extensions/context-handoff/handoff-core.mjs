@@ -460,30 +460,42 @@ async function writeLockToken(fd) {
   return token;
 }
 
+// Exclusively creates lockPath and writes this process's full identity
+// token into it (via writeLockToken), cleaning up (closing the fd,
+// removing the lock) if anything after the exclusive create fails --
+// round-32 finding, and its own "previously missed" follow-up: BOTH the
+// fresh-create path AND the reclaim-success path in acquireLock below
+// perform this exact sequence (each an independent act of becoming the
+// new holder), and each needs the SAME cleanup-on-failure guarantee, not
+// just the first one. Propagates the ORIGINAL openSync error (e.g.
+// EEXIST) uncaught -- only a failure AFTER a successful create triggers
+// cleanup here.
+async function createLockWithToken(lockPath) {
+  const fd = openSync(lockPath, "wx");
+  try {
+    const token = await writeLockToken(fd);
+    return { fd, token };
+  } catch (writeError) {
+    // The exclusive create itself succeeded (this process now genuinely
+    // OWNS lockPath), but finishing its token initialization failed --
+    // without cleanup here, the caller never gets a `{fd, token}` to
+    // release, leaking the fd and leaving a permanently-stuck lock behind
+    // for every future sync attempt on this worktree.
+    try { closeSync(fd); } catch { /* already closed */ }
+    try { unlinkSync(lockPath); } catch { /* best-effort */ }
+    throw writeError;
+  }
+}
+
 async function acquireLock(lockPath) {
   // Ownership token written into the lock file's content, not just its
   // presence at a path -- see the release-time check in
   // withWorktreeSyncLock's finally block for why path-only ownership isn't
-  // enough. See writeLockToken's own doc comment for the placeholder-first
-  // write sequence and the round-31/32 findings it closes.
+  // enough. See writeLockToken's and createLockWithToken's own doc
+  // comments for the placeholder-first write sequence and the round-31/32
+  // findings they close.
   try {
-    const fd = openSync(lockPath, "wx");
-    try {
-      const token = await writeLockToken(fd);
-      return { fd, token };
-    } catch (writeError) {
-      // The exclusive create itself succeeded (this process now genuinely
-      // OWNS lockPath), but finishing its token initialization failed
-      // (round-32 finding) -- without cleanup here, `withWorktreeSyncLock`
-      // never reaches its own `finally` (this function never returns a
-      // `{fd, token}` to release), leaking the fd and leaving a
-      // permanently-stuck lock behind for every future sync attempt on
-      // this worktree. Close the fd and remove the lock this invocation
-      // itself just created before propagating the real error.
-      try { closeSync(fd); } catch { /* already closed */ }
-      try { unlinkSync(lockPath); } catch { /* best-effort */ }
-      throw writeError;
-    }
+    return await createLockWithToken(lockPath);
   } catch (error) {
     if (error?.code !== "EEXIST") throw error;
     let holderPid = null;
@@ -612,12 +624,14 @@ async function acquireLock(lockPath) {
     try { unlinkSync(graveyardPath); } catch { /* best-effort cleanup */ }
     // Only the single winning reclaimer reaches here, so this create is
     // guaranteed fresh -- no residual race with another reclaimer. Uses
-    // the SAME placeholder-first token write as the fresh-create path
-    // above (writeLockToken) -- this is an independent act of becoming
-    // the new holder, with its own freshly-computed token.
-    const fd = openSync(lockPath, "wx");
-    const token = await writeLockToken(fd);
-    return { fd, token };
+    // the SAME cleanup-on-failure create+token sequence as the
+    // fresh-create path above (createLockWithToken) -- this is an
+    // independent act of becoming the new holder, with its own freshly-
+    // computed token, and needs the same guarantee against leaking a
+    // descriptor/placeholder if token initialization fails here too
+    // ("previously missed" round-33 follow-up to round 32's fix, which
+    // only covered the fresh-create path).
+    return await createLockWithToken(lockPath);
   }
 }
 
