@@ -1896,7 +1896,6 @@ def test_open_worktree_cli_unknown_id_is_safe():
 
     asyncio.run(run())
 
-
 def test_open_venue_exits_with_open_venue_decision():
     """picker-venue-pivots Phase 3: the "open-venue" internal action opens a
     remote venue row (a CodeSpace/container) into a Copilot session -- it
@@ -1924,9 +1923,72 @@ def test_open_venue_exits_with_open_venue_decision():
     asyncio.run(run())
 
 
+def test_embody_cli_internal_action_exits_with_resume_decision(monkeypatch):
+    """Phase 7: the dedicated ``embody-cli`` internal verb runs
+    ``agent-dispatch embody --interactive`` and exits into the returned
+    worktree's normal resume flow, even before the picker has reloaded a row
+    for that fresh worktree."""
+    from worktree_manager.production_picker.picker_tui import engine_worktree_actions
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+
+            def _sync_run_bg(_label, work, done=None, **_kwargs):
+                result = work()
+                if done is not None:
+                    done(result)
+
+            monkeypatch.setattr(scr, "_run_bg", _sync_run_bg)
+            monkeypatch.setattr(
+                tasks_mod,
+                "_resolve_argv",
+                lambda _template, _ctx: ["agent-dispatch", "embody", "t1", "--interactive"],
+            )
+            monkeypatch.setattr(tasks_mod, "_child_process_env", lambda: {})
+            class _Proc:
+                returncode = 0
+
+                def communicate(self, timeout=None):
+                    return ('{"worktree":"fresh-task-worktree","project":"adopted-project"}', "")
+
+            monkeypatch.setattr(
+                engine_worktree_actions.subprocess,
+                "Popen",
+                lambda *args, **kwargs: _Proc(),
+            )
+
+            ok, msg = scr._internal_pivot_action(
+                "embody-cli",
+                {
+                    "task_id": "t1",
+                    "title": "Fresh task",
+                    "machine": src.LOCAL[0],
+                    "repo_name": "other-repo",
+                },
+            )
+            assert ok is True
+            assert "interactive CLI session" in msg
+            assert app.result is not None
+            assert app.result["action"] == "resume"
+            assert app.result["worktree_id"] == "fresh-task-worktree"
+            assert app.result["machine"] == src.LOCAL[0]
+            assert app.result["env"] == src.LOCAL[1]
+            assert app.result["is_local"] is True
+            assert app.result["project"] == "adopted-project"
+
+    asyncio.run(run())
+
+
 def test_open_venue_missing_identity_is_safe():
     """No provider/venue in ctx (a malformed row) is a reported no-op --
     never a crash, never an exit."""
+
     src = _bridge_source()
 
     async def run():
@@ -1938,6 +2000,150 @@ def test_open_venue_missing_identity_is_safe():
             assert ok is False
             assert "provider" in msg
             assert app.result is None
+
+    asyncio.run(run())
+
+
+def test_embody_cli_internal_action_reports_transaction_failure(monkeypatch):
+    from worktree_manager.production_picker.picker_tui import engine_worktree_actions
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+
+            def _sync_run_bg(_label, work, done=None, **_kwargs):
+                result = work()
+                if done is not None:
+                    done(result)
+
+            monkeypatch.setattr(scr, "_run_bg", _sync_run_bg)
+            monkeypatch.setattr(
+                tasks_mod,
+                "_resolve_argv",
+                lambda _template, _ctx: ["agent-dispatch", "embody", "t1", "--interactive"],
+            )
+            monkeypatch.setattr(tasks_mod, "_child_process_env", lambda: {})
+            class _Proc:
+                returncode = 1
+
+                def communicate(self, timeout=None):
+                    return ("", "agent-dispatch: task 't1' is 'started'\n")
+
+            monkeypatch.setattr(
+                engine_worktree_actions.subprocess,
+                "Popen",
+                lambda *args, **kwargs: _Proc(),
+            )
+
+            ok, msg = scr._internal_pivot_action(
+                "embody-cli",
+                {
+                    "task_id": "t1",
+                    "title": "Busy task",
+                    "machine": src.LOCAL[0],
+                    "env": src.LOCAL[1],
+                    "source_kind": "machine-ssh",
+                },
+            )
+            assert ok is True
+            assert "interactive CLI session" in msg
+            assert app.result is None
+            assert "started" in scr.debug
+
+    asyncio.run(run())
+
+
+def test_embody_cli_internal_action_ssh_dispatches_for_remote_machine(monkeypatch):
+    from worktree_manager.production_picker.picker_tui import data_ssh
+    from worktree_manager.production_picker.picker_tui import engine_worktree_actions
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+    src = _bridge_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+
+            def _sync_run_bg(_label, work, done=None, **_kwargs):
+                result = work()
+                if done is not None:
+                    done(result)
+
+            monkeypatch.setattr(scr, "_run_bg", _sync_run_bg)
+            monkeypatch.setattr(tasks_mod, "_child_process_env", lambda: {})
+            monkeypatch.setattr(
+                data_ssh,
+                "_find_source",
+                lambda *args, **kwargs: types.SimpleNamespace(
+                    source_kind="machine-ssh",
+                    local=False,
+                    ready=True,
+                    alias="emancipation-cube",
+                    shell="bash",
+                ),
+            )
+            monkeypatch.setattr(data_ssh, "_remote_arg", lambda _shell, token: str(token))
+            monkeypatch.setattr(
+                data_ssh,
+                "_wrap_remote",
+                lambda _shell, alias, inner: [
+                    "ssh",
+                    "-o",
+                    "BatchMode=yes",
+                    "-o",
+                    "ConnectTimeout=5",
+                    alias,
+                    inner,
+                ],
+            )
+            captured = {}
+
+            class _Proc:
+                returncode = 0
+
+                def __init__(self, argv):
+                    captured["argv"] = list(argv)
+
+                def communicate(self, timeout=None):
+                    return ('banner text\r\n{"worktree":"remote-task-worktree","project":"peer-project"}', "")
+
+            def _fake_popen(argv, **kwargs):
+                captured["argv"] = list(argv)
+                return _Proc(argv)
+
+            monkeypatch.setattr(engine_worktree_actions.subprocess, "Popen", _fake_popen)
+
+            ok, _msg = scr._internal_pivot_action(
+                "embody-cli",
+                {
+                    "task_id": "t1",
+                    "title": "Remote task",
+                    "machine": "emancipation-cube",
+                    "env": "Win",
+                    "source_kind": "machine-ssh",
+                },
+            )
+            assert ok is True
+            assert captured["argv"][:4] == [
+                "ssh",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+            ]
+            assert "ConnectTimeout=5" in captured["argv"]
+            assert "emancipation-cube" in captured["argv"]
+            assert "agent-dispatch embody t1 --interactive --machine emancipation-cube" in captured["argv"][-1]
+            assert app.result is not None
+            assert app.result["action"] == "resume"
+            assert app.result["worktree_id"] == "remote-task-worktree"
+            assert app.result["is_local"] is False
+            assert app.result["project"] == "peer-project"
 
     asyncio.run(run())
 
@@ -8882,4 +9088,3 @@ def test_idle_timeout_secs_env_override(monkeypatch):
 
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_IDLE_TIMEOUT_SECONDS", "not-a-number")
     assert eng._idle_timeout_secs() == 1800.0
-

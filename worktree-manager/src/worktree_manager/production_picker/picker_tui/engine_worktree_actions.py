@@ -2,12 +2,23 @@
 """PickerScreen mixin extracted from ``engine.py``."""
 from __future__ import annotations
 
+import json
+import subprocess
 import threading
 
 from .engine_dialogs import SubMenuScreen, WtDetailsScreen
 from .engine_live_screens import MsgViewScreen
 
 class PickerScreenWorktreeActionsMixin:
+    @staticmethod
+    def _parse_action_json(raw):
+        text = str(raw or "").strip()
+        if not text:
+            raise ValueError("embody did not print JSON")
+        start = text.find("{")
+        if start < 0:
+            raise ValueError("embody did not print JSON")
+        return json.loads(text[start:])
     @staticmethod
     def _cleanable(rec):
         """Whether a worktree's cleanup bucket is one the Cleanup flow offers."""
@@ -704,11 +715,14 @@ class PickerScreenWorktreeActionsMixin:
         """Dispatch a registered pivot's INTERNAL (picker-navigation) action
         (#1425). Tiny and defensive: an unknown verb is a reported failure, never
         an exception. ``jump-host`` navigates to the entry's worktree by id;
-        ``open-cli`` opens that worktree into a CLI session (exits the picker with
-        a resume decision -- the shared launch-plumbing, #2253); ``open-venue``
-        (picker-venue-pivots Phase 3) opens a remote venue row (a CodeSpace or
-        fleet container) into a live/dormant Copilot session via the venue's own
-        `copilot` verb, the same exit-and-launch plumbing."""
+        ``open-cli`` opens that worktree into a CLI session (exits the picker
+        with a resume decision -- the shared launch-plumbing, #2253);
+        ``embody-cli`` runs the dedicated interactive-embodiment transaction
+        for an agent-dispatch task, then exits the picker into the resulting
+        worktree's normal resume flow; and ``open-venue`` (picker-venue-pivots
+        Phase 3) opens a remote venue row (a CodeSpace or fleet container) into
+        a live/dormant Copilot session via the venue's own `copilot` verb, the
+        same exit-and-launch plumbing."""
         if verb == "jump-host":
             return self._jump_to_worktree(
                 ctx.get("worktree") or ctx.get("id"),
@@ -721,7 +735,177 @@ class PickerScreenWorktreeActionsMixin:
             )
         if verb == "open-venue":
             return self._open_venue(ctx)
+        if verb == "embody-cli":
+            return self._embody_task_cli(ctx)
         return False, f"unknown internal action: {verb}"
+    def _resume_embodied_worktree_cli(
+        self, wid, *, machine=None, env=None, title=None, source_id=None,
+        source_kind=None, project=None
+    ):
+        """Exit into the standard resume flow for a worktree an internal task
+        action just embodied.
+
+        Prefer the loaded row when it already exists (a resumed Suspended task,
+        or a just-created worktree that has already shown up in the loaded
+        source). Fall back to a synthetic resume decision when the picker has not
+        reloaded yet: the launch path only needs the stable worktree id plus the
+        resolved remote/local host identity, not the full loaded row.
+        """
+        row, error = self._find_internal_worktree(wid, source_id)
+        if row is not None:
+            if row.get("source_kind") != "machine-ssh":
+                return False, "provider-backed worktrees are read-only"
+            self._decide(self._resume_decision(row))
+            if project:
+                self.app.result["project"] = project
+            return True, f"opening …{str(wid)[-4:]} into a CLI session"
+        if source_kind and source_kind != "machine-ssh":
+            return False, "provider-backed worktrees are read-only"
+        machine = str(machine or "").strip()
+        env = str(env or "").strip()
+        if not machine or not env:
+            return False, error or "worktree launched but picker could not resolve its host"
+        self._decide({
+            "action": "resume",
+            "worktree_id": wid,
+            "id4": str(wid)[-4:],
+            "machine": machine,
+            "env": env,
+            "title": title,
+            "is_local": (machine, env) == self.src.LOCAL,
+        })
+        if project:
+            self.app.result["project"] = project
+        return True, f"opening …{str(wid)[-4:]} into a CLI session"
+    def _embody_task_cli(self, ctx):
+        """Run ``agent-dispatch embody --interactive`` for one task, then exit
+        the picker into the returned worktree's normal resume flow.
+
+        The embody command is a real subprocess, so it runs off-thread via
+        ``_run_bg`` just like any other blocking action; a failure reports a
+        clear status-line message rather than raising through action dispatch.
+        """
+        from . import tasks as _tasks
+
+        task_id = str(ctx.get("task_id") or ctx.get("id") or "").strip()
+        machine = str(ctx.get("target_machine") or ctx.get("machine") or "").strip()
+        tab = self._current_tab() or {}
+        local_env = self.src.LOCAL[1] if isinstance(self.src.LOCAL, tuple) and len(self.src.LOCAL) >= 2 else None
+        env = str(ctx.get("env") or tab.get("env") or "").strip()
+        source_id = ctx.get("source_id") or tab.get("source_id")
+        source_kind = ctx.get("source_kind") or tab.get("source_kind")
+        if source_kind == "all":
+            source_kind = None
+        title = str(ctx.get("title") or task_id or "").strip() or None
+        if not task_id:
+            return False, "no task id"
+        if not machine:
+            return False, "no machine"
+        if not env or source_kind is None:
+            matches = [
+                source
+                for source in getattr(self, "source_tabs", []) or []
+                if source.get("machine") == machine
+                and source.get("source_kind", "machine-ssh") == "machine-ssh"
+                and (not source_id or source.get("source_id") == source_id)
+            ]
+            if len(matches) == 1:
+                match = matches[0]
+                env = env or str(match.get("env") or "").strip()
+                source_id = source_id or match.get("source_id")
+                source_kind = source_kind or match.get("source_kind")
+        env = env or str(local_env or "").strip()
+        remote = (machine, env) != self.src.LOCAL
+        base_argv = ["agent-dispatch", "embody", task_id, "--interactive", "--machine", machine]
+        local_argv = _tasks._resolve_argv(
+            base_argv, {"task_id": task_id, "machine": machine}
+        )
+
+        def _work():
+            from . import data_ssh as _data_ssh
+
+            argv = list(local_argv)
+            if remote:
+                source = _data_ssh._find_source(machine, env, source_id=source_id)
+                if (
+                    source is None
+                    or source.source_kind != "machine-ssh"
+                    or source.local
+                    or not source.ready
+                    or not source.alias
+                ):
+                    return False, f"remote host {machine} {env} not available"
+                remote_cmd = " ".join(
+                    _data_ssh._remote_arg(
+                        str(source.shell or "bash"), token
+                    )
+                    for token in base_argv
+                )
+                argv = _data_ssh._wrap_remote(
+                    str(source.shell or "bash"),
+                    str(source.alias or ""),
+                    remote_cmd,
+                )
+            if not argv:
+                return False, "empty action command"
+            proc = None
+            try:
+                proc = subprocess.Popen(
+                    argv,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=_tasks._child_process_env(),
+                )
+                stdout, stderr = proc.communicate(timeout=max(_tasks.ACTION_TIMEOUT, 210.0))
+            except FileNotFoundError:
+                return False, f"{argv[0]} not found on PATH"
+            except subprocess.TimeoutExpired:
+                if proc is not None:
+                    _tasks._kill_proc_tree(proc)
+                    try:
+                        proc.communicate(timeout=5)
+                    except Exception:
+                        pass
+                return False, "embody timed out before it reported a session"
+            except (OSError, subprocess.SubprocessError) as exc:
+                if proc is not None:
+                    _tasks._kill_proc_tree(proc)
+                return False, str(exc)[:200]
+            if proc.returncode != 0:
+                detail = (stderr or stdout or "").strip().splitlines()
+                return False, (detail[-1] if detail else f"exit {proc.returncode}")[:200]
+            try:
+                payload = self._parse_action_json(stdout)
+            except ValueError as exc:
+                return False, str(exc)
+            if not isinstance(payload, dict):
+                return False, "embody did not return a JSON object"
+            worktree_id = str(payload.get("worktree") or "").strip()
+            if not worktree_id:
+                return False, "embody returned no worktree id"
+            return True, payload
+
+        def _done(result):
+            ok, payload = result
+            if not ok:
+                self.debug = f"Open into a CLI session failed · {payload or 'see command output'}"
+                return
+            worktree_id = str(payload.get("worktree") or "").strip()
+            ok2, msg2 = self._resume_embodied_worktree_cli(
+                worktree_id,
+                machine=machine,
+                env=env,
+                title=title,
+                source_id=source_id,
+                source_kind=source_kind,
+                project=str(payload.get("project") or "").strip() or None,
+            )
+            if not ok2:
+                self.debug = f"Open into a CLI session failed · {msg2 or 'see command output'}"
+
+        self._run_bg("Open into a CLI session", _work, _done)
+        return True, f"launching interactive CLI session for {task_id}"
     def _open_worktree_cli(self, wid, source_id=None):
         """#2253: open the worktree ``wid`` into a CLI session, the same way
         selecting its Worktrees row + Open does.
@@ -734,14 +918,7 @@ class PickerScreenWorktreeActionsMixin:
         routes through the normal SSH handoff. Returns ``(ok, message)``; on
         success the caller's post-action re-anchor is a harmless no-op since the
         app is already exiting."""
-        row, error = self._find_internal_worktree(wid, source_id)
-        if row is None:
-            return False, error
-        if row.get("source_kind") != "machine-ssh":
-            return False, "provider-backed worktrees are read-only"
-        decision = self._resume_decision(row)
-        self._decide(decision)
-        return True, f"opening …{str(wid)[-4:]} into a CLI session"
+        return self._resume_embodied_worktree_cli(wid, source_id=source_id)
 
     def _open_venue(self, ctx):
         """picker-venue-pivots Phase 3: open a CodeSpaces/Containers pivot row

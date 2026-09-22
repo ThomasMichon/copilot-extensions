@@ -699,7 +699,7 @@ def _run_production_picker(project: str) -> int:
             return 1
         machine, environment = _remote_machine_env(decision)
         return _run_launch(picker_app.LaunchRequest(
-            project=project,
+            project=str(decision.get("project") or project or ""),
             worktree_id=str(worktree_id),
             mode="bare-resume" if opts.get("bare_resume") else "resume",
             title=str(decision.get("title") or "") or None,

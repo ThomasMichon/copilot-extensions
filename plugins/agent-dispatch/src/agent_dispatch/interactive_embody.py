@@ -208,11 +208,13 @@ def launch_interactive_embodiment(
 ) -> dict[str, Any]:
     """Run the interactive-embodiment transaction for one task.
 
-    Returns ``{"task_id", "worktree", "session", "worker_id", "task"}`` on
-    success. Raises :class:`InteractiveEmbodimentError` on any failure (an
-    ineligible status, a lost claim/resume race, a held task, or
-    ``agent-worktrees``/embody unavailability) -- always after releasing any
-    spawn reservation this call itself took, except for the one edge
+    Returns ``{"task_id", "worktree", "session", "worker_id", "project",
+    "task"}`` on success, where ``project`` is the resolved local
+    ``agent-worktrees`` project name used for the embody launch (or ``None``
+    if none could be resolved). Raises :class:`InteractiveEmbodimentError` on
+    any failure (an ineligible status, a lost claim/resume race, a held task,
+    or ``agent-worktrees``/embody unavailability) -- always after releasing
+    any spawn reservation this call itself took, except for the one edge
     documented in the module docstring (launch succeeds but the follow-up
     bind fails).
     """
@@ -354,5 +356,6 @@ def launch_interactive_embodiment(
         "worktree": worktree_id,
         "session": session_id,
         "worker_id": worker_id,
+        "project": resolved_project,
         "task": bound,
     }
