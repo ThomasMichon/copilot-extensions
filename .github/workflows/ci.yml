@@ -15,6 +15,14 @@ name: CI
 #                      suite runs via the manual `full` workflow below.
 #   * full           - workflow_dispatch only: every plugin's full suite,
 #                      including agent-worktrees, no tight timeout.
+#
+# See also: .github/workflows/context-handoff-exhaustive.yml -- a SEPARATE
+# workflow (not a job here) for the real-git/child-process/lock-race matrix
+# under plugins/context-handoff/tests/exhaustive/. It is intentionally its
+# own workflow file, not a job in this one: a top-level `schedule` trigger
+# applies to EVERY job in whatever workflow it is declared on, so adding it
+# here would have put the entire fast/smoke/full matrix on a weekly cron
+# too, not just the one exhaustive suite that needs it.
 
 on:
   pull_request:

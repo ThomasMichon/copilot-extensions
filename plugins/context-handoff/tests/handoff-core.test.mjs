@@ -3,13 +3,16 @@ import assert from "node:assert/strict";
 import { join, dirname } from "node:path";
 import {
   mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, unlinkSync,
+  existsSync, utimesSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { execFileSync, spawnSync } from "node:child_process";
 
 import {
   HANDOFF_META_PREFIX,
   agentWorktreesGetResult,
+  attemptWorktreeSync,
   buildResumePrompt,
   buildSeedForStored,
   checkHeadAlignment,
@@ -18,14 +21,20 @@ import {
   decodeHandoffPayload,
   encodeHandoffPayload,
   formatConsumeResult,
+  handoffDedupKey,
   isolatedPythonArgs,
   logHandoffPromptReceived,
   manualFallbackInstructions,
   normalizeHandoffTitle,
+  plainGitSync,
+  redactGitDiagnostics,
+  processStartTimeMs,
+  resolveRuntimePython,
   retryStoredHandoffCutover,
   resolveSystemCli,
   runtimeEnvironment,
   safePathSegment,
+  sanitizedGitEnv,
   sessionBindingForSession,
   triggerHandoff,
   writeJsonAtomic,
@@ -808,6 +817,75 @@ test("triggerHandoff stores, signals, waits, and skips manual fallback when pick
   assert.match(result.seed, /task:task-42$/);
 });
 
+test("triggerHandoff calls afterStore once the baton is durably stored, and beforeArmPickup only in auto mode before arming pickup", async () => {
+  // Real regression this guards: a caller's side task (e.g. a worktree
+  // sync) must never start before the store is confirmed, and must only
+  // gate the live-pickup signal in auto mode (manual-only never arms
+  // pickup, so there is nothing to gate and no reason to pay that latency).
+  const calls = [];
+  const stored = {
+    storage: "agent-dispatch",
+    id: "task-77",
+    taskId: "task-77",
+    metadata: { worktree: "wt-example", title: "t" },
+  };
+  await triggerHandoff({
+    promptText: "markdown",
+    sid: "sess-1",
+    cwd: "C:\\repo",
+    title: "t",
+    mode: "auto",
+    store: () => { calls.push("store"); return stored; },
+    writeSessionState: () => { calls.push("session-state"); return { ok: true, path: "p" }; },
+    logActivity: () => { calls.push("activity"); return { logged: true }; },
+    requestBridge: () => { calls.push("bridge"); return { attempted: false, accepted: false }; },
+    readPickupSignals: () => ({ pickedUp: true, via: ["x"], sessionState: {}, worktree: {}, dispatch: {} }),
+    sleepFn: async () => {},
+    afterStore: () => { calls.push("afterStore"); },
+    beforeArmPickup: async () => { calls.push("beforeArmPickup"); },
+  });
+  const order = ["store", "session-state", "afterStore", "beforeArmPickup", "activity"];
+  assert.deepEqual(calls.slice(0, order.length), order);
+});
+
+test("triggerHandoff never calls afterStore/beforeArmPickup when the store itself fails", async () => {
+  const calls = [];
+  const result = await triggerHandoff({
+    promptText: "markdown",
+    sid: "sess-1",
+    cwd: "C:\\repo",
+    title: "t",
+    mode: "auto",
+    store: () => ({ storage: null, error: "no safe store" }),
+    afterStore: () => { calls.push("afterStore"); },
+    beforeArmPickup: async () => { calls.push("beforeArmPickup"); },
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(calls, []);
+});
+
+test("triggerHandoff calls afterStore but never beforeArmPickup under manual-only mode", async () => {
+  const calls = [];
+  const stored = {
+    storage: "agent-dispatch",
+    id: "task-78",
+    taskId: "task-78",
+    metadata: { worktree: "wt-example", title: "t" },
+  };
+  await triggerHandoff({
+    promptText: "markdown",
+    sid: "sess-1",
+    cwd: "C:\\repo",
+    title: "t",
+    mode: "manual-only",
+    store: () => stored,
+    writeSessionState: () => ({ ok: true, path: "p" }),
+    afterStore: () => { calls.push("afterStore"); },
+    beforeArmPickup: async () => { calls.push("beforeArmPickup"); },
+  });
+  assert.deepEqual(calls, ["afterStore"]);
+});
+
 test("triggerHandoff logs the predecessor pid in the handoff_requested activity", async () => {
   const execCalls = [];
   await triggerHandoff({
@@ -1136,4 +1214,71 @@ test("utility helpers preserve safe normalization and bounded CLI diagnostics", 
     (_bin, _args) => JSON.stringify({ found: true, session_id: "session-1" }),
   );
   assert.equal(binding.found, true);
+});
+
+// --- handoffDedupKey (round-9 review fix: a repeat save_handoff_prompt call
+// after this session's own worktree sync must actually refresh a
+// task-backed baton, not silently keep serving the pre-sync payload) -------
+
+test("handoffDedupKey is stable for identical content (true accidental duplicates still dedupe)", () => {
+  const a = handoffDedupKey("sess-1", "same prompt text");
+  const b = handoffDedupKey("sess-1", "same prompt text");
+  assert.equal(a, b);
+});
+
+test("handoffDedupKey changes when the prompt content changes, even for the same session", () => {
+  // Real regression this guards: agent-dispatch's `create --dedup-key K` is
+  // idempotent per K -- a repeat call with the SAME key returns the existing
+  // nonterminal task UNCHANGED, even with different --payload-file content.
+  // Guidance tells the agent to always re-save after a post-approval sync;
+  // without the content folded into the key, that re-save would be a no-op
+  // against agent-dispatch and the successor would still get the stale
+  // pre-sync payload.
+  const before = handoffDedupKey("sess-1", "pre-sync content");
+  const after = handoffDedupKey("sess-1", "post-sync content, rebased on latest main");
+  assert.notEqual(before, after);
+});
+
+test("handoffDedupKey scopes different sessions to different keys even with identical content", () => {
+  const a = handoffDedupKey("sess-1", "identical text");
+  const b = handoffDedupKey("sess-2", "identical text");
+  assert.notEqual(a, b);
+});
+
+test("handoffDedupKey embeds the session id verbatim for debuggability", () => {
+  const key = handoffDedupKey("my-session-42", "content");
+  assert.match(key, /^handoff-my-session-42-[0-9a-f]{12}$/);
+});
+
+// --- sanitizedGitEnv (round-10 review fix: inherited GIT_DIR/GIT_WORK_TREE/
+// etc. could override `cwd` and make a safety check inspect, or the
+// delegated sync mutate, a different repository than the one intended) ----
+
+test("sanitizedGitEnv strips repository-identity variables inherited from the ambient environment", () => {
+  const env = sanitizedGitEnv({
+    GIT_DIR: "/somewhere/else/.git",
+    GIT_WORK_TREE: "/somewhere/else",
+    GIT_INDEX_FILE: "/tmp/other-index",
+    GIT_COMMON_DIR: "/somewhere/else/.git-common",
+    GIT_CONFIG_KEY_0: "foo",
+    GIT_CONFIG_VALUE_0: "bar",
+    UNRELATED_VAR: "keep-me",
+  });
+  assert.equal(env.GIT_DIR, undefined);
+  assert.equal(env.GIT_WORK_TREE, undefined);
+  assert.equal(env.GIT_INDEX_FILE, undefined);
+  assert.equal(env.GIT_COMMON_DIR, undefined);
+  assert.equal(env.GIT_CONFIG_KEY_0, undefined);
+  assert.equal(env.GIT_CONFIG_VALUE_0, undefined);
+  assert.equal(env.UNRELATED_VAR, "keep-me");
+});
+
+test("sanitizedGitEnv disables the terminal credential prompt so an unattended sync never hangs on it", () => {
+  const env = sanitizedGitEnv({});
+  assert.equal(env.GIT_TERMINAL_PROMPT, "0");
+});
+
+test("sanitizedGitEnv is case-insensitive to a lowercase-spelled repository-identity variable", () => {
+  const env = sanitizedGitEnv({ git_dir: "/somewhere/else/.git" });
+  assert.equal(env.git_dir, undefined);
 });

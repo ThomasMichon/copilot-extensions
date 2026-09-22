@@ -113,12 +113,16 @@ a handoff naming the blocker -- not a silent stop.
 When context pressure is the reason for handing off and the objective still has
 more work left to do:
 
-1. **Call `generate_handoff_prompt`.**
-2. **Compose the markdown brief** using the effort-backed shape when a valid
-   open active effort exists, otherwise the full standalone shape.
-3. **Call `save_handoff_prompt`.** This safely stores the baton and returns the
+1. **Sync the worktree first** -- see "Sync before triggering" below. Do this
+   before collecting facts so the composed brief reflects the synced state
+   (and, if the sync conflicts, the brief can say so).
+2. **Call `generate_handoff_prompt`.**
+3. **Compose the markdown brief** using the effort-backed shape when a valid
+   open active effort exists, otherwise the full standalone shape. Note the
+   sync outcome (synced cleanly / conflict left unresolved) if relevant.
+4. **Call `save_handoff_prompt`.** This safely stores the baton and returns the
    short handoff seed.
-4. **Call `trigger_handoff` immediately.**
+5. **Call `trigger_handoff` immediately.**
 
 Do **not** ask the user for confirmation first on this path. Running low on
 context while work remains is sufficient justification by itself.
@@ -133,10 +137,74 @@ listing a set of follow-up ideas or questions:
 3. **Call `save_handoff_prompt`.**
 4. **Replace the usual follow-up list** with one short, low-friction offer to
    continue via handoff.
-5. **Call `trigger_handoff` only after the user says yes.**
+5. **Only once the user says yes:** sync the worktree (see "Sync before
+   triggering" below), then **always re-run `generate_handoff_prompt` and
+   `save_handoff_prompt`** -- even if the sync looked like a no-op -- so the
+   stored baton reflects the post-sync state. A WIP commit, a failed sync
+   attempt, or a conflict left unresolved all matter to the successor even
+   when the branch itself didn't move; `trigger_handoff` otherwise reuses
+   the pre-sync brief and silently omits that outcome. Then **call
+   `trigger_handoff`.** Do not sync or mutate local history before the user
+   has agreed -- a decline must leave the worktree untouched.
 
 Only this turn-end follow-up path is skippable via **autopilot** or prior
 explicit pre-authorization.
+
+## Sync before triggering: give the successor the latest code
+
+The successor inherits the **same on-disk worktree** the predecessor is
+sitting in -- not a fresh checkout. If that worktree's branch is behind the
+repo's default branch, the successor starts on stale plugin code and stale
+instructions, including any bugs already fixed upstream since this session
+began (a live example: a plugin-load reliability fix that shipped mid-session
+would only reach the successor if the worktree's tip actually contains it).
+A predecessor that hands off without syncing silently hands the same bug to
+its own successor.
+
+When the worktree is a git checkout with a remote default branch:
+
+1. **Inspect the tree before committing anything.** Never blanket-commit
+   (`git add -A` / `git commit -a`) -- stage and commit only the paths you
+   recognize as your own reviewed, intentional changes this session, the same
+   discipline the `worktree` skill's cleanup-details reference requires
+   before any commit. If anything in the tree looks unfamiliar, untracked,
+   or possibly sensitive (credentials, secrets, unrelated edits), or you are
+   otherwise unsure it is safe to commit, **skip this sync entirely** and
+   note in the brief that the worktree may be behind the default branch and
+   was left as-is -- never guess.
+2. **Sync using the shared, lock-aware entry point** -- `handoff-cli.mjs
+   sync-worktree` (resolve `$CH`/`$ch` exactly as the "CLI fallback" section
+   below does), not a bare `agent-worktrees git sync` <!-- marketplace-isolation: allow cross-plugin-diagnostic-mention --> or raw `git rebase`.
+   This is the SAME helper the fully-automated force-tier path uses
+   internally (`attemptWorktreeSync`): it takes a per-worktree lock so a
+   concurrent force-tier sync on this same worktree can't race a
+   skill-guided one, checks for an in-progress rebase before touching
+   anything (a paused rebase can report a clean tree, and the sync
+   helper's own failure path aborts any failed rebase -- never one this
+   session should cancel), and runs entirely under a sanitized Git
+   environment. Run:
+   ```bash
+   node "$CH" sync-worktree --json --cwd "$PWD"
+   ```
+   (`$ch`/PowerShell equivalent; exits nonzero for every non-`"synced":
+   true` outcome -- that is expected and NOT itself a reason to stop; read
+   the JSON `reason` and continue). A `"synced": true` result means the
+   sync completed cleanly; anything else (`"attempted": false` for a
+   skipped rebase/lock/dirty-tree case, or `"attempted": true, "synced":
+   false` for a real failure) carries a `"reason"` string -- note it in the
+   brief rather than blocking on it, same as step 3 below.
+3. Either way, if the sync did not complete cleanly (conflict, abort, or
+   step 1 skipped it), do **not** block the handoff on resolving it there --
+   note the conflict/skip and the branch's un-synced state plainly in the
+   handoff brief instead, so the successor knows to resolve it as its first
+   action rather than silently inheriting stale or partially-merged code
+   without realizing it.
+
+This is a lightweight, mechanical step, not a reason to delay a
+context-pressure-driven handoff that needs to trigger immediately -- skip
+straight to noting the un-synced state in the brief if there is any doubt
+about whether it is safe to rebase right now (e.g. genuinely conflicting
+in-flight work you cannot lose).
 
 ## Efforts + handoffs
 

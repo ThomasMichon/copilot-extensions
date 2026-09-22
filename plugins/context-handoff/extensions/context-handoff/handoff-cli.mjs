@@ -24,6 +24,7 @@
 //   node handoff-cli.mjs facts --json                             # basic extension-free handoff facts
 //   node handoff-cli.mjs check-heads --json                       # audit pending-handoff head alignment
 //   node handoff-cli.mjs retry-cutover --json                     # refocus/live-retry a superseded session
+//   node handoff-cli.mjs sync-worktree --json                     # shared lock/rebase-safe worktree sync
 //   node handoff-cli.mjs help
 //
 // Options:
@@ -49,6 +50,8 @@ import {
   normalizeHandoffTitle,
   retryStoredHandoffCutover,
   triggerHandoff,
+  attemptWorktreeSync,
+  waitForWorktreeSyncToSettle,
 } from "./handoff-core.mjs";
 import { manualHandoffEnabled } from "./mode.mjs";
 
@@ -102,6 +105,7 @@ const HELP = `handoff-cli -- invoke a context handoff from the CLI (extension-fr
   node handoff-cli.mjs facts --json                             emit basic extension-free facts
   node handoff-cli.mjs check-heads --json                       audit pending-handoff head alignment
   node handoff-cli.mjs retry-cutover --json                     refocus or respawn a stuck cutover
+  node handoff-cli.mjs sync-worktree --json                     shared lock/rebase-safe worktree sync
 
 Options: --prompt-file|--prompt|stdin, --title, --session-id ($COPILOT_AGENT_SESSION_ID),
          --cwd, --no-task, --handoff-token,
@@ -221,7 +225,16 @@ async function cmdTrigger(args) {
   );
 }
 
-function cmdConsume(args) {
+// Consume-time defensive wait: mirrors the extension's consume_handoff
+// handler (round 31 finding: this extension-free path called the consume
+// helpers directly with no such check at all, unlike the extension
+// handler's bounded wait). No certainty a sync is in flight, so a small
+// grace only -- see extension.mjs's CONSUME_HANDOFF_START_GRACE_MS for
+// the full reasoning.
+const CLI_CONSUME_SYNC_WAIT_TIMEOUT_MS = 15000;
+const CLI_CONSUME_SYNC_START_GRACE_MS = 500;
+
+async function cmdConsume(args) {
   const cwd = args.cwd || process.cwd();
   const sid = requireSid("consume", args);
   requireManualHandoffsEnabled("consume", cwd);
@@ -263,6 +276,30 @@ function cmdConsume(args) {
       "handoff-cli consume: --defer-complete is only valid with a task target\n",
     );
     process.exit(2);
+  }
+  // Defensive: the predecessor's worktree sync could still be settling
+  // (see this function's own doc comment above). Never blocks
+  // indefinitely -- just narrows the window before reading/marking the
+  // stored baton or touching the worktree.
+  const settleResult = await waitForWorktreeSyncToSettle(cwd, {
+    timeoutMs: CLI_CONSUME_SYNC_WAIT_TIMEOUT_MS,
+    startGraceMs: CLI_CONSUME_SYNC_START_GRACE_MS,
+  });
+  if (settleResult.waited && !settleResult.settled) {
+    process.stderr.write(
+      "handoff-cli consume: the predecessor's worktree sync still appears " +
+      "to be in progress after the wait window; proceeding anyway -- " +
+      "verify the worktree yourself if anything looks unexpectedly stale " +
+      "or mid-rebase.\n",
+    );
+  } else if (settleResult.needsInspection) {
+    process.stderr.write(
+      "handoff-cli consume: the predecessor's worktree sync lock recorded " +
+      "a holder that is no longer running, AND an in-progress rebase was " +
+      "found -- the predecessor may have crashed mid-sync. Inspect the " +
+      "worktree before trusting it; a conflicted rebase may need `git " +
+      "rebase --abort` before continuing.\n",
+    );
   }
   const consumed = taskId
     ? consumeDispatchHandoffTask(cwd, taskId, sid, deferComplete)
@@ -336,6 +373,42 @@ function cmdRetryCutover(args) {
   );
 }
 
+// One shared entry point for BOTH the fully-automated force-tier path
+// (autoForceHandoff, which calls attemptWorktreeSync directly) and the
+// agent-guided skill flow (SKILL.md's "Sync before triggering" step) --
+// review finding: without this, the skill flow invoked `agent-worktrees git
+// sync` directly, bypassing attemptWorktreeSync's lock, rebase check, and
+// sanitized environment entirely, so a force-tier sync and a skill-guided
+// sync could still race each other and rebase the same worktree
+// concurrently. The skill flow commits its own reviewed WIP itself (never
+// this command's job); by the time it calls this, the tree is expected to
+// already be clean, matching attemptWorktreeSync's own precondition.
+async function cmdSyncWorktree(args) {
+  const cwd = args.cwd || process.cwd();
+  const result = await attemptWorktreeSync(cwd);
+  if (args.json) {
+    emit(result, args);
+    // process.exitCode (not process.exit()) -- Node lets stdout drain to a
+    // pipe naturally before exiting on this code, whereas an immediate
+    // process.exit() call right after a write can terminate the process
+    // before that write flushes, truncating the documented --json output.
+    if (!result.synced) process.exitCode = 1;
+    return;
+  }
+  if (result.synced) {
+    process.stdout.write("Worktree synced onto the latest default branch.\n");
+    return;
+  }
+  process.stdout.write(
+    `Worktree sync ${result.attempted ? "failed" : "was skipped"}: ${result.reason}\n`,
+  );
+  // Nonzero for EVERY non-synced outcome (attempted-and-failed AND
+  // skipped), not just the "attempted" case -- a caller using this command
+  // as a gate (e.g. "only proceed once synced") must see a real failure
+  // exit status regardless of why the sync did not happen.
+  process.exitCode = 1;
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
@@ -343,10 +416,11 @@ async function main() {
   switch (cmd) {
     case "trigger": return await cmdTrigger(args);
     case "save": return cmdSave(args);
-    case "consume": return cmdConsume(args);
+    case "consume": return await cmdConsume(args);
     case "facts": return cmdFacts(args);
     case "check-heads": return cmdCheckHeads(args);
     case "retry-cutover": return cmdRetryCutover(args);
+    case "sync-worktree": return await cmdSyncWorktree(args);
     case "help":
     case "-h":
     case "--help":

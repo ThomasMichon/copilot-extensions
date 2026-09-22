@@ -1,0 +1,27 @@
+{
+  "name": "context-handoff-connection-race",
+  "description": "Tier-P F1 repro rig for github/copilot-agent-runtime#22266: a single session that discovers the context-handoff plugin from TWO sources at once -- the marketplace-installed copy AND a byte-identical duplicate present as a project-level extension in the working repo -- launches BOTH as real connections under one real headed (tmux-driven) session, and the second one hits validate_external_tools' same-session tool-name clash (generate_handoff_prompt/save_handoff_prompt/consume_handoff/trigger_handoff already registered by another connection). Report-only repro rig, not a regression gate: it asserts the clash IS observed (proving the mechanism), and flags loudly if it stops reproducing (either fixed upstream, or the container's layout/log-naming assumptions diverged).",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": ["tmux (apt, required -- extensions only load under a real headed session)"] },
+  "auth": { "copilot": "required", "gh": "none", "ado": "none" },
+  "validates": "context-handoff same-session double-discovery tool-name clash (copilot-agent-runtime#22266)",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/context-handoff (the marketplace-installed source)",
+    "~/ch-repro/.github/extensions/context-handoff (the duplicated project-level source)",
+    "cr-logs/tmux-pane.log (captured pane output of the driven headed session)",
+    "~/.copilot/logs/extensions/*context-handoff* (per-connection extension logs; asserted for the tool-name-clash text)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install context-handoff (marketplace source)" },
+    { "n": 2, "title": "duplicate the extension as a project-level source in the working repo" },
+    { "n": 3, "title": "run one HEADED session against BOTH sources; both extensions launch" },
+    { "n": 4, "title": "assert the tool-name clash on the second (losing) connection" }
+  ]
+}

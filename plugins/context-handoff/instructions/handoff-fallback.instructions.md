@@ -9,10 +9,18 @@ never registered this session. Everything below needs only a shell.
 
 ## Preparing a brief
 
-Never end a turn with outstanding work and no handoff. Compose: **Original
-Request / Continuing Objective / Progress / Successor Work Roster /
-Outstanding Background Flows & External State / Completion Gates /
-Re-Handoff Instructions** (or **Active Effort / Next Slice / Immediate
+Never end a turn with outstanding work and no handoff. Before triggering
+(context-pressure path) or once the user agrees (turn-end path), sync the
+worktree. Resolve the CLI path first (same resolution as the "CLI
+fallback" section below):
+`CH_ROOT="${COPILOT_PLUGIN_ROOT:-$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff}"; CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"`.
+Then run `node "$CH" sync-worktree --json --cwd "$PWD"` (never a bare
+`git rebase`/`agent-worktrees git sync` -- this shares the same lock and
+rebase guard as the automatic force-tier path). A non-`synced` result is
+not a blocker -- note the reason in the brief and continue. Compose:
+**Original Request / Continuing Objective / Progress / Successor Work
+Roster / Outstanding Background Flows & External State / Completion Gates
+/ Re-Handoff Instructions** (or **Active Effort / Next Slice / Immediate
 Session Delta** when an effort backs the work). Never drop an open
 background flow or owned external state (PR, claim) -- name it explicitly.
 Prefer `generate_handoff_prompt` -> compose -> `save_handoff_prompt` ->
@@ -33,6 +41,7 @@ fall back to the CLI. Recording head is `agent-worktrees`' job -- if
 CH_ROOT="${COPILOT_PLUGIN_ROOT:-$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff}"
 CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 node "$CH" check-heads --json --cwd "$PWD"
+node "$CH" sync-worktree --json --cwd "$PWD"
 node "$CH" save --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 ```
 `trigger`/`consume` share that same `--session-id`/`--cwd` shape.
