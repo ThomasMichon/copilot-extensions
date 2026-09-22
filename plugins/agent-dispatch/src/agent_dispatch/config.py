@@ -326,7 +326,7 @@ def _url_listening(base_url: str, *, timeout: float = 0.25) -> bool:
         return False
 
 
-def _health_responsive(base_url: str, *, timeout: float = 3.0) -> bool:
+def _health_responsive(base_url: str, *, timeout: float = 3.0, token: str | None = None) -> bool:
     """True if ``base_url``'s ``/health`` endpoint answers within ``timeout``.
 
     A TCP listener can stay open (still ``accept()``-ing new connections) long
@@ -336,23 +336,41 @@ def _health_responsive(base_url: str, *, timeout: float = 3.0) -> bool:
     CLI's lazy-start never tried to replace it. Liveness must therefore include
     a real bounded HTTP round-trip, not just a socket connect.
 
-    Sends the configured bearer token (``client_token()``), if any -- a
-    token-protected coordinator otherwise answers 401 here and would be
-    permanently misclassified as dead, causing every autostarting CLI
-    invocation to attempt an unnecessary recovery against a healthy process.
+    Sends ``token`` if given, else the configured bearer token
+    (``client_token()``) -- a token-protected coordinator otherwise answers 401
+    here and would be permanently misclassified as dead. An explicit ``token``
+    lets a caller that knows its own effective server token (e.g. ``serve()``
+    with an explicit ``--token``/``Config.token`` override differing from the
+    ambient environment) probe accurately instead of always falling back to
+    the environment's token (ThomasMichon/copilot-extensions#3066 follow-up).
+
+    Any HTTP response at all -- including a 401/403 from an *authenticated*
+    endpoint rejecting our credentials -- is treated as **live**: a process
+    that answers with an auth error is still definitely running and serving
+    requests, it's simply protected by a token this caller doesn't hold (e.g.
+    a healthy incumbent started with a different token than the one we're
+    probing with). Only a genuine connection failure (refused, timed out,
+    reset) means dead -- credential mismatch must never be conflated with
+    "no coordinator is there" (ThomasMichon/copilot-extensions#3066 follow-up).
     """
     request = urllib.request.Request(f"{base_url.rstrip('/')}/health")
-    token = client_token()
+    token = token if token is not None else client_token()
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as resp:  # noqa: S310 -- fixed loopback host from our own routing table
             return 200 <= resp.status < 300
+    except urllib.error.HTTPError:
+        # Any HTTP status (401/403/...) proves a live process answered --
+        # only connection-level failures below mean nothing is there.
+        return True
     except (OSError, urllib.error.URLError, ValueError, TimeoutError):
         return False
 
 
-def _discovered_endpoint_health_responsive(endpoint, *, timeout: float = 3.0) -> bool:
+def _discovered_endpoint_health_responsive(
+    endpoint, *, timeout: float = 3.0, token: str | None = None,
+) -> bool:
     """True if a discovered ``rendezvous.Endpoint`` answers ``/health``.
 
     ``_discover_local_endpoint()`` returns a ``rendezvous.Endpoint`` (already
@@ -364,10 +382,27 @@ def _discovered_endpoint_health_responsive(endpoint, *, timeout: float = 3.0) ->
     """
     if endpoint.transport != "tcp":
         return True
-    return _health_responsive(f"http://{endpoint.address}")
+    host, port = endpoint.tcp_host_port
+    # A wildcard/unspecified bind (``0.0.0.0``/``::``, permitted by
+    # ``check_bind_safety()`` when a token is configured) isn't a dialable
+    # destination -- normalize to the loopback equivalent first, same as
+    # ``server._loopback_probe_url()`` does for the routing-table path,
+    # else a live wildcard-bound incumbent found only through legacy
+    # discovery is misclassified as dead and the new non-passive serve
+    # guard starts a duplicate (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
+    if host in ("0.0.0.0", ""):
+        host = "127.0.0.1"
+    elif host in ("::", "[::]"):
+        host = "::1"
+    # An IPv6 literal such as ``::1`` needs bracketing (``http://[::1]:port``)
+    # or ``urllib`` misparses it, with the same dead-misclassification result.
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return _health_responsive(f"http://{host}:{port}", token=token)
 
 
-def has_live_local_coordinator() -> bool:
+def has_live_local_coordinator(*, token: str | None = None) -> bool:
     """True if a local coordinator is discoverable **and** answering its probe.
 
     Consults the zdd routing table first (authoritative on the host; it self-heals
@@ -392,12 +427,21 @@ def has_live_local_coordinator() -> bool:
     URL whenever one exists, so falling back here to a *different*, healthy
     legacy endpoint would report "live" while every real request still goes to
     the wedged routed generation, silently defeating this whole check.
+
+    ``token`` overrides the ambient environment token for the ``/health`` probe
+    -- pass a caller-known effective token (e.g. an explicit ``--token``/
+    ``Config.token``) when it may differ from ``AGENT_DISPATCH_TOKEN``, else the
+    probe against a token-protected incumbent started with a different token
+    would 401 and be misclassified as dead (ThomasMichon/copilot-extensions#3066
+    follow-up).
     """
     routed = _routing_url()
     if routed is not None:
-        return _url_listening(routed) and _health_responsive(routed)
+        return _url_listening(routed) and _health_responsive(routed, token=token)
     discovered = _discover_local_endpoint()
-    return discovered is not None and _discovered_endpoint_health_responsive(discovered)
+    return discovered is not None and _discovered_endpoint_health_responsive(
+        discovered, token=token,
+    )
 
 
 def client_url() -> str:

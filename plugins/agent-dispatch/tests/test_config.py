@@ -247,6 +247,27 @@ def test_config_module_importable():
 # -- endpoint discovery (Phase 3 Stage A/B) ---------------------------------
 
 
+def test_connect_probe_normalizes_wildcard_bind_to_loopback():
+    # A wildcard/unspecified bind (0.0.0.0/::, permitted by
+    # check_bind_safety() when a token is configured) is not a dialable
+    # *destination* -- connecting to it directly fails regardless of whether
+    # anything is listening, so an endpoint advertised on 0.0.0.0 would
+    # otherwise be misclassified as stale by rendezvous.resolve() before any
+    # later health check even runs (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
+    import socket as socket_mod
+
+    listener = socket_mod.socket(socket_mod.AF_INET, socket_mod.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    try:
+        endpoint = rendezvous.Endpoint(transport="tcp", address=f"0.0.0.0:{port}")
+        assert rendezvous.connect_probe(endpoint, timeout=1.0) is True
+    finally:
+        listener.close()
+
+
 def test_client_url_discovers_local_endpoint(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
     monkeypatch.setattr("agent_dispatch.netinfo.is_wsl", lambda: False)
@@ -357,6 +378,47 @@ def test_discovered_endpoint_health_responsive_probes_tcp_as_http(monkeypatch):
     assert captured["url"] == "http://127.0.0.1:59999"
 
 
+def test_discovered_endpoint_health_responsive_brackets_ipv6(monkeypatch):
+    # advertise_endpoint() writes a raw "host:port" address; for an IPv6 host
+    # that's e.g. "::1:1234" -- Endpoint.tcp_host_port splits it correctly,
+    # but the http:// URL still needs brackets around the IPv6 literal or
+    # urllib misparses it, permanently misclassifying a live IPv6 incumbent
+    # as dead (review follow-up on ThomasMichon/copilot-extensions#3066).
+    captured = {}
+
+    def _fake_health_responsive(url, **_k):
+        captured["url"] = url
+        return True
+
+    monkeypatch.setattr(config_mod, "_health_responsive", _fake_health_responsive)
+    endpoint = rendezvous.Endpoint(transport="tcp", address="::1:1234")
+    assert config_mod._discovered_endpoint_health_responsive(endpoint) is True
+    assert captured["url"] == "http://[::1]:1234"
+
+
+def test_discovered_endpoint_health_responsive_normalizes_wildcard(monkeypatch):
+    # check_bind_safety() explicitly permits a wildcard/unspecified bind when
+    # a token is configured, but neither is a dialable probe destination --
+    # normalize to loopback first, same as server._loopback_probe_url() does
+    # for the routing-table path (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
+    captured = {}
+
+    def _fake_health_responsive(url, **_k):
+        captured["url"] = url
+        return True
+
+    monkeypatch.setattr(config_mod, "_health_responsive", _fake_health_responsive)
+
+    endpoint = rendezvous.Endpoint(transport="tcp", address="0.0.0.0:1234")
+    assert config_mod._discovered_endpoint_health_responsive(endpoint) is True
+    assert captured["url"] == "http://127.0.0.1:1234"
+
+    endpoint = rendezvous.Endpoint(transport="tcp", address=":::1234")
+    assert config_mod._discovered_endpoint_health_responsive(endpoint) is True
+    assert captured["url"] == "http://[::1]:1234"
+
+
 def test_discovered_endpoint_health_responsive_true_for_non_tcp_transport(monkeypatch):
     # No plain-HTTP mapping exists for a unix socket / named pipe here -- trust
     # the existing connect-probe-verified liveness for those transports rather
@@ -440,6 +502,91 @@ def test_health_responsive_omits_auth_header_when_no_token(monkeypatch):
     monkeypatch.setattr(config_mod.urllib.request, "urlopen", _fake_urlopen)
     assert config_mod._health_responsive("http://127.0.0.1:59999") is True
     assert captured["auth_header"] is None
+
+
+def test_health_responsive_treats_http_error_as_live(monkeypatch):
+    # A 401/403 from an *authenticated* endpoint proves a real process
+    # answered -- it must count as live, never as dead, or a healthy
+    # incumbent started with a different token than the candidate's would be
+    # misclassified as dead and its route seized (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
+    def _raise_unauthorized(request, timeout=None):
+        raise config_mod.urllib.error.HTTPError(
+            "http://127.0.0.1:59999/health", 401, "Unauthorized", hdrs=None, fp=None
+        )
+
+    monkeypatch.setattr(config_mod.urllib.request, "urlopen", _raise_unauthorized)
+    assert config_mod._health_responsive("http://127.0.0.1:59999") is True
+
+
+def test_health_responsive_explicit_token_overrides_ambient(monkeypatch):
+    # A caller with its own known effective token (e.g. serve()'s cfg.token)
+    # must be able to probe accurately even when it differs from the ambient
+    # AGENT_DISPATCH_TOKEN -- otherwise a token-protected incumbent started
+    # with a non-default token is misclassified as dead (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
+    captured: dict = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _fake_urlopen(request, timeout=None):
+        captured["auth_header"] = request.get_header("Authorization")
+        return _FakeResponse()
+
+    monkeypatch.setattr(config_mod, "client_token", lambda: "ambient-token")
+    monkeypatch.setattr(config_mod.urllib.request, "urlopen", _fake_urlopen)
+    assert (
+        config_mod._health_responsive(
+            "http://127.0.0.1:59999", token="explicit-token"
+        )
+        is True
+    )
+    assert "ambient-token" not in captured["auth_header"]
+    assert "explicit-token" in captured["auth_header"]
+
+
+def test_health_responsive_explicit_none_token_falls_back_to_ambient(monkeypatch):
+    captured: dict = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _fake_urlopen(request, timeout=None):
+        captured["auth_header"] = request.get_header("Authorization")
+        return _FakeResponse()
+
+    monkeypatch.setattr(config_mod, "client_token", lambda: "ambient-token")
+    monkeypatch.setattr(config_mod.urllib.request, "urlopen", _fake_urlopen)
+    assert config_mod._health_responsive("http://127.0.0.1:59999") is True
+    assert "ambient-token" in captured["auth_header"]
+
+
+def test_has_live_local_coordinator_passes_token_through_routed_probe(monkeypatch):
+    captured: dict = {}
+
+    monkeypatch.setattr(config_mod, "_routing_url", lambda: "http://127.0.0.1:59999")
+    monkeypatch.setattr(config_mod, "_url_listening", lambda _url: True)
+
+    def _fake_health_responsive(url, *, timeout=3.0, token=None):
+        captured["token"] = token
+        return True
+
+    monkeypatch.setattr(config_mod, "_health_responsive", _fake_health_responsive)
+    assert config_mod.has_live_local_coordinator(token="explicit-token") is True
+    assert captured["token"] == "explicit-token"
 
 
 def test_client_url_wsl_uses_discovered_port_when_opted_in(monkeypatch):

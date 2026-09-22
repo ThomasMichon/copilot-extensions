@@ -5,14 +5,29 @@
 terminal to the resulting mux session via `os.execvp`. These tests mock
 `cmd_embody` and `os.execvp` at the boundary so no real worktree, mux
 session, or process replacement happens.
+
+Fakes emit their JSON via `output._json_output` (not a bare
+`print(json.dumps(...))`) to match `cmd_embody`'s real contract: its JSON
+envelope is written through `_json_output`, which deliberately targets
+`sys.__stdout__` (not `sys.stdout`) so it still reaches the real terminal
+from inside an `output.stdout_to_stderr()` block elsewhere in `cmd_embody`.
+A fake using plain `print()` only exercises `sys.stdout` and would silently
+mask the real bug this module's fix addresses: a `contextlib.redirect_stdout`
+capture (which only swaps `sys.stdout`) never sees anything `_json_output`
+writes, so `cmd_copilot` always failed to parse a genuine `cmd_embody` result
+-- confirmed live (agent-bridge-cli-mode-sessions Phase 4 validation), 100%
+reproducible both locally and over a remote venue SSH session, meaning
+`copilot` never actually attached to the very mux session it had just
+created. Fixed via `output.capture_json_output()`, which swaps
+`sys.__stdout__` itself.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import output
 
 
 def _ns(**kwargs) -> argparse.Namespace:
@@ -36,7 +51,7 @@ class TestCmdCopilot:
         monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
 
         def fake_embody(args):
-            print(json.dumps({"ok": True, "session": "wt-abc", "worktree_id": "abc"}))
+            output._json_output({"ok": True, "session": "wt-abc", "worktree_id": "abc"})
             return 0
 
         monkeypatch.setattr(m, "cmd_embody", fake_embody)
@@ -60,7 +75,7 @@ class TestCmdCopilot:
         monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
 
         def fake_embody(args):
-            print(json.dumps({"ok": False, "error": "Worktree not found: nope"}))
+            output._json_output({"ok": False, "error": "Worktree not found: nope"})
             return 1
 
         monkeypatch.setattr(m, "cmd_embody", fake_embody)
@@ -72,7 +87,7 @@ class TestCmdCopilot:
         monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
 
         def fake_embody(args):
-            print(json.dumps({"ok": True}))  # malformed: no "session" key
+            output._json_output({"ok": True})  # malformed: no "session" key
             return 0
 
         monkeypatch.setattr(m, "cmd_embody", fake_embody)
@@ -84,7 +99,7 @@ class TestCmdCopilot:
         monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
 
         def fake_embody(args):
-            print("not json")
+            m.sys.__stdout__.write("not json\n")
             return 0
 
         monkeypatch.setattr(m, "cmd_embody", fake_embody)
@@ -96,7 +111,7 @@ class TestCmdCopilot:
         monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
 
         def fake_embody(args):
-            print(json.dumps({"ok": True, "session": "wt-abc"}))
+            output._json_output({"ok": True, "session": "wt-abc"})
             return 0
 
         monkeypatch.setattr(m, "cmd_embody", fake_embody)
@@ -110,11 +125,41 @@ class TestCmdCopilot:
         assert rc == 1
         assert "could not attach" in capfd.readouterr().out
 
+    def test_progress_noise_on_stdout_does_not_corrupt_captured_json(
+        self, monkeypatch, capfd,
+    ):
+        # Regression guard for the actual bug shape: `cmd_embody`'s `--new`
+        # path wraps progress logging in `output.stdout_to_stderr()`, which
+        # only swaps `sys.stdout` -- ordinary `print()` calls made under it
+        # still land wherever `sys.stdout` currently points (the real
+        # terminal here, since nothing swaps it in this path) while the
+        # final `_json_output` call goes to `sys.__stdout__` regardless.
+        # `capture_json_output()` must only capture the latter.
+        monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
+
+        def fake_embody(args):
+            print("Fetching latest from origin for repository...")
+            output._json_output({"ok": True, "session": "wt-abc"})
+            return 0
+
+        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "tmux")
+        execed = {}
+        monkeypatch.setattr(
+            m.os, "execvp", lambda bin_, argv: execed.update(bin_=bin_, argv=argv)
+        )
+        rc = m.cmd_copilot(_ns(worktree_id="abc"))
+        assert rc == 0
+        assert execed["argv"] == ["tmux", "attach-session", "-t", "wt-abc"]
+        out = capfd.readouterr().out
+        assert "Fetching latest" in out
+        assert "worktree_id" not in out  # the JSON envelope was captured, not printed
+
     def test_mux_override_is_passed_through(self, monkeypatch):
         monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
 
         def fake_embody(args):
-            print(json.dumps({"ok": True, "session": "wt-abc"}))
+            output._json_output({"ok": True, "session": "wt-abc"})
             return 0
 
         monkeypatch.setattr(m, "cmd_embody", fake_embody)

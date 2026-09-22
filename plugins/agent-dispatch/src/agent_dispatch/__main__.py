@@ -519,18 +519,70 @@ def _parse_affinity(pairs: list[str] | None) -> dict[str, str]:
 
 def _cmd_serve(args: argparse.Namespace) -> int:
     from .config import load_config
-    from .server import serve
+    from .server import CoordinatorAlreadyLiveError, serve
 
-    _reroot_serve_cwd()
+    passive = bool(getattr(args, "passive", False))
+    force = bool(getattr(args, "force", False))
     base = load_config()
+    effective_token = args.token or base.token
+    # A cheap, friendly fast path: most refusals are caught here without even
+    # binding a socket. This is NOT atomic against a second, concurrent
+    # non-passive `serve()` -- `serve()` itself holds a lock across its own
+    # re-check and the routing-table publish, so a race that slips past this
+    # pre-check is still caught there (see CoordinatorAlreadyLiveError below).
+    # Pass the *effective* token (CLI --token, falling back to config), not the
+    # ambient environment default -- a token-protected incumbent started with a
+    # different token would otherwise 401 the probe and be misclassified as
+    # dead (review follow-up on ThomasMichon/copilot-extensions#3066).
+    if (
+        not passive
+        and not force
+        and has_live_local_coordinator(token=effective_token)
+    ):
+        print(
+            "agent-dispatch: a coordinator is already live and answering on this "
+            "host; refusing to start a second one non-passively (it would seize "
+            "the active route without draining the running one -- see "
+            "ThomasMichon/copilot-extensions#3066). Use `agent-dispatch deploy` "
+            "for a graceful, zero-downtime cutover onto new code, or pass "
+            "--force if you intend a deliberate, unmanaged manual restart.",
+            file=sys.stderr,
+        )
+        return 2
+    _reroot_serve_cwd()
     cfg = Config(
         host=_resolve_serve_host(args, base),
         port=args.port or base.port,
         db_path=args.db or base.db_path,
-        token=args.token or base.token,
+        token=effective_token,
         control_token=getattr(args, "control_token", None) or base.control_token,
     )
-    serve(cfg, passive=bool(getattr(args, "passive", False)))
+    try:
+        serve(cfg, passive=passive, force=force)
+    except CoordinatorAlreadyLiveError as exc:
+        if force:
+            # --force already bypasses the liveness rejection; reaching this
+            # from a forced start means the shared start-lock itself is held
+            # by a concurrent starter or transition (or, per the exception's
+            # own message, a genuinely wedged holder) -- telling the operator
+            # to pass --force again is not actionable, since it was already
+            # passed and never bypasses this lock (review follow-up on
+            # ThomasMichon/copilot-extensions#3066).
+            print(
+                f"agent-dispatch: {exc} (ThomasMichon/copilot-extensions#3066). "
+                "--force does not bypass this lock -- retry once the other "
+                "process finishes, or terminate it if it's genuinely wedged.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"agent-dispatch: {exc} (ThomasMichon/copilot-extensions#3066). Use "
+                "`agent-dispatch deploy` for a graceful, zero-downtime cutover onto "
+                "new code, or pass --force if you intend a deliberate, unmanaged "
+                "manual restart.",
+                file=sys.stderr,
+            )
+        return 2
     return 0
 
 
@@ -693,9 +745,15 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     cfg = load_config()
     token = client_token()
     wildcard_v4 = ".".join(("0", "0", "0", "0"))
-    host = cfg.host if cfg.host not in (wildcard_v4, "", "::") else "127.0.0.1"
-    if cfg.host == "::":
+    host = cfg.host if cfg.host not in (wildcard_v4, "", "::", "[::]") else "127.0.0.1"
+    if cfg.host in ("::", "[::]"):
         host = "::1"
+    # Normalize a bracketed IPv6 wildcard to zdd routing's own canonical
+    # unbracketed form for the routing-table bind too -- same fix as
+    # server._publish_routing(), needed here since CutoverOrchestrator
+    # publishes to the same routing table (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
+    routing_bind = "::" if cfg.host == "[::]" else cfg.host
 
     def pick_free_port() -> int:
         family = _socket.AF_INET6 if ":" in host else _socket.AF_INET
@@ -767,44 +825,99 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         except Exception:
             return False
 
-    recovery = breadcrumb.recover_stale_cutover(
-        routing_dir(), make_client, health_check=liveness_check
-    )
-    # #5195: recover_stale_cutover only heals the stranded *old* survivor. The
-    # matching backstop for a passive spawn_passive stood up that never got
-    # promoted (the orchestrator died before/without ever flipping to it) is
-    # reap_abandoned_passive -- but it must see the breadcrumb from BEFORE
-    # recover_stale_cutover rewrote it to a terminal state, so read it first.
-    _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(routing_dir())
-    passive_reap = _reap_abandoned_passive(_pre_recovery_breadcrumb)
-    if getattr(args, "recover", False):
-        recovery["passive_reap"] = passive_reap
-        _emit(recovery)
-        return 0
-    if recovery.get("recovered"):
-        print(f"[>] Recovered a prior aborted cutover: {recovery.get('reason')}", file=sys.stderr)
-    if passive_reap.get("reaped"):
+    # Share the same routing-transition lock `serve()`'s non-passive guard
+    # uses (keyed by routing_dir(), the actual raced-over resource), held
+    # across the *entire* cutover lifecycle -- recovery/reap preamble through
+    # `orch.run()` -- not just the orchestrator call. `recover_stale_cutover`
+    # and `_reap_abandoned_passive` mutate breadcrumb/daemon state and treat
+    # any non-terminal breadcrumb as stale, so without the lock a second
+    # `deploy` could undrain or reap an in-progress cutover while the first
+    # orchestrator is still running; a direct non-passive `serve()` racing in
+    # anywhere in this window could equally observe no live coordinator and
+    # seize the route, recreating the exact undrained-duplicate incident this
+    # guard exists to prevent (review follow-up on
+    # ThomasMichon/copilot-extensions#3066).
+    from .single_instance import SingleInstance, read_holder_pid
+
+    routing_lock_path = routing_dir() / "serve-start.lock"
+    routing_lock = SingleInstance(routing_lock_path)
+    acquired = routing_lock.acquire()
+    if not acquired:
+        # A plain refusal here is unsafe for existing installer callers:
+        # install.sh/.ps1 treat any _cutover/deploy failure as permission to
+        # fall back to a hard service restart -- exactly the undrained-
+        # duplicate race this lock exists to prevent. A concurrent
+        # transition is normally short-lived (seconds), so retry with a
+        # bounded wait before surfacing a real failure, giving it genuine
+        # room to finish rather than immediately handing installers an
+        # excuse to restart out from under it (review follow-up on
+        # ThomasMichon/copilot-extensions#3066).
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            acquired = routing_lock.acquire()
+            if acquired:
+                break
+    if not acquired:
+        holder_pid = read_holder_pid(routing_lock_path)
+        holder_note = f" (held by pid {holder_pid})" if holder_pid else ""
         print(
-            f"[>] Reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})",
+            "agent-dispatch: another process is concurrently starting or "
+            f"cutting over a coordinator on this host{holder_note}; refusing "
+            "to race it for the active route after waiting 30s for it to "
+            "finish. Retry once it finishes, or -- if that process is "
+            "genuinely wedged, not just slow -- terminate it externally "
+            "first.",
             file=sys.stderr,
         )
+        return 2
+    try:
+        recovery = breadcrumb.recover_stale_cutover(
+            routing_dir(), make_client, health_check=liveness_check
+        )
+        # #5195: recover_stale_cutover only heals the stranded *old* survivor. The
+        # matching backstop for a passive spawn_passive stood up that never got
+        # promoted (the orchestrator died before/without ever flipping to it) is
+        # reap_abandoned_passive -- but it must see the breadcrumb from BEFORE
+        # recover_stale_cutover rewrote it to a terminal state, so read it first.
+        _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(routing_dir())
+        passive_reap = _reap_abandoned_passive(_pre_recovery_breadcrumb)
+        if getattr(args, "recover", False):
+            recovery["passive_reap"] = passive_reap
+            _emit(recovery)
+            return 0
+        if recovery.get("recovered"):
+            print(f"[>] Recovered a prior aborted cutover: {recovery.get('reason')}", file=sys.stderr)
+        if passive_reap.get("reaped"):
+            print(
+                f"[>] Reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})",
+                file=sys.stderr,
+            )
 
-    orch = CutoverOrchestrator(
-        routing_dir(),
-        bind=cfg.host,
-        version=__import__("agent_dispatch").__version__,
-        spawn_passive=spawn_passive,
-        health_check=health_check,
-        make_client=make_client,
-        pick_free_port=pick_free_port,
-    )
-    result = orch.run(
-        health_timeout=args.health_timeout,
-        drain_timeout=args.drain_timeout,
-        force=args.force,
-    )
-    if result.ok:
-        _reap_superseded_coordinators(result)
+        orch = CutoverOrchestrator(
+            routing_dir(),
+            bind=routing_bind,
+            version=__import__("agent_dispatch").__version__,
+            spawn_passive=spawn_passive,
+            health_check=health_check,
+            make_client=make_client,
+            pick_free_port=pick_free_port,
+        )
+        result = orch.run(
+            health_timeout=args.health_timeout,
+            drain_timeout=args.drain_timeout,
+            force=args.force,
+        )
+        # Keep the lock through the post-cutover reap too -- otherwise a
+        # second `deploy` can acquire it in the gap right after release,
+        # spawn its own new passive coordinator, and have *this* command's
+        # reaper (which only knows about `result`'s own before/after PIDs)
+        # terminate that still-passive process as an apparent leftover
+        # (review follow-up on ThomasMichon/copilot-extensions#3066).
+        if result.ok:
+            _reap_superseded_coordinators(result)
+    finally:
+        routing_lock.release()
     if getattr(args, "json", False):
         _emit(result.to_dict())
     else:
@@ -3284,6 +3397,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--passive",
         action="store_true",
         help=argparse.SUPPRESS,  # internal: a graceful-cutover passive instance
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="start even if a coordinator is already live and answering on this "
+        "host (bypasses the #3066 guard); the running one is left undrained -- "
+        "prefer `agent-dispatch deploy` for a graceful cutover instead",
     )
     p.set_defaults(func=_cmd_serve)
 
