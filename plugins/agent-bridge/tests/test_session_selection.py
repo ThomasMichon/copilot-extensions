@@ -292,6 +292,44 @@ def test_create_refuse_on_conflict_raises(fixed_caller):
     assert client.resumed == []  # never silently adopts
 
 
+def test_start_agent_session_uses_main_wait_for_idle_compatibility_seam(monkeypatch):
+    class _Client:
+        def start_session(self, **_kwargs):
+            return {"session_id": "sess-new", "name": "agent-x"}
+
+    seen = {}
+    monkeypatch.setattr(m, "_get_caller_id", lambda: "caller-A")
+    monkeypatch.setattr(m, "_sender_repo", lambda: "repo-A")
+    monkeypatch.setattr(m, "_worktrees_get", lambda _key: None)
+    monkeypatch.setattr(
+        m,
+        "_phased_timeouts",
+        lambda: type(
+            "T",
+            (),
+            {
+                "codespace_boot": 1.0,
+                "ssh_connect": 1.0,
+                "session_host_ready": 1.0,
+                "session_start": 2.5,
+                "session_new": 1.0,
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        m,
+        "_wait_for_idle",
+        lambda _client, session_id, timeout=0: seen.update(
+            {"session_id": session_id, "timeout": timeout}
+        ),
+    )
+
+    session_id = m._start_agent_session(_Client(), "agent-x", force_new=True)
+
+    assert session_id == "sess-new"
+    assert seen == {"session_id": "sess-new", "timeout": 2.5}
+
+
 # -- CLI command guards ------------------------------------------------------
 
 

@@ -265,7 +265,7 @@ def _start_agent_session(
     print(f"[>] Session {sid} ({name}) created")
     timeouts = core._phased_timeouts()
     start_timeout = timeouts.codespace_boot if agent_name.startswith("codespace:") else timeouts.session_start
-    _wait_for_idle(client, sid, timeout=start_timeout)
+    core._wait_for_idle(client, sid, timeout=start_timeout)
     return sid
 
 
