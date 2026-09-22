@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 
 from .client_registrations import RegistrationClientMixin
-
+from .client_worktree_status import WorktreeStatusClientMixin
 
 class DispatchError(RuntimeError):
     """A non-2xx response from the coordinator (carries status + detail)."""
@@ -41,7 +41,7 @@ class DispatchUpgradeRequired(DispatchError):
         super().__init__(426, detail)
 
 
-class DispatchClient(RegistrationClientMixin):
+class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(

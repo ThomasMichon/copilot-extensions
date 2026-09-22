@@ -3483,6 +3483,63 @@ class TestInboxBoard:
         assert args.board is True
         assert args.recent_mins == 30
 
+    def test_board_render_reads_relay_without_shelling_out(
+        self, monkeypatch, capsys
+    ):
+        from agent_dispatch import __main__ as m
+        from agent_dispatch import board_cli
+
+        seen = {}
+        class _Client:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return None
+
+            def list(self, **_params):
+                return [{
+                    "id": "t1",
+                    "status": "started",
+                    "repo": "github.com/example/repo",
+                    "owner": "m1/wt1",
+                    "target_worktree": "wt1",
+                    "updated_at": 10.0,
+                }]
+
+            def worktree_status_relays(self, refs):
+                seen["refs"] = list(refs)
+                return {
+                    ("github.com/example/repo", "wt1"): {
+                        "repo": "github.com/example/repo",
+                        "worktree_id": "wt1",
+                        "fetched_at": 995.0,
+                        "poll_interval_seconds": 10.0,
+                        "bundle": {
+                            "facts": {
+                                "claims": {
+                                    "confirmed": True,
+                                    "observed_at": 995.0,
+                                    "value": {"resources": [], "owner_ref": None},
+                                }
+                            }
+                        },
+                    }
+                }
+
+        monkeypatch.setattr(m, "_client", lambda _args: _Client())
+        monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: False)
+        monkeypatch.setattr(m.subprocess, "run", lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("render path must not shell out")
+        ))
+        monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
+
+        args = _args(["inbox", "--machine", "m1", "--board"])
+        assert args.func(args) == 0
+        rows = json.loads(capsys.readouterr().out)
+        assert seen["refs"] == [("github.com/example/repo", "wt1")]
+        assert rows[0]["artifacts_summary"] == "none"
+
     def test_board_defaults(self):
         args = _args(["inbox", "--board"])
         assert args.board is True
