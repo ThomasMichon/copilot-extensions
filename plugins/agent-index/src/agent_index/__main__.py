@@ -768,12 +768,13 @@ def _setup_multi(cfg, args, this: str, root, indexers: list[dict]) -> int:
 def cmd_setup(args: argparse.Namespace) -> int:
     """Adopt agent-index: designate one indexer, then write role + designation config.
 
-    Records the shared indexer designation into the canonical repo config
-    (``<repo>/.copilot-extensions/agent-index/config.yaml`` with legacy config
-    preserved as a read-only fallback) and this machine's concrete ``role:``
-    into the machine-local config (which the installer reads). Running setup on
-    the designated machine makes it the ``host``; everywhere else it is a
-    ``client`` (effort agent-index-engine-daemon, Phase 6; vision
+    Records the shared indexer designation into the repo-local writable overlay
+    (``<repo>/.copilot-extensions/agent-index/config.yaml``) while leaving the
+    checked-in ``<repo>/.agent-index/config.yaml`` defaults untouched, and writes
+    this machine's concrete ``role:`` into the machine-local config (which the
+    installer reads). Running setup on the designated machine makes it the
+    ``host``; everywhere else it is a ``client`` (effort
+    agent-index-engine-daemon, Phase 6; vision
     §adoption-designates-one-indexer).
     """
     from agent_index import config as cfg
@@ -794,7 +795,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     # operator-authored, so setup only resolves THIS machine's role/routing from it
     # and never rewrites it (vision §adoption-designates-ordered-indexers).
     if not single and not indexer and root is not None:
-        raw = cfg._load_yaml(cfg.repo_config_path(root))
+        raw = cfg._load_effective_repo_config(root)
         if isinstance(raw.get("indexers"), list) and cfg.read_indexers(root):
             return _setup_multi(cfg, args, this, root, cfg.read_indexers(root))
 

@@ -38,10 +38,11 @@ explicit lifecycle and is never rebuilt by a routine service update.
 ## Minimal setup
 
 1. Enable the plugin from the `copilot-extensions` marketplace.
-2. Opt the repository in by authoring
-   `.copilot-extensions/agent-index/config.yaml`. Legacy
-   `.agent-index/config.yaml` remains readable during the compatibility window,
-   and an explicit marketplace-specific override may live at
+2. Opt the repository in by authoring the checked-in
+   `.agent-index/config.yaml` defaults. A repo-local
+   `.copilot-extensions/agent-index/config.yaml` overlay may add private
+   sources or an indexer designation, and an explicit marketplace-specific
+   override may live at
    `.copilot-extensions/agent-index/marketplaces/<marketplace-id>/config.yaml`.
    A config must contain an `indexer`/`indexers` designation or at least one
    `corpus.sources` entry. A malformed, unsafe, ambiguous, or empty config is
@@ -125,16 +126,18 @@ The runtime belongs to this plugin; scope is data/config:
 - With no corpus config, `agent-index index` indexes the current git checkout
 (`git`) and its commit history.
 - `AGENT_INDEX_SOURCES` overrides the default with a comma-separated source list.
-- For multi-repo harness-style use, each repo may carry
-`.copilot-extensions/agent-index/config.yaml` with `corpus.sources`; the runtime
-grafts sources from locally adopted projects plus any machine-local supplement in
-`~/.agent-index/config.yaml`.
-- Resolution selects a valid current-repository config first. Only when the
-repository declares `stateless: true` or `requires_external_state_root: true`
-may it fall back to the valid
-`.copilot-extensions/agent-index/config.yaml` (or legacy
-`.agent-index/config.yaml`) in the bound knowledge repo. A present invalid
-local config never falls through.
+- For multi-repo harness-style use, each repo may carry checked-in
+  `.agent-index/config.yaml` defaults, optionally supplemented by a repo-local
+  `.copilot-extensions/agent-index/config.yaml` overlay; the runtime grafts
+  sources from locally adopted projects plus any machine-local supplement in
+  `~/.agent-index/config.yaml`.
+- Resolution selects a valid current-repository config first, layering checked-in
+  defaults, the repo-local overlay, and any marketplace overlay. Repositories
+  that declare `stateless: true` or `requires_external_state_root: true` may
+  also append shareable `corpus.sources` from the bound knowledge repo's
+  `.agent-index/config.yaml`, and still fall back to the knowledge repo's own
+  effective config when no local repo config exists. A present invalid local
+  config never falls through.
 - The session-start scope-binding hook reads that effective config and tells
 agents which configured scopes are safe to prefer `agent-index search` for.
 

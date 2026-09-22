@@ -131,7 +131,11 @@ def _configured_paths() -> tuple[list[Path], list[str]]:
         if not root.is_dir():
             errors.append(f"{root}: adopted project {name!r} is unavailable")
             continue
-        paths.append(config.repo_config_path(root))
+        layers = config._repo_config_layers(root)
+        if layers:
+            paths.extend(layers)
+        else:
+            paths.append(config.repo_config_path(root))
     return paths, errors
 
 

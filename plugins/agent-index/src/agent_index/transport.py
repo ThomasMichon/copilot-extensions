@@ -10,9 +10,9 @@ its own live local endpoint.
 Routing (per invocation):
 
 1. Resolve the backing **project** from the current directory (git top-level, or
-   ``AGENT_INDEX_REPO``). The project selects which repository config
-   (canonical ``.copilot-extensions/agent-index/config.yaml`` with legacy
-   fallback) governs its ``indexer:`` block (``machine``/``ssh``/``shell``).
+   ``AGENT_INDEX_REPO``). The project selects which effective repository config
+   (checked-in ``.agent-index/config.yaml`` defaults plus any repo-local overlay)
+   governs its ``indexer:`` block (``machine``/``ssh``/``shell``).
 2. Determine this machine's **role** for that project: ``host`` iff
    ``machine_id()`` equals the project's ``indexer.machine`` (canonical hostname).
    A project without an explicit indexer designation is ``unconfigured``. Only
@@ -272,7 +272,7 @@ def maybe_delegate(sub: str, raw_argv: list[str]) -> int | None:
         if role == config.UNCONFIGURED_ROLE:
             message = (
                 "agent-index is not configured on this machine. Run inside a "
-                "repository with .copilot-extensions/agent-index/config.yaml, "
+                "repository with .agent-index/config.yaml, "
                 "or run `agent-index "
                 "setup` explicitly."
             )
@@ -281,7 +281,8 @@ def maybe_delegate(sub: str, raw_argv: list[str]) -> int | None:
                 "agent-index: no indexer transport resolvable here. This machine is a "
                 "client, so read commands run on the designated indexer over SSH — but "
                 "the current directory is not inside an adopted repo. Run inside a repo "
-                "with .copilot-extensions/agent-index/config.yaml indexer.ssh, "
+                "with .agent-index/config.yaml or "
+                ".copilot-extensions/agent-index/config.yaml indexer.ssh, "
                 "or set AGENT_INDEX_REPO."
             )
         return _emit_error(
