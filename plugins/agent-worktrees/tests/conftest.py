@@ -10,6 +10,28 @@ import pytest
 from agent_worktrees import tracking
 
 
+def _load_full_command_surface_once() -> None:
+    """Restore the pre-lazy-dispatch full eager module surface for tests.
+
+    Tests exercise `agent_worktrees.__main__` module attributes directly
+    (`m._some_helper`, `monkeypatch.setattr(m, "_x", ...)`) as white-box unit
+    tests of internal implementation, not as simulated CLI invocations. The
+    agent-cli-lazy-dispatch effort deferred that surface's construction
+    behind `main()`'s own dispatch decision (see `_load_full_command_surface`
+    / `_ensure_cluster_loaded` in `agent_worktrees/__main__.py`) so a real
+    fast-tracked invocation never pays for it -- but that means it is no
+    longer populated merely by `import agent_worktrees.__main__`. Force it
+    once, session-wide, so every test keeps seeing the same fully-populated
+    module it always has.
+    """
+    from agent_worktrees import __main__ as m
+
+    m._load_full_command_surface()
+
+
+_load_full_command_surface_once()
+
+
 @pytest.fixture(autouse=True)
 def _disable_resident_monitor_processes():
     """Unit tests opt in explicitly when resident monitor behavior is under test."""
