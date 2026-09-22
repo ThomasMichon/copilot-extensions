@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from . import config as cfg
 from . import finalize, git_ops, sessions, tracking
 
 DISPOSABLE_CLI_POLICY = "disposable-cli"
@@ -167,19 +168,329 @@ def _release_dispatch_session_claims(
 
 
 def _preservation_reason(
-    record: tracking.WorktreeRecord, *, policy: str
+    record: tracking.WorktreeRecord, *, policy: str, pair_clear: bool = False,
 ) -> str | None:
+    """``pair_clear=True`` means a dispatch attempt's own reciprocal-claim
+    check (:func:`_dispatch_pair_clearance`) has already confirmed this
+    record's paired knowledge sibling is itself safe to dispose of
+    together with this worktree -- so ``is_paired`` alone must NOT block
+    here (the caller will conclude both halves as one unit). Every other
+    caller (a human CLI/finalize conclusion, or a dispatch attempt whose
+    sibling is not yet safe to dispose) keeps the original unconditional
+    block: pairing is still an outstanding obligation.
+    """
     if policy == DISPOSABLE_CLI_POLICY and record.resolved_interface != "cli":
         return "not-cli-worktree"
     if record.pending_handoffs:
         return "pending-handoff"
     if record.follow_up or record.active_effort is not None:
         return "follow-up"
-    if record.live_resources or record.owner_ref or record.is_paired:
+    if record.live_resources or record.owner_ref:
+        return "outstanding-obligations"
+    if record.is_paired and not pair_clear:
         return "outstanding-obligations"
     if any(pr.state in {"creating", "open"} for pr in record.prs):
         return "open-pull-request"
     return None
+
+
+def _sibling_preservation_reason(sibling: tracking.WorktreeRecord) -> str | None:
+    """Preservation gate for the RECIPROCAL sibling of a dispatch-owned
+    pair concluding together (see :func:`_dispatch_pair_clearance`).
+    Deliberately narrower than :func:`_preservation_reason`: the sibling
+    being paired back to the very harness worktree we are concluding is
+    expected and must NOT itself block disposal; every other obligation on
+    the sibling's own record is checked exactly as it would be for the
+    harness side.
+    """
+    if sibling.pending_handoffs:
+        return "pair-sibling-pending-handoff"
+    if sibling.follow_up or sibling.active_effort is not None:
+        return "pair-sibling-follow-up"
+    if sibling.live_resources or sibling.owner_ref:
+        return "pair-sibling-outstanding-obligations"
+    if any(pr.state in {"creating", "open"} for pr in sibling.prs):
+        return "pair-sibling-open-pull-request"
+    if sibling.resolved_head_session is not None:
+        # A tracked, still-resumable lifecycle head is independent of live
+        # -process detection (`_session_is_live`): an ENDED session can
+        # still carry an active head that a human/agent could resume.
+        # Marking the sibling bridge/complete without concluding that
+        # session first would silently strand it.
+        return "pair-sibling-active-lifecycle-head"
+    return None
+
+
+def _reciprocal_pair_valid(
+    record: tracking.WorktreeRecord,
+    sibling: tracking.WorktreeRecord,
+    sibling_path: Path,
+) -> bool:
+    """Whether ``sibling`` (loaded from ``sibling_path``) validates as
+    ``record``'s genuine RECIPROCAL harness/knowledge partner -- mirrors
+    the invariant :func:`state_root.resolve_pair` enforces, so a stale or
+    malformed link can never redirect this destructive path onto an
+    unrelated tracking record:
+
+    * ``sibling``'s own identity matches its filename;
+    * ``sibling``'s own worktree path/branch match its own identity
+      (mirrors :func:`_identity_reason`'s harness-side checks) -- a
+      malformed record (e.g. a stale ``branch: main`` claim on a clean
+      checkout) must never be marked ``bridge`` and later let the managed
+      reaper delete/mutate an unrelated branch;
+    * both records share the same non-empty ``pair_id``;
+    * ``pair_role`` is complementary (``{"harness", "knowledge"}``, exactly
+      one of each);
+    * both share ``pair_kind == "worktree"`` (an ``anchor``-kind pair has no
+      sibling worktree of its own to dispose of here);
+    * the sibling's OWN ``pair_ref`` resolves back to this exact record's
+      identity (machine/repo/worktree_id) -- the link is reciprocal, not
+      merely one-directional.
+    """
+    if sibling.worktree_id != sibling_path.stem:
+        return False
+    if Path(sibling.worktree_path).name != sibling.worktree_id:
+        return False
+    if sibling.branch != f"worktree/{sibling.worktree_id}":
+        return False
+    current_pair_id = (record.pair_id or "").strip()
+    sibling_pair_id = (sibling.pair_id or "").strip()
+    if not current_pair_id or current_pair_id != sibling_pair_id:
+        return False
+    current_role = (record.pair_role or "").strip()
+    sibling_role = (sibling.pair_role or "").strip()
+    if {current_role, sibling_role} != {"harness", "knowledge"}:
+        return False
+    if (record.pair_kind or "").strip() != "worktree" or (sibling.pair_kind or "").strip() != "worktree":
+        return False
+    sibling_ref = sibling.pair_claim_ref
+    expected = tracking.format_claim_ref(record.machine, record.repo, record.worktree_id)
+    if sibling_ref is None or sibling_ref.canonical() != expected:
+        return False
+    return True
+
+
+def _resolve_pair_sibling(
+    record: tracking.WorktreeRecord,
+) -> tuple[tracking.WorktreeRecord, Path] | None:
+    """Resolve the sibling record AND its tracking file path, or ``None``
+    when the pair cannot be resolved OR does not validate as a genuine
+    reciprocal harness/knowledge pair (:func:`_reciprocal_pair_valid`).
+    Mirrors :func:`tracking.find_paired_record`'s own qualification rules
+    for locating the file. Also returns the path so a caller can re-lock
+    and persist the sibling.
+    """
+    ref = record.pair_claim_ref
+    if ref is None or not ref.is_qualified or ref.machine != record.machine or not ref.project:
+        return None
+    path = cfg.project_dir(ref.project) / "worktrees" / f"{ref.worktree_id}.yaml"
+    if not path.exists():
+        return None
+    try:
+        sibling = tracking.load_record(path)
+    except Exception:
+        return None
+    if not _reciprocal_pair_valid(record, sibling, path):
+        return None
+    return sibling, path
+
+
+def _sibling_ancestry_reason(sibling: tracking.WorktreeRecord) -> str | None:
+    """Conservative git-ancestry gate for the RECIPROCAL sibling of a
+    dispatch-owned pair concluding together -- mirrors the harness side's
+    own branch-drift/upstream/ahead-count/dirty-work checks (the unlocked
+    git-inspection section of :func:`conclude_disposable_worktree`), so a
+    merely-clean-looking sibling with unpushed local-only commits is never
+    silently marked managed/complete and lost to a later GC sweep. Also
+    mirrors the harness side's MISSING-checkout fallback: even when the
+    sibling's own worktree directory is gone, its branch may still exist
+    (in the sibling project's own anchor) with unpushed commits.
+    """
+    try:
+        sibling_config = cfg.load_config(project=sibling.repo)
+        default_repo = sibling_config.default_repo
+        remote = default_repo.remote
+        default_branch = default_repo.default_branch
+        anchor = default_repo.anchor
+    except Exception:
+        return "pair-sibling-repo-config-unavailable"
+    if not remote or not default_branch:
+        return "pair-sibling-repo-config-unavailable"
+
+    worktree_path = Path(sibling.worktree_path)
+    if not worktree_path.exists():
+        if not sibling.branch:
+            return None
+        branch = git_ops.git(
+            "rev-parse", "--verify", f"refs/heads/{sibling.branch}^{{commit}}",
+            cwd=anchor, check=False,
+        )
+        if branch.returncode != 0:
+            return None
+        upstream = f"{remote}/{default_branch}"
+        verified = git_ops.git(
+            "rev-parse", "--verify", f"{upstream}^{{commit}}", cwd=anchor, check=False,
+        )
+        if verified.returncode != 0:
+            return "pair-sibling-upstream-unavailable"
+        ahead = git_ops.git(
+            "rev-list", "--count", f"{upstream}..{sibling.branch}", cwd=anchor, check=False,
+        )
+        if ahead.returncode != 0:
+            return "pair-sibling-upstream-unavailable"
+        try:
+            ahead_count = int(ahead.stdout.strip())
+        except ValueError:
+            return "pair-sibling-upstream-unavailable"
+        if ahead_count:
+            return "pair-sibling-local-commits"
+        return None
+
+    if not (worktree_path / ".git").exists():
+        return "pair-sibling-invalid-worktree"
+    if sibling.branch:
+        current_branch = git_ops.current_branch(worktree_path)
+        if current_branch != sibling.branch:
+            return "pair-sibling-branch-drift"
+    upstream = f"{remote}/{default_branch}"
+    verified = git_ops.git(
+        "rev-parse", "--verify", f"{upstream}^{{commit}}", cwd=worktree_path, check=False,
+    )
+    if verified.returncode != 0:
+        return "pair-sibling-upstream-unavailable"
+    ahead = git_ops.git(
+        "rev-list", "--count", f"{upstream}..HEAD", cwd=worktree_path, check=False,
+    )
+    if ahead.returncode != 0:
+        return "pair-sibling-upstream-unavailable"
+    try:
+        ahead_count = int(ahead.stdout.strip())
+    except ValueError:
+        return "pair-sibling-upstream-unavailable"
+    if ahead_count:
+        return "pair-sibling-local-commits"
+    if _dirty_entries(worktree_path):
+        return "pair-sibling-dirty-work"
+    return None
+
+
+def _dispatch_pair_clearance(
+    record: tracking.WorktreeRecord,
+    *,
+    policy: str,
+    reservation_key: str | None,
+    owner: str,
+) -> tuple[bool, str | None]:
+    """Whether THIS dispatch attempt may dispose of its own paired
+    knowledge sibling together with the harness worktree it concludes --
+    the "reciprocal claim", symmetric to
+    :func:`_release_dispatch_session_claims`'s own session-claim release.
+
+    Returns ``(pair_clear, block_reason)``:
+
+    * ``(False, None)`` -- unpaired, not a dispatch-attempt conclusion, or
+      ownership is unconfirmed: :func:`_preservation_reason`'s ordinary
+      unconditional ``is_paired`` block still applies unchanged (a human
+      ``finalize``/CLI conclusion, or a dispatch attempt that doesn't
+      exactly match this record's own provenance).
+    * ``(False, <reason>)`` -- paired, dispatch-owned, ownership confirmed,
+      but the sibling itself is not safe to dispose (still live, dirty, or
+      otherwise obligated) -- the WHOLE pair stays preserved rather than
+      unblocking the harness half and orphaning the knowledge half.
+    * ``(True, None)`` -- safe to dispose of both halves together.
+
+    Read-only: never mutates or persists anything.
+    """
+    if not record.is_paired:
+        return False, None
+    if policy != DISPATCH_ATTEMPT_POLICY:
+        return False, None
+    if not _dispatch_ownership_confirmed(record, reservation_key=reservation_key, owner=owner):
+        return False, None
+    if (record.pair_kind or "").strip() == "anchor":
+        # An anchor-kind pair (a non-worktree-class/singleton knowledge
+        # repo, see `_carve_paired_knowledge`) has no disposable sibling
+        # WORKTREE at all -- `pair_ref` names the anchor's own long-lived
+        # checkout directory, never a tracked worktree record. Only THIS
+        # side's own pairing link needs discharging once it concludes; the
+        # anchor itself is a shared resource that must never be touched
+        # here (see `_conclude_pair_sibling`'s caller for the discharge).
+        return True, None
+    resolved = _resolve_pair_sibling(record)
+    if resolved is None:
+        return False, "pair-sibling-unresolved"
+    sibling, _sibling_path = resolved
+    if _session_is_live(sibling):
+        return False, "pair-sibling-live"
+    if reason := _sibling_preservation_reason(sibling):
+        return False, reason
+    if reason := _sibling_ancestry_reason(sibling):
+        return False, reason
+    return True, None
+
+
+def _conclude_pair_sibling(record: tracking.WorktreeRecord) -> dict[str, Any]:
+    """Dispose of the RECIPROCAL sibling of a dispatch-owned pair, once the
+    harness half's own conclusion has just been decided and persisted
+    under lock. Re-resolves and re-locks the sibling's own record file
+    (never trusts the read taken during :func:`_dispatch_pair_clearance`,
+    which ran without the sibling's own lock held) and re-verifies the
+    FULL reciprocal-pair invariant, ancestry, and preservation gates while
+    holding that lock -- a concurrent rewrite/repair could otherwise
+    retarget the path, or a last-instant change (a new live session, new
+    dirty work) could make disposal unsafe, between the earlier unlocked
+    read and this lock acquisition. Any such finding defers this call
+    (returns a ``skipped`` action) rather than forcing disposal through --
+    the harness half's own conclusion is NOT rolled back in that case:
+    orphaning the sibling once more, to be picked up again on a later
+    conclusion/reap pass, is preferable to blocking the whole disposal on
+    a last-instant sibling race.
+
+    On success, DISCHARGES the pairing link on the sibling (clears
+    ``pair_id``/``pair_role``/``pair_ref``/``pair_kind``): once both halves
+    of a dispatch-owned pair have been jointly concluded, neither one still
+    needs the pairing link to reap independently, and the ordinary managed
+    sweep's own paired-worktree guard (``reap_cli.py``) treats ``is_paired``
+    as unconditionally disqualifying -- leaving it set would strand both
+    now-"primed" records forever, never actually reaped. The caller
+    discharges the harness side's own pairing fields the same way once this
+    returns success (see :func:`conclude_disposable_worktree`).
+    """
+    resolved = _resolve_pair_sibling(record)
+    if resolved is None:
+        return {"action": "skipped", "reason": "pair-sibling-unresolved"}
+    _sibling, sibling_path = resolved
+    try:
+        with tracking._RecordLock(sibling_path, timeout=3, require_sidecar=True):
+            sibling = tracking.load_record(sibling_path)
+            if not _reciprocal_pair_valid(record, sibling, sibling_path):
+                return {"action": "skipped", "reason": "pair-sibling-identity-mismatch"}
+            if live_reason := _session_is_live(sibling):
+                return {"action": "skipped", "reason": live_reason}
+            if reason := _sibling_preservation_reason(sibling):
+                return {"action": "skipped", "reason": reason}
+            if reason := _sibling_ancestry_reason(sibling):
+                return {"action": "skipped", "reason": reason}
+            already_primed = (
+                sibling.kind in tracking.MANAGED_KINDS
+                and sibling.status in {"complete", "finalized"}
+            )
+            sibling.kind = "bridge"
+            sibling.owner = record.owner
+            sibling.origin = "delegate"
+            tracking.update_status(sibling, "complete", save=False)
+            # Discharge the pairing link -- see the docstring above.
+            sibling.pair_id = None
+            sibling.pair_role = None
+            sibling.pair_ref = None
+            sibling.pair_kind = None
+            tracking.save_record(sibling, sibling_path)
+            return {
+                "action": "already-primed" if already_primed else "primed",
+                "worktree_id": sibling.worktree_id,
+            }
+    except TimeoutError:
+        return {"action": "skipped", "reason": "pair-sibling-lock-timeout"}
 
 
 def _identity_reason(
@@ -341,7 +652,14 @@ def conclude_disposable_worktree(
                 # same release only once the conclusion has fully succeeded.
                 _release_dispatch_session_claims(record, session_id=session_id)
 
-            if reason := _preservation_reason(record, policy=policy):
+            pair_clear, pair_block_reason = _dispatch_pair_clearance(
+                record, policy=policy, reservation_key=reservation_key, owner=owner,
+            )
+            if pair_block_reason:
+                result.update(action="skipped", reason=pair_block_reason)
+                return result
+
+            if reason := _preservation_reason(record, policy=policy, pair_clear=pair_clear):
                 result.update(action="skipped", reason=reason)
                 return result
 
@@ -478,7 +796,13 @@ def conclude_disposable_worktree(
                 record, reservation_key=reservation_key, owner=owner
             ):
                 _release_dispatch_session_claims(record, session_id=session_id)
-            if reason := _preservation_reason(record, policy=policy):
+            pair_clear, pair_block_reason = _dispatch_pair_clearance(
+                record, policy=policy, reservation_key=reservation_key, owner=owner,
+            )
+            if pair_block_reason:
+                result.update(action="skipped", reason=pair_block_reason)
+                return result
+            if reason := _preservation_reason(record, policy=policy, pair_clear=pair_clear):
                 result.update(action="skipped", reason=reason)
                 return result
             session_result, _session_changed = _save_session_conclusion(
@@ -514,6 +838,57 @@ def conclude_disposable_worktree(
                 reconciled=False,
                 managed_gc_eligible=True,
             )
+            if pair_clear:
+                # Reciprocal disposal (catch-22 follow-up to #3198/#3207):
+                # this dispatch attempt's own paired knowledge sibling is
+                # part of the SAME disposable unit as the harness worktree
+                # just primed above -- dispose of it too rather than
+                # leaving it wedged forever behind `is_paired`.
+                if (record.pair_kind or "").strip() == "anchor":
+                    # No disposable sibling worktree exists for an anchor
+                    # pair (see `_dispatch_pair_clearance`) -- the anchor
+                    # itself is a shared, long-lived checkout that must
+                    # never be touched here. Only this side's own link
+                    # needs discharging below.
+                    sibling_result: dict[str, Any] = {
+                        "action": "not-applicable",
+                        "reason": "anchor-pair",
+                    }
+                    pairing_discharged = True
+                else:
+                    sibling_result = _conclude_pair_sibling(record)
+                    pairing_discharged = sibling_result.get("action") in (
+                        "primed", "already-primed",
+                    )
+                result["pair_sibling"] = sibling_result
+                if pairing_discharged:
+                    # Both halves are now concluded together -- discharge
+                    # THIS side's own pairing link too (see
+                    # `_conclude_pair_sibling`'s docstring for why: the
+                    # managed sweep's paired-worktree guard would otherwise
+                    # strand this now-"primed" record forever, since
+                    # `is_paired` still reads True). Persisted as its own
+                    # save so a failure here never rolls back the
+                    # conclusion already durably recorded above.
+                    record.pair_id = None
+                    record.pair_role = None
+                    record.pair_ref = None
+                    record.pair_kind = None
+                    tracking.save_record(record, record_path)
+                else:
+                    # A last-instant sibling-side race left the pairing
+                    # link intact (`record.is_paired` still True): the
+                    # managed sweep's own paired-worktree guard will keep
+                    # skipping THIS record too, so it must not be reported
+                    # as GC-eligible -- a caller keying off this exact
+                    # field (e.g. `Supervisor`'s conclusion tracking) would
+                    # otherwise treat the whole reservation as cleanly
+                    # concluded and never retry the stranded sibling. The
+                    # harness side's own `bridge`/`complete` transition
+                    # above is NOT rolled back (still a real, durable,
+                    # retryable step); only the eligibility claim is
+                    # corrected.
+                    result["managed_gc_eligible"] = False
             return result
     finally:
         lock.release()

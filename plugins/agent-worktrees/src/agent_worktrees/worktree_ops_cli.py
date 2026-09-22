@@ -151,6 +151,16 @@ def add_parsers(sub) -> None:
         "the venue's bare default. A charter is a spawn profile, never "
         "its own first-class agent-bridge target.",
     )
+    p.add_argument(
+        "--no-pair",
+        action="store_true",
+        dest="no_pair",
+        help="Skip the paired-knowledge carve for THIS creation only, "
+        "regardless of --origin -- for a registrar/pool declaration with "
+        "no bound knowledge repo to give its workers. Narrower than the "
+        "whole-host AGENT_WORKTREES_NO_PAIR env var, which still applies "
+        "on top of this flag.",
+    )
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
     p = sub.add_parser(
@@ -332,6 +342,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                 inherit_parent_session=not (is_system or no_owner),
                 dispatch_attempt=dispatch_attempt,
                 bound_agent=getattr(args, "bound_agent", None),
+                no_pair=getattr(args, "no_pair", False),
             )
         except _core().CoordinationReadinessFailure as exc:
             return _core()._emit_coordination_rejection(exc.readiness, json_out=args.json)

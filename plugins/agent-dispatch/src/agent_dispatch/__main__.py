@@ -4384,6 +4384,16 @@ def build_parser() -> argparse.ArgumentParser:
         "managed GC (repeatable; label-scoped opt-in only)",
     )
     p.add_argument(
+        "--no-pair",
+        action="store_true",
+        help="skip the paired-knowledge carve for every worktree this lane "
+        "creates, whether embodied CLI-side or headless agent-bridge "
+        "(agent-worktrees create --no-pair) -- for a pool with no bound "
+        "knowledge repo to give its workers. Rejected together with "
+        "--pool (fleet mode never creates a paired worktree locally, so "
+        "there is nothing for this flag to skip).",
+    )
+    p.add_argument(
         "--headless-agent",
         default="task-worker",
         metavar="AGENT",
