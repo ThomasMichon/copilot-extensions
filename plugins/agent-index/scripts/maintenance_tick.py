@@ -151,21 +151,26 @@ def run_maintenance(worker: Any, *, runner=subprocess.run) -> dict[str, Any]:
     failed_sources = reindex.get("sources_failed")
     if not isinstance(failed_sources, list):
         failed_sources = []
+    purged_sources = reindex.get("sources_purged")
+    if not isinstance(purged_sources, list):
+        purged_sources = []
     chunks_total = int(reindex.get("chunks_total") or 0)
     worker.progress(
         phase="reindex-complete",
         summary=(
             f"incremental index finished: chunks_total={chunks_total} "
-            f"sources_failed={len(failed_sources)}"
+            f"sources_failed={len(failed_sources)} sources_purged={len(purged_sources)}"
         ),
     )
     return {
         "summary": (
             f"chunks_total={chunks_total}; sources_failed={len(failed_sources)}; "
+            f"sources_purged={len(purged_sources)}; "
             f"service_recovered={service_recovered}; engine_started={engine_started}"
         ),
         "chunks_total": chunks_total,
         "sources_failed": len(failed_sources),
+        "sources_purged": purged_sources,
         "service_recovered": service_recovered,
         "engine_started": engine_started,
         "engine_pid_before": engine_pid_before,

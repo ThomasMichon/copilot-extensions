@@ -113,6 +113,92 @@ def is_live_source(source: str, *, extra_keep: frozenset[str] | None = None) -> 
     return False
 
 
+def is_configured_source(
+    source: str, configured_names: frozenset[str], *, extra_keep: frozenset[str] | None = None,
+) -> bool:
+    """True if *source* is still declared in the CURRENT corpus config.
+
+    A stored source is configured iff it exactly matches a configured source
+    spec's name, or is a hierarchical sub-source of one (e.g. the configured
+    ``github:owner/repo`` covers stored ``github:owner/repo``,
+    ``github:owner/repo:issues``, and ``github:owner/repo:pulls``). Anything
+    else -- typically a source removed from ``corpus.sources`` sometime after
+    it was indexed -- is NOT configured and is eligible for
+    :func:`gc_unconfigured_sources`.
+    """
+    if not source:
+        return False
+    if extra_keep and source in extra_keep:
+        return True
+    if source in configured_names:
+        return True
+    return any(source.startswith(f"{name}:") for name in configured_names)
+
+
+def gc_unconfigured_sources(
+    multi_store: MultiModelStore,
+    path_index: PathIndex,
+    state: IndexState,
+    *,
+    configured_names: frozenset[str],
+    dry_run: bool = False,
+) -> GCSummary:
+    """Delete all chunks whose source is no longer in the CURRENT corpus config.
+
+    Unlike :func:`gc_stale_sources` (which purges abandoned NAMING SCHEMES --
+    a crawler-generation concern -- and only runs on a full reindex), this
+    purges sources a user simply removed from ``corpus.sources`` (harness
+    defaults, a knowledge-repo overlay, or a personal/machine-local addition).
+    It is cheap (one ``source_counts()`` scan) and safe to run on EVERY
+    reindex, incremental included, so a config change takes effect on the
+    next routine reindex tick rather than only on an explicit full reindex or
+    a service restart. Opt-out via ``AGENT_INDEX_REINDEX_GC=0`` (the same
+    escape hatch as :func:`gc_stale_sources`).
+
+    Removes the stale rows from the content + vector tables, the SQLite path
+    index, and IndexState. Does NOT compact -- callers should compact after
+    (a full reindex already does; an incremental reindex leaves compaction to
+    its own periodic pass, consistent with existing incremental behavior).
+    """
+    extra_keep = _extra_keep_sources()
+    counts = multi_store.source_counts()
+
+    purged: dict[str, int] = {}
+    kept: list[str] = []
+    for source, count in counts.items():
+        if is_configured_source(source, configured_names, extra_keep=extra_keep):
+            kept.append(source)
+        else:
+            purged[source] = count
+
+    total_deleted = 0
+    if not dry_run:
+        for source in purged:
+            try:
+                removed = multi_store.delete_by_source_exact(source)
+                path_index.delete_source(source)
+                if source in state.sources and source not in _LIVE_CRAWL_STATE_KEYS:
+                    del state.sources[source]
+                total_deleted += removed
+                log.info(
+                    "GC: purged unconfigured source %s (%d chunks)", source, removed,
+                )
+            except Exception:
+                log.warning(
+                    "GC: failed to purge unconfigured source %s", source, exc_info=True,
+                )
+        state.total_chunks = sum(s.chunk_count for s in state.sources.values())
+    else:
+        total_deleted = sum(purged.values())
+
+    return {
+        "purged": purged,
+        "kept": sorted(kept),
+        "chunks_deleted": total_deleted,
+        "dry_run": dry_run,
+    }
+
+
 def gc_stale_sources(
     multi_store: MultiModelStore,
     path_index: PathIndex,

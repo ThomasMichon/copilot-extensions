@@ -190,6 +190,21 @@ in detached versioned worker subprocesses, so a service cutover does not kill an
 in-flight indexing job; the successor service re-adopts live workers or marks
 dead ones interrupted/resumable.
 
+Step 6 has two independent GC passes. `gc_stale_sources` purges abandoned
+crawler NAMING SCHEMES (a stale generation, e.g. an old `forge:*` variant) and
+runs only on a full reindex, paired with post-GC compaction. `gc_unconfigured_sources`
+purges a source that a user simply removed from the layered `corpus.sources`
+config sometime after it was indexed -- distinct from an abandoned scheme, and
+cheap enough (one `source_counts()` scan) to run on EVERY reindex, incremental
+included, whenever the run covers the full configured set (`--source` is not
+given). This is what lets a config change -- e.g. dropping a source from the
+harness's checked-in defaults, a knowledge-repo overlay, or a personal
+override -- take effect on the very next routine reindex tick (the ~30-minute
+`agent-dispatch` maintenance schedule already runs an incremental `agent-index
+index`), with no full reindex and no service restart required. Both passes
+share the `AGENT_INDEX_REINDEX_GC=0` opt-out and an `AGENT_INDEX_GC_KEEP_SOURCES`
+escape hatch for reviving a remote-ingest source without a code change.
+
 ## Sources and corpus config
 
 Registered source prefixes are `git`, `github`, `ado`, and `azure-devops`.
