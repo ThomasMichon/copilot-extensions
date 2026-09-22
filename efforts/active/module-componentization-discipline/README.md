@@ -1674,7 +1674,7 @@ the Phase 0 runbook, picked up as capacity allows.
   `python -m agent_dispatch producer-fence status --help` through the plugin
   test venv. The shrink-only baseline was then lowered again, from **4,357** to
   **3,624** lines for `plugins/agent-dispatch/src/agent_dispatch/__main__.py`.
-  Version bump for this slice: `agent-dispatch` **`0.1.2-dev175`**.
+  Version bump for this slice: `agent-dispatch` **`0.1.2-dev176`**.
 - Remaining seams are still clean enough to continue the same pattern: the
   task lifecycle + steering + query surface, the declarative loop families,
   supervise registration wiring, and the resolve/run/evaluate/charter family.
