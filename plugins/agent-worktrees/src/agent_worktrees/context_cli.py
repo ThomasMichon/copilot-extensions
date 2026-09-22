@@ -53,6 +53,16 @@ _GET_KEYS: dict[str, str] = {
     "pr-profile": "PR-flow profile: direct|pr-human-merge|pr-agent-merge (check first)",
 }
 
+#: Keys whose value can depend on the control-plane PR-graft overlay
+#: (``_control_plane_related_pr_map`` -- see ``config.load_config``'s
+#: ``include_control_plane_related_pr``). Every other key never reads
+#: ``repo.pr.*``, so skipping that overlay computation for them is safe and,
+#: per copilot-extensions#2660, the single highest-leverage latency fix for
+#: ``get`` (that computation alone measured 7-8s of an 8-15s total ``get``
+#: call, regardless of which key was actually requested -- a 13-subprocess,
+#: ~218-file-read installed-plugin/PR-graft walk with no caching).
+_PR_GRAFT_DEPENDENT_KEYS = frozenset({"pr-enabled", "pr-required", "pr-provider", "pr-profile"})
+
 
 def add_parsers(sub) -> None:
     sub.add_parser(
@@ -287,7 +297,9 @@ def cmd_get(args: argparse.Namespace) -> int:
                 _core()._activate_project_for_path(str(session_cwd))
 
     try:
-        config = cfg.load_config()
+        config = cfg.load_config(
+            include_control_plane_related_pr=key in _PR_GRAFT_DEPENDENT_KEYS
+        )
     except Exception as e:
         output.err(f"Cannot load config: {e}")
         return 1
