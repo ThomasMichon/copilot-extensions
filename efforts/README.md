@@ -11,6 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Draft | #3336 |
+| [Full-Harness Startup Reliability](active/full-harness-startup-reliability/README.md) | Active | #3303 |
 | [Ambient Guidance Navigability](active/ambient-guidance-navigability/README.md) | Active | #3033 |
 | [Unified Skill Review](active/unified-skill-review/README.md) | Draft | #2847 |
 | [Handoff Cutover Lifecycle Journal](active/handoff-cutover-lifecycle-journal/README.md) | Draft | #2457 |
