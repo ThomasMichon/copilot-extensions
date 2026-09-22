@@ -100,7 +100,7 @@ still-large composition root. If the operator prefers a fresh
 `agent-worktrees` file instead of another pass on the same one, `pr_ops.py`
 remains the next best candidate. **Within `agent-bridge`, the next slice is now
 `agent_registry.py`**: with `__main__.py` down to 485 lines and
-`session_manager.py` down to 785, the registry is the plugin's new dominant
+`session_manager.py` down to 771, the registry is the plugin's new dominant
 remaining offender.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
@@ -203,7 +203,7 @@ Verbatim from the operator:
             (`session_resume.py`), `_SessionPromptMixin`
             (`session_prompts.py`), `_SessionLifecycleMixin`
             (`session_lifecycle.py`), and `_SessionHandoffMixin`
-            (`session_handoff.py`), composed back through a 785-line
+            (`session_handoff.py`), composed back through a 771-line
             `session_manager.py` compatibility root that still owns the shared
             helper/exception surface and the test monkeypatch seams. This
             followed the same "single large class sharing instance state"
