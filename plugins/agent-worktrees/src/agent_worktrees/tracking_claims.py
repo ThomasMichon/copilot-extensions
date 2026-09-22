@@ -499,12 +499,12 @@ def orphanage_path(project: str | None = None) -> Path:
 
 def load_orphaned_obligations(project: str | None = None) -> list[dict]:
     try:
-        return tracking.load_orphaned_obligations_strict(project)
+        return _load_orphaned_obligations_strict_local(project)
     except Exception:
         return []
 
 
-def load_orphaned_obligations_strict(project: str | None = None) -> list[dict]:
+def _load_orphaned_obligations_strict_local(project: str | None = None) -> list[dict]:
     path = orphanage_path(project)
     if not path.exists():
         return []
@@ -515,6 +515,10 @@ def load_orphaned_obligations_strict(project: str | None = None) -> list[dict]:
     if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
         raise ValueError(f"invalid orphanage entries: {path}")
     return list(items)
+
+
+def load_orphaned_obligations_strict(project: str | None = None) -> list[dict]:
+    return _load_orphaned_obligations_strict_local(project)
 
 
 def rehome_abandoned_obligations(

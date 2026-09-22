@@ -314,7 +314,7 @@ def _load_repo_freshness(path: Path) -> dict:
 def record_repo_fetch_confirmed(repo: str, *, at: str | None = None) -> None:
     if not repo:
         return
-    path = _repo_freshness_path()
+    path = tracking._repo_freshness_path()
     try:
         with tracking._RecordLock(path, blocking=False) as lock:
             if not lock.acquired:
@@ -330,7 +330,7 @@ def repo_fetch_confirmed_at(repo: str) -> str | None:
     if not repo:
         return None
     try:
-        entry = _load_repo_freshness(_repo_freshness_path()).get(repo)
+        entry = _load_repo_freshness(tracking._repo_freshness_path()).get(repo)
     except Exception:
         return None
     if not isinstance(entry, dict):
