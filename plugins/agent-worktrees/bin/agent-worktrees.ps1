@@ -12,7 +12,18 @@ $env:PYTHONUTF8 = '1'
 # regardless of downstream provisioning path: this script never itself
 # imports Python modules, and the resolved interpreter's own site/venv
 # machinery re-establishes whatever of these it legitimately needs.
-foreach ($_pyEnvVar in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONEXECUTABLE', 'VIRTUAL_ENV', 'UV_INTERNAL__PYTHONHOME', '__PYVENV_LAUNCHER__')) {
+#
+# AGENT_RT_ROOT is included here too (#3220): unlike every other plugin's
+# binstub, which sets this variable itself immediately before dot-sourcing
+# the shared resolver, `resolve-runtime.ps1`'s local `_awr` fallback here
+# honors an *inherited* AGENT_RT_ROOT as an override. A value leaked from
+# another plugin's debugging session (Windows User/Machine scope, or baked
+# into a long-lived parent process' environment) then silently hijacks this
+# resolver into a different plugin's venv, failing with an opaque
+# "No module named agent_worktrees". Clearing it here restores this
+# binstub's own default (`~/.agent-worktrees`) every time, matching the
+# canonical per-invocation-scoping contract every other plugin follows.
+foreach ($_pyEnvVar in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONEXECUTABLE', 'VIRTUAL_ENV', 'UV_INTERNAL__PYTHONHOME', '__PYVENV_LAUNCHER__', 'AGENT_RT_ROOT')) {
     Remove-Item "Env:\$_pyEnvVar" -ErrorAction SilentlyContinue
 }
 # Resolve the runtime slot python SOLELY via the junction-free `current-version`

@@ -12,7 +12,14 @@ export PYTHONUTF8=1
 # the Windows binstub fix). A stray mismatched-architecture PYTHONHOME/
 # PYTHONPATH (or a leaked venv activation) otherwise survives into every
 # dispatch below.
-for _pyenvvar in PYTHONHOME PYTHONPATH PYTHONEXECUTABLE VIRTUAL_ENV UV_INTERNAL__PYTHONHOME __PYVENV_LAUNCHER__; do
+#
+# AGENT_RT_ROOT is included here too (#3220): resolve-runtime.sh's local
+# fallback honors an *inherited* AGENT_RT_ROOT as an override, unlike every
+# other plugin's binstub, which sets it itself immediately before sourcing
+# the shared resolver. A value leaked from another plugin's session then
+# silently hijacks this resolver into a different plugin's venv. Clearing it
+# here restores this binstub's own default every time.
+for _pyenvvar in PYTHONHOME PYTHONPATH PYTHONEXECUTABLE VIRTUAL_ENV UV_INTERNAL__PYTHONHOME __PYVENV_LAUNCHER__ AGENT_RT_ROOT; do
   unset "$_pyenvvar" 2>/dev/null || true
 done
 _awroot="$HOME/.agent-worktrees"
