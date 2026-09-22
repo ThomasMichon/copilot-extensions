@@ -303,6 +303,18 @@ Verbatim from the operator:
               lifecycle/admin command bodies themselves plus the
               registrar/execution helper implementations that still live in
               `__main__.py`.
+            - `agent-dispatch/__main__.py` sixth slice landed: extracted the
+              task lifecycle/admin command bodies into `task_lifecycle_cli.py`
+              (`claim`, `worktree-status`, `show`, `claimant`, `yield`,
+              `start`/`suspend`/`resume`/`release`, `pause`/`unpause`,
+              `embody`, `force-stop`, `reset`, `progress`, `focus`,
+              `complete`, `abandon`, and `reattach`) while deliberately
+              leaving the shared helper seams (`_simple`, `_split_owner`,
+              `_owner_from_identity`, `_resolve_owner`, `_hold_actor`,
+              `_read_result`) in `__main__` for the other already-extracted
+              families that still call through them. Remaining seams are now
+              the registrar/runtime helper band and the
+              resolve/run/evaluate helper band.
             - `agent-bridge/__main__.py` slice landed: the file is now a
               **485-line composition root** with focused sibling modules for
               service start/status (`service_start_cli.py`), daemon/process
@@ -1827,3 +1839,41 @@ the Phase 0 runbook, picked up as capacity allows.
   implementation bands: task lifecycle/admin, the registrar helper/runtime
   surface, and the resolve/run/evaluate helpers. The file is much closer to a
   true composition root now, but still above the 1,000-line cap.
+
+### 2026-09-22 — Phase 2 continued: `plugins/agent-dispatch/src/agent_dispatch/__main__.py` task-lifecycle body slice
+- Took the largest remaining implementation band next: the task lifecycle/admin
+  command bodies. Extracted a new `task_lifecycle_cli.py` (**375** lines)
+  holding the actual handlers for `claim`, `worktree-status`, `show`,
+  `claimant`, `yield`, `start`/`suspend`/`resume`/`release`,
+  `pause`/`unpause`, `embody`, `force-stop`, `reset`, `progress`, `focus`,
+  `complete`, `abandon`, and `reattach`.
+- Deliberately **did not** move the shared helper seams
+  (`_simple`, `_split_owner`, `_owner_from_identity`, `_resolve_owner`,
+  `_hold_actor`, `_read_result`) in this pass. Earlier drafts that tried to
+  move helpers and bodies together widened the blast radius because the already
+  extracted create/steering/query families still call through those helpers via
+  `agent_dispatch.__main__`. Leaving those helpers in place let the command
+  bodies move cleanly while preserving every existing monkeypatch surface.
+- Net result for the root module: `plugins/agent-dispatch/src/agent_dispatch/__main__.py`
+  shrank **2,203 -> 1,843** lines. This is still above the 1,000-line cap, but
+  the remaining code is now much closer to a true compatibility/composition
+  root plus a narrower band of helper logic.
+- Validation again met the full plugin bar. `python tools/run-plugin-tests.py
+  agent-dispatch` passed all six sub-suites green:
+  **3,311 passed / 31 skipped total** (sub-suite counts:
+  `761/5`, `418/11`, `641/14`, `663/1`, `732/0`, `96/4`
+  passed/skipped). Focused follow-up over the moved lifecycle/admin surfaces
+  also passed:
+  `python tools/run-plugin-tests.py agent-dispatch -k "claimant or complete or
+  start or yield or focus or pause or unpause or embody or force-stop or
+  reset or progress or resolution or cli"` -> **646 passed / 8 skipped /
+  2692 deselected**. Required guards then passed:
+  `ruff check --select F,E9 plugins/agent-dispatch`,
+  `python tools/check-module-size.py`,
+  `python tools/check-module-size.py --refresh-baseline`,
+  `python tools/check-install-contract.py`, and
+  `python tools/check-version-consistency.py`.
+- Read-only dogfood for the moved surface will use the plugin test venv help
+  paths (`claim --help`, `complete --help`, `abandon --help`, `focus --help`,
+  `embody --help`, `force-stop --help`) in the PR validation step. Version bump
+  for this slice: `agent-dispatch` **`0.1.2-dev180`**.
