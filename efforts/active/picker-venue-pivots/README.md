@@ -227,7 +227,12 @@ Tasks pivot are the baselines).
       (which of the ~16 real `fleet --json` fields become columns vs.
       subtitle vs. actions-gating, mirroring Codespaces' choices) and the
       Codespaces `subtitle` wiring + new live-session columns, as a design
-      note before writing manifest JSON.
+      note before writing manifest JSON. Both must produce line two as
+      `"[mark] <durable title> - <transient activity>"` (see the vision's
+      "Row grammar" concept) — not a bare fact string — with the durable
+      title sourced from the worktree-title cross-link (or venue identity
+      when unclaimed) and the transient activity sourced from the new
+      agent-bridge live-session join.
 - [ ] Render and review before/after screenshots for both pivots: current
       (real) shape vs. proposed shape, plus one screenshot each of a row
       with vs. without a live agent-bridge session joined.
@@ -298,6 +303,15 @@ Tasks pivot are the baselines).
 
 ## Journal
 
+- **2026-09-21 (later)** — Operator specified a precise row grammar: line
+  one stays columnar (`[ ] <id> STATUS <stats> <claims>`); line two is
+  free-form and must read as `"[mark] <durable title> - <transient
+  activity>"`, with the transient activity (not the title) truncated first
+  when space is short. Recorded as the vision's new "Row grammar" concept
+  and threaded through the Codespaces subtitle-wiring and Containers
+  parity plan items above — both were previously described only as
+  "restore/add a subtitle," now pinned to this exact two-part content
+  contract.
 - **2026-09-21** — Effort opened from an operator request to overhaul the
   Codespaces/Containers pivots. Initially drafted the vision/effort as if
   neither pivot existed ("no registered pivot surfaces a CodeSpace or an

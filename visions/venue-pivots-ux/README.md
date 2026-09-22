@@ -59,19 +59,70 @@ lifecycle state.
 
 ## Concepts & Components
 
-### The two-line row — an existing grammar, applied consistently
+### The row grammar — columnar line one, free-form "title - activity" line two
 
-The Picker already renders a generic two-line row for any declarative pivot:
-a primary line (columns, or an id/title/badges line for non-columnar
-pivots) plus an optional dim second line from `reg.subtitle_field`
-(`WorktreesView._row`/`_column_subtitle`, `RegisteredPivot.subtitle_field`).
-This is not new work — Bridges and Containers already declare a
-`subtitle_field`; Codespaces does not, despite `pool.py` already computing a
-rich subtitle (claim holder, orphaned-lock warning) that the manifest simply
-never maps to `entry.subtitle`. This vision's job is **consistent use** of
-the existing grammar across both pivots — wiring the dropped field, aligning
-which signal lands on line one (identity/status/key-status) vs. line two
-(descriptive detail) — not inventing a new renderer.
+This vision pins down a **precise row grammar** on top of the Picker's
+existing two-line rendering (`RegisteredPivot.subtitle_field` +
+`WorktreesView._row`/`_column_subtitle`), so every venue row — and, as
+Worktrees/Tasks converge on it, every pivot's row — reads the same way:
+
+```
+[ ] <id>  STATUS  <stat1> <stat2> <stat3>  <claim, claim, ...>
+  [mark] <durable subject/theme title> - <transient current activity>
+```
+
+- **Line one is columnar** — it lines up across every row in the pivot, the
+  same way the Worktrees/Codespaces column tables already do: a short id, a
+  palette-coloured primary status word, a handful of compact secondary
+  stat badges (the venue's own key-status axes — e.g. Codespaces'
+  `health`/`occupancy`/`safe`), and a claims list (prominent PR/issue refs).
+  Nothing here is prose; every field is a fixed-width or fit/shrunk column,
+  chosen so a operator's eye can scan straight down any one column across
+  every row.
+- **Line two is free-form**, not columnar, and carries exactly one
+  "**title - activity**" string: an optional leading **relation/mark**
+  glyph identifying what kind of thing follows (a driving-worktree link, an
+  orphaned-lock warning, a live-session marker — whatever the row's most
+  relevant cross-link is), then the **durable subject/theme title** — the
+  stable "what is this for" (a worktree's task title, a claimed PR's title,
+  the CodeSpace's own repo/branch context) — a literal `" - "` separator,
+  then the **transient current activity**: the most recent thing the row's
+  actual driving agent reported doing, which **may be cut** (ellipsis-
+  truncated) when it doesn't fit the render width. The durable title is
+  stable across many renders; the transient activity is expected to change
+  turn-to-turn and is the part most likely to be truncated first when
+  space is short.
+
+This is not a new rendering mechanism — `subtitle_field` and
+`_column_subtitle` already exist and already truncate to width — it is a
+**content contract** for what goes into that one field: durable title,
+literal `" - "`, transient activity, with an optional leading mark. Today,
+Codespaces drops its subtitle entirely (see below) and Containers' subtitle
+is just `image` (a durable fact, no transient activity, no mark) — neither
+currently follows this grammar. Bringing both into line is this vision's
+concrete row-level target.
+
+### Where "durable title" and "transient activity" come from
+
+Consistent with *derive-never-duplicate*, both halves of line two are read
+from whichever layer already owns them, never independently authored by the
+pivot:
+
+- **Durable subject/theme title** — the claiming worktree's own task title
+  (already resolved by the picker's `_worktree_title_map`, the same value
+  Codespaces' `worktree_title` column already carries) when a worktree is
+  driving the venue; falling back to the venue's own stable identity (repo
+  + branch, or the fleet/devcontainer spec name) when no worktree claims it.
+- **Transient current activity** — agent-bridge's most recent reported
+  beat for the live session in that venue (`LiveSessionInfo.latest_progress`
+  / whatever title/intent a session last reported), when one exists; absent
+  entirely (graceful-absence, not a placeholder) when no live session is
+  registered for the venue.
+- **Relation/mark** — a single glyph naming which of these signals is
+  present and most relevant right now (driving-worktree link vs. an
+  orphaned-lock warning vs. a live vs. idle session) — reusing whatever
+  glyph vocabulary the Worktrees/Tasks panes already use for an equivalent
+  distinction, not a new one invented for this pivot.
 
 ### Codespaces: already repo-grouped; wire the dropped subtitle, add the live-session join
 
@@ -84,19 +135,22 @@ cross-links to the claiming local worktree (resolved to that worktree's task
 title via the picker's own `_worktree_title_map`), and Release/Recycle/Verify
 actions are gated on disposition/safety. Two real gaps remain:
 
-- **The dropped subtitle.** `picker_payload` computes `subtitle` (claim
-  holder, cross-machine hold, orphaned-lock warning) on every entry, but the
-  manifest's `entry` mapping never declares `"subtitle"`, so
-  `subtitle_field` stays unset and the computed line is silently never
-  rendered. Wiring it in is a one-line manifest fix with real information
-  restored.
+- **The dropped subtitle, and the missing "- activity" half.**
+  `picker_payload` computes a `subtitle` (claim holder, cross-machine hold,
+  orphaned-lock warning) on every entry, but the manifest's `entry` mapping
+  never declares `"subtitle"`, so `subtitle_field` stays unset and the
+  computed line is silently never rendered — a one-line manifest fix
+  restores the **durable-title** half of line two. It still needs the
+  **transient-activity** half appended (see next point) to fully match the
+  row grammar's `"<title> - <activity>"` shape, not just the title alone.
 - **No remote-session join.** Nothing today reads agent-bridge's
   `LiveSessionInfo`/`LiveSessionVenue` for a CodeSpace-hosted session. Where
   agent-bridge has a live registration keyed by `venue.kind == "codespace"`
-  and `venue.target` matching this entry, the row should surface what
-  agent-bridge already receives back: the session's title, latest reported
-  progress/intent, and liveness — genuinely new information, not a
-  duplication of the existing worktree/task-title cross-link.
+  and `venue.target` matching this entry, the row's line two gains its
+  `" - "` and transient-activity half from what agent-bridge already
+  receives back: the session's latest reported progress/intent — genuinely
+  new information, not a duplication of the existing worktree/task-title
+  cross-link, which stays the durable-title half.
 
 ### Containers: bring to Codespaces' fidelity; same live-session join
 
@@ -116,13 +170,15 @@ this pivot to parity means:
   genuinely picker-worthy) instead of the current bare badge list.
   Grouping by fleet (the container analogue of "repo @ account").
   Wiring `lease` to a `worktree` cross-link the same way Codespaces already
-  does.
+  does — giving line two a real **durable title** (today's subtitle is
+  just `image`, a durable fact with no title/activity structure at all).
 - Adding gated actions analogous to Release/Recycle/Verify — a container
   fleet member's own lifecycle (`lifecycle.py`, `lease.py`, `rescue.py`
   already model start/stop/remove/rescue) deserves the same menu treatment
   Codespaces already has, not a read-only list.
 - The same agent-bridge live-session join as Codespaces, keyed by
-  `venue.kind == "container"` and `venue.target`.
+  `venue.kind == "container"` and `venue.target`, supplying line two's
+  **transient-activity** half exactly as it does for Codespaces.
 
 Both pivots converge on one shared column vocabulary and lifecycle-state
 palette so an operator reads a CodeSpace row and a fleet-container row the
@@ -166,12 +222,14 @@ session into it."
 
 ## Features
 
-### two-line-row-consistency
-Both pivots wire the Picker's existing `subtitle_field` grammar
-consistently: identity/status/key-status/cross-links on the primary
-line/columns, a descriptive second line (claim holder, orphan warnings,
-image/spec detail) — Codespaces gets its already-computed subtitle restored;
-Containers gains one for the first time.
+### row-grammar-consistency
+Line one of every Codespaces/Containers row is columnar
+(id/status/key-status/claims); line two carries exactly one
+`"<mark> <durable title> - <transient activity>"` string. Codespaces gets
+its already-computed durable title restored (currently dropped) and gains
+the transient-activity half for the first time; Containers gains both
+halves for the first time (today's subtitle is a bare `image` fact with
+neither title nor activity structure).
 
 ### codespaces-pivot-parity
 The CodeSpaces pivot keeps its existing repo-grouped, columnar,
@@ -214,7 +272,21 @@ claims renders its row with those fields simply omitted — never an error,
 a stale value, or a blocked pivot load. A pivot with zero venues (no
 CodeSpaces provisioned, no fleet yet built) renders an empty-state hint
 with the New-venue action, matching the existing pivot-registry contract's
-"a bad or absent pivot simply doesn't appear" defensiveness.
+"a bad or absent pivot simply doesn't appear" defensiveness. When only one
+half of line two's `"<title> - <activity>"` is available (a durable title
+with no live session, or — never expected, but degrade the same way if it
+occurs — activity with no resolvable title), the row shows that half alone
+rather than a dangling `" - "` separator or a placeholder for the missing
+half.
+
+### transient-truncates-first
+When line two doesn't fit the render width, the **transient activity**
+half is truncated (ellipsis) before the durable title is touched — the
+title is the stable fact an operator relies on to recognize the row across
+renders; the activity is already expected to change turn-to-turn and is
+the cheaper thing to lose first. The leading relation/mark glyph is never
+dropped for width; it is the cheapest, most information-dense element on
+the line.
 
 ### preview-before-implement
 Every visual iteration on either pivot's row/menu/empty-state design is
@@ -256,6 +328,12 @@ demo data source, before any implementation PR — never a hand-drawn mockup.
 
 ## Provenance
 
+- **2026-09-21 (later)** — Operator specified the precise row grammar:
+  columnar line one, free-form `"[mark] <durable title> - <transient
+  activity>"` line two, with the activity (not the title) the first thing
+  truncated. Added as the "Row grammar" concept and threaded through the
+  Codespaces/Containers sections and a new `transient-truncates-first`
+  behavior.
 - **2026-09-21** — Conceived from an operator request to overhaul the
   under-served Codespaces/Containers pivots. Initially drafted as if
   neither pivot existed; corrected after re-grounding against the real
