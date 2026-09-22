@@ -26,6 +26,26 @@
   "summary": "{spent_cores}/{total_cores} cores in use \u00b7 {headroom_cores} free \u00b7 {running_count}/{total_count} running   {note}",
   "actions": [
     {
+      "label": "Open into a CLI session",
+      "run": ["agent-bridge", "attach", "{id}"],
+      "when": {"sess": "LIVE"},
+      "description": "PROPOSED \u2014 semantics not yet implemented (Phase 3). Attaches to this CodeSpace's own muxed Copilot instance over the fabric's SSH transport."
+    },
+    {
+      "label": "View driving worktree",
+      "run": ["agent-worktrees", "goto", "{worktree}"],
+      "when": {"sess": ["LIVE", "IDLE"]},
+      "description": "PROPOSED \u2014 semantics not yet implemented (Phase 4). Jumps to this CodeSpace's driving worktree's own Worktrees-pivot entry."
+    },
+    {
+      "label": "Worktree status",
+      "kind": "card",
+      "title_from": "worktree_status.title",
+      "body_from": "worktree_status.body",
+      "when": {"sess": ["LIVE", "IDLE"]},
+      "description": "PROPOSED \u2014 semantics not yet implemented (Phase 4). Opens the driving worktree's own Worktree Status card directly, mirroring agent-dispatch's Tasks-pane direction."
+    },
+    {
       "label": "Release",
       "run": ["agent-codespaces", "release", "{id}"],
       "when": {"disposition": "in-use"},
