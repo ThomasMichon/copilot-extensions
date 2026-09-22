@@ -2502,3 +2502,60 @@ against current ownership, added a bounded relay-prune pass, and updated the
 board/local-coordinator tests accordingly. Because those follow-ups again
 changed plugin payload, bumped `agent-dispatch` to `0.1.2-dev168`. Targeted
 validation re-ran green at **193 passed**.
+
+### 2026-09-21 — Checked the Phase 0 preview screenshots; found and fixed a manifest drift
+The operator asked to check the Phase 0 design-preview screenshots (captured
+2026-09-17, kept in the operator's own local evidence-storage location,
+outside this repo) for use as visual-regression and vision-alignment assets
+going forward.
+
+Reviewed all 10 images directly. Every layout/interaction rule they document
+still holds against the current engine: the phase-colour palette, the
+column-fit drop-with-"+N"-indicator at the narrow (118-col) width vs. all-
+columns-shown at the wide (160-col) width, and every phase's task-menu
+content (the `cli_openable` matrix — CLI-open excluded for Blocked/Started/
+Queued-pooled, offered for Proposed/Suspended/Queued-unpooled — plus the
+charter viewer and steer-modal reuse) all still match. No regression there.
+
+Set up the two prerequisite venvs (`plugins/agent-worktrees/.venv`,
+`worktree-manager/.venv`) plus the `picker-snapshot` npm package, and reran
+`render_tasks_preview.py` today to get a fresh baseline against the *current*
+engine rather than trusting five-day-old images. Diffing the two sets found:
+
+1. **A real, fixable drift**: this preview's own
+   `agent-dispatch.proposed.json` manifest had fallen out of sync with the
+   real shipped `plugins/agent-dispatch/pivots/agent-dispatch.json` --
+   missing the WT column's `"style": "bold cyan"` (the 2026-09-20 operator-
+   feedback fix) and every column's `priority` field (silently relying on
+   declaration order instead, which happens to agree with production's
+   priorities today but isn't guaranteed to as either manifest evolves).
+   Fixed by syncing both fields from the real manifest; reran the preview
+   and confirmed the WT column now renders bold cyan, matching production.
+   Verified with the full `production_picker` suite (**653 passed, 1
+   skipped**) after the change.
+2. **A known, out-of-scope gap, not fixed here**: several of this preview's
+   own `actions` entries are still labelled "PROPOSED — not yet
+   implemented" even though Phases 1-4 (and now 5/8) landed real
+   implementations for several of them (pause, force-stop, reset-to-
+   proposed, open-cli). Reconciling the preview's action descriptions with
+   the real, now-implemented backend verbs is a distinct, larger pass (it
+   touches every action's actual argv/semantics, not just two column
+   fields) -- flagged as its own follow-up rather than attempted as a side
+   effect of a screenshot check.
+3. Cosmetic-only, not a regression: the fixture's machine/repo names
+   changed between the two capture dates (from real-looking internal names
+   to neutral placeholders) -- a positive identifier-neutrality improvement
+   to the fixture data, unrelated to engine behavior.
+
+**Going forward, this is the visual-regression workflow -- explicitly a
+local-only, single-operator practice, not a repository-accessible or
+CI-enforced one**: rerun `render_tasks_preview.py` and diff by eye against
+the operator's own previously-saved reference set before merging any
+change that touches `engine.py`'s render/column-fit path, `pivots.py`'s
+manifest contract, or this pivot's own manifest. This repo's own
+`tasks-preview/.gitignore` deliberately keeps generated PNGs out of git as
+binary artifacts, and no shared/reproducible baseline location exists for
+this tool today -- so no other contributor or CI can currently perform this
+diff; only the operator running the tool locally can. Refreshed the
+operator's own reference set with today's fresh, manifest-fixed capture,
+superseding the 2026-09-17 one.
