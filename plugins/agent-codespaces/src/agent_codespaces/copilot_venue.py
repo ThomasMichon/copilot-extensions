@@ -88,6 +88,72 @@ def _resolve_anchor_identity(name: str, config) -> str:  # noqa: ANN001
     return f"anchor-{repo_name}"
 
 
+def _ensure_agent_bridge_plugin(name: str) -> None:
+    """Implicit CLI-mode preflight: install the ``agent-bridge`` Copilot
+    plugin on the venue if it's missing, before ever opening the interactive
+    connection.
+
+    Without this plugin loaded in the *remote* Copilot process, that process
+    never self-registers back to the host daemon -- the interactive session
+    runs perfectly normally but its CLI-mode reservation is never claimed,
+    silently (confirmed live: a real CodeSpace session ran for 5+ minutes
+    with zero registration, purely because this was missing). This is a
+    precondition of the `copilot` verb's own contract, not a project policy
+    choice, so it's applied unconditionally here -- no `--fix`/opt-in needed,
+    unlike `agent-codespaces doctor`'s other remediations. Best-effort: a
+    probe/install failure here is reported but never blocks the connection
+    attempt (the operator may still want to attach and diagnose by hand).
+    """
+    import asyncio
+
+    from . import venue_check
+    from .lifecycle import account_for_codespace
+
+    async def _probe_and_fix() -> None:
+        from ssh_manager import ConnectionManager
+
+        from .codespace_config import CodespaceSource
+
+        source = CodespaceSource(name, account=account_for_codespace(name))
+        manager = ConnectionManager()
+        await manager.ensure_connected(name, source, [])
+        try:
+            readiness = await venue_check.check_remote_venue(
+                manager.exec_command, name,
+            )
+            if readiness.agent_bridge_plugin:
+                return
+            print(
+                f"[PREP] agent-bridge plugin missing on '{name}' -- "
+                "installing (CLI-mode sessions can't self-register without "
+                "it) ...",
+                file=sys.stderr,
+            )
+            remediation = await venue_check.remediate_remote_venue(
+                manager.exec_command, name, readiness,
+            )
+            if "install agent-bridge plugin" in remediation.succeeded:
+                print("[PREP] agent-bridge plugin installed.", file=sys.stderr)
+            else:
+                print(
+                    "[PREP] Could not install agent-bridge plugin "
+                    f"automatically -- CLI-mode registration may not work. "
+                    f"Run `agent-codespaces doctor {name} --fix` to retry.",
+                    file=sys.stderr,
+                )
+        finally:
+            await manager.disconnect(name)
+
+    try:
+        asyncio.run(_probe_and_fix())
+    except Exception as exc:  # noqa: BLE001 -- best-effort, never fatal
+        print(
+            f"[PREP] agent-bridge preflight probe failed ({exc}) -- "
+            "continuing anyway.",
+            file=sys.stderr,
+        )
+
+
 def cmd_copilot(
     args: argparse.Namespace,
     *,
@@ -115,7 +181,15 @@ def cmd_copilot(
 
     ``interactive_ssh`` is injected (``__main__._interactive_ssh``) rather than
     imported, to avoid a circular import between this module and ``__main__``.
+
+    Before connecting, implicitly ensures the ``agent-bridge`` Copilot
+    plugin is installed on the venue (see ``_ensure_agent_bridge_plugin``) --
+    a single-shot prep step so an operator/caller never has to run
+    ``agent-codespaces doctor --fix`` by hand before their first CLI-mode
+    session on a given CodeSpace.
     """
+    _ensure_agent_bridge_plugin(args.name)
+
     from venue_copilot import VenueCopilotError, resolve_daemon_port, run_venue_copilot
 
     from . import connection_owner as _owner
