@@ -322,6 +322,33 @@ def test_changed_since_still_checks_a_baseline_entry_this_diff_edits(
     assert "[INFO]" in result.stdout
 
 
+def test_changed_since_still_checks_a_baseline_entry_this_diff_removes(
+    repo: Path,
+):
+    # Symmetric with the lowering case above: REMOVING a baseline entry
+    # entirely (not just editing its value) must also be re-checked, even
+    # though the removed key no longer appears in the "after" baseline dict
+    # at all -- _changed_baseline_keys must surface it via the "before-only"
+    # side of the diff, not just the "after" side.
+    _write_lines(repo, "src/legacy.py", 5000)
+    _write_baseline(repo, {"src/legacy.py": 5000})
+    _commit_all(repo)
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    _write_baseline(repo, {})  # bogus/mistaken removal; file is still 5000 lines
+    _commit_all(repo)
+
+    result = _run(repo, "--changed-since", base_sha)
+
+    # A removed entry falls back to the hard 1,000-line cap (no baseline
+    # entry == no grandfathering), so the still-5,000-line file must fail.
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "src/legacy.py" in result.stdout
+    assert "[INFO]" in result.stdout
+
+
 def test_changed_since_with_baseline_touch_does_not_blame_unrelated_drift(
     repo: Path,
 ):

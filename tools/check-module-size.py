@@ -81,7 +81,7 @@ Usage::
     python tools/check-module-size.py --changed-since REF  # enforce, PR-diff-scoped (CI pull_request);
                                                              # if REF's diff touches
                                                              # tools/module-size-baseline.json, also
-                                                             # checks every entry that edit itself
+                                                             # checks every entry that diff itself
                                                              # added/changed/removed
     python tools/check-module-size.py --refresh-baseline  # tighten after shrinking a file
     python tools/check-module-size.py --refresh-baseline --allow-widen  # post-merge only; see above
@@ -137,10 +137,10 @@ def _diff_touches_baseline(base_ref: str) -> bool:
     """True when this branch's own commits touch the baseline JSON itself.
 
     A baseline-only edit (or one that edits the baseline alongside files
-    outside ``*.py``) must never be scoped by ``--changed-since``: a ceiling
-    can be lowered/removed for a file the diff's ``*.py``-only file list would
-    otherwise skip entirely, silently passing a now-inconsistent baseline
-    that only the (disabled-for-PRs) full sweep would have caught.
+    outside ``*.py``) must never be scoped by ``--changed-since`` using only
+    its ``*.py`` file list: a ceiling can be lowered/removed for a file that
+    list would otherwise skip entirely. See ``_changed_baseline_keys`` for
+    how that gap is closed without falling back to a fully unscoped sweep.
     """
     out = subprocess.run(
         ["git", "diff", "--name-only", f"{base_ref}...HEAD", "--", str(BASELINE_PATH)],
