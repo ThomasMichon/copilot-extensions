@@ -991,23 +991,36 @@ no lifecycle-control logic invented at this layer.
       (see the Journal entry of the same date for the full writeup) — the
       "agent-dispatch-side relay" design:**
 
-      1. **A new poll tick inside the already-resident `supervise daemon`**
-         (alongside its existing `reconcile_liveness` cadence), scoped only
-         to worktree ids currently referenced by a non-terminal task
-         (`owner`'s worktree, or a pinned `target_worktree` for an
-         unclaimed task) — never the whole fleet. For each, it shells out to
-         `agent-worktrees worktree-status-bundle --worktree <id>` (the same
-         real-caller path the accelerator's own audit now hardens) — **from
-         the daemon's own background thread, never the render/click path**,
-         so it is not the subprocess-free consumer the pattern doc's named
-         exception describes; it is simply one more ordinary, coalesced
-         caller of the accelerator, exactly as *external-status-consumer-
-         contract* describes.
-      2. **A local relay cache, not a task-row column.** The daemon writes
-         each fetched projection (git state, session lineage, liveness, the
-         claims graph — never message history, which stays excluded per
-         *Not a transcript or event warehouse*) plus a `fetched_at`
-         timestamp and the accelerator's own forwarded per-fact freshness/
+      1. **A new asyncio task inside the coordinator service** (`coordinator.py`'s
+         resident ASGI app — the always-running process every client
+         including `board_cli` actually talks to), alongside its existing
+         `_gc_loop`/`_orphan_reap_loop` tasks (**correction, Copilot review
+         2026-09-21**: the design originally named `supervise daemon` for
+         this, but that component is optional, only reconciles registered
+         subprocesses, and does not own liveness reconciliation at all —
+         `LivenessMixin.reconcile_liveness` runs inside `_gc_loop`, itself an
+         `asyncio.create_task` the coordinator schedules directly, per
+         `coordinator.py`'s own `serve()`; the relay tick belongs alongside
+         that, in the same always-resident process, not the optional
+         supervisor). A new `_worktree_status_relay_loop` task, wired the
+         same way `sweeper`/`orphan_reaper` already are, scoped only to
+         worktree ids currently referenced by a non-terminal task (`owner`'s
+         worktree, or a pinned `target_worktree` for an unclaimed task) —
+         never the whole fleet. For each, it calls out to `agent-worktrees
+         worktree-status-bundle --worktree <id>` (the same real-caller path
+         the accelerator's own audit now hardens) — from this async task
+         (a subprocess call off the request-handling path, e.g. via
+         `asyncio.create_subprocess_exec` or a thread executor), never the
+         render/click path — so it is not the subprocess-free consumer the
+         pattern doc's named exception describes; it is simply one more
+         ordinary, coalesced caller of the accelerator, exactly as
+         *external-status-consumer-contract* describes.
+      2. **A local relay cache, not a task-row column.** The coordinator
+         writes each fetched projection (git state, session lineage,
+         liveness, the claims graph — never message history, which stays
+         excluded per *Not a transcript or event warehouse*) plus a
+         `fetched_at` timestamp and the accelerator's own forwarded per-fact
+         freshness/
          unconfirmed markers to a small file under agent-dispatch's own
          runtime state dir (e.g. `worktree-status-relay.json`/sqlite,
          mirroring the accelerator's own cache-file pattern for concurrent-
@@ -1017,8 +1030,8 @@ no lifecycle-control logic invented at this layer.
          schema'd record — as a second, independently-aging copy of
          worktree state. This relay is not part of any task's record at
          all: it is a keyed-by-worktree-id, purely rebuildable cache the
-         daemon may drop or fall behind on at will, with nothing about a
-         task's lifecycle or completion depending on its presence or
+         coordinator may drop or fall behind on at will, with nothing about
+         a task's lifecycle or completion depending on its presence or
          freshness — the same "warmth, not truth" posture the accelerator's
          own cache already has one layer in.
       3. **The render path reads only this local file — never a
@@ -1030,12 +1043,12 @@ no lifecycle-control logic invented at this layer.
          never blocks the render or a card click, matching the pattern
          doc's own `subprocess-free-consumer-reports-stale-on-timeout`
          scenario shape exactly.
-      4. **Cold-start prewarm resolves the open question below:** on daemon
-         startup, and whenever a task transitions from terminal back to a
-         tracked/live state, that worktree's first poll is scheduled
-         immediately rather than waiting for the next periodic tick — the
-         same pattern already proven in this exact effort for the
-         `_setup_live_pivots`/`_prewarm_machine_key_map` cold-start fix
+      4. **Cold-start prewarm resolves the open question below:** on
+         coordinator startup, and whenever a task transitions from terminal
+         back to a tracked/live state, that worktree's first poll is
+         scheduled immediately rather than waiting for the next periodic
+         tick — the same pattern already proven in this exact effort for
+         the `_setup_live_pivots`/`_prewarm_machine_key_map` cold-start fix
          (see the Phase 4 Journal entries above).
       5. **Phase 5 reuse:** the claims graph lives in the same per-worktree
          projection this relay already caches, so Phase 5's
@@ -1056,7 +1069,7 @@ no lifecycle-control logic invented at this layer.
       specifically are Phase 5's own field** (see that phase's 2026-09-20
       note) — Phase 8 renders whatever Phase 5 exposes rather than
       computing claims itself.
-- [ ] Implement the relay poller in `supervise daemon` (step 1-2 above),
+- [ ] Implement the relay poller in the coordinator service (step 1-2 above),
       the render-path reader in `board_cli`/`__main__.py`'s `inbox --board`
       (step 3), the cold-start prewarm hook (step 4), and the two
       regression tests (step 6). Wire Phase 5's `artifacts_summary` to the
@@ -2227,10 +2240,10 @@ bypass, a cache eviction race), **#3186** (Phase 7 ground-truth auditor +
 telemetry), and **#3206** (redesigned the auditor's own daemon-liveness
 check to boot-and-wait like a real caller, after live scheduled-audit runs
 caught the resident monitor's own idle-exit being misreported as an
-outage). Deployed and confirmed live on `tmichon-cloud1`. This session
-picked the effort back up and scoped the design Phase 8 explicitly deferred
-("not yet designed or scoped into concrete steps... an open cold-start
-question").
+outage). Deployed and confirmed live on the operator's own machine. This
+session picked the effort back up and scoped the design Phase 8 explicitly
+deferred ("not yet designed or scoped into concrete steps... an open
+cold-start question").
 
 **Resolved design: the agent-dispatch-side relay.** Read `board_cli`'s
 render path (`__main__.py`'s `inbox --board`) and the pattern doc's
@@ -2240,9 +2253,15 @@ The render path's own documented contract ("no agent-worktrees/agent-bridge
 subprocesses on the Picker read path") is absolute — it cannot itself dial
 the accelerator, cold-boot it, or wait on it, per the pattern doc's named
 exception for exactly this shape of caller. The already-resident
-`agent-dispatch` `supervise daemon` (which already runs a periodic
-`reconcile_liveness` tick) is the natural place to do that dialing instead,
-on its own background thread, writing what it learns to a small local
+`coordinator.py` service (its own asyncio app, alongside its existing
+`_gc_loop`/`_orphan_reap_loop` tasks) is the natural place to do that
+dialing instead — **correction, Copilot review 2026-09-21:** the design
+originally named `supervise daemon` for this, but that component is
+optional and only reconciles registered subprocesses; `reconcile_liveness`
+actually runs inside `_gc_loop`, an `asyncio.create_task` the coordinator
+itself schedules, so the relay tick belongs alongside that in the same
+always-resident process, not the optional supervisor. A new
+`_worktree_status_relay_loop` task writes what it learns to a small local
 relay file — explicitly **not** the task-row write the 2026-09-20 Copilot
 review rejected (that review's objection was a projection persisted into
 the task's own durable, schema'd record; this relay is keyed by worktree id,
