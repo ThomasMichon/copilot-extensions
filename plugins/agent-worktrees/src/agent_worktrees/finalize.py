@@ -56,6 +56,45 @@ from .config import Config
 from .finalize_lock import FinalizeLock
 
 
+def _release_codespace_claims_for_worktree(worktree_id: str) -> None:
+    """Best-effort safety net: release every real ``agent-codespaces`` claim
+    this worktree holds, as the last line of defense before finalize
+    completes.
+
+    The ``tracking.release_all_resources`` call this runs alongside only
+    clears THIS repo's own bookkeeping ledger of what a worktree claimed --
+    it never calls back out to the venue plugin that actually enforces
+    exclusivity (``agent-codespaces``' own ``leases.json``). Without this, a
+    worktree that forgot (or crashed before) releasing a CodeSpace claim
+    explicitly would leave that claim live past its own finalization,
+    blocking every future dispatch to that CodeSpace until its TTL sweep
+    eventually reclaims it -- silently, potentially for hours.
+
+    Shells ``agent-codespaces release-claim --owner <worktree_id> --all``
+    (marketplace-isolation: agent-worktrees never imports a sibling plugin's
+    runtime) rather than trying to resolve which CodeSpace(s) this worktree
+    claimed from the ledger above -- deliberately over-releasing: an
+    already-clear or absent claim is a harmless no-op, and it is always
+    better to over-release than to leave a stale claim behind. Absent
+    binstub / any failure is swallowed -- this must never block finalize.
+    """
+    import subprocess
+
+    from agent_procutil import no_window_flags
+
+    binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
+    if not binstub:
+        return
+    try:
+        subprocess.run(
+            [binstub, "release-claim", "--owner", worktree_id, "--all"],
+            capture_output=True, text=True, timeout=30,
+            creationflags=no_window_flags(),
+        )
+    except Exception:
+        pass
+
+
 def _has_live_session(record) -> bool:
     """Return True if this worktree has a live bound Copilot session.
 
@@ -1877,6 +1916,20 @@ def validate_and_finalize(
             # orphans governed by their own prune safety.
             released = tracking.release_all_resources(record, save=False)
             tracking.update_status(record, "finalized")
+            # Actually release any real CodeSpace claim(s) this worktree holds
+            # in agent-codespaces' own lease store -- distinct from (and a
+            # necessary complement to) the bookkeeping-only ledger release
+            # just above, which only clears THIS repo's own claim records and
+            # never calls back out to the venue plugin that actually enforces
+            # exclusivity. Without this, a worktree that forgot to release a
+            # CodeSpace claim explicitly (or crashed before doing so) would
+            # leave that claim live in agent-codespaces' leases.json past its
+            # own finalization, blocking every future dispatch to that
+            # CodeSpace until the claim's TTL eventually expired. This is the
+            # "worst case at worktree finalization" backstop: best-effort,
+            # over-release rather than under-release (an already-clear claim
+            # is a harmless no-op), and never blocks finalize on failure.
+            _release_codespace_claims_for_worktree(worktree_id)
             # Reset the postToolUse disposition-nudge sidecar (#nudge): a
             # finalized worktree's disposition is sealed, so drop its drift
             # counter. Best-effort -- the nudge hook also self-heals on a

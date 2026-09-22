@@ -136,6 +136,47 @@ def test_release_claim_cmd(monkeypatch, capsys):
     assert "Released claim on cs-x" in capsys.readouterr().out
 
 
+def test_release_claim_cmd_all_releases_every_claim_for_owner(monkeypatch, capsys):
+    """The safety-net bulk form (``--all``, no CodeSpace positional) used by
+    ``agent-worktrees finalize`` -- releases every claim the owner holds via
+    ``lease.release_worktree_claims``, not a single named CodeSpace."""
+    monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+    seen: dict = {}
+
+    def fake_release_all(owner, **kw):
+        seen["owner"] = owner
+        return ["cs-a", "cs-b"]
+
+    monkeypatch.setattr(lease_mod, "release_worktree_claims", fake_release_all)
+
+    rc = main(["release-claim", "--owner", "/wt/a", "--all"])
+
+    assert rc == 0
+    assert seen == {"owner": "/wt/a"}
+    out = capsys.readouterr().out
+    assert "Released 2 claim(s)" in out
+    assert "cs-a" in out and "cs-b" in out
+
+
+def test_release_claim_cmd_all_with_nothing_to_release(monkeypatch, capsys):
+    monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+    monkeypatch.setattr(lease_mod, "release_worktree_claims", lambda owner, **kw: [])
+
+    rc = main(["release-claim", "--owner", "/wt/a", "--all"])
+
+    assert rc == 0
+    assert "No claims owned by" in capsys.readouterr().out
+
+
+def test_release_claim_cmd_requires_name_or_all(monkeypatch, capsys):
+    monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+
+    rc = main(["release-claim", "--owner", "/wt/a"])
+
+    assert rc == 2
+    assert "Either a CodeSpace name or --all" in capsys.readouterr().err
+
+
 def test_claim_cmd_disabled_env_is_noop(monkeypatch, capsys):
     """With the global escape hatch set, the CLI ``claim`` is a no-op success --
     parity with the ``ssh`` direct path, so a daemon shelling ``claim`` with
