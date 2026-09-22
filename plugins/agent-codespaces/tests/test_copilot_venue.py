@@ -133,6 +133,18 @@ def _no_agent_bridge_preflight(request, monkeypatch):
     monkeypatch.setattr(copilot_venue, "_ensure_agent_bridge_plugin", lambda name: None)
 
 
+@pytest.fixture(autouse=True)
+def _no_claim_enforcement(request, monkeypatch):
+    """The exclusive-claim check (`lease.claim_for_connect`) shells out to
+    `agent-worktrees` -- irrelevant to every test below except its own
+    dedicated coverage (`TestCmdCopilotClaimEnforcement`), so it's a no-op
+    everywhere else unless a test explicitly re-patches it."""
+    if request.cls is not None and request.cls.__name__ == "TestCmdCopilotClaimEnforcement":
+        return
+    from agent_codespaces import lease
+    monkeypatch.setattr(lease, "claim_for_connect", lambda *a, **kw: None)
+
+
 def _ns(**kw):
     defaults = dict(
         name="cs-1",
@@ -351,6 +363,123 @@ class TestCmdCopilotAnchorDefault:
         assert rc == 1
         assert "already has an active reservation" in capsys.readouterr().err
         assert "cs-1" not in owner._read_holds()
+
+
+class TestCmdCopilotClaimEnforcement:
+    """agent-bridge-cli-mode-sessions Phase 4 follow-up: `copilot` previously
+    never enforced the exclusive, worktree-keyed CodeSpace claim
+    `agent-codespaces ssh` already does -- a live claim held by one
+    worktree/machine was silently bypassable simply by using `copilot`
+    instead of `ssh` to drive the same CodeSpace. Confirmed live: a CLI-mode
+    session was driven successfully on a CodeSpace a different, still-live
+    worktree on another machine had legitimately claimed."""
+
+    def _patch_common(self, monkeypatch, store):
+        monkeypatch.setattr(owner, "ensure_owner_running", lambda config: True)
+        monkeypatch.setattr(config_mod, "load_merged_config", lambda: object())
+        monkeypatch.setattr("venue_copilot.resolve_daemon_port", lambda: None)
+        monkeypatch.setattr(
+            "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+        )
+
+    def test_claim_conflict_refuses_before_connecting(
+        self, store, monkeypatch, capsys,
+    ) -> None:
+        from agent_codespaces import lease
+
+        self._patch_common(monkeypatch, store)
+
+        def fake_claim(name, *, force=False, effort=None, session_id=None):
+            raise lease.ClaimConflict("cs-1", "other-worktree", "other-host", 4242)
+
+        monkeypatch.setattr(lease, "claim_for_connect", fake_claim)
+        connected = {"called": False}
+
+        def fake_run_venue_copilot(*a, **kw):
+            connected["called"] = True
+            return 0
+
+        monkeypatch.setattr("venue_copilot.run_venue_copilot", fake_run_venue_copilot)
+
+        rc = copilot_venue.cmd_copilot(_ns(), interactive_ssh=lambda *a, **kw: 0)
+
+        assert rc == 75  # _BUSY_EXIT
+        assert connected == {"called": False}
+        err = capsys.readouterr().err
+        assert "[BUSY]" in err
+        assert "--force-claim" in err
+
+    def test_coordination_rejected_refuses_before_connecting(
+        self, store, monkeypatch, capsys,
+    ) -> None:
+        from agent_codespaces import lease
+
+        self._patch_common(monkeypatch, store)
+
+        def fake_claim(name, *, force=False, effort=None, session_id=None):
+            raise lease.CoordinationRejected("not-durable: no L2 lease backend")
+
+        monkeypatch.setattr(lease, "claim_for_connect", fake_claim)
+        connected = {"called": False}
+        monkeypatch.setattr(
+            "venue_copilot.run_venue_copilot",
+            lambda *a, **kw: connected.__setitem__("called", True),
+        )
+
+        rc = copilot_venue.cmd_copilot(_ns(), interactive_ssh=lambda *a, **kw: 0)
+
+        assert rc == 78  # _COORDINATION_EXIT
+        assert connected == {"called": False}
+        assert "[BLOCKED]" in capsys.readouterr().err
+
+    def test_force_claim_and_effort_are_forwarded(self, store, monkeypatch) -> None:
+        self._patch_common(monkeypatch, store)
+        monkeypatch.setattr(
+            "venue_copilot.run_venue_copilot",
+            lambda worktree_id, *, connect, **kw: connect(
+                "agent-worktrees copilot --worktree-id wt-A",
+            ),
+        )
+        seen = {}
+
+        def fake_claim(name, *, force=False, effort=None, session_id=None):
+            seen.update(name=name, force=force, effort=effort)
+
+        from agent_codespaces import lease
+        monkeypatch.setattr(lease, "claim_for_connect", fake_claim)
+
+        rc = copilot_venue.cmd_copilot(
+            _ns(force_claim=True, effort="wt-explicit"),
+            interactive_ssh=lambda *a, **kw: 0,
+        )
+
+        assert rc == 0
+        assert seen == {"name": "cs-1", "force": True, "effort": "wt-explicit"}
+
+    def test_a_claim_bookkeeping_error_never_blocks_the_connect(
+        self, store, monkeypatch, capsys,
+    ) -> None:
+        self._patch_common(monkeypatch, store)
+        monkeypatch.setattr(
+            "venue_copilot.run_venue_copilot",
+            lambda worktree_id, *, connect, **kw: connect(
+                "agent-worktrees copilot --worktree-id wt-A",
+            ),
+        )
+
+        def fake_claim(name, *, force=False, effort=None, session_id=None):
+            raise RuntimeError("leases.json is corrupt")
+
+        from agent_codespaces import lease
+        monkeypatch.setattr(lease, "claim_for_connect", fake_claim)
+
+        rc = copilot_venue.cmd_copilot(_ns(), interactive_ssh=lambda *a, **kw: 0)
+
+        assert rc == 0
+        assert "[WARN]" in capsys.readouterr().err
 
 
 class TestEnsureAgentBridgePlugin:

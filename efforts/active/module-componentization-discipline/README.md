@@ -279,6 +279,21 @@ Verbatim from the operator:
               steering + query surfaces, the declarative loop families,
               supervise registration wiring, and the
               resolve/run/evaluate/charter family.
+            - `agent-dispatch/__main__.py` third slice landed: extracted the
+              read/query family into `task_query_cli.py`
+              (`list`, `doctor`, board/inbox helpers, `find`, `sweep`,
+              `watch`, `payload`, `result`, `consume`, and `mcp`) while keeping
+              `__main__` as the composition root and re-export seam. Remaining
+              seams are now the task lifecycle + steering surfaces, the
+              declarative loop families, supervise registration wiring, and the
+              resolve/run/evaluate/charter family.
+            - `agent-dispatch/__main__.py` fourth slice landed: extracted the
+              steering/card family into `steering_cli.py`
+              (`card set/show/draft`, `steer submit/take`) while keeping the
+              root module as the compatibility re-export seam. Remaining seams
+              are now the task lifecycle/admin surface, the declarative loop
+              families, supervise registration wiring, and the
+              resolve/run/evaluate/charter family.
             - `agent-bridge/__main__.py` slice landed: the file is now a
               **485-line composition root** with focused sibling modules for
               service start/status (`service_start_cli.py`), daemon/process
@@ -1680,3 +1695,85 @@ the Phase 0 runbook, picked up as capacity allows.
   supervise registration wiring, and the resolve/run/evaluate/charter family.
   The file is still over cap, but it is now materially smaller and less
   entangled than when this campaign entered `agent-dispatch`.
+
+### 2026-09-22 — Phase 2 continued: `plugins/agent-dispatch/src/agent_dispatch/__main__.py` task-query slice
+- Took the next least-coupled family after create/spawn: the read/query
+  surfaces. Extracted a new `task_query_cli.py` (**486** lines) holding peer
+  browse, `list`, `doctor`, the board/inbox helpers and constants,
+  `find`, `sweep`, `watch`, `payload`, `result`, `consume`, and `mcp`.
+  `__main__.py` stayed the composition root/re-export seam and shrank again
+  from **3,624 -> 3,162** lines.
+- The seam discipline here was the same as the prior slices: moved call sites
+  that tests or sibling modules may steer through `agent_dispatch.__main__`
+  still route through the live root for compatibility-sensitive helpers
+  (`_scope_repo`, `_browse_peer`, `_consume_already_spent`, `_client`, and the
+  board helpers exposed on `__main__`). This kept the existing `test_cli.py`,
+  `test_doctor.py`, and `test_coordinator.py` style coverage green without
+  changing behavior.
+- Validation again met the full plugin bar. `python tools/run-plugin-tests.py
+  agent-dispatch` passed all six sub-suites green:
+  **3,306 passed / 34 skipped total** (sub-suite counts:
+  `756/5`, `418/10`, `641/14`, `663/1`, `732/0`, `96/4`
+  passed/skipped). Focused follow-up for the moved family also passed:
+  `python tools/run-plugin-tests.py agent-dispatch -k "doctor or board_cli or
+  _board_group or _board_activity or _board_sort_key or _board_keep or
+  _cmd_consume or payload or result or inbox or find or sweep"`
+  -> **215 passed / 1 skipped / 3124 deselected**. Required guards then passed:
+  `ruff check --select F,E9 plugins/agent-dispatch`,
+  `python tools/check-module-size.py`,
+  `python tools/check-module-size.py --refresh-baseline`,
+  `python tools/check-install-contract.py`, and
+  `python tools/check-version-consistency.py`.
+- Read-only dogfood for the moved surface stayed to help paths only:
+  `python -m agent_dispatch list --help`,
+  `doctor --help`, `inbox --help`, and `payload --help` through the plugin
+  test venv. The shrink-only baseline was lowered again, from **3,624** to
+  **3,162** lines for `plugins/agent-dispatch/src/agent_dispatch/__main__.py`.
+  Version bump for this slice: `agent-dispatch` **`0.1.2-dev177`**.
+- Remaining seams are now clearer still: the task lifecycle + steering
+  family, the declarative loop / registrar family, supervise registration
+  wiring, and the resolve/run/evaluate/charter family. The file is not yet
+  near the 1,000-line cap, but it is now substantially smaller and more
+  family-structured than when this sequence started.
+
+### 2026-09-22 — Phase 2 continued: `plugins/agent-dispatch/src/agent_dispatch/__main__.py` steering slice
+- Took the smallest high-confidence seam next: the human-in-the-loop
+  steering/card family. Extracted a new `steering_cli.py` (**191** lines)
+  holding `card set`, `card show`, `card draft save/clear`, `steer submit`,
+  and `steer take`. `__main__.py` remains the composition root/re-export seam
+  and dropped again from **3,162 -> 2,945** lines.
+- Compatibility risk here was mainly parser and owner-resolution routing:
+  existing CLI coverage expects the moved handlers to keep using the
+  `agent_dispatch.__main__` seams for `_client`, `_resolve_owner`, and
+  `_owner_from_identity`, and the parser surface still needs the
+  `agent_dispatch.__main__._cmd_*` attributes for any import/patch callers.
+  The extracted module therefore routes those edges back through the live root
+  while keeping the actual implementation body in `steering_cli.py`.
+- Validation again met the full plugin bar. `python tools/run-plugin-tests.py
+  agent-dispatch` passed all six sub-suites green:
+  **3,306 passed / 34 skipped total** (sub-suite counts:
+  `756/5`, `418/10`, `641/14`, `663/1`, `732/0`, `96/4`
+  passed/skipped). Focused follow-up on the moved steering surfaces also
+  passed:
+  `python tools/run-plugin-tests.py agent-dispatch -k "card_steer or wake_outbox or cli"`
+  -> **382 passed / 2958 deselected**. A one-off coordinator GC test flaked
+  once during the first full run (`test_background_gc_auto_recovers_gone_owner`
+  observed an already-requeued task), immediately passed in isolation on
+  re-run, and the subsequent full suite passed clean; no code change was
+  needed for that unrelated transient. Required guards then passed:
+  `ruff check --select F,E9 plugins/agent-dispatch`,
+  `python tools/check-module-size.py`,
+  `python tools/check-module-size.py --refresh-baseline`,
+  `python tools/check-install-contract.py`, and
+  `python tools/check-version-consistency.py`.
+- Read-only dogfood for the moved surface stayed to help output only:
+  `python -m agent_dispatch card set --help`,
+  `card show --help`,
+  `steer submit --help`, and
+  `steer take --help` through the plugin test venv. The shrink-only baseline
+  was lowered again, from **3,162** to **2,945** lines for
+  `plugins/agent-dispatch/src/agent_dispatch/__main__.py`.
+  Version bump for this slice: `agent-dispatch` **`0.1.2-dev178`**.
+- Remaining seams are now concentrated in the genuinely larger surfaces:
+  task lifecycle/admin, the declarative loop / registrar family, supervise
+  registration wiring, and the resolve/run/evaluate/charter family.
