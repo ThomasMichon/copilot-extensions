@@ -2813,7 +2813,6 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     register_coordinator_commands(sub)
-
     create_parent = _create_args_parent()
     p = sub.add_parser(
         "create",
