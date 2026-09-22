@@ -117,6 +117,19 @@ def _required_context_multi_manifest(tmp_path: Path) -> Path:
     return path
 
 
+def _write_runtime_completion(slot: Path, version: str) -> None:
+    (slot / ".install-complete.json").write_text(
+        json.dumps(
+            {
+                "version": version,
+                "completed_at": "2026-01-01T00:00:00Z",
+                "pid": 123,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     assert generator.process_manifest(manifest, check=False) == []
@@ -227,9 +240,13 @@ def test_payload_dispatcher_delegates_both_platform_shims(tmp_path: Path) -> Non
     powershell = generated[manifest.parent / "bin" / "agent-example.ps1"]
     assert 'exec "$_payload_root/scripts/runtime-gate.sh" "$@"' in posix
     assert 'export AGENT_EXAMPLE_PAYLOAD_ROOT="$_payload_root"' in posix
+    assert "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN" in posix
+    assert "_boot_trace shim-start" in posix
     assert "$_payloadDispatcher = Join-Path $_payloadRoot 'scripts\\runtime-gate.ps1'" in powershell
     assert "$env:AGENT_EXAMPLE_PAYLOAD_ROOT = $_payloadRoot" in powershell
     assert "& $_payloadDispatcher @args" in powershell
+    assert "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN" in powershell
+    assert "Write-BootTrace 'shim-start'" in powershell
     assert "_resolve_runtime" not in posix
     assert "Resolve-PayloadRuntime" not in powershell
 
@@ -286,7 +303,9 @@ def test_required_installation_context_uses_fixed_dispatchers(tmp_path: Path) ->
     assert "if ! command -v bash >/dev/null 2>&1; then" in posix
     assert "[agent-machines] required payload dispatcher needs bash." in posix
     assert 'exec bash "$_payload_root/scripts/invoke-payload-runtime.sh" "$@"' in posix
+    assert "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN" in posix
     assert "$env:AGENT_MACHINES_PAYLOAD_ROOT = $_payloadRoot" in powershell
+    assert "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN" in powershell
     assert "Resolve-PayloadRuntime" not in powershell
 
 
@@ -2143,6 +2162,83 @@ def test_posix_shim_preserves_args_exit_and_project_cwd(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
+def test_posix_shim_boot_trace_is_opt_in_and_stderr_only(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    plugin = manifest.parent
+    (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    scripts = plugin / "scripts"
+    canonical_resolver = (
+        REPO / "libs" / "versioned-runtime" / "resolve-runtime.sh"
+    ).read_text(encoding="utf-8")
+    (scripts / "resolve-runtime.sh").write_text(canonical_resolver, encoding="utf-8")
+
+    home = tmp_path / "home"
+    runtime_root = home / ".agent-example"
+    version = "1.2.3"
+    slot = runtime_root / "versions" / version
+    fake_python = slot / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text(
+        f'#!/bin/sh\nexec "{sys.executable}" "$@"\n',
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    _write_runtime_completion(slot, version)
+    (runtime_root / "current-version").write_text(f"{version}\n", encoding="utf-8")
+    module_dir = tmp_path / "modules"
+    module_dir.mkdir()
+    (module_dir / "agent_example.py").write_text(
+        "import sys\n"
+        "print('stdout:' + '|'.join(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "COPILOT_PLUGIN_ROOT": str(plugin),
+            "PYTHONPATH": str(module_dir),
+        }
+    )
+    command = [str(plugin / "bin" / "agent-example"), "alpha", "beta"]
+
+    baseline = subprocess.run(
+        command,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert baseline.stdout.strip() == "stdout:alpha|beta"
+    assert baseline.stderr == ""
+
+    traced = subprocess.run(
+        command,
+        env={**env, "COPILOT_EXTENSIONS_BOOT_TRACE": "1"},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert traced.stdout == baseline.stdout
+    assert traced.stderr
+    phases = [
+        match.group(1)
+        for match in re.finditer(r"phase=([a-z-]+)", traced.stderr)
+    ]
+    assert phases == [
+        "shim-start",
+        "resolver-marker-start",
+        "resolver-marker-result",
+        "resolver-slot-result",
+        "resolver-loaded",
+        "dispatch",
+    ]
+    assert "::boot-trace:: plugin=agent-example" in traced.stderr
+    assert "stdout:" not in traced.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
 def test_multi_command_shim_dispatches_its_own_module(tmp_path: Path) -> None:
     manifest = _multi_manifest(tmp_path)
     generator.process_manifest(manifest, check=False)
@@ -2176,6 +2272,19 @@ def test_multi_command_shim_dispatches_its_own_module(tmp_path: Path) -> None:
         check=True,
     )
     assert result.stdout.strip() == "-m agent_example.helper two words"
+
+
+def test_multi_command_traces_use_manifest_plugin_identity(tmp_path: Path) -> None:
+    manifest = _multi_manifest(tmp_path)
+
+    generated = generator.expected_files(manifest)
+
+    posix = generated[manifest.parent / "bin" / "example-helper"]
+    powershell = generated[manifest.parent / "bin" / "example-helper.ps1"]
+    assert '_plugin="agent-example"' in posix
+    assert 'COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN="$_plugin"' in posix
+    assert "$_plugin = 'agent-example'" in powershell
+    assert "$env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = $_plugin" in powershell
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
@@ -2369,3 +2478,91 @@ def test_powershell_shim_preserves_sibling_cwd_and_leaves_payload(
     assert payload_result.stdout.strip() == (
         f"{project}|status"
     )
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or shutil.which("pwsh") is None,
+    reason="native Windows PowerShell shim test",
+)
+def test_powershell_shim_boot_trace_is_opt_in_and_stderr_only(
+    tmp_path: Path,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    plugin = manifest.parent
+    (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    scripts = plugin / "scripts"
+    canonical_resolver = (
+        REPO / "libs" / "versioned-runtime" / "resolve-runtime.ps1"
+    ).read_text(encoding="utf-8")
+    (scripts / "resolve-runtime.ps1").write_text(canonical_resolver, encoding="utf-8")
+
+    home = tmp_path / "home"
+    runtime_root = home / ".agent-example"
+    version = "2.3.4"
+    slot = runtime_root / "versions" / version
+    fake_python = slot / "Scripts" / "python.exe"
+    fake_python.parent.mkdir(parents=True)
+    shutil.copy2(sys.executable, fake_python)
+    _write_runtime_completion(slot, version)
+    (runtime_root / "current-version").write_text(f"{version}\n", encoding="utf-8")
+    module_dir = tmp_path / "modules"
+    module_dir.mkdir()
+    (module_dir / "agent_example.py").write_text(
+        "import sys\n"
+        "print('stdout:' + '|'.join(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "COPILOT_PLUGIN_ROOT": str(plugin),
+            "PYTHONPATH": str(module_dir),
+        }
+    )
+    command = [
+        pwsh,
+        "-NoProfile",
+        "-File",
+        str(plugin / "bin" / "agent-example.ps1"),
+        "alpha",
+        "beta",
+    ]
+
+    baseline = subprocess.run(
+        command,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert baseline.stdout.strip() == "stdout:alpha|beta"
+    assert baseline.stderr == ""
+
+    traced = subprocess.run(
+        command,
+        env={**env, "COPILOT_EXTENSIONS_BOOT_TRACE": "1"},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert traced.stdout == baseline.stdout
+    assert traced.stderr
+    phases = [
+        match.group(1)
+        for match in re.finditer(r"phase=([a-z-]+)", traced.stderr)
+    ]
+    assert phases == [
+        "shim-start",
+        "resolver-marker-start",
+        "resolver-marker-result",
+        "resolver-slot-result",
+        "resolver-loaded",
+        "dispatch",
+    ]
+    assert "::boot-trace:: plugin=agent-example" in traced.stderr
+    assert "stdout:" not in traced.stderr

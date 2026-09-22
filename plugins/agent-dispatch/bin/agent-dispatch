@@ -3,10 +3,55 @@
 set -eu
 
 export PYTHONUTF8=1
+_plugin="agent-dispatch"
 _command="agent-dispatch"
 _module="agent_dispatch"
 _self_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 _payload_root="$(CDPATH= cd -- "$_self_dir/.." && pwd -P)"
+
+_boot_trace_ms() {
+    _bt_raw=""
+    if _bt_raw="$(date +%s%3N 2>/dev/null)"; then
+        case "$_bt_raw" in
+            [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9])
+                printf '%s\n' "$_bt_raw"
+                return 0
+                ;;
+        esac
+    fi
+    if _bt_raw="$(date +%s%N 2>/dev/null)"; then
+        case "$_bt_raw" in
+            [0-9]*)
+                if [ "${#_bt_raw}" -eq 19 ]; then
+                    printf '%s\n' "${_bt_raw%??????}"
+                    return 0
+                fi
+                ;;
+        esac
+    fi
+    if _bt_raw="$(date +%s 2>/dev/null)"; then
+        case "$_bt_raw" in
+            [0-9]*) printf '%s000\n' "$_bt_raw"; return 0 ;;
+        esac
+    fi
+    printf '0000000000000\n'
+}
+
+_boot_trace() {
+    [ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ] || return 0
+    _bt_extra="${2-}"
+    if [ -n "$_bt_extra" ]; then
+        printf '::boot-trace:: plugin=%s phase=%s t=%s %s\n' \
+            "${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-$_plugin}" \
+            "$1" "$(_boot_trace_ms)" "$_bt_extra" >&2
+    else
+        printf '::boot-trace:: plugin=%s phase=%s t=%s\n' \
+            "${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-$_plugin}" \
+            "$1" "$(_boot_trace_ms)" >&2
+    fi
+}
+
+_boot_trace shim-start
 
 if [ ! -f "$_payload_root/plugin.json" ]; then
     printf '[%s] payload root is not a plugin: %s\n' "$_command" "$_payload_root" >&2
@@ -25,6 +70,9 @@ _runtime_root="$HOME/.agent-dispatch"
 _resolver="$_payload_root/scripts/resolve-runtime.sh"
 _resolve_runtime() {
     AGENT_RT_PY=""
+    if [ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ]; then
+        export COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN="$_plugin"
+    fi
     if [ -f "$_resolver" ]; then
         AGENT_RT_ROOT="$_runtime_root"
         export AGENT_RT_ROOT
@@ -34,7 +82,9 @@ _resolve_runtime() {
 }
 
 _resolve_runtime
+_boot_trace resolver-loaded
 if [ -n "${AGENT_RT_PY:-}" ]; then
+    _boot_trace dispatch 'path=fast'
     exec "$AGENT_RT_PY" -m "$_module" "$@"
 fi
 if [ -n "${AGENT_DISPATCH_NO_SELFPROVISION:-}" ]; then
@@ -79,6 +129,7 @@ _resolve_runtime
 if [ -n "${AGENT_RT_PY:-}" ]; then
     _unlock_provision
     trap - EXIT INT TERM
+    _boot_trace resolver-loaded
     exec "$AGENT_RT_PY" -m "$_module" "$@"
 fi
 
@@ -92,11 +143,15 @@ printf '[%s] runtime not provisioned -- provisioning from the owning payload.\n'
     "$_command" >&2
 printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use\n' \
     "$_command" >&2
+_boot_trace provision-start
 bash "$_installer" provision >&2
+_boot_trace provision-end
 _resolve_runtime
 if [ -n "${AGENT_RT_PY:-}" ]; then
     _unlock_provision
     trap - EXIT INT TERM
+    _boot_trace resolver-loaded
+    _boot_trace dispatch 'path=provisioned'
     exec "$AGENT_RT_PY" -m "$_module" "$@"
 fi
 printf '[%s] provisioning completed without a resolvable runtime.\n' "$_command" >&2
