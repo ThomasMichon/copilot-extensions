@@ -161,6 +161,44 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
   // behavior for a caller that ignores it.
   return function emergencyLog(label, detail) {
     try {
+      // A cached `fd` from an earlier call in this same process can go
+      // stale: another process's rotation renames the path this `fd`
+      // still points to away into a `.stale-*` sidecar and creates a fresh
+      // file at `logPath`, but this process's own fd is unaffected by that
+      // rename (an open POSIX/Windows file descriptor follows the inode,
+      // not the path) and would otherwise keep silently appending every
+      // subsequent entry into that now-detached, eventually-purged
+      // sidecar instead of the live path -- worse, `purgeOldStaleSidecars()`
+      // assumes a sidecar is written to exactly once and never touched
+      // again, an assumption this exact scenario breaks, risking an
+      // eventual purge out from under a descriptor some other still-live
+      // process keeps writing through. So every call -- not just the
+      // first -- cheaply reverifies that the held `fd` (if any) still
+      // refers to whatever currently sits at `logPath`, by `dev`+`ino`;
+      // a mismatch is treated exactly like `fd === undefined` below,
+      // re-running the full open/validate/rotate sequence to acquire a
+      // fresh, currently-valid descriptor instead of writing to a
+      // silently-detached one.
+      if (fd !== undefined && !openFailed) {
+        try {
+          const liveStat = statSync(logPath);
+          const heldStat = fstatSync(fd);
+          if (liveStat.dev !== heldStat.dev || liveStat.ino !== heldStat.ino) {
+            closeSync(fd);
+            fd = undefined;
+          }
+        } catch {
+          // logPath no longer exists, or some other stat failure -- treat
+          // the held fd as no longer trustworthy either way.
+          try {
+            closeSync(fd);
+          } catch {
+            // Already closed, or otherwise unclosable; either way `fd` is
+            // about to be discarded below.
+          }
+          fd = undefined;
+        }
+      }
       if (fd === undefined && !openFailed) {
         try {
           const candidate = openSync(logPath, OPEN_FLAGS, 0o600);

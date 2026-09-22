@@ -85,6 +85,64 @@ function logEntryLabels(log) {
   return [...log.matchAll(/^\S+ pid=\d+ (\S+):/gm)].map((m) => m[1]);
 }
 
+// Finds the index of the "(" that closes the call whose opening "(" is at
+// `openParenIndex`, counting depth but skipping over any "("/")" that fall
+// inside a single/double-quoted string, a template literal, or a //
+// line/`/* */` block comment -- this file's own extension.mjs has a huge
+// options-object argument full of prompt/description prose that can
+// contain unbalanced parens as plain English, which a naive depth counter
+// would misread. Deliberately minimal (no escape-sequence handling beyond
+// a basic backslash skip, no nested-template-literal `${}` awareness) --
+// sufficient for locating one specific, known call in one specific file,
+// not a general-purpose JS parser.
+function findMatchingCloseParen(source, openParenIndex) {
+  let depth = 0;
+  let quote = null; // one of "'", '"', "`", or null
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = openParenIndex; i < source.length; i += 1) {
+    const ch = source[i];
+    if (inLineComment) {
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === "*" && source[i + 1] === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (ch === "\\") {
+        i += 1; // skip the escaped character
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === "`") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "/" && source[i + 1] === "/") {
+      inLineComment = true;
+      continue;
+    }
+    if (ch === "/" && source[i + 1] === "*") {
+      inBlockComment = true;
+      continue;
+    }
+    if (ch === "(") {
+      depth += 1;
+    } else if (ch === ")") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
 test("clean exit records nothing at all -- routine exits are not logged", async () => {
   await withCrashLog(async (logPath) => {
     const result = spawnSync(process.execPath, [harness, "clean-exit", logPath], {
@@ -520,29 +578,41 @@ test("production extension.mjs calls markReady() only after joinSession() resolv
     /const emergencyDiagnostics = installEmergencyDiagnostics\(emergencyLog\);/,
     "extension.mjs must capture installEmergencyDiagnostics()'s return value",
   );
-  assert.match(
-    extension,
-    /const session = await joinSession\(\{/,
-    "expected to find the joinSession() call",
-  );
+  const callStart = extension.indexOf("const session = await joinSession(");
+  assert.notEqual(callStart, -1, "expected to find the joinSession() call");
   // Merely checking markReady() appears somewhere after the *opening* text
-  // of the joinSession() call is not enough: a regression that moved the
-  // call to inside the (very large) options object literal -- before the
-  // awaited call actually resolves -- would still satisfy that ordering
-  // and mis-tag pre-readiness failures as ready=true, while this test kept
-  // reporting success. Anchor to the actual END of the call instead:
-  // markReady() must be the statement immediately following the line that
-  // closes it (`});`), which only holds true if it runs after joinSession()
-  // has fully returned.
+  // of the joinSession() call (or that some "});" anywhere in the file
+  // precedes it) is not enough: a regression that moved the call to inside
+  // the (very large) options object literal -- before the awaited call
+  // actually resolves -- would still satisfy that ordering, and an
+  // unrelated "});" from some other block could produce a false-positive
+  // adjacency match, both mis-tagging pre-readiness failures as
+  // ready=true while this test kept reporting success. So the joinSession()
+  // call's *own* matching closing paren is located with a small
+  // string/comment-aware scanner that counts parenthesis depth from its
+  // opening "(" but skips over any "("/")" found inside string/template
+  // literals or comments (this file's huge options-object argument is full
+  // of prompt/description prose that can contain unbalanced parens), and
+  // markReady() must be the very next statement after the line containing
+  // that specific, correctly matched closing paren.
+  const closeParenIndex = findMatchingCloseParen(extension, extension.indexOf("(", callStart));
+  assert.notEqual(closeParenIndex, -1, "expected to find joinSession()'s own matching closing paren");
+  const closeLineIndex = extension.slice(0, closeParenIndex).split("\n").length - 1;
   const lines = extension.split("\n");
-  const markReadyLineIndex = lines.findIndex(
-    (line) => line.trim() === "emergencyDiagnostics.markReady();",
-  );
-  assert.notEqual(markReadyLineIndex, -1, "expected to find the markReady() call as its own statement");
-  const precedingLine = lines[markReadyLineIndex - 1]?.trim();
   assert.equal(
-    precedingLine,
+    lines[closeLineIndex].trim(),
     "});",
-    `expected markReady() to immediately follow the joinSession() call's closing "});", but the preceding line was: ${JSON.stringify(precedingLine)}`,
+    `expected joinSession()'s own closing line to be "});", got: ${JSON.stringify(lines[closeLineIndex])}`,
+  );
+  // markReady() must be the very next non-blank statement after that
+  // specific closing line -- not merely somewhere later in the file.
+  let nextLineIndex = closeLineIndex + 1;
+  while (nextLineIndex < lines.length && lines[nextLineIndex].trim() === "") {
+    nextLineIndex += 1;
+  }
+  assert.equal(
+    lines[nextLineIndex]?.trim(),
+    "emergencyDiagnostics.markReady();",
+    `expected markReady() to immediately follow joinSession()'s own closing "});", but the next line was: ${JSON.stringify(lines[nextLineIndex])}`,
   );
 });
