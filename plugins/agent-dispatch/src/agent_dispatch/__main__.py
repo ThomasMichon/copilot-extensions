@@ -81,6 +81,7 @@ from .recipes_cli import (  # noqa: F401 -- re-exported for existing call sites/
     _recipe_param_dicts,
     register_recipes_commands,
 )
+from .registrations import RegistrationKind  # noqa: F401 -- compatibility export for callers/tests
 # Re-exported for backward compatibility: the supervise-family CLI commands
 # live in supervise_cli.py now (see that module's docstring), but
 # build_parser's set_defaults() and tests below still reference them by

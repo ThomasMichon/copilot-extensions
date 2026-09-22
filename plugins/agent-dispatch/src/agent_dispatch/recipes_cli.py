@@ -283,11 +283,11 @@ def register_recipes_commands(sub) -> None:
     rsub = rp.add_subparsers(dest="recipes_command", required=True)
 
     lp = rsub.add_parser("list", help="list the available recipes")
-    lp.set_defaults(func=_cmd_recipes_list)
+    lp.set_defaults(func=_resolve_cli_module()._cmd_recipes_list)
 
     dp = rsub.add_parser("describe", help="show a recipe's full descriptor")
     dp.add_argument("name", help="recipe name (see 'recipes list')")
-    dp.set_defaults(func=_cmd_recipes_describe)
+    dp.set_defaults(func=_resolve_cli_module()._cmd_recipes_describe)
 
     rr = rsub.add_parser(
         "render",
@@ -300,7 +300,7 @@ def register_recipes_commands(sub) -> None:
         metavar="KEY=VALUE",
         help="a recipe parameter (repeatable), e.g. --param repo=owner/name --param pr=42",
     )
-    rr.set_defaults(func=_cmd_recipes_render)
+    rr.set_defaults(func=_resolve_cli_module()._cmd_recipes_render)
 
     kp = rsub.add_parser(
         "kick",
@@ -317,7 +317,7 @@ def register_recipes_commands(sub) -> None:
     kp.add_argument("--async", dest="run_async", action="store_true")
     kp.add_argument("--verify-timeout", type=int, default=0)
     kp.add_argument("--dry-run", action="store_true")
-    kp.set_defaults(func=_cmd_recipes_kick)
+    kp.set_defaults(func=_resolve_cli_module()._cmd_recipes_kick)
 
     dr = rsub.add_parser(
         "drive",
@@ -331,4 +331,4 @@ def register_recipes_commands(sub) -> None:
     dr.add_argument("--source", metavar="REF")
     dr.add_argument("--execute", action="store_true")
     dr.add_argument("wait_cmd", nargs="*", help="for --execute on a SUSPEND, the blocking wait command after '--'")
-    dr.set_defaults(func=_cmd_recipes_drive)
+    dr.set_defaults(func=_resolve_cli_module()._cmd_recipes_drive)
