@@ -279,24 +279,55 @@ def test_daemon_liveness_stale_lock_reports_not_live(tmp_path):
     assert liveness.responsive is None
 
 
-def test_daemon_liveness_no_probe_boots_and_waits_when_ensure_monitor_given(
-    tmp_path, monkeypatch,
-):
+def test_daemon_liveness_no_probe_boots_and_waits_when_ensure_monitor_given(tmp_path):
     """Copilot review round 4 on PR #3206: `run_audit` passes `probe=None`
     whenever the sample is empty (e.g. an empty cache) -- exactly the
     `cache_row_count: 0` scenario that originally motivated this whole
     redesign. The no-probe path must still give an idle-exited monitor
     the same boot-and-wait chance a real probe would, when `ensure_monitor`
     is available, instead of taking an immediate empty snapshot."""
-    monkeypatch.setattr(worktree_status_daemon, "BOOT_WAIT_S", 0.5)
     lock_path = tmp_path / "status-monitor.lock"
     calls = []
     liveness = wsa.check_daemon_liveness(
         lock_path, probe=None, ensure_monitor=lambda: calls.append(1) or True,
+        boot_wait_s=0.2,
     )
     assert calls == [1]
     assert liveness.responsive is None
     assert liveness.lock_present is False
+
+
+def test_daemon_liveness_no_probe_boot_wait_observes_a_delayed_lock(tmp_path):
+    """Copilot review round 5 on PR #3206: the prior no-probe boot-wait
+    test only checked that `ensure_monitor` was invoked -- it never
+    actually verified the poll loop itself observes a lock that lands
+    *during* the wait window (the same gap the probed-path test already
+    closed for that side of the fix). Publish the lock from a background
+    thread after a real delay so this exercises the poll loop, not just
+    the call to `ensure_monitor`."""
+    import threading
+
+    from agent_worktrees import locks
+
+    lock_path = tmp_path / "status-monitor.lock"
+
+    def _write_lock_after_delay():
+        time.sleep(0.1)
+        locks.write_lock(lock_path, extra={
+            "worktree_status_endpoint": "127.0.0.1:1", "worktree_status_token": "tok",
+        })
+
+    def _ensure_monitor():
+        threading.Thread(target=_write_lock_after_delay, daemon=True).start()
+        return True
+
+    assert not lock_path.exists()
+    liveness = wsa.check_daemon_liveness(
+        lock_path, probe=None, ensure_monitor=_ensure_monitor, boot_wait_s=1.0,
+    )
+    assert liveness.lock_present is True
+    assert liveness.rendezvous_present is True
+    assert liveness.responsive is None
 
 
 def test_daemon_liveness_no_probe_reports_unknown_responsiveness(tmp_path):
@@ -349,6 +380,7 @@ def test_daemon_liveness_calls_ensure_monitor_when_nothing_is_reachable(tmp_path
     calls = []
     wsa.check_daemon_liveness(
         lock_path, probe=("proj", "wt1"), ensure_monitor=lambda: calls.append(1) or True,
+        boot_wait_s=0.2,
     )
     assert calls == [1]
 
@@ -537,6 +569,17 @@ def test_cmd_worktree_status_audit_passes_ensure_monitor_when_enabled(tmp_path, 
         return real_run_audit(**kwargs)
 
     monkeypatch.setattr(wsa, "run_audit", _spy_run_audit)
+    # This test only asserts wiring (what `run_audit` received) -- stub
+    # out the actual daemon probe so it doesn't pay the real boot-wait
+    # window (the sample is empty here, so `probe=None`, and a sentinel
+    # `ensure_monitor` that never publishes a lock would otherwise make
+    # the real no-probe wait loop run to its full timeout).
+    monkeypatch.setattr(
+        wsa, "check_daemon_liveness",
+        lambda lock_path, probe=None, ensure_monitor=None, boot_wait_s=None: wsa.DaemonLiveness(
+            lock_present=False, rendezvous_present=False, responsive=None,
+        ),
+    )
     wsa.cmd_worktree_status_audit(
         argparse.Namespace(sample=1, log_path=None, no_log=True, seed=1, json=True)
     )

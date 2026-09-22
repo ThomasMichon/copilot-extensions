@@ -1444,3 +1444,33 @@ Updated the two existing no-probe-failure-path tests
 `responsive is None` instead of the previous (incorrect)
 `responsive is False`.
 
+### 2026-09-21 — PR #3206 review round 5: 2 real gaps (test rigor + test speed), rest stale carryovers
+All 3 "Open" findings this round (version bump, CLI opt-out test,
+stale-lock-with-probe test) were re-flagged stale carryovers again,
+confirmed already fixed and passing. Two genuine issues from the
+review's own headline text (not itemized as discrete findings, but
+real):
+
+1. **The new no-probe boot-wait test never verified the poll loop
+   itself.** `test_daemon_liveness_no_probe_boots_and_waits_when_ensure_
+   monitor_given` only asserted `ensure_monitor` was called -- it never
+   published a lock during the wait window, so it couldn't have told a
+   working poll loop from a broken one (same gap the probed-path test
+   had already closed in round 1). Added a companion test that
+   publishes the lock from a background thread after a real delay and
+   asserts the poll loop actually observes it.
+2. **Two tests paid an avoidable ~4s wait.** `check_daemon_liveness` had
+   no way to override the boot-wait window, so
+   `test_daemon_liveness_calls_ensure_monitor_when_nothing_is_reachable`
+   (a never-boots probe path) and
+   `test_cmd_worktree_status_audit_passes_ensure_monitor_when_enabled`
+   (an empty-sample CLI run whose sentinel `ensure_monitor` never
+   publishes a lock) each ran the real default `BOOT_WAIT_S` (4.0s) to
+   completion. Added a `boot_wait_s` override parameter to
+   `check_daemon_liveness` (threaded to both the no-probe poll loop and
+   `status_with_boot`'s own `boot_wait_s` kwarg -- a pure testability
+   knob, production callers never pass it) and used it (or a stubbed
+   `check_daemon_liveness`, for the CLI wiring-only test) to bring both
+   down to well under a second. Whole-module test time dropped from
+   ~36s to ~24s.
+

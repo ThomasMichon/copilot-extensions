@@ -372,6 +372,7 @@ def check_daemon_liveness(
     *,
     probe: tuple[str, str] | None = None,
     ensure_monitor: Callable[[], bool] | None = None,
+    boot_wait_s: float | None = None,
 ) -> DaemonLiveness:
     """Whether the resident status-monitor's worktree-status daemon
     answers a request the way a real consumer actually experiences it --
@@ -401,6 +402,12 @@ def check_daemon_liveness(
     there is nothing to have actually failed, only "no one to ask", so
     this always reports ``responsive=None`` rather than treating an
     absent/resting monitor as an outage.
+
+    ``boot_wait_s``, when given, overrides the wait window used for both
+    branches above (default: ``worktree_status_daemon.BOOT_WAIT_S``) --
+    a pure testability knob so a test can exercise a real poll loop
+    without paying the full production wait; production callers never
+    need to pass it.
     """
     # Lazy import: see `_check_freshness`'s own comment -- keeps this
     # module importable without the vendored `work_coalescing_singleton`
@@ -411,6 +418,10 @@ def check_daemon_liveness(
         if data is None or not locks.lock_is_live(data):
             return None
         return worktree_status_daemon.endpoint_from_rendezvous(data)
+
+    effective_boot_wait_s = (
+        worktree_status_daemon.BOOT_WAIT_S if boot_wait_s is None else boot_wait_s
+    )
 
     if probe is None:
         data = locks.read_lock(lock_path)
@@ -423,10 +434,7 @@ def check_daemon_liveness(
             # about. Mirrors that function's own poll loop/timeout.
             started = time.time()
             ensure_monitor()
-            while (
-                endpoint is None
-                and time.time() - started < worktree_status_daemon.BOOT_WAIT_S
-            ):
+            while endpoint is None and time.time() - started < effective_boot_wait_s:
                 time.sleep(0.1)
                 data = locks.read_lock(lock_path)
                 endpoint = _live_endpoint(data)
@@ -466,6 +474,7 @@ def check_daemon_liveness(
         key=worktree_status_daemon.coalescing_key(project, worktree_id),
         payload={"project": project, "worktree_id": worktree_id},
         fallback=_fallback,
+        boot_wait_s=effective_boot_wait_s,
     )
     data_after = locks.read_lock(lock_path)
     lock_present = data_after is not None
