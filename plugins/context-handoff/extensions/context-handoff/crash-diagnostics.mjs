@@ -26,7 +26,7 @@ import {
   constants as fsConstants,
   fstatSync,
   openSync,
-  readdirSync,
+  opendirSync,
   renameSync,
   statSync,
   unlinkSync,
@@ -69,7 +69,18 @@ const MAX_SIDECARS_PURGED_PER_CALL = 20;
  * Best-effort removal of this log's own `.stale-*` sidecars older than
  * {@link STALE_SIDECAR_MAX_AGE_MS}, bounded to at most
  * {@link MAX_SIDECARS_PURGED_PER_CALL} candidates examined per call (see its
- * own doc comment). `justCreatedSidecar` -- the sidecar path *this specific
+ * own doc comment). Uses `opendirSync()`'s synchronous, one-entry-at-a-time
+ * `readSync()` rather than `readdirSync()`, which unconditionally
+ * materializes *every* entry in the directory (`os.tmpdir()` is commonly a
+ * large, shared directory with entries from every application on the host)
+ * before this function's own cap could ever apply -- since this whole call
+ * can run synchronously inside a signal handler that must re-raise within
+ * the CLI's five-second SIGKILL grace period, that unconditional full scan
+ * was itself the unbounded cost, independent of the candidate cap.
+ * Iterating the directory stream instead means a sufficiently early match
+ * (or the cap being reached) genuinely stops touching the directory further,
+ * rather than merely stopping the in-memory loop after the full listing was
+ * already read. `justCreatedSidecar` -- the sidecar path *this specific
  * rotation* just produced -- is always skipped outright, regardless of its
  * mtime: if the earlier `utimesSync()` re-stamp attempt failed, this sidecar
  * could still carry the oversized source file's old, possibly already-stale
@@ -81,13 +92,16 @@ const MAX_SIDECARS_PURGED_PER_CALL = 20;
  * itself become a crash-handler failure mode.
  */
 function purgeOldStaleSidecars(logPath, justCreatedSidecar) {
+  let dirHandle;
   try {
     const dir = dirname(logPath);
     const prefix = `${basename(logPath)}.stale-`;
     const now = Date.now();
     let examined = 0;
-    for (const name of readdirSync(dir)) {
-      if (examined >= MAX_SIDECARS_PURGED_PER_CALL) break;
+    dirHandle = opendirSync(dir);
+    let entry;
+    while (examined < MAX_SIDECARS_PURGED_PER_CALL && (entry = dirHandle.readSync()) !== null) {
+      const name = entry.name;
       if (!name.startsWith(prefix)) continue;
       const candidate = join(dir, name);
       if (candidate === justCreatedSidecar) continue;
@@ -102,6 +116,12 @@ function purgeOldStaleSidecars(logPath, justCreatedSidecar) {
     }
   } catch {
     // Best-effort only; see the doc comment above.
+  } finally {
+    try {
+      dirHandle?.closeSync();
+    } catch {
+      // Nothing further to do if even closing the handle fails.
+    }
   }
 }
 
