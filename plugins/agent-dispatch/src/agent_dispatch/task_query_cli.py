@@ -15,6 +15,15 @@ def _core():
     return _resolve_cli_module()
 
 
+def _core_helper(name: str, local):
+    """Prefer a monkeypatched ``agent_dispatch.__main__`` helper when present."""
+
+    candidate = getattr(_core(), name, None)
+    if callable(candidate) and candidate is not local:
+        return candidate
+    return local
+
+
 #: The picker Tasks-pivot **board** groups, in the operator's priority order:
 #: what needs your attention first (a task blocked awaiting your steer), then
 #: what's actually running (more interesting to inspect at a glance than a
@@ -166,11 +175,14 @@ def _board_activity(task: dict, *, now: float | None = None) -> str | None:
         current = time.time() if now is None else float(now)
     except (TypeError, ValueError):
         return None
-    return activity if current - observed <= _BOARD_ACTIVITY_TTL_SECONDS else None
+    ttl = getattr(_core(), "_BOARD_ACTIVITY_TTL_SECONDS", _BOARD_ACTIVITY_TTL_SECONDS)
+    return activity if current - observed <= ttl else None
 
 def _board_sort_key(task: dict) -> tuple:
-    grp = _board_group(task)
-    prio = _BOARD_GROUPS.index(grp) if grp in _BOARD_GROUPS else len(_BOARD_GROUPS)
+    group_fn = _core_helper("_board_group", _board_group)
+    groups = getattr(_core(), "_BOARD_GROUPS", _BOARD_GROUPS)
+    grp = group_fn(task)
+    prio = groups.index(grp) if grp in groups else len(groups)
     # Within a group, surface the most recent activity first.
     ts = task.get("updated_at") or task.get("created_at") or 0
     try:
@@ -183,7 +195,9 @@ def _board_keep(task: dict, cutoff: float) -> bool:
     """Keep an active task always; keep a terminal (completed/abandoned) task only
     when its terminal timestamp is at/after ``cutoff`` (the recency window), so the
     board shows *recently* finished work without unbounded growth."""
-    if _board_group(task) not in _BOARD_TERMINAL:
+    group_fn = _core_helper("_board_group", _board_group)
+    terminals = getattr(_core(), "_BOARD_TERMINAL", _BOARD_TERMINAL)
+    if group_fn(task) not in terminals:
         return True
     ts = task.get("completed_at") or task.get("updated_at") or 0
     try:

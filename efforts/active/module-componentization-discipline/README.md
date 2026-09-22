@@ -1691,7 +1691,7 @@ the Phase 0 runbook, picked up as capacity allows.
 
 ### 2026-09-22 — Phase 2 continued: `plugins/agent-dispatch/src/agent_dispatch/__main__.py` task-query slice
 - Took the next least-coupled family after create/spawn: the read/query
-  surfaces. Extracted a new `task_query_cli.py` (**513** lines) holding peer
+  surfaces. Extracted a new `task_query_cli.py` (**486** lines) holding peer
   browse, `list`, `doctor`, the board/inbox helpers and constants,
   `find`, `sweep`, `watch`, `payload`, `result`, `consume`, and `mcp`.
   `__main__.py` stayed the composition root/re-export seam and shrank again
