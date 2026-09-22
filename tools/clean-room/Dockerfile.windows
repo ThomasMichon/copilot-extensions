@@ -71,3 +71,14 @@ RUN $ErrorActionPreference = 'Stop'; \
     Copy-Item -LiteralPath $exe.FullName -Destination C:\psmux\psmux.exe; \
     Remove-Item C:\psmux.zip, C:\psmux-extract -Recurse -Force
 RUN [Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';C:\psmux', 'Machine')
+
+# git -- scenario.ps1's phase 2 (duplicating the extension as a project-level
+# source) needs a real repo; MinGit is the portable, no-installer Git for
+# Windows distribution (avoids an interactive/elevated .exe installer inside
+# the build).
+ARG MINGIT_VERSION=2.47.0.2
+RUN $ErrorActionPreference = 'Stop'; \
+    Invoke-WebRequest -Uri ('https://github.com/git-for-windows/git/releases/download/v' + $env:MINGIT_VERSION + '.windows.1/MinGit-' + $env:MINGIT_VERSION + '-64-bit.zip') -OutFile C:\mingit.zip; \
+    Expand-Archive -LiteralPath C:\mingit.zip -DestinationPath C:\mingit; \
+    Remove-Item C:\mingit.zip
+RUN [Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';C:\mingit\cmd', 'Machine')
