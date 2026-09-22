@@ -315,6 +315,13 @@ Verbatim from the operator:
               families that still call through them. Remaining seams are now
               the registrar/runtime helper band and the
               resolve/run/evaluate helper band.
+            - `agent-dispatch/__main__.py` seventh slice landed: extracted the
+              resolve/run/evaluate/charter command bodies into
+              `execution_cli.py` while keeping the dash-dash parser shim and
+              the shared helper seams in `__main__`. Remaining work is now
+              concentrated in the registrar/runtime helper band plus the
+              shared compatibility helpers still used across the extracted
+              modules.
             - `agent-bridge/__main__.py` slice landed: the file is now a
               **485-line composition root** with focused sibling modules for
               service start/status (`service_start_cli.py`), daemon/process
@@ -1877,3 +1884,48 @@ the Phase 0 runbook, picked up as capacity allows.
   paths (`claim --help`, `complete --help`, `abandon --help`, `focus --help`,
   `embody --help`, `force-stop --help`) in the PR validation step. Version bump
   for this slice: `agent-dispatch` **`0.1.2-dev180`**.
+
+### 2026-09-22 — Phase 2 continued: `plugins/agent-dispatch/src/agent_dispatch/__main__.py` execution-body slice
+- Took the remaining explicit command-family implementation band for
+  resolve/run/evaluate/charter. Extracted a new `execution_cli.py`
+  (**288** lines) holding `_run_resolution_step`, `resolve`, the
+  hibernate-the-wait `run` path, evaluator application, and `charter show`.
+  The command family's parser registration had already moved in the prior
+  slice, so this pass was the matching body extraction.
+- Compatibility stayed the same pattern as the earlier slices: the real
+  command bodies moved, but call sites that tests patch through
+  `agent_dispatch.__main__` still route back through the live root where
+  needed (`_client`, `_resolve_owner`, `_run_resolution_step`,
+  `_spawn_detached_waiter`, `_suspend_for_detached_wait`). This preserved the
+  existing monkeypatch-heavy hibernation / resolution / evaluator coverage
+  without changing behavior.
+- Net result for the root module: `plugins/agent-dispatch/src/agent_dispatch/__main__.py`
+  shrank **1,843 -> 1,576** lines. At this point the root is no longer a large
+  command-body registrar; what remains is predominantly the registrar runtime
+  helpers (`_declaration_summary`, `_cmd_registrar`), the dash-dash parser
+  compatibility shim, and the shared helper seams retained on purpose because
+  multiple extracted families still call through them.
+- Validation again met the full plugin bar. `python tools/run-plugin-tests.py
+  agent-dispatch` passed all six sub-suites green:
+  **3,311 passed / 31 skipped total** (sub-suite counts:
+  `761/5`, `418/11`, `641/14`, `663/1`, `732/0`, `96/4`
+  passed/skipped). Focused follow-up over the moved execution family also
+  passed:
+  `python tools/run-plugin-tests.py agent-dispatch -k "recipes or driver or
+  hibernation or resolution or worker_charter or evaluate or cli"`
+  -> **440 passed / 5 skipped / 2901 deselected**. Required guards then
+  passed: `ruff check --select F,E9 plugins/agent-dispatch`,
+  `python tools/check-module-size.py`,
+  `python tools/check-module-size.py --refresh-baseline`,
+  `python tools/check-install-contract.py`, and
+  `python tools/check-version-consistency.py`.
+- Read-only dogfood for the moved surface stayed to help output only:
+  `python -m agent_dispatch charter show --help`,
+  `resolve --help`, `run --help`, and `evaluate --help` through the plugin
+  test venv. The shrink-only baseline was lowered again, from **1,843** to
+  **1,576** lines for `plugins/agent-dispatch/src/agent_dispatch/__main__.py`.
+  Version bump for this slice: `agent-dispatch` **`0.1.2-dev181`**.
+- Remaining work is now concentrated in the registrar/runtime helper band and
+  the deliberately-retained shared utility seams. This is the first point in
+  the campaign where the residual `__main__.py` surface starts to look less
+  like “one more family” and more like a shared compatibility kernel.
