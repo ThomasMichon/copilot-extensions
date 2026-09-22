@@ -211,6 +211,22 @@ Verbatim from the operator:
             `agent_bridge.session_manager.AcpClient` / `spawn` / helper
             monkeypatch compatibility by routing moved call sites back through
             the composition root where tests rely on that surface.
+      - [x] `agent-bridge/agent_registry.py` (2,963 live lines at slice start,
+            mixed top-level registry/topology helpers + one large `AgentResolver`
+            class + namespace/relay support) — split by **real responsibility**
+            rather than by a blind midpoint: shared constants/types moved to
+            `agent_registry_common.py`; namespace contracts + CLI-backed
+            providers to `agent_registry_namespace.py`; registry parsing,
+            auto-discovery, related/repo registry reads, and topology-derived
+            roster synthesis to `agent_registry_topology.py`; credential-relay
+            profile helpers to `agent_registry_relay.py`; and the
+            `AgentResolver` implementation to `agent_registry_resolver.py`.
+            `agent_registry.py` now stays a compatibility/composition root that
+            re-exports the historical surface, keeps the monkeypatch-heavy seams
+            (`_detect_local_machine`, `resolve_repo_remote`,
+            `_agent_worktrees_bin`) at the old import path, and still owns
+            resolver construction / built-in namespace registration so existing
+            imports and tests stay unchanged.
       - [x] `agent-dispatch/coordinator.py` (2,509, a demonstrated repeat
             drifter) — split the FastAPI app-factory along its real route
             seams using the same `register_*_routes(app, ...)` shape already
@@ -1495,3 +1511,57 @@ the Phase 0 runbook, picked up as capacity allows.
   at **2,963** lines becomes the plugin's next dominant remaining offender.
   Repo-wide, the largest remaining production target stays
   `plugins/agent-worktrees/src/agent_worktrees/__main__.py`.
+
+### 2026-09-21 — Phase 2 continued: `plugins/agent-bridge/src/agent_bridge/agent_registry.py` structural split
+- Took the exact seam the prior `session_manager.py` journal entry queued, but
+  the shape was **hybrid**, not a one-pattern repeat: `agent_registry.py` mixed
+  several independent top-level responsibility bands (registry parsing, local
+  auto-discovery, topology/repo-registry synthesis, credential-relay profile
+  helpers, namespace CLI boundary types) with one large stateful
+  `AgentResolver`. The clean split was therefore **free-function modules plus a
+  class extraction**, not one more all-mixin move.
+- Extracted five focused siblings, each under the cap: `agent_registry_common.py`
+  (shared constants + `AgentConfig`/`NamespaceAgentInfo`/core exceptions),
+  `agent_registry_namespace.py` (the `NamespaceResolver` contract plus
+  `CliNamespaceResolver` / `RestrictedCliNamespaceResolver`),
+  `agent_registry_topology.py` (parse/load/discover + related/repo-registry
+  + topology-derived roster helpers), `agent_registry_relay.py`
+  (`FileTokenValidator` / `FileTokenAuthorizer` + relay-profile application),
+  and `agent_registry_resolver.py` (the full `AgentResolver` implementation).
+  Left `agent_registry.py` as the compatibility/composition root: it re-exports
+  the historical surface, keeps the patch-heavy helper seams
+  (`_detect_local_machine`, `resolve_repo_remote`, `_agent_worktrees_bin`) at
+  the original import path, and still owns `build_resolver()` /
+  `daemon_resolver()` / built-in namespace registration.
+- The tricky part was, again, **compatibility rather than line cutting**. The
+  existing tests patch `agent_bridge.agent_registry._detect_local_machine`,
+  `_agent_worktrees_bin`, `resolve_repo_remote`, and even `Path.home` / `os.name`
+  on the root module to steer resolver and binstub behavior. A naive extraction
+  would have left those patches hitting dead aliases. The moved call sites that
+  depend on those seams now bounce back through the live
+  `agent_bridge.agent_registry` module so the historical monkeypatch surface
+  keeps steering the real implementation.
+- Result: `agent_registry.py` shrank **2,963 -> 451** lines, fell completely out
+  of the shrink-only baseline, and every new sibling module stayed well under
+  the 1,000-line cap.
+- Validation matched the runbook's stricter post-`db.py` discipline. The full
+  `python tools/run-plugin-tests.py agent-bridge` pass still stops in sub-suite
+  1 on the same two pre-existing Windows `bash.exe` path failures in
+  `tests/test_bootstrap_check_reconcile_opt_in.py`
+  (`test_sh_skips_spawn_without_opt_in`,
+  `test_sh_attempts_spawn_with_opt_in`) and otherwise reports
+  **569 passed / 2 failed / 2 skipped**. A targeted follow-up over the moved
+  registry/relay surfaces passed green:
+  `python tools/run-plugin-tests.py agent-bridge -k "agent_registry or relay_profile"`
+  -> **172 passed / 1 skipped / 2420 deselected**. Ruff (`--select F,E9`)
+  passed across all touched/created modules, `python tools/check-module-size.py`
+  stayed green, and `--refresh-baseline` removed only the
+  `agent_registry.py` entry from `tools/module-size-baseline.json`.
+- Bumped `agent-bridge` to `0.4.0-dev542`.
+- `python tools/rank-module-size.py --limit 100` disproved the tempting "plugin
+  clear" claim: `agent-bridge` still has several oversized baselined modules
+  (`client.py`, `routes/sessions.py`, `acp_client.py`, `routes/worktrees.py`,
+  `transport.py`, `remote_operations.py`, `app.py`, `result_snapshot.py`,
+  `models.py`, `session_host/spawner.py`). So this slice retires the registry
+  offender, but **does not** make `agent-bridge` module-cap clean yet. The
+  plugin's next dominant remaining offender is now `client.py` at 1,710 lines.
