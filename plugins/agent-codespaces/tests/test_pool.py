@@ -533,6 +533,54 @@ def test_picker_payload_status_stale_and_stopped():
     assert by["s"]["worktree"] == ""         # unclaimed
 
 
+# --- claims_summary (picker-venue-pivots Phase 1) --------------------------
+
+def test_picker_payload_claims_summary_wired_from_claiming_worktree(monkeypatch):
+    """The ``claims_summary`` entry field is the claiming worktree's ranked
+    claims-list (via the shared ``agent_worktrees.claims_rank`` module),
+    looked up by the same ``worktree`` short id already used for the TASK
+    title cross-link."""
+    import time as _t
+    from agent_codespaces.pool import picker_payload
+    now = _t.time()
+    lease = Lease(codespace="held", effort="3bac", pid=1, host="dev6",
+                  acquired_at=now, heartbeat_at=now)
+    held = CodespaceInfo(name="held", display_name="my-feature",
+                         repository="o/web-codespaces", branch="main",
+                         state="Available", machine="premiumLinux", account="a",
+                         last_used_at="")
+    members, budget = build_pool(now=now, codespaces=[held], leases=[lease], markers={})
+    seen_ids = []
+    monkeypatch.setattr(
+        "agent_codespaces.pool._claims_summary_for_worktree",
+        lambda worktree_id: seen_ids.append(worktree_id) or "PR #2481",
+    )
+    e = picker_payload(members, budget)["entries"][0]
+    assert seen_ids == ["3bac"]              # looked up by the claiming worktree id
+    assert e["claims_summary"] == "PR #2481"
+
+
+def test_picker_payload_claims_summary_blank_when_unclaimed():
+    import time as _t
+    from agent_codespaces.pool import picker_payload
+    now = _t.time()
+    free = CodespaceInfo(name="free", display_name="", repository="o/web-codespaces",
+                         branch="main", state="Shutdown", machine="premiumLinux",
+                         account="a", last_used_at="")
+    members, budget = build_pool(now=now, codespaces=[free], leases=[], markers={})
+    e = picker_payload(members, budget)["entries"][0]
+    assert e["claims_summary"] == ""
+
+
+def test_claims_summary_for_worktree_degrades_gracefully_without_agent_worktrees():
+    """agent-codespaces does not depend on agent-worktrees (see pyproject.toml);
+    in an environment where it isn't installed alongside, the lookup must
+    degrade to `` "" `` rather than raise."""
+    from agent_codespaces.pool import _claims_summary_for_worktree
+    assert _claims_summary_for_worktree("") == ""
+    assert _claims_summary_for_worktree("some-worktree-id") == ""
+
+
 # --- picker_stream_frames + diff_entries (D2 NDJSON streaming) -------------
 
 def test_picker_stream_frames_envelope_order_and_rows():

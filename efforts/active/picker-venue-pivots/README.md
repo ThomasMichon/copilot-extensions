@@ -9,10 +9,14 @@
 - **Created:** 2026-09-21
 - **Status:** Active — Phase 0 fully complete (design, operator-approved
   committed screenshots, and the shared claims-pecking-order module all
-  done). Phase 1 (Codespaces implementation) next.
+  done). Phase 1 (Codespaces implementation) in progress.
 - **Vision:** [`visions/venue-pivots-ux`](../../../visions/venue-pivots-ux/README.md)
-- **Umbrella issue:** _TBD — file before Phase 1 implementation lands._
-- **Sub-issues:** _TBD, one per Plan phase._
+- **Umbrella issue:** `ThomasMichon/copilot-extensions#3253`
+- **Sub-issues:** Phase 1 `ThomasMichon/copilot-extensions#3254`, Phase 2
+  `ThomasMichon/copilot-extensions#3255`, Phase 3
+  `ThomasMichon/copilot-extensions#3256`, Phase 4
+  `ThomasMichon/copilot-extensions#3257`, Phase 5
+  `ThomasMichon/copilot-extensions#3258`.
 
 ## Guiding Intent
 
@@ -100,14 +104,27 @@ realization.
   manifest/screenshot design, operator-approved committed screenshots
   (`design-previews/*.png`), and the shared claims-pecking-order module
   (`agent_worktrees.claims_rank`, real code + 13 passing tests) are all
-  done. **Phase 1 has not started.**
-- **Immediate next step:** open the umbrella issue (still `_TBD_` at the top
-  of this README), then start Phase 1: wire `pivots/agent-codespaces.json`'s
-  `entry.subtitle` and wire `pool.picker_payload` to call
-  `claims_rank.summarize_claims` for its `claims_summary` field (the
-  module exists; nothing calls it from the real pivot yet). If any
-  implementation-phase session changes a row/menu's visual shape, re-run
-  the render script (`worktree-manager\.venv\Scripts\python.exe
+  done. **Phase 1 is in progress.**
+- **Umbrella + sub-issues filed** (2026-09-21):
+  `ThomasMichon/copilot-extensions#3253` (umbrella), `#3254`-`#3258` (Phase
+  1-5 sub-issues, one each).
+- **Phase 1 progress (2026-09-21):** wired `pool.picker_payload`'s
+  `claims_summary` entry field to the shared `agent_worktrees.claims_rank`
+  module (via a new `_claims_summary_for_worktree` helper, lazy-imported the
+  same way `config._registered_repo_paths` already does — degrades to `""`
+  when agent-worktrees isn't installed alongside, never raises) and wired
+  `pivots/agent-codespaces.json`'s `entry.subtitle` + a new `claims_summary`
+  column (matching the approved `agent-codespaces.proposed.json` preview
+  manifest's width/priority). 65 pool tests pass (3 new); full
+  agent-codespaces suite is green apart from 2 pre-existing, unrelated
+  `test_bootstrap_check_reconcile_opt_in.py` failures (a Windows bash
+  path-translation issue, confirmed present on `main` too via `git stash`).
+- **Immediate next step:** remaining Phase 1 checklist items — additional
+  columns worth surfacing from `pool.picker_payload`'s fuller entry dict,
+  the agent-bridge live-session join (`sess` column + transient-activity
+  half of the subtitle), and the design-only New-codespace entry point. If
+  any implementation-phase session changes a row/menu's visual shape,
+  re-run the render script (`worktree-manager\.venv\Scripts\python.exe
   worktree-manager\scripts\picker-snapshot\venue-preview\render_venue_preview.py
   --out-dir worktree-manager\scripts\picker-snapshot\venue-preview\out`,
   both venvs already built in this worktree) and diff the fresh output
@@ -397,14 +414,18 @@ note explaining why, whenever the design is deliberately revised.
 
 ### Phase 1 — Codespaces pivot (implementation)
 - [x] ~~Build the shared claims-pecking-order module~~ — done in Phase 0
-      (`claims_rank.py`, see above). Remaining: wire `pool.py`'s
-      `picker_payload` to actually call `claims_rank.summarize_claims`
-      against the driving worktree's real claim ledger for its
-      `claims_summary` entry field, instead of the preview's hand-authored
-      placeholder strings.
-- [ ] Wire `entry.subtitle` into `pivots/agent-codespaces.json` so
+      (`claims_rank.py`, see above). **Done (2026-09-21):** wired
+      `pool.py`'s `picker_payload` to actually call
+      `claims_rank.summarize_claims` (via a new
+      `_claims_summary_for_worktree` helper, lazy-imported like `config
+      ._registered_repo_paths`) against the claiming worktree's real claim
+      ledger for its `claims_summary` entry field, replacing the preview's
+      hand-authored placeholder strings. 3 new tests, all passing.
+- [x] Wire `entry.subtitle` into `pivots/agent-codespaces.json` so
       `pool.picker_payload`'s already-computed subtitle (claim/orphan
       detail) actually renders as the durable-title half of line two.
+      **Done (2026-09-21)**, alongside a new `claims_summary` column
+      (matching the approved proposed-manifest width/priority).
 - [ ] Add any additional columns worth surfacing from `pool.picker_payload`'s
       fuller entry dict (per Phase 0 design note).
 - [ ] agent-bridge live-session join keyed on
@@ -496,6 +517,23 @@ note explaining why, whenever the design is deliberately revised.
 
 ## Journal
 
+- **2026-09-21 (latest+7)** — Filed the umbrella issue
+  (`ThomasMichon/copilot-extensions#3253`) and one sub-issue per Plan phase
+  (`#3254`-`#3258`), the last open Phase 0 housekeeping item. Started Phase
+  1: wired `pool.picker_payload`'s `claims_summary` entry field to the
+  shared `claims_rank` module via a new `_claims_summary_for_worktree`
+  helper (looked up by the claiming worktree's short id, lazy-imported
+  `agent_worktrees` the same way `config._registered_repo_paths` already
+  does — agent-codespaces has no hard dependency on agent-worktrees, so
+  this degrades to `""` rather than raising when it isn't installed
+  alongside); wired `pivots/agent-codespaces.json`'s `entry.subtitle` (the
+  durable-title half of line two) and added a `claims_summary` column
+  matching the approved `agent-codespaces.proposed.json` preview manifest's
+  width/priority. 3 new tests (`test_pool.py`); full agent-codespaces
+  suite green (565 pass) apart from 2 pre-existing, unrelated
+  `test_bootstrap_check_reconcile_opt_in.py` failures confirmed present on
+  the pre-change tree too (a Windows-bash path-translation issue, verified
+  via `git stash`/`git stash pop`).
 - **2026-09-21 (latest+6)** — Operator proposed a `.d/` drop-in system so
   any module/plugin can declare claim-type metadata (kind + priority),
   "so any system can offer claims and play" — mirroring the Picker's own

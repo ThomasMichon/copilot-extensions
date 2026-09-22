@@ -640,6 +640,46 @@ def _short_claim_ref(ref: str) -> str:
     return f"{worktree}@{machine}" if machine else worktree
 
 
+def _claims_summary_for_worktree(worktree_id: str) -> str:
+    """The ranked ``claims_summary`` for the worktree claiming this box
+    (picker-venue-pivots Phase 1), via the shared ``agent_worktrees.claims_rank``
+    module -- the same ranking every claims-showing pivot consumes.
+
+    Lazily imports ``agent_worktrees`` (mirroring ``config
+    ._registered_repo_paths``'s own cross-plugin pattern): agent-codespaces
+    does not declare a hard dependency on agent-worktrees, so an environment
+    where it is not installed alongside still renders a full payload -- just
+    without a ``claims_summary``. Never raises: an empty/unknown ``worktree_id``,
+    a missing record, or an import failure all degrade to ``""``.
+    """
+    if not worktree_id:
+        return ""
+    try:
+        from agent_worktrees import claim_kinds_registry, claims_rank, tracking
+    except ImportError:
+        return ""
+    try:
+        record = tracking.load_record_by_id(worktree_id)
+    except Exception:
+        return ""
+    if record is None:
+        return ""
+    try:
+        pecking_order = claim_kinds_registry.effective_pecking_order()
+        label_overrides = claim_kinds_registry.effective_label_overrides()
+    except Exception:
+        pecking_order = None
+        label_overrides = None
+    try:
+        return claims_rank.summarize_claims(
+            record.resources,
+            pecking_order=pecking_order,
+            label_overrides=label_overrides,
+        )
+    except Exception:
+        return ""
+
+
 def picker_payload(
     members: list[PoolMember],
     budget: Budget,
@@ -720,6 +760,11 @@ def picker_payload(
             "status": status,          # RUNNING / STALE / STOPPED (compact STATE)
             "worktree": worktree,      # claiming worktree short id (-> TASK title)
             "subtitle": subtitle,      # optional 2nd line (durable id + claim)
+            # Phase 1 (picker-venue-pivots): the claiming worktree's own ranked
+            # claims-list (PR/bug/etc.), via the shared claims_rank module --
+            # "" when unclaimed, unresolvable, or agent-worktrees isn't
+            # installed alongside (see _claims_summary_for_worktree).
+            "claims_summary": _claims_summary_for_worktree(worktree),
             "repository": m.repository,
             "repo": _short_repo(m.repository),
             "branch": m.branch,
