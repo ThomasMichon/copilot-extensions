@@ -182,9 +182,10 @@ def _passive_daemon_creationflags() -> int:
 def _passive_daemon_stdio_kwargs() -> tuple[dict, list]:
     from .config import config_dir
 
-    log_out = open(config_dir() / "agent-bridge.log", "ab")
+    open_fn = getattr(_core(), "open", open)
+    log_out = open_fn(config_dir() / "agent-bridge.log", "ab")
     try:
-        log_err = open(config_dir() / "agent-bridge-err.log", "ab")
+        log_err = open_fn(config_dir() / "agent-bridge-err.log", "ab")
     except OSError:
         log_out.close()
         raise

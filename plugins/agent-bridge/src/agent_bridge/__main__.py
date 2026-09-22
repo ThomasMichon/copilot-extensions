@@ -165,7 +165,7 @@ def _add_stream_args(p: argparse.ArgumentParser) -> None:
 
 
 def _worktrees_get(key: str) -> str | None:
-    exe = shutil.which("agent-worktrees")
+    exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow agent-worktrees-management
     if not exe:
         return None
     try:
