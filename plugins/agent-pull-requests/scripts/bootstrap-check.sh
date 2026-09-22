@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Session-start runtime bootstrap + reconcile -- generic, self-locating. Invoked
+# (via hooks.json) from the plugin's scripts/ dir. Derives the install dir from
+# plugin.json's name (~/.<name>). Two jobs, both grace-window-cheap:
+#   1. FIRST install (unprovisioned): if the installer supports a cheap 'stamp'
+#      action, splat the self-provisioning binstub now (deferring the venv build
+#      to the binstub's first use) so the CLI is on PATH this session -- no venv
+#      build on the hook. Installers without 'stamp' keep the old no-op.
+#   2. RECONCILE (already provisioned): re-run the installer in the BACKGROUND
+#      only when the deployed version drifts. Reconciles the TOOL, never state.
+#
+# OPT-IN GATE (fanned out from the agent-bridge reference implementation, see
+# tools/check-bootstrap-sync.py FAMILIES): the background reconcile spawn
+# below requires an explicit, checked-in, PER-PLUGIN opt-in --
+# <project>/.copilot-extensions/config.yaml carrying a top-level
+# `background_reconcile_<plugin-name>: true` line (plain regex match, no yaml
+# parser -- this hook has no python/venv yet). No opt-in -> no background
+# spawn; deliberate behavior change from silent auto-heal.
+ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PluginDir="$(cd "$ScriptDir/.." && pwd)"
+session_start_json_emitted=0
+emit_session_start_json() {
+  if [ "${session_start_json_emitted:-0}" -eq 0 ]; then
+    printf '{}'
+    session_start_json_emitted=1
+  fi
+}
+trap 'emit_session_start_json' EXIT
+if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then exit 0; fi
+py="$(command -v python3 || command -v python || true)"; [ -n "$py" ] || exit 0
+name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" 2>/dev/null)"
+[ -n "$name" ] || exit 0
+InstallDir="$HOME/.$name"
+Manifest="$InstallDir/deploy-manifest.json"
+if [ ! -f "$Manifest" ]; then
+  # Not provisioned yet -- do the cheap FIRST install (stamp) so the binstub is
+  # callable this session; it self-provisions the runtime on first use. Fully
+  # back-compatible: only fires when the installer declares a 'stamp' action.
+  installer=""
+  for candidate in "$PluginDir/scripts/init.sh" "$PluginDir/scripts/install.sh"; do
+    if [ -f "$candidate" ] && grep -qE '^[[:space:]]*([[:alnum:]_-]+\|)*stamp(\|[[:alnum:]_-]+)*\)' "$candidate" 2>/dev/null; then installer="$candidate"; break; fi
+  done
+  if [ -n "$installer" ]; then
+    bash "$installer" stamp >/dev/null 2>&1 || true
+  fi
+  exit 0
+fi
+deployed="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"].get("version",""))' "$Manifest" 2>/dev/null)"
+current="$deployed"
+pyproj="$PluginDir/pyproject.toml"
+if [ -f "$pyproj" ]; then
+  v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$pyproj" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
+  [ -n "$v" ] && current="$v"
+fi
+# "Provisioned" no longer implies a .venv: the marker runtime model (#581) publishes
+# the active slot via a current-version marker (POSIX keeps a .venv symlink, but a
+# marker+slot is authoritative). Treat a marker whose slot python exists as
+# provisioned too, so a current runtime is a clean no-op, not a needless rebuild.
+provisioned=0
+[ -e "$InstallDir/.venv" ] && provisioned=1
+if [ "$provisioned" = 0 ] && [ -f "$InstallDir/current-version" ]; then
+  cv="$(tr -d '[:space:]' < "$InstallDir/current-version")"
+  # ...and only when it names the CURRENT payload version (the marker is authoritative
+  # for the active slot; a stale marker must not suppress reconcile).
+  if [ -n "$cv" ] && [ "$cv" = "$current" ] && { [ -x "$InstallDir/versions/$cv/bin/python" ] || [ -f "$InstallDir/versions/$cv/Scripts/python.exe" ]; }; then provisioned=1; fi
+fi
+if [ "$provisioned" = 1 ] && [ "$deployed" = "$current" ]; then exit 0; fi
+
+# OPT-IN GATE: drift exists, so we'd normally reconcile -- but only when this
+# project has explicitly opted THIS plugin in (per-plugin, not a blanket
+# flag). COPILOT_PROJECT_DIR is the session's project checkout, injected by
+# the CLI at session start; fall back to cwd if unset.
+ProjectDir="${COPILOT_PROJECT_DIR:-$(pwd)}"
+optInFile="$ProjectDir/.copilot-extensions/config.yaml"
+optInKey="background_reconcile_${name}"
+optedIn=0
+if [ -f "$optInFile" ] && grep -qE "^[[:space:]]*${optInKey}:[[:space:]]*true[[:space:]]*\$" "$optInFile" 2>/dev/null; then
+  optedIn=1
+fi
+if [ "$optedIn" -ne 1 ]; then
+  echo "[$name] runtime $deployed -> $current; background reconcile SKIPPED (no opt-in -- add '${optInKey}: true' to $optInFile to enable)" >&2
+  exit 0
+fi
+
+if [ -f "$PluginDir/scripts/init.sh" ]; then
+  target=("$PluginDir/scripts/init.sh")
+elif [ -f "$PluginDir/scripts/install.sh" ]; then
+  target=("$PluginDir/scripts/install.sh" install)
+else
+  exit 0
+fi
+echo "[$name] runtime $deployed -> $current; reconciling in background..." >&2
+nohup bash "${target[@]}" >/dev/null 2>&1 &
+exit 0

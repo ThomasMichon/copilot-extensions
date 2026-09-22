@@ -6,12 +6,14 @@ has no local worktree checkout.
 
 ## Status of this slice
 
-This is **step 1 / scaffold + first working verb** of the staged rollout from
+This is the first runtime-backed step of the staged rollout from
 `agent-worktrees`' existing PR verbs into a superset plugin:
 
 - `agent-worktrees` is unchanged in this slice.
 - Consumer/doc migration and deprecation are explicitly later steps.
 - The only implemented end-to-end verb here is `status`.
+- Marketplace install now deploys a real `~/.local/bin/agent-pull-requests`
+  binstub backed by the plugin's own versioned runtime.
 
 ## Planned verb surface
 
