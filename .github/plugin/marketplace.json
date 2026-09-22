@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.7-dev205"
+    "version": "1.7.7-dev206"
   },
   "plugins": [
     {
@@ -14,6 +14,13 @@
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
       "version": "1.5.5-dev238",
       "source": "plugins/agent-worktrees"
+    },
+    {
+      "name": "agent-pull-requests",
+      "description": "Cross-repository pull-request CLI for API-driven status/create/merge/wait flows (status implemented; others staged), initially mediated through agent-worktrees account resolution. Payload-only for now -- no install script deploys a binstub yet; invoke via 'python -m agent_pull_requests' after 'pip install -e'.",
+      "version": "0.1.0-dev1",
+      "source": "plugins/agent-pull-requests",
+      "defaultEnabled": false
     },
     {
       "name": "agent-bridge",

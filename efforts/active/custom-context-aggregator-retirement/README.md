@@ -188,7 +188,7 @@ There is no third, custom composition authority between plugins and the host.
 
 ### 2026-09-07 — Output-free bootstrap and scanner hardening
 
-- Audited the full 21-plugin marketplace roster. Fourteen plugins still
+- Audited the full 22-plugin marketplace roster. Fourteen plugins still
   register `sessionStart` commands; seven (`efforts`, `visions`,
   `customizing-copilot`, `copilot-extensions-harness`, `wsl-setup`,
   `harness-knowledge`, and `delegation-guidance`) do not and needed no startup
