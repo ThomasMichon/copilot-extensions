@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "label": "Containers",
+  "after": "Worktrees",
+  "list": ["agent-containers", "fleet", "--json"],
+  "entry": {
+    "id": "name",
+    "title": "name",
+    "worktree": "lease",
+    "group": "fleet",
+    "subtitle": "subtitle"
+  },
+  "columns": [
+    {"key": "name", "header": "container", "width": 20},
+    {"key": "fleet", "header": "fleet", "width": 14},
+    {"key": "state", "header": "state", "width": 8, "palette": "state"},
+    {"key": "driven", "header": "driven", "width": 8, "palette": "state", "priority": 5},
+    {"key": "lease", "header": "worktree", "width": 10},
+    {"key": "security_profile", "header": "profile", "width": 10, "priority": 3},
+    {"key": "worktree_title", "header": "task", "width": 30, "priority": 6},
+    {"key": "claims_summary", "header": "claims", "width": 18, "priority": 4}
+  ],
+  "actions": [
+    {
+      "label": "Open into a CLI session",
+      "run": ["agent-bridge", "attach", "{id}"],
+      "when": {"live": "yes"},
+      "description": "PROPOSED \u2014 semantics not yet implemented (Phase 3). Attaches to this fleet container's own muxed Copilot instance over the fabric's SSH transport."
+    },
+    {
+      "label": "View driving worktree",
+      "run": ["agent-worktrees", "goto", "{lease}"],
+      "when": {"driven": "DRIVEN"},
+      "description": "PROPOSED \u2014 semantics not yet implemented (Phase 4). Jumps to this container's driving worktree's own Worktrees-pivot entry."
+    },
+    {
+      "label": "Worktree status",
+      "kind": "card",
+      "title_from": "worktree_status.title",
+      "body_from": "worktree_status.body",
+      "when": {"driven": "DRIVEN"},
+      "description": "PROPOSED \u2014 semantics not yet implemented (Phase 4). Opens the driving worktree's own Worktree Status card directly, mirroring agent-dispatch's Tasks-pane direction."
+    },
+    {
+      "label": "Stop",
+      "run": ["agent-containers", "stop", "{id}"],
+      "when": {"state": "running"},
+      "confirm": true,
+      "description": "PROPOSED \u2014 semantics not yet implemented (Phase 2). Analogous to Codespaces' Release."
+    },
+    {
+      "label": "Remove",
+      "run": ["agent-containers", "remove", "{id}"],
+      "when": {"state": "exited"},
+      "confirm": true,
+      "description": "PROPOSED \u2014 semantics not yet implemented (Phase 2). Analogous to Codespaces' Recycle."
+    }
+  ],
+  "empty_hint": "No fleet containers (run `agent-containers up <fleet>`)."
+}

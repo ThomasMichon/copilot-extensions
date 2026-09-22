@@ -94,18 +94,24 @@ realization.
   until Phase 0 previews are captured and approved; each implementation
   phase gets its own fresh worktree off `main` afterward (Tasks-pane
   precedent).
-- **Current phase:** Phase 0 — grounding is done (including the 2026-09-21
-  correction below); preview tooling and screenshots are not yet built.
-- **Immediate next step:** stand up `scripts/picker-snapshot/venue-preview/`
-  (sibling of the existing `tasks-preview/`), reusing its hermetic-demo /
-  fixed-fixture / real-engine pattern, but seeded from the **real current
-  manifests** (`pivots/agent-codespaces.json`,
-  `pivots/agent-containers.json`) plus proposed diffs on top of them —
-  not from-scratch proposed manifests — with fixed fixtures standing in for
-  `agent-codespaces pool --picker-json`, `agent-containers fleet --json`,
-  and a fixed agent-bridge `live-sessions --json` fixture for the
-  cross-link join. Render before/after screenshots so the operator can see
-  exactly what changes on each row.
+- **Current phase:** Phase 0 — grounding, manifest/screenshot design, and
+  the preview tooling are all done. Six screenshots rendered successfully
+  on the first attempt against the real Textual engine (see
+  `worktree-manager/scripts/picker-snapshot/venue-preview/out/` after
+  running the render script, or the venue-preview README for a full
+  description of each). **Remaining before Phase 1:** the shared
+  claims-pecking-order module is still only a design placeholder in the
+  preview (hand-authored `claims_summary` strings, not a real ranking), and
+  the operator has not yet reviewed/approved the screenshots.
+- **Immediate next step:** get operator sign-off on the six
+  `venue-preview/out/*.png` screenshots (or iterate on manifest/fixture
+  design per feedback — re-run
+  `worktree-manager\.venv\Scripts\python.exe
+  worktree-manager\scripts\picker-snapshot\venue-preview\render_venue_preview.py
+  --out-dir worktree-manager\scripts\picker-snapshot\venue-preview\out`
+  after any manifest edit, both venvs are already built in this worktree).
+  Once approved, Phase 1 starts with the shared claims-pecking-order module
+  design (still open) before touching the real `pivots/agent-codespaces.json`.
 
 ## Context
 
@@ -235,6 +241,20 @@ Tasks pivot are the baselines).
   pivots and a future Tasks-pane-ux implementation can import from (a
   natural home is `agent-worktrees` itself, since it already owns the
   ledger being ranked).
+- **The row grammar needs zero new picker-engine code — confirmed by
+  building the Phase 0 preview.** `subtitle_field`/`_column_subtitle`
+  already render one composed string; `Column`/`group_field`/
+  `worktree_field` already exist. Every proposed field in the Phase 0
+  manifests (`driven`, `claims_summary`, the composed `subtitle`) is just a
+  new column/entry-mapping declaration plus a new value the real backend
+  command (`pool.py`, `_cmd_fleet`) would compute — exactly the same shape
+  as the existing `worktree_title` auto-injection. The preview's own
+  fixtures bake the agent-bridge join's *output* (`live`, the composed
+  activity text) directly into the fixture rows rather than modeling a
+  separate `agent-bridge live-sessions --json` fixture and a join step in
+  the preview tooling — that join is real Phase 1/2 backend work
+  (`pool.py`/`_cmd_fleet` calling agent-bridge), not something the picker
+  engine or this preview tool needs to simulate to prove the row grammar.
 
 ## Plan
 
@@ -254,38 +274,42 @@ Tasks pivot are the baselines).
       "reported intent/progress" (`live_representation.py`,
       `db_live_sessions.py`) — update this README's grounding section once
       confirmed rather than leaving the placeholder above.
-- [ ] Stand up `scripts/picker-snapshot/venue-preview/`: hermetic demo
+- [x] Stand up `scripts/picker-snapshot/venue-preview/`: hermetic demo
       Worktrees source (reuse `render_tasks_preview.py`'s pattern), fixed
       fixtures for `agent-codespaces pool --picker-json` and
-      `agent-containers fleet --json`, a fixed agent-bridge
-      `live-sessions --json` fixture, and **proposed manifest diffs on top
-      of the real current manifests** (not from-scratch proposals).
-- [ ] Design the exact column/field mapping for the Containers parity pass
-      (which of the ~16 real `fleet --json` fields become columns vs.
-      subtitle vs. actions-gating, mirroring Codespaces' choices) and the
-      Codespaces `subtitle` wiring + new live-session columns, as a design
-      note before writing manifest JSON. Both must produce line two as
-      `"[mark] <durable title> - <transient activity>"` (see the vision's
-      "Row grammar" concept) — not a bare fact string — with the durable
-      title sourced from a declared checkout intent, else the
-      worktree-title cross-link, else venue identity; and the transient
-      activity sourced from the new agent-bridge live-session join.
-- [ ] Decide, per the Phase 0 preview, whether the driving-worktree
-      indicator lives in a dedicated line-one stat slot or the line-two
-      `[mark]` glyph, and design the "view driving worktree"/"worktree
-      status" menu entries for both pivots.
+      `agent-containers fleet --json` (`fake_pool.py`/`fake_fleet.py`), and
+      **both a byte-copy of the real current manifest and a proposed
+      manifest** for each pivot (not from-scratch proposals) — see
+      `worktree-manager/scripts/picker-snapshot/venue-preview/README.md`.
+- [x] Design the exact column/field mapping for the Containers parity pass
+      and the Codespaces `subtitle` wiring, realized directly as the two
+      `*.proposed.json` manifests (not just a prose note): `driven` and
+      `claims` columns on both, `subtitle` composed as
+      `"[mark] <durable title> - <transient activity>"`, a `worktree`
+      cross-link on Containers via `lease`.
+- [x] Decide the driving-worktree indicator's slot: a dedicated `driven`
+      line-one stat column (not the `[mark]` glyph) — reads unambiguously
+      in the column table, leaving `[mark]` free for the line-two
+      relation semantics (→ driving link / ⚠ orphaned). "View driving
+      worktree"/"Worktree status" menu entries added to both pivots' proposed
+      manifests, gated on `driven`.
 - [ ] Design the shared claims-pecking-order module: its home (proposed:
       `agent-worktrees`, since it owns the ledger being ranked), its input
       shape (a worktree's claim-ledger entries) and output shape (an
       ordered/truncated "1-2 prominent" list per the ranking), and how a
       pivot's rendering code calls into it — this is genuinely new
       infrastructure (confirmed nothing like it exists today), size the
-      design accordingly.
-- [ ] Render and review before/after screenshots for both pivots: current
-      (real) shape vs. proposed shape, plus one screenshot each of a row
-      with vs. without a live agent-bridge session joined, one showing the
-      driving-worktree mark + menu entries, and one showing the claims
-      pecking order picking between multiple ledger entries on one row.
+      design accordingly. **Not yet designed**: the preview's
+      `claims_summary` values are hand-authored placeholders standing in
+      for this module's eventual output, not a working ranking.
+- [x] Render and review before/after screenshots for both pivots: current
+      (real) shape vs. proposed shape (`codespaces-before/after.png`,
+      `containers-before/after.png`), plus a menu screenshot for each
+      showing Open/View-driving-worktree/Worktree-status
+      (`codespaces-menu-driven-live.png`, `containers-menu-driven-live.png`).
+      All six ran successfully against the real Textual engine on the
+      first attempt — see the venue-preview README for the full
+      before/after description of each.
 - [ ] Operator review of the screenshots; resolve any design feedback here
       before Phase 1 starts.
 
@@ -384,6 +408,23 @@ Tasks pivot are the baselines).
 
 ## Journal
 
+- **2026-09-21 (latest+2)** — Built and ran the Phase 0 preview tooling
+  (`worktree-manager/scripts/picker-snapshot/venue-preview/`): hermetic
+  demo Worktrees source, `fake_pool.py`/`fake_fleet.py` fixtures (4/3 rows
+  each covering driven+live, driven+idle, undriven, and orphaned-lock
+  scenarios), byte-copies of both real current manifests, and two proposed
+  manifests. Built the `agent-worktrees` and `worktree-manager` `.venv`s in
+  this worktree and rendered all six screenshots against the real Textual
+  engine on the **first attempt** — no engine.py changes needed (confirmed
+  the row grammar, driven column, and claims column are all achievable as
+  pure manifest + backend-command work, using the exact same
+  `subtitle_field`/`Column`/`worktree_field` mechanisms `worktree_title`
+  auto-injection already proved out). Decided the driving-worktree
+  indicator lives in a dedicated `driven` column (not the `[mark]` glyph),
+  freeing `[mark]` for line two's own relation semantics. The shared
+  claims-pecking-order module remains undesigned; the preview's
+  `claims_summary` values are explicit placeholders. Next: operator review
+  of the screenshots.
 - **2026-09-21 (latest+1)** — Operator supplied a shared claims prominence
   ranking (PR > bug > effort > bridge > CodeSpace/container > child
   worktree > machine SSH > dispatch task, tunable; human-mappable/
