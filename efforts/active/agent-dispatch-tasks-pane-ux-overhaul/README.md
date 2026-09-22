@@ -1012,17 +1012,30 @@ no lifecycle-control logic invented at this layer.
          tasks in `Status.OWNED` (`CLAIMED`/`STARTED`/`SUSPENDED` —
          `queue_records.py`) whose `owner`/`target_machine` is this
          coordinator's own machine — never the whole fleet, never another
-         machine's rows. For each, it calls out to `agent-worktrees
-         worktree-status-bundle --project <repo> --worktree <id>` (the same
-         real-caller path the accelerator's own audit now hardens) from this
-         async task (a subprocess call off the request-handling path, e.g.
-         via `asyncio.create_subprocess_exec` or a thread executor), never
-         the render/click path — so it is not the subprocess-free consumer
-         the pattern doc's named exception describes; it is simply one more
-         ordinary, coalesced caller of the accelerator, exactly as
-         *external-status-consumer-contract* describes. A cross-machine
-         board render (task claimed on machine B, rendered via machine A's
-         shared/local coordinator) reads machine B's relay over the same
+         machine's rows. **Correction (Copilot review 2026-09-21, "Resolve
+         canonical repo lanes before invoking agent-worktrees"):** a task's
+         `repo` field is agent-dispatch's own canonical remote lane (e.g.
+         `github.com/org/repo`), not the value `agent-worktrees --project`
+         accepts (a locally adopted project *name*) — passing the lane
+         directly would fail project resolution and leave the relay cold
+         for ordinary tasks. Resolve the lane through the existing
+         `identity.name_for_repo(canonical)` mapping (with its documented
+         `None` fallback for an unadopted repo, which simply skips that
+         poll) before invoking the CLI, while still keying the relay by the
+         canonical `repo` (stable across machines) rather than the locally-
+         resolved name (which can vary per machine's own adoption). For
+         each resolved worktree, it calls out to `agent-worktrees
+         worktree-status-bundle --project <resolved-name> --worktree <id>`
+         (the same real-caller path the accelerator's own audit now
+         hardens) from this async task (a subprocess call off the request-
+         handling path, e.g. via `asyncio.create_subprocess_exec` or a
+         thread executor), never the render/click path — so it is not the
+         subprocess-free consumer the pattern doc's named exception
+         describes; it is simply one more ordinary, coalesced caller of the
+         accelerator, exactly as *external-status-consumer-contract*
+         describes. A cross-machine board render (task claimed on machine
+         B, rendered via machine A's shared/local coordinator) reads
+         machine B's relay over the same
          federation/routing transport the board already uses to reach a
          remote coordinator for task data (step 3) — no new cross-machine
          mechanism to invent.
@@ -2361,4 +2374,25 @@ and cross-referenced from Phase 5. This remains a design-only pass — no
 code changes — but the design is now grounded against the actual topology,
 state machine, and transport rather than assumed single-machine/single-
 process shapes.
+
+### 2026-09-21 — PR #3222 review round 3 + round 4: test-count mismatch, then a real repo/project-name gap
+Round 3 (1 finding, real): two other places in the design still said "the
+two named regression tests" while step 6 enumerates three (render-path
+no-subprocess, freshness/staleness, cross-machine ownership) — fixed both
+mentions to match, since the mismatch could have caused the cross-machine
+safety test to be silently dropped at implementation time.
+
+Round 4 (1 "previously missed" finding, real and substantive): the design's
+step 1 called `agent-worktrees worktree-status-bundle --project <repo>`
+directly using agent-dispatch's own `repo` field — but that field holds
+the canonical remote lane (e.g. `github.com/org/repo`), while `agent-
+worktrees --project` expects a locally adopted project *name*, resolved
+per-machine. Passing the lane directly would fail project resolution and
+leave the relay permanently cold for ordinary tasks — a design bug that
+would have shipped completely broken. Fixed by resolving the lane through
+the existing `identity.name_for_repo(canonical)` mapping (skipping that
+poll on its documented `None` fallback for an unadopted repo) before
+invoking the CLI, while still keying the relay by the canonical `repo`
+(stable across machines, unlike the locally-resolved name) rather than the
+resolved name itself.
 
