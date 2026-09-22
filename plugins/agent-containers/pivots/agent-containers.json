@@ -6,8 +6,33 @@
   "entry": {
     "id": "name",
     "title": "name",
-    "subtitle": "image",
-    "badges": ["state", "fleet"]
+    "worktree": "lease",
+    "group": "fleet",
+    "subtitle": "subtitle"
   },
+  "columns": [
+    {"key": "name", "header": "container", "width": 20},
+    {"key": "fleet", "header": "fleet", "width": 14},
+    {"key": "state", "header": "state", "width": 8, "palette": "state"},
+    {"key": "sess", "header": "live", "width": 4, "palette": "state", "priority": 5},
+    {"key": "lease", "header": "worktree", "width": 10},
+    {"key": "security_profile", "header": "profile", "width": 10, "priority": 3},
+    {"key": "worktree_title", "header": "task", "width": 30, "priority": 6},
+    {"key": "claims_summary", "header": "claims", "width": 18, "priority": 4}
+  ],
+  "actions": [
+    {
+      "label": "Stop",
+      "run": ["agent-containers", "stop", "{id}"],
+      "when": {"state": "running"},
+      "confirm": true
+    },
+    {
+      "label": "Remove",
+      "run": ["agent-containers", "remove", "{id}"],
+      "when": {"state": "exited"},
+      "confirm": true
+    }
+  ],
   "empty_hint": "No fleet containers (run `agent-containers up <fleet>`)."
 }
