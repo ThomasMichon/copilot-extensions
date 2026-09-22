@@ -1074,3 +1074,52 @@ the Phase 0 runbook, picked up as capacity allows.
   no-project bare help fallback, and the Worktree Manager install trigger.
   Version bump for this slice: `agent-worktrees` **`1.5.5-dev223`** and
   marketplace `metadata.version` **`1.7.7-dev191`**.
+
+### 2026-09-21 — Tooling fix: `--changed-since` no longer falls back to a fully unscoped sweep on baseline touch
+- PR #3205 (the status/front-door slice above) merged despite CI's `guards +
+  lint` job reporting `FAILURE` -- caught while auditing that merge. The real
+  cause: `check-module-size.py --changed-since REF` unconditionally fell back
+  to a **fully unscoped, whole-tree sweep** whenever a diff touched
+  `tools/module-size-baseline.json` -- which is every single slice of this
+  campaign, since every split legitimately lowers its own file's ceiling. That
+  full sweep then failed the PR on completely unrelated, already-baselined
+  files elsewhere (`agent-bridge/__main__.py`, `agent_registry.py`,
+  `client.py`; `agent-dispatch/__main__.py`, `bridge.py`, `embody.py`,
+  `supervisor.py`) that had drifted slightly past their own recorded ceilings
+  via other, unrelated merged PRs -- exactly the unfair-attribution failure
+  mode `--changed-since` exists to prevent, just reintroduced through the one
+  documented exception meant to keep a baseline edit self-consistent.
+- Fixed `tools/check-module-size.py`: added `_changed_baseline_keys(base_ref)`,
+  which diffs `tools/module-size-baseline.json` between the merge-base and
+  `HEAD` to find exactly which entries a diff itself added, changed, or
+  removed. When a diff touches the baseline, scope is now
+  `_changed_py_files(...) | _changed_baseline_keys(...)` -- this diff's own
+  changed `*.py` files, plus every baseline entry it itself edited -- instead
+  of `only_paths=None` (full sweep). This still catches the original concern
+  the full-sweep fallback existed for (a baseline edit that silently
+  mismatches a file's actual size, even one outside the diff's `*.py` list),
+  because that file's entry is, by definition, part of the diff's own
+  baseline edit and therefore always in scope. It just stops re-litigating
+  every *other*, untouched entry on every single baseline-touching PR.
+- Added three regression tests to `tools/test_check_module_size.py`,
+  replacing the old (now-inaccurate) "falls back to full sweep" test:
+  `test_changed_since_still_checks_a_baseline_entry_this_diff_edits` (the
+  original safety property, preserved), `test_changed_since_with_baseline
+  _touch_does_not_blame_unrelated_drift` (the exact PR #3205 shape,
+  reproduced with real git branching/rebase so the "unrelated" growth
+  genuinely lands via a separate, already-advanced trunk commit rather than
+  this diff's own commits), and
+  `test_changed_since_with_baseline_touch_still_catches_this_diffs_own_growth`
+  (confirms the widened scope isn't a loophole for this diff's *own* growth).
+  All 20 tests in the file pass; `ruff check --select F,E9` clean. Confirmed
+  the plain, flagless full sweep (used for push-time/scheduled runs, not PR
+  gating) still correctly reports the seven pre-existing agent-bridge/
+  agent-dispatch violations above -- this fix only narrows the *PR-time,
+  `--changed-since`-scoped* gate, never detection elsewhere.
+- No version bump needed (`tools/` is a repo-root path, not vendored into any
+  plugin, per `CONTRIBUTING.md`'s version-bump scope).
+- **Those seven pre-existing agent-bridge/agent-dispatch violations remain
+  unaddressed** -- they're genuine Phase 2 organic-drift backlog, exactly the
+  kind of thing the watchdog/decomposer mechanism (not this PR-time gate, and
+  not this campaign's own agent-worktrees-focused slices) exists to pick up.
+  Noted here rather than fixed in scope of this tooling PR.
