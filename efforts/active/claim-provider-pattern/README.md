@@ -2,7 +2,8 @@
 
 - **Slug:** `claim-provider-pattern`
 - **Repo:** copilot-extensions
-- **Branch(es):** `worktree/tmichon-book2-win-20260922-141135-03c8`
+- **Branch(es):** per-slice worktree branch (see the driving worktree's own
+  metadata; not recorded here to keep this public artifact generic)
 - **Created:** 2026-09-22
 - **Status:** Active
 - **Vision:** `visions/plugin-services` §Concepts & Components (extends: adds the
@@ -36,15 +37,15 @@ intent, not a written pattern.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| tmichon-book2 (Copilot CLI session) | sole driver | `D:\Src\copilot-extensions.worktrees\tmichon-book2-win-20260922-141135-03c8` |
+| the driving Copilot CLI session | sole driver | its own linked worktree checkout |
 
 ## Coordination
 
 - **Topology:** single-driver, one PR.
-- **Host (owns PR):** tmichon-book2.
+- **Host (owns PR):** the driving session.
 - **Delegates:** none.
 - **Handoff:** none expected; if context runs out mid-effort, resume via
-  `agent-worktrees` handoff from the same worktree.
+  the session's own handoff mechanism.
 
 ## Context
 

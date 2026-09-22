@@ -74,6 +74,11 @@ def test_parse_manifest_accepts_status_only():
     assert manifest.reclaim_command is None
 
 
+def test_parse_manifest_rejects_a_namespace_that_is_only_a_colon():
+    with pytest.raises(cp.ManifestError, match="namespace"):
+        cp.parse_manifest({"schema_version": 1, "namespace": ":", "status_command": ["x"]})
+
+
 # --- discover_claim_providers --------------------------------------------
 
 
@@ -167,6 +172,34 @@ def test_missing_payload_binstub_degrades_to_missing_target(tmp_path):
     assert findings[0].reason == "missing-target"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs elevation on Windows")
+def test_symlinked_binstub_degrades_to_target_unusable(tmp_path):
+    """A manifest that points bin/<command> at a symlink (potentially
+    escaping the identity-verified plugin root) must be rejected outright,
+    never resolved-through -- regression for the pre-resolve lstat check."""
+    plugin_root, plugins_root = _installed_plugins_tree(tmp_path, "agent-codespaces")
+    outside_target = tmp_path / "outside-the-plugin-root.sh"
+    outside_target.write_text("#!/bin/sh\nexit 0\n")
+    outside_target.chmod(0o755)
+    bin_dir = plugin_root / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "agent-codespaces").symlink_to(outside_target)
+    _write_manifest(plugin_root, "codespace", status_command=["agent-codespaces"])
+
+    import agent_worktrees.claim_providers as mod
+    real_resolver = mod.resolve_active_plugins
+    mod.resolve_active_plugins = lambda: _active_report(  # type: ignore[assignment]
+        "agent-codespaces@copilot-extensions", plugin_root
+    )
+    try:
+        providers, findings = cp.discover_claim_providers(plugins_root)
+    finally:
+        mod.resolve_active_plugins = real_resolver
+
+    assert providers == {}
+    assert findings[0].reason == "target-unusable"
+
+
 def test_duplicate_namespace_keeps_first_and_records_a_finding(tmp_path):
     root_a, plugins_root = _installed_plugins_tree(tmp_path, "agent-codespaces")
     root_b, _ = _installed_plugins_tree(tmp_path, "agent-containers")
@@ -257,6 +290,57 @@ def test_resolve_claim_status_invokes_the_callback_and_parses_json(tmp_path, mon
     assert result == {"available": True, "exists": True, "state": "running"}
 
 
+def test_resolve_claim_status_envelope_available_wins_over_callback_supplied_key(tmp_path, monkeypatch):
+    """Regression: a provider that happens to emit its own "available" key
+    must never be able to shadow the envelope's own True/False verdict."""
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=(
+                "python", "-c",
+                "import json;print(json.dumps({'exists': True, 'available': False}))",
+            ),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.resolve_claim_status("codespace:my-box-1", plugins_root=tmp_path)
+    assert result == {"available": True, "exists": True}
+
+
+def test_resolve_claim_status_degrades_when_required_field_missing(tmp_path, monkeypatch):
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=("python", "-c", "import json;print(json.dumps({'state': 'running'}))"),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.resolve_claim_status("codespace:my-box-1", plugins_root=tmp_path)
+    assert result["available"] is False
+    assert "callback failed" in result["reason"]
+
+
+def test_resolve_claim_status_degrades_when_required_field_wrong_type(tmp_path, monkeypatch):
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=("python", "-c", "import json;print(json.dumps({'exists': 'yes'}))"),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.resolve_claim_status("codespace:my-box-1", plugins_root=tmp_path)
+    assert result["available"] is False
+
+
 def test_resolve_claim_status_degrades_when_callback_exits_nonzero(tmp_path, monkeypatch):
     def fake_discover(_plugins_root):
         provider = cp.ClaimProviderManifest(
@@ -276,7 +360,7 @@ def test_resolve_claim_status_degrades_when_callback_exits_nonzero(tmp_path, mon
 def test_resolve_claim_reclaim_passes_apply_flag(tmp_path, monkeypatch):
     captured = {}
 
-    def fake_run_callback(command, *, timeout):
+    def fake_run_callback(command, *, timeout, required_bool_field):
         captured["command"] = command
         return {"reclaimed": True}
 
@@ -299,7 +383,7 @@ def test_resolve_claim_reclaim_passes_apply_flag(tmp_path, monkeypatch):
 def test_resolve_claim_reclaim_omits_apply_flag_in_dry_run(tmp_path, monkeypatch):
     captured = {}
 
-    def fake_run_callback(command, *, timeout):
+    def fake_run_callback(command, *, timeout, required_bool_field):
         captured["command"] = command
         return {"reclaimed": True, "detail": "would delete"}
 

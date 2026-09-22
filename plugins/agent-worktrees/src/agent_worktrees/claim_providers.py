@@ -113,6 +113,8 @@ def parse_manifest(data: object, *, source_path: str = "") -> ClaimProviderManif
     if not isinstance(ns, str) or not ns.strip():
         raise ManifestError("`namespace` is required and must be a non-empty string")
     ns = ns.strip().rstrip(":")
+    if not ns:
+        raise ManifestError("`namespace` must not be empty after stripping ':'")
 
     def _argv(field: str) -> tuple[str, ...] | None:
         value = data.get(field)
@@ -170,14 +172,29 @@ def _payload_command(root: Path, command: str) -> Path | None:
     return None
 
 
+def _is_reparse(info: os.stat_result) -> bool:
+    """Whether a Windows stat result names a reparse point (mirrors
+    ``picker_support.pivot_targets._is_reparse``)."""
+    return bool(
+        getattr(info, "st_file_attributes", 0) & 0x400 or getattr(info, "st_reparse_tag", 0)
+    )
+
+
 def _resolve_command(command: tuple[str, ...], *, root: Path) -> tuple[str, ...]:
     first = command[0]
     payload = _payload_command(root, first)
     if payload is None:
         raise FileNotFoundError(first)
+    # lstat the candidate itself -- BEFORE any resolve() -- so a symlink or
+    # reparse point planted at bin/<command> is rejected outright rather
+    # than silently followed to whatever it points at (which could sit
+    # outside the identity-verified plugin root entirely).
+    pre_resolve_info = payload.lstat()
+    if stat.S_ISLNK(pre_resolve_info.st_mode) or _is_reparse(pre_resolve_info):
+        raise TargetUnusableError("command must not be a symlink or reparse point")
     canonical = payload.resolve(strict=True)
     info = canonical.lstat()
-    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or _is_reparse(info):
         raise TargetUnusableError("command must be a regular, non-symlink file")
     if os.name != "nt" and not os.access(canonical, os.X_OK):
         raise TargetUnusableError("command is not executable")
@@ -333,12 +350,15 @@ def discover_claim_providers(
     return providers, tuple(findings)
 
 
-def _run_callback(command: tuple[str, ...], *, timeout: float) -> dict | None:
+def _run_callback(
+    command: tuple[str, ...], *, timeout: float, required_bool_field: str
+) -> dict | None:
     try:
         proc = subprocess.run(
             list(command), capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8", errors="replace",
         )
-    except (subprocess.SubprocessError, OSError):
+    except (subprocess.SubprocessError, OSError, ValueError):
         return None
     if proc.returncode != 0:
         return None
@@ -346,7 +366,11 @@ def _run_callback(command: tuple[str, ...], *, timeout: float) -> dict | None:
         data = json.loads(proc.stdout)
     except (ValueError, TypeError):
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+    if not isinstance(data.get(required_bool_field), bool):
+        return None
+    return data
 
 
 def split_namespaced_ref(ref: str) -> tuple[str, str] | None:
@@ -383,10 +407,16 @@ def resolve_claim_status(
             "available": False,
             "reason": f"no claim provider registered for namespace '{namespace}:'",
         }
-    result = _run_callback((*provider.status_command, "claim-status", identifier), timeout=timeout)
+    result = _run_callback(
+        (*provider.status_command, "claim-status", identifier),
+        timeout=timeout, required_bool_field="exists",
+    )
     if result is None:
         return {"available": False, "reason": f"{provider.plugin} claim-status callback failed"}
-    return {"available": True, **result}
+    # "available" is the envelope's own key, set here (never sourced from
+    # the callback) -- a provider that happens to emit its own "available"
+    # key in ``result`` must never be able to shadow it.
+    return {**{k: v for k, v in result.items() if k != "available"}, "available": True}
 
 
 def resolve_claim_reclaim(
@@ -414,7 +444,7 @@ def resolve_claim_reclaim(
     argv = [*provider.reclaim_command, "claim-reclaim", identifier]
     if apply:
         argv.append("--apply")
-    result = _run_callback(tuple(argv), timeout=timeout)
+    result = _run_callback(tuple(argv), timeout=timeout, required_bool_field="reclaimed")
     if result is None:
         return {"available": False, "reason": f"{provider.plugin} claim-reclaim callback failed"}
-    return {"available": True, **result}
+    return {**{k: v for k, v in result.items() if k != "available"}, "available": True}

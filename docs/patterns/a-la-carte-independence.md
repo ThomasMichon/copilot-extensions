@@ -74,18 +74,24 @@ resources a worktree can hold — a CodeSpace, a container, a dispatch task,
 (agent-codespaces, agent-containers, agent-dispatch). Rather than
 agent-worktrees hardcoding a call to each higher-tier sibling's CLI to check
 a claim's status (an upward call, forbidden by the rule above), each
-claim-owning plugin registers as a **claim provider**: it drops a manifest
-into agent-worktrees' own `claim-providers.d` registry declaring the claim
-**namespace** it serves (e.g. `codespace:`, `container:`, `dispatch-task:`)
-and an absolute **status-check callback** command. agent-worktrees resolves
-the provider for a namespaced claim ref's prefix and invokes the callback
-for status, exactly mirroring how agent-bridge resolves a namespace
-provider for `namespace-resolve` — never importing the provider's package,
-never assuming its internal layout, and degrading that one namespace's
-status resolution (never the whole claims command) if the provider is
-absent or its manifest is malformed.
+claim-owning plugin registers as a **claim provider**: it ships a static
+`<plugin_root>/claim-providers/<namespace>.json` template in its own
+payload declaring the claim **namespace** it serves (e.g. `codespace:`,
+`container:`, `dispatch-task:`) and one or both **status-check**/
+**reclaim** callback argv templates. Unlike the bridge-provider's
+config-dir-plus-sessionStart-hook registry, agent-worktrees discovers these
+templates by scanning the **installed-plugins tree directly** (mirroring
+this same plugin's own pivot and claim-kind registries) — no separate
+registration step, since the manifest ships with, and is always current
+with, the contributing plugin's own installed version. agent-worktrees
+verifies the contributing plugin's identity, resolves the declared command
+only to that plugin's own payload-local binstub (never ambient `PATH`),
+and invokes the callback for status/reclaim — never importing the
+provider's package, never assuming its internal layout, and degrading that
+one namespace's resolution (never the whole claims command) if the
+provider is absent or its manifest is malformed.
 
- A plugin talks to a sibling through the sibling's
+**No cross-plugin reach-around.** A plugin talks to a sibling through the sibling's
 declared surface (its CLI, its service endpoint, its resolver), never by poking the
 sibling's runtime files or assuming its internal layout.
 
