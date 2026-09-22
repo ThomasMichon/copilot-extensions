@@ -1572,8 +1572,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     register_coordinator_commands(sub)
     register_create_commands(sub)
-
-
     register_registrar_commands(sub)
 
     p = sub.add_parser(
