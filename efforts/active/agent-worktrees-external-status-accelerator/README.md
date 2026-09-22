@@ -1503,10 +1503,10 @@ not yet written up as a dedicated entry here since no code changed):
    separate top-level verb, to reduce the CLI's already-large flat
    subcommand surface and the chance an agent guesses at the wrong one
    for a task. Not a trivial one-liner: `--audit` samples *N* random
-   worktrees and appends telemetry, while `-bundle` resolves exactly
-   one worktree via its `--worktree`/`--worktree-id` option (no
-   `--project` flag -- it resolves the owning project internally) --
-   a flag here would need to switch the command's entire output shape,
+   worktrees and appends telemetry, while `worktree-status-bundle`
+   resolves exactly one worktree via its `--worktree`/`--worktree-id`
+   option (no `--project` flag -- it resolves the owning project
+   internally) -- a flag here would need to switch the command's entire output shape,
    not just add a knob. Worth scoping as its own small design pass, and
    worth doing alongside a broader look at separating genuinely
    diagnostic/introspection verbs (audit, doctor, hygiene,
