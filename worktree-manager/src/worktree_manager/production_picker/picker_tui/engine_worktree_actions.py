@@ -705,7 +705,10 @@ class PickerScreenWorktreeActionsMixin:
         (#1425). Tiny and defensive: an unknown verb is a reported failure, never
         an exception. ``jump-host`` navigates to the entry's worktree by id;
         ``open-cli`` opens that worktree into a CLI session (exits the picker with
-        a resume decision -- the shared launch-plumbing, #2253)."""
+        a resume decision -- the shared launch-plumbing, #2253); ``open-venue``
+        (picker-venue-pivots Phase 3) opens a remote venue row (a CodeSpace or
+        fleet container) into a live/dormant Copilot session via the venue's own
+        `copilot` verb, the same exit-and-launch plumbing."""
         if verb == "jump-host":
             return self._jump_to_worktree(
                 ctx.get("worktree") or ctx.get("id"),
@@ -716,6 +719,8 @@ class PickerScreenWorktreeActionsMixin:
                 ctx.get("worktree") or ctx.get("id"),
                 ctx.get("source_id"),
             )
+        if verb == "open-venue":
+            return self._open_venue(ctx)
         return False, f"unknown internal action: {verb}"
     def _open_worktree_cli(self, wid, source_id=None):
         """#2253: open the worktree ``wid`` into a CLI session, the same way
@@ -737,3 +742,26 @@ class PickerScreenWorktreeActionsMixin:
         decision = self._resume_decision(row)
         self._decide(decision)
         return True, f"opening …{str(wid)[-4:]} into a CLI session"
+
+    def _open_venue(self, ctx):
+        """picker-venue-pivots Phase 3: open a CodeSpaces/Containers pivot row
+        into a live/dormant Copilot session via the venue's own ``copilot``
+        verb (``agent-codespaces copilot <name>`` / ``agent-containers copilot
+        <name>``) -- the same reserve/ensure-mux/attach-or-embody contract
+        either provider already implements for a live *or* dormant venue
+        (embody-or-attach is uniform; there is no separate "live-only" case
+        to gate on). Exits the picker so ``__main__`` can hand the operator a
+        real TTY (the venue command needs one for its interactive SSH
+        session) -- the same exit-and-launch plumbing ``open-cli`` uses for a
+        local worktree, just with a different provider on the other end."""
+        provider = ctx.get("provider")
+        venue = ctx.get("id")
+        if not provider or not venue:
+            return False, "missing provider/venue identity for this row"
+        self._decide({
+            "action": "open-venue",
+            "provider": str(provider),
+            "venue": str(venue),
+            "title": ctx.get("title"),
+        })
+        return True, f"opening {venue} into a Copilot session"

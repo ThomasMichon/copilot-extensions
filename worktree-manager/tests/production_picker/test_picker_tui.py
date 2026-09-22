@@ -1897,6 +1897,74 @@ def test_open_worktree_cli_unknown_id_is_safe():
     asyncio.run(run())
 
 
+def test_open_venue_exits_with_open_venue_decision():
+    """picker-venue-pivots Phase 3: the "open-venue" internal action opens a
+    remote venue row (a CodeSpace/container) into a Copilot session -- it
+    exits the picker with an ``open-venue`` decision naming the provider +
+    venue, so __main__ maps it onto ``<provider> copilot <venue>``."""
+    src = _bridge_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            ok, msg = scr._internal_pivot_action(
+                "open-venue",
+                {"provider": "agent-codespaces", "id": "my-codespace", "title": "my task"},
+            )
+            assert ok is True
+            assert "my-codespace" in msg
+            assert app.result is not None
+            assert app.result["action"] == "open-venue"
+            assert app.result["provider"] == "agent-codespaces"
+            assert app.result["venue"] == "my-codespace"
+            assert app.result["title"] == "my task"
+
+    asyncio.run(run())
+
+
+def test_open_venue_missing_identity_is_safe():
+    """No provider/venue in ctx (a malformed row) is a reported no-op --
+    never a crash, never an exit."""
+    src = _bridge_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            ok, msg = scr._internal_pivot_action("open-venue", {"id": "box-1"})
+            assert ok is False
+            assert "provider" in msg
+            assert app.result is None
+
+    asyncio.run(run())
+
+
+def test_task_action_ctx_includes_provider_from_list_cmd():
+    """picker-venue-pivots Phase 3: ``ctx["provider"]`` is the registered
+    pivot's own ``list`` argv[0] (e.g. ``"agent-codespaces"``), reused by the
+    ``open-venue`` internal action so it never hardcodes a provider list of
+    its own."""
+    from worktree_manager.production_picker.picker_tui.engine_pivot_actions import (
+        PickerScreenPivotActionsMixin,
+    )
+
+    inst = PickerScreenPivotActionsMixin.__new__(PickerScreenPivotActionsMixin)
+    inst._pivot_machine_id = lambda: "host"
+    reg = types.SimpleNamespace(
+        id_field="id", title_field="title", worktree_field="worktree",
+        list_cmd=("agent-codespaces", "pool", "--picker-json"),
+    )
+    rec = {"id": "my-codespace", "title": "my task", "worktree": "3bac"}
+
+    ctx = inst._task_action_ctx(reg, rec)
+
+    assert ctx["provider"] == "agent-codespaces"
+    assert ctx["id"] == "my-codespace"
+
+
 def test_jump_to_caller_targets_caller_worktree():
     """A bridge worktree with a recorded caller offers 'Jump to caller', which
     navigates to the CALLER worktree (not the bridge itself) (#2178)."""

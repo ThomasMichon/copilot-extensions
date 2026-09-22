@@ -127,3 +127,32 @@ def test_execute_success_path():
     plan = _exec_plan(cmd=[sys.executable, "-c", "print('ok')"],
                       work_dir=None, env={})
     assert launcher.launch(plan) == 0
+
+
+# --- open_venue (picker-venue-pivots Phase 3) ------------------------------
+
+def test_open_venue_execs_the_provider_copilot_verb(monkeypatch):
+    monkeypatch.setattr(launcher.shutil, "which", lambda name: f"/bin/{name}")
+    calls = []
+
+    class _Proc:
+        returncode = 42
+
+    monkeypatch.setattr(
+        launcher.subprocess, "run", lambda argv: calls.append(argv) or _Proc(),
+    )
+
+    assert launcher.open_venue("agent-codespaces", "my-codespace") == 42
+    assert calls == [["/bin/agent-codespaces", "copilot", "my-codespace"]]
+
+
+def test_open_venue_missing_provider_or_venue_is_an_error(capsys):
+    assert launcher.open_venue("", "my-codespace") == 1
+    assert launcher.open_venue("agent-codespaces", "") == 1
+    assert "missing provider/venue" in capsys.readouterr().out
+
+
+def test_open_venue_provider_not_on_path_is_an_error(monkeypatch, capsys):
+    monkeypatch.setattr(launcher.shutil, "which", lambda name: None)
+    assert launcher.open_venue("agent-codespaces", "my-codespace") == 1
+    assert "not on PATH" in capsys.readouterr().out

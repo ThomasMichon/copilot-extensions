@@ -26,6 +26,7 @@ Copilot.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -164,3 +165,20 @@ def launch(
 ) -> int:
     """Compose then execute a launch plan (the Picker's launch/resume action)."""
     return execute(compose_launch(plan, capability, want_mux=want_mux))
+
+
+def open_venue(provider: str, venue: str) -> int:
+    """Exec a remote venue's own ``copilot`` verb with a real TTY (picker-
+    venue-pivots Phase 3): the Codespaces/Containers pivots' "Open" action,
+    dispatched here after the Picker has already exited (the venue command
+    needs the real terminal, not the TUI's). ``provider`` is the pivot's own
+    ``list`` argv[0] (``"agent-codespaces"``/``"agent-containers"``);
+    resolved via ``PATH`` rather than assumed present. Never raises: a
+    missing provider/venue or an unresolvable binstub is a reported error,
+    not a traceback."""
+    binstub = shutil.which(provider) if provider and venue else None
+    if not binstub:
+        print(f"error: '{provider}' is not on PATH." if provider
+              else "error: missing provider/venue for open-venue.")
+        return 1
+    return subprocess.run([binstub, "copilot", venue]).returncode

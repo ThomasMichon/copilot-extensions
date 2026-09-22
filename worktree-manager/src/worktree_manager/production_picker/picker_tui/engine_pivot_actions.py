@@ -131,6 +131,11 @@ class PickerScreenPivotActionsMixin:
         wt = rec.get(reg.worktree_field) if reg.worktree_field else None
         ctx["worktree"] = wt or ""
         ctx["machine"] = self._pivot_machine_id() or ""
+        # picker-venue-pivots Phase 3: the pivot's own `list` argv[0] is the
+        # provider binstub name (e.g. "agent-codespaces"/"agent-containers"),
+        # reused verbatim by the "open-venue" internal action so it never
+        # hardcodes a provider list of its own.
+        ctx["provider"] = reg.list_cmd[0] if reg.list_cmd else ""
         return ctx
     def _run_bg(self, label, work, done=None, *, quiet=False):
         """Run a blocking cross-process / IO callable OFF the Textual render flow.
