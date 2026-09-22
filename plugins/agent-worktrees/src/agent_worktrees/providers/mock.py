@@ -299,6 +299,14 @@ class MockPRProvider:
             sorted(n for n, pr in self._bucket(repo).items() if pr.state == "open")
         )
 
+    def find_pull_by_head(
+        self, repo: str, head: str, *, api_base: str = "", token: str | None = None
+    ) -> PullResult | None:
+        for pr in self._bucket(repo).values():
+            if pr.head == head:
+                return self._pull_result(pr)
+        return None
+
     # -- test-only fabrication helpers (not part of the PRProvider protocol) --
 
     def add_review(
