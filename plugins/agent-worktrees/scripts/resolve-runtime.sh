@@ -24,6 +24,50 @@
 AW_PY=""
 _awr="${AGENT_RT_ROOT:-$HOME/.agent-worktrees}"
 _awv=""
+_aw_trace_source=""
+_aw_trace_version=""
+
+_aw_boot_trace_ms() {
+  _aw_bt_raw=""
+  if _aw_bt_raw="$(date +%s%3N 2>/dev/null)"; then
+    case "$_aw_bt_raw" in
+      [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9])
+        printf '%s\n' "$_aw_bt_raw"
+        return 0
+        ;;
+    esac
+  fi
+  if _aw_bt_raw="$(date +%s%N 2>/dev/null)"; then
+    case "$_aw_bt_raw" in
+      [0-9]*)
+        if [ "${#_aw_bt_raw}" -eq 19 ]; then
+          printf '%s\n' "${_aw_bt_raw%??????}"
+          return 0
+        fi
+        ;;
+    esac
+  fi
+  if _aw_bt_raw="$(date +%s 2>/dev/null)"; then
+    case "$_aw_bt_raw" in
+      [0-9]*) printf '%s000\n' "$_aw_bt_raw"; return 0 ;;
+    esac
+  fi
+  printf '0000000000000\n'
+}
+
+_aw_boot_trace() {
+  [ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ] || return 0
+  _aw_bt_plugin="${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-${_awr##*/}}"
+  _aw_bt_plugin="${_aw_bt_plugin#.}"
+  _aw_bt_extra="${2-}"
+  if [ -n "$_aw_bt_extra" ]; then
+    printf '::boot-trace:: plugin=%s phase=%s t=%s %s\n' \
+      "$_aw_bt_plugin" "$1" "$(_aw_boot_trace_ms)" "$_aw_bt_extra" >&2
+  else
+    printf '::boot-trace:: plugin=%s phase=%s t=%s\n' \
+      "$_aw_bt_plugin" "$1" "$(_aw_boot_trace_ms)" >&2
+  fi
+}
 
 _aw_marker_valid() {
   [ -n "$1" ] || return 1
@@ -77,15 +121,33 @@ _aw_version_key() {
 }
 
 # Tier 1: the `current-version` marker (source of truth; atomically written).
+_aw_boot_trace resolver-marker-start 'source=current-version'
 [ -f "$_awr/current-version" ] && _awv=$(tr -d ' \t\r\n' < "$_awr/current-version" 2>/dev/null)
 [ -n "$_awv" ] && _aw_try_slot "$_awv"
+if [ -n "$AW_PY" ]; then
+  _aw_trace_source="current-version"
+  _aw_trace_version="$_awv"
+  _aw_boot_trace resolver-marker-result \
+    "source=current-version result=hit version=$_awv"
+else
+  _aw_boot_trace resolver-marker-result 'source=current-version result=miss'
+fi
 
 # Tier 2: marker absent/stale -> the last version the installer activated
 # (`last-known-good`), preferred over a newest-slot guess. Read only here, so the
 # common tier-1 path pays nothing.
 if [ -z "$AW_PY" ] && [ -f "$_awr/last-known-good" ]; then
+  _aw_boot_trace resolver-marker-start 'source=last-known-good'
   _awlkg=$(tr -d ' \t\r\n' < "$_awr/last-known-good" 2>/dev/null)
   _aw_try_slot "$_awlkg"
+  if [ -n "$AW_PY" ]; then
+    _aw_trace_source="last-known-good"
+    _aw_trace_version="$_awlkg"
+    _aw_boot_trace resolver-marker-result \
+      "source=last-known-good result=hit version=$_awlkg"
+  else
+    _aw_boot_trace resolver-marker-result 'source=last-known-good result=miss'
+  fi
 fi
 
 # Tier 3: true first-run -> newest complete installed slot.
@@ -96,9 +158,20 @@ if [ -z "$AW_PY" ]; then
       printf '%s\n' "${_slot##*/}"
     done | _aw_version_key | LC_ALL=C sort | cut -f2-
   ); do
-    _aw_try_slot "$_awv" || true
+    if _aw_try_slot "$_awv"; then
+      _aw_trace_source="newest"
+      _aw_trace_version="$_awv"
+    fi
   done
 fi
+if [ -n "$AW_PY" ]; then
+  _aw_boot_trace resolver-slot-result \
+    "source=$_aw_trace_source result=resolved version=$_aw_trace_version"
+else
+  _aw_boot_trace resolver-slot-result 'source=none result=miss'
+fi
 AGENT_RT_PY="$AW_PY"
-unset _awr _awv _awlkg _sub _slot 2>/dev/null || true
-unset -f _aw_marker_valid _aw_try_slot _aw_version_key 2>/dev/null || true
+unset _awr _awv _awlkg _sub _slot _aw_trace_source _aw_trace_version \
+  _aw_bt_raw _aw_bt_plugin _aw_bt_extra 2>/dev/null || true
+unset -f _aw_marker_valid _aw_try_slot _aw_version_key \
+  _aw_boot_trace_ms _aw_boot_trace 2>/dev/null || true

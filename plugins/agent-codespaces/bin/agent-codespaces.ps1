@@ -4,6 +4,24 @@ $env:PYTHONUTF8 = '1'
 $_command = 'agent-codespaces'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
+function Get-BootTraceTimestamp {
+    return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+}
+
+function Write-BootTrace([string]$Phase, [string]$Extra = '') {
+    if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return }
+    $plugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
+        $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
+    } else {
+        $_command
+    }
+    $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$(Get-BootTraceTimestamp)"
+    if ($Extra) { $line += " $Extra" }
+    [Console]::Error.WriteLine($line)
+}
+
+Write-BootTrace 'shim-start'
+
 if (-not (Test-Path -LiteralPath (Join-Path $_payloadRoot 'plugin.json'))) {
     [Console]::Error.WriteLine("[$_command] payload root is not a plugin: $_payloadRoot")
     exit 126
@@ -25,6 +43,10 @@ if (
     [IO.Directory]::SetCurrentDirectory($_outside)
 }
 
+if ($env:COPILOT_EXTENSIONS_BOOT_TRACE) {
+    $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = $_command
+}
+Write-BootTrace 'dispatch'
 $env:AGENT_CODESPACES_PAYLOAD_ROOT = $_payloadRoot
 $_payloadDispatcher = Join-Path $_payloadRoot 'scripts\runtime-gate.ps1'
 & $_payloadDispatcher @args
