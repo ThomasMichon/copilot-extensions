@@ -1738,7 +1738,7 @@ the Phase 0 runbook, picked up as capacity allows.
 
 ### 2026-09-22 — Phase 2 continued: `plugins/agent-dispatch/src/agent_dispatch/__main__.py` steering slice
 - Took the smallest high-confidence seam next: the human-in-the-loop
-  steering/card family. Extracted a new `steering_cli.py` (**181** lines)
+  steering/card family. Extracted a new `steering_cli.py` (**191** lines)
   holding `card set`, `card show`, `card draft save/clear`, `steer submit`,
   and `steer take`. `__main__.py` remains the composition root/re-export seam
   and dropped again from **3,162 -> 2,945** lines.
