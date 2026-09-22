@@ -13,19 +13,46 @@ usable standalone.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
 from .queue_records import SpawnState, Status
 
-#: Upper bound on concurrent per-task liveness probes in one
-#: :meth:`LivenessMixin.reconcile_liveness` pass. Each probe is a blocking
-#: subprocess/SSH call (``tracking.liveness_verdict`` et al, 3-6s timeout);
-#: running them concurrently bounds a pass's wall-clock cost by the slowest
-#: single probe rather than the sum of every held task's timeout budget. The
-#: cap keeps a large held backlog from spawning dozens of simultaneous
-#: bridge/SSH subprocesses at once.
+#: Upper bound on concurrent per-task liveness probes across ALL
+#: :meth:`LivenessMixin.reconcile_liveness` passes, not just one pass. Each
+#: probe is a blocking subprocess/SSH call (``tracking.liveness_verdict`` et
+#: al, 3-6s timeout); running them concurrently bounds a pass's wall-clock
+#: cost by the slowest single probe rather than the sum of every held task's
+#: timeout budget. The cap keeps a large held backlog from spawning dozens of
+#: simultaneous bridge/SSH subprocesses at once.
+#:
+#: Deliberately a single **shared, process-wide** executor (below) rather
+#: than one created per call: the coordinator's GC loop runs each pass under
+#: ``asyncio.wait_for(asyncio.to_thread(...), timeout=cycle_timeout)``
+#: (``coordinator_loops._run_supervised_cycle``), and that timeout does NOT
+#: cancel the underlying thread -- a hung/slow pass keeps running in the
+#: background even after the loop reports it as timed out and starts a new
+#: cycle. A per-call executor would let overlapping passes each spin up
+#: their own ``_LIVENESS_PROBE_CONCURRENCY`` workers, multiplying concurrent
+#: probe threads well past the intended cap under exactly the failure mode
+#: this fix exists to bound. A shared executor keeps total in-flight probes
+#: capped regardless of how many passes happen to overlap.
 _LIVENESS_PROBE_CONCURRENCY = 8
+_probe_executor_lock = threading.Lock()
+_probe_executor: ThreadPoolExecutor | None = None
+
+
+def _get_probe_executor() -> ThreadPoolExecutor:
+    global _probe_executor
+    if _probe_executor is None:
+        with _probe_executor_lock:
+            if _probe_executor is None:
+                _probe_executor = ThreadPoolExecutor(
+                    max_workers=_LIVENESS_PROBE_CONCURRENCY,
+                    thread_name_prefix="liveness-probe",
+                )
+    return _probe_executor
 
 
 class LivenessMixin:
@@ -205,18 +232,17 @@ class LivenessMixin:
         # reservations pile up unreaped indefinitely.
         probed: list[tuple[str, str, str | None, int, int, str, bool]] = []
         if specs:
-            max_workers = min(len(specs), _LIVENESS_PROBE_CONCURRENCY)
-            with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                for row, verdict, cli_embodied in pool.map(_probe, specs):
-                    counts["checked"] += 1
-                    counts[verdict] = counts.get(verdict, 0) + 1
-                    probed.append(
-                        (
-                            row["id"], verdict, row["owner_session_id"],
-                            row["generation"], row["attempts"], row["status"],
-                            cli_embodied,
-                        )
+            pool = _get_probe_executor()
+            for row, verdict, cli_embodied in pool.map(_probe, specs):
+                counts["checked"] += 1
+                counts[verdict] = counts.get(verdict, 0) + 1
+                probed.append(
+                    (
+                        row["id"], verdict, row["owner_session_id"],
+                        row["generation"], row["attempts"], row["status"],
+                        cli_embodied,
                     )
+                )
         if not probed:
             return counts
         with self._connect() as conn:
