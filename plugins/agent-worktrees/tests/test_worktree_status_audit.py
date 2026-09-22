@@ -207,6 +207,41 @@ def test_check_freshness_tolerates_a_missing_entry():
     assert wsa._check_freshness(None, now=time.time()) == []
 
 
+def test_check_freshness_flags_a_stale_entry_still_within_its_demand_window():
+    """A demanded (demand_age < DEMAND_TTL_SECONDS), TTL-expired entry that
+    the sweep hasn't refreshed is a real sweep malfunction -- must still be
+    flagged."""
+    from agent_worktrees.worktree_status_cache import DEMAND_TTL_SECONDS
+
+    now = time.time()
+    entry = {"computed_at": now - 10_000, "demanded_at": now - (DEMAND_TTL_SECONDS - 30)}
+    mismatches = wsa._check_freshness(entry, now=now)
+    assert len(mismatches) == 1
+    assert mismatches[0].check == "cache_freshness_bounds"
+
+
+def test_check_freshness_ok_when_demand_has_aged_out():
+    """`WorktreeStatusCache.sweep_due` only refreshes an entry while it is
+    still demanded -- once nothing has asked about this worktree within
+    `DEMAND_TTL_SECONDS`, the sweep correctly stops keeping it warm (it
+    will be evicted, not endlessly refreshed). A growing cache_age past
+    that point is expected, not a sweep malfunction, and must not be
+    flagged.
+
+    Uses the cache's own exact `DEMAND_TTL_SECONDS` cutoff, not a padded
+    one (Copilot review, 2026-09-21, round 2): padding this cutoff to
+    tolerate the persisted `demanded_at`'s own narrow, self-correcting lag
+    behind true in-memory demand (round 1's concern) would systematically
+    reintroduce this exact false positive for every genuinely-expired row
+    that ages through the padding window -- a worse, more frequent cost
+    than the narrow race it would guard against."""
+    from agent_worktrees.worktree_status_cache import DEMAND_TTL_SECONDS
+
+    now = time.time()
+    entry = {"computed_at": now - 10_000, "demanded_at": now - (DEMAND_TTL_SECONDS + 30)}
+    assert wsa._check_freshness(entry, now=now) == []
+
+
 # -- audit_one -------------------------------------------------------------
 
 def test_audit_one_clean_when_cache_matches_live(monkeypatch):

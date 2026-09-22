@@ -1526,3 +1526,87 @@ not yet written up as a dedicated entry here since no code changed):
    exact path for a human to add through the Windows Security app
    itself. On-demand only, never run as a side effect of anything else.
 
+### 2026-09-21 — `_check_freshness` flagged demand-scoped staleness as a sweep bug
+A scheduled `worktree-status-audit` run reported a real, growing
+`mismatch_count` (1, then 2 across consecutive hourly-style runs) --
+distinct from the daemon-liveness pattern already diagnosed and fixed in
+PR #3206. Investigated rather than dismissing it as another transient.
+
+Root cause: `_check_freshness`'s bound (`DEFAULT_TTL_SECONDS +
+SWEEP_INTERVAL_SECONDS + FRESHNESS_SLACK_SECONDS` = 90s) assumed
+`WorktreeStatusCache.sweep_due` keeps every cached entry warm
+unconditionally. It doesn't: `sweep_due` only refreshes an entry while it
+is still *demanded* (`get_or_refresh` registers demand on every read;
+nothing re-demands it once no consumer is asking) -- once demand ages
+past `DEMAND_TTL_SECONDS` (300s), the sweep correctly stops refreshing
+that entry (it will be evicted, not endlessly kept warm), and its
+`cache_age` grows as an expected consequence, not a malfunction. The
+audit's own passive snapshot read never registers new demand either, so
+sampling an undemanded worktree only ever observes this expected aging,
+never resets it. This is the same class of bug the daemon-liveness
+redesign (PR #3206) already fixed once this session: confusing a real
+caller's own tolerated resting state for an outage.
+
+Fixed `_check_freshness` to read the entry's own `demanded_at` and skip
+the bound check entirely once `now - demanded_at > DEMAND_TTL_SECONDS` --
+a mismatch is now only raised for an entry that is still within its
+demand window (the sweep genuinely should be keeping it warm) but isn't.
+An entry with no `demanded_at` at all (an older-schema row) falls back to
+the original unconditional check rather than silently passing. Added 2
+new regression tests (`test_check_freshness_flags_a_stale_entry_still_
+within_its_demand_window`, `test_check_freshness_ok_when_demand_has_
+aged_out`); all 45 `worktree_status_audit` tests pass. Bumped
+`agent-worktrees` to `1.5.5-dev235` and the marketplace catalog to
+`1.7.7-dev203`.
+
+### 2026-09-21 — PR #3252 review round 1: the persisted demand timestamp can lag true demand
+Copilot's review caught a real gap in the fix above: `_check_freshness`'s
+new demand-window check reads the *persisted* `demanded_at`, but
+`get_or_refresh`'s fresh-hit path deliberately extends demand only in
+memory and never synchronously persists that bump (see that method's own
+docstring -- durability of the demand timestamp alone isn't worth
+blocking an otherwise memory-only read on SQLite's busy-timeout). The
+persisted value only catches up the next time the entry is actually
+recomputed (a miss, or the sweep's own TTL-triggered refresh, which
+re-persists whatever `demanded_at` is then in memory) -- bounded to
+roughly one TTL+sweep cycle, not unbounded, but treating
+`DEMAND_TTL_SECONDS` as an exact cutoff could still hide a real
+stale-entry mismatch for an entry genuinely still demanded in memory
+whose last persisted `demanded_at` happens to sit just past that bound.
+
+Fixed by reusing this same check's own `FRESHNESS_SLACK_SECONDS` (already
+applied to the `cache_age` bound) on the demand-window check too: an
+entry is now only treated as demand-expired once
+`now - demanded_at > DEMAND_TTL_SECONDS + FRESHNESS_SLACK_SECONDS`, giving
+the persisted timestamp's own lag room to catch up before this check
+stops looking. Updated the "demand has aged out" test to sit clearly past
+the new, larger threshold, and added a new test
+(`test_check_freshness_flags_entry_near_demand_boundary_not_yet_past_
+slack`) asserting an entry just past the bare `DEMAND_TTL_SECONDS` (but
+still within the slack window) is still checked and flagged. All 46
+`worktree_status_audit` tests pass. Bumped `agent-worktrees` to
+`1.5.5-dev236` and the marketplace catalog to `1.7.7-dev204`.
+
+### 2026-09-21 — PR #3252 review round 2: the round-1 padding reintroduced the original bug
+Copilot's review confirmed round 1's fix but caught that it traded one
+false positive for another: padding the demand-window cutoff by
+`FRESHNESS_SLACK_SECONDS` to tolerate the persisted `demanded_at`'s narrow
+lag meant a row genuinely past the cache's own real `DEMAND_TTL_SECONDS`
+cutoff -- which the cache has, by design, already stopped sweeping --
+would still be checked (and flagged as `cache_freshness_bounds`) for the
+whole padding window. That is exactly the "expected resting state
+reported as an outage" mistake this fix exists to eliminate, just delayed
+and confined to a 60s window instead of removed.
+
+Weighed the two failure modes directly: the round-1 lag is narrow (bounded
+to roughly one TTL+sweep cycle, ~30s) and self-correcting (the very next
+sweep tick, or the next hourly audit run, observes an updated
+`demanded_at` regardless) -- a rare, transient false negative. The
+round-2 padding window, by contrast, reproduces the false positive
+*every single audit run* for the entire 60s stretch any naturally-idle
+row spends aging through it -- a frequent, systematic cost. Reverted to
+the cache's own exact `DEMAND_TTL_SECONDS` cutoff (no padding), accepting
+the narrow round-1 race as the lesser cost rather than reintroducing a
+worse, more frequent one. Updated/removed the tests that had asserted the
+now-reverted padded behavior; all 45 `worktree_status_audit` tests pass.
+
