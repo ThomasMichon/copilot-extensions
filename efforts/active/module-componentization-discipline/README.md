@@ -270,6 +270,15 @@ Verbatim from the operator:
               separate: create/spawn, task lifecycle/steering/query, declarative
               loop surfaces, supervise registration wiring, and the
               resolve/run/evaluate/charter family.
+            - `agent-dispatch/__main__.py` second slice landed: extracted the
+              create/spawn family into `create_cli.py`
+              (`create`/`propose`/`approve`, `producer-fence`, payload-file
+              reads, cross-machine dispatch, spawn reservation + embody/bridge
+              launch), again keeping `__main__` as the composition root and
+              monkeypatch surface. Remaining seams are now the task lifecycle +
+              steering + query surfaces, the declarative loop families,
+              supervise registration wiring, and the
+              resolve/run/evaluate/charter family.
             - `agent-bridge/__main__.py` slice landed: the file is now a
               **485-line composition root** with focused sibling modules for
               service start/status (`service_start_cli.py`), daemon/process
@@ -1578,7 +1587,7 @@ the Phase 0 runbook, picked up as capacity allows.
 ### 2026-09-22 — Phase 2 continued: `plugins/agent-dispatch/src/agent_dispatch/__main__.py` coordinator slice
 - Started `agent-dispatch/__main__.py` with the safest strong seam instead of
   trying to land the whole 5,046-line registrar in one shot: the
-  coordinator/service family. Extracted a new `coordinator_cli.py` (**623**
+  coordinator/service family. Extracted a new `coordinator_cli.py` (**653**
   lines) holding `serve`/`deploy`/`_cutover`/`_retire-supervisors`,
   federation `run`/`status`, and the read-only coordinator surfaces
   (`health`, `installer-readiness`, `print-endpoint`), while leaving
@@ -1624,3 +1633,50 @@ the Phase 0 runbook, picked up as capacity allows.
   family. The next slice should keep the same discipline: pick one family,
   preserve every `agent_dispatch.__main__.<name>` seam tests patch, validate
   the full plugin suite, then land.
+
+### 2026-09-22 — Phase 2 continued: `plugins/agent-dispatch/src/agent_dispatch/__main__.py` create/spawn slice
+- Took the next strong seam immediately after the coordinator pass instead of
+  trying to attack the remaining 4,357-line root wholesale: the create/spawn
+  family. Extracted a new `create_cli.py` (**760** lines) holding the task
+  creation/proposal surface, producer-fence inspection/handoff, payload file
+  reads, cross-machine create+embody dispatch, and the full spawn reservation /
+  embody / bridge launch flow. `__main__.py` now stays the composition root and
+  compatibility re-export surface for the moved names, and dropped again from
+  **4,357 -> 3,624** lines.
+- The compatibility hazard here was broader than the raw parser block. Tests
+  patch `agent_dispatch.__main__._scope_repo`, `_read_payload_file`,
+  `producer_capability_value`, `_spawn_route`, `_do_spawn`,
+  `_release_failed_created_spawn`, and `_cmd_create`, so the extracted module
+  could not simply call its own local helpers without severing that seam. The
+  moved call sites now deliberately route through the live `agent_dispatch
+  .__main__` module for those compatibility-sensitive edges, while the ordinary
+  implementation still lives in `create_cli.py`.
+- Validation stayed at the same full-plugin bar as the first slice. `python
+  tools/run-plugin-tests.py agent-dispatch` again passed all six sub-suites
+  green after the extraction: **3,303 passed / 34 skipped total** (sub-suite
+  counts: `754/5`, `418/10`, `641/14`, `663/1`, `731/0`, `96/4`
+  passed/skipped). Focused create-family follow-up coverage also passed during
+  the seam-fix loop:
+  `python tools/run-plugin-tests.py agent-dispatch -k "propose_queue or recipes or spawn_reservation or embody or cli"`
+  -> **549 passed / 2788 deselected**, plus the narrower post-fix pass
+  `-k "test_create_cli_prefers_capability_command_resolver or
+  test_create_cli_reads_remote_capability_envelope or propose_queue or recipes
+  or spawn_reservation or embody or cli"` -> **549 passed / 2788 deselected**.
+  Required guards then passed:
+  `ruff check --select F,E9 plugins/agent-dispatch`,
+  `python tools/check-module-size.py`,
+  `python tools/check-module-size.py --refresh-baseline`,
+  `python tools/check-install-contract.py`, and
+  `python tools/check-version-consistency.py`.
+- Read-only dogfood for the moved surface stayed bounded to help output only:
+  `python -m agent_dispatch create --help`,
+  `python -m agent_dispatch propose --help`, and
+  `python -m agent_dispatch producer-fence status --help` through the plugin
+  test venv. The shrink-only baseline was then lowered again, from **4,357** to
+  **3,624** lines for `plugins/agent-dispatch/src/agent_dispatch/__main__.py`.
+  Version bump for this slice: `agent-dispatch` **`0.1.2-dev176`**.
+- Remaining seams are still clean enough to continue the same pattern: the
+  task lifecycle + steering + query surface, the declarative loop families,
+  supervise registration wiring, and the resolve/run/evaluate/charter family.
+  The file is still over cap, but it is now materially smaller and less
+  entangled than when this campaign entered `agent-dispatch`.
