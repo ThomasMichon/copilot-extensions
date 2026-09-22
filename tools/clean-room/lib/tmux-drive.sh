@@ -18,6 +18,17 @@
 # genuinely interactive session (not just a headless prompt/response) should
 # use this instead of re-deriving its own tmux incantations.
 #
+# IMPORTANT -- also pass `--experimental` to the driven `copilot` invocation
+# whenever the scenario cares about the extension-host mechanism specifically:
+# without it, `/env` reports "Extensions: No extensions loaded" even when a
+# plugin's skills/hooks load fine -- the JS extension-host component is
+# gated behind that flag entirely, independent of headed vs. headless mode.
+# This helper does not add the flag automatically (callers that only need a
+# headed session for some OTHER reason should not be forced into
+# experimental-features territory), but every extension-focused scenario
+# built on this file should include it explicitly, as
+# context-handoff-connection-race does.
+#
 # Public helper API:
 #   cr_tmux_ensure                    -- install tmux via apt if missing
 #                                        (best-effort; returns 1 if it

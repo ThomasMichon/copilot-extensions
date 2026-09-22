@@ -126,8 +126,12 @@ else
     # prompt text itself: cr_tmux_wait_for matches the FIRST occurrence in
     # the pane, and the prompt's own on-screen echo would otherwise satisfy
     # a self-referential wait pattern before the model ever replies.
+    # --experimental is REQUIRED: without it, `/env` reports "Extensions:
+    # No extensions loaded" even when a plugin's skills/hooks load fine --
+    # the JS extension-host component is gated behind this flag entirely,
+    # independent of headed vs. headless mode.
     cr_tmux_start "$TMUX_SESSION" "$HOME/ch-repro" "What is 19+23? Reply with only the number." \
-        --allow-all-tools "${PLUGIN_ARG[@]}"
+        --experimental --allow-all-tools "${PLUGIN_ARG[@]}"
     # Extension subprocesses launch during session bootstrap, which precedes
     # the first model turn, so by the time the reply lands every candidate
     # has already had its chance to connect (or clash).
@@ -137,6 +141,14 @@ else
         jam "headed-session-timeout" "tmux pane never showed the expected reply within 60s" \
             "inspect cr-logs/tmux-pane.log (captured below) for a startup hang"
     fi
+    # Give the extension-host handshake time to fully settle (ready/reject)
+    # BEFORE tearing the session down: the model's reply lands as soon as
+    # its OWN turn completes, which can race ahead of a still-connecting
+    # (or still being rejected) extension subprocess. Killing the tmux
+    # session too early SIGTERMs those in-flight children before they reach
+    # `ready` OR their rejection, producing a false `ready-timeout` /
+    # `stopped-normally` reading instead of the real clash outcome.
+    sleep 8
     cr_tmux_capture "$TMUX_SESSION" > "$CR_LOGDIR/tmux-pane.log" 2>/dev/null || true
     cr_tmux_stop "$TMUX_SESSION"
 fi
