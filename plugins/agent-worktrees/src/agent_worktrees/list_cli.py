@@ -211,20 +211,28 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
             bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
         except Exception:
             bare_orphan_wts = None
-    for rec in records:
-        emit({"type": "worktree", "phase": "fast", "wt": to_dict(rec, None)})
+    from . import delegate_cli
+
+    fast_rows = [to_dict(rec, None) for rec in records]
+    delegate_cli.annotate_delegate_graph(fast_rows)
+    for wt in fast_rows:
+        emit({"type": "worktree", "phase": "fast", "wt": wt})
     if getattr(args, "classify", False):
         config = cfg.load_config()
         repo = config.default_repo
         active_paths = _build_active_paths(records, session_ctx)
         from .picker_support.data_local import _stamp_from_raw
 
+        classified_rows = []
         for rec in records:
             info = _classify_one_record(
                 rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx
             )
             wt = to_dict(rec, info)
             _stamp_from_raw(rec, wt, session_ctx)
+            classified_rows.append(wt)
+        delegate_cli.annotate_delegate_graph(classified_rows)
+        for wt in classified_rows:
             emit({"type": "worktree", "phase": "classified", "wt": wt})
     emit({"type": "done", "count": len(records)})
     return 0
@@ -359,6 +367,9 @@ def _build_list_json_payload(
             norm = _normalize_path(rec.worktree_path)
             title = session_ctx.latest_summary.get(norm)
         wt_dict["title"] = title
+    from . import delegate_cli
+
+    delegate_cli.annotate_delegate_graph(worktrees)
     if getattr(args, "classify", False) and stamp_session_state:
         from .picker_support.data_local import _stamp_from_raw
 
@@ -434,6 +445,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     if args.json:
         if getattr(args, "cache_only", False):
             from .picker_support.data_local import _overlay_cached_state
+            from . import delegate_cli
 
             worktrees = []
             for rec in records:
@@ -447,6 +459,7 @@ def cmd_list(args: argparse.Namespace) -> int:
                     raw["title"] = rec.session_summary
                 _overlay_cached_state(raw, rec)
                 worktrees.append(raw)
+            delegate_cli.annotate_delegate_graph(worktrees)
             _json_output({"worktrees": worktrees})
             return 0
         _lc_key = None
