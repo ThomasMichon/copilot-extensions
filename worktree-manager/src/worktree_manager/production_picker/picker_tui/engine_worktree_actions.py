@@ -725,7 +725,7 @@ class PickerScreenWorktreeActionsMixin:
         same exit-and-launch plumbing."""
         if verb == "jump-host":
             return self._jump_to_worktree(
-                ctx.get("worktree") or ctx.get("id"),
+                ctx.get("worktree_id") or ctx.get("worktree") or ctx.get("id"),
                 ctx.get("source_id"),
             )
         if verb == "open-cli":

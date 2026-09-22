@@ -27,8 +27,12 @@ Worktree Picker's CodeSpaces pivot (Phase 3 / #709) renders the derived view.
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import subprocess
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -681,6 +685,325 @@ def _claims_summary_for_worktree(worktree_id: str) -> str:
         return ""
 
 
+def _driving_worktree_id(member: PoolMember) -> str:
+    """The full driving-worktree id when this CodeSpace is locally backed by a
+    tracked worktree, else ``""``.
+
+    The existing ``worktree`` picker field intentionally remains the compact
+    cross-link token Phases 1-2 already use for title/claims correlation
+    (beacon / effort / local worktree id). Phase 4's drill-in actions need the
+    **full** tracked worktree id because the picker's internal worktree jump
+    resolves rows by stable id, not a 4-char beacon/preview token.
+    """
+    if member.holder_worktree:
+        return _worktree_dir_id(member.holder_worktree)
+    return ""
+
+
+def _driving_worktree_mark(*, has_driving_worktree: bool, orphaned: bool) -> str:
+    """The reserved line-two mark for a row's most relevant relation."""
+    if orphaned:
+        return "\u26a0"
+    if has_driving_worktree:
+        return "\u2192"
+    return ""
+
+
+def _prefixed_subtitle(
+    subtitle: str,
+    *,
+    has_driving_worktree: bool,
+    orphaned: bool,
+) -> str:
+    """Apply the reserved Phase 4 line-two mark to the composed subtitle."""
+    mark = _driving_worktree_mark(
+        has_driving_worktree=has_driving_worktree,
+        orphaned=orphaned,
+    )
+    if mark and subtitle and not subtitle.startswith(f"{mark} "):
+        return f"{mark} {subtitle}"
+    return subtitle
+
+
+def _worktree_status_for_worktree(worktree_id: str) -> dict[str, Any]:
+    """A read-only Worktree Status card payload for the driving worktree, or
+    an explicit unavailable card when this row isn't backed by a resolvable
+    tracked worktree."""
+    unavailable = {
+        "title": "Worktree status unavailable",
+        "status": "unknown",
+        "link": None,
+        "body": "No tracked driving worktree is recorded for this CodeSpace.",
+    }
+    if not worktree_id:
+        return unavailable
+    try:
+        from agent_worktrees import claim_kinds_registry, claims_rank, status_bar_cli, tracking
+    except ImportError:
+        return unavailable
+    try:
+        record = tracking.load_record_by_id(worktree_id)
+    except Exception:
+        return unavailable
+    if record is None:
+        return unavailable
+    try:
+        payload = status_bar_cli._status_segment_json(record.path)
+    except Exception:
+        payload = None
+    try:
+        claims = claims_rank.summarize_claims(
+            record.resources,
+            pecking_order=claim_kinds_registry.effective_pecking_order(),
+            label_overrides=claim_kinds_registry.effective_label_overrides(),
+        )
+    except Exception:
+        claims = ""
+    state = str((payload or {}).get("state") or "unknown")
+    closure = (payload or {}).get("closure") or {}
+    git_bits = [
+        f"ahead {payload.get('ahead', 0)}" if payload is not None else None,
+        f"behind {payload.get('behind', 0)}" if payload is not None else None,
+        "dirty" if payload and payload.get("dirty") else "clean" if payload else None,
+    ]
+    git_summary = ", ".join(bit for bit in git_bits if bit)
+    live = (
+        "mux live" if record.mux_live is True else
+        "bound live" if record.bound_live is True else
+        "idle"
+    )
+    body = "\n".join([
+        f"- Repo: `{record.repo}`",
+        f"- Worktree: `{record.worktree_id}`",
+        f"- Branch: `{record.branch}`",
+        f"- Turns: {(payload or {}).get('turn_count', 0)}",
+        f"- Live: {live}",
+        f"- Git: {state}" + (f" ({git_summary})" if git_summary else ""),
+        f"- Closure: {closure.get('label', 'unknown')}",
+        f"- Claims: {claims or 'none'}",
+    ])
+    return {
+        "title": f"Worktree {record.worktree_id} ({record.repo})",
+        "status": closure.get("style") or state,
+        "link": None,
+        "body": body,
+    }
+
+
+_ADO_REMOTE_URL_COMMAND = (
+    'git -C "${VM_REPO_PATH:-$PWD}" config --get remote.origin.url 2>/dev/null || true'
+)
+
+
+@dataclass(frozen=True)
+class _AdoRepoRef:
+    host: str
+    organization: str
+    project: str
+    repository: str
+
+    def api_base(self) -> str:
+        if self.host.endswith(".visualstudio.com"):
+            return f"https://{self.host}/{self.project}"
+        return f"https://{self.host}/{self.organization}/{self.project}"
+
+    def pr_url(self, pr_id: int) -> str:
+        return f"{self.api_base()}/_git/{self.repository}/pullrequest/{pr_id}"
+
+
+def _ado_remote_ref(remote_url: str) -> _AdoRepoRef | None:
+    """Parse an Azure DevOps git remote into its repo coordinates."""
+    url = (remote_url or "").strip()
+    if not url:
+        return None
+    ssh = re.match(
+        r"^(?:ssh://)?git@(?P<host>ssh\.dev\.azure\.com)[:/](?:v3/)?(?P<org>[^/]+)/(?P<project>[^/]+)/(?P<repo>[^/\s]+)$",
+        url,
+        re.IGNORECASE,
+    )
+    if ssh:
+        return _AdoRepoRef(
+            host="dev.azure.com",
+            organization=str(ssh.group("org")),
+            project=str(ssh.group("project")),
+            repository=str(ssh.group("repo")),
+        )
+    parsed = urllib.parse.urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    parts = [part for part in parsed.path.split("/") if part]
+    if host == "dev.azure.com" and len(parts) >= 4 and parts[2] == "_git":
+        return _AdoRepoRef(
+            host=host,
+            organization=parts[0],
+            project=parts[1],
+            repository=parts[3],
+        )
+    if host.endswith(".visualstudio.com") and len(parts) >= 3 and parts[1] == "_git":
+        return _AdoRepoRef(
+            host=host,
+            organization=host.split(".", 1)[0],
+            project=parts[0],
+            repository=parts[2],
+        )
+    return None
+
+
+def _codespace_remote_origin_url(codespace_name: str) -> str | None:
+    """Best-effort remote-origin probe inside one CodeSpace."""
+    try:
+        from . import gh_account
+        from .lifecycle import account_for_codespace
+    except Exception:
+        return None
+    try:
+        account = account_for_codespace(codespace_name)
+    except Exception:
+        account = None
+    try:
+        proc = subprocess.run(
+            [
+                "gh", "codespace", "ssh", "-c", codespace_name,
+                "--", "-T", "bash", "-lc", _ADO_REMOTE_URL_COMMAND,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=gh_account.env_for_account(account),
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    value = (proc.stdout or "").strip()
+    return value or None
+
+
+def _ado_rest_bearer() -> str | None:
+    """Best-effort ADO REST bearer from the same sources the relay uses."""
+    try:
+        from .auth_preflight import _ado_scope
+        from credential_relay.sources.injected_token import InjectedTokenSource
+        from credential_relay.sources.az_login import AzLoginSource
+        import asyncio
+    except Exception:
+        return None
+
+    async def _resolve() -> str | None:
+        scope = _ado_scope()
+        for source in (
+            InjectedTokenSource(allowed_resources=["*"]),
+            AzLoginSource(allowed_resources=["*"], cache_ttl_override=0),
+        ):
+            try:
+                response = await source.resolve(
+                    "get-azure-token",
+                    {"scope": scope},
+                    timeout=30.0,
+                )
+            except Exception:
+                continue
+            if not response:
+                continue
+            match = re.search(r"(?:^|[\r\n])token=(.+)", str(response))
+            if match:
+                return match.group(1).strip()
+        return None
+
+    try:
+        return asyncio.run(_resolve())
+    except Exception:
+        return None
+
+
+def _normalize_branch_ref(branch: str) -> str | None:
+    value = (branch or "").strip()
+    if not value:
+        return None
+    return value if value.startswith("refs/heads/") else f"refs/heads/{value}"
+
+
+def _odsp_web_pr_ref(codespace_name: str, branch: str) -> str | None:
+    """The active odsp-web PR produced by this CodeSpace's current ADO branch,
+    or ``None`` when no such PR is detectable."""
+    branch_ref = _normalize_branch_ref(branch)
+    if not branch_ref:
+        return None
+    remote = _ado_remote_ref(_codespace_remote_origin_url(codespace_name) or "")
+    if remote is None or remote.repository.casefold() != "odsp-web":
+        return None
+    token = _ado_rest_bearer()
+    if not token:
+        return None
+    query = urllib.parse.urlencode({
+        "searchCriteria.sourceRefName": branch_ref,
+        "searchCriteria.status": "active",
+        "api-version": "7.1",
+    })
+    url = (
+        f"{remote.api_base()}/_apis/git/repositories/"
+        f"{urllib.parse.quote(remote.repository, safe='')}/pullrequests?{query}"
+    )
+    request = urllib.request.Request(url)
+    request.add_header("Authorization", f"Bearer {token}")
+    request.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = response.read().decode("utf-8")
+    except Exception:
+        return None
+    try:
+        data = json.loads(payload)
+    except Exception:
+        return None
+    values = data.get("value") if isinstance(data, dict) else None
+    if not isinstance(values, list) or not values:
+        return None
+    pr_id = values[0].get("pullRequestId")
+    try:
+        pr_number = int(pr_id)
+    except (TypeError, ValueError):
+        return None
+    return remote.pr_url(pr_number)
+
+
+def _auto_claim_odsp_web_pr(
+    codespace_name: str,
+    repository: str,
+    branch: str,
+    worktree_id: str,
+) -> str | None:
+    """Best-effort producer for Phase 4's odsp-web PR auto-claim.
+
+    Detection is intentionally read-triggered and idempotent: when the
+    Codespaces pivot materializes a row backed by a resolvable driving
+    worktree for `microsoft/odsp-web`, it probes the CodeSpace's current ADO
+    origin + branch for an active PR and, if found, journals it onto that
+    worktree's existing claim ledger through the already-shipped `claims add pr`
+    verb. No new claim store exists here; `claims add` deduplicates by ref.
+    """
+    if _short_repo(repository).casefold() != "odsp-web" or not worktree_id:
+        return None
+    try:
+        from agent_worktrees import tracking
+    except ImportError:
+        return None
+    try:
+        record = tracking.load_record_by_id(worktree_id)
+    except Exception:
+        return None
+    if record is None or not record.owner_ref:
+        return None
+    pr_ref = _odsp_web_pr_ref(codespace_name, branch)
+    if not pr_ref:
+        return None
+    try:
+        from .coordination import journal_claim
+    except Exception:
+        return pr_ref
+    journal_claim("pr", pr_ref, record.owner_ref)
+    return pr_ref
+
+
 #: agent-bridge liveness labels (``LiveSessionInfo.liveness`` /
 #: ``routes.live_sessions._live_liveness``) that read as "a turn is actually
 #: running right now" for the picker's compact ``sess`` column -- "stalled"
@@ -823,6 +1146,8 @@ def picker_payload(
             holder = _short_claim_ref(m.l2_holder)
         else:
             holder = ""
+        driving_worktree_id = _driving_worktree_id(m)
+        has_driving_worktree = bool(driving_worktree_id)
         friendly = m.display_name or m.name
         # The claiming worktree's short id: the cross-machine beacon (the 4-hex
         # borrowing-worktree id) when held elsewhere, else the local lease's
@@ -867,6 +1192,19 @@ def picker_payload(
         activity = _activity_from_live_session(live_session)
         if activity:
             subtitle = f"{subtitle} - {activity}" if subtitle else f"{friendly} - {activity}"
+        elif has_driving_worktree and not subtitle and not m.orphaned:
+            subtitle = friendly
+        subtitle = _prefixed_subtitle(
+            subtitle,
+            has_driving_worktree=has_driving_worktree,
+            orphaned=m.orphaned,
+        )
+        _auto_claim_odsp_web_pr(
+            m.name,
+            m.repository,
+            m.branch,
+            driving_worktree_id,
+        )
         entries.append({
             "id": m.name,
             "name": m.name,            # durable GitHub-assigned id
@@ -874,7 +1212,10 @@ def picker_payload(
             "group": group,            # repo @ account (section grouping)
             "status": status,          # RUNNING / STALE / STOPPED (compact STATE)
             "worktree": worktree,      # claiming worktree short id (-> TASK title)
+            "worktree_id": driving_worktree_id,  # full tracked id for drill-in
+            "has_driving_worktree": "true" if has_driving_worktree else "false",
             "subtitle": subtitle,      # optional 2nd line (durable id + claim)
+            "worktree_status": _worktree_status_for_worktree(driving_worktree_id),
             # Phase 1 (picker-venue-pivots): the claiming worktree's own ranked
             # claims-list (PR/bug/etc.), via the shared claims_rank module --
             # "" when unclaimed, unresolvable, or agent-worktrees isn't
