@@ -34,22 +34,34 @@ search an already-enabled index. For day-to-day querying, use the
 
 ## The layered config model
 
+Use the same layered naming and precedence documented for the other
+`.agent-*` configs in `docs/configuration.md` and
+`plugins/agent-worktrees/docs/config-reference.md`:
+**machine-local > knowledge overlay > in-repo**.
+
 There are three distinct configuration roles:
 
-1. **Checked-in repo defaults** — `<repo>/.agent-index/config.yaml`
+1. **In-repo** — `<repo>/.agent-index/config.yaml`
    - Shareable, tracked, safe to commit.
    - Declares default `corpus.sources` for that repository.
    - Should not carry machine identity.
-2. **Repo-local machine overlay** — `<repo>/.copilot-extensions/agent-index/config.yaml`
+2. **Knowledge overlay** — `<knowledge-repo>/.agent-index/config.yaml`
+   - Shareable within the operator's private knowledge repo.
+   - Sits above the in-repo base for repositories that require external state.
+   - Typically self-declares knowledge-repo corpus sources that should follow
+     the operator across stateless-harness repos.
+3. **Machine-local** — `<repo>/.copilot-extensions/agent-index/config.yaml`
    - Personal or machine-local; usually gitignored.
    - Adds private `corpus.sources` and/or the local `indexer:` designation.
-   - Overlays the checked-in defaults; `corpus.sources` unions by `name`
-     (first contributor wins), while scalar keys like `indexer` follow normal
-     overlay semantics.
-3. **Bound knowledge-repo overlay** — `<knowledge-repo>/.agent-index/config.yaml`
-   - Shareable within the operator's private knowledge repo.
-   - Used to self-declare knowledge-repo corpus sources, which appear as an
-     additional overlay when the current repo requires external state.
+   - This is the highest-precedence layer.
+
+`corpus.sources` is the one intentional exception to the ordinary merge rule.
+The established config model replaces list-valued keys wholesale from the
+highest-precedence layer that sets them; agent-index keeps that rule for
+`indexer`, `indexers`, and every other key. But `corpus.sources` behaves like a
+set of independent declarations, so it unions by `name`, with the
+higher-precedence layer winning duplicate names and lower-precedence layers
+contributing only missing names.
 
 This separation keeps a public/shareable repo's defaults in tree while letting
 an operator privately designate the host/indexer machine and add personal
@@ -112,7 +124,8 @@ corpus:
 ```
 
 This file is the shareable, checked-in declaration for the knowledge repo
-itself. It is distinct from the current repo's machine-local overlay.
+itself. It is the **knowledge overlay** tier in the precedence model and is
+distinct from the current repo's machine-local overlay.
 
 ## Verify the setup
 

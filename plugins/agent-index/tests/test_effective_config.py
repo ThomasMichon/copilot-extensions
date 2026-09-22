@@ -595,7 +595,7 @@ def test_shareable_base_merges_with_repo_local_overlay(
     assert result["sources"] == [{"name": "git:example", "repo": "example"}]
 
 
-def test_repo_local_overlay_unions_sources_and_supplies_indexer(
+def test_repo_local_machine_overlay_wins_over_in_repo_for_duplicate_names(
     tmp_path: Path,
 ) -> None:
     module = _module()
@@ -617,8 +617,10 @@ def test_repo_local_overlay_unions_sources_and_supplies_indexer(
         "  ssh: overlay-box\n"
         "corpus:\n"
         "  sources:\n"
+        "    - name: github:gim-home/odsp-web-harness\n"
+        "      trust_domain: machine-local\n"
         "    - name: github:ThomasMichon/copilot-extensions\n"
-        "      trust_domain: marketplace\n",
+        "      trust_domain: machine-local\n",
         encoding="utf-8",
     )
 
@@ -628,15 +630,18 @@ def test_repo_local_overlay_unions_sources_and_supplies_indexer(
     assert Path(result["config"]) == config.resolve()
     assert result["indexers"] == [{"machine": "overlay-box", "ssh": "overlay-box"}]
     assert result["sources"] == [
-        {"name": "github:gim-home/odsp-web-harness", "trust_domain": "harness"},
+        {
+            "name": "github:gim-home/odsp-web-harness",
+            "trust_domain": "machine-local",
+        },
         {
             "name": "github:ThomasMichon/copilot-extensions",
-            "trust_domain": "marketplace",
+            "trust_domain": "machine-local",
         },
     ]
 
 
-def test_duplicate_source_name_keeps_shareable_definition(
+def test_duplicate_source_name_uses_higher_precedence_machine_local_layer(
     tmp_path: Path,
 ) -> None:
     module = _module()
@@ -666,11 +671,11 @@ def test_duplicate_source_name_keeps_shareable_definition(
 
     assert result["opted_in"] is True
     assert result["sources"] == [
-        {"name": "git:dotfiles", "repo": "dotfiles", "trust_domain": "shareable"}
+        {"name": "git:dotfiles", "repo": "override", "trust_domain": "overlay"}
     ]
 
 
-def test_external_state_root_shareable_overlay_adds_sources(
+def test_knowledge_overlay_beats_in_repo_base_for_duplicate_names(
     tmp_path: Path, monkeypatch
 ) -> None:
     module = _module()
@@ -690,6 +695,8 @@ def test_external_state_root_shareable_overlay_adds_sources(
     knowledge_config.write_text(
         "corpus:\n"
         "  sources:\n"
+        "    - name: github:gim-home/odsp-web-harness\n"
+        "      repo: knowledge-copy\n"
         "    - name: git:dotfiles\n"
         "      repo: dotfiles\n",
         encoding="utf-8",
@@ -703,9 +710,53 @@ def test_external_state_root_shareable_overlay_adds_sources(
     assert result["opted_in"] is True
     assert Path(result["config"]) == config.resolve()
     assert result["sources"] == [
-        {"name": "github:gim-home/odsp-web-harness"},
+        {"name": "github:gim-home/odsp-web-harness", "repo": "knowledge-copy"},
         {"name": "git:dotfiles", "repo": "dotfiles"},
     ]
+
+
+def test_machine_local_overlay_beats_knowledge_overlay_for_duplicate_names(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _module()
+    repo = _repo(tmp_path / "repo", requires_external=True)
+    config = repo / ".agent-index" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        "corpus:\n"
+        "  sources:\n"
+        "    - name: git:dotfiles\n"
+        "      repo: repo-base\n",
+        encoding="utf-8",
+    )
+    overlay = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text(
+        "corpus:\n"
+        "  sources:\n"
+        "    - name: git:dotfiles\n"
+        "      repo: machine-local\n",
+        encoding="utf-8",
+    )
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    knowledge_config = knowledge / ".agent-index" / "config.yaml"
+    knowledge_config.parent.mkdir(parents=True)
+    knowledge_config.write_text(
+        "corpus:\n"
+        "  sources:\n"
+        "    - name: git:dotfiles\n"
+        "      repo: knowledge\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        module, "_external_state_root", lambda _root: ("ready", knowledge)
+    )
+
+    result = module.resolve(repo)
+
+    assert result["opted_in"] is True
+    assert result["sources"] == [{"name": "git:dotfiles", "repo": "machine-local"}]
 
 
 def test_marketplace_overlay_merges_on_top_of_base(

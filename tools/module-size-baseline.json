@@ -40,7 +40,7 @@
   "plugins/agent-dispatch/src/agent_dispatch/supervisor.py": 3651,
   "plugins/agent-dispatch/src/agent_dispatch/supervisor_daemon.py": 2207,
   "plugins/agent-index/scripts/cell-runtime.py": 5145,
-  "plugins/agent-index/scripts/resolve_effective_config.py": 1125,
+  "plugins/agent-index/scripts/resolve_effective_config.py": 1136,
   "plugins/agent-index/scripts/versioned_runtime.py": 1245,
   "plugins/agent-index/src/agent_index/__main__.py": 1738,
   "plugins/agent-index/src/agent_index/store/content_store.py": 1019,
