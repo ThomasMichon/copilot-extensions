@@ -1,5 +1,7 @@
 # ruff: noqa: F401,F821
 # Executed into installation_context.py's shared module globals.
+from __future__ import annotations
+
 def _write_retirement_record_locked(
     *,
     record_path: Path,

@@ -1,5 +1,7 @@
 # ruff: noqa: F401,F821
 # Executed into installation_context.py's shared module globals.
+from __future__ import annotations
+
 def _runtime_slot_paths(
     validated: Mapping[str, Any],
     runtime_version: str,

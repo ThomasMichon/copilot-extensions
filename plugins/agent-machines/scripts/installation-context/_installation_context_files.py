@@ -1,5 +1,7 @@
 # ruff: noqa: F401,F821
 # Executed into installation_context.py's shared module globals.
+from __future__ import annotations
+
 def _validate_legacy_attribution_items(
     items: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:

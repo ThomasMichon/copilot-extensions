@@ -1,5 +1,7 @@
 # ruff: noqa: F401,F821
 # Executed into installation_context.py's shared module globals.
+from __future__ import annotations
+
 def _trusted_plugin_id(
     *,
     plugin_id: str | None,

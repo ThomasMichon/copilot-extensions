@@ -1,5 +1,7 @@
 # ruff: noqa: F401,F821
 # Executed into installation_context.py's shared module globals.
+from __future__ import annotations
+
 def _assert_positive_integer(value: Any, name: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
         _fail(f"{name} must be an integer.")
