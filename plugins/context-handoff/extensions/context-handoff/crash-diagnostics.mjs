@@ -150,16 +150,37 @@ const SIGNALS = ["SIGTERM", "SIGINT", "SIGHUP"];
  * same `(code=null, signal=<signal>)` shape a parent would have seen with no
  * diagnostics installed at all.
  */
+/**
+ * Best-effort, never-throwing description of an arbitrary thrown/rejected
+ * value. A thrown value is not required to be an `Error` -- reading
+ * `.stack` or coercing with `String()` can run a hostile/buggy user-defined
+ * getter, `toString()`, or `Symbol.toPrimitive` that itself throws. Those
+ * expressions would otherwise run directly inside `uncaughtException`/
+ * `unhandledRejection` handler bodies, outside `emergencyLog`'s own
+ * try/catch (which only guards its own file I/O) -- a second exception
+ * thrown while Node is already dispatching `uncaughtException` is fatal and
+ * bypasses further JS, losing the very diagnostic this module exists to
+ * capture. Every failure path here falls back to a fixed, allocation-free
+ * string.
+ */
+function describeFailure(value) {
+  try {
+    if (value && typeof value === "object" && typeof value.stack === "string") {
+      return value.stack;
+    }
+    return String(value);
+  } catch {
+    return "<failure detail unavailable: describing it threw>";
+  }
+}
+
 export function installEmergencyDiagnostics(emergencyLog) {
   const onUncaughtException = (err) => {
-    emergencyLog("uncaughtException", err && err.stack ? err.stack : String(err));
+    emergencyLog("uncaughtException", describeFailure(err));
     process.exit(1);
   };
   const onUnhandledRejection = (reason) => {
-    emergencyLog(
-      "unhandledRejection",
-      reason instanceof Error ? reason.stack : String(reason),
-    );
+    emergencyLog("unhandledRejection", describeFailure(reason));
     process.exit(1);
   };
   const onExit = (code) => {

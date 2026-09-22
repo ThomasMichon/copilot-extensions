@@ -68,6 +68,22 @@ test("an uncaught exception is logged with its stack, then exits 1", async () =>
   });
 });
 
+// A thrown value is not required to be an Error. Reading a hostile/buggy
+// .stack getter runs arbitrary user code that can itself throw -- that must
+// not crash describeFailure() (and lose the diagnostic) while it is already
+// handling the original failure.
+test("a hostile throwing .stack getter does not itself crash the handler", async () => {
+  await withCrashLog(async (logPath) => {
+    const result = spawnSync(process.execPath, [harness, "throw-hostile-getter", logPath], {
+      encoding: "utf-8",
+    });
+    assert.equal(result.status, 1);
+    const log = readLogSafe(logPath);
+    assert.match(log, /uncaughtException: <failure detail unavailable: describing it threw>/);
+    assert.match(log, /\bexit: code=1\b/);
+  });
+});
+
 // A predictable path in a shared os.tmpdir() means another local user could
 // have pre-created an ordinary, world-readable regular file there before
 // this process ever runs. O_NOFOLLOW alone does not protect against this

@@ -27,6 +27,19 @@ switch (scenario) {
       Promise.reject(new Error("boom-rejected"));
     });
     break;
+  case "throw-hostile-getter":
+    // Regression case: a thrown value is not required to be an Error, and
+    // reading a hostile/buggy .stack getter (or a Symbol.toPrimitive/
+    // toString that throws) must not itself crash the crash handler and
+    // lose the diagnostic -- see describeFailure() in crash-diagnostics.mjs.
+    setImmediate(() => {
+      throw {
+        get stack() {
+          throw new Error("bad getter");
+        },
+      };
+    });
+    break;
   case "wait-for-signal":
     // The parent test sends the signal via child.kill(). A bare
     // process.on(signal, ...) registration does NOT by itself keep the
