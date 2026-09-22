@@ -41,7 +41,14 @@ information fidelity:
 3. An **Open** action on either pivot (neither has one today) that attaches
    the operator to a live row's muxed Copilot instance over the fabric's SSH
    transport.
-4. **Design only** for this effort: "New codespace" / "New container" /
+4. A reserved **driving-worktree mark** (a stat slot or the `[mark]` glyph)
+   plus menu actions to jump to the driving worktree's Worktrees-pivot entry
+   or open its Worktree Status card directly.
+5. For odsp-web: auto-journal a pushed-branch's resulting PR onto the
+   driving worktree's existing claim ledger
+   (`agent-worktrees claims add pr <ref>`), so it appears in the row's
+   claims-list with no manual claim step.
+6. **Design only** for this effort: "New codespace" / "New container" /
    "New agent"-on-a-dormant-venue, provision-then-embody. Per operator
    decision (2026-09-21), the interactive create→embody implementation is
    deferred to land alongside the parallel drive-CLI-agents-over-SSH
@@ -198,6 +205,21 @@ Tasks pivot are the baselines).
   title/intent field names against `db_live_sessions.py` /
   `live_representation.py` during Phase 1 grounding rather than assuming a
   field name from this README.
+- **Claims are an existing per-worktree ledger, not a new store:**
+  `agent-worktrees`' `claims_cli.py` already implements
+  `claims add <kind> <ref>` (kinds already include `pr`, `codespace`,
+  `container`), `claims release`/`settle`/`sweep`. This effort's
+  claims-list column reads that ledger through the driving-worktree
+  cross-link — **no new claim storage or rendering**; the only new piece
+  is a *producer* (Phase 5's odsp-web PR auto-claim) calling the existing
+  `claims add pr <ref>` verb.
+- **odsp-web PR detection has no existing hook yet:** nothing in
+  `agent-codespaces` today watches for a pushed ADO branch turning into a
+  PR (`codespace_assets/ado-auth-helper-relay`/`ado-auth-helper-wrapper`
+  handle ADO *auth*, not PR detection). Phase 5 needs to design this
+  detection point from scratch — likely a periodic/triggered check inside
+  the CodeSpace's own git activity or an ADO API poll — before it can call
+  the existing `claims add pr` verb.
 
 ## Plan
 
@@ -230,26 +252,29 @@ Tasks pivot are the baselines).
       note before writing manifest JSON. Both must produce line two as
       `"[mark] <durable title> - <transient activity>"` (see the vision's
       "Row grammar" concept) — not a bare fact string — with the durable
-      title sourced from the worktree-title cross-link (or venue identity
-      when unclaimed) and the transient activity sourced from the new
-      agent-bridge live-session join.
+      title sourced from a declared checkout intent, else the
+      worktree-title cross-link, else venue identity; and the transient
+      activity sourced from the new agent-bridge live-session join.
+- [ ] Decide, per the Phase 0 preview, whether the driving-worktree
+      indicator lives in a dedicated line-one stat slot or the line-two
+      `[mark]` glyph, and design the "view driving worktree"/"worktree
+      status" menu entries for both pivots.
 - [ ] Render and review before/after screenshots for both pivots: current
       (real) shape vs. proposed shape, plus one screenshot each of a row
-      with vs. without a live agent-bridge session joined.
+      with vs. without a live agent-bridge session joined, and one showing
+      the driving-worktree mark + menu entries.
 - [ ] Operator review of the screenshots; resolve any design feedback here
       before Phase 1 starts.
 
 ### Phase 1 — Codespaces pivot (implementation)
 - [ ] Wire `entry.subtitle` into `pivots/agent-codespaces.json` so
       `pool.picker_payload`'s already-computed subtitle (claim/orphan
-      detail) actually renders.
+      detail) actually renders as the durable-title half of line two.
 - [ ] Add any additional columns worth surfacing from `pool.picker_payload`'s
       fuller entry dict (per Phase 0 design note).
 - [ ] agent-bridge live-session join keyed on
-      `venue.kind == "codespace"` + `venue.target`, surfaced as new
-      columns/subtitle detail.
-- [ ] Claims summary reusing the Tasks pane's shared prominent-artifacts
-      surface, if distinct from the existing worktree/claim cross-link.
+      `venue.kind == "codespace"` + `venue.target`, surfaced as the
+      transient-activity half of line two.
 - [ ] (Manifest/action shape only, per Phase 0 design) the New-codespace
       entry point.
 
@@ -274,7 +299,23 @@ Tasks pivot are the baselines).
 - [ ] Confirm behavior parity with the Worktrees pane's own Open/resume
       action for a row with no live session (resumable but dormant venue).
 
-### Phase 4 — New-venue → embody design handoff (design only)
+### Phase 4 — Driving-worktree navigation + odsp-web PR auto-claim
+- [ ] Implement the reserved driving-worktree mark on both pivots (stat
+      slot or `[mark]` glyph per Phase 0 decision) and its two menu
+      actions: jump to the driving worktree's Worktrees-pivot entry, and
+      open its Worktree Status card directly.
+- [ ] Confirm the claims-list column already reads the driving worktree's
+      existing `agent-worktrees` claim ledger with no new storage (should
+      require no new code beyond the existing cross-link, per Phase 1/2).
+- [ ] Design and implement the odsp-web push→PR detection point (new: no
+      existing hook watches for this) that calls
+      `agent-worktrees claims add pr <ref>` on the driving worktree when a
+      CodeSpace's pushed ADO branch produces a PR.
+- [ ] Confirm the auto-claimed PR shows up in the claims-list with no
+      manual step, and that it is visually indistinguishable from a
+      manually-claimed one (same ledger, same rendering).
+
+### Phase 5 — New-venue → embody design handoff (design only)
 - [ ] Record the finalized create→embody flow design (target-info prompt,
       provisioning call, hand-off into a fresh Copilot session) as a design
       note in this effort, explicitly scoped as **input to** the parallel
@@ -300,9 +341,29 @@ Tasks pivot are the baselines).
 - [ ] Confirm the Containers pivot still never surfaces a non-fleet
       container after the parity changes (no regression on the existing
       fleet-only scoping).
+- [ ] Unit tests for the driving-worktree mark/menu-navigation actions
+      (jump-to-worktree, worktree-status-card) against fixed fixtures with
+      and without a driving worktree.
+- [ ] A live/manual check on a real odsp-web CodeSpace: push a real ADO
+      topic branch, open the resulting PR, and confirm it appears in the
+      row's claims-list with no manual claim step (Phase 4's own
+      "validate beyond unit tests" case, not just a mocked push→PR
+      fixture).
 
 ## Journal
 
+- **2026-09-21 (latest)** — Operator refined the title/activity model and
+  added new scope: `<title>` is a declared checkout intent (distinct from
+  the venue's repo/spec identity, which stays a line-one fact); `<activity>`
+  is an accumulating snagged-signal stream, not limited to agent-bridge.
+  Added a new Phase 4: a reserved driving-worktree mark/navigation (view
+  driving worktree, or its Worktree Status card — mirroring
+  agent-dispatch's own direction) and an odsp-web-scoped PR auto-claim
+  (a CodeSpace's pushed ADO branch auto-journals its resulting PR onto the
+  driving worktree via the *existing* `agent-worktrees claims add pr <ref>`
+  ledger — clarified in grounding that claims are that existing ledger, not
+  a new store this effort invents; the only new piece is the push→PR
+  detection point, which has no existing hook today).
 - **2026-09-21 (later)** — Operator specified a precise row grammar: line
   one stays columnar (`[ ] <id> STATUS <stats> <claims>`); line two is
   free-form and must read as `"[mark] <durable title> - <transient

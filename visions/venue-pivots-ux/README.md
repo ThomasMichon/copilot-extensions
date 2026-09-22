@@ -23,6 +23,8 @@
   (`_cmd_fleet`) and `fleet.py`/`lease.py` ·
   `plugins/agent-bridge/src/agent_bridge/models.py` (`LiveSessionInfo`,
   `LiveSessionVenue`) ·
+  `plugins/agent-worktrees/src/agent_worktrees/claims_cli.py` (the existing
+  per-worktree claim ledger — `pr`/`codespace`/`container` claim kinds) ·
   `efforts/active/picker-venue-pivots/README.md`
 
 ## Purpose & Intent
@@ -106,23 +108,88 @@ concrete row-level target.
 
 Consistent with *derive-never-duplicate*, both halves of line two are read
 from whichever layer already owns them, never independently authored by the
-pivot:
+pivot (see the following three sections for the full detail on each):
 
-- **Durable subject/theme title** — the claiming worktree's own task title
-  (already resolved by the picker's `_worktree_title_map`, the same value
-  Codespaces' `worktree_title` column already carries) when a worktree is
-  driving the venue; falling back to the venue's own stable identity (repo
-  + branch, or the fleet/devcontainer spec name) when no worktree claims it.
-- **Transient current activity** — agent-bridge's most recent reported
-  beat for the live session in that venue (`LiveSessionInfo.latest_progress`
-  / whatever title/intent a session last reported), when one exists; absent
-  entirely (graceful-absence, not a placeholder) when no live session is
-  registered for the venue.
+- **Durable subject/theme title** — a declared checkout intent when one
+  exists, else the claiming worktree's own task title (already resolved by
+  the picker's `_worktree_title_map`, the same value Codespaces'
+  `worktree_title` column already carries), else the venue's own stable
+  identity (repo + branch, or the fleet/devcontainer spec name) as a last
+  resort.
+- **Transient current activity** — the most recent entry in the venue's
+  accumulating snagged-signal stream: agent-bridge's live-session beat
+  today, a detected auto-claimed PR or other externally-observable event as
+  that capability lands; absent entirely (graceful-absence, not a
+  placeholder) when nothing has been snagged yet.
 - **Relation/mark** — a single glyph naming which of these signals is
   present and most relevant right now (driving-worktree link vs. an
   orphaned-lock warning vs. a live vs. idle session) — reusing whatever
   glyph vocabulary the Worktrees/Tasks panes already use for an equivalent
   distinction, not a new one invented for this pivot.
+
+### Checkout intent vs. venue identity — <title> is declared, not derived
+
+A CodeSpace's durable identity is its **source repo** (and branch); a
+container's is its **devcontainer/fleet spec**. Both are already
+first-class, line-one facts (repo grouping, `fleet` column) and stay there
+— they are *what the venue is built from*, not *why it is checked out right
+now*. `<title>` is a different thing: the **checkout intent** declared when
+a worktree borrows/creates the venue for a purpose ("reproduce #4021 on a
+clean box", "spike the new auth flow") — the same kind of intent a task's
+own charter already records for a worktree. When an explicit intent exists
+it is the durable title; absent one, the title falls back to the driving
+worktree's own task title, and only then to the venue's bare identity
+(repo/branch or fleet name) as a last resort — never conflating "what this
+venue is" with "what it's for right now."
+
+### Snagged activity — an accumulating stream, agent-bridge is one source
+
+`<activity>` is not limited to agent-bridge's live-session beat. As a
+Copilot session actually works inside a venue, the fabric already snags
+values along the way — a live-session progress beat is one instance of
+that, but so is a detected git push, a newly opened PR, a completed CI run,
+or any other externally-observable signal the venue's own activity
+produces. This vision treats the *transient activity* half of line two as
+the most recent entry in that accumulating stream, however it was snagged,
+not as a hardcoded read of one specific field. Phase 1 grounds it in
+agent-bridge's `latest_progress` (the one source that exists today); the
+PR-auto-claim capability below is the first non-agent-bridge source, and the
+row should be built so a future snagged signal slots in the same way.
+
+### Auto-claiming a PR from its own pushed branch (odsp-web / ADO)
+
+`agent-worktrees` already has a general claim ledger keyed by worktree
+(`claims_cli.py`'s `claims add <kind> <ref>`, with `pr` and `codespace`/
+`container` themselves already valid claim kinds) — **claims are not a new
+store this vision invents**; the row's claims-list is the *same* ledger a
+Task or Worktree row already reads, joined through whichever worktree is
+currently driving the venue (derive-never-duplicate, same as the
+title/activity cross-links). What is genuinely new: for odsp-web, most
+Codespaces exist to push ADO topic branches that become PRs. Detecting that
+a venue's own activity just produced a new PR from a pushed branch, and
+auto-journaling it (`claims add pr <ref>`) on the driving worktree, means
+the PR shows up in the claims-list **without** the operator or a registrar
+manually claiming it — the natural, expected outcome of "I pushed a branch
+from this box" becoming visible with no extra step. This is scoped to
+odsp-web's ADO-backed flow to start; the detection mechanism (watching for
+a push→PR transition) is new work, but the claim it produces rides the
+existing ledger unchanged.
+
+### Driving-worktree mark and navigation — a reserved slot, not just a fact
+
+Which local worktree is actively driving a venue is important enough to
+reserve a dedicated signal, not bury it as one more stat. Either a
+dedicated line-one stat slot (a compact "DRIVEN"/idle-equivalent badge
+alongside `health`/`occupancy`) or the line-two `[mark]` glyph carries this
+—design chooses whichever the Phase 0 preview shows reads best, but *one*
+of them is reserved for it specifically, not shared with an unrelated
+signal. Whichever slot it lives in, the row's action menu gains a way to
+act on that link directly: **view the driving worktree's own Worktrees-pivot
+entry**, or **open its Worktree Status card** directly — the same
+destination agent-dispatch's Tasks pane is already building toward for its
+own embodied-task→worktree drill-in (`visions/plugins/agent-dispatch/
+tasks-pane-ux`'s Worktree Status card). A venue with no driving worktree
+simply omits both the mark and the menu entries (graceful-absence).
 
 ### Codespaces: already repo-grouped; wire the dropped subtitle, add the live-session join
 
@@ -185,14 +252,21 @@ palette so an operator reads a CodeSpace row and a fleet-container row the
 same way, differing only in the fields each venue actually has (e.g.
 `cores` for Codespaces, `security_profile` for Containers).
 
-### Claims — the same shared surface Tasks already established
+### Claims — one ledger, read through the driving-worktree cross-link
 
-Both pivots reuse the "1-2 prominent claims inline, full graph on drill-in"
-convention the Tasks pane's Prominent-Artifacts feature established, rather
-than inventing a second claims rendering. A CodeSpace or fleet container that
-is backing a claimed PR/issue (via its driving worktree, or a registrar that
-claims venues directly) reads the same way a Task or Worktree row already
-does.
+Claims are **not a new store this vision invents**: `agent-worktrees`
+already journals a per-worktree claim ledger (`claims_cli.py`'s
+`claims add <kind> <ref>`), with `pr` and `codespace`/`container`
+themselves already valid claim kinds. The row's claims-list is that same
+ledger, read through whichever worktree is currently driving the venue —
+the identical derive-never-duplicate cross-link that resolves the durable
+title, not a second claims rendering. A CodeSpace or fleet container with
+no driving worktree simply has no claims to show (graceful-absence); one
+with a driving worktree shows exactly what that worktree's own ledger
+already carries, the "1-2 prominent inline, full graph on drill-in"
+convention the Tasks pane's Prominent-Artifacts feature already
+established. See "Auto-claiming a PR" above for the one new *producer* of
+claim entries this vision adds — the ledger and its rendering are unchanged.
 
 ### Open — into the muxed Copilot instance, over SSH
 
@@ -243,6 +317,21 @@ the columns, fleet-grouping, worktree/lease cross-link, gated lifecycle
 actions, and agent-bridge live-session join needed to match the CodeSpaces
 pivot's presentation fidelity, using the same shared column vocabulary and
 lifecycle palette.
+
+### driving-worktree-mark-and-nav
+A reserved line-one stat slot or the line-two `[mark]` glyph (design
+chooses which in Phase 0) identifies which local worktree, if any, is
+actively driving the venue. The row's action menu gains "view driving
+worktree" (jump to its Worktrees-pivot entry) and "worktree status" (open
+its Worktree Status card directly) — new on both pivots, mirroring
+agent-dispatch's own Tasks→Worktree drill-in direction.
+
+### codespace-pr-auto-claim
+For odsp-web's ADO-backed flow, a CodeSpace's own pushed topic branch that
+becomes a PR is auto-journaled (`agent-worktrees claims add pr <ref>`) onto
+the driving worktree's existing claim ledger — no manual claim step, no new
+claim store, just a new producer feeding the ledger the claims-list column
+already reads.
 
 ### open-into-muxed-session
 A new **Open** action on either pivot attaches the operator to a live row's
@@ -311,6 +400,14 @@ demo data source, before any implementation PR — never a hand-drawn mockup.
 - **Not a new row-rendering mechanism.** The two-line/columnar row grammar
   already exists generically (`subtitle_field`, `Column`); this vision uses
   it consistently rather than building a new renderer.
+- **Not a new claim store or claim-rendering surface.** The claims-list
+  reads `agent-worktrees`' existing per-worktree claim ledger through the
+  driving-worktree cross-link; this vision adds one new *producer* (the
+  odsp-web PR auto-claim) but no new storage or rendering path.
+- **Not a general ADO/CI event pipeline.** PR auto-claiming is scoped to
+  the specific push→PR transition odsp-web's ADO flow produces; this vision
+  does not attempt to generalize to every possible externally-observable
+  signal a venue could produce.
 
 ## See Also
 
@@ -328,6 +425,16 @@ demo data source, before any implementation PR — never a hand-drawn mockup.
 
 ## Provenance
 
+- **2026-09-21 (latest)** — Operator refined the title/activity model:
+  `<title>` is a declared checkout intent, distinct from the venue's own
+  repo/spec identity (already line one); `<activity>` is an accumulating
+  "snagged" signal stream, not limited to agent-bridge. Added the
+  odsp-web PR auto-claim capability (a CodeSpace's own pushed ADO branch
+  auto-journals its resulting PR onto the driving worktree's existing
+  claim ledger — clarified that claims are that same existing
+  `agent-worktrees` ledger, not a new store) and a reserved
+  driving-worktree mark/navigation slot (view the driving worktree, or its
+  Worktree Status card, mirroring agent-dispatch's own direction).
 - **2026-09-21 (later)** — Operator specified the precise row grammar:
   columnar line one, free-form `"[mark] <durable title> - <transient
   activity>"` line two, with the activity (not the title) the first thing
