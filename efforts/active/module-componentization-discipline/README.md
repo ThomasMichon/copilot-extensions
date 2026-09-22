@@ -1557,7 +1557,7 @@ the Phase 0 runbook, picked up as capacity allows.
   passed across all touched/created modules, `python tools/check-module-size.py`
   stayed green, and `--refresh-baseline` removed only the
   `agent_registry.py` entry from `tools/module-size-baseline.json`.
-- Bumped `agent-bridge` to `0.4.0-dev541`.
+- Bumped `agent-bridge` to `0.4.0-dev542`.
 - `python tools/rank-module-size.py --limit 100` disproved the tempting "plugin
   clear" claim: `agent-bridge` still has several oversized baselined modules
   (`client.py`, `routes/sessions.py`, `acp_client.py`, `routes/worktrees.py`,
