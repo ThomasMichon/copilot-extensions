@@ -16,6 +16,20 @@
 $AgentRtPy = $null
 $_rtRoot = $env:AGENT_RT_ROOT
 if ($_rtRoot) {
+  $_rtTraceSource = ''
+  $_rtTraceVersion = ''
+
+  function _Rt-WriteBootTrace([string]$phase, [string]$extra = '') {
+    if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return }
+    $plugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
+      $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
+    } else {
+      (Split-Path -Leaf $_rtRoot).TrimStart('.')
+    }
+    $line = "::boot-trace:: plugin=$plugin phase=$phase t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+    if ($extra) { $line += " $extra" }
+    [Console]::Error.WriteLine($line)
+  }
 
   function _Rt-MarkerValid([string]$slot, [string]$ver) {
     if (-not $ver) { return $false }
@@ -61,15 +75,31 @@ if ($_rtRoot) {
   }
 
   # Tier 1: the `current-version` marker (source of truth; atomically written).
+  _Rt-WriteBootTrace 'resolver-marker-start' 'source=current-version'
   $_rtVer = ''
   try { $_rtVer = ([IO.File]::ReadAllText((Join-Path $_rtRoot 'current-version'))).Trim() } catch {}
   if ($_rtVer) { $AgentRtPy = _Rt-TrySlot $_rtVer }
+  if ($AgentRtPy) {
+    $_rtTraceSource = 'current-version'
+    $_rtTraceVersion = $_rtVer
+    _Rt-WriteBootTrace 'resolver-marker-result' "source=current-version result=hit version=$_rtVer"
+  } else {
+    _Rt-WriteBootTrace 'resolver-marker-result' 'source=current-version result=miss'
+  }
 
   # Tier 2: marker absent/stale -> the last version the installer activated.
   if (-not $AgentRtPy) {
+    _Rt-WriteBootTrace 'resolver-marker-start' 'source=last-known-good'
     $_rtLkg = ''
     try { $_rtLkg = ([IO.File]::ReadAllText((Join-Path $_rtRoot 'last-known-good'))).Trim() } catch {}
     if ($_rtLkg) { $AgentRtPy = _Rt-TrySlot $_rtLkg }
+    if ($AgentRtPy) {
+      $_rtTraceSource = 'last-known-good'
+      $_rtTraceVersion = $_rtLkg
+      _Rt-WriteBootTrace 'resolver-marker-result' "source=last-known-good result=hit version=$_rtLkg"
+    } else {
+      _Rt-WriteBootTrace 'resolver-marker-result' 'source=last-known-good result=miss'
+    }
   }
 
   # Tier 3: true first-run (no marker, no last-known-good) -> newest complete
@@ -80,7 +110,16 @@ if ($_rtRoot) {
       Sort-Object { _Rt-VersionKey $_.Name }
     foreach ($_rtSlot in $_rtSlots) {
       $p = _Rt-TrySlot $_rtSlot.Name
-      if ($p) { $AgentRtPy = $p }
+      if ($p) {
+        $AgentRtPy = $p
+        $_rtTraceSource = 'newest'
+        $_rtTraceVersion = $_rtSlot.Name
+      }
     }
+  }
+  if ($AgentRtPy) {
+    _Rt-WriteBootTrace 'resolver-slot-result' "source=$_rtTraceSource result=resolved version=$_rtTraceVersion"
+  } else {
+    _Rt-WriteBootTrace 'resolver-slot-result' 'source=none result=miss'
   }
 }

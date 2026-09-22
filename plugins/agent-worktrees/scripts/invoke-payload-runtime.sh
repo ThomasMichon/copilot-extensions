@@ -15,6 +15,47 @@ INSTALLER="$SCRIPT_DIR/install.sh"
 LEGACY_ROOT="$HOME/.agent-worktrees" # marketplace-isolation: allow legacy compatibility root
 SEP=$'\034'
 
+boot_trace_ms() {
+    local raw=""
+    if raw="$(date +%s%3N 2>/dev/null)"; then
+        case "$raw" in
+            [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9])
+                printf '%s\n' "$raw"
+                return 0
+                ;;
+        esac
+    fi
+    if raw="$(date +%s%N 2>/dev/null)"; then
+        case "$raw" in
+            [0-9]*)
+                if [[ "${#raw}" -eq 19 ]]; then
+                    printf '%s\n' "${raw%??????}"
+                    return 0
+                fi
+                ;;
+        esac
+    fi
+    if raw="$(date +%s 2>/dev/null)"; then
+        case "$raw" in
+            [0-9]*) printf '%s000\n' "$raw"; return 0 ;;
+        esac
+    fi
+    printf '0000000000000\n'
+}
+
+boot_trace() {
+    [[ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ]] || return 0
+    local phase="$1" extra="${2-}"
+    local plugin="${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-agent-worktrees}"
+    if [[ -n "$extra" ]]; then
+        printf '::boot-trace:: plugin=%s phase=%s t=%s %s\n' \
+            "$plugin" "$phase" "$(boot_trace_ms)" "$extra" >&2
+    else
+        printf '::boot-trace:: plugin=%s phase=%s t=%s\n' \
+            "$plugin" "$phase" "$(boot_trace_ms)" >&2
+    fi
+}
+
 json_path() {
     local result="" component
     for component in "$@"; do
@@ -60,6 +101,9 @@ profile_home() {
 
 resolve_runtime() {
     AGENT_RT_PY=""
+    if [[ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ]]; then
+        export COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN="agent-worktrees"
+    fi
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
     # shellcheck source=/dev/null
@@ -256,7 +300,9 @@ installation_resolution_current() {
 }
 
 resolve_runtime
+boot_trace resolver-loaded
 if [[ -n "${AGENT_RT_PY:-}" ]]; then
+    boot_trace dispatch 'path=fast'
     run_runtime "$@"
 fi
 if [[ -n "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then
@@ -266,6 +312,7 @@ fi
 
 printf '[agent-worktrees] runtime not provisioned -- provisioning from the owning payload.\n' >&2
 printf '::agent-provisioning:: plugin=agent-worktrees eta_seconds=120 reason=first-use\n' >&2
+boot_trace provision-start
 mkdir -p "$RUNTIME_ROOT"
 LOCK_LINK=""
 PROVISION_PID=""
@@ -326,6 +373,8 @@ resolve_runtime
 if [[ -n "${AGENT_RT_PY:-}" ]]; then
     unlock_provision
     trap - EXIT INT TERM
+    boot_trace resolver-loaded
+    boot_trace dispatch 'path=locked-fast'
     run_runtime "$@"
 fi
 
@@ -347,14 +396,17 @@ else
     }
     run_provision bash "$SNAPSHOT_INSTALLER" provision >&2
 fi
+boot_trace provision-end
 installation_resolution_current || {
     printf '[agent-worktrees] installation governance changed during provisioning.\n' >&2
     exit 126
 }
 resolve_runtime
+boot_trace resolver-loaded
 if [[ -n "${AGENT_RT_PY:-}" ]]; then
     unlock_provision
     trap - EXIT INT TERM
+    boot_trace dispatch 'path=provisioned'
     run_runtime "$@"
 fi
 printf '[agent-worktrees] provisioning completed without a resolvable runtime.\n' >&2

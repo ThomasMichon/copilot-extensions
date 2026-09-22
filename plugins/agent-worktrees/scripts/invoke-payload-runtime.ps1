@@ -16,6 +16,18 @@ $modeRunner = Join-Path $scriptDir 'installation-context\installation-context.ps
 $runtimeResolver = Join-Path $scriptDir 'resolve-runtime.ps1'
 $installer = Join-Path $scriptDir 'install.ps1'
 $legacyRoot = Join-Path $env:USERPROFILE '.agent-worktrees' # marketplace-isolation: allow legacy compatibility root
+
+function Write-BootTrace([string]$Phase, [string]$Extra = '') {
+    if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return }
+    $plugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
+        $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
+    } else {
+        'agent-worktrees'
+    }
+    $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+    if ($Extra) { $line += " $Extra" }
+    [Console]::Error.WriteLine($line)
+}
 if (
     -not (Test-Path -LiteralPath $modeRunner -PathType Leaf) -or
     -not (Test-Path -LiteralPath $runtimeResolver -PathType Leaf) -or
@@ -253,6 +265,9 @@ function Test-InstallationResolutionCurrent {
 
 function Resolve-AgentWorktreesRuntime {
     $AgentRtPy = $null
+    if ($env:COPILOT_EXTENSIONS_BOOT_TRACE) {
+        $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = 'agent-worktrees'
+    }
     $env:AGENT_RT_ROOT = $runtimeRoot
     . $runtimeResolver
     return $AgentRtPy
@@ -269,7 +284,11 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
 }
 
 $python = Resolve-AgentWorktreesRuntime
-if ($python) { Invoke-AgentWorktreesRuntime $python }
+Write-BootTrace 'resolver-loaded'
+if ($python) {
+    Write-BootTrace 'dispatch' 'path=fast'
+    Invoke-AgentWorktreesRuntime $python
+}
 if ($env:AGENT_WORKTREES_NO_SELFPROVISION) {
     [Console]::Error.WriteLine(
         '[agent-worktrees] runtime not provisioned ' +
@@ -284,6 +303,7 @@ if ($env:AGENT_WORKTREES_NO_SELFPROVISION) {
 [Console]::Error.WriteLine(
     '::agent-provisioning:: plugin=agent-worktrees eta_seconds=120 reason=first-use'
 )
+Write-BootTrace 'provision-start'
 if (-not (Test-Path -LiteralPath $runtimeRoot)) {
     New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
 }
@@ -310,7 +330,11 @@ try {
         exit 126
     }
     $python = Resolve-AgentWorktreesRuntime
-    if ($python) { Invoke-AgentWorktreesRuntime $python }
+    Write-BootTrace 'resolver-loaded'
+    if ($python) {
+        Write-BootTrace 'dispatch' 'path=locked-fast'
+        Invoke-AgentWorktreesRuntime $python
+    }
 
     if ($actualMode -ceq 'namespaced') {
         if (
@@ -360,6 +384,7 @@ try {
         $provisionStatus = $LASTEXITCODE
         if ($provisionStatus -ne 0) { exit $provisionStatus }
     }
+    Write-BootTrace 'provision-end'
 
     if (-not (Test-InstallationResolutionCurrent)) {
         [Console]::Error.WriteLine(
@@ -368,7 +393,11 @@ try {
         exit 126
     }
     $python = Resolve-AgentWorktreesRuntime
-    if ($python) { Invoke-AgentWorktreesRuntime $python }
+    Write-BootTrace 'resolver-loaded'
+    if ($python) {
+        Write-BootTrace 'dispatch' 'path=provisioned'
+        Invoke-AgentWorktreesRuntime $python
+    }
 } finally {
     if ($lock) { $lock.Dispose() }
 }

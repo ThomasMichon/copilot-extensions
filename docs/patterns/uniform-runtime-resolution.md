@@ -45,11 +45,24 @@ Binding rules that make it real:
 - **One source of truth.** The three-tier order lives once (in the primitive and
   the shared shell resolver); a launch site copies the resolver, never the logic.
   `tools/check-runtime-resolution.py` guards against re-divergence.
+- **Opt-in boot tracing is stderr-only.** Set
+  `COPILOT_EXTENSIONS_BOOT_TRACE=1` to have the generated payload binstub and
+  resolver emit one `::boot-trace::` line per phase transition to **stderr**
+  only, using stable `plugin=... phase=... t=<epoch-ms>` fields plus optional
+  `source=...`, `result=...`, and `version=...` details. Unset or empty means a
+  complete no-op: no trace lines, no files, no locks, and no behavior change.
 - **Completion is necessary; consumer readiness may be stricter.** The shared
   resolver rejects slots without a valid completion marker. A consumer whose
   launch contract includes an import/readiness probe must apply that probe to the
   resolved candidate before dispatch and treat failure as unresolved. It must not
   weaken or reimplement the three-tier ordering to add the probe.
+
+The canonical phase names are:
+
+- Binstubs / payload launchers: `shim-start`, `resolver-loaded`,
+  `provision-start`, `provision-end`, `dispatch`
+- Runtime resolvers: `resolver-marker-start`, `resolver-marker-result`,
+  `resolver-slot-result`
 
 ### Gotchas this pattern encodes
 

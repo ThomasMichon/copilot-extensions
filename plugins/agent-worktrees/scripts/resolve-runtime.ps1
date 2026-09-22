@@ -24,6 +24,20 @@ $_awr = if ($env:AGENT_RT_ROOT) {
 } else {
   Join-Path $env:USERPROFILE '.agent-worktrees'
 }
+$_awTraceSource = ''
+$_awTraceVersion = ''
+
+function _Aw-WriteBootTrace([string]$phase, [string]$extra = '') {
+  if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return }
+  $plugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
+    $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
+  } else {
+    (Split-Path -Leaf $_awr).TrimStart('.')
+  }
+  $line = "::boot-trace:: plugin=$plugin phase=$phase t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+  if ($extra) { $line += " $extra" }
+  [Console]::Error.WriteLine($line)
+}
 
 function _Aw-MarkerValid([string]$slot, [string]$ver) {
   if (-not $ver) { return $false }
@@ -69,24 +83,52 @@ function _Aw-VersionKey([string]$ver) {
 }
 
 # Tier 1: the `current-version` marker (source of truth; atomically written).
+_Aw-WriteBootTrace 'resolver-marker-start' 'source=current-version'
 $_awv = ''
 try { $_awv = ([IO.File]::ReadAllText((Join-Path $_awr 'current-version'))).Trim() } catch {}
 if ($_awv) { $AwPy = _Aw-TrySlot $_awv }
+if ($AwPy) {
+  $_awTraceSource = 'current-version'
+  $_awTraceVersion = $_awv
+  _Aw-WriteBootTrace 'resolver-marker-result' "source=current-version result=hit version=$_awv"
+} else {
+  _Aw-WriteBootTrace 'resolver-marker-result' 'source=current-version result=miss'
+}
 
 # Tier 2: marker absent/stale -> the last version the installer activated
 # (`last-known-good`), preferred over a newest-slot guess. Read only here.
 if (-not $AwPy) {
+  _Aw-WriteBootTrace 'resolver-marker-start' 'source=last-known-good'
   $_awlkg = ''
   try { $_awlkg = ([IO.File]::ReadAllText((Join-Path $_awr 'last-known-good'))).Trim() } catch {}
   if ($_awlkg) { $AwPy = _Aw-TrySlot $_awlkg }
+  if ($AwPy) {
+    $_awTraceSource = 'last-known-good'
+    $_awTraceVersion = $_awlkg
+    _Aw-WriteBootTrace 'resolver-marker-result' "source=last-known-good result=hit version=$_awlkg"
+  } else {
+    _Aw-WriteBootTrace 'resolver-marker-result' 'source=last-known-good result=miss'
+  }
 }
 
 # Tier 3: true first-run -> newest complete installed slot.
 if (-not $AwPy) {
   $AwPy = Get-ChildItem (Join-Path $_awr 'versions') -Directory -ErrorAction SilentlyContinue |
     Sort-Object { _Aw-VersionKey $_.Name } |
-    ForEach-Object { _Aw-TrySlot $_.Name } |
+    ForEach-Object {
+      $resolved = _Aw-TrySlot $_.Name
+      if ($resolved) {
+        $_awTraceSource = 'newest'
+        $_awTraceVersion = $_.Name
+      }
+      $resolved
+    } |
     Where-Object { $_ } | Select-Object -Last 1
+}
+if ($AwPy) {
+  _Aw-WriteBootTrace 'resolver-slot-result' "source=$_awTraceSource result=resolved version=$_awTraceVersion"
+} else {
+  _Aw-WriteBootTrace 'resolver-slot-result' 'source=none result=miss'
 }
 
 $AgentRtPy = $AwPy
