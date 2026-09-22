@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "label": "CodeSpaces",
+  "after": "Worktrees",
+  "scope": "account",
+  "stream": true,
+  "list": ["agent-codespaces", "pool", "--picker-json"],
+  "entry": {
+    "id": "id",
+    "title": "display",
+    "worktree": "worktree",
+    "group": "group",
+    "subtitle": "subtitle"
+  },
+  "columns": [
+    {"key": "display", "header": "codespace", "width": 26},
+    {"key": "health", "header": "health", "width": 8, "palette": "state"},
+    {"key": "occupancy", "header": "use", "width": 8, "palette": "state"},
+    {"key": "safe", "header": "safe", "width": 8, "palette": "state"},
+    {"key": "sess", "header": "live", "width": 4, "palette": "state", "priority": 5},
+    {"key": "worktree", "header": "worktree", "width": 10},
+    {"key": "cores", "header": "cores", "width": 5, "align": "r"},
+    {"key": "worktree_title", "header": "task", "width": 30, "priority": 6},
+    {"key": "claims_summary", "header": "claims", "width": 18, "priority": 4}
+  ],
+  "summary": "{spent_cores}/{total_cores} cores in use \u00b7 {headroom_cores} free \u00b7 {running_count}/{total_count} running   {note}",
+  "actions": [
+    {
+      "label": "Open into a CLI session",
+      "run": ["agent-bridge", "attach", "{id}"],
+      "when": {"sess": "LIVE"},
+      "description": "PROPOSED \u2014 semantics not yet implemented (Phase 3). Attaches to this CodeSpace's own muxed Copilot instance over the fabric's SSH transport."
+    },
+    {
+      "label": "View driving worktree",
+      "run": ["agent-worktrees", "goto", "{worktree}"],
+      "when": {"sess": ["LIVE", "IDLE"]},
+      "description": "PROPOSED \u2014 semantics not yet implemented (Phase 4). Jumps to this CodeSpace's driving worktree's own Worktrees-pivot entry."
+    },
+    {
+      "label": "Worktree status",
+      "kind": "card",
+      "title_from": "worktree_status.title",
+      "body_from": "worktree_status.body",
+      "when": {"sess": ["LIVE", "IDLE"]},
+      "description": "PROPOSED \u2014 semantics not yet implemented (Phase 4). Opens the driving worktree's own Worktree Status card directly, mirroring agent-dispatch's Tasks-pane direction."
+    },
+    {
+      "label": "Release",
+      "run": ["agent-codespaces", "release", "{id}"],
+      "when": {"disposition": "in-use"},
+      "confirm": true
+    },
+    {
+      "label": "Recycle",
+      "run": ["agent-codespaces", "finalize", "{id}", "--delete", "--picker-progress"],
+      "when": {"disposition": "stale", "safe": "yes"},
+      "confirm": true,
+      "progress": true
+    },
+    {
+      "label": "Verify",
+      "run": ["agent-codespaces", "verify", "{id}"],
+      "when": {"disposition": "stale", "safe": ["unknown", "no"]},
+      "progress": true
+    }
+  ],
+  "empty_hint": "No CodeSpaces (is the GitHub CLI authenticated with the 'codespace' scope?)."
+}

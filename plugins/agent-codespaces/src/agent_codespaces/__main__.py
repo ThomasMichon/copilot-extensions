@@ -694,11 +694,49 @@ def main(argv: list[str] | None = None) -> int:
     doctor_parser = sub.add_parser(
         "doctor",
         help="Check gh auth and config.d registry hygiene; print remedies and "
-             "exit non-zero when either has findings (#980)",
+             "exit non-zero when either has findings (#980). Given a "
+             "CodeSpace <name>, pivots instead to that venue's own "
+             "readiness (see `check`), optionally remediating with --fix.",
+    )
+    doctor_parser.add_argument(
+        "name", nargs="?", default=None,
+        help="CodeSpace name -- pivots to per-venue readiness/remediation "
+             "instead of host-side gh-auth/config.d hygiene",
     )
     doctor_parser.add_argument(
         "--json", dest="json_output", action="store_true",
         help="Output exhaustive gh-auth and config.d diagnostics as JSON",
+    )
+    doctor_parser.add_argument(
+        "--fix", action="store_true",
+        help="With a CodeSpace <name>: apply the two safely-idempotent "
+             "remediations this command knows (install tmux; provision/"
+             "refresh agent-worktrees). Read-only (report-only) without "
+             "this flag. Has no effect on the host-side (no-name) mode.",
+    )
+    doctor_parser.add_argument(
+        "--timeout", type=float, default=240.0,
+        help="Seconds to wait for the venue probe/remediation round trip "
+             "(default: 240)",
+    )
+
+    # --- check (agent-bridge-cli-mode-sessions Phase 4: venue preflight) ---
+    check_parser = sub.add_parser(
+        "check",
+        help="Read-only venue toolchain readiness probe for the CLI-mode "
+             "`copilot` verb's own preflight: copilot/tmux presence and "
+             "agent-worktrees install state (absent/lean/full). Never "
+             "mutates the venue -- follow up with `doctor <name> --fix` to "
+             "remediate.",
+    )
+    check_parser.add_argument("name", help="CodeSpace name")
+    check_parser.add_argument(
+        "--json", dest="json_output", action="store_true",
+        help="Output the readiness report as JSON",
+    )
+    check_parser.add_argument(
+        "--timeout", type=float, default=30.0,
+        help="Seconds to wait for the probe round trip (default: 30)",
     )
 
     # --- version ---
@@ -886,7 +924,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "installer-readiness":
             return _cmd_installer_readiness()
         if args.command == "doctor":
+            if getattr(args, "name", None):
+                from .venue_check_cli import cmd_doctor_venue
+
+                return asyncio.run(cmd_doctor_venue(args))
             return _cmd_doctor(json_output=args.json_output)
+        if args.command == "check":
+            from .venue_check_cli import cmd_check
+
+            return asyncio.run(cmd_check(args))
         if args.command == "version":
             return _cmd_version()
         if args.command == "acp-model-flags":
@@ -2351,6 +2397,20 @@ def _interactive_ssh(
     args = ["gh", "codespace", "ssh", "-c", codespace_name]
     if port_forwards or remote_command:
         args.append("--")
+    # A remote_command needs a real pty: without one, ssh never allocates a
+    # remote tty when given a command, so `agent-worktrees copilot`'s own
+    # `sys.stdin.isatty()` guard on the FAR side always fails -- the venue
+    # `copilot` verb documents itself (this module's docstring, and the CLI
+    # help text in `copilot_venue.add_copilot_subparser`) as "SSHes -t in",
+    # but nothing here ever added the flag, so the documented contract was
+    # never actually implemented (confirmed live, agent-bridge-cli-mode-
+    # sessions Phase 4 validation against a real odsp-web CodeSpace: the
+    # remote `agent-worktrees copilot` immediately refused with "needs a
+    # controlling terminal to attach to"). An ordinary port-forward-only /
+    # no-command interactive shell is unaffected -- `gh codespace ssh`
+    # already allocates a pty for that case on its own.
+    if remote_command:
+        args.append("-t")
     for fwd in port_forwards:
         args.extend(["-R", fwd])
     if remote_command:

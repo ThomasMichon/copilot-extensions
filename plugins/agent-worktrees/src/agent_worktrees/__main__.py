@@ -2285,6 +2285,7 @@ def _create_worktree_core(
     launch_preflight: LaunchPreflight | None = None,
     recovery: bool = False,
     bound_agent: str | None = None,
+    no_pair: bool = False,
 ) -> dict:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
@@ -2295,6 +2296,12 @@ def _create_worktree_core(
     ``kind="system"`` marks the worktree as daemon-owned (hidden from the
     Picker, exempt from routine cleanup); ``owner``/``name`` label it for the
     System-menu browse view.
+
+    ``no_pair`` opts THIS creation out of the paired-knowledge carve
+    regardless of ``origin`` -- for a registrar/pool declaration that has no
+    bound knowledge repo to give every worker (e.g. a portable pool). It is
+    a narrower, per-call sibling of the blunt whole-host
+    ``AGENT_WORKTREES_NO_PAIR`` env var; either one skips the carve.
 
     Raises ``RuntimeError`` on failure.
     """
@@ -2367,7 +2374,17 @@ def _create_worktree_core(
     # revalidate-under-lock shape immediately below; `_carve_paired_
     # knowledge`'s own preflight/revalidation stay in place as defense in
     # depth for the narrower TOCTOU window between here and its own carve.
-    if kind == "session" and origin in (None, "user"):  # #3198 follow-up
+    #
+    # Pairing applies to every `kind == "session"` worktree regardless of
+    # `origin` (#catch-22 follow-up to #3207): a delegate/system-origin
+    # dispatch worker needs its own paired knowledge sibling exactly as much
+    # as an interactive operator does -- reciprocal disposal (see
+    # `terminal_conclusion.conclude_disposable_worktree`) is what lets a
+    # dispatch attempt's conclusion release both halves together, so origin
+    # is no longer a reason to skip the carve. `no_pair` is the intentional,
+    # explicit per-call opt-out for a registrar/pool with no bound knowledge
+    # repo to hand its workers.
+    if kind == "session" and not no_pair:
         _paired_knowledge_allocation_preflight(config)
 
     # Ensure root exists
@@ -2547,8 +2564,10 @@ def _create_worktree_core(
     # a stateless harness bound to a knowledge repo, carve/stamp the knowledge
     # pair together with this worktree and cross-stamp the linkage. Only for
     # plain session worktrees (never system/bridge), and fully fail-safe -- a
-    # pairing failure never breaks the harness carve.
-    if kind == "session" and origin in (None, "user"):  # #3198 follow-up
+    # pairing failure never breaks the harness carve. Applies regardless of
+    # `origin` (see the preflight comment above for why); `no_pair` is the
+    # explicit per-call opt-out.
+    if kind == "session" and not no_pair:
         try:
             pair_stamp = _carve_paired_knowledge(
                 config,
@@ -6928,6 +6947,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Same codename resolution as `embody --codename` (local first, "
         "then a cross-machine SSH scan; fails closed on a different machine).",
     )
+    g.add_argument(
+        "--anchor", action="store_true",
+        help="Deliver a Copilot session directly in the active project's "
+        "anchor checkout instead of any worktree -- same as "
+        "`embody --anchor`, see its help for the full rationale.",
+    )
     p.add_argument(
         "--seed", default=None,
         help="Seed prompt injected as the session's first interactive turn once Copilot is ready",
@@ -7232,6 +7257,7 @@ cmd_conclude_session = session_tracking_cli.cmd_conclude_session
 cmd_conclude_disposable = session_tracking_cli.cmd_conclude_disposable
 cmd_link_succession = session_tracking_cli.cmd_link_succession
 cmd_session_transcript = session_tracking_cli.cmd_session_transcript
+cmd_session_tail = session_tracking_cli.cmd_session_tail
 cmd_recent_messages = session_tracking_cli.cmd_recent_messages
 terminal_conclusion = session_tracking_cli.terminal_conclusion
 _resolve_worktree_for_read = session_metadata_cli._resolve_worktree_for_read
@@ -7549,12 +7575,10 @@ dispatch_bare_invocation = front_door_cli.dispatch_bare_invocation
 socket = _socket
 svc = _svc
 
-
 def cmd_handoff_trace(args):
     return handoff_diagnostics.cmd_handoff_trace(
         args, json_output=_json_output, json_error=_json_error
     )
-
 COMMAND_MAP = {
     "resolve": cmd_resolve,
     "execution-leg": cmd_execution_leg,
@@ -7648,6 +7672,7 @@ COMMAND_MAP = {
     "conclude-disposable": cmd_conclude_disposable,
     "link-succession": cmd_link_succession,
     "session-transcript": cmd_session_transcript,
+    "session-tail": cmd_session_tail,
     "recent-messages": cmd_recent_messages,
     "anchor-check": cmd_anchor_check,
     "activity": activity.cmd_activity,

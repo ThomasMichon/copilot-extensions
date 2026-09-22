@@ -26,9 +26,16 @@ def add_copilot_subparser(sub) -> None:
     )
     copilot_p.add_argument("name", help="Container name")
     copilot_p.add_argument(
-        "--worktree-id", dest="worktree_id", required=True,
+        "--worktree-id", dest="worktree_id", default=None,
         help="The worktree id to reserve/attach on the venue side (forwarded "
-             "verbatim to the remote `agent-worktrees copilot --worktree-id`).",
+             "verbatim to the remote `agent-worktrees copilot --worktree-id`). "
+             "Omit for the default: a trusted container is conventionally "
+             "anchor-only (its fleet image already clones the repo directly; "
+             "no worktree exists unless an operator explicitly created one), "
+             "so this delivers a Copilot session directly in the anchor "
+             "checkout instead -- matching headless ACP dispatch's own "
+             "existing behavior of running straight in the container's "
+             "workspace_folder.",
     )
     copilot_p.add_argument(
         "--driver", default="cli-mode",
@@ -77,6 +84,13 @@ def cmd_copilot(
     only: a restricted fleet has no SSH key projection (deny-by-construction),
     so this verb refuses it outright rather than degrading silently.
 
+    Defaults to **anchor mode** (no ``--worktree-id``): a trusted container is
+    conventionally anchor-only (its fleet image already clones the repo
+    directly; no worktree exists unless an operator explicitly created one),
+    so forcing ``--worktree-id`` on every caller would be needless ceremony
+    for the common case. Mirrors headless ACP dispatch's own existing
+    behavior of running straight in the container's ``workspace_folder``.
+
     Every ``__main__``-private helper is injected rather than imported, to
     avoid a circular import between this module and ``__main__``.
     """
@@ -96,6 +110,11 @@ def cmd_copilot(
             file=sys.stderr,
         )
         return 1
+
+    anchor_mode = not args.worktree_id
+    identity = args.worktree_id or (
+        f"anchor-{os.path.basename(target.workspace_folder.rstrip('/')) or args.name}"
+    )
 
     from ssh_manager import TargetBusyError, TargetLock
 
@@ -155,8 +174,9 @@ def cmd_copilot(
 
         try:
             return run_venue_copilot(
-                args.worktree_id,
+                identity,
                 connect=connect,
+                anchor=anchor_mode,
                 ttl_seconds=args.ttl_seconds,
                 driver=args.driver,
                 seed=args.seed,

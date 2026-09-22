@@ -63,6 +63,7 @@ _KNOWN_BODY_KEYS = frozenset(
         "headless_labels",
         "cli_labels",
         "disposable_cli_labels",
+        "no_pair",
     }
 )
 _KNOWN_FLEET_KEYS = frozenset({"pool", "origin", "headless"})
@@ -104,6 +105,16 @@ class Body:
     headless_labels: tuple[str, ...] = ()
     cli_labels: tuple[str, ...] = ()
     disposable_cli_labels: tuple[str, ...] = ()
+    no_pair: bool = False
+    """Skip the paired-knowledge carve for every worktree this lane
+    creates -- for a pool with no bound knowledge repo to give its workers
+    (see the reciprocal-disposal/pairing-configurability effort). Applies
+    to BOTH body types: a headless agent-bridge ACP body also pre-creates
+    (and, since #catch-22, also pairs) its own worktree via the same
+    `agent-worktrees create` path a CLI-embodied body uses. Rejected
+    together with a fleet (`--pool`) declaration by `load_declaration`
+    (fleet mode never creates a paired worktree locally, so there is
+    nothing for this flag to skip)."""
 
 
 @dataclass(frozen=True)
@@ -258,6 +269,8 @@ class ProfileDeclaration:
                 args += ["--cli-label", label]
         for label in self.body.disposable_cli_labels:
             args += ["--disposable-cli-label", label]
+        if self.body.no_pair:
+            args.append("--no-pair")
         if self.body.type == "headless" or self.body.headless_labels or self.fleet.headless:
             args += ["--headless-agent", self.body.agent]
         if self.evaluator:
@@ -403,6 +416,7 @@ def _load_body(data: object) -> Body:
             data.get("disposable_cli_labels"),
             key="body.disposable_cli_labels",
         ),
+        no_pair=_as_bool(data.get("no_pair", False), key="body.no_pair"),
     )
 
 
@@ -676,6 +690,10 @@ def load_declaration(
                 "body.disposable_cli_labels are supported only for local "
                 "worker bodies"
             )
+    if decl.body.no_pair and decl.fleet.enabled:
+        raise RegistrarError(
+            "body.no_pair is supported only for local worker bodies"
+        )
     return decl
 
 

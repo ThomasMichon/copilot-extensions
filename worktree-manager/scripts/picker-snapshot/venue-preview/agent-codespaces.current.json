@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "label": "CodeSpaces",
+  "after": "Worktrees",
+  "scope": "account",
+  "stream": true,
+  "list": ["agent-codespaces", "pool", "--picker-json"],
+  "entry": {
+    "id": "id",
+    "title": "display",
+    "worktree": "worktree",
+    "group": "group"
+  },
+  "columns": [
+    {"key": "display", "header": "codespace", "width": 26},
+    {"key": "health", "header": "health", "width": 8, "palette": "state"},
+    {"key": "occupancy", "header": "use", "width": 8, "palette": "state"},
+    {"key": "safe", "header": "safe", "width": 8, "palette": "state"},
+    {"key": "worktree", "header": "worktree", "width": 10},
+    {"key": "cores", "header": "cores", "width": 5, "align": "r"},
+    {"key": "worktree_title", "header": "task", "width": 30}
+  ],
+  "summary": "{spent_cores}/{total_cores} cores in use \u00b7 {headroom_cores} free \u00b7 {running_count}/{total_count} running   {note}",
+  "actions": [
+    {
+      "label": "Release",
+      "run": ["agent-codespaces", "release", "{id}"],
+      "when": {"disposition": "in-use"},
+      "confirm": true
+    },
+    {
+      "label": "Recycle",
+      "run": ["agent-codespaces", "finalize", "{id}", "--delete", "--picker-progress"],
+      "when": {"disposition": "stale", "safe": "yes"},
+      "confirm": true,
+      "progress": true
+    },
+    {
+      "label": "Verify",
+      "run": ["agent-codespaces", "verify", "{id}"],
+      "when": {"disposition": "stale", "safe": ["unknown", "no"]},
+      "progress": true
+    }
+  ],
+  "empty_hint": "No CodeSpaces (is the GitHub CLI authenticated with the 'codespace' scope?)."
+}

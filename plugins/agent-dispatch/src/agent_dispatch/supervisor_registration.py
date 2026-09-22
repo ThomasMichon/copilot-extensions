@@ -223,8 +223,10 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
             "embody_backend": "headless",
             "headless_labels": [],
             "cli_labels": [],
+            "script_labels": [],
             "disposable_cli_labels": [],
             "headless_agent": "task-worker",
+            "no_pair": False,
         }
         for key, value in defaults.items():
             if spec.get(key) is None:
@@ -233,6 +235,7 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
             "labels",
             "headless_labels",
             "cli_labels",
+            "script_labels",
             "disposable_cli_labels",
         ):
             spec[key] = sorted(set(spec.get(key) or []))
@@ -246,6 +249,7 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
                 spec[key] = int(spec[key])
             except (TypeError, ValueError):
                 pass
+        spec["no_pair"] = bool(spec.get("no_pair"))
         label_attempts = {}
         for key, value in (spec.get("label_max_attempts") or {}).items():
             try:
@@ -363,15 +367,20 @@ def _lane_flags(spec: dict) -> list[str]:
     for k, v in (spec.get("label_max_attempts") or {}).items():
         argv += ["--label-max-attempts", f"{k}={v}"]
     # Embody backend + per-label overrides (headless is the default; emit the flag
-    # only when a spec pins 'cli' so older store-backed specs stay byte-stable).
+    # only when a spec pins a non-default body so older store-backed specs stay
+    # byte-stable).
     if spec.get("embody_backend"):
         argv += ["--embody-backend", str(spec["embody_backend"])]
     for label in spec.get("headless_labels", []) or []:
         argv += ["--headless-label", str(label)]
     for label in spec.get("cli_labels", []) or []:
         argv += ["--cli-label", str(label)]
+    for label in spec.get("script_labels", []) or []:
+        argv += ["--script-label", str(label)]
     for label in spec.get("disposable_cli_labels", []) or []:
         argv += ["--disposable-cli-label", str(label)]
+    if spec.get("no_pair"):
+        argv.append("--no-pair")
     # Fleet dispatch: fan bodies across a pool of remote hosts, each driving the
     # origin task back over SSH. Mirrors ``ProfileDeclaration.to_supervise_args``;
     # emitted from spec["fleet"] (which declaration_to_spec now carries). Absent for
@@ -559,5 +568,3 @@ class ReconcileSummary:
     backing_off: list[str] = field(default_factory=list)
     #: Units retained after exhausting their restart budget.
     dead: list[str] = field(default_factory=list)
-
-

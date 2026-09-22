@@ -56,7 +56,7 @@ class TestInteractiveSshReverseForwardsAndRemoteCommand:
             ) == 0
         call.assert_called_once_with(
             [
-                "gh", "codespace", "ssh", "-c", "cs-example", "--",
+                "gh", "codespace", "ssh", "-c", "cs-example", "--", "-t",
                 "-R", "51234:127.0.0.1:51234",
                 "agent-worktrees copilot --worktree-id wt-A",
             ],
@@ -72,9 +72,32 @@ class TestInteractiveSshReverseForwardsAndRemoteCommand:
                 "cs-example", [], remote_command="echo hi",
             ) == 0
         call.assert_called_once_with(
-            ["gh", "codespace", "ssh", "-c", "cs-example", "--", "echo hi"],
+            ["gh", "codespace", "ssh", "-c", "cs-example", "--", "-t", "echo hi"],
             env=None,
         )
+
+    def test_remote_command_requests_a_pty(self) -> None:
+        """Regression coverage for a second real bug found live (this
+        session, agent-bridge-cli-mode-sessions Phase 4 live validation
+        against a real odsp-web CodeSpace): the venue `copilot` verb's own
+        docstring and CLI help text document "SSHes -t in", but no `-t`
+        flag was ever actually added -- without one, ssh never allocates a
+        remote pty for a command invocation, so the remote
+        `agent-worktrees copilot` immediately refused with "needs a
+        controlling terminal to attach to", 100% reproducible. An ordinary
+        interactive connect (no remote command) is unaffected -- `gh
+        codespace ssh` already allocates a pty for that case on its own.
+        """
+        with (
+            patch("agent_codespaces.lifecycle.account_for_codespace", return_value=None),
+            patch("subprocess.call", return_value=0) as call,
+        ):
+            _interactive_ssh(
+                "cs-example", [], remote_command="agent-worktrees copilot --worktree-id wt-A",
+            )
+        argv = call.call_args.args[0]
+        assert "-t" in argv
+        assert argv.index("-t") > argv.index("--")
 
     def test_no_forwards_or_command_keeps_prior_bare_argv(self) -> None:
         """Existing behavior for a plain interactive connect is unchanged."""
@@ -97,6 +120,17 @@ def store(monkeypatch, tmp_path):
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def _no_agent_bridge_preflight(request, monkeypatch):
+    """The implicit agent-bridge-plugin preflight opens a real SSH connection
+    -- irrelevant to every test below except its own dedicated coverage
+    (``TestEnsureAgentBridgePlugin``, which must exercise the real thing), so
+    it's a no-op everywhere else unless a test explicitly re-patches it."""
+    if request.cls is not None and request.cls.__name__ == "TestEnsureAgentBridgePlugin":
+        return
+    monkeypatch.setattr(copilot_venue, "_ensure_agent_bridge_plugin", lambda name: None)
+
+
 def _ns(**kw):
     defaults = dict(
         name="cs-1",
@@ -111,7 +145,87 @@ def _ns(**kw):
     return argparse.Namespace(**defaults)
 
 
-class TestCmdCopilot:
+class TestCmdCopilotAnchorDefault:
+    """Omitting --worktree-id defaults to anchor mode: a CodeSpace is
+    conventionally anchor-only (the devcontainer already clones the repo
+    directly), matching headless ACP dispatch's own existing behavior of
+    running straight in the workspace_folder -- so this should be the
+    zero-ceremony default, not something an operator has to opt into."""
+
+    def test_no_worktree_id_resolves_anchor_identity_and_forwards_anchor(
+        self, store, monkeypatch,
+    ) -> None:
+        monkeypatch.setattr(owner, "ensure_owner_running", lambda config: True)
+
+        class _Config:
+            def resolved_workspace_folder_for(self, repo):
+                assert repo == "octo/example-web-codespaces"
+                return "/workspaces/example-web"
+
+        monkeypatch.setattr(config_mod, "load_merged_config", lambda: _Config())
+        monkeypatch.setattr(
+            "agent_codespaces.lifecycle.list_codespaces",
+            lambda: [
+                argparse.Namespace(name="cs-1", repository="octo/example-web-codespaces"),
+            ],
+        )
+
+        seen = {}
+
+        def fake_run_venue_copilot(identity, *, connect, anchor=False, **kwargs):
+            seen["identity"] = identity
+            seen["anchor"] = anchor
+            return connect("agent-worktrees copilot --anchor")
+
+        monkeypatch.setattr("venue_copilot.run_venue_copilot", fake_run_venue_copilot)
+        monkeypatch.setattr("venue_copilot.resolve_daemon_port", lambda: None)
+        monkeypatch.setattr(
+            "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+        )
+
+        rc = copilot_venue.cmd_copilot(
+            _ns(worktree_id=None), interactive_ssh=lambda *a, **kw: 0,
+        )
+
+        assert rc == 0
+        assert seen == {"identity": "anchor-example-web", "anchor": True}
+
+    def test_explicit_worktree_id_still_wins_over_anchor_default(
+        self, store, monkeypatch,
+    ) -> None:
+        monkeypatch.setattr(owner, "ensure_owner_running", lambda config: True)
+        monkeypatch.setattr(config_mod, "load_merged_config", lambda: object())
+        monkeypatch.setattr(
+            "agent_codespaces.lifecycle.list_codespaces",
+            lambda: (_ for _ in ()).throw(
+                AssertionError("must not resolve anchor identity when --worktree-id is given")
+            ),
+        )
+
+        seen = {}
+
+        def fake_run_venue_copilot(identity, *, connect, anchor=False, **kwargs):
+            seen["identity"] = identity
+            seen["anchor"] = anchor
+            return connect("agent-worktrees copilot --worktree-id wt-A")
+
+        monkeypatch.setattr("venue_copilot.run_venue_copilot", fake_run_venue_copilot)
+        monkeypatch.setattr("venue_copilot.resolve_daemon_port", lambda: None)
+        monkeypatch.setattr(
+            "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+        )
+
+        rc = copilot_venue.cmd_copilot(_ns(), interactive_ssh=lambda *a, **kw: 0)
+
+        assert rc == 0
+        assert seen == {"identity": "wt-A", "anchor": False}
+
     def test_places_and_releases_owner_hold_around_a_successful_run(
         self, store, monkeypatch,
     ) -> None:
@@ -235,3 +349,148 @@ class TestCmdCopilot:
         assert rc == 1
         assert "already has an active reservation" in capsys.readouterr().err
         assert "cs-1" not in owner._read_holds()
+
+
+class TestEnsureAgentBridgePlugin:
+    """agent-bridge-cli-mode-sessions Phase 4 follow-up: without the
+    ``agent-bridge`` Copilot plugin installed on the venue, the remote CLI
+    process runs perfectly normally but its CLI-mode reservation is *never
+    claimed* -- silently (confirmed live). `cmd_copilot` must implicitly
+    close this gap itself, not merely document it as a manual `doctor --fix`
+    prerequisite."""
+
+    def test_cmd_copilot_invokes_the_preflight_with_the_venue_name(
+        self, store, monkeypatch,
+    ) -> None:
+        monkeypatch.setattr(owner, "ensure_owner_running", lambda config: True)
+        monkeypatch.setattr(config_mod, "load_merged_config", lambda: object())
+        monkeypatch.setattr(
+            "venue_copilot.run_venue_copilot",
+            lambda worktree_id, *, connect, **kwargs: connect(
+                "agent-worktrees copilot --worktree-id wt-A",
+            ),
+        )
+        monkeypatch.setattr("venue_copilot.resolve_daemon_port", lambda: None)
+        monkeypatch.setattr(
+            "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+        )
+
+        seen = {}
+        monkeypatch.setattr(
+            copilot_venue, "_ensure_agent_bridge_plugin",
+            lambda name: seen.setdefault("name", name),
+        )
+
+        rc = copilot_venue.cmd_copilot(_ns(), interactive_ssh=lambda *a, **kw: 0)
+
+        assert rc == 0
+        assert seen == {"name": "cs-1"}
+
+    def test_installs_when_missing(self, monkeypatch) -> None:
+        from agent_codespaces import venue_check
+
+        readiness_before = venue_check.VenueReadiness(
+            copilot_path="/usr/local/bin/copilot", tmux=True,
+            agent_worktrees_state="full", agent_bridge_plugin=False,
+        )
+
+        class _FakeManager:
+            async def ensure_connected(self, name, source, forwards):
+                return None
+
+            async def exec_command(self, host, script):
+                return argparse.Namespace(stdout="", exit_code=0, stderr="")
+
+            async def disconnect(self, name):
+                return None
+
+        monkeypatch.setattr(
+            "ssh_manager.ConnectionManager", lambda: _FakeManager(),
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.lifecycle.account_for_codespace", lambda name: None,
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.codespace_config.CodespaceSource",
+            lambda name, account=None: object(),
+        )
+
+        calls = {"check": 0}
+
+        async def fake_check(exec_command, host, **kwargs):
+            calls["check"] += 1
+            return readiness_before
+
+        remediated = {}
+
+        async def fake_remediate(exec_command, host, readiness, **kwargs):
+            remediated["called"] = True
+            result = venue_check.RemediationResult()
+            result.succeeded.append("install agent-bridge plugin")
+            return result
+
+        monkeypatch.setattr(venue_check, "check_remote_venue", fake_check)
+        monkeypatch.setattr(venue_check, "remediate_remote_venue", fake_remediate)
+
+        copilot_venue._ensure_agent_bridge_plugin("cs-1")
+
+        assert remediated == {"called": True}
+        assert calls["check"] == 1
+
+    def test_already_present_skips_remediation(self, monkeypatch) -> None:
+        from agent_codespaces import venue_check
+
+        readiness = venue_check.VenueReadiness(
+            copilot_path="/usr/local/bin/copilot", tmux=True,
+            agent_worktrees_state="full", agent_bridge_plugin=True,
+        )
+
+        class _FakeManager:
+            async def ensure_connected(self, name, source, forwards):
+                return None
+
+            async def exec_command(self, host, script):
+                return argparse.Namespace(stdout="", exit_code=0, stderr="")
+
+            async def disconnect(self, name):
+                return None
+
+        monkeypatch.setattr(
+            "ssh_manager.ConnectionManager", lambda: _FakeManager(),
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.lifecycle.account_for_codespace", lambda name: None,
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.codespace_config.CodespaceSource",
+            lambda name, account=None: object(),
+        )
+
+        async def fake_check(exec_command, host, **kwargs):
+            return readiness
+
+        called = {"remediate": False}
+
+        async def fake_remediate(*a, **kw):
+            called["remediate"] = True
+            raise AssertionError("must not remediate when already present")
+
+        monkeypatch.setattr(venue_check, "check_remote_venue", fake_check)
+        monkeypatch.setattr(venue_check, "remediate_remote_venue", fake_remediate)
+
+        copilot_venue._ensure_agent_bridge_plugin("cs-1")
+
+        assert called == {"remediate": False}
+
+    def test_a_probe_failure_never_raises(self, monkeypatch) -> None:
+        """Best-effort: a broken connection during the implicit preflight
+        must not prevent the operator from still attempting to connect."""
+        monkeypatch.setattr(
+            "ssh_manager.ConnectionManager",
+            lambda: (_ for _ in ()).throw(RuntimeError("no route to host")),
+        )
+
+        copilot_venue._ensure_agent_bridge_plugin("cs-1")  # must not raise

@@ -190,6 +190,9 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
     cli = [label for label in (getattr(args, "cli_label", None) or []) if label]
     if cli:
         spec["cli_labels"] = cli
+    script = [label for label in (getattr(args, "script_label", None) or []) if label]
+    if script:
+        spec["script_labels"] = script
     disposable_cli = [
         label for label in (getattr(args, "disposable_cli_label", None) or []) if label
     ]
@@ -566,6 +569,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         make_embody_spawn,
         make_headless_spawn,
         make_label_routed_spawn,
+        make_script_spawn,
         make_redrive_sender,
     )
 
@@ -578,12 +582,15 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     # Embody backend default is HEADLESS: a dispatched/supervised task is a
     # self-contained, autonomous body that needs no human attach, and headless
     # sidesteps the CLI-start-prompt path entirely. `--embody-backend cli` opts the
-    # whole lane back to CLI/mux (attachable); per-label overrides fine-tune either
-    # way (`--cli-label` forces CLI when the default is headless; `--headless-label`
-    # forces headless when the default is cli).
+    # whole lane back to CLI/mux (attachable); `--embody-backend script` opts the
+    # whole lane to a plain deterministic subprocess. Per-label overrides fine-tune
+    # either way (`--cli-label` forces CLI when the default is headless/script;
+    # `--headless-label` or `--script-label` force those bodies when the default
+    # is CLI or one another).
     backend = getattr(args, "embody_backend", None) or "headless"
     headless_labels = [label for label in (getattr(args, "headless_label", None) or []) if label]
     cli_labels = [label for label in (getattr(args, "cli_label", None) or []) if label]
+    script_labels = [label for label in (getattr(args, "script_label", None) or []) if label]
     disposable_cli_labels = [
         label for label in (getattr(args, "disposable_cli_label", None) or []) if label
     ]
@@ -611,6 +618,20 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
+        if backend == "script" or script_labels:
+            print(
+                "agent-dispatch supervise: the script embodiment is supported "
+                "only for local (non-pool) worker bodies.",
+                file=sys.stderr,
+            )
+            return 2
+        if getattr(args, "no_pair", False):
+            print(
+                "agent-dispatch supervise: --no-pair is supported only for "
+                "local worker bodies.",
+                file=sys.stderr,
+            )
+            return 2
         fleet = FleetSpawner(
             pool,
             origin=origin,
@@ -621,10 +642,10 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         )
         spawn_fn = fleet
         capacity_gate = fleet.can_spawn
-        if headless_labels or cli_labels:
+        if headless_labels or cli_labels or script_labels:
             print(
-                "agent-dispatch supervise: per-label --headless-label/--cli-label "
-                "are ignored in fleet (--pool) mode; the whole pool is "
+                "agent-dispatch supervise: per-label --headless-label/--cli-label/"
+                "--script-label are ignored in fleet (--pool) mode; the whole pool is "
                 f"{'headless' if fleet_headless else 'CLI'} "
                 "(set --embody-backend to change).",
                 file=sys.stderr,
@@ -652,11 +673,17 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             agent=getattr(args, "headless_agent", None) or "task-worker",
             route=route,
             all_repos=all_repos,
+            no_pair=bool(getattr(args, "no_pair", False)),
+        )
+        script_spawn = make_script_spawn(
+            route=route,
+            all_repos=all_repos,
         )
         embody_spawn = make_embody_spawn(
             verify_timeout=getattr(args, "verify_timeout", 0) or 0,
             route=route,
             all_repos=all_repos,
+            no_pair=bool(getattr(args, "no_pair", False)),
         )
         watched = set(args.label or [])
         disposable = set(disposable_cli_labels)
@@ -668,25 +695,46 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             )
             return 2
         if backend == "cli":
-            # CLI-default lane: headless is the per-label opt-in.
-            default_spawn, overrides = (
-                embody_spawn,
-                {label: headless_spawn for label in headless_labels},
-            )
+            default_spawn = embody_spawn
+            overrides = {label: headless_spawn for label in headless_labels}
+            overrides.update({label: script_spawn for label in script_labels})
+            routed_parts = []
+            if headless_labels:
+                routed_parts.append(f"headless-ACP for label(s): {', '.join(headless_labels)}")
+            if script_labels:
+                routed_parts.append(f"script for label(s): {', '.join(script_labels)}")
             routed_note = (
-                f"CLI embody; headless-ACP for label(s): {', '.join(headless_labels)}"
-                if headless_labels
+                "CLI embody; " + "; ".join(routed_parts)
+                if routed_parts
                 else "CLI embody (all watched labels)"
             )
-        else:
-            # Headless-default lane (the default): CLI is the per-label opt-out.
-            default_spawn, overrides = (
-                headless_spawn,
-                {label: embody_spawn for label in cli_labels},
-            )
+        elif backend == "script":
+            default_spawn = script_spawn
+            overrides = {label: embody_spawn for label in cli_labels}
+            overrides.update({label: headless_spawn for label in headless_labels})
+            routed_parts = []
+            if cli_labels:
+                routed_parts.append(f"CLI for label(s): {', '.join(cli_labels)}")
+            if headless_labels:
+                routed_parts.append(f"headless-ACP for label(s): {', '.join(headless_labels)}")
             routed_note = (
-                f"headless-ACP embody; CLI for label(s): {', '.join(cli_labels)}"
-                if cli_labels
+                "script embody; " + "; ".join(routed_parts)
+                if routed_parts
+                else "script embody (all watched labels)"
+            )
+        else:
+            # Headless-default lane (the default): CLI/script are the per-label opt-out.
+            default_spawn = headless_spawn
+            overrides = {label: embody_spawn for label in cli_labels}
+            overrides.update({label: script_spawn for label in script_labels})
+            routed_parts = []
+            if cli_labels:
+                routed_parts.append(f"CLI for label(s): {', '.join(cli_labels)}")
+            if script_labels:
+                routed_parts.append(f"script for label(s): {', '.join(script_labels)}")
+            routed_note = (
+                "headless-ACP embody; " + "; ".join(routed_parts)
+                if routed_parts
                 else "headless-ACP embody (all watched labels)"
             )
         spawn_fn = (
@@ -696,8 +744,8 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         )
         print(f"agent-dispatch supervise: {routed_note}", file=sys.stderr)
         # A local lane is headless when the default backend is headless, or when a
-        # CLI-default lane routes a subset of labels to a headless body.
-        _headless_active = backend != "cli" or bool(headless_labels)
+        # non-headless default routes a subset of labels to a headless body.
+        _headless_active = backend == "headless" or bool(headless_labels)
         _preflight_agent = (
             (getattr(args, "headless_agent", None) or "task-worker") if _headless_active else None
         )
@@ -769,5 +817,3 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
 
         sup.serve(interval=args.interval, on_cycle=_on_cycle)
     return 0
-
-

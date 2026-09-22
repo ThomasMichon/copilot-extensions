@@ -668,6 +668,29 @@ mechanism CLI mode binds through.
       (`agent-bridge --json live-sessions list` showed the live session with
       `driven_by: "cli-mode"`) -- identical mechanism to the local case, no
       CLI-mode-specific divergence.
+      **Independently reconfirmed against a real odsp-web `agent-codespaces`
+      CodeSpace (2026-09-22)**, closing the last gap the container pass
+      couldn't cover (a genuinely distinct venue transport, not just a
+      second Docker run): fixed a third real bug found only here --
+      `_interactive_ssh`'s `gh codespace ssh` invocation never actually
+      passed `-t`, so the remote `agent-worktrees copilot` always refused
+      with "needs a controlling terminal to attach to" despite this
+      module's own docstring and CLI help text documenting "SSHes -t in" --
+      confirmed via direct in-process reproduction and fixed by adding the
+      flag when a `remote_command` is present (never for a plain
+      interactive connect, which `gh codespace ssh` already handles).
+      With all three bugs across this validation (PATH/login-shell,
+      JSON-capture, and this pty flag) fixed, ran the actual production
+      task end-to-end: `agent-codespaces copilot friendly-eureka-...
+      --worktree-id <id>` reserved the CLI-mode slot, connected with the
+      now-correctly-account-pinned SSH env, opened a real pty-backed
+      interactive `copilot` TUI inside a genuine tmux session on the
+      CodeSpace, and -- driven by `tmux send-keys`/`capture-pane` exactly
+      like the container pass -- completed a full real task ("add a haiku
+      to a package README and open a PR"), landing real Azure DevOps PR
+      #2397021 on `odsp-web`. The CLI-mode reservation was released cleanly
+      on exit (`agent-bridge --json live-sessions cli-mode status` empty
+      afterward) and the tmux session tore down on `/exit`.
 
 ## Proposal
 
@@ -679,6 +702,139 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-09-22 — Unified `agent-bridge create <target> --cli`, anchor-mode default, and registration-identity fix
+
+Follow-up request after the live CodeSpace validation below: the operator
+wanted a single, natural command shape for delivering a remote CLI-mode
+session -- not a raw `gh codespace ssh` command, not a manually-composed
+`agent-bridge live-sessions cli-mode reserve` + venue-verb pairing (which
+turn out to *conflict*, since `create_cli_mode_reservation` refuses a
+second reserve for the same identity regardless of claimed status), and
+critically **not requiring a worktree at the far end** -- a CodeSpace's
+anchor checkout is what the existing headless ACP dispatch already drives
+directly, and CLI mode needed to match that same contract rather than
+inventing a worktree requirement headless dispatch never had.
+
+Landed in three stacked pieces (PR ThomasMichon/copilot-extensions#3245,
+two commits, then PR #3249):
+
+1. **`agent-worktrees --anchor` mode** (`embody`/`copilot`): a new
+   mutually-exclusive `--anchor` flag that embodies directly in the active
+   project's anchor checkout, no worktree created or required, session id
+   synthesized as `anchor-<repo_name>`. Turned out to need almost no new
+   plumbing -- `_build_launch_cmd`/`_build_env`/`_repo_session_env`/
+   `_preflight_launch` were already generic over an arbitrary `work_dir`
+   string.
+2. **Anchor-default venue verbs + registration-identity fix**:
+   `--worktree-id` changed from required to optional on `agent-codespaces
+   copilot`/`agent-containers copilot` (omitting it now resolves an
+   `anchor-<repo_name>` identity and forwards `--anchor` remotely instead);
+   added `agent-worktrees get session-scope-id` (worktree id, or
+   `anchor-<repo_name>` when in the anchor) and switched `agent-bridge`'s
+   `metadata.mjs` to read it directly instead of deriving `worktree_id`
+   from `basename(worktree-dir)` (empty in the anchor -- would have
+   silently broken self-registration for every anchor-mode session).
+3. **`agent-bridge create <target> "<prompt>" --cli`** (this repo's actual
+   ask all along, per the operator's explicit "this is exactly what I was
+   asking for for this whole effort"): resolves a namespaced target's
+   `<prefix>:<name>` to its owning plugin's binstub
+   (`codespace:` → `agent-codespaces`, `container:` → `agent-containers`,
+   fixed mapping, no in-process import of either -- preserves the existing
+   agent-bridge/sibling-plugin process-boundary CLI seam, #892/#1643) and
+   execs `<binstub> copilot <name>` with inherited stdio, forwarding
+   `--seed`/`--driver`. A bare/unprefixed target is refused with a pointer
+   to `agent-worktrees copilot` directly (no agent-bridge mediation needed
+   locally). 8 new tests (`test_create_cli_mode.py`); full agent-bridge
+   suite otherwise unchanged (569 passed, 2 pre-existing unrelated
+   failures). Closes the "unified CLI-mode dispatch" feature request that
+   turned out to be this whole session's real thread, start to finish.
+
+### 2026-09-22 — Full live validation against a real odsp-web CodeSpace: 2 more bugs found and fixed; Phase 4 genuinely done end-to-end
+
+Continued from the container-only validation above with a request to prove
+the venue `copilot` verb against an actual `agent-codespaces` CodeSpace, not
+just the disposable Docker container. Resolved `odsp-web`'s preferred venue
+(`agent-worktrees related resolve odsp-web` -> CodeSpace, delegate
+`agent-codespaces`, per the harness's own routing policy) and picked an
+already-`Available` operator CodeSpace (`friendly-eureka-...`) rather than
+provisioning a fresh one.
+
+**Bug found #1 (ssh-manager, cross-cutting):** `agent-codespaces ssh
+--remote-cmd` 404'd ("getting full codespace details") whenever the ambient
+`gh` account differed from the CodeSpace's owner -- previously written off
+in this effort's own journal as a "pre-existing, unrelated quirk." Traced
+to root cause: `CodespaceSource`/`CodespaceConfigSource` already pinned `gh
+codespace ssh --config`'s own config-fetch subprocess to the owning account
+via an internal `gh_env`, but nothing threaded that env onward to the
+*actual* SSH connection -- the ControlMaster, `exec_command`,
+`open_stdio_channel`, the graceful `-O exit` disconnect, and (on Windows)
+the embedded ProxyCommand's `gh cs ssh --stdio` child all silently
+inherited the ambient process environment instead. Fixed in the shared,
+triple-vendored `ssh-manager` lib (`agent-bridge`/`agent-codespaces`/
+`agent-containers`): exposed `gh_env` as a public property, threaded it
+through `ConnectionManager` (stored on `ConnectionInfo`, passed to every
+`create_ssh_subprocess` call for that connection), landed as
+ThomasMichon/copilot-extensions#3232. This is the actual fix for the
+quirk this effort had been working around since the 2026-09-21 journal
+entry above -- not a separate concern.
+
+**Prerequisite: built `agent-codespaces check`/`doctor <name> --fix`**
+(ThomasMichon/copilot-extensions#3237) to consolidate the manual venue-prep
+this session (and the container pass before it) had been doing by hand --
+closing the Phase 4 checklist's own long-standing "preflight already
+documented, not yet enforced in code" gap. Used it directly: `check
+friendly-eureka-...` reported `tmux: MISSING` (everything else -- copilot,
+a fully-provisioned `agent-worktrees` -- already ready from an earlier
+`agent-worktrees update` this session); `doctor friendly-eureka-... --fix`
+installed `tmux` via `apt-get` and re-probed to `READY` in one shot.
+
+**Bug found #2 (agent-codespaces, the actual Phase 4 launch verb):** even
+with #1 fixed and the venue toolchain ready, `agent-codespaces copilot
+<name> --worktree-id <id>` still failed immediately with `agent-worktrees
+copilot`'s own "needs a controlling terminal to attach to" refusal.
+`_interactive_ssh`'s own docstring and the `copilot` subcommand's CLI help
+text both document "SSHes -t in" -- but no `-t` flag was ever actually
+added to the `gh codespace ssh` argv when a `remote_command` is present.
+Without it, `ssh` never allocates a remote pty for a command invocation, so
+the documented contract had silently never been implemented; every prior
+validation pass (including Phase 3's Docker clean-room test) used a
+different, non-venue launch path and never exercised this exact code path
+with a real remote command, so nothing had caught it. Fixed by adding `-t`
+right after the `--` separator whenever `remote_command` is set (an
+ordinary interactive connect, no command, is unaffected -- `gh codespace
+ssh` already allocates a pty for that case unconditionally). Regression
+tests added/updated in `test_copilot_venue.py`.
+
+**Full production-task live validation, no shortcuts:** with all three
+bugs (this session's #1/#2 plus the prior session's PATH/login-shell and
+JSON-capture fixes) in place, ran `agent-codespaces copilot
+friendly-eureka-... --worktree-id <id>` for real -- reserved the CLI-mode
+slot, connected with the now-correctly-pinned SSH env, opened a genuine
+pty-backed interactive `copilot` TUI inside a real tmux session on the
+CodeSpace (observed live via a second, independent `tmux capture-pane`
+SSH call, exactly mirroring the container pass's validation method), and
+drove it with an actual unscripted task -- "make a PR where you add a
+haiku into the README.md of the utilities/resources package on odsp-web"
+-- through to completion: it edited
+`odsp-common/utilities/resources/README.md`, ran the repo's own commit/PR
+skill (including resolving a Rush change-file policy blocker along the
+way, entirely on its own), and landed real Azure DevOps PR **#2397021**
+("Add haiku to utilities resources README"). Exited cleanly via `/exit`;
+the tmux session tore down and the CLI-mode reservation released with no
+leftover state (`agent-bridge --json live-sessions cli-mode status`
+returned empty afterward).
+
+This closes Phase 4's remaining Validation Plan item with genuine,
+end-to-end, real-venue evidence -- not a container stand-in, and not a
+synthetic task. Versions bumped: `ssh-manager` (all 3 vendored copies)
+0.1.0-dev19 -> dev20, `agent-codespaces` 0.4.0-dev150 -> dev153 (across the
+`check`/`doctor` feature and the `-t` fix). Full test suites for all
+touched plugins pass with only the same pre-existing, unrelated failures
+already tracked in this effort's prior entries.
+
+Remaining open for Phase 5: docs/architecture updates and the vision
+confirmation pass -- untouched this session.
 
 ### 2026-09-21/22 — Disposable trusted-container venue install closes Phase 4; two more genuine bugs found and fixed
 

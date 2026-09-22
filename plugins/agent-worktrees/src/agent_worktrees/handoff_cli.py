@@ -79,6 +79,7 @@ def add_parsers(sub) -> None:
     g.add_argument("--worktree-id", dest="worktree_id", default=None, help="Embody in this existing worktree")
     g.add_argument("--new", action="store_true", help="Create a fresh worktree first, then embody in it")
     g.add_argument("--codename", default=None, help="Embody the worktree with this codename (pr-attribution-codenames Phase 2/3) -- resolved locally first, then via a cross-machine SSH scan. A codename found on a DIFFERENT machine fails closed with the machine name (remote launch is not supported); resolve/embody there directly instead.")
+    g.add_argument("--anchor", action="store_true", help="Embody directly in the active project's ANCHOR checkout instead of any worktree -- no worktree is created or required. Matches the existing headless-dispatch behavior (a CodeSpace/container ACP session already runs in the anchor, never a worktree); this brings CLI-mode into line with that same contract. Session id is synthesized as `anchor-<repo_name>` (one live anchor session per repo, same one-live-session-per-target rule as an ordinary worktree). The anchor is not writable through this harness's own PR-gated flow (see AGENTS.md) -- use for reads/exploration or a repo whose anchor is otherwise safe to drive directly; an actual change still belongs in a worktree/PR.")
     p.add_argument("--seed", default=None, help="Seed prompt injected as the session's first interactive turn once Copilot is ready")
     p.add_argument("--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0, metavar="SECONDS", help="How long to wait for Copilot's input prompt before typing the --seed (default 180). A fresh MCP/skill-heavy autopilot can take much longer than the fast handoff default to become ready; if this is too short the seed is never delivered and the session idles at an empty prompt")
     p.add_argument("--driver", default=None, help="Label of the agent steering this session; stamps the 'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY) so a human taking over in Neuron Forge sees who's at the wheel")
@@ -198,6 +199,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     make_new = getattr(args, "new", False)
     raw_id = getattr(args, "worktree_id", None)
     codename_arg = getattr(args, "codename", None)
+    anchor_mode = getattr(args, "anchor", False)
     if codename_arg and not raw_id:
         # pr-attribution-codenames Phase 2/3: --codename is an alternate
         # selector for --worktree-id, resolved locally first then via a
@@ -213,9 +215,14 @@ def cmd_embody(args: argparse.Namespace) -> int:
             "--new is mutually exclusive with --worktree-id/--codename",
             exit_code=2,
         )
-    if not make_new and not raw_id:
+    if anchor_mode and (make_new or raw_id):
         return _json_error(
-            "embody requires --worktree-id <id>, --codename <name>, or --new",
+            "--anchor is mutually exclusive with --worktree-id/--codename/--new",
+            exit_code=2,
+        )
+    if not anchor_mode and not make_new and not raw_id:
+        return _json_error(
+            "embody requires --worktree-id <id>, --codename <name>, --new, or --anchor",
             exit_code=2,
         )
 
@@ -223,6 +230,10 @@ def cmd_embody(args: argparse.Namespace) -> int:
         config = cfg.load_config()
     except Exception as e:
         return _json_error(str(e))
+
+    if anchor_mode:
+        return _cmd_embody_anchor(args, config)
+
     # Resolve target worktree id + path (creating a fresh worktree for --new).
     if make_new:
         try:
@@ -471,6 +482,163 @@ def cmd_embody(args: argparse.Namespace) -> int:
     if selection.assignment is not None:
         response["profile_assignment"] = profile_assignment.metadata(selection.assignment)
     _json_output(response)
+    return 0
+
+
+def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
+    """The ``--anchor`` half of :func:`cmd_embody`: create-or-resume a
+    detached mux+Copilot session directly in the active project's anchor
+    checkout, with no worktree involved at all.
+
+    Deliberately parallels headless dispatch's own existing behavior: a
+    CodeSpace/container ACP session already runs `copilot --acp --stdio`
+    straight in the venue's anchor checkout (its ``workspace_folder``),
+    never in a worktree -- CLI mode had no equivalent, forcing every
+    interactive venue session through worktree creation/tracking it didn't
+    actually need. This reuses the exact same launch-building primitives
+    (:func:`_build_launch_cmd`, :func:`_build_env`, :func:`_repo_session_env`,
+    :func:`_preflight_launch`) the worktree path uses -- none of them
+    require a worktree tracking record; they only need a ``work_dir`` string,
+    confirmed by ``_build_env``'s own docstring ("A non-worktree work_dir (the
+    anchor) ... simply omits the var"). Skips entirely the worktree-specific
+    machinery that genuinely doesn't apply here: tracking-record
+    load/re-verify, launch-profile fleet assignment (`_launch_profile_selection`,
+    meant for routing across many parallel worktrees), and the managed-kind/
+    terminal-status guard.
+
+    One live anchor session per repo (mirrors "one live session per
+    worktree"): the synthesized id ``anchor-<repo_name>`` is what
+    ``sessions.has_mux_session``/``mux_new_session`` key off, so a second
+    ``--anchor`` call resumes the same session rather than duplicating it,
+    identically to the worktree case.
+    """
+    repo_name = config.repo_name
+    if not repo_name:
+        return _json_error(
+            "--anchor requires an active project (cd into an adopted repo, "
+            "or pass --project)",
+            exit_code=2,
+        )
+    work_dir = config.default_repo.anchor
+    if not work_dir:
+        return _json_error(
+            f"project {repo_name!r} has no resolved anchor path", exit_code=2,
+        )
+    wt_id = f"anchor-{repo_name}"
+    seed = getattr(args, "seed", None)
+
+    already = sessions.has_mux_session(wt_id)
+    launch_preflight = None
+    if getattr(args, "dry_run", False) or not already:
+        launch_preflight = _preflight_launch(config, args, work_dir)
+        if launch_preflight.error:
+            return _json_error(launch_preflight.error, exit_code=3)
+
+    if getattr(args, "dry_run", False):
+        launch_cmd = _build_launch_cmd(
+            config, args, work_dir, profile=None, preflight=launch_preflight,
+        )
+        _json_output({
+            "ok": True,
+            "dry_run": True,
+            "worktree_id": wt_id,
+            "anchor": True,
+            "session": sessions.mux_session_name(wt_id),
+            "work_dir": work_dir,
+            "would": "resume" if already else "create",
+            "cmd": list(launch_cmd),
+            "seed_len": len(seed) if seed else 0,
+        })
+        return 0
+
+    if already:
+        _json_output({
+            "ok": True,
+            "worktree_id": wt_id,
+            "anchor": True,
+            "session": sessions.mux_session_name(wt_id),
+            "work_dir": work_dir,
+            "created": False,
+            "resumed": True,
+            "new_pane": (sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)),
+            "note": "a live mux session already embodies this repo's anchor",
+        })
+        return 0
+
+    launch_cmd = _build_launch_cmd(
+        config, args, work_dir, profile=None, preflight=launch_preflight,
+    )
+    env = _build_env(None, _repo_session_env(config, work_dir), work_dir=work_dir)
+    driver = getattr(args, "driver", None)
+    if driver:
+        env["AGENT_BRIDGE_DRIVEN_BY"] = driver
+
+    # No worktree record, no repo.worktree_root-scoped lifecycle lock to
+    # acquire -- there is no worktree lifecycle (create/finalize/GC) for the
+    # anchor to race with here. The has_mux_session recheck above/below is
+    # the only concurrency guard this path needs (mirrors the worktree path's
+    # own re-check pattern, just without the record-staleness half of it).
+    if sessions.has_mux_session(wt_id):
+        _json_output({
+            "ok": True,
+            "worktree_id": wt_id,
+            "anchor": True,
+            "session": sessions.mux_session_name(wt_id),
+            "work_dir": work_dir,
+            "created": False,
+            "resumed": True,
+            "new_pane": (sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)),
+            "note": "a live mux session already embodies this repo's anchor",
+        })
+        return 0
+    if getattr(args, "ensure_mux", False):
+        sessions.ensure_mux_available()
+    result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
+    if not result.get("ok"):
+        return _json_error(
+            f"failed to create session wt-{wt_id}: {result.get('error')}",
+            exit_code=4,
+        )
+
+    new_pane = result.get("new_pane")
+    seed_ready_timeout = getattr(args, "seed_ready_timeout", None) or 180.0
+    seed_result = (
+        sessions.mux_seed_pane(new_pane, seed, ready_timeout=seed_ready_timeout)
+        if (new_pane and seed)
+        else {}
+    )
+
+    verified = None
+    verify_timeout = getattr(args, "verify_timeout", 0.0) or 0.0
+    if verify_timeout > 0:
+        deadline = time.monotonic() + verify_timeout
+        verified = False
+        while time.monotonic() < deadline:
+            if sessions.has_mux_session(wt_id):
+                verified = True
+                break
+            time.sleep(0.3)
+
+    _json_output({
+        "ok": True,
+        "worktree_id": wt_id,
+        "anchor": True,
+        "session": sessions.mux_session_name(wt_id),
+        "work_dir": work_dir,
+        "created": True,
+        "resumed": False,
+        "new_pane": new_pane,
+        "driven_by": driver,
+        "seeded": bool(seed_result.get("sent")) if seed else False,
+        "seed_ready": bool(seed_result.get("ready")) if seed else False,
+        "seed_submitted": bool(seed_result.get("submitted")) if seed else False,
+        "seed_reason": seed_result.get("reason") if seed else None,
+        "mux_verified": verified,
+        "verify_hint": (
+            f"agent-bridge live-sessions | grep {wt_id}  "
+            "(the embodied Copilot auto-registers with the local bridge)"
+        ),
+    })
     return 0
 
 

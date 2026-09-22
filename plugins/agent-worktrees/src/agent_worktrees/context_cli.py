@@ -28,6 +28,9 @@ _GET_KEYS: dict[str, str] = {
     "repo-dir": "Anchor repo directory",
     "worktree-dir": "Current worktree root (the worktree you are in; empty if not inside one)",
     "worktree-id": "Current worktree id (empty if not inside one)",
+    "session-scope-id": "The identity used for live-session self-registration "
+    "and CLI-mode reservations: the worktree id when inside a worktree, "
+    "`anchor-<repo>` when inside the anchor, empty otherwise",
     "worktree-state-dir": "Per-worktree or adopted-anchor state directory outside the repo checkout",
     "worktrees-root": "Parent directory that holds all worktrees (formerly 'worktree-dir')",
     "src-dir": "Source root (parent of repos)",
@@ -344,10 +347,16 @@ def cmd_get(args: argparse.Namespace) -> int:
             output.err(f"Cannot create worktree state directory: {exc}")
             return 1
 
+    session_scope_id = wt_id or (
+        f"anchor-{config.repo_name}"
+        if state_scope_id == tracking.ANCHOR_ID and config.repo_name
+        else ""
+    )
     values = {
         "repo-dir": repo.anchor,
         "worktree-dir": current_worktree,
         "worktree-id": wt_id or "",
+        "session-scope-id": session_scope_id,
         "worktree-state-dir": (str(state_dir) if state_dir is not None else ""),
         "worktrees-root": repo.worktree_root,
         "src-dir": config.srcroot,

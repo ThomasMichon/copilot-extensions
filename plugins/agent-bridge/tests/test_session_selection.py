@@ -292,6 +292,44 @@ def test_create_refuse_on_conflict_raises(fixed_caller):
     assert client.resumed == []  # never silently adopts
 
 
+def test_start_agent_session_uses_main_wait_for_idle_compatibility_seam(monkeypatch):
+    class _Client:
+        def start_session(self, **_kwargs):
+            return {"session_id": "sess-new", "name": "agent-x"}
+
+    seen = {}
+    monkeypatch.setattr(m, "_get_caller_id", lambda: "caller-A")
+    monkeypatch.setattr(m, "_sender_repo", lambda: "repo-A")
+    monkeypatch.setattr(m, "_worktrees_get", lambda _key: None)
+    monkeypatch.setattr(
+        m,
+        "_phased_timeouts",
+        lambda: type(
+            "T",
+            (),
+            {
+                "codespace_boot": 1.0,
+                "ssh_connect": 1.0,
+                "session_host_ready": 1.0,
+                "session_start": 2.5,
+                "session_new": 1.0,
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        m,
+        "_wait_for_idle",
+        lambda _client, session_id, timeout=0: seen.update(
+            {"session_id": session_id, "timeout": timeout}
+        ),
+    )
+
+    session_id = m._start_agent_session(_Client(), "agent-x", force_new=True)
+
+    assert session_id == "sess-new"
+    assert seen == {"session_id": "sess-new", "timeout": 2.5}
+
+
 # -- CLI command guards ------------------------------------------------------
 
 
@@ -300,6 +338,49 @@ def test_cmd_send_rejects_new_flag():
     with pytest.raises(SystemExit) as ei:
         m._cmd_send(args)
     assert ei.value.code == 2
+
+
+def test_cmd_send_uses_main_resolve_target_compatibility_seam(monkeypatch):
+    class _Client:
+        def resolve_live_session(self, _target):
+            return {}
+
+    client = _Client()
+    seen = {}
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_caller_id_for", lambda _args: "caller-A")
+    monkeypatch.setattr(
+        m,
+        "_resolve_target",
+        lambda _client, _target, force=False: seen.setdefault("resolved", "sess-compat"),
+    )
+    monkeypatch.setattr(
+        m,
+        "_submit_and_stream",
+        lambda _client, _args, session_id, prompt, *, caller_id: seen.update(
+            {"session_id": session_id, "prompt": prompt, "caller_id": caller_id}
+        ),
+    )
+    args = argparse.Namespace(
+        target="agent-x",
+        prompt="hello",
+        prompt_file=None,
+        new=False,
+        force=False,
+        full_history=False,
+        json=False,
+        queue=False,
+        no_wait=True,
+    )
+
+    m._cmd_send(args)
+
+    assert seen == {
+        "resolved": "sess-compat",
+        "session_id": "sess-compat",
+        "prompt": "hello",
+        "caller_id": "caller-A",
+    }
 
 
 class _ReadRenderer:

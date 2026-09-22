@@ -58,26 +58,23 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-21, post-`engine.py` split)
+### Current pecking order (snapshot, 2026-09-21, post-`agent-bridge/session_manager.py` split)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
-— re-run before starting a phase, this list moves; it already has once per
-PR merged during this effort — treat it as a live command, not a frozen
-table):
+— re-run before starting a phase, this list moves; it already has multiple
+passes during this effort — treat it as a live command, not a frozen table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 8,145 | +7,145 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
-| 6,971 | +5,971 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
-| 6,751 | +5,751 | `plugins/agent-bridge/src/agent_bridge/session_manager.py` | |
+| 8,162 | +7,162 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
 | 5,145 | +4,145 | `plugins/agent-index/scripts/cell-runtime.py` | |
-| 5,022 | +4,022 | `plugins/agent-dispatch/src/agent_dispatch/__main__.py` | Already partially split (`producers_cli.py` et al. extracted) — still a strong model for how far a CLI-registration split can continue |
-| 4,693 | +3,693 | `plugins/agent-codespaces/src/agent_codespaces/__main__.py` | CLI registration surface |
+| 5,032 | +4,032 | `plugins/agent-dispatch/src/agent_dispatch/__main__.py` | Already partially split (`producers_cli.py` et al. extracted) — still a strong model for how far a CLI-registration split can continue |
+| 4,753 | +3,753 | `plugins/agent-codespaces/src/agent_codespaces/__main__.py` | CLI registration surface |
 | 4,508 | +3,508 | `plugins/agent-dispatch/src/agent_dispatch/queue.py` | The original motivating case for the cap itself |
 | 3,946 | +2,946 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | Partial split landed: the claim/follow-up/orphanage ledger now lives in `tracking_claims.py`, asserted head/handoff/create primitives in `tracking_lifecycle.py`, and the hook/session-registry + repo-freshness helpers in `tracking_session_registry.py`. What's left is the persistence-heavy core: `WorktreeRecord`, YAML load/save/merge, locking/stamp-queue machinery, and the remaining parse/serialize compatibility helpers. |
-| 3,514 | +2,514 | `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` | |
-| 2,963 | +1,963 | `plugins/agent-bridge/src/agent_bridge/agent_registry.py` | |
-| 2,680 | +1,680 | `plugins/agent-worktrees/src/agent_worktrees/sessions.py` | |
+| 3,521 | +2,521 | `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` | |
+| 2,963 | +1,963 | `plugins/agent-bridge/src/agent_bridge/agent_registry.py` | Now `agent-bridge`'s dominant remaining offender after the `session_manager.py` mixin split. |
+| 2,662 | +1,662 | `plugins/agent-worktrees/src/agent_worktrees/sessions.py` | |
 | 2,583 | +1,583 | `plugins/agent-codespaces/src/agent_codespaces/config.py` | |
 | 2,429 | +1,429 | `tools/clean-room/scenarios/agent-index-installation-cells/scenario.py` | Clean-room fixture, not production code — lower urgency |
 | 2,369 | +1,369 | `tools/clean-room/scenarios/progressive-context-disclosure-baseline/fixture.py` | Clean-room fixture, not production code — lower urgency |
@@ -87,19 +84,24 @@ table):
 | 2,124 | +1,124 | `plugins/agent-worktrees/src/agent_worktrees/session_projection.py` | |
 | 2,107 | +1,107 | `plugins/agent-worktrees/src/agent_worktrees/config.py` | |
 | 2,078 | +1,078 | `worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py` | Now the largest remaining `worktree-manager` / production-picker module after the `engine.py` split; coherent same-package follow-up if the campaign stays in this area |
+| 2,011 | +1,011 | `plugins/agent-worktrees/src/agent_worktrees/finalize.py` | |
+| 2,006 | +1,006 | `plugins/agent-machines/src/agent_machines/resources.py` | |
 
 **Suggested next pick (Phase 2, next slice):** if the priority is still the
 largest remaining production offender overall, take
 `plugins/agent-worktrees/src/agent_worktrees/__main__.py`. If the operator
 wants to stay in `worktree-manager` / the production-picker package that
-opened this effort, `picker_tui/data_ssh.py` is now the clearest local
+opened this effort, `picker_tui/data_ssh.py` is still the clearest local
 follow-up. If the operator wants to stay in `agent-worktrees`,
-`tracking.py` is still the clearest partially-resolved target: split the
+`tracking.py` remains the clearest partially-resolved target: split the
 persistence/serialization core (`load_record`, `_save_record_unlocked`,
 locking, stamp queue, and the record/PR parse-merge helpers) away from the
 still-large composition root. If the operator prefers a fresh
 `agent-worktrees` file instead of another pass on the same one, `pr_ops.py`
-remains the next best candidate.
+remains the next best candidate. **Within `agent-bridge`, the next slice is now
+`agent_registry.py`**: with `__main__.py` down to 485 lines and
+`session_manager.py` down to 771, the registry is the plugin's new dominant
+remaining offender.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
 margin of their own ceiling (most likely to tip over next from unrelated
@@ -189,6 +191,42 @@ Verbatim from the operator:
             harder/riskier shape than either Phase 1 or this mixin split;
             it needs its own dedicated design pass, not a quick mechanical
             move. Bumped `agent-bridge` to `0.4.0-dev491`.
+      - [x] `agent-bridge/session_manager.py` (6,282 live lines at slice start,
+            single `SessionManager` class with existing mixin precedent) —
+            split by responsibility into `_SessionCoreMixin`
+            (`session_core.py`), `_SessionHostConnectionMixin`
+            (`session_host_connection.py`), `_SessionParityMixin`
+            (`session_parity.py`), `_SessionHostRecoveryMixin`
+            (`session_host_recovery.py`), `_SessionMonitoringMixin`
+            (`session_monitoring.py`), `_SessionStartMixin`
+            (`session_start.py`), `_SessionResumeMixin`
+            (`session_resume.py`), `_SessionPromptMixin`
+            (`session_prompts.py`), `_SessionLifecycleMixin`
+            (`session_lifecycle.py`), and `_SessionHandoffMixin`
+            (`session_handoff.py`), composed back through a 771-line
+            `session_manager.py` compatibility root that still owns the shared
+            helper/exception surface and the test monkeypatch seams. This
+            followed the same "single large class sharing instance state"
+            mixin pattern proven by `db.py`, while preserving
+            `agent_bridge.session_manager.AcpClient` / `spawn` / helper
+            monkeypatch compatibility by routing moved call sites back through
+            the composition root where tests rely on that surface.
+      - [x] `agent-bridge/agent_registry.py` (2,963 live lines at slice start,
+            mixed top-level registry/topology helpers + one large `AgentResolver`
+            class + namespace/relay support) — split by **real responsibility**
+            rather than by a blind midpoint: shared constants/types moved to
+            `agent_registry_common.py`; namespace contracts + CLI-backed
+            providers to `agent_registry_namespace.py`; registry parsing,
+            auto-discovery, related/repo registry reads, and topology-derived
+            roster synthesis to `agent_registry_topology.py`; credential-relay
+            profile helpers to `agent_registry_relay.py`; and the
+            `AgentResolver` implementation to `agent_registry_resolver.py`.
+            `agent_registry.py` now stays a compatibility/composition root that
+            re-exports the historical surface, keeps the monkeypatch-heavy seams
+            (`_detect_local_machine`, `resolve_repo_remote`,
+            `_agent_worktrees_bin`) at the old import path, and still owns
+            resolver construction / built-in namespace registration so existing
+            imports and tests stay unchanged.
       - [x] `agent-dispatch/coordinator.py` (2,509, a demonstrated repeat
             drifter) — split the FastAPI app-factory along its real route
             seams using the same `register_*_routes(app, ...)` shape already
@@ -223,6 +261,21 @@ Verbatim from the operator:
             (not just guards) green before and after, given their live-
             orchestration blast radius. Do not rush these late in a long
             session; each deserves a fresh-context pass.
+            - `agent-bridge/__main__.py` slice landed: the file is now a
+              **485-line composition root** with focused sibling modules for
+              service start/status (`service_start_cli.py`), daemon/process
+              lifecycle (`service_process_state.py`, `service_process_cli.py`),
+              venue parity + ZDD deploy (`venue_cli.py`), inventory/catalog
+              commands (`inventory_cli.py`), session maintenance
+              (`session_maintenance_cli.py`), prompt/targeting
+              (`session_targeting_cli.py`), session start/read-target helpers
+              (`session_start_cli.py`), streaming/wait/read/result
+              (`session_streaming_cli.py`), lifecycle/handoff/agent mode
+              (`session_lifecycle_cli.py`), and config/doctor
+              (`config_cli.py`). Compatibility was preserved by re-exporting
+              the historical `__main__` helper and command symbols so the
+              existing monkeypatch-heavy tests still hit the moved
+              implementations through the old import surface.
             - `agent-worktrees/__main__.py` first slice landed: extracted the
               non-destructive namespace/composition surfaces into
               `context_cli.py`, `services_cli.py`, `repos_cli.py`, and
@@ -1342,3 +1395,173 @@ the Phase 0 runbook, picked up as capacity allows.
   now `plugins/agent-worktrees/src/agent_worktrees/__main__.py` at 8,145
   lines; within the same `worktree-manager` picker package, the next coherent
   local target is `picker_tui/data_ssh.py` at 2,078 lines.
+
+### 2026-09-21 — Phase 2 continued: `plugins/agent-bridge/src/agent_bridge/__main__.py` split
+- Pivoted this campaign into `agent-bridge`'s largest untouched offender and
+  treated it as the runbook's canonical CLI-registration split rather than a
+  "move a few helpers" nibble. The live file's seams held up under a full read:
+  a thin shared surface at the top, then distinct command families
+  (service start/status and remote-carrier verbs; daemon/process-management;
+  venue parity + installer-internal deploy; inventory/catalog verbs; session
+  maintenance; send/create targeting; session start/read-target selection;
+  streaming/wait/read/result; lifecycle/handoff/agent mode; config/doctor).
+  Extracted those into focused sibling modules and left `__main__.py` as the
+  composition root + compatibility surface. Final shape:
+  `__main__.py` **485** lines (from **6,971**),
+  `service_start_cli.py` (643),
+  `service_process_state.py` (331),
+  `service_process_cli.py` (641),
+  `venue_cli.py` (341),
+  `inventory_cli.py` (425),
+  `session_maintenance_cli.py` (274),
+  `session_targeting_cli.py` (544),
+  `session_start_cli.py` (336),
+  `session_streaming_cli.py` (612),
+  `session_lifecycle_cli.py` (371), and
+  `config_cli.py` (167). Every extracted file stays under the 1,000-line cap.
+- The key design constraint was **compatibility, not just import hygiene**.
+  This CLI has extensive tests -- and real sibling modules like
+  `restart_worktree_cli.py` -- that import or monkeypatch historical
+  `agent_bridge.__main__` helpers directly. A naive extraction would have left
+  tests (and any runtime monkeypatch seam) mutating dead aliases. The chosen
+  pattern preserves the old surface by re-exporting the moved functions from
+  `__main__.py`, while the new modules resolve cross-calls through the live
+  `agent_bridge.__main__` module (`core._foo`) wherever a monkeypatch seam or
+  back-compat call path mattered. This mirrors the coordinator split's lesson:
+  keep the old seam alive until callers stop depending on it.
+- Validation surfaced exactly those seam hazards. The first cut broke tests that
+  monkeypatch `__main__._resolve_target`, `__main__._live_sender_label`,
+  `__main__._live_reply_to`, `__main__._spawn_detached_argv`, and
+  `__main__._spawn_watchdog_replacement` because the moved code had started
+  calling its own local implementations directly. Fixed by routing those calls
+  back through the composition root so existing monkeypatches still steer the
+  real runtime path. After that, the focused CLI corpus was green again without
+  changing behavior.
+- Final validation for the slice:
+  `python tools/run-plugin-tests.py agent-bridge` hit **569 passed / 2 failed /
+  2 skipped** before stopping in sub-suite 1 on two pre-existing Windows
+  `bash.exe` pathing failures in
+  `tests/test_bootstrap_check_reconcile_opt_in.py`
+  (`test_sh_skips_spawn_without_opt_in`,
+  `test_sh_attempts_spawn_with_opt_in`), unrelated to this Python-only split.
+  Per the runbook's early-stop warning, a targeted follow-up run covering the
+  touched CLI/runtime surfaces then passed:
+  `python tools/run-plugin-tests.py agent-bridge -k "attention_wait or agent_single_lookup_cli or cli_mode_launch or create_singleton_cli or dynamic_bind or emit_back or phased_timeouts or project_override or prompt_file or remote_operations or result_snapshot or send_coming_up or service_port_liveness or service_stop_wedged or session_selection or status_and_read or stream_sim or wmi_broker_spawn or payload_invocation or send_help or restart_worktree_cli"`
+  -> **330 passed, 2 skipped**. Ruff (`--select F,E9`) passed across every
+  touched/created CLI module. `python tools/check-module-size.py` passed and
+  `--refresh-baseline` removed `agent-bridge/__main__.py` from the shrink-only
+  baseline entirely.
+- Read-only dogfood stayed within the daemon-safety guardrails: validated only
+  safe surfaces (`agent-bridge --help`, `agent-bridge version`,
+  `agent-bridge status --help`, `agent-bridge session-usage --help`, parser
+  coverage via `test_payload_invocation.py` / `test_send_help.py`) and did **not**
+  start, stop, restart, drain, spawn, or otherwise touch a live bridge daemon.
+- Resulting backlog shift: `agent-bridge/__main__.py` disappears from the
+  pecking order entirely. The plugin's next dominant target is now
+  `plugins/agent-bridge/src/agent_bridge/session_manager.py` at **6,751**
+  lines, which is also the repo's second-largest remaining offender overall
+  after `agent-worktrees/__main__.py`. Recommendation: if the campaign stays in
+  `agent-bridge`, take `session_manager.py` next; the new CLI split removed the
+  plugin's front-door sprawl, leaving that session core as the clear follow-up.
+
+### 2026-09-21 — Phase 2 continued: `plugins/agent-bridge/src/agent_bridge/session_manager.py` mixin split
+- Took the exact follow-up seam the prior `agent-bridge/__main__.py` slice had
+  queued: the session core had become the plugin's dominant remaining offender,
+  and unlike the CLI registrar it was one huge stateful class with an **existing
+  mixin precedent already in-file** (`_RecoveryDormancyMixin`,
+  `_HostLivenessMixin`). That made it the campaign's clearest re-use of the
+  `db.py` pattern instead of a new decomposition shape.
+- Kept the shared support surface in `session_manager.py` itself (helpers,
+  exceptions, `Session`, and the factory) and split only the class body by real
+  responsibility, preserving runtime and test seams. Final mixins/files:
+  `session_core.py` (drain/persistence/rehydrate/gc + the core constructor),
+  `session_host_connection.py` (Session Host launch/forward/relay/reattach
+  plumbing), `session_parity.py` (parity-only relay interruption and container
+  replacement), `session_host_recovery.py` (authority recovery + reattach/
+  respawn decisions), `session_monitoring.py` (heartbeat/disconnect/idle and
+  stranded-host sweeps), `session_start.py` (fresh launch + failed-start parity
+  cleanup), `session_resume.py` (resume/resync), `session_prompts.py`
+  (prompt submit/queue/usage/reapable state), `session_lifecycle.py`
+  (interrupt/stop/end teardown), and `session_handoff.py`
+  (auto-handoff + successor seeding). The composition root now inherits those
+  mixins plus the pre-existing dormancy/liveness mixins.
+- The tricky part was **compatibility, not line cutting**. `agent-bridge`'s
+  tests aggressively monkeypatch `agent_bridge.session_manager.AcpClient`,
+  `spawn`, `_resolve_remote_ai_plugin_dirs`, `_resolve_relay_launch_env`,
+  `_claim_codespace`, and `_release_codespace_claim`. A naive extraction would
+  have left those monkeypatches steering dead aliases. The moved methods that
+  touch those seams now resolve them back through the live
+  `agent_bridge.session_manager` module, mirroring the compatibility discipline
+  from the earlier `agent-bridge/__main__.py` split.
+- Result: `session_manager.py` shrank **6,282 -> 771** lines in the live file,
+  and every extracted sibling stayed under the 1,000-line cap.
+- Validation matched the stricter post-`db.py` discipline: the full
+  `python tools/run-plugin-tests.py agent-bridge` run reached the same two
+  pre-existing Windows `bash.exe` path failures in
+  `tests/test_bootstrap_check_reconcile_opt_in.py`
+  (`test_sh_skips_spawn_without_opt_in`,
+  `test_sh_attempts_spawn_with_opt_in`) while otherwise going green at
+  **569 passed / 2 failed / 2 skipped**. A targeted follow-up on the moved
+  runtime surfaces then passed green:
+  `python tools/run-plugin-tests.py agent-bridge -k "session_manager or auto_handoff or attention_wait or acp_agent or acp_ws or startup_reattach_nonblocking or status_and_read or remote_operations or result_snapshot or stream_sim"`
+  -> **396 passed / 1 skipped / 2196 deselected**. Ruff (`--select F,E9`)
+  passed across all touched/created modules.
+- Resulting backlog shift: `session_manager.py` disappears from the pecking
+  order entirely, and `plugins/agent-bridge/src/agent_bridge/agent_registry.py`
+  at **2,963** lines becomes the plugin's next dominant remaining offender.
+  Repo-wide, the largest remaining production target stays
+  `plugins/agent-worktrees/src/agent_worktrees/__main__.py`.
+
+### 2026-09-21 — Phase 2 continued: `plugins/agent-bridge/src/agent_bridge/agent_registry.py` structural split
+- Took the exact seam the prior `session_manager.py` journal entry queued, but
+  the shape was **hybrid**, not a one-pattern repeat: `agent_registry.py` mixed
+  several independent top-level responsibility bands (registry parsing, local
+  auto-discovery, topology/repo-registry synthesis, credential-relay profile
+  helpers, namespace CLI boundary types) with one large stateful
+  `AgentResolver`. The clean split was therefore **free-function modules plus a
+  class extraction**, not one more all-mixin move.
+- Extracted five focused siblings, each under the cap: `agent_registry_common.py`
+  (shared constants + `AgentConfig`/`NamespaceAgentInfo`/core exceptions),
+  `agent_registry_namespace.py` (the `NamespaceResolver` contract plus
+  `CliNamespaceResolver` / `RestrictedCliNamespaceResolver`),
+  `agent_registry_topology.py` (parse/load/discover + related/repo-registry
+  + topology-derived roster helpers), `agent_registry_relay.py`
+  (`FileTokenValidator` / `FileTokenAuthorizer` + relay-profile application),
+  and `agent_registry_resolver.py` (the full `AgentResolver` implementation).
+  Left `agent_registry.py` as the compatibility/composition root: it re-exports
+  the historical surface, keeps the patch-heavy helper seams
+  (`_detect_local_machine`, `resolve_repo_remote`, `_agent_worktrees_bin`) at
+  the original import path, and still owns `build_resolver()` /
+  `daemon_resolver()` / built-in namespace registration.
+- The tricky part was, again, **compatibility rather than line cutting**. The
+  existing tests patch `agent_bridge.agent_registry._detect_local_machine`,
+  `_agent_worktrees_bin`, `resolve_repo_remote`, and even `Path.home` / `os.name`
+  on the root module to steer resolver and binstub behavior. A naive extraction
+  would have left those patches hitting dead aliases. The moved call sites that
+  depend on those seams now bounce back through the live
+  `agent_bridge.agent_registry` module so the historical monkeypatch surface
+  keeps steering the real implementation.
+- Result: `agent_registry.py` shrank **2,963 -> 451** lines, fell completely out
+  of the shrink-only baseline, and every new sibling module stayed well under
+  the 1,000-line cap.
+- Validation matched the runbook's stricter post-`db.py` discipline. The full
+  `python tools/run-plugin-tests.py agent-bridge` pass still stops in sub-suite
+  1 on the same two pre-existing Windows `bash.exe` path failures in
+  `tests/test_bootstrap_check_reconcile_opt_in.py`
+  (`test_sh_skips_spawn_without_opt_in`,
+  `test_sh_attempts_spawn_with_opt_in`) and otherwise reports
+  **569 passed / 2 failed / 2 skipped**. A targeted follow-up over the moved
+  registry/relay surfaces passed green:
+  `python tools/run-plugin-tests.py agent-bridge -k "agent_registry or relay_profile"`
+  -> **172 passed / 1 skipped / 2420 deselected**. Ruff (`--select F,E9`)
+  passed across all touched/created modules, `python tools/check-module-size.py`
+  stayed green, and `--refresh-baseline` removed only the
+  `agent_registry.py` entry from `tools/module-size-baseline.json`.
+- Bumped `agent-bridge` to `0.4.0-dev542`.
+- `python tools/rank-module-size.py --limit 100` disproved the tempting "plugin
+  clear" claim: `agent-bridge` still has several oversized baselined modules
+  (`client.py`, `routes/sessions.py`, `acp_client.py`, `routes/worktrees.py`,
+  `transport.py`, `remote_operations.py`, `app.py`, `result_snapshot.py`,
+  `models.py`, `session_host/spawner.py`). So this slice retires the registry
+  offender, but **does not** make `agent-bridge` module-cap clean yet. The
+  plugin's next dominant remaining offender is now `client.py` at 1,710 lines.

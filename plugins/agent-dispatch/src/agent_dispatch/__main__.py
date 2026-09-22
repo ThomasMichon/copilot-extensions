@@ -2465,29 +2465,25 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
     # Blocked -> Proposed -> Started -> Queued -> Suspended -> Completed ->
     # Abandoned. Overrides --awaiting-steer / --status.
     if getattr(args, "board", False):
-        import time as _time
-
-        from .queue import machine_matches
+        from . import board_cli as _board_cli
 
         status = "proposed,queued,claimed,started,suspended,completed,abandoned,dead_letter"
         with _client(args) as c:
             tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
-        inbox = [t for t in tasks if machine_matches(t.get("target_machine"), machine)]
-        now = _time.time()
-        cutoff = now - max(0, getattr(args, "recent_mins", 120)) * 60
-        inbox = [t for t in inbox if _board_keep(t, cutoff)]
-        inbox.sort(key=_board_sort_key)
-        # Pure coordinator-state rendering: no agent-worktrees/agent-bridge
-        # subprocesses on the Picker read path.
-        inbox = _enrich(inbox, resolve_repo_names=False)
-        inbox = [
-            {
-                **t,
-                "group": _board_group(t),
-                "activity": _board_activity(t, now=now),
-            }
-            for t in inbox
-        ]
+            def _relay_fetch_many(
+                refs: list[tuple[str, str]]
+            ) -> dict[tuple[str, str], dict | None]:
+                try:
+                    return c.worktree_status_relays(refs)
+                except DispatchError:
+                    return {}
+
+            inbox = _board_cli._build(
+                tasks,
+                machine=machine,
+                recent_mins=getattr(args, "recent_mins", 120),
+                relay_fetch_many=_relay_fetch_many,
+            )
         return _emit(inbox)
     # --awaiting-steer widens the fetch to the owned states (a task blocked on
     # operator steering is `claimed`/`started`, not a filterable "held" -- HELD
@@ -4348,15 +4344,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--embody-backend",
-        choices=["headless", "cli"],
+        choices=["headless", "cli", "script"],
         default="headless",
         help="how the supervisor embodies a claimed task by default: 'headless' "
         "(default) -- a headless agent-bridge ACP session (no mux, no "
         "CLI-start-prompt), the right body for self-contained autonomous "
         "sweeps; 'cli' -- a CLI-backed autopilot worktree session (mux, "
-        "attachable). Per-label overrides: --cli-label (force CLI when the "
-        "default is headless) / --headless-label (force headless when the "
-        "default is cli).",
+        "attachable); 'script' -- a plain deterministic subprocess that drives "
+        "the task lifecycle without an LLM. Per-label overrides: --cli-label "
+        "(force CLI when the default is headless/script) / --headless-label "
+        "(force headless when the default is cli/script) / --script-label "
+        "(force script when the default is headless/cli).",
     )
     p.add_argument(
         "--headless-label",
@@ -4376,12 +4374,30 @@ def build_parser() -> argparse.ArgumentParser:
         "(non-pool) mode only.",
     )
     p.add_argument(
+        "--script-label",
+        action="append",
+        metavar="LABEL",
+        help="force queued tasks carrying this label to a plain deterministic "
+        "script subprocess instead of the lane's default body (repeatable; "
+        "local non-pool mode only).",
+    )
+    p.add_argument(
         "--disposable-cli-label",
         action="append",
         metavar="LABEL",
         help="on terminal settlement, conclude the exact recorded CLI session "
         "for this label and prime its clean worktree for conservative "
         "managed GC (repeatable; label-scoped opt-in only)",
+    )
+    p.add_argument(
+        "--no-pair",
+        action="store_true",
+        help="skip the paired-knowledge carve for every worktree this lane "
+        "creates, whether embodied CLI-side or headless agent-bridge "
+        "(agent-worktrees create --no-pair) -- for a pool with no bound "
+        "knowledge repo to give its workers. Rejected together with "
+        "--pool (fleet mode never creates a paired worktree locally, so "
+        "there is nothing for this flag to skip).",
     )
     p.add_argument(
         "--headless-agent",
@@ -4517,10 +4533,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rp.add_argument(
         "--embody-backend",
-        choices=["headless", "cli"],
+        choices=["headless", "cli", "script"],
         default="headless",
         help="default embody body for the lane: 'headless' (default) "
-        "agent-bridge ACP, or 'cli' autopilot worktree session",
+        "agent-bridge ACP, 'cli' autopilot worktree session, or 'script' "
+        "deterministic subprocess",
     )
     rp.add_argument(
         "--headless-label",
@@ -4535,6 +4552,13 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="LABEL",
         help="force tasks carrying this label to a CLI autopilot instead "
         "of the default headless body (repeatable)",
+    )
+    rp.add_argument(
+        "--script-label",
+        action="append",
+        metavar="LABEL",
+        help="force tasks carrying this label to a deterministic script "
+        "subprocess instead of the lane's default body (repeatable)",
     )
     rp.add_argument(
         "--disposable-cli-label",

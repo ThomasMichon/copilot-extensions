@@ -48,6 +48,7 @@ from .identity import canonical_reviewer_target, canonicalize_remote
 from .payload import PayloadStore, is_blob_ref
 from .queue_handoff_fallback import HandoffFallbackMixin
 from .queue_liveness import LivenessMixin
+from .queue_notifications import QueueNotificationMixin
 from .queue_producer_fences import (  # noqa: F401 -- re-exported for existing call sites/tests
     ProducerFenceError,
     ProducerFenceMixin,
@@ -640,6 +641,7 @@ class TaskQueue(
     ProducerFenceMixin,
     LivenessMixin,
     HandoffFallbackMixin,
+    QueueNotificationMixin,
 ):
     """A leased, capability-gated task queue over a SQLite database file.
 
@@ -679,25 +681,13 @@ class TaskQueue(
         self.blob_threshold = blob_threshold
         self.result_max_bytes = result_max_bytes
         self._wake_notifier: Callable[[], None] | None = None
+        self._owned_transition_notifier: Callable[[], None] | None = None
         # Blobs live in a ``payloads/`` directory beside the queue DB unless the
         # caller overrides it (e.g. a shared blob volume).
         if payload_dir is None:
             payload_dir = Path(self.db_path).parent / "payloads"
         self.payloads = PayloadStore(payload_dir)
         self._migrate()
-
-    def set_wake_notifier(self, notifier: Callable[[], None] | None) -> None:
-        """Set the process-local signal invoked after a wake transaction commits."""
-        self._wake_notifier = notifier
-
-    def _notify_wake(self) -> None:
-        notifier = self._wake_notifier
-        if notifier is None:
-            return
-        try:
-            notifier()
-        except Exception:
-            log.warning("wake notifier failed after durable commit", exc_info=True)
 
     # -- connection / schema -------------------------------------------------
 
@@ -2276,6 +2266,8 @@ class TaskQueue(
                 )
         task = self.get(task_id)
         assert task is not None
+        if claim_as and task.status == Status.CLAIMED:
+            self._notify_owned_transition()
         outcome = CreationOutcome(
             task=task,
             disposition="created",
@@ -2472,6 +2464,8 @@ class TaskQueue(
             task=task,
             producer_rejections=producer_rejections,
         )
+        if task is not None:
+            self._notify_owned_transition()
         return outcome if _with_outcome else task
 
     def claim_outcome(self, *args: object, **kwargs: object) -> ClaimOutcome:
@@ -2868,7 +2862,7 @@ class TaskQueue(
         if adopt_owner_session_id is not None:
             extra["owner_session_id"] = adopt_owner_session_id
         allowed, to = _task_transition_spec("resume")
-        return self._transition(
+        result = self._transition(
             task_id,
             allowed=allowed,
             to=to,
@@ -2889,6 +2883,8 @@ class TaskQueue(
             #: session -- a no-op would silently drop that real effect.
             idempotent_replay=adopt_owner_session_id is None,
         )
+        self._notify_owned_transition()
+        return result
 
     def release_suspended(
         self,
@@ -3569,6 +3565,7 @@ class TaskQueue(
         ts = self._now(now)
         payload = json.dumps(fields, separators=(",", ":"))
         wake_enqueued = False
+        notify_owned_transition = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             task = self._fetch(conn, task_id)
@@ -3589,6 +3586,7 @@ class TaskQueue(
             )
             resumed = task.status == Status.SUSPENDED
             cold_headless = bool(resumed and self._has_headless_reservation(conn, task_id))
+            notify_owned_transition = resumed
             if cold_headless:
                 conn.execute(
                     "UPDATE tasks SET awaiting_steer = 0, resume_requested = 1,"
@@ -3656,6 +3654,8 @@ class TaskQueue(
             conn.execute("COMMIT")
         if wake_enqueued:
             self._notify_wake()
+        if notify_owned_transition:
+            self._notify_owned_transition()
         return result  # type: ignore[return-value]
 
     def save_card_draft(
