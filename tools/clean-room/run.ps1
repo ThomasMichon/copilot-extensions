@@ -240,12 +240,37 @@ if ($Os -eq 'windows') {
     $untilArgs = @()
     if ($Until -ne 'all') { $untilArgs = @('-e', "CR_UNTIL=$Until") }
 
+    # Auth (mirrors run.sh's resolve_token/token_args): prefer a host-grabbed
+    # Copilot token so no interactive device-code step is needed inside the
+    # container -- `copilot -i` exits immediately with "No authentication
+    # information found" otherwise (confirmed: this is why the Windows arm's
+    # psmux-driven session never produced a live pane to capture). -NoToken
+    # opts out (the scenario then runs unauthenticated, on purpose).
+    $tokenArgs = @()
+    if (-not $NoToken) {
+        $winToken = $env:COPILOT_GITHUB_TOKEN
+        if (-not $winToken) {
+            $ghArgs = @('auth', 'token')
+            if ($TokenAccount) { $ghArgs += @('--user', $TokenAccount) }
+            $winToken = (& gh @ghArgs 2>$null | Select-Object -First 1)
+        }
+        if ($winToken) {
+            Write-Host "auth: injecting COPILOT_GITHUB_TOKEN from host gh ($(if ($TokenAccount) { $TokenAccount } else { 'active gh account' })) -- no device-code needed" -ForegroundColor Cyan
+            $env:COPILOT_GITHUB_TOKEN = $winToken
+            $tokenArgs = @('-e', 'COPILOT_GITHUB_TOKEN')
+        }
+        else {
+            Write-Warning "no host Copilot token found (gh auth token empty) -- scenario will run unauthenticated; pass -TokenAccount or set `$env:COPILOT_GITHUB_TOKEN, or use -NoToken to silence this"
+        }
+    }
+
     Write-Host "== running Windows clean-room scenario '$sname' (through stage $Until) ==" -ForegroundColor Cyan
     & docker @dh run --rm --isolation=hyperv `
         -v "${sdir}:C:\scenario:ro" `
         -v "${libDir}:C:\lib:ro" `
         -v "${ResultsDir}:C:\out" `
         -v "${partner}:C:\partner:ro" `
+        @tokenArgs `
         -e "CR_LIB=C:\lib\clean-room-lib.ps1" `
         -e "CR_PARTNER_PATH=C:\partner" `
         -e "CR_PARTNER_NAME=$PartnerName" `

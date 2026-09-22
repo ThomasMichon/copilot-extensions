@@ -16,6 +16,23 @@ LABEL org.opencontainers.image.description="copilot-extensions clean-room fresh-
 # scenario is driven with `powershell -File C:\scenario\scenario.ps1`.
 WORKDIR C:\\cr
 
+# Make the default shell explicit rather than relying on each RUN line to
+# wrap itself in its own `powershell -Command "..."`: Docker's Windows
+# default shell IS powershell already, so a RUN that ALSO does its own
+# `powershell -NoProfile -Command "..."` wrapping is invoked twice --
+# Docker's own implicit wrapper parses (and interpolates `$env:...`
+# variables in) the ENTIRE instruction text as PowerShell code first, before
+# the nested `-Command` string is ever handed to a second PowerShell
+# process. That first pass consumes the nested double-quotes as its own
+# string delimiters and expands things like `$env:PATH` (a huge
+# `;`-separated string) in place, corrupting the instruction before it ever
+# reaches the intended inner invocation. Confirmed by a real build failure:
+# `[Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';C:\nodejs',
+# 'Machine')` arrived at PowerShell as unquoted, comma-and-paren-stripped
+# tokens. Fix: declare SHELL once, then write plain PowerShell in every RUN
+# below with NO second `powershell -Command` wrapper.
+SHELL ["powershell", "-NoProfile", "-Command"]
+
 # Node + the GitHub Copilot CLI itself (mirrors Dockerfile's own Linux install)
 # -- ADDED for scenarios that need to actually run `copilot`, not just validate
 # a partner's *_ps1 setup flow (the original narrower purpose this image was
@@ -24,17 +41,16 @@ WORKDIR C:\\cr
 # of the experiment and is not inherited into any scenario's runtime.
 ARG NODE_VERSION=22.14.0
 ARG NPM_REGISTRY=https://registry.npmjs.org/
-RUN powershell -NoProfile -Command " \
-    $ErrorActionPreference = 'Stop'; \
-    Invoke-WebRequest -Uri \"https://nodejs.org/dist/v$env:NODE_VERSION/node-v$env:NODE_VERSION-win-x64.zip\" -OutFile C:\node.zip; \
+RUN $ErrorActionPreference = 'Stop'; \
+    Invoke-WebRequest -Uri ('https://nodejs.org/dist/v' + $env:NODE_VERSION + '/node-v' + $env:NODE_VERSION + '-win-x64.zip') -OutFile C:\node.zip; \
     Expand-Archive -LiteralPath C:\node.zip -DestinationPath C:\ ; \
-    Rename-Item -LiteralPath \"C:\node-v$env:NODE_VERSION-win-x64\" -NewName C:\nodejs; \
-    Remove-Item C:\node.zip"
-RUN setx /M PATH "%PATH%;C:\nodejs"
-RUN powershell -NoProfile -Command " \
+    Rename-Item -LiteralPath ('C:\node-v' + $env:NODE_VERSION + '-win-x64') -NewName C:\nodejs; \
+    Remove-Item C:\node.zip
+RUN [Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';C:\nodejs', 'Machine')
+RUN $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'Machine'); \
     npm config set registry $env:NPM_REGISTRY; \
-    npm install -g @github/copilot; \
-    npm config delete registry"
+    npm install -g '@github/copilot'; \
+    npm config delete registry
 
 # psmux (a tmux-alike for Windows) -- the headed-session driver for scenarios
 # that need a REAL interactive `copilot -i` session, not just `-p` (headless
@@ -44,16 +60,37 @@ RUN powershell -NoProfile -Command " \
 # (.github/workflows/ci.yml's "Install psmux" step) for parity.
 ARG PSMUX_VERSION=3.3.8
 ARG PSMUX_SHA256=1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe
-RUN powershell -NoProfile -Command " \
-    $ErrorActionPreference = 'Stop'; \
-    Invoke-WebRequest -Uri \"https://github.com/psmux/psmux/releases/download/v$env:PSMUX_VERSION/psmux-v$env:PSMUX_VERSION-windows-x64.zip\" -OutFile C:\psmux.zip; \
+RUN $ErrorActionPreference = 'Stop'; \
+    Invoke-WebRequest -Uri ('https://github.com/psmux/psmux/releases/download/v' + $env:PSMUX_VERSION + '/psmux-v' + $env:PSMUX_VERSION + '-windows-x64.zip') -OutFile C:\psmux.zip; \
     $actual = (Get-FileHash -Algorithm SHA256 C:\psmux.zip).Hash.ToLowerInvariant(); \
-    if ($actual -ne $env:PSMUX_SHA256) { throw \"psmux archive checksum mismatch: $actual\" }; \
+    if ($actual -ne $env:PSMUX_SHA256) { throw ('psmux archive checksum mismatch: ' + $actual) }; \
     Expand-Archive -LiteralPath C:\psmux.zip -DestinationPath C:\psmux-extract; \
     $exe = Get-ChildItem -LiteralPath C:\psmux-extract -Filter psmux.exe -Recurse | Select-Object -First 1; \
     if (-not $exe) { throw 'psmux.exe not found in release archive' }; \
     New-Item -ItemType Directory -Force -Path C:\psmux | Out-Null; \
     Copy-Item -LiteralPath $exe.FullName -Destination C:\psmux\psmux.exe; \
-    Remove-Item C:\psmux.zip, C:\psmux-extract -Recurse -Force"
-RUN setx /M PATH "%PATH%;C:\psmux"
+    Remove-Item C:\psmux.zip, C:\psmux-extract -Recurse -Force
+RUN [Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';C:\psmux', 'Machine')
 
+# git -- scenario.ps1's phase 2 (duplicating the extension as a project-level
+# source) needs a real repo; MinGit is the portable, no-installer Git for
+# Windows distribution (avoids an interactive/elevated .exe installer inside
+# the build). Tag and asset-name formats diverge (tag is
+# v<MINGIT_TAG_VERSION>.windows.<N>, asset is MinGit-<MINGIT_TAG_VERSION>.<N>-<arch>.zip)
+# -- confirm both against the actual release before bumping either ARG.
+ARG MINGIT_TAG_VERSION=2.55.0
+ARG MINGIT_PATCH=5
+RUN $ErrorActionPreference = 'Stop'; \
+    Invoke-WebRequest -Uri ('https://github.com/git-for-windows/git/releases/download/v' + $env:MINGIT_TAG_VERSION + '.windows.' + $env:MINGIT_PATCH + '/MinGit-' + $env:MINGIT_TAG_VERSION + '.' + $env:MINGIT_PATCH + '-64-bit.zip') -OutFile C:\mingit.zip; \
+    Expand-Archive -LiteralPath C:\mingit.zip -DestinationPath C:\mingit; \
+    Remove-Item C:\mingit.zip
+RUN [Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';C:\mingit\cmd', 'Machine')
+
+# copilot-extensions itself has deep nested paths (skills/plugins trees) that
+# can exceed Windows' legacy 260-char MAX_PATH once cloned under a long
+# marketplace-cache prefix (confirmed: phase-1 marketplace add failed with
+# "fatal: unable to checkout working tree" after a full clone). Enable git's
+# own long-path support AND the OS-level opt-in so both the git client and
+# the Win32 file APIs it calls agree paths over 260 chars are legal.
+RUN C:\mingit\cmd\git.exe config --system core.longpaths true
+RUN New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1 -PropertyType DWORD -Force | Out-Null
