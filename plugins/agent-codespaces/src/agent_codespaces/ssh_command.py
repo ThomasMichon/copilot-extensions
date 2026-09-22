@@ -242,6 +242,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         use_relay=not args.no_relay,
         ado_host=getattr(config.credentials, "ado_host", None),
         feed_token_env=getattr(config.credentials, "feed_token_env", None),
+        copilot_token=getattr(args, "copilot_token", None),
     )
 
     manager = ConnectionManager()
@@ -555,7 +556,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         if getattr(args, "native_transport", False):
             from .native_transport import serve
 
-            return await serve(args, manager, connection.config, relay_env)
+            return await serve(args, manager, connection.config, relay_env, reconnect=_reconnect)
 
         if args.stdio and remote_cmd:
             # Structured stdio mode for agent-bridge

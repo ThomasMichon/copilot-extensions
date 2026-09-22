@@ -59,9 +59,19 @@ class InputPump:
 async def serve(
     args, manager, ssh_config, relay_env: str, *,
     require_owner, mark_launch, retire, namespace="codespace", output=None,
+    reconnect=None,
 ) -> int:
     from ssh_manager import LocalForward
+    from ssh_manager.manager import exec_with_retry
     from ssh_manager.remote_command import render_command
+
+    # Native-host control actions that are read-only or idempotent-by-identity
+    # (the remote agent-bridge reserves by executionId+generation), so a retry
+    # after a transient dev-tunnel reset cannot double-apply. ``message`` /
+    # ``result`` / ``resource-complete`` carry delivery-uncertain semantics and
+    # are deliberately excluded -- they keep the existing reply_transport_timeout
+    # contract instead of a blind retry.
+    _RETRIABLE_ACTIONS = frozenset({"capabilities", "start", "status", "activate", "stop"})
 
     forwards = []
     host_forward = None
@@ -106,11 +116,19 @@ async def serve(
             if not math.isfinite(wait) or not 0 < wait <= 300:
                 raise ValueError("native reply timeout must be in (0,300]")
             timeout = wait + 30
-        result = await manager.exec_command(
-            args.name, render_command(descriptor, command),
-            timeout=timeout,
-            input_bytes=json.dumps(payload).encode("utf-8"),
-        )
+        rendered = render_command(descriptor, command)
+        payload_bytes = json.dumps(payload).encode("utf-8")
+        if action in _RETRIABLE_ACTIONS:
+            # Ride through a transient tunnel reset on an idempotent action so a
+            # single dropped connection does not fail native start/observe.
+            result = await exec_with_retry(
+                manager, args.name, rendered,
+                timeout=timeout, input_bytes=payload_bytes, reconnect=reconnect,
+            )
+        else:
+            result = await manager.exec_command(
+                args.name, rendered, timeout=timeout, input_bytes=payload_bytes,
+            )
         if getattr(result, "timed_out", False):
             raise CommandDeadlineError(
                 "Remote observation deadline expired; delivery may have been admitted. "
@@ -219,13 +237,15 @@ async def serve(
             raise RuntimeError("remote native execution hosting capability is unavailable")
         resources = capability.get("hostResources") == "native-host-resources-v1"
         if not retirement_only:
-            started = await manager.exec_command(
-                args.name, render_command(descriptor, ["service", "start"]), timeout=150.0,
+            started = await exec_with_retry(
+                manager, args.name, render_command(descriptor, ["service", "start"]),
+                timeout=150.0, reconnect=reconnect,
             )
             if started.exit_code != 0:
                 raise RuntimeError("remote shared agent-bridge service did not start")
-            ready = await manager.exec_command(
-                args.name, render_command(descriptor, ["installer-readiness"]), timeout=30.0,
+            ready = await exec_with_retry(
+                manager, args.name, render_command(descriptor, ["installer-readiness"]),
+                timeout=30.0, reconnect=reconnect,
             )
             state = json.loads(ready.stdout)
             if ready.exit_code != 0 or state.get("module") != "agent-bridge/runtime" or state.get("state") != "ready":

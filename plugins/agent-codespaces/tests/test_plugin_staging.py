@@ -294,7 +294,8 @@ def test_is_transient_ssh_failure_classification():
 def test_exec_with_retry_recovers_from_transient(monkeypatch):
     async def _nosleep(_d):
         return
-    monkeypatch.setattr(cli.asyncio, "sleep", _nosleep)
+    import ssh_manager.manager as _sm
+    monkeypatch.setattr(_sm.asyncio, "sleep", _nosleep)
     calls = []
     reconnects = []
 
@@ -318,7 +319,8 @@ def test_exec_with_retry_recovers_from_transient(monkeypatch):
 def test_exec_with_retry_gives_up_after_attempts(monkeypatch):
     async def _nosleep(_d):
         return
-    monkeypatch.setattr(cli.asyncio, "sleep", _nosleep)
+    import ssh_manager.manager as _sm
+    monkeypatch.setattr(_sm.asyncio, "sleep", _nosleep)
     calls = []
 
     class M:

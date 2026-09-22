@@ -10,7 +10,7 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
+import re
 import signal
 import subprocess
 import sys
@@ -147,6 +147,78 @@ class CommandResult:
             raise subprocess.CalledProcessError(
                 self.exit_code, "ssh", self.stdout, self.stderr
             )
+
+
+# The dev-tunnel cluster resets ~10% of connections mid-flight ("An existing
+# connection was forcibly closed", "error getting tunnel", a bare exit 255).
+# These signatures classify such a transient transport failure so idempotent
+# callers can retry rather than fail a whole op that would have succeeded on a
+# second try. This is the canonical home (ssh_manager owns CommandResult), so
+# every plugin -- native hosting, plugin staging, readiness probes -- shares one
+# definition instead of re-deriving it.
+_TRANSIENT_SSH_EXIT = 255
+_TRANSIENT_SSH_STDERR = re.compile(
+    r"forcibly closed|connection reset|broken pipe|closed network connection|"
+    r"connection closed|wsarecv|kex_exchange_identification|"
+    r"error getting tunnel|Connection timed out|Timeout, server .* not responding",
+    re.IGNORECASE,
+)
+
+
+def is_transient_ssh_failure(result: CommandResult) -> bool:
+    """True when a CommandResult reflects a transient SSH/tunnel failure (not a
+    genuine nonzero exit from the remote command)."""
+    if getattr(result, "timed_out", False):
+        return True
+    if result.exit_code == _TRANSIENT_SSH_EXIT:
+        return True
+    return bool(
+        result.exit_code not in (0, None)
+        and _TRANSIENT_SSH_STDERR.search(result.stderr or "")
+    )
+
+
+async def exec_with_retry(
+    manager: "ConnectionManager",
+    host: str,
+    command: str,
+    *,
+    timeout: float | None = 60.0,
+    input_bytes: bytes | None = None,
+    attempts: int = 3,
+    reconnect=None,
+) -> CommandResult:
+    """``ConnectionManager.exec_command`` with retry-and-backoff on transient
+    SSH/tunnel failures.
+
+    Only for IDEMPOTENT commands -- a retry may re-run the command. Retries on an
+    SSH connection failure (exit 255), a timeout, or connection-reset stderr; a
+    genuine nonzero exit from the remote command is returned immediately. Between
+    attempts it best-effort ``reconnect``s to heal a dropped ControlMaster (a
+    no-op for direct-SSH, where each exec is a fresh connection).
+    """
+    kwargs: dict = {"timeout": timeout}
+    if input_bytes is not None:
+        kwargs["input_bytes"] = input_bytes
+    result = await manager.exec_command(host, command, **kwargs)
+    delay = 2.0
+    for attempt in range(1, attempts):
+        if not is_transient_ssh_failure(result):
+            return result
+        log.warning(
+            "Transient SSH failure on %s (attempt %d/%d, exit %s); retrying in %.0fs: %s",
+            host, attempt, attempts, result.exit_code, delay,
+            (result.stderr or "").strip()[:200],
+        )
+        if reconnect is not None:
+            try:
+                await reconnect()
+            except Exception as exc:  # pragma: no cover - best-effort heal
+                log.debug("Reconnect before retry on %s failed: %s", host, exc)
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, 8.0)
+        result = await manager.exec_command(host, command, **kwargs)
+    return result
 
 
 @dataclass

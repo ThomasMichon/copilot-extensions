@@ -1261,76 +1261,16 @@ async def _settle_codespace_on_disconnect(
     return False
 
 
-# SSH exit code 255 means the ssh client itself failed (connection/tunnel), not
-# the remote command. Combined with these stderr markers it identifies the
-# intermittent Azure dev-tunnel resets (~10% of ops on this cluster) that must be
-# retried rather than treated as a hard failure.
-_TRANSIENT_SSH_EXIT = 255
-_TRANSIENT_SSH_STDERR = re.compile(
-    r"forcibly closed|connection reset|broken pipe|closed network connection|"
-    r"connection closed|wsarecv|kex_exchange_identification|"
-    r"error getting tunnel|Connection timed out|Timeout, server .* not responding",
-    re.IGNORECASE,
+# The transient-SSH detector and the idempotent retry-with-backoff live
+# canonically in ssh_manager (it owns CommandResult), so the codespace
+# stage/register/read paths and the native-host control channel share ONE
+# definition instead of each re-deriving the dev-tunnel-reset signatures.
+# Re-exported here under the historical private names the call sites and tests
+# in this module already use.
+from ssh_manager import (  # noqa: E402
+    exec_with_retry as _exec_with_retry,
+    is_transient_ssh_failure as _is_transient_ssh_failure,
 )
-
-
-def _is_transient_ssh_failure(result) -> bool:
-    """True when a CommandResult reflects a transient SSH/tunnel failure (not a
-    genuine nonzero exit from the remote command)."""
-    if getattr(result, "timed_out", False):
-        return True
-    if result.exit_code == _TRANSIENT_SSH_EXIT:
-        return True
-    return bool(
-        result.exit_code not in (0, None)
-        and _TRANSIENT_SSH_STDERR.search(result.stderr or "")
-    )
-
-
-async def _exec_with_retry(
-    manager,
-    name: str,
-    command: str,
-    *,
-    timeout: float | None = 60.0,
-    input_bytes: bytes | None = None,
-    attempts: int = 3,
-    reconnect=None,
-):
-    """``exec_command`` with retry-and-backoff on transient SSH/tunnel failures.
-
-    Only for IDEMPOTENT commands -- a retry may re-run the command. The dev-tunnel
-    cluster resets ~10% of connections, and a single reset otherwise fails a whole
-    stage/register/read op that would have succeeded on a second try. Retries on an
-    SSH connection failure (exit 255), a timeout, or connection-reset stderr; a
-    genuine nonzero exit from the remote command is returned immediately. Between
-    attempts it best-effort ``reconnect``s to heal a dropped ControlMaster (a
-    no-op for direct-SSH, where each exec is a fresh connection).
-    """
-    delay = 2.0
-    # Only forward input_bytes when provided, so callers/mocks whose exec_command
-    # does not accept it (register/read paths) keep working unchanged.
-    kwargs = {"timeout": timeout}
-    if input_bytes is not None:
-        kwargs["input_bytes"] = input_bytes
-    result = await manager.exec_command(name, command, **kwargs)
-    for attempt in range(1, attempts):
-        if not _is_transient_ssh_failure(result):
-            return result
-        log.warning(
-            "Transient SSH failure on %s (attempt %d/%d, exit %s); retrying in %.0fs: %s",
-            name, attempt, attempts, result.exit_code, delay,
-            (result.stderr or "").strip()[:200],
-        )
-        if reconnect is not None:
-            try:
-                await reconnect()
-            except Exception as exc:
-                log.debug("Reconnect before retry on %s failed: %s", name, exc)
-        await asyncio.sleep(delay)
-        delay = min(delay * 2, 8.0)
-        result = await manager.exec_command(name, command, **kwargs)
-    return result
 
 
 async def _stage_plugins(

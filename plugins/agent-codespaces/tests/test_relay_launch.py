@@ -42,6 +42,30 @@ def test_build_relay_env_no_relay_still_scrubs():
     assert "COPILOT_CUSTOM_INSTRUCTIONS_DIRS" in env
 
 
+def test_build_relay_env_omits_copilot_token_by_default():
+    # No copilot_token -> a plain (non-Copilot) launch never carries a bearer.
+    env = build_relay_env(9857, "tok123", use_relay=True)
+    assert "COPILOT_GITHUB_TOKEN" not in env
+
+
+def test_build_relay_env_injects_copilot_token_last():
+    env = build_relay_env(
+        9857, "tok123", use_relay=True, copilot_token="gho_secret value"
+    )
+    # Shell-quoted so a token with spaces/specials stays a single word.
+    assert "export COPILOT_GITHUB_TOKEN='gho_secret value';" in env
+    # Authoritative: the Copilot bearer is exported AFTER the PAT scrub and the
+    # relay exports so nothing can clobber it.
+    assert env.index("unset") < env.index("COPILOT_GITHUB_TOKEN")
+    assert env.index("LC_GIT_CREDENTIAL_RELAY") < env.index("COPILOT_GITHUB_TOKEN")
+
+
+def test_build_relay_env_injects_copilot_token_without_relay():
+    # Even with no relay, a Copilot launch still needs its bearer exported.
+    env = build_relay_env(9857, None, use_relay=False, copilot_token="gho_abc")
+    assert "export COPILOT_GITHUB_TOKEN=gho_abc;" in env
+
+
 def test_build_azure_auth_helper_compat_shim_maps_bare_name():
     # #415: RushStack's AdoCodespacesAuthCredential hard-codes the bare
     # "azure-auth-helper" name; map it to the relay-first ado-auth-helper

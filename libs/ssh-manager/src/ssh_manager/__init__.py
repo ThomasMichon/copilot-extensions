@@ -46,7 +46,9 @@ from .manager import (
     CommandResult,
     ConnectionInfo,
     ConnectionManager,
+    exec_with_retry,
     get_default_manager,
+    is_transient_ssh_failure,
 )
 from .platform import MultiplexMode, PlatformInfo, detect_platform
 
@@ -83,8 +85,10 @@ __all__ = [
     "detect_platform",
     "ensure_healthy",
     "encode_envelope",
+    "exec_with_retry",
     "get_default_manager",
     "hello_envelope",
+    "is_transient_ssh_failure",
     "locks_dir",
     "pick_free_local_port",
     "pid_alive",

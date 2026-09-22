@@ -15,7 +15,7 @@ from . import execution_claims
 CAPABILITY = "codespace-native-transport-v1"
 
 
-async def serve(args, manager, ssh_config, relay_env: str) -> int:
+async def serve(args, manager, ssh_config, relay_env: str, *, reconnect=None) -> int:
     from ssh_manager.native_channel import serve as serve_channel
     from .lease import _lease_lock, CoordinationRejected
 
@@ -47,7 +47,7 @@ async def serve(args, manager, ssh_config, relay_env: str) -> int:
     return await serve_channel(
         args, manager, ssh_config, relay_env, require_owner=require_owner,
         mark_launch=lambda: execution_claims.mark(args.name, args.effort, identity, launchRequested=True),
-        retire=retire, output=sys.stdout,
+        retire=retire, output=sys.stdout, reconnect=reconnect,
     )
 
 
@@ -75,6 +75,12 @@ def command(args) -> int:
             raise RuntimeError("Native CodeSpace account token is unavailable; refusing ambient authentication")
         os.environ["GH_TOKEN"] = token
         os.environ.pop("GITHUB_TOKEN", None)
+        # The native session launches the Copilot CLI, which needs a
+        # Copilot-entitled GitHub bearer in its own environment. Reuse the same
+        # account-bound host token (never an ambient one) and hand it to the
+        # launch-prelude builder so it is injected as COPILOT_GITHUB_TOKEN over
+        # the secure stdin-carried prelude -- headless auth with no device-code.
+        args.copilot_token = token
     if sys.platform != "win32":
         def interrupted(*_):
             raise KeyboardInterrupt

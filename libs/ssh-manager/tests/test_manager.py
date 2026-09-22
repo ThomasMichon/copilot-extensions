@@ -13,7 +13,9 @@ from ssh_manager.manager import (
     CommandResult,
     ConnectionInfo,
     ConnectionManager,
+    exec_with_retry,
     get_default_manager,
+    is_transient_ssh_failure,
 )
 from ssh_manager.platform import MultiplexMode, PlatformInfo
 
@@ -397,3 +399,92 @@ class TestGetDefaultManager:
 
         # Cleanup
         mod._default_manager = None
+
+
+class _Res:
+    def __init__(self, exit_code, stderr="", timed_out=False):
+        self.exit_code = exit_code
+        self.stderr = stderr
+        self.timed_out = timed_out
+
+
+def test_is_transient_ssh_failure_classification():
+    # SSH-client-level failures (exit 255), timeouts, and known tunnel-reset
+    # stderr are transient; a genuine nonzero exit from the remote command is not.
+    assert is_transient_ssh_failure(_Res(255))
+    assert is_transient_ssh_failure(_Res(-1, timed_out=True))
+    assert is_transient_ssh_failure(_Res(1, "kex_exchange_identification: connection reset"))
+    assert is_transient_ssh_failure(_Res(1, "wsarecv: An existing connection was forcibly closed"))
+    assert is_transient_ssh_failure(_Res(1, "error getting tunnel"))
+    assert not is_transient_ssh_failure(_Res(0))
+    assert not is_transient_ssh_failure(_Res(2, "bash: command not found"))
+
+
+def test_exec_with_retry_recovers_from_transient(monkeypatch):
+    import ssh_manager.manager as mod
+
+    async def _nosleep(_d):
+        return
+    monkeypatch.setattr(mod.asyncio, "sleep", _nosleep)
+    calls = []
+    reconnects = []
+
+    class M:
+        async def exec_command(self, name, command, **kw):
+            calls.append(kw)
+            return _Res(255, "forcibly closed") if len(calls) == 1 else _Res(0, "ok")
+
+    async def reconnect():
+        reconnects.append(True)
+
+    res = asyncio.run(exec_with_retry(
+        M(), "cs", "rm -rf d && mkdir d", input_bytes=b"payload", reconnect=reconnect,
+    ))
+    assert res.exit_code == 0
+    assert len(calls) == 2
+    assert reconnects == [True]
+    assert calls[0].get("input_bytes") == b"payload"
+
+
+def test_exec_with_retry_gives_up_after_attempts(monkeypatch):
+    import ssh_manager.manager as mod
+
+    async def _nosleep(_d):
+        return
+    monkeypatch.setattr(mod.asyncio, "sleep", _nosleep)
+    calls = []
+
+    class M:
+        async def exec_command(self, name, command, **kw):
+            calls.append(1)
+            return _Res(255, "forcibly closed")
+
+    res = asyncio.run(exec_with_retry(M(), "cs", "x", attempts=3))
+    assert res.exit_code == 255
+    assert len(calls) == 3
+
+
+def test_exec_with_retry_no_retry_on_genuine_error():
+    calls = []
+
+    class M:
+        async def exec_command(self, name, command, **kw):
+            calls.append(1)
+            return _Res(2, "real command error")
+
+    res = asyncio.run(exec_with_retry(M(), "cs", "x"))
+    assert res.exit_code == 2
+    assert len(calls) == 1
+
+
+def test_exec_with_retry_omits_input_bytes_when_absent():
+    seen = []
+
+    class M:
+        async def exec_command(self, name, command, *, timeout=None):
+            seen.append(timeout)
+            return _Res(0)
+
+    res = asyncio.run(exec_with_retry(M(), "cs", "x", timeout=240.0))
+    assert res.exit_code == 0
+    assert seen == [240.0]

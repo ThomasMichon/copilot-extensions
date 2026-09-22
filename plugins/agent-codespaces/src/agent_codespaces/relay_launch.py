@@ -173,6 +173,7 @@ def build_relay_env(
     use_relay: bool,
     ado_host: str | None = None,
     feed_token_env: list[str] | None = None,
+    copilot_token: str | None = None,
 ) -> str:
     """Build the CodeSpace launch-prelude env string.
 
@@ -193,6 +194,11 @@ def build_relay_env(
     (npm/nuget/rush) works over the relay (dotfiles#1221). The feed-token
     exports come LAST so they can use the just-exported
     ``LC_GIT_CREDENTIAL_RELAY``.
+
+    When ``copilot_token`` is supplied (a managed interactive Copilot session),
+    a final ``export COPILOT_GITHUB_TOKEN`` is appended so the on-CodeSpace
+    Copilot CLI authenticates headlessly with a Copilot-entitled bearer, exactly
+    as the container launch path injects one -- no device-code login.
     """
     from .codespace_assets import build_auth_error_policy_command
 
@@ -213,6 +219,20 @@ def build_relay_env(
         env += build_relay_portmap_write(relay_port)
         env += build_azure_auth_helper_compat_shim()
         env += build_feed_token_exports(feed_token_env)
+    if copilot_token:
+        # A managed interactive Copilot session (native SSH host / --stdio launch)
+        # runs the Copilot CLI, which needs a Copilot-entitled GitHub bearer in
+        # its environment. The CodeSpace's own GITHUB_TOKEN lives only in login
+        # shells (absent in the non-login native-host command) and is not
+        # reliably Copilot-entitled, so -- exactly as the container run.ps1/run.sh
+        # path does ("prefer a host-grabbed Copilot token injected as
+        # COPILOT_GITHUB_TOKEN -- no device-code needed") -- inject the
+        # host-resolved, account-bound token. Exported LAST so it is authoritative,
+        # and only ever delivered over the secure stdin-carried prelude (never an
+        # argv/disk artifact), the same channel that already carries
+        # LC_GIT_CREDENTIAL_RELAY_TOKEN. COPILOT_GITHUB_TOKEN is Copilot-specific,
+        # so git/gh keep flowing through the credential relay untouched.
+        env += f"export COPILOT_GITHUB_TOKEN={shlex.quote(copilot_token)}; "
     return env
 
 
