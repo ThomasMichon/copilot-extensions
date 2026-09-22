@@ -198,6 +198,7 @@ from .execution_cli import (  # noqa: F401 -- re-exported for existing call site
     _suspend_for_detached_wait,
 )
 from .registrar_runtime_cli import (  # noqa: F401 -- re-exported for existing call sites/tests
+    _WORKTREE_PARENT_SUFFIX,
     _cmd_registrar,
     _declaration_summary,
     _reject_worktree_checkout_as_repo_root,

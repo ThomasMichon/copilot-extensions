@@ -1981,7 +1981,7 @@ the Phase 0 runbook, picked up as capacity allows.
 ### 2026-09-22 — Phase 2 continued: `plugins/agent-dispatch/src/agent_dispatch/__main__.py` shared-helper + registrar-runtime slice
 - Took the residual compatibility kernel as the final `__main__` reduction
   pass rather than stopping at "close enough." Extracted a new `shared_cli.py`
-  (**114** lines) for the shared CLI helper/re-export surface
+  (**115** lines) for the shared CLI helper/re-export surface
   (`_split_owner`, `_simple`, `_owner_from_identity`, `_resolve_owner`,
   `_hold_actor`, `_read_result`, and the dash-dash parser shim) plus a new
   `registrar_runtime_cli.py` (**162** lines) for the remaining registrar/runtime
