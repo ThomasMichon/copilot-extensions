@@ -140,6 +140,11 @@ silently latching onto it, and tells you to end the existing one first:
 <agent-bridge catalog argv[0]> create <agent-name> "..."   # then start clean
 ```
 
+For a **singleton repo** (one anchor checkout, no worktree isolation),
+`create` is also a declared refusal: there is no second checkout to create.
+Use `resume <repo-or-agent>` to load/take over the anchor's current head, or
+`handoff <repo-or-agent>` to roll it forward deliberately.
+
 ### Choosing send vs create — check for an outstanding session first
 
 Before dispatching work to an agent, **check whether it already has a
@@ -186,14 +191,19 @@ be discarded (or the cancel signature *persists* across sends). See the
 # Stop a session (preserves state for resume)
 <agent-bridge catalog argv[0]> stop <session-id>
 
-# Resume a stopped session -- or load/take-over a worktree by handle.
-# The target may be an owned ACP session id OR a worktree handle. If it is a
-# worktree handle whose interactive CLI has stopped (e.g. after a reboot), the
-# worktree is loaded as a fresh owned session -- a dormant worktree is just a
-# note. If a *live* interactive CLI still holds the worktree, resume refuses
+# Resume a stopped session -- or load/take-over a worktree / singleton anchor.
+# The target may be an owned ACP session id, a worktree handle, or a
+# singleton repo key / agent name. Singleton repos are keyed internally by a
+# stable `<repo>@anchor` pseudo-worktree id, but the CLI accepts the repo key.
+# If the target's interactive CLI has stopped (e.g. after a reboot), resume
+# loads it as a fresh owned session -- a dormant target is just a note. If a
+# *live* interactive CLI still holds the checkout, resume refuses
 # (break-glass); stop that CLI first, then re-run with --force to take it over.
-<agent-bridge catalog argv[0]> resume <session-id|worktree-handle>
-<agent-bridge catalog argv[0]> resume <worktree-handle> --force   # affirmative take-over
+<agent-bridge catalog argv[0]> resume <session-id|worktree-handle|repo-or-agent>
+<agent-bridge catalog argv[0]> resume <worktree-handle|repo-or-agent> --force   # affirmative take-over
+
+# Retire the current session and continue in a fresh successor in place.
+<agent-bridge catalog argv[0]> handoff <session-id|worktree-handle|repo-or-agent>
 
 # End a session (full cleanup)
 <agent-bridge catalog argv[0]> end <session-id>
