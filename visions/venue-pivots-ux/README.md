@@ -268,6 +268,38 @@ convention the Tasks pane's Prominent-Artifacts feature already
 established. See "Auto-claiming a PR" above for the one new *producer* of
 claim entries this vision adds — the ledger and its rendering are unchanged.
 
+### Claims pecking order — one shared prominence ranking, everywhere
+
+A worktree's claim ledger can carry several entries at once (a PR, an
+issue, a claimed CodeSpace, a child worktree...), but line one's claims
+slot only has room for the "1-2 prominent" the existing Tasks-pane
+convention already limits itself to — so *something* has to decide which
+1-2 win. This vision fixes that as one **shared prominence ranking**,
+usable identically by every pivot that shows a claims-list (Worktrees,
+Tasks, Codespaces, Containers), not a value each pivot picks for itself.
+The ranking's organizing principle is **human-mappable, quick-find first**:
+an entity a human can recognize and act on by its own external identity
+(a PR number, a bug number) outranks one that is only ever meaningful
+inside the fabric itself. Starting order (operator-supplied, expected to be
+tuned as real usage surfaces exceptions):
+
+1. Active PR
+2. Active bug/issue
+3. Active effort
+4. Active bridge (agent-bridge agent/session)
+5. Active CodeSpace/Container
+6. Active child worktree
+7. Active machine SSH session
+8. Active dispatch task
+
+Dispatch tasks rank last deliberately: a task id is essentially never an
+independently-referenceable identity outside this fabric the way a PR or
+bug number is, so even an active one is the least "human-mappable, quick
+find" thing to lead with. This is a **starting, explicitly tunable**
+ordering, not a frozen spec — the value this vision adds is fixing that
+exactly one such list exists and is shared, not the specific order of any
+one entry.
+
 ### Open — into the muxed Copilot instance, over SSH
 
 The single most important action on either pivot is **Open**: for a row that
@@ -333,6 +365,13 @@ the driving worktree's existing claim ledger — no manual claim step, no new
 claim store, just a new producer feeding the ledger the claims-list column
 already reads.
 
+### claims-pecking-order
+Every pivot showing a claims-list (Worktrees, Tasks, Codespaces,
+Containers) selects its "1-2 prominent" entries from one shared
+prominence ranking (PR > bug/issue > effort > bridge > CodeSpace/container
+> child worktree > machine SSH > dispatch task, tunable), not a
+per-pivot ad hoc choice.
+
 ### open-into-muxed-session
 A new **Open** action on either pivot attaches the operator to a live row's
 muxed Copilot instance over the fabric's SSH transport, regardless of
@@ -354,6 +393,13 @@ layer — `agent-codespaces`/`agent-containers` for venue identity and
 lifecycle, `agent-worktrees` for the driving-worktree cross-link,
 agent-bridge for live-session state — never independently tracked or
 cached as a second copy inside the pivot itself.
+
+### one-ranking-many-consumers
+The claims pecking order is defined **once**, in one place a claim-showing
+pivot's rendering code calls into (not copy-pasted per pivot and not
+recomputed differently by Worktrees vs. Tasks vs. Codespaces vs.
+Containers). Tuning the order is a single-point change that every
+consuming pivot picks up identically.
 
 ### graceful-absence
 A venue with no live agent-bridge session, no driving worktree, or no
@@ -408,6 +454,13 @@ demo data source, before any implementation PR — never a hand-drawn mockup.
   the specific push→PR transition odsp-web's ADO flow produces; this vision
   does not attempt to generalize to every possible externally-observable
   signal a venue could produce.
+- **Not sole authority over the claims pecking order elsewhere.** This
+  vision proposes and consumes the shared ranking, but the Worktrees and
+  Tasks panes' own prominent-artifact selection predates it
+  (`plugins/agent-dispatch/tasks-pane-ux`'s Prominent Artifacts feature) —
+  aligning those panes onto this ranking is a cross-vision coordination
+  item, not something this vision can unilaterally mandate onto another
+  plugin's owned surface.
 
 ## See Also
 
@@ -425,6 +478,15 @@ demo data source, before any implementation PR — never a hand-drawn mockup.
 
 ## Provenance
 
+- **2026-09-21 (latest+1)** — Operator supplied a cross-pivot claims
+  prominence ranking (PR > bug > effort > bridge > CodeSpace/container >
+  child worktree > machine SSH > dispatch task — human-mappable/
+  quick-find first, dispatch tasks penalized for lacking an externally
+  referenceable id), explicitly tunable. Added as a shared "Claims pecking
+  order" concept and `one-ranking-many-consumers` behavior; flagged as a
+  cross-vision coordination item with `plugins/agent-dispatch/
+  tasks-pane-ux`'s own pre-existing Prominent Artifacts feature rather than
+  something this vision can unilaterally mandate there.
 - **2026-09-21 (latest)** — Operator refined the title/activity model:
   `<title>` is a declared checkout intent, distinct from the venue's own
   repo/spec identity (already line one); `<activity>` is an accumulating

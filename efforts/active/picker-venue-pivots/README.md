@@ -48,7 +48,12 @@ information fidelity:
    driving worktree's existing claim ledger
    (`agent-worktrees claims add pr <ref>`), so it appears in the row's
    claims-list with no manual claim step.
-6. **Design only** for this effort: "New codespace" / "New container" /
+6. Adopt a single **shared claims pecking order** (PR > bug > effort >
+   bridge > CodeSpace/container > child worktree > machine SSH > dispatch
+   task, tunable) for picking the "1-2 prominent" claims every pivot's
+   claims-list shows — one ranking, every claim-showing pivot consumes it
+   the same way.
+7. **Design only** for this effort: "New codespace" / "New container" /
    "New agent"-on-a-dormant-venue, provision-then-embody. Per operator
    decision (2026-09-21), the interactive create→embody implementation is
    deferred to land alongside the parallel drive-CLI-agents-over-SSH
@@ -220,6 +225,16 @@ Tasks pivot are the baselines).
   detection point from scratch — likely a periodic/triggered check inside
   the CodeSpace's own git activity or an ADO API poll — before it can call
   the existing `claims add pr` verb.
+- **No prominent-claims-selection code exists anywhere yet:** confirmed
+  (grep across `engine.py`/`pivot_manifest.py`) — the Tasks-pane-ux
+  vision's own "Prominent Artifacts" feature has never been implemented,
+  and no other pivot picks "1-2 prominent" claims out of a fuller ledger
+  today. This effort's shared claims-pecking-order module is therefore
+  genuinely new infrastructure, not a wrapper around an existing selector —
+  size and test it accordingly, and place it somewhere both this effort's
+  pivots and a future Tasks-pane-ux implementation can import from (a
+  natural home is `agent-worktrees` itself, since it already owns the
+  ledger being ranked).
 
 ## Plan
 
@@ -259,14 +274,25 @@ Tasks pivot are the baselines).
       indicator lives in a dedicated line-one stat slot or the line-two
       `[mark]` glyph, and design the "view driving worktree"/"worktree
       status" menu entries for both pivots.
+- [ ] Design the shared claims-pecking-order module: its home (proposed:
+      `agent-worktrees`, since it owns the ledger being ranked), its input
+      shape (a worktree's claim-ledger entries) and output shape (an
+      ordered/truncated "1-2 prominent" list per the ranking), and how a
+      pivot's rendering code calls into it — this is genuinely new
+      infrastructure (confirmed nothing like it exists today), size the
+      design accordingly.
 - [ ] Render and review before/after screenshots for both pivots: current
       (real) shape vs. proposed shape, plus one screenshot each of a row
-      with vs. without a live agent-bridge session joined, and one showing
-      the driving-worktree mark + menu entries.
+      with vs. without a live agent-bridge session joined, one showing the
+      driving-worktree mark + menu entries, and one showing the claims
+      pecking order picking between multiple ledger entries on one row.
 - [ ] Operator review of the screenshots; resolve any design feedback here
       before Phase 1 starts.
 
 ### Phase 1 — Codespaces pivot (implementation)
+- [ ] Build the shared claims-pecking-order module (per Phase 0 design) in
+      `agent-worktrees`, and wire Codespaces' claims-list column to select
+      its "1-2 prominent" entries through it rather than an ad hoc choice.
 - [ ] Wire `entry.subtitle` into `pivots/agent-codespaces.json` so
       `pool.picker_payload`'s already-computed subtitle (claim/orphan
       detail) actually renders as the durable-title half of line two.
@@ -287,6 +313,8 @@ Tasks pivot are the baselines).
       account").
 - [ ] Wire the existing `lease` field to a `worktree` cross-link exactly
       as Codespaces already does.
+- [ ] Wire Containers' claims-list column to the same Phase 1
+      claims-pecking-order module — no second implementation.
 - [ ] Add gated lifecycle actions analogous to Release/Recycle/Verify,
       built on `lifecycle.py`/`lease.py`/`rescue.py`'s existing
       start/stop/remove/rescue primitives.
@@ -335,6 +363,10 @@ Tasks pivot are the baselines).
       link against `test_fleet_json.py`'s existing fixture shape.
 - [ ] Unit tests for the Codespaces/Containers agent-bridge live-session
       joins against fixed fixtures (venue-target match, no match).
+- [ ] Unit tests for the shared claims-pecking-order module: correct
+      ordering across a mixed ledger (PR + bug + child worktree, etc.),
+      correct truncation to "1-2 prominent," and stable behavior with an
+      empty ledger.
 - [ ] A live/manual check against a real CodeSpace and a real fleet
       container (not just fixtures) before Phase 1/2 are considered done,
       per this repo's "validate beyond unit tests" policy.
@@ -352,6 +384,19 @@ Tasks pivot are the baselines).
 
 ## Journal
 
+- **2026-09-21 (latest+1)** — Operator supplied a shared claims prominence
+  ranking (PR > bug > effort > bridge > CodeSpace/container > child
+  worktree > machine SSH > dispatch task, tunable; human-mappable/
+  quick-find first, dispatch tasks penalized for lacking an externally
+  referenceable id) meant to apply across every pivot's claims-list, not
+  just this effort's two. Grounded: confirmed no prominent-claims-selection
+  code exists anywhere yet (`engine.py`/`pivot_manifest.py` grep) — this is
+  genuinely new shared infrastructure, proposed to live in `agent-worktrees`
+  since it already owns the ledger being ranked. Added Phase 0 design task,
+  Phase 1 build-it task, Phase 2 reuse-it task, and flagged in the vision's
+  Non-Goals that aligning the Worktrees/Tasks panes' own prominent-artifact
+  selection onto this ranking is a cross-vision coordination item, not
+  something owned outright here.
 - **2026-09-21 (latest)** — Operator refined the title/activity model and
   added new scope: `<title>` is a declared checkout intent (distinct from
   the venue's repo/spec identity, which stays a line-one fact); `<activity>`
