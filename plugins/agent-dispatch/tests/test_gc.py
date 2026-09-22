@@ -362,6 +362,72 @@ def test_reconcile_ignores_unheld_tasks(q):
     assert counts["checked"] == 0 and counts["requeued"] == 0
 
 
+def test_reconcile_probes_held_tasks_concurrently_not_serially(q):
+    """Each held task's liveness probe is a blocking call with its own
+    multi-second real-world timeout (``tracking.liveness_verdict``: 3-6s SSH/
+    bridge subprocess). A large held backlog probed one-at-a-time could
+    serially exceed a GC loop's overall cycle timeout -- and since verdicts
+    were only written after *every* probe finished, a mid-loop timeout meant
+    none of that cycle's transitions landed, letting stale/`unknown` tasks
+    and cold reservations pile up unreaped indefinitely (the root cause
+    behind a real production `liveness_gc: cycle exceeded 60.0s` incident).
+
+    Probing must therefore run concurrently. Proved deterministically (not via
+    a wall-clock timing bound, which can be flaky under a slow/contended CI
+    runner) with a two-party `threading.Barrier`: any two probe calls racing
+    to the same barrier together proves at least 2-way concurrency, which a
+    serial implementation (one probe at a time) can never achieve. A 2-party
+    barrier (rather than one sized to ``n``) also keeps this test decoupled
+    from the exact ``_LIVENESS_PROBE_CONCURRENCY`` cap -- it still passes if
+    that cap is ever tuned, as long as probing stays non-serial.
+    """
+    import threading
+
+    n = 6
+    barrier = threading.Barrier(2, timeout=2.0)
+    for i in range(n):
+        t = q.create(f"t{i}", now=1000.0 + i)
+        _claim_and_start(q, t.id, wt=f"wt{i}", session=f"S{i}", now=1001.0 + i)
+
+    def barrier_resolver(wt, mc, sid):
+        barrier.wait()  # raises BrokenBarrierError if a partner never arrives
+        return "live"
+
+    counts = q.reconcile_liveness(barrier_resolver, now=9999.0)
+
+    assert counts["checked"] == n and counts["live"] == n
+
+
+def test_reconcile_uses_a_shared_process_wide_probe_executor(q):
+    """The probe executor must be **shared across calls**, not created fresh
+    per pass.
+
+    The coordinator's GC loop runs each ``reconcile_liveness`` pass under
+    ``asyncio.wait_for(asyncio.to_thread(...), timeout=cycle_timeout)``
+    (``coordinator_loops._run_supervised_cycle``), and that timeout does NOT
+    cancel the underlying thread -- a slow/hung pass keeps running in the
+    background even after the loop times it out and starts a new cycle. A
+    per-call executor would let overlapping passes each spin up their own
+    ``_LIVENESS_PROBE_CONCURRENCY`` workers, multiplying concurrent probe
+    threads past the intended cap under exactly that failure mode -- the
+    real Copilot review finding this test guards against regressing.
+    """
+    from agent_dispatch import queue_liveness
+
+    t = q.create("x", now=1000.0)
+    _claim_and_start(q, t.id, wt="wt", session="S1", now=1001.0)
+    q.reconcile_liveness(lambda wt, mc, sid: "live", now=2000.0)
+    first = queue_liveness._probe_executor
+    assert first is not None
+
+    t2 = q.create("y", now=1000.0)
+    _claim_and_start(q, t2.id, wt="wt2", session="S2", now=1001.0)
+    q.reconcile_liveness(lambda wt, mc, sid: "live", now=3000.0)
+    second = queue_liveness._probe_executor
+
+    assert second is first
+
+
 def test_reconcile_default_resolver_safe_without_bridge(q, monkeypatch):
     monkeypatch.setattr(tracking, "agent_bridge_launch_prefix", lambda: None)
     t = q.create("x", now=1000.0)
