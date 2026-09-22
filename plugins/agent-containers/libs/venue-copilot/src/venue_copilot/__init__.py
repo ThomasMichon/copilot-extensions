@@ -150,6 +150,7 @@ def release_cli_mode(
 def build_copilot_remote_command(
     worktree_id: str,
     *,
+    anchor: bool = False,
     driver: str | None = None,
     seed: str | None = None,
     ensure_mux: bool = True,
@@ -163,6 +164,15 @@ def build_copilot_remote_command(
     already carry a *full* ``agent-worktrees`` install (not just its lean
     self-provisioned tools) for this to resolve.
 
+    ``anchor=True`` forwards ``--anchor`` instead of ``--worktree-id
+    <worktree_id>`` -- a CodeSpace/container venue is conventionally
+    anchor-only (the devcontainer/CodeSpace already clones the repo directly;
+    there is no worktree unless an operator explicitly created one), matching
+    headless ACP dispatch's own existing behavior of running straight in the
+    anchor checkout. ``worktree_id`` is still required in this case (as the
+    CLI-mode reservation identity -- see :func:`reserve_cli_mode`), but is
+    never forwarded to the remote command itself.
+
     Wrapped in ``bash -lc`` (a login shell): confirmed live against a real
     disposable trusted-container venue (agent-bridge-cli-mode-sessions Phase
     4 validation) that OpenSSH's non-interactive remote-command exec never
@@ -175,7 +185,8 @@ def build_copilot_remote_command(
     and layered underneath, the already-tracked "venue lacks a full install"
     gap.
     """
-    argv = [embody_bin, "copilot", "--worktree-id", worktree_id]
+    argv = [embody_bin, "copilot"]
+    argv += ["--anchor"] if anchor else ["--worktree-id", worktree_id]
     if driver:
         argv += ["--driver", driver]
     if seed:
@@ -190,6 +201,7 @@ def run_venue_copilot(
     worktree_id: str,
     *,
     connect: Callable[[str], int],
+    anchor: bool = False,
     ttl_seconds: float = DEFAULT_TTL_SECONDS,
     driver: str | None = "cli-mode",
     seed: str | None = None,
@@ -207,13 +219,21 @@ def run_venue_copilot(
     onto its own transport). The reservation is released in a ``finally``
     regardless of how ``connect`` returns, so a crashed or killed interactive
     session never leaks a reservation past its own TTL only.
+
+    ``worktree_id`` is always the CLI-mode reservation's identity (the string
+    key agent-bridge's daemon correlates a self-registering session against);
+    for ``anchor=True`` the caller passes the same synthesized
+    ``anchor-<repo_name>`` identity ``agent-worktrees get session-scope-id``
+    reports remotely once the anchor session registers, so the reservation
+    can actually be claimed (see the effort's Phase 4 registration-identity
+    follow-up).
     """
     reserve_cli_mode(
         worktree_id, ttl_seconds=ttl_seconds, bridge_bin=bridge_bin, run=run,
     )
     remote_command = build_copilot_remote_command(
-        worktree_id, driver=driver, seed=seed, ensure_mux=ensure_mux,
-        embody_bin=embody_bin,
+        worktree_id, anchor=anchor, driver=driver, seed=seed,
+        ensure_mux=ensure_mux, embody_bin=embody_bin,
     )
     try:
         return connect(remote_command)

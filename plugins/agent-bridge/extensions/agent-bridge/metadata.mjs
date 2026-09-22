@@ -20,7 +20,6 @@
 // flight, so a slow one degrades registration latency, never extension
 // readiness. The four calls also run in parallel (`Promise.all`), bounded by
 // the single slowest one instead of their sum.
-import { basename } from "node:path";
 import { exec, execFile } from "node:child_process";
 
 // --- Async CLI runner (non-blocking; never freezes the event loop) ---
@@ -56,16 +55,16 @@ export function runCliAsync(bin, args, cwd) {
 // absent/partial value and self-corrects on the next heartbeat.
 export async function resolveMetadataAsync({ cwd = process.cwd(), env = process.env } = {}) {
   const getAsync = (key) => runCliAsync("agent-worktrees", ["get", key], cwd); // marketplace-isolation: allow agent-worktrees-management
-  const [branch, wtDir, machine, repo] = await Promise.all([
+  const [branch, sessionScopeId, machine, repo] = await Promise.all([
     runCliAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], cwd),
-    getAsync("worktree-dir"),
+    getAsync("session-scope-id"),
     getAsync("machine"),
     getAsync("project"),
   ]);
   return {
     machine,
     cwd,
-    worktree_id: wtDir ? basename(wtDir) : null,
+    worktree_id: sessionScopeId || null,
     repo,
     branch: branch || null,
     // process.pid is the extension host process -- a liveness hint, not the
