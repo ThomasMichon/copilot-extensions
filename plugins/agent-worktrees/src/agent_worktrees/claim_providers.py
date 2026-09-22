@@ -63,6 +63,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
 from dropin_registry import EntryDecision, EntryStatus, Finding, scan_directory
 from plugin_activation import ActivationReport, resolve_active_plugins
 
@@ -198,6 +199,19 @@ def _resolve_command(command: tuple[str, ...], *, root: Path) -> tuple[str, ...]
         raise TargetUnusableError("command must be a regular, non-symlink file")
     if os.name != "nt" and not os.access(canonical, os.X_OK):
         raise TargetUnusableError("command is not executable")
+    # `payload` itself was never a symlink (checked above), but an
+    # ANCESTOR directory (e.g. `root/bin` or `root` itself) could still be
+    # one, letting resolve() silently escape the identity-verified root
+    # even though the leaf file is an ordinary regular file. Verify the
+    # fully-resolved path is still contained in `root`'s own resolved
+    # form -- mirrors `picker_support.pivot_targets._resolve_command`'s own
+    # containment check.
+    try:
+        canonical.relative_to(root.resolve(strict=True))
+    except ValueError as exc:
+        raise TargetUnusableError(
+            "command resolves outside the identity-verified plugin root"
+        ) from exc
     return (str(canonical), *command[1:])
 
 
@@ -350,13 +364,36 @@ def discover_claim_providers(
     return providers, tuple(findings)
 
 
+def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
+    """Route a ``.cmd``/``.bat`` command through ``cmd.exe`` on Windows.
+
+    ``CreateProcess`` (what ``subprocess.run(..., shell=False)`` ultimately
+    calls) cannot execute a batch file directly -- only ``cmd.exe``'s own
+    interpreter understands it -- so every real claim-provider callback
+    (whose resolved binstub is a `.cmd` shim on Windows, per
+    ``_payload_command``) would otherwise fail to launch at all and degrade
+    to ``available: False`` before its logic ever ran. ``/d`` skips
+    ``AutoRun`` registry commands (never let an ambient AutoRun script
+    inject itself into this call); ``/s`` plus wrapping the already
+    correctly-quoted command line (`subprocess.list2cmdline`) in one more
+    pair of quotes is the standard technique for handing a pre-quoted
+    argument list to ``cmd.exe /c`` without a second, conflicting layer of
+    its own parsing.
+    """
+    if os.name != "nt" or Path(command[0]).suffix.casefold() not in (".cmd", ".bat"):
+        return list(command)
+    quoted = subprocess.list2cmdline(list(command))
+    comspec = os.environ.get("ComSpec", "cmd.exe")
+    return [comspec, "/d", "/s", "/c", f'"{quoted}"']
+
+
 def _run_callback(
     command: tuple[str, ...], *, timeout: float, required_bool_field: str
 ) -> dict | None:
     try:
         proc = subprocess.run(
-            list(command), capture_output=True, text=True, timeout=timeout,
-            encoding="utf-8", errors="replace",
+            _windows_batch_argv(command), capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8", errors="replace", **no_window_kwargs(),
         )
     except (subprocess.SubprocessError, OSError, ValueError):
         return None

@@ -8,8 +8,7 @@
 - **Status:** Active
 - **Vision:** `visions/plugin-services` §Concepts & Components (extends: adds the
   **Claim provider** concept and the explicit plugin-stack layering rule)
-- **Umbrella issue:** aperture-labs Gitea #7341 (tracked-correction intake);
-  public tracker: [ThomasMichon/copilot-extensions#3295](https://github.com/ThomasMichon/copilot-extensions/issues/3295)
+- **Umbrella issue:** [ThomasMichon/copilot-extensions#3295](https://github.com/ThomasMichon/copilot-extensions/issues/3295)
 
 ## Guiding Intent
 
@@ -49,9 +48,8 @@ intent, not a written pattern.
 
 ## Context
 
-- Full architectural finding: aperture-labs Gitea issue #7341 (private
-  tracked-correction; this effort's public GitHub issue, once filed per
-  Phase 0, restates it generically without facility context).
+- Full architectural finding: restated generically in the public tracking
+  issue [#3295](https://github.com/ThomasMichon/copilot-extensions/issues/3295).
 - The existing bridge-provider precedent: `plugins/agent-bridge/src/
   agent_bridge/provider_sources.py` (`providers.d` manifests, namespace
   resolution, `dropin-registry` lib for scan/reconcile/findings).
@@ -72,7 +70,8 @@ intent, not a written pattern.
 
 ## Request
 
-Per operator direction (aperture-labs Gitea #7341, restated generically):
+Per operator direction (see public tracking issue
+[#3295](https://github.com/ThomasMichon/copilot-extensions/issues/3295)):
 introduce a **claim provider** pattern, parallel to agent-bridge's bridge
 provider, so Dispatch, Codespaces, and Containers -- each of which owns a
 distinct kind of "thing a worktree can claim" -- register their claim
@@ -98,8 +97,8 @@ always declare a namespace.
 - Fix the `_inbound_claims` naming confusion (agent-worktrees' `claims`
   ledger vs. agent-dispatch's "claimed tasks") as part of this same
   conversion, not deferred.
-- Cite aperture-labs #7341 in commit/PR text only as "an architecture
-  correction", never with facility-specific language, per this repo's
+- Cite this effort's own public tracking issue (#3295) in commit/PR text,
+  never any private/internal tracker identifier, per this repo's
   public-safe conventions.
 
 ## Plan
@@ -221,9 +220,9 @@ _Pending._
   bounded.
 
 ### 2026-09-22 — Kickoff
-- Effort created from aperture-labs tracked correction (Gitea #7341),
-  itself filed from an earlier architecture-audit conversation about
-  agent-worktrees' upward calls to agent-codespaces and agent-dispatch.
+- Effort created from an architecture-audit finding about agent-worktrees'
+  upward calls to agent-codespaces and agent-dispatch, restated generically
+  in public tracking issue [#3295](https://github.com/ThomasMichon/copilot-extensions/issues/3295).
 - Confirmed both violation call sites still exist as described
   (`cleanup.py::_run_codespaces`, `claims_cli.py::_inbound_claims`), and
   that no existing effort or vision text already covers the claim-provider

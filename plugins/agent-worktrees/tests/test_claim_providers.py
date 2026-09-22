@@ -200,6 +200,36 @@ def test_symlinked_binstub_degrades_to_target_unusable(tmp_path):
     assert findings[0].reason == "target-unusable"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs elevation on Windows")
+def test_symlinked_bin_directory_degrades_to_target_unusable(tmp_path):
+    """Regression: even when bin/<command> itself is an ordinary regular
+    file (passes the pre-resolve lstat check), an ANCESTOR directory (here
+    bin/ itself) being a symlink must still be caught by the post-resolve
+    containment check -- resolve() would otherwise silently escape the
+    identity-verified plugin root through the symlinked directory."""
+    plugin_root, plugins_root = _installed_plugins_tree(tmp_path, "agent-codespaces")
+    outside_bin = tmp_path / "outside-bin"
+    outside_bin.mkdir()
+    real_command = outside_bin / "agent-codespaces"
+    real_command.write_text("#!/bin/sh\nexit 0\n")
+    real_command.chmod(0o755)
+    (plugin_root / "bin").symlink_to(outside_bin, target_is_directory=True)
+    _write_manifest(plugin_root, "codespace", status_command=["agent-codespaces"])
+
+    import agent_worktrees.claim_providers as mod
+    real_resolver = mod.resolve_active_plugins
+    mod.resolve_active_plugins = lambda: _active_report(  # type: ignore[assignment]
+        "agent-codespaces@copilot-extensions", plugin_root
+    )
+    try:
+        providers, findings = cp.discover_claim_providers(plugins_root)
+    finally:
+        mod.resolve_active_plugins = real_resolver
+
+    assert providers == {}
+    assert findings[0].reason == "target-unusable"
+
+
 def test_duplicate_namespace_keeps_first_and_records_a_finding(tmp_path):
     root_a, plugins_root = _installed_plugins_tree(tmp_path, "agent-codespaces")
     root_b, _ = _installed_plugins_tree(tmp_path, "agent-containers")
@@ -417,3 +447,33 @@ def test_resolve_claim_reclaim_degrades_when_no_reclaim_command_declared(tmp_pat
     result = cp.resolve_claim_reclaim("codespace:my-box-1", apply=True, plugins_root=tmp_path)
     assert result["available"] is False
     assert "no claim provider registered" in result["reason"]
+
+
+# --- _windows_batch_argv --------------------------------------------------
+
+
+def test_windows_batch_argv_routes_cmd_shims_through_comspec(monkeypatch):
+    """Regression: CreateProcess (what subprocess.run(shell=False) uses)
+    cannot execute a .cmd file directly -- every real Windows claim-provider
+    callback would otherwise fail to launch. Exercised on any platform by
+    forcing os.name to "nt", since the routing logic itself is pure."""
+    monkeypatch.setattr(cp.os, "name", "nt")
+    monkeypatch.setenv("ComSpec", r"C:\Windows\System32\cmd.exe")
+    argv = cp._windows_batch_argv(("C:\\plugins\\agent-codespaces\\bin\\agent-codespaces.cmd", "claim-status", "my box"))
+    assert argv[0] == r"C:\Windows\System32\cmd.exe"
+    assert argv[1:4] == ["/d", "/s", "/c"]
+    assert argv[4].startswith('"') and argv[4].endswith('"')
+    assert "agent-codespaces.cmd" in argv[4]
+    assert '"my box"' in argv[4]
+
+
+def test_windows_batch_argv_leaves_non_batch_commands_untouched(monkeypatch):
+    monkeypatch.setattr(cp.os, "name", "nt")
+    command = ("C:\\plugins\\agent-codespaces\\bin\\agent-codespaces.exe", "claim-status", "ref")
+    assert cp._windows_batch_argv(command) == list(command)
+
+
+def test_windows_batch_argv_is_a_noop_off_windows(monkeypatch):
+    monkeypatch.setattr(cp.os, "name", "posix")
+    command = ("/opt/plugin/bin/agent-codespaces.cmd", "claim-status", "ref")
+    assert cp._windows_batch_argv(command) == list(command)
