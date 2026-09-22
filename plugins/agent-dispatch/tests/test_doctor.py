@@ -184,6 +184,39 @@ def test_repair_client_errors_are_surfaced_not_raised():
     assert "error" in result["task"]
 
 
+def test_repair_terminal_task_clears_only_the_stale_reservation():
+    """Regression (copilot-extensions#3025): a task diagnosed
+    `orphaned_worktree_gone` that has already gone terminal must never have
+    its task state transitioned, but its stale reservation -- which
+    `resolve_worktree` already confirmed gone -- is cleared with
+    `force=True, confirmed_absent=True` rather than left fenced forever."""
+
+    class _TerminalClient:
+        def __init__(self):
+            self.fail_spawn_calls = []
+
+        def fail_spawn(self, key, *, detail=None, force=False, confirmed_absent=False, **kw):
+            self.fail_spawn_calls.append((key, detail, force, confirmed_absent))
+            return {"state": "failed"}
+
+        def yield_task(self, *a, **k):
+            raise AssertionError("must not transition an already-terminal task")
+
+        def release(self, *a, **k):
+            raise AssertionError("must not transition an already-terminal task")
+
+    d = doctor.Diagnosis(
+        task_id="t-1", status="completed", verdict="orphaned_worktree_gone",
+        detail="gone", worktree_id="wt-1", reservation_key="dispatch-task:t-1:1",
+        owner="headless-x",
+    )
+    client = _TerminalClient()
+    result = doctor.repair(d, client, reason="doctor: gone")
+    assert client.fail_spawn_calls == [("dispatch-task:t-1:1", "doctor: gone", True, True)]
+    assert result["reservation"] == {"state": "failed"}
+    assert "skipped" in result["task"]
+
+
 # -- CLI ---------------------------------------------------------------
 
 
@@ -517,26 +550,34 @@ def test_diagnose_many_untruncated_page_still_diagnoses_normally(monkeypatch):
     assert payload["diagnoses"][0]["verdict"] != doctor.RESERVATION_HISTORY_TRUNCATED_VERDICT
 
 
-def test_diagnose_many_never_repairs_a_terminal_task_diagnosed_via_dash_task(monkeypatch):
-    """`--task` fetches a task of any status (unlike the repo/label sweep,
-    which is pre-filtered to EXAMINED_STATUSES); a terminal task must never
-    reach `repair()` even if its old worktree happens to resolve as gone."""
+def test_diagnose_many_repairs_only_the_reservation_for_a_terminal_task(monkeypatch):
+    """Regression (copilot-extensions#3025): `--task` fetches a task of any
+    status (unlike the repo/label sweep, which is pre-filtered to
+    EXAMINED_STATUSES). A terminal task must never have its *task state*
+    transitioned (`yield_task`/`release` would be an invalid transition on an
+    already-finished task) -- but its stale reservation, if its worktree
+    resolves as confirmed gone, is now cleared (force + confirmed_absent)
+    rather than left permanently fencing its exclusive_key."""
     monkeypatch.setattr(doctor, "resolve_worktree", lambda wt, **k: {"status": "finalized"})
     terminal_task = _task(task_id="t-1", status="completed")
 
     class _Client:
-        def fail_spawn(self, *a, **k):
-            raise AssertionError("must not repair a terminal task")
+        def fail_spawn(self, key, *, detail=None, force=False, confirmed_absent=False, **k):
+            assert force is True
+            assert confirmed_absent is True
+            return {"state": "failed"}
 
         def yield_task(self, *a, **k):
-            raise AssertionError("must not repair a terminal task")
+            raise AssertionError("must not transition a terminal task's status")
 
         def release(self, *a, **k):
-            raise AssertionError("must not repair a terminal task")
+            raise AssertionError("must not transition a terminal task's status")
 
     payload = doctor.diagnose_many(_Client(), [terminal_task], repair_orphaned=True)
     assert payload["diagnoses"][0]["verdict"] == "orphaned_worktree_gone"
-    assert payload["repaired"] == []
+    assert len(payload["repaired"]) == 1
+    assert payload["repaired"][0]["reservation"] == {"state": "failed"}
+    assert "skipped" in payload["repaired"][0]["task"]
 
 
 def test_diagnose_many_still_repairs_an_examined_status_task(monkeypatch):
@@ -553,3 +594,24 @@ def test_diagnose_many_still_repairs_an_examined_status_task(monkeypatch):
     payload = doctor.diagnose_many(_Client(), [task], repair_orphaned=True)
     assert len(payload["repaired"]) == 1
     assert payload["repaired"][0]["task"]["status"] == "queued"
+
+
+def test_diagnose_many_never_repairs_a_non_examined_non_terminal_status(monkeypatch):
+    """A status that is neither EXAMINED_STATUSES nor TERMINAL_STATES (e.g.
+    `queued`/`proposed`, which have no owner/reservation to repair in the
+    first place) stays excluded from auto-repair entirely."""
+    monkeypatch.setattr(doctor, "resolve_worktree", lambda wt, **k: {"status": "finalized"})
+    task = _task(task_id="t-1", status="queued")
+
+    class _Client:
+        def fail_spawn(self, *a, **k):
+            raise AssertionError("must not repair a queued task")
+
+        def yield_task(self, *a, **k):
+            raise AssertionError("must not repair a queued task")
+
+        def release(self, *a, **k):
+            raise AssertionError("must not repair a queued task")
+
+    payload = doctor.diagnose_many(_Client(), [task], repair_orphaned=True)
+    assert payload["repaired"] == []
