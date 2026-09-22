@@ -239,6 +239,30 @@ def run_fleet(argv: list[str]) -> int:
         )
         for machine_key, env_name, alias, shell, is_local in targets
     ]
+    from . import delegate_cli
+
+    reachable_hosts = {
+        (str(row.get("machine") or ""), str(row.get("env") or "")): bool(row.get("reachable"))
+        for row in rows
+    }
+    worktrees = [
+        dict(worktree)
+        for row in rows
+        for worktree in row.get("worktrees", [])
+        if isinstance(worktree, dict)
+    ]
+    delegate_cli.annotate_delegate_graph(worktrees, reachable_hosts=reachable_hosts)
+    worktrees_by_id = {
+        str(worktree.get("id")): worktree
+        for worktree in worktrees
+        if isinstance(worktree.get("id"), str)
+    }
+    for row in rows:
+        row["worktrees"] = [
+            worktrees_by_id.get(str(worktree.get("id")), worktree)
+            for worktree in row.get("worktrees", [])
+            if isinstance(worktree, dict)
+        ]
 
     if args.json:
         print(json.dumps({"version": 1, "hosts": rows}, default=str))

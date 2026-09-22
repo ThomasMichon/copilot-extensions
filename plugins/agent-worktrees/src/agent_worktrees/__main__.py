@@ -8066,17 +8066,15 @@ def main(argv: list[str] | None = None) -> int:
             print("\nCancelled.")
             return 130
 
-    # lease/fleet/reconcile -- self-contained argparse verbs manually
-    # dispatched here (each owns its own module: lease_cli/list_views_cli/
-    # reconcile_cli) rather than growing this already-at-ceiling argparse
-    # tree. lease: Git-ref resource lease store. fleet: aggregate `list
-    # --json` across every reachable machine x environment (fleet-flows
-    # Phase 1, #2740). reconcile: out-of-band PR-state refresh incl.
-    # 'finalized' worktrees (fleet-flows Phase 2, #2740).
+    # lease/fleet/reconcile/delegates -- self-contained argparse verbs manually
+    # dispatched here (each owns its own module) rather than growing this
+    # already-at-ceiling tree. fleet/reconcile/delegates are Phase 1/2/3 of
+    # #2740 (aggregate list, out-of-band PR reconcile, delegate graph/sweep).
     _manual_verb_modules = {
         "lease": ("lease_cli", "run_lease"),
         "fleet": ("list_views_cli", "run_fleet"),
         "reconcile": ("reconcile_cli", "run_reconcile"),
+        "delegates": ("delegate_cli", "run_delegates"),
     }
     if args_list[0] in _manual_verb_modules:
         mod_name, func_name = _manual_verb_modules[args_list[0]]
