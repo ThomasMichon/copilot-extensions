@@ -43,16 +43,42 @@ boot_trace_ms() {
     printf '0000000000000\n'
 }
 
+boot_trace_iso() {
+    local raw=""
+    if raw="$(date -u +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null)"; then
+        printf '%s\n' "$raw"
+        return 0
+    fi
+    printf '1970-01-01T00:00:00+00:00\n'
+}
+
+boot_trace_log() {
+    [[ -n "${RUNTIME_ROOT:-}" && -d "${RUNTIME_ROOT:-}" ]] || return 0
+    local phase="$1" now_ms="$2" dispatch_path="${3-}"
+    local log_path="$RUNTIME_ROOT/logs/activity.jsonl"
+    local log_dir="${log_path%/*}"
+    [[ -d "$log_dir" ]] || mkdir -p "$log_dir" 2>/dev/null || return 0
+    local line
+    line="{\"ts\":\"$(boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"agent-worktrees\",\"phase\":\"$phase\",\"t_ms\":$now_ms,\"pid\":$$"
+    [[ -n "${HOSTNAME:-}" ]] && line="$line,\"host\":\"$HOSTNAME\""
+    line="$line,\"source\":\"launcher\""
+    [[ -n "$dispatch_path" ]] && line="$line,\"path\":\"$dispatch_path\""
+    line="$line}"
+    { printf '%s\n' "$line" >> "$log_path"; } 2>/dev/null || true
+}
+
 boot_trace() {
+    local phase="$1" dispatch_path="${2-}" now_ms
+    now_ms="$(boot_trace_ms)"
+    boot_trace_log "$phase" "$now_ms" "$dispatch_path"
     [[ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ]] || return 0
-    local phase="$1" extra="${2-}"
     local plugin="${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-agent-worktrees}"
-    if [[ -n "$extra" ]]; then
-        printf '::boot-trace:: plugin=%s phase=%s t=%s %s\n' \
-            "$plugin" "$phase" "$(boot_trace_ms)" "$extra" >&2
+    if [[ -n "$dispatch_path" ]]; then
+        printf '::boot-trace:: plugin=%s phase=%s t=%s path=%s\n' \
+            "$plugin" "$phase" "$now_ms" "$dispatch_path" >&2
     else
         printf '::boot-trace:: plugin=%s phase=%s t=%s\n' \
-            "$plugin" "$phase" "$(boot_trace_ms)" >&2
+            "$plugin" "$phase" "$now_ms" >&2
     fi
 }
 
@@ -302,7 +328,7 @@ installation_resolution_current() {
 resolve_runtime
 boot_trace resolver-loaded
 if [[ -n "${AGENT_RT_PY:-}" ]]; then
-    boot_trace dispatch 'path=fast'
+    boot_trace dispatch fast
     run_runtime "$@"
 fi
 if [[ -n "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then
@@ -374,7 +400,7 @@ if [[ -n "${AGENT_RT_PY:-}" ]]; then
     unlock_provision
     trap - EXIT INT TERM
     boot_trace resolver-loaded
-    boot_trace dispatch 'path=locked-fast'
+    boot_trace dispatch locked-fast
     run_runtime "$@"
 fi
 
@@ -406,7 +432,7 @@ boot_trace resolver-loaded
 if [[ -n "${AGENT_RT_PY:-}" ]]; then
     unlock_provision
     trap - EXIT INT TERM
-    boot_trace dispatch 'path=provisioned'
+    boot_trace dispatch provisioned
     run_runtime "$@"
 fi
 printf '[agent-worktrees] provisioning completed without a resolvable runtime.\n' >&2

@@ -22,6 +22,9 @@ if [ -n "$_rt_root" ]; then
   _rt_ver=""
   _rt_trace_source=""
   _rt_trace_version=""
+  _rt_bt_plugin="${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-${_rt_root##*/}}"
+  _rt_bt_plugin="${_rt_bt_plugin#.}"
+  _rt_bt_log_path="${COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH:-$_rt_root/logs/boot-trace.jsonl}"
 
   _rt_boot_trace_ms() {
     _rt_bt_raw=""
@@ -51,17 +54,69 @@ if [ -n "$_rt_root" ]; then
     printf '0000000000000\n'
   }
 
+  _rt_boot_trace_iso() {
+    if _rt_bt_iso="$(date -u +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null)"; then
+      printf '%s\n' "$_rt_bt_iso"
+      return 0
+    fi
+    printf '1970-01-01T00:00:00+00:00\n'
+  }
+
+  _rt_boot_trace_log() {
+    [ -n "${_rt_bt_log_path:-}" ] || return 0
+    [ -d "$_rt_root" ] || return 0
+    _rt_phase="$1"
+    _rt_now_ms="$2"
+    _rt_resolution_source="${3-}"
+    _rt_result="${4-}"
+    _rt_version="${5-}"
+    _rt_bt_log_dir="${_rt_bt_log_path%/*}"
+    if [ ! -d "$_rt_bt_log_dir" ]; then
+      mkdir -p "$_rt_bt_log_dir" 2>/dev/null || return 0
+    fi
+    _rt_bt_line="{\"ts\":\"$(_rt_boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"$_rt_bt_plugin\",\"phase\":\"$_rt_phase\",\"t_ms\":$_rt_now_ms,\"pid\":$$"
+    if [ -n "${HOSTNAME:-}" ]; then
+      _rt_bt_line="$_rt_bt_line,\"host\":\"$HOSTNAME\""
+    fi
+    _rt_bt_line="$_rt_bt_line,\"source\":\"resolver\""
+    if [ -n "$_rt_resolution_source" ]; then
+      _rt_bt_line="$_rt_bt_line,\"resolution_source\":\"$_rt_resolution_source\""
+    fi
+    if [ -n "$_rt_result" ]; then
+      _rt_bt_line="$_rt_bt_line,\"result\":\"$_rt_result\""
+    fi
+    if [ -n "$_rt_version" ]; then
+      _rt_bt_line="$_rt_bt_line,\"version\":\"$_rt_version\""
+    fi
+    _rt_bt_line="$_rt_bt_line}"
+    { printf '%s\n' "$_rt_bt_line" >> "$_rt_bt_log_path"; } 2>/dev/null || true
+  }
+
   _rt_boot_trace() {
+    _rt_phase="$1"
+    _rt_resolution_source="${2-}"
+    _rt_result="${3-}"
+    _rt_version="${4-}"
+    _rt_now_ms="$(_rt_boot_trace_ms)"
+    _rt_boot_trace_log \
+      "$_rt_phase" "$_rt_now_ms" "$_rt_resolution_source" "$_rt_result" "$_rt_version"
     [ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ] || return 0
-    _rt_bt_plugin="${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-${_rt_root##*/}}"
-    _rt_bt_plugin="${_rt_bt_plugin#.}"
-    _rt_bt_extra="${2-}"
+    _rt_bt_extra=""
+    if [ -n "$_rt_resolution_source" ]; then
+      _rt_bt_extra="source=$_rt_resolution_source"
+    fi
+    if [ -n "$_rt_result" ]; then
+      _rt_bt_extra="${_rt_bt_extra}${_rt_bt_extra:+ }result=$_rt_result"
+    fi
+    if [ -n "$_rt_version" ]; then
+      _rt_bt_extra="${_rt_bt_extra}${_rt_bt_extra:+ }version=$_rt_version"
+    fi
     if [ -n "$_rt_bt_extra" ]; then
       printf '::boot-trace:: plugin=%s phase=%s t=%s %s\n' \
-        "$_rt_bt_plugin" "$1" "$(_rt_boot_trace_ms)" "$_rt_bt_extra" >&2
+        "$_rt_bt_plugin" "$_rt_phase" "$_rt_now_ms" "$_rt_bt_extra" >&2
     else
       printf '::boot-trace:: plugin=%s phase=%s t=%s\n' \
-        "$_rt_bt_plugin" "$1" "$(_rt_boot_trace_ms)" >&2
+        "$_rt_bt_plugin" "$_rt_phase" "$_rt_now_ms" >&2
     fi
   }
 
@@ -122,31 +177,29 @@ if [ -n "$_rt_root" ]; then
   }
 
   # Tier 1: the `current-version` marker (source of truth; atomically written).
-  _rt_boot_trace resolver-marker-start 'source=current-version'
+  _rt_boot_trace resolver-marker-start current-version
   [ -f "$_rt_root/current-version" ] && \
     _rt_ver=$(tr -d ' \t\r\n' < "$_rt_root/current-version" 2>/dev/null)
   [ -n "$_rt_ver" ] && _rt_try_slot "$_rt_ver"
   if [ -n "$AGENT_RT_PY" ]; then
     _rt_trace_source="current-version"
     _rt_trace_version="$_rt_ver"
-    _rt_boot_trace resolver-marker-result \
-      "source=current-version result=hit version=$_rt_ver"
+    _rt_boot_trace resolver-marker-result current-version hit "$_rt_ver"
   else
-    _rt_boot_trace resolver-marker-result 'source=current-version result=miss'
+    _rt_boot_trace resolver-marker-result current-version miss
   fi
 
   # Tier 2: marker absent/stale -> the last version the installer activated.
   if [ -z "$AGENT_RT_PY" ] && [ -f "$_rt_root/last-known-good" ]; then
-    _rt_boot_trace resolver-marker-start 'source=last-known-good'
+    _rt_boot_trace resolver-marker-start last-known-good
     _rt_lkg=$(tr -d ' \t\r\n' < "$_rt_root/last-known-good" 2>/dev/null)
     _rt_try_slot "$_rt_lkg"
     if [ -n "$AGENT_RT_PY" ]; then
       _rt_trace_source="last-known-good"
       _rt_trace_version="$_rt_lkg"
-      _rt_boot_trace resolver-marker-result \
-        "source=last-known-good result=hit version=$_rt_lkg"
+      _rt_boot_trace resolver-marker-result last-known-good hit "$_rt_lkg"
     else
-      _rt_boot_trace resolver-marker-result 'source=last-known-good result=miss'
+      _rt_boot_trace resolver-marker-result last-known-good miss
     fi
   fi
 
@@ -169,15 +222,17 @@ if [ -n "$_rt_root" ]; then
   fi
 
   if [ -n "$AGENT_RT_PY" ]; then
-    _rt_boot_trace resolver-slot-result \
-      "source=$_rt_trace_source result=resolved version=$_rt_trace_version"
+    _rt_boot_trace resolver-slot-result "$_rt_trace_source" resolved "$_rt_trace_version"
   else
-    _rt_boot_trace resolver-slot-result 'source=none result=miss'
+    _rt_boot_trace resolver-slot-result none miss
   fi
 
   unset _rt_root _rt_ver _rt_lkg _rt_sub _rt_v _rt_dir \
     _rt_trace_source _rt_trace_version _rt_bt_raw _rt_bt_plugin _rt_bt_extra \
+    _rt_bt_log_path _rt_bt_log_dir _rt_bt_line _rt_bt_iso \
+    _rt_phase _rt_now_ms _rt_resolution_source _rt_result _rt_version \
     2>/dev/null || true
   unset -f _rt_marker_valid _rt_try_slot _rt_version_key \
-    _rt_boot_trace_ms _rt_boot_trace 2>/dev/null || true
+    _rt_boot_trace_ms _rt_boot_trace_iso _rt_boot_trace_log _rt_boot_trace \
+    2>/dev/null || true
 fi

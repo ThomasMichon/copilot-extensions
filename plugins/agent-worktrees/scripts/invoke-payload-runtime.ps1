@@ -17,15 +17,59 @@ $runtimeResolver = Join-Path $scriptDir 'resolve-runtime.ps1'
 $installer = Join-Path $scriptDir 'install.ps1'
 $legacyRoot = Join-Path $env:USERPROFILE '.agent-worktrees' # marketplace-isolation: allow legacy compatibility root
 
-function Write-BootTrace([string]$Phase, [string]$Extra = '') {
+function Get-BootTraceIsoTimestamp {
+    return [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:sszzz')
+}
+
+function Escape-BootTraceJson([string]$Value) {
+    if ($null -eq $Value) { return '' }
+    return $Value.Replace('\', '\\').Replace('"', '\"')
+}
+
+function Write-BootTraceRecord(
+    [string]$Phase,
+    [long]$TimestampMs,
+    [string]$DispatchPath = ''
+) {
+    if (-not $runtimeRoot -or -not [IO.Directory]::Exists($runtimeRoot)) { return }
+    $bootTraceLogPath = Join-Path $runtimeRoot 'logs\activity.jsonl'
+    try {
+        [IO.Directory]::CreateDirectory((Split-Path -Parent $bootTraceLogPath)) | Out-Null
+        $parts = [System.Collections.Generic.List[string]]::new()
+        $parts.Add('"ts":"' + (Escape-BootTraceJson (Get-BootTraceIsoTimestamp)) + '"')
+        $parts.Add('"event":"boot_trace"')
+        $parts.Add('"plugin":"agent-worktrees"')
+        $parts.Add('"phase":"' + (Escape-BootTraceJson $Phase) + '"')
+        $parts.Add('"t_ms":' + $TimestampMs)
+        $parts.Add('"pid":' + $PID)
+        $hostName = [Environment]::MachineName
+        if ($hostName) {
+            $parts.Add('"host":"' + (Escape-BootTraceJson $hostName) + '"')
+        }
+        $parts.Add('"source":"launcher"')
+        if ($DispatchPath) {
+            $parts.Add('"path":"' + (Escape-BootTraceJson $DispatchPath) + '"')
+        }
+        $line = '{' + ($parts -join ',') + '}'
+        [IO.File]::AppendAllText(
+            $bootTraceLogPath,
+            $line + [Environment]::NewLine,
+            [Text.UTF8Encoding]::new($false)
+        )
+    } catch {}
+}
+
+function Write-BootTrace([string]$Phase, [string]$DispatchPath = '') {
+    $timestampMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    Write-BootTraceRecord -Phase $Phase -TimestampMs $timestampMs -DispatchPath $DispatchPath
     if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return }
     $plugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
         $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
     } else {
         'agent-worktrees'
     }
-    $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
-    if ($Extra) { $line += " $Extra" }
+    $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$timestampMs"
+    if ($DispatchPath) { $line += " path=$DispatchPath" }
     [Console]::Error.WriteLine($line)
 }
 if (
@@ -286,7 +330,7 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
 $python = Resolve-AgentWorktreesRuntime
 Write-BootTrace 'resolver-loaded'
 if ($python) {
-    Write-BootTrace 'dispatch' 'path=fast'
+    Write-BootTrace 'dispatch' 'fast'
     Invoke-AgentWorktreesRuntime $python
 }
 if ($env:AGENT_WORKTREES_NO_SELFPROVISION) {
@@ -332,7 +376,7 @@ try {
     $python = Resolve-AgentWorktreesRuntime
     Write-BootTrace 'resolver-loaded'
     if ($python) {
-        Write-BootTrace 'dispatch' 'path=locked-fast'
+        Write-BootTrace 'dispatch' 'locked-fast'
         Invoke-AgentWorktreesRuntime $python
     }
 
@@ -395,7 +439,7 @@ try {
     $python = Resolve-AgentWorktreesRuntime
     Write-BootTrace 'resolver-loaded'
     if ($python) {
-        Write-BootTrace 'dispatch' 'path=provisioned'
+        Write-BootTrace 'dispatch' 'provisioned'
         Invoke-AgentWorktreesRuntime $python
     }
 } finally {

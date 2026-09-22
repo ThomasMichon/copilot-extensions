@@ -18,16 +18,82 @@ $_rtRoot = $env:AGENT_RT_ROOT
 if ($_rtRoot) {
   $_rtTraceSource = ''
   $_rtTraceVersion = ''
+  $_rtBootTracePlugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
+    $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
+  } else {
+    (Split-Path -Leaf $_rtRoot).TrimStart('.')
+  }
+  $_rtBootTraceLogPath = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH) {
+    $env:COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH
+  } else {
+    Join-Path $_rtRoot 'logs\boot-trace.jsonl'
+  }
 
-  function _Rt-WriteBootTrace([string]$phase, [string]$extra = '') {
+  function _Rt-BootTraceIsoTimestamp {
+    return [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:sszzz')
+  }
+
+  function _Rt-EscapeBootTraceJson([string]$value) {
+    if ($null -eq $value) { return '' }
+    return $value.Replace('\', '\\').Replace('"', '\"')
+  }
+
+  function _Rt-WriteBootTraceRecord(
+    [string]$phase,
+    [long]$timestampMs,
+    [string]$resolutionSource = '',
+    [string]$result = '',
+    [string]$version = ''
+  ) {
+    if (-not $_rtBootTraceLogPath) { return }
+    if (-not [IO.Directory]::Exists($_rtRoot)) { return }
+    try {
+      [IO.Directory]::CreateDirectory((Split-Path -Parent $_rtBootTraceLogPath)) | Out-Null
+      $parts = [System.Collections.Generic.List[string]]::new()
+      $parts.Add('"ts":"' + (_Rt-EscapeBootTraceJson (_Rt-BootTraceIsoTimestamp)) + '"')
+      $parts.Add('"event":"boot_trace"')
+      $parts.Add('"plugin":"' + (_Rt-EscapeBootTraceJson $_rtBootTracePlugin) + '"')
+      $parts.Add('"phase":"' + (_Rt-EscapeBootTraceJson $phase) + '"')
+      $parts.Add('"t_ms":' + $timestampMs)
+      $parts.Add('"pid":' + $PID)
+      $hostName = [Environment]::MachineName
+      if ($hostName) {
+        $parts.Add('"host":"' + (_Rt-EscapeBootTraceJson $hostName) + '"')
+      }
+      $parts.Add('"source":"resolver"')
+      if ($resolutionSource) {
+        $parts.Add('"resolution_source":"' + (_Rt-EscapeBootTraceJson $resolutionSource) + '"')
+      }
+      if ($result) {
+        $parts.Add('"result":"' + (_Rt-EscapeBootTraceJson $result) + '"')
+      }
+      if ($version) {
+        $parts.Add('"version":"' + (_Rt-EscapeBootTraceJson $version) + '"')
+      }
+      $line = '{' + ($parts -join ',') + '}'
+      [IO.File]::AppendAllText(
+        $_rtBootTraceLogPath,
+        $line + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false)
+      )
+    } catch {}
+  }
+
+  function _Rt-WriteBootTrace(
+    [string]$phase,
+    [string]$resolutionSource = '',
+    [string]$result = '',
+    [string]$version = ''
+  ) {
+    $timestampMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    _Rt-WriteBootTraceRecord $phase $timestampMs $resolutionSource $result $version
     if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return }
-    $plugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
-      $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
-    } else {
-      (Split-Path -Leaf $_rtRoot).TrimStart('.')
-    }
-    $line = "::boot-trace:: plugin=$plugin phase=$phase t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
-    if ($extra) { $line += " $extra" }
+    $extras = [System.Collections.Generic.List[string]]::new()
+    if ($resolutionSource) { $extras.Add("source=$resolutionSource") }
+    if ($result) { $extras.Add("result=$result") }
+    if ($version) { $extras.Add("version=$version") }
+    $line = "::boot-trace:: plugin=$_rtBootTracePlugin phase=$phase t=$timestampMs"
+    if ($extras.Count) { $line += " " + ($extras -join ' ') }
     [Console]::Error.WriteLine($line)
   }
 
@@ -75,30 +141,30 @@ if ($_rtRoot) {
   }
 
   # Tier 1: the `current-version` marker (source of truth; atomically written).
-  _Rt-WriteBootTrace 'resolver-marker-start' 'source=current-version'
+  _Rt-WriteBootTrace 'resolver-marker-start' 'current-version'
   $_rtVer = ''
   try { $_rtVer = ([IO.File]::ReadAllText((Join-Path $_rtRoot 'current-version'))).Trim() } catch {}
   if ($_rtVer) { $AgentRtPy = _Rt-TrySlot $_rtVer }
   if ($AgentRtPy) {
     $_rtTraceSource = 'current-version'
     $_rtTraceVersion = $_rtVer
-    _Rt-WriteBootTrace 'resolver-marker-result' "source=current-version result=hit version=$_rtVer"
+    _Rt-WriteBootTrace 'resolver-marker-result' 'current-version' 'hit' $_rtVer
   } else {
-    _Rt-WriteBootTrace 'resolver-marker-result' 'source=current-version result=miss'
+    _Rt-WriteBootTrace 'resolver-marker-result' 'current-version' 'miss'
   }
 
   # Tier 2: marker absent/stale -> the last version the installer activated.
   if (-not $AgentRtPy) {
-    _Rt-WriteBootTrace 'resolver-marker-start' 'source=last-known-good'
+    _Rt-WriteBootTrace 'resolver-marker-start' 'last-known-good'
     $_rtLkg = ''
     try { $_rtLkg = ([IO.File]::ReadAllText((Join-Path $_rtRoot 'last-known-good'))).Trim() } catch {}
     if ($_rtLkg) { $AgentRtPy = _Rt-TrySlot $_rtLkg }
     if ($AgentRtPy) {
       $_rtTraceSource = 'last-known-good'
       $_rtTraceVersion = $_rtLkg
-      _Rt-WriteBootTrace 'resolver-marker-result' "source=last-known-good result=hit version=$_rtLkg"
+      _Rt-WriteBootTrace 'resolver-marker-result' 'last-known-good' 'hit' $_rtLkg
     } else {
-      _Rt-WriteBootTrace 'resolver-marker-result' 'source=last-known-good result=miss'
+      _Rt-WriteBootTrace 'resolver-marker-result' 'last-known-good' 'miss'
     }
   }
 
@@ -118,8 +184,8 @@ if ($_rtRoot) {
     }
   }
   if ($AgentRtPy) {
-    _Rt-WriteBootTrace 'resolver-slot-result' "source=$_rtTraceSource result=resolved version=$_rtTraceVersion"
+    _Rt-WriteBootTrace 'resolver-slot-result' $_rtTraceSource 'resolved' $_rtTraceVersion
   } else {
-    _Rt-WriteBootTrace 'resolver-slot-result' 'source=none result=miss'
+    _Rt-WriteBootTrace 'resolver-slot-result' 'none' 'miss'
   }
 }

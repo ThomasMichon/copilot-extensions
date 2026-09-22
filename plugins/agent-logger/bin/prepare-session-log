@@ -7,6 +7,8 @@ _plugin="agent-logger"
 _command="prepare-session-log"
 _self_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 _payload_root="$(CDPATH= cd -- "$_self_dir/.." && pwd -P)"
+_runtime_root="$HOME/.agent-logger"
+_boot_trace_log_path="$_runtime_root/logs/boot-trace.jsonl"
 
 _boot_trace_ms() {
     _bt_raw=""
@@ -36,17 +38,50 @@ _boot_trace_ms() {
     printf '0000000000000\n'
 }
 
+_boot_trace_iso() {
+    if _bt_iso="$(date -u +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null)"; then
+        printf '%s\n' "$_bt_iso"
+        return 0
+    fi
+    printf '1970-01-01T00:00:00+00:00\n'
+}
+
+_boot_trace_log() {
+    [ -n "${_boot_trace_log_path:-}" ] || return 0
+    [ -d "$_runtime_root" ] || return 0
+    _bt_phase="$1"
+    _bt_now_ms="$2"
+    _bt_dispatch_path="${3-}"
+    _bt_log_dir="${_boot_trace_log_path%/*}"
+    if [ ! -d "$_bt_log_dir" ]; then
+        mkdir -p "$_bt_log_dir" 2>/dev/null || return 0
+    fi
+    _bt_line="{\"ts\":\"$(_boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"$_plugin\",\"phase\":\"$_bt_phase\",\"t_ms\":$_bt_now_ms,\"pid\":$$"
+    if [ -n "${HOSTNAME:-}" ]; then
+        _bt_line="$_bt_line,\"host\":\"$HOSTNAME\""
+    fi
+    _bt_line="$_bt_line,\"source\":\"launcher\""
+    if [ -n "$_bt_dispatch_path" ]; then
+        _bt_line="$_bt_line,\"path\":\"$_bt_dispatch_path\""
+    fi
+    _bt_line="$_bt_line}"
+    { printf '%s\n' "$_bt_line" >> "$_boot_trace_log_path"; } 2>/dev/null || true
+}
+
 _boot_trace() {
+    _bt_phase="$1"
+    _bt_dispatch_path="${2-}"
+    _bt_now_ms="$(_boot_trace_ms)"
+    _boot_trace_log "$_bt_phase" "$_bt_now_ms" "$_bt_dispatch_path"
     [ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ] || return 0
-    _bt_extra="${2-}"
-    if [ -n "$_bt_extra" ]; then
-        printf '::boot-trace:: plugin=%s phase=%s t=%s %s\n' \
+    if [ -n "$_bt_dispatch_path" ]; then
+        printf '::boot-trace:: plugin=%s phase=%s t=%s path=%s\n' \
             "${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-$_plugin}" \
-            "$1" "$(_boot_trace_ms)" "$_bt_extra" >&2
+            "$_bt_phase" "$_bt_now_ms" "$_bt_dispatch_path" >&2
     else
         printf '::boot-trace:: plugin=%s phase=%s t=%s\n' \
             "${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-$_plugin}" \
-            "$1" "$(_boot_trace_ms)" >&2
+            "$_bt_phase" "$_bt_now_ms" >&2
     fi
 }
 
@@ -65,9 +100,7 @@ case "$PWD/" in
         ;;
 esac
 
-if [ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ]; then
-    export COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN="$_plugin"
-fi
+export COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN="$_plugin"
 _boot_trace dispatch
 export AGENT_LOGGER_PAYLOAD_ROOT="$_payload_root"
 export COPILOT_EXTENSIONS_PAYLOAD_COMMAND="$_command"

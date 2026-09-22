@@ -4,20 +4,66 @@ $env:PYTHONUTF8 = '1'
 $_plugin = 'agent-index'
 $_command = 'agent-index'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$_runtimeRoot = Join-Path $env:USERPROFILE '.agent-index'
+$_bootTraceLogPath = Join-Path $_runtimeRoot 'logs\boot-trace.jsonl'
 
 function Get-BootTraceTimestamp {
     return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 }
 
-function Write-BootTrace([string]$Phase, [string]$Extra = '') {
+function Get-BootTraceIsoTimestamp {
+    return [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:sszzz')
+}
+
+function Escape-BootTraceJson([string]$Value) {
+    if ($null -eq $Value) { return '' }
+    return $Value.Replace('\', '\\').Replace('"', '\"')
+}
+
+function Write-BootTraceRecord(
+    [string]$Phase,
+    [long]$TimestampMs,
+    [string]$DispatchPath = ''
+) {
+    if (-not $_bootTraceLogPath) { return }
+    if (-not [IO.Directory]::Exists($_runtimeRoot)) { return }
+    try {
+        [IO.Directory]::CreateDirectory((Split-Path -Parent $_bootTraceLogPath)) | Out-Null
+        $parts = [System.Collections.Generic.List[string]]::new()
+        $parts.Add('"ts":"' + (Escape-BootTraceJson (Get-BootTraceIsoTimestamp)) + '"')
+        $parts.Add('"event":"boot_trace"')
+        $parts.Add('"plugin":"' + (Escape-BootTraceJson $_plugin) + '"')
+        $parts.Add('"phase":"' + (Escape-BootTraceJson $Phase) + '"')
+        $parts.Add('"t_ms":' + $TimestampMs)
+        $parts.Add('"pid":' + $PID)
+        $hostName = [Environment]::MachineName
+        if ($hostName) {
+            $parts.Add('"host":"' + (Escape-BootTraceJson $hostName) + '"')
+        }
+        $parts.Add('"source":"launcher"')
+        if ($DispatchPath) {
+            $parts.Add('"path":"' + (Escape-BootTraceJson $DispatchPath) + '"')
+        }
+        $line = '{' + ($parts -join ',') + '}'
+        [IO.File]::AppendAllText(
+            $_bootTraceLogPath,
+            $line + [Environment]::NewLine,
+            [Text.UTF8Encoding]::new($false)
+        )
+    } catch {}
+}
+
+function Write-BootTrace([string]$Phase, [string]$DispatchPath = '') {
+    $timestampMs = Get-BootTraceTimestamp
+    Write-BootTraceRecord -Phase $Phase -TimestampMs $timestampMs -DispatchPath $DispatchPath
     if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return }
     $plugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
         $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
     } else {
         $_plugin
     }
-    $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$(Get-BootTraceTimestamp)"
-    if ($Extra) { $line += " $Extra" }
+    $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$timestampMs"
+    if ($DispatchPath) { $line += " path=$DispatchPath" }
     [Console]::Error.WriteLine($line)
 }
 
@@ -44,9 +90,7 @@ if (
     [IO.Directory]::SetCurrentDirectory($_outside)
 }
 
-if ($env:COPILOT_EXTENSIONS_BOOT_TRACE) {
-    $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = $_plugin
-}
+$env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = $_plugin
 Write-BootTrace 'dispatch'
 $env:AGENT_INDEX_PAYLOAD_ROOT = $_payloadRoot
 $_payloadDispatcher = Join-Path $_payloadRoot 'scripts\runtime-gate.ps1'

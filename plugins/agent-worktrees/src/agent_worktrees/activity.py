@@ -15,6 +15,8 @@ the full picture across processes.
 
 Events are intentionally high-level:
 
+  boot_trace                always-on payload-launch timing from the shell
+                            launcher / resolver path
   worktree_created          a new worktree + branch was created
   worktree_resumed          an existing worktree was resumed via the picker
   launcher_started          the session launcher began a launch flow (carries

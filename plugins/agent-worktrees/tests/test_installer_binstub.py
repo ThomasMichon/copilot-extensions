@@ -850,6 +850,10 @@ def test_payload_shims_propagate_ownership_root() -> None:
     assert "$env:AGENT_WORKTREES_PAYLOAD_ROOT = $_payloadRoot" in powershell
     assert "scripts/invoke-payload-runtime.sh" in posix
     assert "scripts\\invoke-payload-runtime.ps1" in powershell
+    assert 'logs/activity.jsonl' in posix
+    assert "logs\\activity.jsonl" in powershell
+    assert '\\"event\\":\\"boot_trace\\"' in posix
+    assert '"event":"boot_trace"' in powershell
     dispatcher = (
         PLUGIN / "scripts" / "invoke-payload-runtime.ps1"
     ).read_text(encoding="utf-8")

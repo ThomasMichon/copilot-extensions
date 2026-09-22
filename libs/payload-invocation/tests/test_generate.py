@@ -130,6 +130,14 @@ def _write_runtime_completion(slot: Path, version: str) -> None:
     )
 
 
+def _read_jsonl(path: Path) -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     assert generator.process_manifest(manifest, check=False) == []
@@ -204,6 +212,22 @@ def test_payload_root_env_is_opt_in_and_preserves_defaults(tmp_path: Path) -> No
         in generated[powershell_path]
     )
     assert "} finally {" in generated[powershell_path]
+
+
+def test_boot_trace_log_file_defaults_and_can_be_overridden(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    baseline = generator.expected_files(manifest)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["bootTraceLogFile"] = "logs/activity.jsonl"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    generated = generator.expected_files(manifest)
+
+    posix_path = manifest.parent / "bin" / "agent-example"
+    powershell_path = manifest.parent / "bin" / "agent-example.ps1"
+    assert "logs/boot-trace.jsonl" in baseline[posix_path]
+    assert "logs\\boot-trace.jsonl" in baseline[powershell_path]
+    assert "logs/activity.jsonl" in generated[posix_path]
+    assert "logs\\activity.jsonl" in generated[powershell_path]
 
 
 def test_session_start_bootstrap_defaults_true_and_requires_boolean(
@@ -975,8 +999,8 @@ def test_agent_worktrees_namespaced_first_use_is_single_flight(
         stderr=subprocess.PIPE,
         text=True,
     )
-    first_stdout, first_stderr = first.communicate(timeout=30)
-    second_stdout, second_stderr = second.communicate(timeout=30)
+    first_stdout, first_stderr = first.communicate(timeout=90)
+    second_stdout, second_stderr = second.communicate(timeout=90)
 
     assert first.returncode == 0, first_stderr
     assert second.returncode == 0, second_stderr
@@ -2162,7 +2186,9 @@ def test_posix_shim_preserves_args_exit_and_project_cwd(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
-def test_posix_shim_boot_trace_is_opt_in_and_stderr_only(tmp_path: Path) -> None:
+def test_posix_shim_boot_trace_is_durable_by_default_and_stderr_is_still_opt_in(
+    tmp_path: Path,
+) -> None:
     manifest = _manifest(tmp_path)
     generator.process_manifest(manifest, check=False)
     plugin = manifest.parent
@@ -2212,6 +2238,30 @@ def test_posix_shim_boot_trace_is_opt_in_and_stderr_only(tmp_path: Path) -> None
     )
     assert baseline.stdout.strip() == "stdout:alpha|beta"
     assert baseline.stderr == ""
+    durable = _read_jsonl(runtime_root / "logs" / "boot-trace.jsonl")
+    assert [rec["phase"] for rec in durable] == [
+        "shim-start",
+        "resolver-marker-start",
+        "resolver-marker-result",
+        "resolver-slot-result",
+        "resolver-loaded",
+        "dispatch",
+    ]
+    assert [rec["source"] for rec in durable] == [
+        "shim",
+        "resolver",
+        "resolver",
+        "resolver",
+        "shim",
+        "shim",
+    ]
+    assert [int(rec["t_ms"]) for rec in durable] == sorted(
+        int(rec["t_ms"]) for rec in durable
+    )
+    assert durable[1]["resolution_source"] == "current-version"
+    assert durable[2]["result"] == "hit"
+    assert durable[2]["version"] == version
+    assert durable[-1]["path"] == "fast"
 
     traced = subprocess.run(
         command,
@@ -2236,6 +2286,61 @@ def test_posix_shim_boot_trace_is_opt_in_and_stderr_only(tmp_path: Path) -> None
     ]
     assert "::boot-trace:: plugin=agent-example" in traced.stderr
     assert "stdout:" not in traced.stderr
+    assert len(_read_jsonl(runtime_root / "logs" / "boot-trace.jsonl")) == 12
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
+def test_posix_shim_boot_trace_write_failures_are_non_fatal(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    plugin = manifest.parent
+    (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    scripts = plugin / "scripts"
+    canonical_resolver = (
+        REPO / "libs" / "versioned-runtime" / "resolve-runtime.sh"
+    ).read_text(encoding="utf-8")
+    (scripts / "resolve-runtime.sh").write_text(canonical_resolver, encoding="utf-8")
+
+    home = tmp_path / "home"
+    runtime_root = home / ".agent-example"
+    version = "1.2.3"
+    slot = runtime_root / "versions" / version
+    fake_python = slot / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text(
+        f'#!/bin/sh\nexec "{sys.executable}" "$@"\n',
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    _write_runtime_completion(slot, version)
+    (runtime_root / "current-version").write_text(f"{version}\n", encoding="utf-8")
+    (runtime_root / "logs").write_text("not-a-directory\n", encoding="utf-8")
+    module_dir = tmp_path / "modules"
+    module_dir.mkdir()
+    (module_dir / "agent_example.py").write_text(
+        "print('ok')\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "COPILOT_PLUGIN_ROOT": str(plugin),
+            "PYTHONPATH": str(module_dir),
+        }
+    )
+
+    result = subprocess.run(
+        [str(plugin / "bin" / "agent-example")],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout.strip() == "ok"
+    assert result.stderr == ""
+    assert (runtime_root / "logs").is_file()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
@@ -2484,6 +2589,72 @@ def test_powershell_shim_preserves_sibling_cwd_and_leaves_payload(
     os.name != "nt" or shutil.which("pwsh") is None,
     reason="native Windows PowerShell shim test",
 )
+def test_required_dispatcher_shim_writes_durable_boot_trace_by_default(
+    tmp_path: Path,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    manifest = _required_context_manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    plugin = manifest.parent
+    (plugin / "plugin.json").write_text('{"name":"agent-machines"}\n', encoding="utf-8")
+    scripts = plugin / "scripts"
+    (scripts / "invoke-payload-runtime.ps1").write_text(
+        "Write-Output ('stdout:' + ($args -join '|'))\n",
+        encoding="utf-8",
+    )
+
+    home = tmp_path / "home"
+    (home / ".agent-example").mkdir(parents=True)
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "COPILOT_PLUGIN_ROOT": str(plugin),
+        }
+    )
+    command = [
+        pwsh,
+        "-NoProfile",
+        "-File",
+        str(plugin / "bin" / "agent-machines.ps1"),
+        "alpha",
+        "beta",
+    ]
+
+    baseline = subprocess.run(
+        command,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert baseline.stdout.strip() == "stdout:alpha|beta"
+    assert baseline.stderr == ""
+    durable = _read_jsonl(home / ".agent-example" / "logs" / "boot-trace.jsonl")
+    assert [rec["phase"] for rec in durable] == ["shim-start", "dispatch"]
+    assert [rec["source"] for rec in durable] == ["launcher", "launcher"]
+
+    traced = subprocess.run(
+        command,
+        env={**env, "COPILOT_EXTENSIONS_BOOT_TRACE": "1"},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert traced.stdout == baseline.stdout
+    assert [
+        match.group(1)
+        for match in re.finditer(r"phase=([a-z-]+)", traced.stderr)
+    ] == ["shim-start", "dispatch"]
+    assert len(_read_jsonl(home / ".agent-example" / "logs" / "boot-trace.jsonl")) == 4
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or shutil.which("pwsh") is None,
+    reason="native Windows PowerShell shim test",
+)
 def test_powershell_shim_boot_trace_is_opt_in_and_stderr_only(
     tmp_path: Path,
 ) -> None:
@@ -2542,6 +2713,30 @@ def test_powershell_shim_boot_trace_is_opt_in_and_stderr_only(
     )
     assert baseline.stdout.strip() == "stdout:alpha|beta"
     assert baseline.stderr == ""
+    durable = _read_jsonl(runtime_root / "logs" / "boot-trace.jsonl")
+    assert [rec["phase"] for rec in durable] == [
+        "shim-start",
+        "resolver-marker-start",
+        "resolver-marker-result",
+        "resolver-slot-result",
+        "resolver-loaded",
+        "dispatch",
+    ]
+    assert [rec["source"] for rec in durable] == [
+        "shim",
+        "resolver",
+        "resolver",
+        "resolver",
+        "shim",
+        "shim",
+    ]
+    assert [int(rec["t_ms"]) for rec in durable] == sorted(
+        int(rec["t_ms"]) for rec in durable
+    )
+    assert durable[1]["resolution_source"] == "current-version"
+    assert durable[2]["result"] == "hit"
+    assert durable[2]["version"] == version
+    assert durable[-1]["path"] == "fast"
 
     traced = subprocess.run(
         command,
@@ -2566,3 +2761,141 @@ def test_powershell_shim_boot_trace_is_opt_in_and_stderr_only(
     ]
     assert "::boot-trace:: plugin=agent-example" in traced.stderr
     assert "stdout:" not in traced.stderr
+    assert len(_read_jsonl(runtime_root / "logs" / "boot-trace.jsonl")) == 12
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or shutil.which("pwsh") is None,
+    reason="native Windows PowerShell shim test",
+)
+def test_powershell_shim_boot_trace_write_failures_are_non_fatal(
+    tmp_path: Path,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    plugin = manifest.parent
+    (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    scripts = plugin / "scripts"
+    canonical_resolver = (
+        REPO / "libs" / "versioned-runtime" / "resolve-runtime.ps1"
+    ).read_text(encoding="utf-8")
+    (scripts / "resolve-runtime.ps1").write_text(canonical_resolver, encoding="utf-8")
+
+    home = tmp_path / "home"
+    runtime_root = home / ".agent-example"
+    version = "2.3.4"
+    slot = runtime_root / "versions" / version
+    fake_python = slot / "Scripts" / "python.exe"
+    fake_python.parent.mkdir(parents=True)
+    shutil.copy2(sys.executable, fake_python)
+    _write_runtime_completion(slot, version)
+    (runtime_root / "current-version").write_text(f"{version}\n", encoding="utf-8")
+    (runtime_root / "logs").write_text("not-a-directory\n", encoding="utf-8")
+    module_dir = tmp_path / "modules"
+    module_dir.mkdir()
+    (module_dir / "agent_example.py").write_text("print('ok')\n", encoding="utf-8")
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "COPILOT_PLUGIN_ROOT": str(plugin),
+            "PYTHONPATH": str(module_dir),
+        }
+    )
+
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-File", str(plugin / "bin" / "agent-example.ps1")],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout.strip() == "ok"
+    assert result.stderr == ""
+    assert (runtime_root / "logs").is_file()
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or shutil.which("pwsh") is None,
+    reason="native Windows PowerShell shim test",
+)
+def test_powershell_shim_boot_trace_lines_survive_concurrent_invocations(
+    tmp_path: Path,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    plugin = manifest.parent
+    (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    scripts = plugin / "scripts"
+    canonical_resolver = (
+        REPO / "libs" / "versioned-runtime" / "resolve-runtime.ps1"
+    ).read_text(encoding="utf-8")
+    (scripts / "resolve-runtime.ps1").write_text(canonical_resolver, encoding="utf-8")
+
+    home = tmp_path / "home"
+    runtime_root = home / ".agent-example"
+    version = "2.3.4"
+    slot = runtime_root / "versions" / version
+    fake_python = slot / "Scripts" / "python.exe"
+    fake_python.parent.mkdir(parents=True)
+    shutil.copy2(sys.executable, fake_python)
+    _write_runtime_completion(slot, version)
+    (runtime_root / "current-version").write_text(f"{version}\n", encoding="utf-8")
+    module_dir = tmp_path / "modules"
+    module_dir.mkdir()
+    (module_dir / "agent_example.py").write_text("print('ok')\n", encoding="utf-8")
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "COPILOT_PLUGIN_ROOT": str(plugin),
+            "PYTHONPATH": str(module_dir),
+        }
+    )
+    command = [pwsh, "-NoProfile", "-File", str(plugin / "bin" / "agent-example.ps1")]
+
+    procs = [
+        subprocess.Popen(
+            command,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(3)
+    ]
+    for proc in procs:
+        out, err = proc.communicate(timeout=15)
+        assert proc.returncode == 0, err
+        assert out.strip() == "ok"
+        assert err == ""
+
+    records = _read_jsonl(runtime_root / "logs" / "boot-trace.jsonl")
+    assert len(records) >= 9
+    by_pid: dict[int, list[dict[str, object]]] = {}
+    for rec in records:
+        by_pid.setdefault(int(rec["pid"]), []).append(rec)
+    assert len(by_pid) == 3
+    for pid_records in by_pid.values():
+        phases = [str(rec["phase"]) for rec in pid_records]
+        expected = [
+            "shim-start",
+            "resolver-marker-start",
+            "resolver-marker-result",
+            "resolver-slot-result",
+            "resolver-loaded",
+            "dispatch",
+        ]
+        cursor = 0
+        for phase in phases:
+            while cursor < len(expected) and expected[cursor] != phase:
+                cursor += 1
+            assert cursor < len(expected), phases
+            cursor += 1

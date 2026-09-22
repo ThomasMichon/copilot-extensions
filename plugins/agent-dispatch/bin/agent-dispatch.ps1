@@ -5,20 +5,98 @@ $_plugin = 'agent-dispatch'
 $_command = 'agent-dispatch'
 $_module = 'agent_dispatch'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$_runtimeRoot = Join-Path $env:USERPROFILE '.agent-dispatch'
+$_bootTraceLogPath = Join-Path $_runtimeRoot 'logs\boot-trace.jsonl'
 
 function Get-BootTraceTimestamp {
     return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 }
 
-function Write-BootTrace([string]$Phase, [string]$Extra = '') {
+function Get-BootTraceIsoTimestamp {
+    return [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:sszzz')
+}
+
+function Escape-BootTraceJson([string]$Value) {
+    if ($null -eq $Value) { return '' }
+    return $Value.Replace('\', '\\').Replace('"', '\"')
+}
+
+function Write-BootTraceRecord(
+    [string]$Phase,
+    [long]$TimestampMs,
+    [string]$Emitter,
+    [string]$ResolutionSource = '',
+    [string]$Result = '',
+    [string]$Version = '',
+    [string]$DispatchPath = ''
+) {
+    if (-not $_bootTraceLogPath) { return }
+    if (-not [IO.Directory]::Exists($_runtimeRoot)) { return }
+    try {
+        [IO.Directory]::CreateDirectory((Split-Path -Parent $_bootTraceLogPath)) | Out-Null
+        $parts = [System.Collections.Generic.List[string]]::new()
+        $parts.Add('"ts":"' + (Escape-BootTraceJson (Get-BootTraceIsoTimestamp)) + '"')
+        $parts.Add('"event":"boot_trace"')
+        $parts.Add('"plugin":"' + (Escape-BootTraceJson $_plugin) + '"')
+        $parts.Add('"phase":"' + (Escape-BootTraceJson $Phase) + '"')
+        $parts.Add('"t_ms":' + $TimestampMs)
+        $parts.Add('"pid":' + $PID)
+        $hostName = [Environment]::MachineName
+        if ($hostName) {
+            $parts.Add('"host":"' + (Escape-BootTraceJson $hostName) + '"')
+        }
+        $parts.Add('"source":"' + (Escape-BootTraceJson $Emitter) + '"')
+        if ($ResolutionSource) {
+            $parts.Add('"resolution_source":"' + (Escape-BootTraceJson $ResolutionSource) + '"')
+        }
+        if ($Result) {
+            $parts.Add('"result":"' + (Escape-BootTraceJson $Result) + '"')
+        }
+        if ($Version) {
+            $parts.Add('"version":"' + (Escape-BootTraceJson $Version) + '"')
+        }
+        if ($DispatchPath) {
+            $parts.Add('"path":"' + (Escape-BootTraceJson $DispatchPath) + '"')
+        }
+        $line = '{' + ($parts -join ',') + '}'
+        [IO.File]::AppendAllText(
+            $_bootTraceLogPath,
+            $line + [Environment]::NewLine,
+            [Text.UTF8Encoding]::new($false)
+        )
+    } catch {}
+}
+
+function Write-BootTrace(
+    [string]$Phase,
+    [string]$Emitter = 'shim',
+    [string]$ResolutionSource = '',
+    [string]$Result = '',
+    [string]$Version = '',
+    [string]$DispatchPath = ''
+) {
+    $timestampMs = Get-BootTraceTimestamp
+    Write-BootTraceRecord `
+        -Phase $Phase `
+        -TimestampMs $timestampMs `
+        -Emitter $Emitter `
+        -ResolutionSource $ResolutionSource `
+        -Result $Result `
+        -Version $Version `
+        -DispatchPath $DispatchPath
     if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return }
     $plugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
         $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
     } else {
         $_plugin
     }
-    $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$(Get-BootTraceTimestamp)"
-    if ($Extra) { $line += " $Extra" }
+    $extras = [System.Collections.Generic.List[string]]::new()
+    if ($ResolutionSource) { $extras.Add("source=$ResolutionSource") }
+    if ($Result) { $extras.Add("result=$Result") }
+    if ($Version) { $extras.Add("version=$Version") }
+    if ($DispatchPath) { $extras.Add("path=$DispatchPath") }
+    $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$timestampMs"
+    if ($extras.Count) { $line += " " + ($extras -join ' ') }
     [Console]::Error.WriteLine($line)
 }
 
@@ -45,13 +123,11 @@ if (
     [IO.Directory]::SetCurrentDirectory($_outside)
 }
 
-$_runtimeRoot = Join-Path $env:USERPROFILE '.agent-dispatch'
 $_resolver = Join-Path $_payloadRoot 'scripts\resolve-runtime.ps1'
 function Resolve-PayloadRuntime {
     $AgentRtPy = $null
-    if ($env:COPILOT_EXTENSIONS_BOOT_TRACE) {
-        $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = $_plugin
-    }
+    $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = $_plugin
+    $env:COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH = $_bootTraceLogPath
     if (Test-Path -LiteralPath $_resolver) {
         $env:AGENT_RT_ROOT = $_runtimeRoot
         . $_resolver
@@ -62,7 +138,7 @@ function Resolve-PayloadRuntime {
 $_py = Resolve-PayloadRuntime
 Write-BootTrace 'resolver-loaded'
 if ($_py) {
-    Write-BootTrace 'dispatch' 'path=fast'
+    Write-BootTrace 'dispatch' 'shim' '' '' '' 'fast'
     & $_py -m $_module @args
     exit $LASTEXITCODE
 }
@@ -138,7 +214,7 @@ $_provisionRc = $LASTEXITCODE
 }
 if ($_provisionRc -ne 0) { exit $_provisionRc }
 if ($_provisionedPy) {
-    Write-BootTrace 'dispatch' 'path=provisioned'
+    Write-BootTrace 'dispatch' 'shim' '' '' '' 'provisioned'
     & $_provisionedPy -m $_module @args
     exit $LASTEXITCODE
 }
