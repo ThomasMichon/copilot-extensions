@@ -24,6 +24,7 @@ import httpx
 
 from . import __version__
 from .client import DispatchClient, DispatchError
+from .config import Config as Config  # noqa: F401 -- compatibility export for callers/tests
 from .config import (
     client_control_token,
     client_token,

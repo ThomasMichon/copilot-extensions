@@ -1578,7 +1578,7 @@ the Phase 0 runbook, picked up as capacity allows.
 ### 2026-09-22 — Phase 2 continued: `plugins/agent-dispatch/src/agent_dispatch/__main__.py` coordinator slice
 - Started `agent-dispatch/__main__.py` with the safest strong seam instead of
   trying to land the whole 5,046-line registrar in one shot: the
-  coordinator/service family. Extracted a new `coordinator_cli.py` (**620**
+  coordinator/service family. Extracted a new `coordinator_cli.py` (**623**
   lines) holding `serve`/`deploy`/`_cutover`/`_retire-supervisors`,
   federation `run`/`status`, and the read-only coordinator surfaces
   (`health`, `installer-readiness`, `print-endpoint`), while leaving
