@@ -407,32 +407,38 @@ This file is:
   a routine stop from a crash" purpose of this file), each process checks
   the file's size once, at its own first write: if it has grown to 1 MiB or
   more, it is **rotated** -- renamed aside to a per-process, uniquely-named
-  `.stale-<pid>-<timestamp>` sidecar, left in place permanently, with a
-  fresh file opened at the original path -- rather than truncated in place.
-  This matters because the file is shared by every extension instance on
-  the machine (see the next bullet): an in-place reset is not serialized
-  across processes, so a second process's own reset could otherwise erase
-  the crash entry a first process just finished appending moments earlier.
-  The rename is guarded by an identity check first (on POSIX: the file
-  currently at this path must still have the same device+inode this
-  process actually opened and measured as oversized) -- a *blind* rename of
-  whatever currently sits at the path, with no such check, could otherwise
-  rename a different process's already-rotated, already-live fresh file
-  into this process's own sidecar, silently detaching that process's
-  diagnostics from the well-known path. The sidecar this rename produces is
-  **never deleted automatically**, specifically so that even the narrower
-  race the identity check cannot fully close (the file could still change
-  between the check and the rename itself) can, at worst, leave an entry
-  filed under an unexpected sidecar name -- it can never be destroyed by
-  this process's own cleanup, because there is no such cleanup step. This
-  bounds growth across the many separate short-lived processes that are
-  the actual growth vector (though not a single pathological process
-  logging in a tight loop -- not a real shape here, since at most a handful
-  of entries are ever logged per process lifetime). A rotation discards
-  nothing -- the oversized content survives under its sidecar name -- but
-  the live path itself becomes a rolling window, not a permanent record;
-  accumulated `.stale-*` sidecars are manually-cleared scratch files like
-  the log itself.
+  `.stale-<pid>-<timestamp>-<uuid>` sidecar, with a fresh file opened at the
+  original path -- rather than truncated in place. This matters because the
+  file is shared by every extension instance on the machine (see the next
+  bullet): an in-place reset is not serialized across processes, so a
+  second process's own reset could otherwise erase the crash entry a first
+  process just finished appending moments earlier. The rename is guarded by
+  an identity check first (the file currently at this path must still have
+  the same device+inode this process actually opened and measured as
+  oversized -- empirically confirmed reliable on both POSIX and Windows) --
+  a *blind* rename of whatever currently sits at the path, with no such
+  check, could otherwise rename a different process's already-rotated,
+  already-live fresh file into this process's own sidecar, silently
+  detaching that process's diagnostics from the well-known path.
+  Immediately after a rotation, the same process also opportunistically
+  purges any of this log's own sidecars whose *modification time* is older
+  than 24 hours: a sidecar is written to exactly once, at the moment of its
+  own rotation, and never touched again afterward, so its mtime is a
+  reliable, race-safe proxy for "how long ago was this rotation" -- a
+  sidecar genuinely still involved in a concurrent rotation race is, at
+  most, a few seconds old, nowhere near that threshold, so this age gate
+  bounds the *cumulative* disk usage many rotations over a long-lived host
+  would otherwise leave unbounded, without reintroducing the destructive
+  race a blind/unconditional delete would risk. This bounds growth across
+  the many separate short-lived processes that are the actual growth vector
+  (though not a single pathological process logging in a tight loop -- not
+  a real shape here, since at most a handful of entries are ever logged per
+  process lifetime). A rotation discards nothing at the moment it happens
+  -- the oversized content survives under its sidecar name until that
+  sidecar eventually ages out -- but the live path itself becomes a rolling
+  window, not a permanent record; any sidecar an operator needs to inspect
+  sooner than its own 24-hour purge is still a manually-cleared scratch
+  file like the log itself.
 - **A failed file write falls back to a best-effort line on stderr, not
   silence.** Since these listeners suppress Node's own default
   uncaught-exception report, a log write that fails for any reason

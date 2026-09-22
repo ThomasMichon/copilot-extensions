@@ -42,6 +42,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -195,6 +196,46 @@ test(
       const sidecars = readdirSync(dir).filter((name) => name.startsWith(`${base}.stale-`));
       assert.equal(sidecars.length, 1, `expected exactly one sidecar, found: ${JSON.stringify(sidecars)}`);
       assert.equal(readFileSync(join(dir, sidecars[0]), "utf-8"), oldContent);
+    });
+  },
+);
+
+// purgeOldStaleSidecars() bounds the *cumulative* disk usage many rotations
+// over a long-lived host would otherwise leave unbounded, without risking
+// the destructive-delete race an unconditional cleanup would reintroduce:
+// a sidecar's mtime is fixed the moment it is created and never touched
+// again, so age-gating on mtime is safe -- a sidecar genuinely mid-rotation
+// is at most a few seconds old, nowhere near the 24h threshold. This test
+// backdates a fake old sidecar with utimesSync() (rather than waiting 24h)
+// and confirms it is purged by the next rotation, while a fresh one from
+// that same rotation survives.
+test(
+  "a rotation purges old sidecars (by mtime) but keeps its own fresh one",
+  { skip: !RUN_STRESS_CASES },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      const oneMiB = 1_048_576;
+      writeFileSync(logPath, "x".repeat(oneMiB + 10));
+      chmodSync(logPath, 0o600);
+      // A pre-existing sidecar, backdated well past the 24h purge
+      // threshold -- simulates one left behind by a rotation long ago.
+      const oldSidecar = `${logPath}.stale-99999-0-old`;
+      writeFileSync(oldSidecar, "ancient rotated content\n");
+      const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+      utimesSync(oldSidecar, twoDaysAgo, twoDaysAgo);
+
+      const emergencyLog = createEmergencyLog(logPath);
+      emergencyLog("signal", "SIGTERM ready=true");
+
+      const dir = dirname(logPath);
+      const base = logPath.slice(dir.length + 1);
+      const sidecars = readdirSync(dir).filter((name) => name.startsWith(`${base}.stale-`));
+      assert.equal(
+        sidecars.length,
+        1,
+        `expected the ancient sidecar purged and exactly one fresh one left, found: ${JSON.stringify(sidecars)}`,
+      );
+      assert.notEqual(sidecars[0], `${base}.stale-99999-0-old`, "the ancient sidecar should have been purged");
     });
   },
 );

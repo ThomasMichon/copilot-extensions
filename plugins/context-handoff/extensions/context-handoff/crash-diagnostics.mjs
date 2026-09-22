@@ -26,15 +26,60 @@ import {
   constants as fsConstants,
   fstatSync,
   openSync,
+  readdirSync,
   renameSync,
   statSync,
+  unlinkSync,
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 export const DEFAULT_CRASH_LOG = join(tmpdir(), "context-handoff-extension-crash.log");
+
+// A rotated-away `.stale-*` sidecar is written to exactly once, at the
+// moment of its own rotation, and never touched again by any process
+// afterward (see the "never delete" rotation rationale below) -- so its
+// mtime is a reliable, race-safe proxy for "how long ago was this
+// rotation." Purging sidecars older than this age bounds the *cumulative*
+// disk usage those permanent sidecars would otherwise leave unbounded (a
+// single rotation event only ever bounds the *live* path's own size, not
+// the growing pile of sidecars it leaves behind over the lifetime of a
+// long-running host) without reintroducing the destructive-delete race
+// this design was built to avoid: a sidecar genuinely still "in flight"
+// from a concurrent rotation is, at most, a few seconds old, nowhere near
+// this threshold.
+const STALE_SIDECAR_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
+ * Best-effort removal of this log's own `.stale-*` sidecars older than
+ * {@link STALE_SIDECAR_MAX_AGE_MS}. Every failure (missing directory,
+ * permissions, a sidecar vanishing between listing and unlinking, ...) is
+ * swallowed -- this is a bounded courtesy cleanup, never a correctness
+ * requirement, and it must never itself become a crash-handler failure
+ * mode.
+ */
+function purgeOldStaleSidecars(logPath) {
+  try {
+    const dir = dirname(logPath);
+    const prefix = `${basename(logPath)}.stale-`;
+    const now = Date.now();
+    for (const name of readdirSync(dir)) {
+      if (!name.startsWith(prefix)) continue;
+      const candidate = join(dir, name);
+      try {
+        if (now - statSync(candidate).mtimeMs > STALE_SIDECAR_MAX_AGE_MS) {
+          unlinkSync(candidate);
+        }
+      } catch {
+        // This one sidecar failed to stat/unlink; move on to the rest.
+      }
+    }
+  } catch {
+    // Best-effort only; see the doc comment above.
+  }
+}
 
 // Bounds this fixed, machine-global file's growth. SIGTERM is the Copilot
 // CLI's own routine mechanism for `/clear` and foreground-session
@@ -213,16 +258,19 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
                 throw new Error("crash log path is no longer trustworthy after reset");
               }
               fd = reopened;
-              // Deliberately no cleanup/unlink of any `.stale-*` sidecar
-              // here: this process cannot distinguish "a sidecar I just
-              // created from the oversized file I actually measured" from
-              // "a sidecar that, due to the residual race described above,
-              // actually holds another process's live, freshly-written
-              // entry" -- and unlinking the latter would destroy exactly
-              // the diagnostic this module exists to preserve. Leaving
-              // every `.stale-*` sidecar in place is the safe default;
-              // operators can clear them manually (same framing as this
-              // log file's own retention, described above).
+              // No unconditional cleanup/unlink of the sidecar this
+              // rotation *just* created here: this process cannot
+              // distinguish "the sidecar I just created from the oversized
+              // file I actually measured" from "a sidecar that, due to the
+              // residual race described above, actually holds another
+              // process's live, freshly-written entry" -- and unlinking the
+              // latter would destroy exactly the diagnostic this module
+              // exists to preserve. Instead, purgeOldStaleSidecars() below
+              // only removes sidecars whose mtime already proves they are
+              // long-settled (see its own doc comment) -- bounding the
+              // *cumulative* disk usage those permanent sidecars would
+              // otherwise leave unbounded, without reintroducing that race.
+              purgeOldStaleSidecars(logPath);
             }
           } else {
             closeSync(candidate);
