@@ -145,6 +145,40 @@ def _no_claim_enforcement(request, monkeypatch):
     monkeypatch.setattr(lease, "claim_for_connect", lambda *a, **kw: None)
 
 
+class _FakeTargetLock:
+    """Fake ``ssh_manager.TargetLock`` -- mirrors agent-containers' own test
+    double for the identical vendored primitive, so both venues' `copilot`
+    tests exercise the same fake shape."""
+
+    instances: list["_FakeTargetLock"] = []
+
+    def __init__(self, target, *, op):
+        self.target = target
+        self.op = op
+        self.released = False
+        self.force = None
+        _FakeTargetLock.instances.append(self)
+
+    def acquire(self, *, force=False):
+        self.force = force
+
+    def release(self):
+        self.released = True
+
+
+@pytest.fixture(autouse=True)
+def _no_target_lock_enforcement(request, monkeypatch):
+    """The same-machine ``TargetLock`` acquisition touches
+    ``~/.ssh-manager/locks/`` -- irrelevant to every test below except its
+    own dedicated coverage (`TestCmdCopilotTargetLockEnforcement`), so it's
+    faked out everywhere else unless a test explicitly re-patches it."""
+    _FakeTargetLock.instances.clear()
+    if request.cls is not None and request.cls.__name__ == "TestCmdCopilotTargetLockEnforcement":
+        return
+    import ssh_manager
+    monkeypatch.setattr(ssh_manager, "TargetLock", _FakeTargetLock)
+
+
 def _ns(**kw):
     defaults = dict(
         name="cs-1",
@@ -480,6 +514,123 @@ class TestCmdCopilotClaimEnforcement:
 
         assert rc == 0
         assert "[WARN]" in capsys.readouterr().err
+
+
+class TestCmdCopilotTargetLockEnforcement:
+    """agent-bridge-cli-mode-sessions Phase 4 follow-up: `copilot` never
+    acquired the same-machine, cross-process `ssh-manager` `TargetLock`
+    `agent-codespaces ssh` already does, even though both ride the exact
+    same shared credential-relay reverse-forward -- a second local
+    `ssh`/`copilot` invocation against the same CodeSpace could collide on
+    that relay port and collapse the first one's connection.
+    `agent-containers`' own `copilot` verb already acquires this lock; this
+    brings the two venues into consistent parity."""
+
+    def _patch_common(self, monkeypatch, store):
+        monkeypatch.setattr(owner, "ensure_owner_running", lambda config: True)
+        monkeypatch.setattr(config_mod, "load_merged_config", lambda: object())
+        monkeypatch.setattr("venue_copilot.resolve_daemon_port", lambda: None)
+        monkeypatch.setattr(
+            "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+        )
+        from agent_codespaces import lease
+        monkeypatch.setattr(lease, "claim_for_connect", lambda *a, **kw: None)
+
+    def test_acquires_and_releases_the_lock_around_a_successful_connect(
+        self, store, monkeypatch,
+    ) -> None:
+        import ssh_manager
+
+        self._patch_common(monkeypatch, store)
+        monkeypatch.setattr(ssh_manager, "TargetLock", _FakeTargetLock)
+        monkeypatch.setattr(
+            "venue_copilot.run_venue_copilot",
+            lambda worktree_id, *, connect, **kw: connect(
+                "agent-worktrees copilot --worktree-id wt-A",
+            ),
+        )
+
+        rc = copilot_venue.cmd_copilot(_ns(), interactive_ssh=lambda *a, **kw: 0)
+
+        assert rc == 0
+        assert len(_FakeTargetLock.instances) == 1
+        lock = _FakeTargetLock.instances[0]
+        assert lock.target == "cs-1"
+        assert lock.op == "copilot"
+        assert lock.force is False
+        assert lock.released is True
+
+    def test_force_flag_is_forwarded_to_the_lock(self, store, monkeypatch) -> None:
+        import ssh_manager
+
+        self._patch_common(monkeypatch, store)
+        monkeypatch.setattr(ssh_manager, "TargetLock", _FakeTargetLock)
+        monkeypatch.setattr(
+            "venue_copilot.run_venue_copilot",
+            lambda worktree_id, *, connect, **kw: connect(
+                "agent-worktrees copilot --worktree-id wt-A",
+            ),
+        )
+
+        rc = copilot_venue.cmd_copilot(
+            _ns(force=True), interactive_ssh=lambda *a, **kw: 0,
+        )
+
+        assert rc == 0
+        assert _FakeTargetLock.instances[0].force is True
+
+    def test_busy_lock_refuses_before_connecting(
+        self, store, monkeypatch, capsys,
+    ) -> None:
+        import ssh_manager
+
+        self._patch_common(monkeypatch, store)
+
+        class _BusyLock:
+            def __init__(self, target, *, op):
+                pass
+
+            def acquire(self, *, force=False):
+                holder = ssh_manager.LockHolder(
+                    pid=4242, op="ssh", target="cs-1", started_at=0.0,
+                )
+                raise ssh_manager.TargetBusyError("cs-1", holder)
+
+        monkeypatch.setattr(ssh_manager, "TargetLock", _BusyLock)
+        connected = {"called": False}
+        monkeypatch.setattr(
+            "venue_copilot.run_venue_copilot",
+            lambda *a, **kw: connected.__setitem__("called", True),
+        )
+
+        rc = copilot_venue.cmd_copilot(_ns(), interactive_ssh=lambda *a, **kw: 0)
+
+        assert rc == 75  # _BUSY_EXIT
+        assert connected == {"called": False}
+        assert "[BUSY]" in capsys.readouterr().err
+
+    def test_lock_is_released_even_when_connect_raises(
+        self, store, monkeypatch,
+    ) -> None:
+        import ssh_manager
+
+        self._patch_common(monkeypatch, store)
+        monkeypatch.setattr(ssh_manager, "TargetLock", _FakeTargetLock)
+
+        def fake_run_venue_copilot(worktree_id, *, connect, **kw):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(
+            "venue_copilot.run_venue_copilot", fake_run_venue_copilot,
+        )
+
+        with pytest.raises(RuntimeError):
+            copilot_venue.cmd_copilot(_ns(), interactive_ssh=lambda *a, **kw: 0)
+
+        assert _FakeTargetLock.instances[0].released is True
 
 
 class TestEnsureAgentBridgePlugin:
