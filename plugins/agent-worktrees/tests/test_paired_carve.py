@@ -589,16 +589,21 @@ class TestPairedKnowledgeAllocationEarlyPreflight:
         assert not (tmp_path / "harness-worktrees").exists()
 
 
-class TestDelegateOriginSkipsPairing:
+class TestNonUserOriginSkipsPairing:
     """Regression: pairing exists to give a human operator a personal
     knowledge-repo sibling alongside their own interactive work. A
-    ``origin="delegate"`` worktree (a headless dispatch attempt, or any
-    other automated/Picker-hidden creation) has no such operator, yet
+    non-``"user"`` origin worktree (``"delegate"`` -- a headless dispatch
+    attempt or any other automated/Picker-hidden creation -- or
+    ``"system"`` -- a daemon-owned worktree, independently selectable from
+    ``kind`` via the CLI's own ``--origin`` flag) has no such operator, yet
     ``kind`` for a dispatch attempt still defaults to the ordinary
     "session" -- so before this fix, the carve fired for every single
     dispatch attempt, leaking a full extra, permanently-unreleasable
     knowledge worktree per attempt (confirmed: 103 orphaned "-k" knowledge
-    worktrees on one operator's machine, most with session_count 0)."""
+    worktrees on one operator's machine, most with session_count 0). The
+    guard excludes every non-"user" origin (an allowlist), not merely
+    "delegate" (a denylist), so a "system"-origin `kind="session"`
+    creation is covered too."""
 
     def _setup(self, monkeypatch, tmp_path):
         _common_patches(monkeypatch, tmp_path)
@@ -667,12 +672,36 @@ class TestDelegateOriginSkipsPairing:
         # One for the harness worktree, one for its paired knowledge sibling.
         assert len(create_worktree_calls) == 2
 
+    def test_user_origin_still_carves(self, monkeypatch, tmp_path):
+        create_worktree_calls = self._setup(monkeypatch, tmp_path)
+        m._create_worktree_core(
+            self._harness_config(tmp_path), origin="user",
+        )
+        assert len(create_worktree_calls) == 2
+
     def test_delegate_origin_does_not_carve(self, monkeypatch, tmp_path):
         create_worktree_calls = self._setup(monkeypatch, tmp_path)
         m._create_worktree_core(
             self._harness_config(tmp_path), origin="delegate",
         )
         # Only the (dispatch-owned) worktree itself -- no knowledge sibling.
+        assert len(create_worktree_calls) == 1
+        yaml_files = list((tmp_path / "tracking").glob("*.yaml"))
+        assert len(yaml_files) == 1
+        record = tk.load_record_by_id(
+            yaml_files[0].stem, tracking_path=tmp_path / "tracking",
+        )
+        assert record is not None
+        assert not record.is_paired
+
+    def test_system_origin_does_not_carve(self, monkeypatch, tmp_path):
+        # A "system"-origin worktree can still carry kind="session" (kind
+        # and origin are independent CLI flags) -- must be excluded the
+        # same as "delegate", not just the dispatch-specific case.
+        create_worktree_calls = self._setup(monkeypatch, tmp_path)
+        m._create_worktree_core(
+            self._harness_config(tmp_path), origin="system",
+        )
         assert len(create_worktree_calls) == 1
         yaml_files = list((tmp_path / "tracking").glob("*.yaml"))
         assert len(yaml_files) == 1
