@@ -114,7 +114,6 @@ def _cmd_start(args: argparse.Namespace) -> None:
         _WINDOWS_SERVING_GRACE,
         arm_serving_watchdog,
     )
-    from .windows_proactor import resilient_loop_factory
     from .winjob import setup_kill_on_close_job
 
     core = _core()
@@ -187,6 +186,8 @@ def _cmd_start(args: argparse.Namespace) -> None:
 
     config_kwargs: dict[str, Any] = {"log_level": cfg.log_level, "ws": "wsproto"}
     if sys.platform == "win32":
+        from .windows_proactor import resilient_loop_factory
+
         config_kwargs["loop"] = resilient_loop_factory
     config = uvicorn.Config(app, **config_kwargs)
     server = uvicorn.Server(config)

@@ -53,3 +53,48 @@ def test_launch_argv_falls_back_to_binstub_on_path(monkeypatch, tmp_path):
     monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-bridge")
     argv = m._daemon_launch_argv()
     assert argv == ["/usr/bin/agent-bridge", "start"]
+
+
+def test_cmd_start_imports_cleanly_on_this_platform(monkeypatch, tmp_path):
+    """``_cmd_start`` crashed the daemon on Linux (#3238 follow-up): a
+    ``windows_proactor.resilient_loop_factory`` import at the top of the
+    function was unconditional even though its only use is inside an
+    ``if sys.platform == "win32":`` guard further down -- ``windows_proactor``
+    only defines that name inside its own matching guard, so any non-Windows
+    platform hit an immediate ``ImportError`` before the daemon could even
+    bind a socket. Exercise the real function up through every one of its
+    top-of-body imports (stopping cleanly at the first controllable exit
+    point, the singleton guard) rather than re-deriving the import list,
+    so a reintroduced unconditional import fails this test the same way it
+    failed the real daemon.
+
+    Stubs the two real-process side effects ``_cmd_start`` performs before
+    reaching that exit point (the kill-on-close job attach and a CWD
+    ``chdir`` into the config dir) -- neither is what this test is about,
+    and leaving them live would attach the pytest worker to a real Job
+    Object on Windows and strand it in a temp dir for later tests.
+    """
+    import argparse
+    import os
+
+    from agent_bridge import config as bridge_config
+    from agent_bridge import service_start_cli, winjob
+    from agent_bridge.singleton import AlreadyRunningError, SingleInstance
+
+    def _fake_acquire(self):
+        raise AlreadyRunningError(lock_path=self.lock_path, holder_pid=1234)
+
+    monkeypatch.setattr(SingleInstance, "acquire", _fake_acquire)
+    monkeypatch.setattr(winjob, "setup_kill_on_close_job", lambda: None)
+    monkeypatch.setattr(bridge_config, "config_dir", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    args = argparse.Namespace(
+        port=0, bind=None, idle_shutdown=None, passive=False,
+    )
+    # No exception at all (in particular no ImportError) -- the function
+    # returns as soon as the (mocked) singleton guard reports another
+    # instance already holds the lock. monkeypatch's own fixture teardown
+    # restores the real cwd afterward regardless of _cmd_start's chdir.
+    service_start_cli._cmd_start(args)
+    assert os.getcwd() == str(tmp_path)
