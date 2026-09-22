@@ -2439,7 +2439,7 @@ Implemented the design above as one cohesive `agent-dispatch` change.
   a board-render no-subprocess test, a relay staleness test, and a
   cross-machine ownership test. Targeted coverage for the touched surfaces:
   `run-plugin-tests.py agent-dispatch -k "board_cli or coordinator or inbox"`
-  passed (**190 passed** after the follow-up below). Full plugin suite:
+  passed (**191 passed** after the follow-ups below). Full plugin suite:
   `run-plugin-tests.py agent-dispatch` reached **751 passed, 2 skipped**;
   the only failures were the pre-existing Windows bash-path tests
   `test_bootstrap_check_reconcile_opt_in.py::{test_sh_skips_spawn_without_opt_in,test_sh_proceeds_with_opt_in}`,
@@ -2463,3 +2463,19 @@ periodic snapshots still prewarm the whole owned set by draining that queue
 back-to-back without waiting for another cadence tick. Added a focused test
 proving the helper can limit one worktree per cycle; targeted validation for
 the touched surfaces re-ran green at **190 passed**.
+
+### 2026-09-21 — PR #3234 review round 2: batch relay reads per board refresh + version rebump
+The next Copilot review found a real render-path performance problem: the
+board still fetched relay entries one row at a time, so a large Tasks pane
+refresh could add hundreds of serial coordinator round-trips even though the
+task list itself already arrives in one request. Fixed by adding a batched
+relay HTTP route/client method and switching both `board_cli.py` and
+`__main__.py`'s `inbox --board` path to prefetch every needed
+`(repo, worktree_id)` relay entry once per refresh, then render from that
+single batch result (with a one-shot failure degrading every card to
+stale/unknown rather than retrying per row). Added route coverage and updated
+the no-subprocess board test to assert the batched read shape. Because this
+follow-up changed plugin content after the first version bump, bumped
+`agent-dispatch` again to `0.1.2-dev167` so marketplace deployment remains
+version-triggered and not stale-gated. Targeted validation re-ran green at
+**191 passed**.
