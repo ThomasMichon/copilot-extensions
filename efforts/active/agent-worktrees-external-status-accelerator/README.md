@@ -1587,3 +1587,26 @@ still within the slack window) is still checked and flagged. All 46
 `worktree_status_audit` tests pass. Bumped `agent-worktrees` to
 `1.5.5-dev236` and the marketplace catalog to `1.7.7-dev204`.
 
+### 2026-09-21 — PR #3252 review round 2: the round-1 padding reintroduced the original bug
+Copilot's review confirmed round 1's fix but caught that it traded one
+false positive for another: padding the demand-window cutoff by
+`FRESHNESS_SLACK_SECONDS` to tolerate the persisted `demanded_at`'s narrow
+lag meant a row genuinely past the cache's own real `DEMAND_TTL_SECONDS`
+cutoff -- which the cache has, by design, already stopped sweeping --
+would still be checked (and flagged as `cache_freshness_bounds`) for the
+whole padding window. That is exactly the "expected resting state
+reported as an outage" mistake this fix exists to eliminate, just delayed
+and confined to a 60s window instead of removed.
+
+Weighed the two failure modes directly: the round-1 lag is narrow (bounded
+to roughly one TTL+sweep cycle, ~30s) and self-correcting (the very next
+sweep tick, or the next hourly audit run, observes an updated
+`demanded_at` regardless) -- a rare, transient false negative. The
+round-2 padding window, by contrast, reproduces the false positive
+*every single audit run* for the entire 60s stretch any naturally-idle
+row spends aging through it -- a frequent, systematic cost. Reverted to
+the cache's own exact `DEMAND_TTL_SECONDS` cutoff (no padding), accepting
+the narrow round-1 race as the lesser cost rather than reintroducing a
+worse, more frequent one. Updated/removed the tests that had asserted the
+now-reverted padded behavior; all 45 `worktree_status_audit` tests pass.
+

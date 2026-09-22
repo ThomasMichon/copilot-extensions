@@ -314,25 +314,25 @@ def _check_freshness(cache_entry: dict | None, *, now: float) -> list[FieldMisma
     # tolerated resting state for an outage" mistake this module's
     # daemon-liveness check was redesigned to avoid.
     #
-    # This durable `demanded_at` can itself lag the cache's true in-memory
-    # demand (Copilot review, 2026-09-21): `get_or_refresh`'s fresh-hit path
-    # deliberately extends demand only in memory, never persisting that
-    # bump on its own -- the persisted value only catches up the next time
-    # this entry is actually recomputed (a miss, or the sweep's own
-    # TTL-triggered refresh, which re-persists whatever `demanded_at` is
-    # then in memory). That lag is bounded by roughly one TTL+sweep cycle,
-    # not unbounded, but treating the boundary as exact would still risk
-    # hiding a real stale-entry mismatch for an entry that is genuinely
-    # still demanded in memory but whose last persisted `demanded_at`
-    # happens to sit just past DEMAND_TTL_SECONDS. Reuse the same
-    # FRESHNESS_SLACK_SECONDS this check already applies to the cache_age
-    # bound below, so an entry is only ever treated as demand-expired (and
-    # exempted here) once it is clearly past that window, not merely at it.
+    # Use the cache's own exact DEMAND_TTL_SECONDS cutoff here, not a
+    # widened one (Copilot review, 2026-09-21, round 2): the persisted
+    # `demanded_at` can lag true in-memory demand by roughly one TTL+sweep
+    # cycle (a fresh hit extends demand only in memory -- see
+    # `get_or_refresh`'s own docstring), which could in principle let a
+    # still-genuinely-demanded entry's persisted timestamp read just past
+    # this cutoff and get wrongly exempted here. But padding the cutoff to
+    # cover that narrow, self-correcting race (the next sweep tick, or the
+    # next audit run, observes an updated `demanded_at` regardless) would
+    # systematically reintroduce the opposite, more damaging false
+    # positive this whole check exists to avoid: a row genuinely past
+    # `DEMAND_TTL_SECONDS` is -- by the cache's own real, unpadded cutoff
+    # -- no longer being swept at all, so flagging it during any padding
+    # window would be exactly the "expected resting state reported as an
+    # outage" mistake again, just delayed and confined to that window
+    # instead of eliminated. The narrow lag risk is accepted as the lesser
+    # cost.
     demanded_at = cache_entry.get("demanded_at")
-    if (
-        isinstance(demanded_at, (int, float))
-        and now - demanded_at > DEMAND_TTL_SECONDS + FRESHNESS_SLACK_SECONDS
-    ):
+    if isinstance(demanded_at, (int, float)) and now - demanded_at > DEMAND_TTL_SECONDS:
         return []
 
     age = now - computed_at
