@@ -510,6 +510,7 @@ def make_embody_spawn(
     verify_timeout: int = 0,
     route: str = "",
     all_repos: bool = False,
+    no_pair: bool = False,
 ) -> SpawnFn:
     """Build a :data:`SpawnFn` that embodies a worker via ``agent-worktrees``.
 
@@ -565,6 +566,7 @@ def make_embody_spawn(
     spawn.requires_reusable_worktree = True
     spawn.allocation_driver = driver
     spawn.allocation_interface = "cli"
+    spawn.allocation_no_pair = no_pair
     return spawn
 
 
@@ -573,6 +575,7 @@ def make_headless_spawn(
     agent: str = "task-worker",
     route: str = "",
     all_repos: bool = False,
+    no_pair: bool = False,
 ) -> SpawnFn:
     """Build a :data:`SpawnFn` that embodies a worker as a **headless
     agent-bridge ACP** session -- no mux, no CLI-start-prompt.
@@ -659,6 +662,7 @@ def make_headless_spawn(
     spawn.allocation_driver = "agent-dispatch"
     spawn.allocation_interface = "acp"
     spawn.allocation_agent = agent
+    spawn.allocation_no_pair = no_pair
     spawn.allocation_project_for = lambda _task: (
         bridge.registered_agent_project(agent, strict=True) or ""
     )
@@ -704,6 +708,16 @@ def make_label_routed_spawn(default: SpawnFn, *, overrides: Mapping[str, SpawnFn
         value = selector(task) if callable(selector) else getattr(selected, name, fallback)
         return value if isinstance(value, str) and value else fallback
 
+    def selected_bool_attribute(task: dict, name: str, fallback: bool) -> bool:
+        selected = default
+        for label in task.get("labels") or []:
+            if label in overrides:
+                selected = overrides[label]
+                break
+        selector = getattr(selected, f"{name}_for", None)
+        value = selector(task) if callable(selector) else getattr(selected, name, fallback)
+        return bool(value)
+
     spawn.requires_reusable_worktree_for = requires_reusable_worktree
     spawn.allocation_driver_for = lambda task: selected_attribute(
         task, "allocation_driver", "agent-dispatch"
@@ -712,4 +726,7 @@ def make_label_routed_spawn(default: SpawnFn, *, overrides: Mapping[str, SpawnFn
         task, "allocation_interface", "cli"
     )
     spawn.allocation_project_for = lambda task: selected_attribute(task, "allocation_project", "")
+    spawn.allocation_no_pair_for = lambda task: selected_bool_attribute(
+        task, "allocation_no_pair", False
+    )
     return spawn

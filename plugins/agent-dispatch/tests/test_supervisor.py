@@ -455,6 +455,40 @@ def test_poll_records_failed_headless_session_before_releasing_worktree(
     assert reservation.worktree == "wt-created"
 
 
+def test_poll_threads_allocation_no_pair_into_worktree_preparation(
+    monkeypatch, q, client
+):
+    """Regression: a registrar/pool declaration's `body.no_pair` (rendered
+    as `--no-pair` and surfaced on the spawn_fn as `allocation_no_pair`)
+    must reach `embody.prepare_reusable_worktree`'s own `no_pair` kwarg --
+    the mechanism that skips the paired-knowledge carve for a worker pool
+    with no bound knowledge repo."""
+    from agent_dispatch import embody
+
+    task = q.create("work")
+    captured_kwargs: dict = {}
+
+    def fake_prepare(*_args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return {
+            "worktree": "wt-created",
+            "path": "/tmp/wt-created",
+            "created": True,
+            "replaced": False,
+            "ownership": "created",
+        }
+
+    monkeypatch.setattr(embody, "prepare_reusable_worktree", fake_prepare)
+
+    spawn = _ok_spawn()
+    spawn.requires_reusable_worktree = True
+    spawn.allocation_no_pair = True
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, machine="host-a")
+
+    assert sup.poll_once() == [task.id]
+    assert captured_kwargs.get("no_pair") is True
+
+
 def test_protected_label_pool_does_not_claim_unlabeled_task(q, client):
     q.handoff_producer_scope(
         TEST_REPO,

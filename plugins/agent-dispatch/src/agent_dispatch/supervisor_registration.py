@@ -225,6 +225,7 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
             "cli_labels": [],
             "disposable_cli_labels": [],
             "headless_agent": "task-worker",
+            "no_pair": False,
         }
         for key, value in defaults.items():
             if spec.get(key) is None:
@@ -246,6 +247,7 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
                 spec[key] = int(spec[key])
             except (TypeError, ValueError):
                 pass
+        spec["no_pair"] = bool(spec.get("no_pair"))
         label_attempts = {}
         for key, value in (spec.get("label_max_attempts") or {}).items():
             try:
@@ -372,6 +374,8 @@ def _lane_flags(spec: dict) -> list[str]:
         argv += ["--cli-label", str(label)]
     for label in spec.get("disposable_cli_labels", []) or []:
         argv += ["--disposable-cli-label", str(label)]
+    if spec.get("no_pair"):
+        argv.append("--no-pair")
     # Fleet dispatch: fan bodies across a pool of remote hosts, each driving the
     # origin task back over SSH. Mirrors ``ProfileDeclaration.to_supervise_args``;
     # emitted from spec["fleet"] (which declaration_to_spec now carries). Absent for

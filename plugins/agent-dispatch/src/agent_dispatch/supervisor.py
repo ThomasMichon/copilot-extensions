@@ -493,6 +493,12 @@ class Supervisor:
             return bool(selector(task))
         return bool(getattr(self.spawn_fn, "requires_reusable_worktree", False))
 
+    def _spawn_no_pair(self, task: dict) -> bool:
+        selector = getattr(self.spawn_fn, "allocation_no_pair_for", None)
+        if callable(selector):
+            return bool(selector(task))
+        return bool(getattr(self.spawn_fn, "allocation_no_pair", False))
+
     def _spawn_attribute(self, task: dict, name: str, default: str) -> str:
         selector = getattr(self.spawn_fn, f"{name}_for", None)
         if callable(selector):
@@ -521,6 +527,7 @@ class Supervisor:
             driver=driver,
             supervisor=self.supervisor_id,
             agent=agent or None,
+            no_pair=self._spawn_no_pair(task),
         )
         worktree = str(prepared["worktree"])
         replaced = bool(prepared.get("replaced"))

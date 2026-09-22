@@ -589,21 +589,21 @@ class TestPairedKnowledgeAllocationEarlyPreflight:
         assert not (tmp_path / "harness-worktrees").exists()
 
 
-class TestNonUserOriginSkipsPairing:
-    """Regression: pairing exists to give a human operator a personal
-    knowledge-repo sibling alongside their own interactive work. A
-    non-``"user"`` origin worktree (``"delegate"`` -- a headless dispatch
-    attempt or any other automated/Picker-hidden creation -- or
-    ``"system"`` -- a daemon-owned worktree, independently selectable from
-    ``kind`` via the CLI's own ``--origin`` flag) has no such operator, yet
-    ``kind`` for a dispatch attempt still defaults to the ordinary
-    "session" -- so before this fix, the carve fired for every single
-    dispatch attempt, leaking a full extra, permanently-unreleasable
-    knowledge worktree per attempt (confirmed: 103 orphaned "-k" knowledge
-    worktrees on one operator's machine, most with session_count 0). The
-    guard excludes every non-"user" origin (an allowlist), not merely
-    "delegate" (a denylist), so a "system"-origin `kind="session"`
-    creation is covered too."""
+class TestOriginDoesNotSkipPairing:
+    """Regression (catch-22 follow-up to #3207): a delegate/system-origin
+    dispatch worker needs its own paired knowledge sibling exactly as much
+    as an interactive operator does -- excluding non-"user" origins from
+    the carve merely traded one leak (orphaned knowledge worktrees, since
+    fixed) for another (a dispatch worker silently missing the knowledge
+    repo its own session guidance/skills depend on). The actual fix for
+    the orphan leak is reciprocal disposal: a concluding dispatch attempt
+    now disposes of BOTH halves of its own pair together (see
+    `terminal_conclusion.conclude_disposable_worktree` /
+    `TestReciprocalDisposal`), so pairing itself no longer needs to be
+    skipped by origin. The only remaining opt-out is the explicit,
+    per-call ``no_pair`` flag (for a registrar/pool with no bound
+    knowledge repo to give its workers) or the whole-host
+    ``AGENT_WORKTREES_NO_PAIR`` env var."""
 
     def _setup(self, monkeypatch, tmp_path):
         _common_patches(monkeypatch, tmp_path)
@@ -679,28 +679,30 @@ class TestNonUserOriginSkipsPairing:
         )
         assert len(create_worktree_calls) == 2
 
-    def test_delegate_origin_does_not_carve(self, monkeypatch, tmp_path):
+    def test_delegate_origin_still_carves(self, monkeypatch, tmp_path):
         create_worktree_calls = self._setup(monkeypatch, tmp_path)
         m._create_worktree_core(
             self._harness_config(tmp_path), origin="delegate",
         )
-        # Only the (dispatch-owned) worktree itself -- no knowledge sibling.
-        assert len(create_worktree_calls) == 1
-        yaml_files = list((tmp_path / "tracking").glob("*.yaml"))
-        assert len(yaml_files) == 1
-        record = tk.load_record_by_id(
-            yaml_files[0].stem, tracking_path=tmp_path / "tracking",
-        )
-        assert record is not None
-        assert not record.is_paired
+        # Both the dispatch-owned worktree and its knowledge sibling.
+        assert len(create_worktree_calls) == 2
 
-    def test_system_origin_does_not_carve(self, monkeypatch, tmp_path):
+    def test_system_origin_still_carves(self, monkeypatch, tmp_path):
         # A "system"-origin worktree can still carry kind="session" (kind
-        # and origin are independent CLI flags) -- must be excluded the
-        # same as "delegate", not just the dispatch-specific case.
+        # and origin are independent CLI flags); origin is no longer part
+        # of the pairing gate at all.
         create_worktree_calls = self._setup(monkeypatch, tmp_path)
         m._create_worktree_core(
             self._harness_config(tmp_path), origin="system",
+        )
+        assert len(create_worktree_calls) == 2
+
+    def test_no_pair_flag_skips_pairing_regardless_of_origin(self, monkeypatch, tmp_path):
+        # The explicit per-call opt-out still works for any origin,
+        # including the default ("user"-equivalent) one.
+        create_worktree_calls = self._setup(monkeypatch, tmp_path)
+        m._create_worktree_core(
+            self._harness_config(tmp_path), origin="delegate", no_pair=True,
         )
         assert len(create_worktree_calls) == 1
         yaml_files = list((tmp_path / "tracking").glob("*.yaml"))

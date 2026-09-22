@@ -197,6 +197,21 @@ def test_disposable_cli_label_must_be_watched_and_local():
         )
 
 
+def test_no_pair_supported_only_for_local_bodies():
+    with pytest.raises(RegistrarError, match="only for local"):
+        load_declaration(
+            {
+                "name": "x",
+                "labels": ["review"],
+                "fleet": {"pool": ["host-a"]},
+                "body": {
+                    "type": "embody",
+                    "no_pair": True,
+                },
+            }
+        )
+
+
 def test_concurrency_must_be_positive():
     with pytest.raises(RegistrarError, match="concurrency"):
         load_declaration({"name": "x", "concurrency": 0})
@@ -293,6 +308,28 @@ def test_supervise_args_emit_disposable_cli_label():
     )
     args = declaration.to_supervise_args()
     assert _flag_val(args, "--disposable-cli-label") == "review"
+
+
+def test_supervise_args_emit_no_pair():
+    declaration = load_declaration(
+        {
+            "name": "portable-pool",
+            "labels": ["review"],
+            "body": {"type": "embody", "no_pair": True},
+        }
+    )
+    args = declaration.to_supervise_args()
+    assert "--no-pair" in args
+    assert declaration.body.no_pair is True
+
+
+def test_supervise_args_omit_no_pair_by_default():
+    declaration = load_declaration(
+        {"name": "reviewers", "labels": ["review"], "body": {"type": "embody"}}
+    )
+    args = declaration.to_supervise_args()
+    assert "--no-pair" not in args
+    assert declaration.body.no_pair is False
 
 
 def test_supervise_args_lane_scoped():

@@ -1302,3 +1302,521 @@ def test_reused_pid_does_not_keep_a_stale_lifecycle_lock(
         assert lock_path.read_text(encoding="utf-8") == lock.token
     finally:
         lock.release()
+
+
+def _pair_sibling(
+    tmp_path,
+    monkeypatch,
+    *,
+    project,
+    harness_machine,
+    harness_project,
+    harness_worktree_id,
+    dirty=False,
+):
+    """Build a real second git worktree + tracking record, paired back to
+    the given harness identity, in its OWN project's tracking directory
+    (``cfg.project_dir(project)``) -- exactly what
+    `terminal_conclusion._resolve_pair_sibling` resolves via
+    ``record.pair_ref``. Monkeypatches ``tc.cfg.project_dir`` so this
+    project name resolves under ``tmp_path``."""
+    remote = tmp_path / f"{project}-remote.git"
+    anchor = tmp_path / f"{project}-anchor"
+    root = tmp_path / f"{project}-worktrees"
+    project_root = tmp_path / f".{project}"
+    tracking_dir = project_root / "worktrees"
+    worktree_id = f"{project}-wt"
+    worktree = root / worktree_id
+    tracking_dir.mkdir(parents=True)
+    root.mkdir()
+
+    git_ops.git("init", "--bare", "-b", "main", str(remote))
+    git_ops.git("init", "-b", "main", str(anchor))
+    _git(anchor, "config", "user.email", "test@example.com")
+    _git(anchor, "config", "user.name", "Test")
+    (anchor / "README.md").write_text("base\n", encoding="utf-8")
+    _git(anchor, "add", "-A")
+    _git(anchor, "commit", "-m", "initial")
+    _git(anchor, "remote", "add", "origin", str(remote))
+    _git(anchor, "push", "-u", "origin", "main")
+    git_ops.git(
+        "worktree",
+        "add",
+        str(worktree),
+        "-b",
+        f"worktree/{worktree_id}",
+        "origin/main",
+        cwd=anchor,
+    )
+    _git(worktree, "config", "user.email", "test@example.com")
+    _git(worktree, "config", "user.name", "Test")
+
+    record = tracking.create_new_record(
+        worktree_id,
+        f"worktree/{worktree_id}",
+        str(worktree),
+        project,
+        harness_machine,
+        "linux",
+        tracking_dir,
+    )
+    record.pair_id = "pair1"
+    record.pair_role = "knowledge"
+    record.pair_ref = tracking.format_claim_ref(
+        harness_machine, harness_project, harness_worktree_id,
+    )
+    record.pair_kind = "worktree"
+    record_path = tracking_dir / f"{worktree_id}.yaml"
+    tracking.save_record(record, record_path)
+
+    if dirty:
+        (worktree / "wip.txt").write_text("uncommitted\n", encoding="utf-8")
+
+    original_project_dir = tc.cfg.project_dir
+    monkeypatch.setattr(
+        tc.cfg,
+        "project_dir",
+        lambda name=None: project_root if name == project else original_project_dir(name),
+    )
+    original_load_config = tc.cfg.load_config
+    this_project = project
+    sibling_config = types.SimpleNamespace(
+        default_repo=types.SimpleNamespace(
+            remote="origin", default_branch="main", anchor=str(anchor),
+        ),
+    )
+    monkeypatch.setattr(
+        tc.cfg,
+        "load_config",
+        lambda project=None: (
+            sibling_config if project == this_project else original_load_config(project=project)
+        ),
+    )
+    return record, record_path, worktree
+
+
+class TestReciprocalDisposal:
+    """Regression (catch-22 follow-up to #3198/#3207): a dispatch attempt's
+    own paired knowledge sibling must be treated as ONE disposable unit with
+    the harness worktree it concludes -- `is_paired` unconditionally
+    blocking `conclude_disposable_worktree` forever (with no release path
+    at all) left every dispatch-created pair permanently wedged. A
+    concluding dispatch attempt now disposes of BOTH halves together
+    (`_dispatch_pair_clearance` + `_conclude_pair_sibling`), never just the
+    harness side (which would orphan the knowledge sibling), and never
+    unconditionally (a paired human/CLI conclusion, or an unmatched
+    dispatch attempt, still preserves exactly as before)."""
+
+    def _harness(self, tmp_path, monkeypatch, *, pair_ref, pair_kind="worktree"):
+        repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+        record = tracking.load_record(record_path)
+        record.origin = "delegate"
+        record.dispatch_attempt = tracking.DispatchAttempt(
+            task_id="task-1",
+            reservation_key="dispatch-task:task-1:1",
+            attempt=1,
+            driver="dispatcher",
+            supervisor="supervisor-1",
+            creator_machine=record.machine,
+        )
+        record.pair_id = "pair1"
+        record.pair_role = "harness"
+        record.pair_ref = pair_ref
+        record.pair_kind = pair_kind
+        tracking.save_record(record, record_path)
+        return repo, record_path, worktree
+
+    def test_concludes_both_halves_of_a_clean_pair(self, tmp_path, monkeypatch):
+        sibling, sibling_path, _sibling_worktree = _pair_sibling(
+            tmp_path,
+            monkeypatch,
+            project="knowledge-proj",
+            harness_machine="host",
+            harness_project="demo",
+            harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _worktree = self._harness(
+            tmp_path,
+            monkeypatch,
+            pair_ref=tracking.format_claim_ref(
+                "host", "knowledge-proj", sibling.worktree_id,
+            ),
+        )
+
+        result = _conclude(
+            record_path,
+            repo,
+            policy=tc.DISPATCH_ATTEMPT_POLICY,
+            reservation_key="dispatch-task:task-1:1",
+        )
+
+        assert result["action"] == "primed"
+        assert result["pair_sibling"]["action"] == "primed"
+        harness_record = tracking.load_record(record_path)
+        assert harness_record.kind == "bridge"
+        assert harness_record.status == "complete"
+        # Discharged: both halves are jointly concluded, so the pairing
+        # link itself is cleared -- otherwise the managed sweep's own
+        # paired-worktree guard would strand both records forever.
+        assert not harness_record.is_paired
+        sibling_record = tracking.load_record(sibling_path)
+        assert sibling_record.kind == "bridge"
+        assert sibling_record.status == "complete"
+        assert not sibling_record.is_paired
+
+    def test_blocks_on_sibling_with_unpushed_commits(self, tmp_path, monkeypatch):
+        """A sibling with no porcelain dirtiness but local-only commits ahead
+        of its own upstream must still block -- exactly like the harness
+        side's own ahead-count gate."""
+        sibling, sibling_path, sibling_worktree = _pair_sibling(
+            tmp_path,
+            monkeypatch,
+            project="knowledge-proj",
+            harness_machine="host",
+            harness_project="demo",
+            harness_worktree_id="worker-20260901-abcd",
+        )
+        (sibling_worktree / "unpushed.txt").write_text("wip\n", encoding="utf-8")
+        _git(sibling_worktree, "add", "-A")
+        _git(sibling_worktree, "commit", "-m", "local-only work")
+        repo, record_path, _worktree = self._harness(
+            tmp_path,
+            monkeypatch,
+            pair_ref=tracking.format_claim_ref(
+                "host", "knowledge-proj", sibling.worktree_id,
+            ),
+        )
+
+        result = _conclude(
+            record_path,
+            repo,
+            policy=tc.DISPATCH_ATTEMPT_POLICY,
+            reservation_key="dispatch-task:task-1:1",
+        )
+
+        assert result["action"] == "skipped"
+        assert result["reason"] == "pair-sibling-local-commits"
+        harness_record = tracking.load_record(record_path)
+        assert harness_record.kind == "session"
+        sibling_record = tracking.load_record(sibling_path)
+        assert sibling_record.kind == "session"
+
+    def test_conclude_pair_sibling_revalidates_full_identity_under_lock(
+        self, tmp_path, monkeypatch,
+    ):
+        """Regression (Copilot review finding): `_conclude_pair_sibling`
+        must re-run the FULL reciprocal-pair validation while holding the
+        sibling's own lock, not just re-check `worktree_id == path.stem`.
+        Simulates a race by retargeting the sibling's role after the
+        (unlocked) preliminary clearance already ran."""
+        sibling, sibling_path, _sibling_worktree = _pair_sibling(
+            tmp_path,
+            monkeypatch,
+            project="knowledge-proj",
+            harness_machine="host",
+            harness_project="demo",
+            harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _worktree = self._harness(
+            tmp_path,
+            monkeypatch,
+            pair_ref=tracking.format_claim_ref(
+                "host", "knowledge-proj", sibling.worktree_id,
+            ),
+        )
+        record = tracking.load_record(record_path)
+        original_resolve = tc._resolve_pair_sibling
+        stale_resolution = (sibling, sibling_path)
+
+        # A concurrent rewrite breaks the reciprocal link between the
+        # preliminary (unlocked) resolve and the locked re-check below.
+        # Force the preliminary resolve to return the STALE (pre-mutation)
+        # result so the locked block is the one that must catch it.
+        monkeypatch.setattr(tc, "_resolve_pair_sibling", lambda _r: stale_resolution)
+        mutated_sibling = tracking.load_record(sibling_path)
+        mutated_sibling.pair_role = "harness"  # no longer complementary
+        tracking.save_record(mutated_sibling, sibling_path)
+
+        outcome = tc._conclude_pair_sibling(record)
+        monkeypatch.setattr(tc, "_resolve_pair_sibling", original_resolve)
+
+        assert outcome == {
+            "action": "skipped",
+            "reason": "pair-sibling-identity-mismatch",
+        }
+        sibling_record = tracking.load_record(sibling_path)
+        assert sibling_record.kind == "session"
+
+    def test_blocks_on_dirty_knowledge_sibling(self, tmp_path, monkeypatch):
+        sibling, sibling_path, _sibling_worktree = _pair_sibling(
+            tmp_path,
+            monkeypatch,
+            project="knowledge-proj",
+            harness_machine="host",
+            harness_project="demo",
+            harness_worktree_id="worker-20260901-abcd",
+            dirty=True,
+        )
+        repo, record_path, _worktree = self._harness(
+            tmp_path,
+            monkeypatch,
+            pair_ref=tracking.format_claim_ref(
+                "host", "knowledge-proj", sibling.worktree_id,
+            ),
+        )
+
+        result = _conclude(
+            record_path,
+            repo,
+            policy=tc.DISPATCH_ATTEMPT_POLICY,
+            reservation_key="dispatch-task:task-1:1",
+        )
+
+        assert result["action"] == "skipped"
+        assert result["reason"] == "pair-sibling-dirty-work"
+        harness_record = tracking.load_record(record_path)
+        assert harness_record.kind == "session"
+        sibling_record = tracking.load_record(sibling_path)
+        assert sibling_record.kind == "session"
+
+    def test_unresolvable_sibling_blocks_the_whole_pair(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            tc.cfg, "project_dir", lambda name=None: tmp_path / f".{name}",
+        )
+        repo, record_path, _worktree = self._harness(
+            tmp_path,
+            monkeypatch,
+            pair_ref=tracking.format_claim_ref(
+                "host", "knowledge-proj", "does-not-exist",
+            ),
+        )
+
+        result = _conclude(
+            record_path,
+            repo,
+            policy=tc.DISPATCH_ATTEMPT_POLICY,
+            reservation_key="dispatch-task:task-1:1",
+        )
+
+        assert result["action"] == "skipped"
+        assert result["reason"] == "pair-sibling-unresolved"
+
+    def test_non_reciprocal_link_blocks_the_whole_pair(self, tmp_path, monkeypatch):
+        """Regression (Copilot review finding): a record whose `pair_ref`
+        resolves to an EXISTING worktree that is not genuinely its
+        reciprocal sibling (e.g. a stale/malformed link pointing at some
+        unrelated tracked worktree that never links back) must never be
+        treated as safe to dispose of -- this is a destructive path."""
+        unrelated, _unrelated_path, _unrelated_worktree = _pair_sibling(
+            tmp_path,
+            monkeypatch,
+            project="knowledge-proj",
+            harness_machine="host",
+            harness_project="some-other-harness",  # does NOT match this test's harness
+            harness_worktree_id="not-this-worktree",
+        )
+        repo, record_path, _worktree = self._harness(
+            tmp_path,
+            monkeypatch,
+            pair_ref=tracking.format_claim_ref(
+                "host", "knowledge-proj", unrelated.worktree_id,
+            ),
+        )
+
+        result = _conclude(
+            record_path,
+            repo,
+            policy=tc.DISPATCH_ATTEMPT_POLICY,
+            reservation_key="dispatch-task:task-1:1",
+        )
+
+        assert result["action"] == "skipped"
+        assert result["reason"] == "pair-sibling-unresolved"
+        harness_record = tracking.load_record(record_path)
+        assert harness_record.kind == "session"
+        unrelated_record = tracking.load_record(_unrelated_path)
+        assert unrelated_record.kind == "session"
+
+    def test_disposable_cli_policy_still_blocks_unconditionally_on_pairing(
+        self, tmp_path, monkeypatch,
+    ):
+        """The reciprocal-disposal fix is scoped to dispatch-attempt
+        conclusions only -- a plain CLI/human conclusion of a paired
+        worktree must keep behaving exactly as before (unconditional
+        block), never silently reach for a sibling to dispose of too."""
+        sibling, _sibling_path, _sibling_worktree = _pair_sibling(
+            tmp_path,
+            monkeypatch,
+            project="knowledge-proj",
+            harness_machine="host",
+            harness_project="demo",
+            harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+        record = tracking.load_record(record_path)
+        record.pair_id = "pair1"
+        record.pair_role = "harness"
+        record.pair_ref = tracking.format_claim_ref(
+            "host", "knowledge-proj", sibling.worktree_id,
+        )
+        record.pair_kind = "worktree"
+        tracking.save_record(record, record_path)
+
+        result = _conclude(record_path, repo, policy=tc.DISPOSABLE_CLI_POLICY)
+
+        assert result["action"] == "skipped"
+        assert result["reason"] == "outstanding-obligations"
+        harness_record = tracking.load_record(record_path)
+        assert harness_record.kind == "session"
+
+    def test_unit_pair_clearance_is_scoped_to_dispatch_attempt_policy(
+        self, tmp_path, monkeypatch,
+    ):
+        """Direct unit check: `_dispatch_pair_clearance` must return
+        ``(False, None)`` -- deferring entirely to `_preservation_reason`'s
+        ordinary unconditional `is_paired` block -- for a paired record
+        under ANY policy other than `DISPATCH_ATTEMPT_POLICY`, even one
+        whose (irrelevant, for this policy) dispatch provenance would
+        otherwise match."""
+        sibling, _sibling_path, _sibling_worktree = _pair_sibling(
+            tmp_path,
+            monkeypatch,
+            project="knowledge-proj",
+            harness_machine="host",
+            harness_project="demo",
+            harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _worktree = self._harness(
+            tmp_path,
+            monkeypatch,
+            pair_ref=tracking.format_claim_ref(
+                "host", "knowledge-proj", sibling.worktree_id,
+            ),
+        )
+        record = tracking.load_record(record_path)
+
+        pair_clear, block_reason = tc._dispatch_pair_clearance(
+            record,
+            policy=tc.DISPOSABLE_CLI_POLICY,
+            reservation_key="dispatch-task:task-1:1",
+            owner="dispatcher",
+        )
+
+        assert (pair_clear, block_reason) == (False, None)
+        assert tc._preservation_reason(
+            record, policy=tc.DISPOSABLE_CLI_POLICY, pair_clear=pair_clear,
+        ) == "outstanding-obligations"
+
+    def test_blocks_on_sibling_active_lifecycle_head(self, tmp_path, monkeypatch):
+        """A sibling with an ENDED-but-still-resumable tracked lifecycle
+        head must block -- independent of `_session_is_live`, which only
+        detects a currently-running process."""
+        sibling, sibling_path, _sibling_worktree = _pair_sibling(
+            tmp_path,
+            monkeypatch,
+            project="knowledge-proj",
+            harness_machine="host",
+            harness_project="demo",
+            harness_worktree_id="worker-20260901-abcd",
+        )
+        sibling_record = tracking.load_record(sibling_path)
+        sibling_record.sessions = [
+            tracking.SessionEntry(
+                session_id="sibling-session", started_at="2026-09-01T00:00:00Z",
+            )
+        ]
+        sibling_record.head_session = "sibling-session"
+        tracking.save_record(sibling_record, sibling_path)
+        repo, record_path, _worktree = self._harness(
+            tmp_path,
+            monkeypatch,
+            pair_ref=tracking.format_claim_ref(
+                "host", "knowledge-proj", sibling.worktree_id,
+            ),
+        )
+
+        result = _conclude(
+            record_path,
+            repo,
+            policy=tc.DISPATCH_ATTEMPT_POLICY,
+            reservation_key="dispatch-task:task-1:1",
+        )
+
+        assert result["action"] == "skipped"
+        assert result["reason"] == "pair-sibling-active-lifecycle-head"
+        harness_record = tracking.load_record(record_path)
+        assert harness_record.kind == "session"
+
+    def test_blocks_on_missing_sibling_checkout_with_unpushed_branch(
+        self, tmp_path, monkeypatch,
+    ):
+        """Regression (Copilot review finding): even when the sibling's own
+        worktree directory is entirely gone, its branch may still exist
+        (git worktrees share refs/objects with their anchor) with unpushed
+        commits -- this must still block, mirroring the harness side's own
+        missing-checkout fallback."""
+        sibling, sibling_path, sibling_worktree = _pair_sibling(
+            tmp_path,
+            monkeypatch,
+            project="knowledge-proj",
+            harness_machine="host",
+            harness_project="demo",
+            harness_worktree_id="worker-20260901-abcd",
+        )
+        (sibling_worktree / "unpushed.txt").write_text("wip\n", encoding="utf-8")
+        _git(sibling_worktree, "add", "-A")
+        _git(sibling_worktree, "commit", "-m", "local-only work")
+        import shutil as _shutil
+
+        _shutil.rmtree(sibling_worktree)
+
+        repo, record_path, _worktree = self._harness(
+            tmp_path,
+            monkeypatch,
+            pair_ref=tracking.format_claim_ref(
+                "host", "knowledge-proj", sibling.worktree_id,
+            ),
+        )
+
+        result = _conclude(
+            record_path,
+            repo,
+            policy=tc.DISPATCH_ATTEMPT_POLICY,
+            reservation_key="dispatch-task:task-1:1",
+        )
+
+        assert result["action"] == "skipped"
+        assert result["reason"] == "pair-sibling-local-commits"
+        harness_record = tracking.load_record(record_path)
+        assert harness_record.kind == "session"
+
+    def test_anchor_pair_concludes_harness_and_discharges_link_only(
+        self, tmp_path, monkeypatch,
+    ):
+        """An anchor-kind pair (a non-worktree-class/singleton knowledge
+        repo) has no disposable sibling worktree at all -- only the
+        harness side concludes and discharges its own pairing link; the
+        (nonexistent, shared) anchor is never touched."""
+        repo, record_path, _worktree = self._harness(
+            tmp_path,
+            monkeypatch,
+            pair_ref=tracking.format_claim_ref("host", "knowledge-proj", "anchor"),
+            pair_kind="anchor",
+        )
+
+        result = _conclude(
+            record_path,
+            repo,
+            policy=tc.DISPATCH_ATTEMPT_POLICY,
+            reservation_key="dispatch-task:task-1:1",
+        )
+
+        assert result["action"] == "primed"
+        assert result["pair_sibling"] == {
+            "action": "not-applicable",
+            "reason": "anchor-pair",
+        }
+        harness_record = tracking.load_record(record_path)
+        assert harness_record.kind == "bridge"
+        assert harness_record.status == "complete"
+        assert not harness_record.is_paired

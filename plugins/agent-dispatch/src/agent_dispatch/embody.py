@@ -121,12 +121,18 @@ def create_worktree(
     supervisor: str,
     timeout: float | None = None,
     agent: str | None = None,
+    no_pair: bool = False,
 ) -> dict[str, str | None]:
     """Create a worktree without launching Copilot and return its id/path.
 
     This is the first half of create -> record -> spawn -> bind. Capturing the
     worktree id before any Copilot/ACP setup means a failed or hung launch still
     leaves the host with a durable worktree binding to retry or inspect.
+
+    ``no_pair`` opts THIS worker out of the paired-knowledge carve regardless
+    of origin -- for a registrar/pool declaration (``body.no_pair``) whose
+    workers have no bound knowledge repo to be given (see
+    ``agent-worktrees create --no-pair``).
     """
     exe_prefix = _agent_worktrees_launch_prefix()
     if exe_prefix is None:
@@ -157,6 +163,8 @@ def create_worktree(
     ]
     if agent:
         cmd += ["--agent", agent]
+    if no_pair:
+        cmd.append("--no-pair")
     result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
         cmd,
         check=False,
@@ -237,6 +245,7 @@ def prepare_reusable_worktree(
     supervisor: str,
     timeout: float | None = None,
     agent: str | None = None,
+    no_pair: bool = False,
 ) -> dict[str, object]:
     """Resolve or create the worktree carried by an exclusive reservation.
     A successful lookup reuses the existing checkout. A positively missing
@@ -264,6 +273,7 @@ def prepare_reusable_worktree(
                 supervisor=supervisor,
                 timeout=timeout,
                 agent=agent,
+                no_pair=no_pair,
             )
             path = created.get("path")
             if not isinstance(path, str) or not path:
@@ -298,6 +308,7 @@ def prepare_reusable_worktree(
         supervisor=supervisor,
         timeout=timeout,
         agent=agent,
+        no_pair=no_pair,
     )
     path = created.get("path")
     if not isinstance(path, str) or not path:
