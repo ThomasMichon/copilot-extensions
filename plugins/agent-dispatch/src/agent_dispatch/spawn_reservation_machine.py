@@ -152,7 +152,7 @@ SPAWN_TRANSITIONS: tuple[SpawnTransition, ...] = (
         implemented_by="TaskQueue.retire_spawn (exact absence proof, failed disposition)",
     ),
     SpawnTransition(
-        name="force_fail_handle_less_release",
+        name="force_fail_stuck_release",
         from_states=frozenset({SpawnState.RELEASING}),
         to_state=SpawnState.FAILED,
         recovery_mode=RecoveryMode.SELF_REPAIR,
@@ -161,7 +161,13 @@ SPAWN_TRANSITIONS: tuple[SpawnTransition, ...] = (
             "override for a releasing reservation with no recorded "
             "session_handle -- one automatic release_requested_bodies() "
             "cleanup can never resolve, since retire_spawn's exact-absence "
-            "proof has nothing to check; copilot-extensions#3179)"
+            "proof has nothing to check; copilot-extensions#3179) or, with "
+            "force=True, confirmed_absent=True, one that DOES carry a "
+            "session_handle but whose caller has independently established "
+            "it no longer exists -- e.g. doctor's orphaned_worktree_gone "
+            "verdict on a reservation whose owning task already went "
+            "terminal and will never revisit it again, otherwise fencing "
+            "its exclusive_key forever; copilot-extensions#3025)"
         ),
     ),
     SpawnTransition(

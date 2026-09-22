@@ -627,6 +627,33 @@ def test_force_fail_refuses_a_releasing_reservation_with_a_handle(q):
     assert current.state == SpawnState.RELEASING
 
 
+def test_force_fail_confirmed_absent_recovers_a_handle_carrying_releasing_reservation(q):
+    """Regression (copilot-extensions#3025): a releasing reservation that DID
+    capture a handle, whose owning task has already gone terminal (e.g. via
+    doctor confirming its worktree is gone), will never be revisited by any
+    automatic retire/liveness-checked path again -- permanently fencing its
+    exclusive_key. ``fail_spawn(force=True, confirmed_absent=True)`` is the
+    narrower opt-in that clears exactly this case, once the caller has
+    independently established the handle no longer names anything live."""
+    task = q.create("terminal-handle", exclusive_key="lane:x")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(reservation.key, session_handle="local-body:sid-2")
+    released = q.request_spawn_release(reservation.key, disposition="failed")
+    assert released.state == SpawnState.RELEASING
+
+    forced = q.fail_spawn(
+        released.key,
+        detail="worktree confirmed gone",
+        force=True,
+        confirmed_absent=True,
+    )
+    assert forced.state == SpawnState.FAILED
+    # The exclusive_key is now free for a fresh reservation.
+    fresh_task = q.create("successor", exclusive_key="lane:x")
+    fresh_reservation, _ = q.reserve_spawn(fresh_task.id)
+    assert fresh_reservation.state == SpawnState.RESERVING
+
+
 def test_force_fail_without_force_still_rejects_releasing(q):
     task = q.create("orphaned-create")
     reservation, _ = q.reserve_spawn(task.id)
@@ -1286,7 +1313,42 @@ def test_http_fail_force_refuses_a_releasing_reservation_with_a_handle(api):
     assert "session_handle" in forced.json()["detail"]
 
 
-def test_http_defer(api):
+def test_http_fail_force_confirmed_absent_recovers_handle_carrying_releasing(api):
+    """Route-level companion to
+    ``test_force_fail_confirmed_absent_recovers_a_handle_carrying_releasing_reservation``
+    (copilot-extensions#3025): passing ``confirmed_absent`` alongside
+    ``force`` over the ``/fail`` route clears a handle-carrying ``releasing``
+    reservation an operator (or ``doctor --repair``) has independently
+    confirmed dead."""
+    task_id = _create_task(api)
+    reservation = api.post(
+        "/spawn-reservations",
+        json={"task_id": task_id},
+    ).json()["reservation"]
+    api.post(
+        f"/spawn-reservations/{reservation['key']}/spawned",
+        json={"session_handle": "local-body:sid-1", "worktree": "w"},
+    )
+    api.post(
+        f"/spawn-reservations/{reservation['key']}/release",
+        json={"disposition": "failed"},
+    )
+
+    still_refused = api.post(
+        f"/spawn-reservations/{reservation['key']}/fail",
+        json={"force": True, "confirmed_absent": False},
+    )
+    assert still_refused.status_code == 409
+
+    forced = api.post(
+        f"/spawn-reservations/{reservation['key']}/fail",
+        json={"force": True, "confirmed_absent": True},
+    )
+    assert forced.status_code == 200
+    assert forced.json()["state"] == SpawnState.FAILED
+
+
+
     """The `/defer` route mirrors `/fail`'s shape but lands `deferred`, not
     `failed` -- a carried session confirmed live/busy (#2056) is a legitimate
     deferral, not a spawn failure."""
@@ -1444,10 +1506,12 @@ def test_cli_release_pending_transition_is_rejected(
         def __exit__(self, *_exc):
             return False
 
-        def fail_spawn(self, key, *, detail=None, force=False):
+        def fail_spawn(self, key, *, detail=None, force=False, confirmed_absent=False):
             from dataclasses import asdict
 
-            return asdict(q.fail_spawn(key, detail=detail, force=force))
+            return asdict(
+                q.fail_spawn(key, detail=detail, force=force, confirmed_absent=confirmed_absent)
+            )
 
         def settle_spawn(self, key, *, detail=None):
             from dataclasses import asdict

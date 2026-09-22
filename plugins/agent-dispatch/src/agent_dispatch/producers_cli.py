@@ -217,7 +217,14 @@ def _cmd_reservations(args: argparse.Namespace) -> int:
             rows = c.list_reservations(task_id=args.task, state=args.state, limit=args.limit)
             return _emit(rows)
         if args.reservations_command == "fail":
-            return _emit(c.fail_spawn(args.key, detail=args.detail, force=args.force))
+            return _emit(
+                c.fail_spawn(
+                    args.key,
+                    detail=args.detail,
+                    force=args.force,
+                    confirmed_absent=args.confirmed_absent,
+                )
+            )
         if args.reservations_command == "defer":
             return _emit(c.defer_spawn(args.key, detail=args.detail))
         if args.reservations_command == "settle":
@@ -390,9 +397,25 @@ def register_reservations_command(subparsers: Any) -> None:
             "explicit operator override for a 'releasing' reservation with no "
             "recorded session_handle (nothing an automatic exact-absence proof "
             "could ever confirm, so it would otherwise sit 'releasing' forever "
-            "-- copilot-extensions#3179). Refused if the reservation still "
-            "carries a handle: that one goes through the ordinary "
-            "liveness-checked release path instead."
+            "-- copilot-extensions#3179). Refused on a handle-carrying "
+            "reservation unless --confirmed-absent is also given: that one "
+            "otherwise goes through the ordinary liveness-checked release "
+            "path instead."
+        ),
+    )
+    rp.add_argument(
+        "--confirmed-absent",
+        action="store_true",
+        help=(
+            "combined with --force, additionally overrides a 'releasing' "
+            "reservation that DOES carry a session_handle, when you have "
+            "independently verified (e.g. via `agent-dispatch doctor "
+            "--task <id> --check-live-sessions`) that the session/worktree "
+            "it names no longer exists -- e.g. its owning task already went "
+            "terminal and will never revisit this reservation again, "
+            "permanently fencing its exclusive_key (copilot-"
+            "extensions#3025). Never combine this with a guess -- confirm "
+            "absence first."
         ),
     )
     rp.set_defaults(func=_cmd_reservations)

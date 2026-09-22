@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING, Any
 
 from .procutil import agent_worktrees_launch_prefix, no_window_kwargs
 from .spawn_factories import _parse_fleet_body_handle, _parse_local_body_handle
+from .task_state_machine import TERMINAL_STATES
 
 if TYPE_CHECKING:
     from .client import DispatchClient
@@ -371,7 +372,21 @@ def repair(diagnosis: Diagnosis, client: DispatchClient, *, reason: str) -> dict
     stale reservation (freeing the exclusive key for a fresh attempt) and
     unbind + re-queue the task itself. A no-op for every other verdict, by
     design -- see the module docstring for why this is the only condition
-    doctor will act on automatically."""
+    doctor will act on automatically.
+
+    A task diagnosed ``orphaned_worktree_gone`` that has *already gone
+    terminal* (completed/abandoned/dead-lettered -- see
+    :data:`agent_dispatch.task_state_machine.TERMINAL_STATES`) is a distinct,
+    narrower case: the task itself must never be re-queued (``yield_task``/
+    ``release`` on an already-terminal task is an invalid transition), but its
+    stale spawn reservation can still be left permanently stuck in
+    ``releasing``, fencing its ``exclusive_key`` forever with nothing left to
+    ever revisit it (copilot-extensions#3025). ``resolve_worktree`` having
+    already reported this worktree gone (the same positive evidence
+    :data:`REPAIRABLE_VERDICT` is built on) is exactly the independent
+    absence proof ``fail_spawn(force=True, confirmed_absent=True)`` requires,
+    so this path clears only the reservation and explicitly skips the task
+    transition rather than attempting and swallowing an invalid one."""
     if diagnosis.verdict != REPAIRABLE_VERDICT:
         return {
             "task_id": diagnosis.task_id,
@@ -379,12 +394,24 @@ def repair(diagnosis: Diagnosis, client: DispatchClient, *, reason: str) -> dict
             "reason": f"verdict is {diagnosis.verdict!r}, not repairable",
         }
     actions: dict[str, Any] = {"task_id": diagnosis.task_id}
+    task_is_terminal = diagnosis.status in TERMINAL_STATES
     if diagnosis.reservation_key:
         try:
-            fail_result = client.fail_spawn(diagnosis.reservation_key, detail=reason)
+            fail_result = client.fail_spawn(
+                diagnosis.reservation_key,
+                detail=reason,
+                force=task_is_terminal,
+                confirmed_absent=task_is_terminal,
+            )
             actions["reservation"] = {"state": fail_result.get("state")}
         except Exception as exc:
             actions["reservation"] = {"error": str(exc)}
+    if task_is_terminal:
+        actions["task"] = {
+            "skipped": f"status {diagnosis.status!r} is already terminal -- only "
+            "the stale reservation was cleared, no task transition attempted"
+        }
+        return actions
     owner = diagnosis.owner or ""
     try:
         if diagnosis.status == "suspended":
@@ -472,12 +499,16 @@ def diagnose_many(
             # `--task` intentionally fetches a task of *any* status (unlike
             # the repo/label sweep, which is pre-filtered to
             # EXAMINED_STATUSES). A terminal task (completed/abandoned/
-            # dead_letter) whose old worktree happens to resolve as gone
-            # would otherwise still get `orphaned_worktree_gone` and be
-            # handed to `repair()`, which calls `fail_spawn` then
-            # `yield_task`/`release` -- an invalid transition on an already-
-            # finished task. Restrict auto-repair to the statuses this
-            # diagnostic is actually designed to examine.
-            if d.verdict == REPAIRABLE_VERDICT and d.status in EXAMINED_STATUSES
+            # dead_letter) whose old worktree happens to resolve as gone is
+            # now also handed to `repair()` -- which, for exactly that
+            # terminal-status case, clears only the stale reservation
+            # (never attempting the invalid `yield_task`/`release` task
+            # transition; see `repair()`'s own terminal-status branch,
+            # copilot-extensions#3025). Any other non-examined,
+            # non-terminal status (e.g. `queued`/`proposed`, which have no
+            # owner/reservation to repair in the first place) is still
+            # excluded.
+            if d.verdict == REPAIRABLE_VERDICT
+            and (d.status in EXAMINED_STATUSES or d.status in TERMINAL_STATES)
         ]
     return payload

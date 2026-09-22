@@ -835,6 +835,7 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin):
         conclusion_detail: str | None = None,
         claim_token: str | None = None,
         force: bool = False,
+        confirmed_absent: bool = False,
     ) -> dict:
         return self._unwrap(
             self._http.post(
@@ -845,6 +846,7 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin):
                     "conclusion_detail": conclusion_detail,
                     "claim_token": claim_token,
                     "force": force,
+                    "confirmed_absent": confirmed_absent,
                 },
             )
         )

@@ -73,6 +73,7 @@ class ReservationDetailBody(BaseModel):
 
 class FailSpawnBody(ReservationDetailBody):
     force: bool = False
+    confirmed_absent: bool = False
 
 
 class RequestSpawnReleaseBody(BaseModel):
@@ -282,6 +283,7 @@ def register_spawn_routes(
                 conclusion_detail=body.conclusion_detail,
                 claim_token=body.claim_token,
                 force=body.force,
+                confirmed_absent=body.confirmed_absent,
             )
         )
         bus.publish({"type": "spawn.failed", "reservation": result})

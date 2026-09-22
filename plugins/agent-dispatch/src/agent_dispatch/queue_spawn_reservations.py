@@ -614,6 +614,7 @@ class SpawnReservationMixin:
         conclusion_detail: str | None = None,
         claim_token: str | None = None,
         force: bool = False,
+        confirmed_absent: bool = False,
         now: float | None = None,
     ) -> SpawnReservation:
         """Mark a reservation ``failed`` (spawn failed or lost), releasing the
@@ -624,22 +625,25 @@ class SpawnReservationMixin:
         release.
 
         ``force`` is an explicit, audited operator override for a
-        ``releasing`` reservation that automatic cleanup
-        (``release_requested_bodies``) can never resolve on its own: one with
-        no recorded ``session_handle`` at all has nothing whose absence the
-        exact-absence proof (:meth:`retire_spawn`) could ever confirm, so it
-        would otherwise sit ``releasing`` forever (copilot-extensions#3179 --
-        e.g. a headless spawn whose create call raised before any session id
-        could be captured, orphaning the reservation with no recovery
-        handle). Only a **handle-less** ``releasing`` row is eligible: one
-        that did capture a handle still must go through the ordinary
-        liveness-checked release path (or ``reservations settle``/an
-        automatic retire), since forcing it here could mask a still-live
-        orphaned worker. The no-handle check is read inside the same
-        transaction as the state transition (via ``_update_reservation``'s
-        ``guard``), not a separate preceding query -- a concurrent
-        ``record_spawn`` attaching a handle between a preceding read and this
-        write would otherwise let ``--force`` race past a now-live handle.
+        ``releasing`` reservation with no recorded ``session_handle``, which
+        no automatic exact-absence proof (:meth:`retire_spawn`) could ever
+        confirm and would otherwise sit ``releasing`` forever
+        (copilot-extensions#3179).
+
+        ``confirmed_absent`` additionally permits ``force`` to override a
+        **handle-carrying** ``releasing`` row once the caller has
+        independently established the handle's session/worktree no longer
+        exists -- e.g. ``doctor``'s ``orphaned_worktree_gone`` verdict on a
+        reservation whose owning task already went terminal, otherwise
+        fencing its ``exclusive_key`` forever (copilot-extensions#3025).
+        Never widens plain ``force``'s own handle-less eligibility on its
+        own -- masking a still-live orphaned worker requires the caller to
+        have done the absence check itself.
+
+        The eligibility check runs inside the same transaction as the state
+        transition (via ``_update_reservation``'s ``guard``), not a separate
+        preceding query -- a concurrent ``record_spawn`` attaching a handle
+        in between would otherwise let ``--force`` race past a live handle.
         """
         allowed_from = (SpawnState.ACTIVE - frozenset({SpawnState.RELEASING})) | frozenset(
             {SpawnState.FAILED}
@@ -649,12 +653,17 @@ class SpawnReservationMixin:
             allowed_from = allowed_from | frozenset({SpawnState.RELEASING})
 
             def guard(row: sqlite3.Row) -> None:
-                if row["state"] == SpawnState.RELEASING and row["session_handle"]:
+                if (
+                    row["state"] == SpawnState.RELEASING
+                    and row["session_handle"]
+                    and not confirmed_absent
+                ):
                     raise TaskError(
                         f"reservation {key} is 'releasing' with a recorded "
-                        f"session_handle {row['session_handle']!r} -- --force "
-                        "only overrides a releasing reservation with no handle "
-                        "to verify absence of; let automatic cleanup or "
+                        f"session_handle {row['session_handle']!r} -- pass "
+                        "--confirmed-absent if you have independently "
+                        "verified it no longer exists (e.g. via "
+                        "`agent-dispatch doctor`), or let automatic cleanup/"
                         "`reservations settle` resolve this one instead"
                     )
         return self._update_reservation(
