@@ -30,7 +30,15 @@ RUN powershell -NoProfile -Command " \
     Expand-Archive -LiteralPath C:\node.zip -DestinationPath C:\ ; \
     Rename-Item -LiteralPath \"C:\node-v$env:NODE_VERSION-win-x64\" -NewName C:\nodejs; \
     Remove-Item C:\node.zip"
-RUN setx /M PATH "%PATH%;C:\nodejs"
+# PowerShell-native PATH update, NOT `setx /M PATH "%PATH%;..."`: Docker's
+# default Windows RUN shell is powershell, which does not expand `%PATH%`
+# (that is cmd syntax) and can lose the surrounding quotes across the
+# Dockerfile-instruction -> `powershell -Command` translation, silently
+# executing `setx /M PATH %PATH%;C:\nodejs` unquoted -- the `;C:\nodejs`
+# then parses as its own statement (an attempt to *execute* `C:\nodejs` as
+# a command) rather than being appended to PATH's value. Confirmed by a
+# real build failure: "C:\nodejs : The term ... is not recognized ...".
+RUN powershell -NoProfile -Command "[Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';C:\nodejs', 'Machine')"
 RUN powershell -NoProfile -Command " \
     npm config set registry $env:NPM_REGISTRY; \
     npm install -g @github/copilot; \
@@ -55,5 +63,8 @@ RUN powershell -NoProfile -Command " \
     New-Item -ItemType Directory -Force -Path C:\psmux | Out-Null; \
     Copy-Item -LiteralPath $exe.FullName -Destination C:\psmux\psmux.exe; \
     Remove-Item C:\psmux.zip, C:\psmux-extract -Recurse -Force"
-RUN setx /M PATH "%PATH%;C:\psmux"
+# Same PowerShell-native PATH update as the Node.js step above (see its
+# comment for why `setx /M PATH "%PATH%;..."` is unreliable under Docker's
+# default Windows RUN shell).
+RUN powershell -NoProfile -Command "[Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';C:\psmux', 'Machine')"
 
