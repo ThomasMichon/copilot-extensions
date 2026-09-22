@@ -31,7 +31,6 @@
   "plugins/agent-dispatch/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/agent-dispatch/scripts/versioned_runtime.py": 1245,
   "plugins/agent-dispatch/src/agent_dispatch/__main__.py": 5022,
-  "plugins/agent-dispatch/src/agent_dispatch/bridge.py": 1167,
   "plugins/agent-dispatch/src/agent_dispatch/client.py": 1173,
   "plugins/agent-dispatch/src/agent_dispatch/companion.py": 1421,
   "plugins/agent-dispatch/src/agent_dispatch/embody.py": 1082,
@@ -89,6 +88,5 @@
   "tools/clean-room/scenarios/agent-machines-installation-cells/scenario.py": 1117,
   "tools/clean-room/scenarios/progressive-context-disclosure-baseline/fixture.py": 2369,
   "worktree-manager/src/worktree_manager/__main__.py": 1441,
-  "worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py": 2078,
-  "worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py": 9267
+  "worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py": 2078
 }
