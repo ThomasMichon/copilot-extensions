@@ -74,7 +74,8 @@ def _read_result(args: argparse.Namespace) -> object | None:
         if args.result_file == "-":
             raw = sys.stdin.read()
         else:
-            path = Path(args.result_file).expanduser()
+            path_cls = getattr(_core(), "Path", Path)
+            path = path_cls(args.result_file).expanduser()
             raw = path.read_text(encoding="utf-8-sig")
     if raw is None:
         return None
