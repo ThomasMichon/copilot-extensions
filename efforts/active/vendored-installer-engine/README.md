@@ -588,3 +588,75 @@ installs, no service-specific config needed for this class of plugin.
   whether each future adopter phase requires one rather than only repo-level
   guards.
 
+### 2026-09-22 — PR #3287 merged: 10 real review findings fixed, no shortcuts
+
+- Operator explicitly rejected the earlier session's ad-hoc `pip install`
+  workaround ("use the proper vendored installer engine from the get-go, no
+  shortcuts") and confirmed the Phase-0-then-Phase-1-with-a-reordered-pilot
+  plan (Design decision above) before any code was written.
+- Landed `libs/installer-engine/` + `tools/sync-installer-engine.py` +
+  `agent-pull-requests`'s conversion as `ThomasMichon/copilot-extensions#3287`.
+  Copilot's automated review found **10 real, non-cosmetic** issues across
+  three review rounds (concurrency/immutability bugs, not style nits) — all
+  fixed before merge, none dismissed or worked around:
+  1. POSIX binstub lock had no `flock`-unavailable fallback and never
+     released fd 9 before `exec`, so a successful lock blocked every other
+     invocation for the dispatched process's entire lifetime.
+  2. Cleanup/mark-complete helper failures were silently swallowed in both
+     `.ps1`/`.sh`, letting install continue into an incomplete/protected slot.
+  3. `-Force`/`--force` could reach the venv/install step even for an
+     already-complete, currently-active immutable slot, and the
+     interpreter-presence-only build gate missed a killed-build-left-no-marker
+     case entirely — the exact hazard the versioned-runtime contract exists
+     to prevent.
+  4. The install-contract's new engine exemption was a naive substring check
+     (a comment mentioning the function name alone would bypass the
+     requirement) — tightened to require a real dot-source/include plus a
+     real call shape, with regression fixtures for both the legitimate pass
+     and a deliberate bypass attempt.
+  5. The POSIX uv bootstrap piped the mutable `astral.sh/uv/install.sh`
+     script with no version pin or integrity check, unlike the Windows path's
+     pinned-version + SHA-256-verified download — brought to parity.
+  6. `ensure_uv`'s diagnostic lines leaked onto stdout ahead of its returned
+     path, so `UV_CMD=$(ensure_uv ...)`-style capture could try to execute
+     log text as a command on a fresh host with no uv on PATH.
+  7. A custom `-InstallDir`/`--install-dir` wasn't forwarded to the
+     self-provisioning binstub's `provision` invocation, so first-use
+     provisioning silently installed to the wrong (default) root.
+  8. POSIX interpreter resolution for `mark-complete` checked the legacy
+     link/ambient Python before the just-built versioned slot's own
+     interpreter, so a host with no ambient Python (uv-provisioned Python
+     only) never got a completion marker despite a working install.
+  9. No single lock covered the whole install transaction (slot
+     create/install/activate/manifest), only the deployed binstub's own
+     first-use lock — a manual `install.sh` run and a binstub-triggered
+     provision could race each other on the same slot.
+  10. The installed Windows binstub/`.cmd` resolved `pwsh`/PowerShell via
+      ambient `Get-Command`/bare names, unlike the payload shim's
+      restricted-PATH-safe absolute `%SystemRoot%\System32\where.exe` +
+      absolute-path fallback — brought to parity.
+- Also caught and fixed two things the review flagged that weren't concurrency
+  bugs: a genuinely missing `tools/check-bootstrap-sync.py` `FAMILIES`
+  registration (the plugin's `bootstrap-check.ps1`/`.sh` weren't byte-identical
+  to the shared `versioned-venv/psscriptroot` family template — fixed by
+  copying the real template verbatim and registering the plugin), and a
+  required PR-description "Documentation impact" statement.
+- One operational hazard hit and recovered from mid-session: an accidental
+  `git stash pop` in the shared repo checkout popped a stale, unrelated stash
+  entry from a completely different historical session (git stash is
+  per-repository, not per-worktree) and produced a large merge-conflict mess
+  touching unrelated plugins. Recovered cleanly with `git reset --hard HEAD`
+  before anything was pushed — the stash entry itself was untouched/preserved
+  throughout. Lesson: never `git stash`/`git stash pop` in a shared
+  multi-worktree repo checkout without first confirming the stash stack is
+  actually empty or owned by this session.
+- Final state: all 10 findings fixed and validated for real (every repo
+  guard + the plugin's own test suite + the install-contract's own new
+  regression fixtures), plus a full clean-reinstall + idempotent-reinstall
+  proof and a real `agent-pull-requests status` call through the deployed
+  binstub, immediately before merge. Squash-merged; worktree finalized.
+- **Genuinely still open** (not silently dropped): `agent-bridge`'s actual
+  Phase 1 conversion, all Phase 2+ adopters, and a POSIX live-install proof
+  lane (this session's end-to-end proof was Windows-only, matching the
+  machine it ran on).
+
