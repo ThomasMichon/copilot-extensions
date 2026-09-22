@@ -2439,7 +2439,7 @@ Implemented the design above as one cohesive `agent-dispatch` change.
   a board-render no-subprocess test, a relay staleness test, and a
   cross-machine ownership test. Targeted coverage for the touched surfaces:
   `run-plugin-tests.py agent-dispatch -k "board_cli or coordinator or inbox"`
-  passed (**189 passed**). Full plugin suite:
+  passed (**190 passed** after the follow-up below). Full plugin suite:
   `run-plugin-tests.py agent-dispatch` reached **751 passed, 2 skipped**;
   the only failures were the pre-existing Windows bash-path tests
   `test_bootstrap_check_reconcile_opt_in.py::{test_sh_skips_spawn_without_opt_in,test_sh_proceeds_with_opt_in}`,
@@ -2447,3 +2447,19 @@ Implemented the design above as one cohesive `agent-dispatch` change.
   C:Users...bootstrap-check.sh: No such file or directory` failure), so
   they remain unrelated baseline noise rather than regressions from this
   slice.
+
+### 2026-09-21 — PR #3234 review round 1: bound relay work to prevent overlapping scans
+Copilot's first review found a real concurrency gap in the initial relay
+poller: a single supervised cycle walked every owned worktree serially while
+each `agent-worktrees worktree-status-bundle` call could take up to 60
+seconds. If enough worktrees stalled, the outer supervised cycle could time
+out while its worker thread kept scanning, and the next periodic pass could
+start a second full scan on top of it.
+
+Fixed by turning the loop into a bounded work queue: each cycle now processes
+exactly one queued `(repo, worktree_id)` relay refresh with a timeout sized
+for one `worktree-status-bundle` call, while startup and subsequent trigger/
+periodic snapshots still prewarm the whole owned set by draining that queue
+back-to-back without waiting for another cadence tick. Added a focused test
+proving the helper can limit one worktree per cycle; targeted validation for
+the touched surfaces re-ran green at **190 passed**.
