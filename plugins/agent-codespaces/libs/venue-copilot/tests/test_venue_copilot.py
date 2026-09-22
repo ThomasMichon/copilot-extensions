@@ -147,6 +147,29 @@ class TestBuildCopilotRemoteCommand:
         inner = shlex.split(cmd)[2]
         assert inner == "agent-worktrees copilot --worktree-id wt-A"
 
+    def test_anchor_forwards_anchor_flag_not_worktree_id(self) -> None:
+        # A CodeSpace/container venue is conventionally anchor-only (no
+        # worktree unless an operator explicitly created one) -- matching
+        # headless ACP dispatch's own existing anchor-checkout behavior.
+        # `worktree_id` is still the CLI-mode reservation identity (the
+        # caller's synthesized `anchor-<repo_name>`), but must never reach
+        # the remote command as a literal --worktree-id (there is no such
+        # tracked worktree to resolve).
+        cmd = build_copilot_remote_command(
+            "anchor-odsp-web", anchor=True, ensure_mux=False,
+        )
+        assert cmd == "bash -lc 'agent-worktrees copilot --anchor'"
+        assert "anchor-odsp-web" not in cmd
+
+    def test_anchor_with_driver_and_seed(self) -> None:
+        cmd = build_copilot_remote_command(
+            "anchor-odsp-web", anchor=True, driver="cli-mode", seed="explore",
+        )
+        assert cmd == (
+            "bash -lc 'agent-worktrees copilot --anchor --driver cli-mode "
+            "--seed explore --ensure-mux'"
+        )
+
 
 class TestRunVenueCopilot:
     def test_reserves_connects_and_releases_on_success(self) -> None:
@@ -167,6 +190,32 @@ class TestRunVenueCopilot:
         assert rc == 0
         assert calls == ["reserve", "connect", "release"]
         assert "agent-worktrees copilot --worktree-id wt-A" in seen_command["cmd"]
+
+    def test_anchor_mode_reserves_with_the_synthesized_identity_but_builds_the_anchor_command(
+        self,
+    ) -> None:
+        calls: list[str] = []
+        reserved_worktree_ids: list[str] = []
+
+        def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
+            calls.append(argv[4])
+            if argv[4] == "reserve":
+                reserved_worktree_ids.append(argv[argv.index("--worktree-id") + 1])
+            return _FakeCompletedProcess(json.dumps({"removed": 1}))
+
+        seen_command = {}
+
+        def connect(remote_command: str) -> int:
+            seen_command["cmd"] = remote_command
+            return 0
+
+        rc = run_venue_copilot(
+            "anchor-odsp-web", connect=connect, anchor=True, run=fake_run,
+        )
+        assert rc == 0
+        assert reserved_worktree_ids == ["anchor-odsp-web"]
+        assert "--anchor" in seen_command["cmd"]
+        assert "anchor-odsp-web" not in seen_command["cmd"]
 
     def test_releases_even_when_connect_raises(self) -> None:
         calls: list[str] = []

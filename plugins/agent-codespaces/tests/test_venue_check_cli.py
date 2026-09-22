@@ -21,12 +21,14 @@ class _FakeResult:
 _READY_PROBE_OUTPUT = (
     "COPILOT=/usr/local/bin/copilot\n"
     "TMUX=yes\nNODE=yes\nPYTHON3=yes\nUV=yes\nAPT=yes\nSUDO_NOPASSWD=yes\n"
+    "AGENT_BRIDGE_PLUGIN=yes\n"
     "AGENT_WORKTREES_STATE=full\nAGENT_WORKTREES_VERSION=agent-worktrees 1.5.5-dev229\n"
 )
 
 _LEAN_PROBE_OUTPUT = (
     "COPILOT=/usr/local/bin/copilot\n"
     "TMUX=no\nNODE=yes\nPYTHON3=yes\nUV=yes\nAPT=yes\nSUDO_NOPASSWD=yes\n"
+    "AGENT_BRIDGE_PLUGIN=no\n"
     "AGENT_WORKTREES_STATE=lean\n"
 )
 
@@ -145,8 +147,9 @@ class TestCmdDoctorVenue:
         assert "READY" in out
         assert "[OK] install tmux" in out
         assert "[OK] provision/refresh agent-worktrees" in out
-        # probe, remediate(tmux + agent-worktrees), re-probe == 4 calls
-        assert len(manager.exec_calls) == 4
+        assert "[OK] install agent-bridge plugin" in out
+        # probe, remediate(tmux + agent-worktrees + agent-bridge plugin), re-probe == 5 calls
+        assert len(manager.exec_calls) == 5
 
     def test_fix_json_output_includes_remediation(self, monkeypatch, capsys) -> None:
         manager = _FakeManager([_LEAN_PROBE_OUTPUT, _READY_PROBE_OUTPUT])

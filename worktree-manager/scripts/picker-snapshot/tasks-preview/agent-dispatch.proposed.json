@@ -12,14 +12,14 @@
     "badges": ["activity"]
   },
   "columns": [
-    {"key": "id", "header": "ID", "width": 9},
-    {"key": "group", "header": "PHASE", "width": 10, "palette": "task_phase"},
-    {"key": "repo_name", "header": "REPO", "width": 15},
-    {"key": "title", "header": "TITLE", "width": 40},
-    {"key": "target_worktree", "header": "WT", "width": 5},
-    {"key": "turn_count", "header": "T", "width": 4, "align": "r"},
-    {"key": "wt_live", "header": "LIVE", "width": 13},
-    {"key": "artifacts_summary", "header": "ARTIFACTS", "width": 18}
+    {"key": "id", "header": "ID", "width": 9, "priority": 2},
+    {"key": "group", "header": "PHASE", "width": 10, "palette": "task_phase", "priority": 3},
+    {"key": "repo_name", "header": "REPO", "width": 15, "priority": 6},
+    {"key": "title", "header": "TITLE", "width": 40, "priority": 1},
+    {"key": "target_worktree", "header": "WT", "width": 5, "priority": 4, "style": "bold cyan"},
+    {"key": "turn_count", "header": "T", "width": 4, "align": "r", "priority": 7},
+    {"key": "wt_live", "header": "LIVE", "width": 13, "priority": 5},
+    {"key": "artifacts_summary", "header": "ARTIFACTS", "width": 18, "priority": 8}
   ],
   "group_field": "group",
   "empty_hint": "No active or recently-finished tasks for this machine.",

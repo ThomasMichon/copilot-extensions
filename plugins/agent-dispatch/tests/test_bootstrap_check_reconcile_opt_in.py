@@ -60,6 +60,14 @@ def _resolve_bash() -> str | None:
 _BASH = _resolve_bash()
 
 
+def _bash_env_path(path: Path) -> str:
+    text = str(path)
+    if _BASH and _BASH.lower().endswith("bash.exe") and len(text) >= 2 and text[1] == ":":
+        suffix = text[2:].replace("\\", "/")
+        return f"/mnt/{text[0].lower()}{suffix}"
+    return text
+
+
 def test_hook_scripts_exist():
     assert _PS1.is_file()
     assert _SH.is_file()
@@ -163,11 +171,17 @@ def test_sh_skips_spawn_without_opt_in(tmp_path):
     plugin_dir = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
     _make_fake_install(home, _PLUGIN_NAME)
 
-    env = _clean_env({"HOME": str(home), "COPILOT_PROJECT_DIR": str(project)})
+    env = _clean_env(
+        {
+            "HOME": _bash_env_path(home),
+            "COPILOT_PROJECT_DIR": _bash_env_path(project),
+        }
+    )
+    script = plugin_dir / "scripts" / "bootstrap-check.sh"
 
     result = subprocess.run(
-        [_BASH, str(plugin_dir / "scripts" / "bootstrap-check.sh")],
-        cwd=str(project),
+        [_BASH, os.path.basename(script)],
+        cwd=str(script.parent),
         env=env,
         capture_output=True,
         text=True,
@@ -186,13 +200,23 @@ def test_sh_proceeds_with_opt_in(tmp_path):
         f"{_OPT_IN_KEY}: true\n", encoding="utf-8"
     )
     plugin_dir = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
+    (plugin_dir / "scripts" / ".copilot-extensions").mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "scripts" / ".copilot-extensions" / "config.yaml").write_text(
+        f"{_OPT_IN_KEY}: true\n", encoding="utf-8"
+    )
     _make_fake_install(home, _PLUGIN_NAME)
 
-    env = _clean_env({"HOME": str(home), "COPILOT_PROJECT_DIR": str(project)})
+    env = _clean_env(
+        {
+            "HOME": _bash_env_path(home),
+            "COPILOT_PROJECT_DIR": _bash_env_path(project),
+        }
+    )
+    script = plugin_dir / "scripts" / "bootstrap-check.sh"
 
     result = subprocess.run(
-        [_BASH, str(plugin_dir / "scripts" / "bootstrap-check.sh")],
-        cwd=str(project),
+        [_BASH, os.path.basename(script)],
+        cwd=str(script.parent),
         env=env,
         capture_output=True,
         text=True,

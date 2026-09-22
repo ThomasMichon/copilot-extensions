@@ -891,14 +891,31 @@ to `machine` only when the mismatch is machine-wide.
 
 **Same body choice in the supervisor, keyed by label.** A persistent
 `agent-dispatch supervise` loop <!-- marketplace-isolation: allow supervisor-management -->
-embodies via the **CLI autopilot** (`embody`) by
-default, but `--headless-label L` (repeatable; `--headless-agent` names the
-bridge agent) routes tasks carrying label `L` to the **headless bridge** body
-instead -- for **self-contained sweeps** that need no human attach (and whose
-seeded CLI session could otherwise race the input caret and never start). Only
-listed labels go headless; the rest stay CLI-first. Service knobs:
-`AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS` / `_HEADLESS_AGENT` in
-`supervisor.env`. See the design doc's "Per-label embody body" section.
+is **headless by default**, but can route labels to two other bodies:
+
+- `--cli-label L` -> a durable **CLI autopilot** (`embody`) worktree session.
+- `--script-label L` -> a plain deterministic **script subprocess** that never
+  invokes an LLM.
+
+The headless body still reuses the **same autopilot seed** as the CLI backend,
+so a headless-embodied task is *driven* identically; only its body differs. The
+script body is deliberately non-agentic: it drives claim/start/progress/
+complete/abandon through the ordinary lifecycle client surface instead of a live
+Copilot session. Service knobs mirror the flags in `supervisor.env`. See the
+design doc's "Per-label embody body" section.
+
+**Script payload contract.** A script-embodied task carries a JSON
+`payload_inline` describing what to launch:
+
+- `{"path":"C:\\absolute\\worker.py","args":["..."],"env":{"K":"V"}}`
+  runs the file with agent-dispatch's own runtime Python.
+- `{"argv":["some-exe","arg1","arg2"],"cwd":"C:\\absolute\\dir","env":{"K":"V"}}`
+  runs the exact argv directly.
+
+`agent_dispatch.script_worker.ScriptTaskRuntime` is the helper contract for such
+bodies. It reads supervisor-injected task/coordinator context from environment
+variables, wraps claim/start/heartbeat/progress/complete/abandon, and treats a
+return without an explicit terminal call as a protocol violation.
 
 **Fleet mode (`--pool`) is fleet-wide, not per-label.** When the supervisor fans
 bodies out across a **pool of remote hosts** (`--pool a,b [--origin <alias>]`), the
