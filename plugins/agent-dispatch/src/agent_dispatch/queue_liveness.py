@@ -149,6 +149,17 @@ class LivenessMixin:
         vocabulary. All are injectable so tests drive verdicts deterministically
         and the engine itself stays subprocess-free.
 
+        **Concurrency contract:** ``resolver``, ``headless_local_verdict``, and
+        ``headless_fleet_verdict`` are invoked concurrently, on worker threads
+        from a shared executor (not sequentially, and not on the calling
+        thread) -- probing N held tasks costs roughly the slowest single call,
+        not their sum. A caller-supplied callable must therefore be safe to
+        call from multiple threads at once: no thread-local state, no
+        assumptions about running on an asyncio event loop thread, and no
+        re-entrant calls back into this (or another) ``TaskQueue``'s
+        connection. The built-in defaults (subprocess-based bridge/SSH probes)
+        already satisfy this; they open no shared state across calls.
+
         **Fencing:** liveness is probed **outside** the write lock, then each gone
         task is transitioned under a short transaction with a conditional update
         on ``(id, status, owner_session_id, generation)`` -- so if the owner
