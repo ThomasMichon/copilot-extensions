@@ -1526,3 +1526,36 @@ not yet written up as a dedicated entry here since no code changed):
    exact path for a human to add through the Windows Security app
    itself. On-demand only, never run as a side effect of anything else.
 
+### 2026-09-21 — `_check_freshness` flagged demand-scoped staleness as a sweep bug
+A scheduled `worktree-status-audit` run reported a real, growing
+`mismatch_count` (1, then 2 across consecutive hourly-style runs) --
+distinct from the daemon-liveness pattern already diagnosed and fixed in
+PR #3206. Investigated rather than dismissing it as another transient.
+
+Root cause: `_check_freshness`'s bound (`DEFAULT_TTL_SECONDS +
+SWEEP_INTERVAL_SECONDS + FRESHNESS_SLACK_SECONDS` = 90s) assumed
+`WorktreeStatusCache.sweep_due` keeps every cached entry warm
+unconditionally. It doesn't: `sweep_due` only refreshes an entry while it
+is still *demanded* (`get_or_refresh` registers demand on every read;
+nothing re-demands it once no consumer is asking) -- once demand ages
+past `DEMAND_TTL_SECONDS` (300s), the sweep correctly stops refreshing
+that entry (it will be evicted, not endlessly kept warm), and its
+`cache_age` grows as an expected consequence, not a malfunction. The
+audit's own passive snapshot read never registers new demand either, so
+sampling an undemanded worktree only ever observes this expected aging,
+never resets it. This is the same class of bug the daemon-liveness
+redesign (PR #3206) already fixed once this session: confusing a real
+caller's own tolerated resting state for an outage.
+
+Fixed `_check_freshness` to read the entry's own `demanded_at` and skip
+the bound check entirely once `now - demanded_at > DEMAND_TTL_SECONDS` --
+a mismatch is now only raised for an entry that is still within its
+demand window (the sweep genuinely should be keeping it warm) but isn't.
+An entry with no `demanded_at` at all (an older-schema row) falls back to
+the original unconditional check rather than silently passing. Added 2
+new regression tests (`test_check_freshness_flags_a_stale_entry_still_
+within_its_demand_window`, `test_check_freshness_ok_when_demand_has_
+aged_out`); all 45 `worktree_status_audit` tests pass. Bumped
+`agent-worktrees` to `1.5.5-dev235` and the marketplace catalog to
+`1.7.7-dev203`.
+

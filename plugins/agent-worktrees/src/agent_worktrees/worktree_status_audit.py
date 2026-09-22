@@ -297,6 +297,25 @@ def _check_freshness(cache_entry: dict | None, *, now: float) -> list[FieldMisma
     # .cmd_worktree_status_bundle`, which import it the same way rather
     # than at module scope.
     from .worktree_status_daemon import SWEEP_INTERVAL_SECONDS
+    from .worktree_status_cache import DEMAND_TTL_SECONDS
+
+    # `WorktreeStatusCache.sweep_due` only refreshes an entry while it is
+    # still *demanded* (`get_or_refresh` registers demand on every read;
+    # the sweep drops that bookkeeping -- and eventually the row itself --
+    # once nothing has asked about this worktree within DEMAND_TTL_SECONDS,
+    # per that cache's own "an operator who moved on stops paying the
+    # sweep cost for it" design). A cache_age past the TTL+sweep+slack
+    # bound is therefore only ever a real sweep malfunction while the entry
+    # is still within its demand window; once demand itself has aged past
+    # DEMAND_TTL_SECONDS, a growing cache_age is the cache correctly
+    # ceasing to refresh a worktree nobody is asking about (it will be
+    # evicted, not endlessly kept warm) -- flagging that here would be a
+    # false positive for exactly the same "confuse a real caller's own
+    # tolerated resting state for an outage" mistake this module's
+    # daemon-liveness check was redesigned to avoid.
+    demanded_at = cache_entry.get("demanded_at")
+    if isinstance(demanded_at, (int, float)) and now - demanded_at > DEMAND_TTL_SECONDS:
+        return []
 
     age = now - computed_at
     bound = DEFAULT_TTL_SECONDS + SWEEP_INTERVAL_SECONDS + FRESHNESS_SLACK_SECONDS
@@ -305,8 +324,9 @@ def _check_freshness(cache_entry: dict | None, *, now: float) -> list[FieldMisma
             check="cache_freshness_bounds",
             detail=(
                 f"cached entry is {age:.0f}s old, exceeding the {bound:.0f}s "
-                "bound (TTL + sweep interval + slack) -- the sweep may not "
-                "be keeping this entry warm"
+                "bound (TTL + sweep interval + slack) while still within "
+                "its demand window -- the sweep may not be keeping this "
+                "actively-demanded entry warm"
             ),
         )]
     return []
