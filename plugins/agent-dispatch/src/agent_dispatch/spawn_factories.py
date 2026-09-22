@@ -507,12 +507,28 @@ def _default_fleet_end(host: str, bridge_session_id: str) -> bool:
     return embody.stop_fleet_body(host, bridge_session_id)
 
 
-def _encode_script_body_handle(worker_id: str, pid: int, start_token: str | None) -> str:
+def _cleanup_script_task_file(task_file: str | None) -> None:
+    if not isinstance(task_file, str) or not task_file:
+        return
+    try:
+        Path(task_file).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _encode_script_body_handle(
+    worker_id: str,
+    pid: int,
+    start_token: str | None,
+    *,
+    task_file: str | None = None,
+) -> str:
     payload = json.dumps(
         {
             "worker_id": worker_id,
             "pid": pid,
             "start_token": start_token,
+            "task_file": task_file,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -520,10 +536,12 @@ def _encode_script_body_handle(worker_id: str, pid: int, start_token: str | None
     return f"{_SCRIPT_BODY_PREFIX}{payload}"
 
 
-def _parse_script_body_handle(session_handle: str | None) -> tuple[str, int, str | None] | None:
+def _parse_script_body_handle(
+    session_handle: str | None,
+) -> tuple[str, int, str | None, str | None] | None:
     """Decode a ``script-body:<json>`` reservation handle.
 
-    Returns ``(worker_id, pid, start_token)`` for a script body embodied on this
+    Returns ``(worker_id, pid, start_token, task_file)`` for a script body embodied on this
     host, else ``None``.
     """
     if not session_handle or not session_handle.startswith(_SCRIPT_BODY_PREFIX):
@@ -538,13 +556,16 @@ def _parse_script_body_handle(session_handle: str | None) -> tuple[str, int, str
     worker_id = payload.get("worker_id")
     pid = payload.get("pid")
     start_token = payload.get("start_token")
+    task_file = payload.get("task_file")
     if not isinstance(worker_id, str) or not worker_id:
         return None
     if not isinstance(pid, int) or pid <= 0:
         return None
     if start_token is not None and not isinstance(start_token, str):
         return None
-    return worker_id, pid, start_token
+    if task_file is not None and not isinstance(task_file, str):
+        return None
+    return worker_id, pid, start_token, task_file
 
 
 def _default_script_body_verdict(pid: int, start_token: str | None) -> str:
@@ -865,7 +886,9 @@ def make_script_spawn(
                     "AGENT_DISPATCH_SCRIPT_ROUTE": (
                         "shared" if route.strip() == "--shared" else "local"
                     ),
-                    "AGENT_DISPATCH_SCRIPT_REPO": str(task.get("repo") or ""),
+                    "AGENT_DISPATCH_SCRIPT_REPO": (
+                        "" if all_repos else str(task.get("repo") or "")
+                    ),
                     "AGENT_DISPATCH_SCRIPT_ALL_REPOS": "1" if all_repos else "0",
                     "AGENT_DISPATCH_SCRIPT_TASK_FILE": task_file_path,
                 }
@@ -894,7 +917,12 @@ def make_script_spawn(
         except Exception:
             start_token = None
         return True, {
-            "session": _encode_script_body_handle(worker_id, process.pid, start_token),
+            "session": _encode_script_body_handle(
+                worker_id,
+                process.pid,
+                start_token,
+                task_file=task_file_path,
+            ),
             "worktree": None,
         }
 

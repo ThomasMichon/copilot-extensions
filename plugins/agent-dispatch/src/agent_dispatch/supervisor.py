@@ -88,6 +88,7 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     _default_script_body_verdict,
     _default_verdict,
     _default_worktree_directory_present,
+    _cleanup_script_task_file,
     _machine_from_owner,
     _parse_fleet_body_handle,
     _parse_local_body_handle,
@@ -587,7 +588,7 @@ class Supervisor:
                     return True
             script_handle = _parse_script_body_handle(reservation.get("session_handle"))
             if script_handle is not None:
-                _worker_id, pid, start_token = script_handle
+                _worker_id, pid, start_token, _task_file = script_handle
                 try:
                     return self.script_body_verdict_fn(pid, start_token) != _tracking().GONE
                 except Exception:
@@ -628,7 +629,7 @@ class Supervisor:
                 return True
         script_handle = _parse_script_body_handle(reservation.get("session_handle"))
         if script_handle is not None:
-            _worker_id, pid, start_token = script_handle
+            _worker_id, pid, start_token, _task_file = script_handle
             try:
                 return self.script_body_verdict_fn(pid, start_token) != _tracking().GONE
             except Exception:
@@ -986,7 +987,7 @@ class Supervisor:
 
             script_handle = _parse_script_body_handle(res.get("session_handle"))
             if script_handle is not None:
-                worker_id, pid, start_token = script_handle
+                worker_id, pid, start_token, _task_file = script_handle
                 try:
                     verdict = self.script_body_verdict_fn(pid, start_token)
                 except Exception:
@@ -2450,6 +2451,10 @@ class Supervisor:
                 if not ready:
                     continue
                 local_sid = _parse_local_body_handle(res.get("session_handle"))
+                script_handle = _parse_script_body_handle(res.get("session_handle"))
+                if script_handle is not None:
+                    _worker_id, _pid, _start_token, task_file = script_handle
+                    _cleanup_script_task_file(task_file)
                 if (
                     not exclusive
                     and local_sid is not None
@@ -2789,7 +2794,7 @@ class Supervisor:
                 continue
             script_handle = _parse_script_body_handle(res.get("session_handle"))
             if script_handle is not None:
-                _worker_id, pid, start_token = script_handle
+                _worker_id, pid, start_token, _task_file = script_handle
                 if self.publish_activity:
                     try:
                         verdict = self.script_body_verdict_fn(pid, start_token)
@@ -3025,12 +3030,13 @@ class Supervisor:
                 continue  # local body handled -> don't fall to the worktree path
             script_handle = _parse_script_body_handle(res.get("session_handle"))
             if script_handle is not None:
-                worker_id, pid, start_token = script_handle
+                worker_id, pid, start_token, task_file = script_handle
                 try:
                     sverdict = self.script_body_verdict_fn(pid, start_token)
                 except Exception:
                     sverdict = tracking.UNKNOWN
                 if sverdict == tracking.GONE:
+                    _cleanup_script_task_file(task_file)
                     detail = (
                         "script body exited without explicit complete/abandon "
                         f"(worker {worker_id}, pid {pid})"

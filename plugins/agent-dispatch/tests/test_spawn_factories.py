@@ -39,8 +39,8 @@ def test_parse_local_body_handle_is_directly_importable():
 
 
 def test_parse_script_body_handle_is_directly_importable():
-    handle = 'script-body:{"pid":123,"start_token":"tok","worker_id":"script-1"}'
-    assert _parse_script_body_handle(handle) == ("script-1", 123, "tok")
+    handle = 'script-body:{"pid":123,"start_token":"tok","task_file":"C:\\\\temp\\\\task.json","worker_id":"script-1"}'
+    assert _parse_script_body_handle(handle) == ("script-1", 123, "tok", "C:\\temp\\task.json")
     assert _parse_script_body_handle("local-body:sess-1") is None
 
 

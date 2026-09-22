@@ -618,6 +618,13 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
+        if backend == "script" or script_labels:
+            print(
+                "agent-dispatch supervise: the script embodiment is supported "
+                "only for local (non-pool) worker bodies.",
+                file=sys.stderr,
+            )
+            return 2
         if getattr(args, "no_pair", False):
             print(
                 "agent-dispatch supervise: --no-pair is supported only for "

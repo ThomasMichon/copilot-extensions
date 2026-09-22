@@ -112,11 +112,11 @@ def run_maintenance(worker: Any, *, runner=subprocess.run) -> dict[str, Any]:
     engine_pid_before = engine_status.get("pid")
 
     if actions["recover_service"]:
-        _run_agent_index(["deploy", "--recover", "--json"], expect_json=True, runner=runner)
+        _run_agent_index(["restart"], expect_json=False, runner=runner)
         _completed, service_status = _run_agent_index(["status"], expect_json=True, runner=runner)
         if not _service_ready(service_status):
             raise RuntimeError(
-                "agent-index service is still not ready after deploy --recover"
+                "agent-index service is still not ready after restart"
             )
         service_recovered = True
 
