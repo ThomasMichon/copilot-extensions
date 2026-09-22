@@ -237,6 +237,58 @@ def test_card_draft_save_routes_through_root_client(monkeypatch, capsys):
     assert output["id"] == "task-8"
 
 
+def test_card_show_routes_through_root_client(monkeypatch, capsys):
+    seen = {"get": [], "steer_log": []}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, task_id):
+            seen["get"].append(task_id)
+            return {"card": {"title": "Need answer"}, "awaiting_steer": True, "card_draft": None}
+
+        def steer_log(self, task_id):
+            seen["steer_log"].append(task_id)
+            return [{"fields": {"decision": "revise"}}]
+
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    args = _args(["card", "show", "task-6"])
+
+    assert args.func(args) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert seen == {"get": ["task-6"], "steer_log": ["task-6"]}
+    assert output["task_id"] == "task-6"
+    assert output["card"]["title"] == "Need answer"
+    assert output["awaiting_steer"] is True
+
+
+def test_card_draft_clear_routes_through_root_client(monkeypatch, capsys):
+    cleared = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def clear_card_draft(self, task_id):
+            cleared["task_id"] = task_id
+            return {"id": task_id, "cleared": True}
+
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    args = _args(["card", "draft", "clear", "task-5"])
+
+    assert args.func(args) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert cleared == {"task_id": "task-5"}
+    assert output == {"id": "task-5", "cleared": True}
+
+
 def test_steer_take_routes_through_root_owner_and_client(monkeypatch, capsys):
     from agent_dispatch import __main__ as m
 
