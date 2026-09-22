@@ -12,30 +12,31 @@ API-first surface. In this scaffold slice:
 - `create`, `merge`, and `wait` are reserved as planned verbs and currently
   return a clear "not implemented yet" error.
 
-## Installation (payload-only for now)
+## Installation
 
-Marketplace install (`copilot plugin install agent-pull-requests@copilot-extensions`)
-only vendors this payload today -- there is no `scripts/install.*`/`init.*`
-runtime installer, so no `~/.local/bin/agent-pull-requests` binstub is deployed
-yet (that lands in a follow-up slice, matching `agent-worktrees`' own install
-contract). Until then, run it directly from a checkout:
+Marketplace install deploys a real runtime:
 
 ```bash
-pip install -e plugins/agent-pull-requests
-python -m agent_pull_requests status --repo <owner/repo> --number <n>
+copilot plugin install agent-pull-requests@copilot-extensions
+agent-pull-requests status --repo <owner/repo> --number <n>
 ```
+
+The installer builds an immutable versioned venv under
+`~/.agent-pull-requests/versions/<version>/`, deploys a real
+`~/.local/bin/agent-pull-requests` binstub, and self-reconciles that runtime on
+session start the same way the other Python runtime plugins do.
 
 ## Current constraint
 
-The initial GitHub implementation shells out through:
+The current GitHub implementation still shells out through:
 
 `agent-worktrees repos gh <owner/repo> -- gh api ...`
 
 That means this plugin currently depends on an available `agent-worktrees`
-command plus its GitHub account-resolution logic. An explicit `owner/repo`
-target does **not** require a local checkout, but unregistered repos still rely
-on `agent-worktrees`' owner-to-login mapping or owner fallback, so an org-owned
-repo whose GitHub login differs from the org may fall back to ambient `gh`
-authentication until a dedicated account-resolution layer lands here.
+runtime plus its GitHub account-resolution logic. An explicit `owner/repo`
+target does **not** require a local checkout, but unregistered repos still
+rely on `agent-worktrees`' owner-to-login mapping or owner fallback, so an
+org-owned repo whose GitHub login differs from the org may fall back to ambient
+`gh` authentication until a dedicated account-resolution layer lands here.
 
 See [docs/cli-reference.md](docs/cli-reference.md) for the planned surface.

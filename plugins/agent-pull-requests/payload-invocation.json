@@ -1,0 +1,12 @@
+{
+  "schema": "copilot-extensions.payload-invocation",
+  "version": 1,
+  "command": "agent-pull-requests",
+  "module": "agent_pull_requests",
+  "runtimeRoot": ".agent-pull-requests",
+  "noSelfProvisionEnv": "AGENT_PULL_REQUESTS_NO_SELFPROVISION",
+  "purpose": "Read and later drive cross-repository pull request state",
+  "installer": "install",
+  "windowsCatalogShim": "cmd",
+  "provisionMode": "direct"
+}

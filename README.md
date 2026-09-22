@@ -50,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 | Plugin | Type | What it gives you |
 |--------|------|-------------------|
 | [agent-worktrees](plugins/agent-worktrees/) | Session tool | Each Copilot CLI session runs in its own git worktree — no branch conflicts, no stale state. Install this first. |
-| [agent-pull-requests](plugins/agent-pull-requests/) | Cross-repo PR CLI (payload-only for now) | Query and eventually drive pull requests by explicit `owner/repo`, even when no local checkout exists. This first slice ships a standalone `status` verb and stages the broader extraction from `agent-worktrees`; marketplace install vendors the payload only until a binstub-deploying installer lands. |
+| [agent-pull-requests](plugins/agent-pull-requests/) | Cross-repo PR CLI | Query and eventually drive pull requests by explicit `owner/repo`, even when no local checkout exists. This first runtime-backed slice ships a standalone `status` verb, deploys a real `~/.local/bin/agent-pull-requests` binstub, and stages the broader extraction from `agent-worktrees`. |
 | [agent-bridge](plugins/agent-bridge/) | Persistent service | Converse with and steer live agents across worktree, repository, machine, CodeSpace, and container boundaries. |
 | [agent-codespaces](plugins/agent-codespaces/) | CLI + relay | Create/manage GitHub Codespaces, address them as bridge agents (`codespace:<name>`), and forward git/GitHub/Azure credentials into them. |
 | [agent-containers](plugins/agent-containers/) | CLI + resolver | Manage a fleet of local Docker dev containers, borrow/release them per effort, and address them as bridge agents (`container:<name>`). |
@@ -109,6 +109,7 @@ flowchart TB
     end
     subgraph RT["Local runtimes — ~/.* + ~/.local/bin"]
       RW["~/.agent-worktrees<br/>agent-worktrees"]
+      RPR["~/.agent-pull-requests<br/>agent-pull-requests"]
       RB["~/.agent-bridge<br/>service (OS-assigned port)"]
       RC["~/.agent-codespaces<br/>agent-codespaces"]
       RN["~/.agent-containers<br/>agent-containers"]
@@ -121,6 +122,7 @@ flowchart TB
       RV["~/.agent-vault<br/>secret store service"]
     end
     MP -->|copilot plugin install| AW
+    MP -->|copilot plugin install| APR["agent-pull-requests<br/>cross-repo PR CLI"]
     MP -->|copilot plugin install| AB
     MP -->|copilot plugin install| AC
     MP -->|copilot plugin install| AN
@@ -133,6 +135,7 @@ flowchart TB
     MP -->|copilot plugin install| AV
     MP -->|copilot plugin install| PO
     AW -->|init.ps1 / init.sh| RW
+    APR -->|install.ps1 / install.sh| RPR
     AB -->|install.ps1 / install.sh| RB
     AC -->|init.ps1 / init.sh| RC
     AN -->|init.ps1 / init.sh| RN

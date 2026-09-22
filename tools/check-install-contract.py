@@ -35,6 +35,7 @@ Exit code 0 = conformant, 1 = violations (suitable for a pre-push hook).
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import re
 import sys
@@ -49,6 +50,7 @@ from install_contract_guard import (
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
+INSTALLER_ENGINE_SYNC = Path(__file__).resolve().parent / "sync-installer-engine.py"
 
 # Immutable-versioned-runtime invariant (dotfiles #581): every Python runtime
 # plugin ships the byte-identical scripts/versioned_runtime.py primitive AND
@@ -226,6 +228,83 @@ def _entrypoint_base(plugin: Path) -> str | None:
     return None
 
 
+def _verify_installer_engine_sync() -> list[str]:
+    spec = importlib.util.spec_from_file_location("sync_installer_engine", INSTALLER_ENGINE_SYNC)
+    if spec is None or spec.loader is None:
+        return [f"unable to load {INSTALLER_ENGINE_SYNC.relative_to(REPO)}"]
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return list(module.verify())
+
+
+def _strip_quoted_strings(line: str) -> str:
+    line = re.sub(r"'(?:[^']|'')*'", "''", line)
+    line = re.sub(r'"(?:[^"`]|`.)*"', '""', line)
+    return line
+
+
+def _non_comment_lines(text: str) -> list[str]:
+    lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        lines.append(line)
+    return lines
+
+
+def _uses_installer_engine(text: str, ext: str) -> bool:
+    if ext == "ps1":
+        return any(
+            re.search(
+                r"""\.\s*\(Join-Path\s+\$PSScriptRoot\s+['"]installer-engine\.ps1['"]\)""",
+                line,
+            )
+            for line in _non_comment_lines(text)
+        )
+    return any(
+        re.search(r"""(?:^|\s)(?:source|\.)\s+["']?\$SCRIPT_DIR/installer-engine\.sh["']?""", line)
+        for line in _non_comment_lines(text)
+    )
+
+
+def _calls_engine_function(text: str, ext: str, *names: str) -> bool:
+    code_lines = [_strip_quoted_strings(line) for line in _non_comment_lines(text)]
+    if ext == "ps1":
+        return any(
+            re.search(
+                rf"""(?<![\w-])(?:{"|".join(re.escape(name) for name in names)})(?=\s|\(|$)""",
+                line,
+            )
+            for line in code_lines
+        )
+    return any(
+        re.search(
+            rf"""(?<![\w])(?:{"|".join(re.escape(name) for name in names)})(?=\s|\(|$)""",
+            line,
+        )
+        for line in code_lines
+    )
+
+
+def _uses_engine_uv_install(text: str, ext: str) -> bool:
+    return _uses_installer_engine(text, ext) and _calls_engine_function(
+        text,
+        ext,
+        "Invoke-UvPipInstallResilient",
+        "invoke_uv_pip_install_resilient",
+    )
+
+
+def _uses_engine_manifest_writer(text: str, ext: str) -> bool:
+    return _uses_installer_engine(text, ext) and _calls_engine_function(
+        text,
+        ext,
+        "Write-DeployManifest",
+        "write_deploy_manifest",
+    )
+
+
 def check() -> int:
     violations: list[str] = []
     ps1_resolvers: dict[str, str | None] = {}
@@ -343,7 +422,12 @@ def check() -> int:
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
 
-            if not is_payload and "uv pip install" not in text:
+            uses_engine = _uses_installer_engine(text, ext)
+            if (
+                not is_payload
+                and "uv pip install" not in text
+                and not (uses_engine and _uses_engine_uv_install(text, ext))
+            ):
                 violations.append(f"{name}/{script}: no 'uv pip install' (package must not be file-copied)")
             if not is_payload and VERSIONED_MARKER not in text:
                 violations.append(
@@ -365,9 +449,14 @@ def check() -> int:
                     )
             if FORBIDDEN_PYTHONPATH.search(text):
                 violations.append(f"{name}/{script}: binstub sets PYTHONPATH to a runtime lib/ dir")
-            if "schema_version" not in text or '"source"' not in text and "source " not in text:
+            if (
+                "schema_version" not in text
+                or ('"source"' not in text and "source " not in text)
+            ) and not (uses_engine and _uses_engine_manifest_writer(text, ext)):
                 violations.append(f"{name}/{script}: no schema_version 3 manifest with a source block")
-            elif not re.search(r"schema_version[\"'=:\s]+3", text):
+            elif not re.search(r"schema_version[\"'=:\s]+3", text) and not (
+                uses_engine and _uses_engine_manifest_writer(text, ext)
+            ):
                 violations.append(f"{name}/{script}: manifest is not schema_version 3")
 
             if ext == "ps1":
@@ -425,6 +514,14 @@ def check() -> int:
                 f"({VERSIONED_RUNTIME_CANONICAL.relative_to(REPO).as_posix()}) in: "
                 f"{', '.join(drifted)} -- run 'python tools/sync-versioned-runtime.py'"
             )
+
+    installer_engine_drift = _verify_installer_engine_sync()
+    if installer_engine_drift:
+        violations.append(
+            "vendored installer-engine files are out of sync -- run "
+            "'python tools/sync-installer-engine.py'"
+        )
+        violations.extend(f"installer-engine: {problem}" for problem in installer_engine_drift)
 
     if violations:
         print("Install-contract violations:", file=sys.stderr)

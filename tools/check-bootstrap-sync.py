@@ -52,6 +52,7 @@ FAMILIES: dict[str, list[str]] = {
         "agent-containers",
         "agent-dispatch",
         "agent-logger",
+        "agent-pull-requests",
         "agent-vault",
     ],
     # budget-guidance can stamp its payload-local command before Python exists.
