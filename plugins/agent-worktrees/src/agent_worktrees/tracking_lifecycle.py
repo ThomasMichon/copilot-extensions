@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from . import tracking
-from .tracking_controller_relations import (
-    _derive_initial_controller_relations,
-    _mark_controller_projection_dirty,
-)
+if TYPE_CHECKING:
+    from . import tracking
+
+
+def _tracking():
+    from . import tracking as tracking_mod
+
+    return tracking_mod
 
 
 class SessionLifecycleError(ValueError):
@@ -39,6 +43,7 @@ def _append_head_transition(
     at: str | None = None,
     related_session_ids: tuple[str, ...] = (),
 ) -> tracking.HeadTransition:
+    tracking = _tracking()
     if session_id is not None and record.session_entry(session_id) is None:
         raise SessionLifecycleError(
             f"session {session_id} is not tracked on worktree {record.worktree_id}"
@@ -96,6 +101,7 @@ def open_handoff(
     opened_at: str | None = None,
     save: bool = True,
 ) -> tracking.SessionHandoff:
+    tracking = _tracking()
     if not token:
         raise SessionLifecycleError("handoff token must not be empty")
     predecessor = record.session_entry(predecessor_id)
@@ -143,6 +149,7 @@ def link_handoff(
     linked_at: str | None = None,
     save: bool = True,
 ) -> tracking.SessionHandoff:
+    tracking = _tracking()
     successor = record.session_entry(successor_id)
     if successor is None:
         raise SessionLifecycleError(
@@ -214,6 +221,7 @@ def associate_handoff_candidate(
     associated_at: str | None = None,
     save: bool = True,
 ) -> tracking.SessionHandoff:
+    tracking = _tracking()
     successor = record.session_entry(session_id)
     if successor is None:
         raise SessionLifecycleError(
@@ -273,6 +281,7 @@ def set_head_session(
     *,
     save: bool = True,
 ) -> None:
+    tracking = _tracking()
     _ensure_head_ledger(record)
     if record.resolved_head_session != session_id:
         _append_head_transition(record, session_id, reason="adopted")
@@ -288,6 +297,7 @@ def conclude_session(
     handoff_token: str | None = None,
     save: bool = True,
 ) -> None:
+    tracking = _tracking()
     if state not in tracking._CONCLUDED_SESSION_STATES:
         raise SessionLifecycleError(
             f"conclude state must be one of {tracking._CONCLUDED_SESSION_STATES}, got {state!r}"
@@ -336,6 +346,7 @@ def link_succession(
     handoff_token: str | None = None,
     save: bool = True,
 ) -> None:
+    tracking = _tracking()
     pred = record.session_entry(predecessor_id)
     succ = record.session_entry(successor_id)
     if pred is None:
@@ -390,6 +401,12 @@ def create_new_record(
     codename_source: str | None = None,
     bound_agent: str | None = None,
 ) -> tracking.WorktreeRecord:
+    tracking = _tracking()
+    from .tracking_controller_relations import (
+        _derive_initial_controller_relations,
+        _mark_controller_projection_dirty,
+    )
+
     now = tracking._now_iso()
     normalized_parent_session = parent_session or None
     normalized_caller_worktree = caller_worktree or None
@@ -461,6 +478,7 @@ def create_new_record_if_absent(
     origin: tracking.WorktreeOrigin | None = None,
     checkout_managed: bool = True,
 ) -> tuple[tracking.WorktreeRecord, bool]:
+    tracking = _tracking()
     path = tracking_path / f"{worktree_id}.yaml"
     tracking_path.mkdir(parents=True, exist_ok=True)
     with tracking._RecordLock(path, require_sidecar=True):

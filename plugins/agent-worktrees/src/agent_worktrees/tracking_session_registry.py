@@ -4,12 +4,22 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import obligations
-from . import tracking
+
+if TYPE_CHECKING:
+    from . import tracking
+
+
+def _tracking():
+    from . import tracking as tracking_mod
+
+    return tracking_mod
 
 
 def _ensure_activation_history(entry: tracking.SessionEntry) -> None:
+    tracking = _tracking()
     if entry.activations or not entry.started_at:
         return
     entry.activations.append(
@@ -32,6 +42,7 @@ def _start_session_activation(
     recorded_at: str,
     source: str,
 ) -> bool:
+    tracking = _tracking()
     _ensure_activation_history(entry)
     latest = max(entry.activations, key=lambda item: item.ordinal, default=None)
     if latest is not None and latest.ended_at is None:
@@ -84,6 +95,7 @@ def _end_session_activation(
 
 
 def seal_worktree_identity(record: tracking.WorktreeRecord | None) -> dict:
+    tracking = _tracking()
     from . import sessions as _sessions
 
     result = {"sessions": 0, "titled": False}
@@ -131,6 +143,7 @@ def register_session(
     candidate_token: str | None = None,
     initial_projection: bool = False,
 ) -> tracking.SessionHandoff | None:
+    tracking = _tracking()
     yaml_path = tracking._owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return None
@@ -312,6 +325,7 @@ def _load_repo_freshness(path: Path) -> dict:
 
 
 def record_repo_fetch_confirmed(repo: str, *, at: str | None = None) -> None:
+    tracking = _tracking()
     if not repo:
         return
     path = tracking._repo_freshness_path()
@@ -327,6 +341,7 @@ def record_repo_fetch_confirmed(repo: str, *, at: str | None = None) -> None:
 
 
 def repo_fetch_confirmed_at(repo: str) -> str | None:
+    tracking = _tracking()
     if not repo:
         return None
     try:
@@ -364,6 +379,7 @@ def deregister_session(
     source: str = "hook",
     recorded_at: str | None = None,
 ) -> None:
+    tracking = _tracking()
     yaml_path = tracking._owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return

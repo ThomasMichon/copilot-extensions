@@ -4,13 +4,21 @@ import secrets
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import yaml
 
 from . import config as cfg
 from . import obligations
-from . import tracking
+
+if TYPE_CHECKING:
+    from . import tracking
+
+
+def _tracking():
+    from . import tracking as tracking_mod
+
+    return tracking_mod
 
 # work still rides on the resource, "at-rest" once that work is safe (merged /
 # off-box / itself finalized) but the claim is still held, "released" once the
@@ -224,6 +232,7 @@ def load_or_create_anchor_record(
     platform_name: str,
     tracking_path: Path,
 ) -> tracking.WorktreeRecord:
+    tracking = _tracking()
     path = tracking_path / f"{ANCHOR_ID}.yaml"
     if path.exists():
         return tracking.load_record(path)
@@ -255,6 +264,7 @@ def claim_handoff_reservation(
 
 
 def reopen_finalized_owner(record: tracking.WorktreeRecord, *, reason: str) -> bool:
+    tracking = _tracking()
     if record.status != "finalized":
         return False
     if record.completed_at:
@@ -282,6 +292,7 @@ def add_resource_claim(
     *,
     save: bool = True,
 ) -> ResourceClaim:
+    tracking = _tracking()
     if (
         record.status in {"finalizing", "orphaned"}
         or (
@@ -336,6 +347,7 @@ def settle_resource_claim(
     save: bool = True,
     path: Path | None = None,
 ) -> ResourceClaim | None:
+    tracking = _tracking()
     match = next((claim for claim in record.resources if claim.ref == ref), None)
     if match is None or claim_handoff_reservation(record, match):
         return None
@@ -352,6 +364,7 @@ def release_resource_claim(
     save: bool = True,
     path: Path | None = None,
 ) -> ResourceClaim | None:
+    tracking = _tracking()
     match = next((claim for claim in record.resources if claim.ref == ref), None)
     if match is None or claim_handoff_reservation(record, match):
         return None
@@ -381,6 +394,7 @@ def add_follow_up(
     id_factory: Callable[[], str] | None = None,
     save: bool = True,
 ) -> FollowUpRecord:
+    tracking = _tracking()
     if record.status in {"finalizing", "orphaned"}:
         raise ValueError(
             f"owner worktree {record.worktree_id} is {record.status}; "
@@ -418,6 +432,7 @@ def resolve_follow_up(
     result_ref: str | None = None,
     save: bool = True,
 ) -> FollowUpRecord | None:
+    tracking = _tracking()
     item = _resolve_follow_up_item(record, follow_up_id)
     if item is None:
         return None
@@ -437,6 +452,7 @@ def dismiss_follow_up(
     reason: str,
     save: bool = True,
 ) -> FollowUpRecord | None:
+    tracking = _tracking()
     item = _resolve_follow_up_item(record, follow_up_id)
     if item is None:
         return None
@@ -457,6 +473,7 @@ def sweep_abandoned_obligations(
     save: bool = True,
     path: Path | None = None,
 ) -> list[ResourceClaim]:
+    tracking = _tracking()
     reclaimed: list[ResourceClaim] = []
     for claim in record.resources:
         if not claim.is_unsettled or claim_handoff_reservation(record, claim):
@@ -485,6 +502,7 @@ def release_all_resources(
     *,
     save: bool = True,
 ) -> list[ResourceClaim]:
+    tracking = _tracking()
     released = [claim for claim in record.resources if claim.is_live and claim.kind != "session"]
     for claim in released:
         claim.state = "released"
@@ -498,6 +516,7 @@ def orphanage_path(project: str | None = None) -> Path:
 
 
 def load_orphaned_obligations(project: str | None = None) -> list[dict]:
+    tracking = _tracking()
     try:
         return tracking.load_orphaned_obligations_strict(project)
     except Exception:
@@ -505,7 +524,8 @@ def load_orphaned_obligations(project: str | None = None) -> list[dict]:
 
 
 def _load_orphaned_obligations_strict_local(project: str | None = None) -> list[dict]:
-    path = orphanage_path(project)
+    tracking = _tracking()
+    path = tracking.orphanage_path(project)
     if not path.exists():
         return []
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -529,6 +549,7 @@ def rehome_abandoned_obligations(
     handoff_to: str | None = None,
     project: str | None = None,
 ) -> list[dict]:
+    tracking = _tracking()
     try:
         path = tracking.orphanage_path(project)
         with tracking._RecordLock(path, require_sidecar=True):
@@ -578,6 +599,7 @@ def remove_orphaned_obligations(
     *,
     project: str | None = None,
 ) -> int:
+    tracking = _tracking()
     try:
         drop = {(key[0], key[1]) for key in keys}
         if not drop:
@@ -608,6 +630,7 @@ def remove_orphaned_obligations(
 def find_orphaned_children(
     tracking_path: Path,
 ) -> list[tuple[tracking.WorktreeRecord, tracking.WorktreeRecord | None]]:
+    tracking = _tracking()
     out: list[tuple[tracking.WorktreeRecord, tracking.WorktreeRecord | None]] = []
     try:
         this_machine = cfg.load_config().machine

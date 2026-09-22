@@ -1165,7 +1165,7 @@ the Phase 0 runbook, picked up as capacity allows.
   `python tools/run-plugin-tests.py agent-worktrees -k "tracking or claimant or
   claim_handoffs or obligation or orphanage or follow_up or repo_freshness or
   register_session or session_lifecycle or terminal_conclusion"` sweep, which
-  passed **638** tests with **4,469** deselected. `python tools/check-module-size.py`
+  passed **638** tests with **4,489** deselected. `python tools/check-module-size.py`
   and `python tools/check-module-size.py --refresh-baseline` pass, lowering
   `tools/module-size-baseline.json`'s ceiling for
   `agent_worktrees/tracking.py` to match the new post-slice size. `python
