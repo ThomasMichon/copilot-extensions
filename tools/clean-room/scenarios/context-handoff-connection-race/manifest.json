@@ -1,10 +1,10 @@
 {
   "name": "context-handoff-connection-race",
-  "description": "Tier-P F1 repro rig for github/copilot-agent-runtime#22266: a single session that discovers the context-handoff plugin from TWO sources at once -- the marketplace-installed copy AND a byte-identical duplicate present as a project-level extension in the working repo -- launches BOTH as real connections under one real headed (tmux-driven) session, and the second one hits validate_external_tools' same-session tool-name clash (generate_handoff_prompt/save_handoff_prompt/consume_handoff/trigger_handoff already registered by another connection). Report-only repro rig, not a regression gate: it asserts the clash IS observed (proving the mechanism), and flags loudly if it stops reproducing (either fixed upstream, or the container's layout/log-naming assumptions diverged).",
+  "description": "Tier-P F1 repro rig for github/copilot-agent-runtime#22266: a single session that discovers the context-handoff plugin from TWO sources at once -- the marketplace-installed copy AND a byte-identical duplicate present as a project-level extension in the working repo -- launches BOTH as real connections under one real headed (tmux-driven on Linux, psmux-driven on Windows) session, and the second one hits validate_external_tools' same-session tool-name clash (generate_handoff_prompt/save_handoff_prompt/consume_handoff/trigger_handoff already registered by another connection). Report-only repro rig, not a regression gate: it asserts the clash IS observed (proving the mechanism), and flags loudly if it stops reproducing (either fixed upstream, or the container's layout/log-naming assumptions diverged). Has both a scenario.sh (Linux arm, `-Os linux` / the default, confirmed 6/6 reproducible across two fresh-container runs) and a scenario.ps1 (Windows arm, `-Os windows`, UNVALIDATED as of authoring -- see scenario.ps1's own header) so the next round can determine whether the underlying extension-connection-clash mechanism is Windows-portable, and separately whether the still-open ready-then-self-exit(1) mystery (copilot-agent-runtime#22266's other half) is OS-specific or a general Copilot CLI behavior.",
   "tier": "P",
   "family": "F1",
   "image": "base",
-  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": ["tmux (apt, required -- extensions only load under a real headed session)"] },
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": ["tmux (apt, Linux arm) / psmux (baked into the Windows image) -- both required: extensions only load under a real headed session"] },
   "auth": { "copilot": "required", "gh": "none", "ado": "none" },
   "validates": "context-handoff same-session double-discovery tool-name clash (copilot-agent-runtime#22266)",
   "config": {
@@ -14,7 +14,7 @@
   "expected_artifacts": [
     "~/.copilot/installed-plugins/<marketplace>/context-handoff (the marketplace-installed source)",
     "~/ch-repro/.github/extensions/context-handoff (the duplicated project-level source)",
-    "cr-logs/tmux-pane.log (captured pane output of the driven headed session)",
+    "cr-logs/tmux-pane.log or cr-logs/psmux-pane.log (captured pane output of the driven headed session)",
     "~/.copilot/logs/extensions/*context-handoff* (per-connection extension logs; asserted for the tool-name-clash text)"
   ],
   "stages": [

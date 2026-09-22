@@ -15,3 +15,45 @@ LABEL org.opencontainers.image.description="copilot-extensions clean-room fresh-
 # Scenario + lib + partner tree + results are bind-mounted at run time; the
 # scenario is driven with `powershell -File C:\scenario\scenario.ps1`.
 WORKDIR C:\\cr
+
+# Node + the GitHub Copilot CLI itself (mirrors Dockerfile's own Linux install)
+# -- ADDED for scenarios that need to actually run `copilot`, not just validate
+# a partner's *_ps1 setup flow (the original narrower purpose this image was
+# built for). NPM_REGISTRY is a BUILD-TIME convenience ONLY to install this one
+# prereq -- see Dockerfile's own comment for the full rationale; it is not part
+# of the experiment and is not inherited into any scenario's runtime.
+ARG NODE_VERSION=22.14.0
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+RUN powershell -NoProfile -Command " \
+    $ErrorActionPreference = 'Stop'; \
+    Invoke-WebRequest -Uri \"https://nodejs.org/dist/v$env:NODE_VERSION/node-v$env:NODE_VERSION-win-x64.zip\" -OutFile C:\node.zip; \
+    Expand-Archive -LiteralPath C:\node.zip -DestinationPath C:\ ; \
+    Rename-Item -LiteralPath \"C:\node-v$env:NODE_VERSION-win-x64\" -NewName C:\nodejs; \
+    Remove-Item C:\node.zip"
+RUN setx /M PATH "%PATH%;C:\nodejs"
+RUN powershell -NoProfile -Command " \
+    npm config set registry $env:NPM_REGISTRY; \
+    npm install -g @github/copilot; \
+    npm config delete registry"
+
+# psmux (a tmux-alike for Windows) -- the headed-session driver for scenarios
+# that need a REAL interactive `copilot -i` session, not just `-p` (headless
+# mode never loads extensions at all -- see the Linux
+# context-handoff-connection-race scenario's own docs/finding). Same release
+# artifact and checksum-verification the repo's own CI uses
+# (.github/workflows/ci.yml's "Install psmux" step) for parity.
+ARG PSMUX_VERSION=3.3.8
+ARG PSMUX_SHA256=1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe
+RUN powershell -NoProfile -Command " \
+    $ErrorActionPreference = 'Stop'; \
+    Invoke-WebRequest -Uri \"https://github.com/psmux/psmux/releases/download/v$env:PSMUX_VERSION/psmux-v$env:PSMUX_VERSION-windows-x64.zip\" -OutFile C:\psmux.zip; \
+    $actual = (Get-FileHash -Algorithm SHA256 C:\psmux.zip).Hash.ToLowerInvariant(); \
+    if ($actual -ne $env:PSMUX_SHA256) { throw \"psmux archive checksum mismatch: $actual\" }; \
+    Expand-Archive -LiteralPath C:\psmux.zip -DestinationPath C:\psmux-extract; \
+    $exe = Get-ChildItem -LiteralPath C:\psmux-extract -Filter psmux.exe -Recurse | Select-Object -First 1; \
+    if (-not $exe) { throw 'psmux.exe not found in release archive' }; \
+    New-Item -ItemType Directory -Force -Path C:\psmux | Out-Null; \
+    Copy-Item -LiteralPath $exe.FullName -Destination C:\psmux\psmux.exe; \
+    Remove-Item C:\psmux.zip, C:\psmux-extract -Recurse -Force"
+RUN setx /M PATH "%PATH%;C:\psmux"
+

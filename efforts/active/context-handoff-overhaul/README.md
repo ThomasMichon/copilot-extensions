@@ -2669,3 +2669,74 @@ since prior rounds' verification):
   single-attempt fence are unaffected; only the historical journal
   entry's implementation description above is now stale, corrected here
   rather than rewritten in place.
+
+### 2026-09-21 -- PR #3167 merged; Windows clean-room arm prepared for next round
+
+- **PR #3167 landed**: squash-merged into `main` as `d1f65ad79`. Final round
+  fixed one genuinely-new finding (`withWorktreeSyncLock`'s catch around
+  `acquireLock()` conflated routine lock contention with a genuinely
+  different failure -- permissions, an unsupported filesystem, disk I/O --
+  misreporting the latter as "another sync attempt ... already in
+  progress"; now branches on `error?.code === "EEXIST"` and reports a
+  distinct reason otherwise, with a structural regression test). The other
+  9 items the reviewer still listed as "Open" were independently confirmed
+  already resolved by earlier rounds (fallback `sync-worktree` calls,
+  emit-guidance sync-first ordering, the separate exhaustive-suite workflow
+  file, current PR body version/doc-impact) via direct inspection of the
+  merged file contents -- stale review-thread carryovers, not live gaps.
+- **`tools/clean-room/scenarios/context-handoff-connection-race`** (the
+  same-session double-discovery repro for
+  github/copilot-agent-runtime#22266) confirmed reproducible on the Linux
+  arm: 6/6 across two independent fresh-container runs, once two things
+  were found: (a) `copilot -p` (headless) never loads the JS extension-host
+  component at all -- only skills/hooks -- regardless of headed vs.
+  headless, so the scenario must drive a REAL interactive session; (b)
+  `--experimental` is required for that extension-host component to load at
+  all, headed or not. Both are now documented as load-bearing notes in
+  `lib/tmux-drive.sh` (the new first-class headed-session driver this
+  session added: tmux + `-i` + send-keys + auto-dismissed folder-trust
+  prompt) for any future extension-focused scenario.
+- **Windows arm prepared, NOT yet validated** (next round, per operator
+  direction, via a different machine's Windows-container Docker host --
+  this machine's Docker is in Linux-container mode, and switching modes
+  mid-session was avoided to not disrupt the Linux-arm work in flight):
+  - `Dockerfile.windows` gained Node.js + the `@github/copilot` CLI +
+    psmux (this repo's own tmux-alike for Windows, already used elsewhere
+    -- `.github/workflows/ci.yml`'s "Install psmux" step,
+    `worktree-manager/bin/pane-wrapper.ps1`) -- the base image previously
+    only carried python + PowerShell for partner `*_ps1` setup-flow
+    validation, with no way to run `copilot` itself at all.
+  - New `lib/psmux-drive.ps1`: the Windows port of `lib/tmux-drive.sh`'s
+    API (`Start-CrPsmux`/`Send-CrPsmuxKeys`/`Get-CrPsmuxCapture`/
+    `Wait-CrPsmuxFor`/`Stop-CrPsmux`), same headed-session-driving
+    rationale, ported by close analogy -- psmux mirrors tmux's own CLI
+    closely enough (`new-session`/`kill-session`/`capture-pane`/
+    `list-panes` already confirmed identical elsewhere in this repo) that
+    this is a port, not a fresh design.
+  - New `scenarios/context-handoff-connection-race/scenario.ps1`: the same
+    5-phase logic as `scenario.sh` (install marketplace copy, duplicate as
+    a project-level source, drive one headed psmux session with
+    `--experimental`, assert the clash in the losing connection's log).
+  - **What the next round needs to do**: `run.ps1 -Os windows` mandates a
+    `-PartnerPath`/`-PartnerRepo` (its Windows arm was built for a
+    different, narrower purpose -- validating a partner's setup flow, not
+    running `copilot` generally); pass anything harmless to satisfy that
+    precondition, `scenario.ps1` doesn't use it. Both parse cleanly
+    (PowerShell AST parse, zero errors) but are UNVALIDATED against a real
+    Windows container -- expect at least one iteration to fix a wrong path
+    assumption (the Linux runtime-payload cache lives under
+    `~/.cache/copilot/pkg/<platform>/<version>/`; the Windows equivalent
+    almost certainly differs and this scenario doesn't need to resolve it
+    directly, but the underlying `%LOCALAPPDATA%\copilot\pkg\...` layout
+    from earlier in this same investigation is the right starting guess if
+    a future scenario ever needs it) or a psmux command-name mismatch
+    (`send-keys`/`capture-pane`/`new-session`/`kill-session` are assumed
+    identical to tmux by analogy, not independently confirmed for this
+    exact psmux version).
+  - **The actual open question this round exists to answer**: does the
+    same-session double-discovery clash reproduce on Windows too (same
+    mechanism, OS-portable), and separately, does the still-open
+    ready-then-self-exit(1) mystery (this effort's other unresolved half,
+    tracked in copilot-agent-runtime#22266) show up on Windows as well --
+    which would argue for a genuine Copilot CLI/runtime bug rather than
+    anything specific to this plugin or to Linux.
