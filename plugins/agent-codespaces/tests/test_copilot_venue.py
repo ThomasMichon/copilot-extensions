@@ -56,7 +56,7 @@ class TestInteractiveSshReverseForwardsAndRemoteCommand:
             ) == 0
         call.assert_called_once_with(
             [
-                "gh", "codespace", "ssh", "-c", "cs-example", "--",
+                "gh", "codespace", "ssh", "-c", "cs-example", "--", "-t",
                 "-R", "51234:127.0.0.1:51234",
                 "agent-worktrees copilot --worktree-id wt-A",
             ],
@@ -72,9 +72,32 @@ class TestInteractiveSshReverseForwardsAndRemoteCommand:
                 "cs-example", [], remote_command="echo hi",
             ) == 0
         call.assert_called_once_with(
-            ["gh", "codespace", "ssh", "-c", "cs-example", "--", "echo hi"],
+            ["gh", "codespace", "ssh", "-c", "cs-example", "--", "-t", "echo hi"],
             env=None,
         )
+
+    def test_remote_command_requests_a_pty(self) -> None:
+        """Regression coverage for a second real bug found live (this
+        session, agent-bridge-cli-mode-sessions Phase 4 live validation
+        against a real odsp-web CodeSpace): the venue `copilot` verb's own
+        docstring and CLI help text document "SSHes -t in", but no `-t`
+        flag was ever actually added -- without one, ssh never allocates a
+        remote pty for a command invocation, so the remote
+        `agent-worktrees copilot` immediately refused with "needs a
+        controlling terminal to attach to", 100% reproducible. An ordinary
+        interactive connect (no remote command) is unaffected -- `gh
+        codespace ssh` already allocates a pty for that case on its own.
+        """
+        with (
+            patch("agent_codespaces.lifecycle.account_for_codespace", return_value=None),
+            patch("subprocess.call", return_value=0) as call,
+        ):
+            _interactive_ssh(
+                "cs-example", [], remote_command="agent-worktrees copilot --worktree-id wt-A",
+            )
+        argv = call.call_args.args[0]
+        assert "-t" in argv
+        assert argv.index("-t") > argv.index("--")
 
     def test_no_forwards_or_command_keeps_prior_bare_argv(self) -> None:
         """Existing behavior for a plain interactive connect is unchanged."""

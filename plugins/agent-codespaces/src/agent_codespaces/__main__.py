@@ -2397,6 +2397,20 @@ def _interactive_ssh(
     args = ["gh", "codespace", "ssh", "-c", codespace_name]
     if port_forwards or remote_command:
         args.append("--")
+    # A remote_command needs a real pty: without one, ssh never allocates a
+    # remote tty when given a command, so `agent-worktrees copilot`'s own
+    # `sys.stdin.isatty()` guard on the FAR side always fails -- the venue
+    # `copilot` verb documents itself (this module's docstring, and the CLI
+    # help text in `copilot_venue.add_copilot_subparser`) as "SSHes -t in",
+    # but nothing here ever added the flag, so the documented contract was
+    # never actually implemented (confirmed live, agent-bridge-cli-mode-
+    # sessions Phase 4 validation against a real odsp-web CodeSpace: the
+    # remote `agent-worktrees copilot` immediately refused with "needs a
+    # controlling terminal to attach to"). An ordinary port-forward-only /
+    # no-command interactive shell is unaffected -- `gh codespace ssh`
+    # already allocates a pty for that case on its own.
+    if remote_command:
+        args.append("-t")
     for fwd in port_forwards:
         args.extend(["-R", fwd])
     if remote_command:
