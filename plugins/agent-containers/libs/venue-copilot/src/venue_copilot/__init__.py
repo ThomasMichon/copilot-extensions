@@ -270,6 +270,45 @@ def resolve_daemon_port(config_dir: str | None = None) -> int | None:
     return int(endpoint.port) if endpoint is not None and endpoint.port else None
 
 
+def resolve_local_auth_token(config_dir: str | None = None) -> str | None:
+    """The host ``agent-bridge`` daemon's own bearer token, or ``None``.
+
+    Reads ``<config_dir>/auth.yaml``'s ``token:`` key -- the exact file
+    ``agent_bridge.config.load_or_create_auth_token()`` writes, and the exact
+    file the interactive CLI extension's own ``resolveToken()``
+    (``extensions/agent-bridge/extension.mjs``) reads on whatever machine it
+    runs on. A remote CLI-mode venue never has this file: nothing has ever
+    provisioned it there. Without a token, that extension logs "no local
+    agent-bridge auth token found; not registering (ok)" and silently never
+    calls the registration endpoint at all -- confirmed live
+    (agent-bridge-cli-mode-sessions Phase 4 follow-up): a real CodeSpace
+    session loaded the extension, reached a ready prompt, and still never
+    registered, because this file was never copied there. A caller (the venue
+    `copilot` verb) is expected to provision this token (plus the matching
+    ``active.json`` from :func:`resolve_daemon_port`) onto the remote venue
+    before connecting -- see ``agent_codespaces.copilot_venue``'s
+    ``_provision_registration_credentials``.
+
+    Uses a plain regex, not a YAML parser, matching the JS extension's own
+    parse and avoiding a PyYAML dependency in this vendored, no-heavy-deps
+    lib. Returns ``None`` on any missing/unparseable file.
+    """
+    import re
+
+    base = os.path.expanduser(config_dir or os.environ.get(
+        "AGENT_BRIDGE_CONFIG_DIR", _DEFAULT_BRIDGE_CONFIG_DIR,
+    ))
+    try:
+        with open(os.path.join(base, "auth.yaml"), encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return None
+    match = re.search(r"^\s*token:\s*(\S+)", text, re.MULTILINE)
+    if not match:
+        return None
+    return match.group(1).strip("'\"")
+
+
 def daemon_port_reverse_forward(port: int) -> str:
     """The ``-R`` spec string carrying the daemon's own port into the venue.
 
