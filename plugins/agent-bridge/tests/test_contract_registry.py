@@ -96,6 +96,9 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
         "dispatch_task_session": (
             bridge_protocol.DISPATCH_TASK_SESSION_PROTOCOL_VERSION
         ),
+        "bare_session_transcript": (
+            bridge_protocol.BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION
+        ),
     }
 
 

@@ -393,6 +393,76 @@ class TestSessionRoutes:
             resp = client.get("/api/v1/sessions/nowhere")
         assert resp.status_code == 404
 
+    def test_get_session_transcript_returns_cold_store_events(
+        self, client, app
+    ) -> None:
+        """A bare (non-worktree-scoped, `worktree_id=None`) session's
+        transcript is answered by the registered cold-store provider --
+        letting a solo-session consumer retire its own direct historical
+        transcript dependency."""
+        from agent_bridge.cold_store import ColdStoreSession
+
+        mgr = app.state.session_manager
+        cold = ColdStoreSession(
+            session_id="archived-2",
+            status="ended",
+            worktree_id=None,
+            events=({"type": "message", "text": "hi"},),
+        )
+        with patch.object(
+            mgr, "fetch_cold_store_session", AsyncMock(return_value=cold)
+        ):
+            resp = client.get("/api/v1/sessions/archived-2/transcript")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["session_id"] == "archived-2"
+        assert body["events"] == [{"type": "message", "text": "hi"}]
+        assert body["meta"]["worktree_id"] is None
+        assert body["meta"]["read_only"] is True
+        assert body["meta"]["at_rest"] is True
+
+    def test_get_session_transcript_404s_when_no_cold_store_answer(
+        self, client, app
+    ) -> None:
+        mgr = app.state.session_manager
+        with patch.object(
+            mgr, "fetch_cold_store_session", AsyncMock(return_value=None)
+        ):
+            resp = client.get("/api/v1/sessions/nowhere/transcript")
+        assert resp.status_code == 404
+
+    def test_get_session_transcript_prefers_a_live_session(
+        self, client, app
+    ) -> None:
+        """A solo session can be LIVE (no owning agent to shell into), so
+        the live ledger must be checked before ever falling through to
+        cold storage -- otherwise a live bare session would 404 or read
+        stale archived content instead of its real transcript."""
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt")
+        session = Session("live-1", "calm-lake", target, "test-agent")
+        session.status = SessionStatus.IDLE
+        mgr._sessions["live-1"] = session
+        mgr.db.create_session(
+            "live-1", "calm-lake", "test-agent", "/wt", "local",
+            "idle", time.time(),
+        )
+        mgr.db.append_event(
+            "live-1", 1, "agent_message", {"text": "hi"}, time.time()
+        )
+        with patch.object(
+            mgr, "fetch_cold_store_session", AsyncMock(return_value=None)
+        ) as cold_fetch:
+            resp = client.get("/api/v1/sessions/live-1/transcript")
+        cold_fetch.assert_not_called()
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["session_id"] == "live-1"
+        assert body["events"][0]["data"] == {"text": "hi"}
+        assert body["meta"]["worktree_id"] is None
+        assert body["meta"]["read_only"] is False
+        assert body["meta"]["at_rest"] is True
+
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session(self, mock_acp_cls, mock_spawn, client) -> None:
@@ -2703,6 +2773,33 @@ class TestAcpAliasResolution:
     def test_unknown_ref_404s(self, client) -> None:
         resp = client.get("/api/v1/sessions/no-such-ref")
         assert resp.status_code == 404
+
+    def test_transcript_by_acp_id_reads_the_resolved_bridge_session(
+        self, client, app
+    ) -> None:
+        """Addressing the transcript route by the durable ACP id must read
+        events keyed under the resolved bridge session_id, not the raw ACP
+        reference -- otherwise the events table lookup misses silently and
+        returns an empty transcript."""
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt")
+        session = Session("bridge-uuid-3", "cool-brook", target, "test-agent")
+        session.status = SessionStatus.IDLE
+        session.acp_session_id = "acp-alias-transcript"
+        mgr._sessions[session.session_id] = session
+        mgr.db.create_session(
+            session.session_id, "cool-brook", "test-agent", "/wt", "local",
+            "idle", time.time(),
+        )
+        mgr.db.append_event(
+            session.session_id, 1, "agent_message", {"text": "hi"}, time.time()
+        )
+
+        resp = client.get("/api/v1/sessions/acp-alias-transcript/transcript")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["session_id"] == "bridge-uuid-3"
+        assert body["events"][0]["data"] == {"text": "hi"}
 
 
 class TestBackgroundTaskTeardownGate:
