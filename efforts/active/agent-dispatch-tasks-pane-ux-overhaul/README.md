@@ -885,7 +885,16 @@ first time since Phase 4 landed.
    the original note anticipated; scope and implement as its own follow-up
    rather than folded into this session's item 1-2 fix.
 
-### Phase 5 — Artifacts (claims) surface — BLOCKED on the agent-worktrees accelerator
+### Phase 5 — Artifacts (claims) surface — was BLOCKED on the agent-worktrees accelerator, now UNBLOCKED
+**Status update 2026-09-21:** the `agent-worktrees` accelerator prerequisite
+this phase (and Phase 8) depended on is now built, hardened through 4 PRs
+(#3102, #3147, #3186, #3206), and deployed — including the daemon-liveness
+audit's boot-and-wait redesign that makes its own health signal trustworthy.
+Phase 8's design entry (2026-09-21, see its own Journal writeup) resolves
+the "agent-dispatch-side consumer" this phase also needs: Phase 5's
+`artifacts_summary` is a second reader of that same relay file (see Phase
+8's own numbered design above, step 5) — no separate poll mechanism to
+design here.
 - [ ] Land `artifacts_summary` computation in `board_cli.py` (or wherever
       agent-dispatch tracks claims) and the drill-in claims viewer content
       for the Worktree Status card. (Not duplicated with Phase 3 — Phase 3
@@ -903,18 +912,8 @@ first time since Phase 4 landed.
       (e.g. task-level, not worktree-level), name and scope that as an
       explicitly different concept before implementing it, rather than
       reusing the word for two different ownership boundaries.
-- [ ] **Explicit prerequisite (Copilot review, 2026-09-20):** this phase now
-      depends on the same not-yet-built projection path Phase 8 depends on
-      (an `agent-worktrees` accelerator exposing worktree/claims state, plus
-      agent-dispatch's own consumer of it — neither exists yet). Per this
-      effort's own sequencing rule (land each phase before starting the
-      next), **do not start Phase 5's implementation until that
-      prerequisite work lands** — starting it earlier either produces
-      nothing executable or invites exactly the duplicate-claims-computation
-      fallback this reconciliation forbids. If Phase 5 is picked up before
-      the prerequisite lands, treat Phase 6 (independent of claims) as the
-      next unblocked phase instead, and say so explicitly rather than
-      silently reordering.
+- [ ] Implement against the same relay file Phase 8 populates (see Phase
+      8's numbered design) — do not stand up a second poller.
 
 ### Phase 6 — Source-repo grouping/filtering
 - [ ] The REPO column ships in Phase 3. A dedicated repo filter chip
@@ -988,28 +987,80 @@ no lifecycle-control logic invented at this layer.
       conflicting with `provider-owned-worktrees-surface` (a control plane
       renders without persisting a second copy) and `derive-dont-duplicate`
       (agent-worktrees owns this state). Any read-side design must stay a
-      **non-authoritative, transient view** — read fresh from the
-      accelerator (or a short-lived in-memory cache scoped to a single
-      board render, never a durable task-row column or other persisted
-      copy) — not yet designed or scoped into concrete steps; do that as
-      the next step before writing any Phase 8 code. **Open cold-start
-      question (Copilot review, 2026-09-20):** a subprocess-free consumer
-      still needs the accelerator warm to answer inside its own bounded
-      render/click wait — whether that means an explicit prewarm trigger
-      (e.g. on Picker/Tasks-pivot startup) or a background lifecycle
-      distinct from the render path itself is a real, unresolved
-      implementation question, not something this design pass or the
-      vision (deliberately "Not a specification") settles; scope it
-      explicitly as part of the next step above rather than assuming
-      boot-on-demand alone is fast enough for a render/click deadline.
-      Recent-message
-      history is explicitly NOT part of this cache (pulled on demand from
-      the owning session host instead, per the vision's existing *Not a
-      transcript or event warehouse* non-goal) — Phase 8's card body should
-      treat any "last messages" content, if wanted at all, as a separate
-      on-demand fetch, not a cached field. **Claims specifically are Phase
-      5's own field** (see that phase's 2026-09-20 note) — Phase 8 renders
-      whatever Phase 5 exposes rather than computing claims itself.
+      **non-authoritative, transient view**. **Design resolved 2026-09-21
+      (see the Journal entry of the same date for the full writeup) — the
+      "agent-dispatch-side relay" design:**
+
+      1. **A new poll tick inside the already-resident `supervise daemon`**
+         (alongside its existing `reconcile_liveness` cadence), scoped only
+         to worktree ids currently referenced by a non-terminal task
+         (`owner`'s worktree, or a pinned `target_worktree` for an
+         unclaimed task) — never the whole fleet. For each, it shells out to
+         `agent-worktrees worktree-status-bundle --worktree <id>` (the same
+         real-caller path the accelerator's own audit now hardens) — **from
+         the daemon's own background thread, never the render/click path**,
+         so it is not the subprocess-free consumer the pattern doc's named
+         exception describes; it is simply one more ordinary, coalesced
+         caller of the accelerator, exactly as *external-status-consumer-
+         contract* describes.
+      2. **A local relay cache, not a task-row column.** The daemon writes
+         each fetched projection (git state, session lineage, liveness, the
+         claims graph — never message history, which stays excluded per
+         *Not a transcript or event warehouse*) plus a `fetched_at`
+         timestamp and the accelerator's own forwarded per-fact freshness/
+         unconfirmed markers to a small file under agent-dispatch's own
+         runtime state dir (e.g. `worktree-status-relay.json`/sqlite,
+         mirroring the accelerator's own cache-file pattern for concurrent-
+         read safety) — **this is explicitly not the rejected idea from the
+         Copilot review above.** That review flagged writing the projection
+         into an agent-dispatch **task row** — the task's own durable,
+         schema'd record — as a second, independently-aging copy of
+         worktree state. This relay is not part of any task's record at
+         all: it is a keyed-by-worktree-id, purely rebuildable cache the
+         daemon may drop or fall behind on at will, with nothing about a
+         task's lifecycle or completion depending on its presence or
+         freshness — the same "warmth, not truth" posture the accelerator's
+         own cache already has one layer in.
+      3. **The render path reads only this local file — never a
+         subprocess.** `board_cli`'s render function reads the relay file
+         (a fast local read) for each worktree id it needs. An entry
+         fresher than a render-side staleness ceiling (e.g. 2x the poll
+         cadence) renders with its forwarded freshness markers; a missing
+         or stale entry renders every fact as stale/unknown and moves on —
+         never blocks the render or a card click, matching the pattern
+         doc's own `subprocess-free-consumer-reports-stale-on-timeout`
+         scenario shape exactly.
+      4. **Cold-start prewarm resolves the open question below:** on daemon
+         startup, and whenever a task transitions from terminal back to a
+         tracked/live state, that worktree's first poll is scheduled
+         immediately rather than waiting for the next periodic tick — the
+         same pattern already proven in this exact effort for the
+         `_setup_live_pivots`/`_prewarm_machine_key_map` cold-start fix
+         (see the Phase 4 Journal entries above).
+      5. **Phase 5 reuse:** the claims graph lives in the same per-worktree
+         projection this relay already caches, so Phase 5's
+         `artifacts_summary` is just another reader of the identical relay
+         file, keyed the same way — no second poll mechanism, no second
+         cache.
+      6. **Validation:** a render-path test asserting the board render
+         function never shells out (mirroring existing "Picker read path:
+         no subprocess" assertions elsewhere in this codebase), plus a
+         relay freshness/staleness test covering the pattern doc's
+         `subprocess-free-consumer-reports-stale-on-timeout` scenario.
+
+      Recent-message history is explicitly NOT part of this cache (pulled
+      on demand from the owning session host instead, per the vision's
+      existing *Not a transcript or event warehouse* non-goal) — Phase 8's
+      card body should treat any "last messages" content, if wanted at all,
+      as a separate on-demand fetch, not a cached field. **Claims
+      specifically are Phase 5's own field** (see that phase's 2026-09-20
+      note) — Phase 8 renders whatever Phase 5 exposes rather than
+      computing claims itself.
+- [ ] Implement the relay poller in `supervise daemon` (step 1-2 above),
+      the render-path reader in `board_cli`/`__main__.py`'s `inbox --board`
+      (step 3), the cold-start prewarm hook (step 4), and the two
+      regression tests (step 6). Wire Phase 5's `artifacts_summary` to the
+      same relay file once this lands (step 5).
 
 ### Phase 9 — Configuration → Registrars viewer/editor (implementation)
 - [ ] Build the Configuration-menu view listing every registration
@@ -2165,4 +2216,51 @@ pointer. **Not implemented this session**: agent-dispatch's own client design
 (Phase 8) and the Phase 5 claims-projection consumption — those remain this
 effort's own next steps, now genuinely unblocked rather than waiting on
 foundational work elsewhere.
+
+### 2026-09-21 — Accelerator hardened + deployed; Phase 8/5 consumer design resolved
+Since the last entry, the `agent-worktrees-external-status-accelerator`
+effort landed 3 more PRs hardening the accelerator itself (not part of this
+effort, but the prerequisite this effort's own Phase 5/8 blockers named):
+**#3147** (follow-up fixes: coalescing-key collisions, subscriber
+registration, `has_active_demand` in-flight detection, a record-identity
+bypass, a cache eviction race), **#3186** (Phase 7 ground-truth auditor +
+telemetry), and **#3206** (redesigned the auditor's own daemon-liveness
+check to boot-and-wait like a real caller, after live scheduled-audit runs
+caught the resident monitor's own idle-exit being misreported as an
+outage). Deployed and confirmed live on `tmichon-cloud1`. This session
+picked the effort back up and scoped the design Phase 8 explicitly deferred
+("not yet designed or scoped into concrete steps... an open cold-start
+question").
+
+**Resolved design: the agent-dispatch-side relay.** Read `board_cli`'s
+render path (`__main__.py`'s `inbox --board`) and the pattern doc's
+`external-status-consumer-contract`/`subprocess-free-consumer-reports-
+stale-on-timeout` sections directly rather than re-deriving from memory.
+The render path's own documented contract ("no agent-worktrees/agent-bridge
+subprocesses on the Picker read path") is absolute — it cannot itself dial
+the accelerator, cold-boot it, or wait on it, per the pattern doc's named
+exception for exactly this shape of caller. The already-resident
+`agent-dispatch` `supervise daemon` (which already runs a periodic
+`reconcile_liveness` tick) is the natural place to do that dialing instead,
+on its own background thread, writing what it learns to a small local
+relay file — explicitly **not** the task-row write the 2026-09-20 Copilot
+review rejected (that review's objection was a projection persisted into
+the task's own durable, schema'd record; this relay is keyed by worktree id,
+lives outside any task's record entirely, and is freely rebuildable/
+droppable — the same "warmth, not truth" posture the accelerator's own
+cache already has one layer in). The render path then only ever reads this
+local file (fast, no subprocess), rendering a missing/stale entry as
+explicit stale/unknown rather than blocking. Cold-start is handled by
+scheduling an immediate poll on daemon startup and on any task's
+terminal-to-live transition, mirroring the `_setup_live_pivots`/
+`_prewarm_machine_key_map` pattern this same effort already used to fix an
+analogous cold-start bug in Phase 4's follow-on work. Phase 5's
+`artifacts_summary` becomes a second reader of the identical relay file —
+no separate poll mechanism. Wrote the full numbered design into Phase 8's
+own Plan entry (see above) and updated Phase 5 to point at it instead of
+independently re-deriving the same mechanism. **Not implemented this
+session** (design-only pass, per the operator's explicit choice): the
+poller, the relay file, the render-path reader, the cold-start hook, and
+the two named regression tests remain Phase 8's actual implementation
+work.
 
