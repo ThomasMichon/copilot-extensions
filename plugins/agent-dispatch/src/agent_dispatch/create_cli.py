@@ -25,7 +25,7 @@ _REPO_UNRESOLVED = (
 def _cmd_create(args: argparse.Namespace) -> int:
     repo = _core()._scope_repo(args)
     if not repo:
-        print(_REPO_UNRESOLVED, file=sys.stderr)
+        print(_core()._REPO_UNRESOLVED, file=sys.stderr)
         return 2
     # Cross-machine dispatch (Phase 8 8a): an embody spawn targeted at *another*
     # machine runs the whole create+embody THERE over the SSH mesh, so
@@ -35,7 +35,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
     from . import remote_dispatch
 
     if remote_dispatch.is_cross_machine(args):
-        return _dispatch_cross_machine(args, repo)
+        return _core()._dispatch_cross_machine(args, repo)
     payload_inline = args.payload_inline
     if args.remote_create_envelope:
         if args.payload_file or args.payload_inline is not None:
@@ -142,7 +142,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
         won = task.get("owner") == claim_as and task.get("status") == "claimed"
         return _core()._emit(_core()._enrich({**task, "claimed_by_me": won}))
     if args.spawn and not args.proposed:
-        _spawn_worker_for(args, task)
+        _core()._spawn_worker_for(args, task)
     return _core()._emit(_core()._enrich(task))
 
 def _cmd_producer_fence(args: argparse.Namespace) -> int:
@@ -505,7 +505,7 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
                 )
                 return None
             _core()._report_spawn_result(result, task["id"], "agent-worktrees embody")
-            return result, "agent-worktrees embody", _embody_handle(result)
+            return result, "agent-worktrees embody", _core()._embody_handle(result)
         # Graceful degrade: no agent-worktrees -> try the headless bridge path.
         print(
             "agent-dispatch: embody backend unavailable (agent-worktrees not on "
