@@ -1479,10 +1479,10 @@ the Phase 0 runbook, picked up as capacity allows.
   from the earlier `agent-bridge/__main__.py` split.
 - Result: `session_manager.py` shrank **6,282 -> 771** lines in the live file,
   and every extracted sibling stayed under the 1,000-line cap (`session_start.py`
-  892, `session_core.py` 871, `session_host_connection.py` 788,
+  896, `session_core.py` 871, `session_host_connection.py` 788,
   `session_host_recovery.py` 723, `session_prompts.py` 522,
   `session_resume.py` 474, `session_lifecycle.py` 383,
-  `session_handoff.py` 377, `session_parity.py` 358, `session_monitoring.py`
+  `session_handoff.py` 398, `session_parity.py` 358, `session_monitoring.py`
   355).
 - Validation matched the stricter post-`db.py` discipline: the full
   `python tools/run-plugin-tests.py agent-bridge` run reached the same two
