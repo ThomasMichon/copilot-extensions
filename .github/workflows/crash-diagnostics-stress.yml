@@ -19,14 +19,26 @@ permissions:
   contents: read
 
 jobs:
-  stress:
-    name: full subprocess suite (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  stress-linux:
+    name: full subprocess suite (ubuntu-latest)
+    runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Run the full crash-diagnostics subprocess suite
+        env:
+          CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS: "1"
+        run: >-
+          node --test
+          plugins/context-handoff/tests/crash-diagnostics.test.mjs
+
+  stress-windows:
+    name: full subprocess suite (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

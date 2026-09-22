@@ -506,6 +506,15 @@ above):
   stderr instead -- a best-effort fallback specifically so a logging
   failure never reproduces the original silent-exit symptom this module
   exists to diagnose.
+- A **standalone** `exit: code=1 ready=...` line, **with no preceding**
+  `uncaughtException`/`unhandledRejection`/`signal` line for that same
+  `pid=` -- the process reached the exit handler with a non-zero code
+  through some other path entirely (a bare `process.exit(1)` elsewhere in
+  the code, for instance), without ever raising a captured exception,
+  rejection, or signal here. There is no stack to inspect for this shape;
+  correlate the timestamp/`pid=` against whatever other logs this host
+  keeps (the harness's own launch log, application logs, etc.) to find
+  what actually called `process.exit(1)`.
 - **No entry at all for a launch whose own harness log shows it reached
   `ready` and then stopped** -- four distinct possibilities, not just one:
   the ordinary case is simply a routine `code=0` exit, which is never logged
