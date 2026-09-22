@@ -65,11 +65,11 @@ plus `extensions\context-handoff\handoff-cli.mjs`; run `node $ch <verb> ...`.
 
 No store, no `node`? Write the brief to a `handoff-<slug>.md`
 under your state folder's `files/` directory (create it first), state the
-path, and tell the user: `/clear` then "Read <path> and resume the
-objective it describes." No auto-pickup, no claim tracking.
+absolute path, and tell the user: `/clear` then "Read <path> and resume
+the objective it describes." No auto-pickup, no claim tracking.
 
 ## Rules
 
-- Never claim auto-pickup; a handoff never loads automatically on restart.
+- Never claim auto-pickup; a handoff never auto-loads on restart.
 - The seed is a locator, never the full markdown inline.
 - Consuming is setup, not completion -- keep driving the objective.
