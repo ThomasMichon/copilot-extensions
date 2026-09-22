@@ -1106,9 +1106,10 @@ no lifecycle-control logic invented at this layer.
       computing claims itself.
 - [ ] Implement the relay poller in the coordinator service (step 1-2 above),
       the render-path reader in `board_cli`/`__main__.py`'s `inbox --board`
-      (step 3), the cold-start prewarm hook (step 4), and the two
-      regression tests (step 6). Wire Phase 5's `artifacts_summary` to the
-      same relay file once this lands (step 5).
+      (step 3), the cold-start prewarm hook (step 4), and the three
+      regression tests (step 6 — render-path no-subprocess, freshness/
+      staleness, and cross-machine ownership). Wire Phase 5's
+      `artifacts_summary` to the same relay file once this lands (step 5).
 
 ### Phase 9 — Configuration → Registrars viewer/editor (implementation)
 - [ ] Build the Configuration-menu view listing every registration
@@ -2315,7 +2316,7 @@ own Plan entry (see above) and updated Phase 5 to point at it instead of
 independently re-deriving the same mechanism. **Not implemented this
 session** (design-only pass, per the operator's explicit choice): the
 poller, the relay file, the render-path reader, the cold-start hook, and
-the two named regression tests remain Phase 8's actual implementation
+the three named regression tests remain Phase 8's actual implementation
 work.
 
 ### 2026-09-21 — PR #3222 review round 1 + round 2: real design gaps in the relay
