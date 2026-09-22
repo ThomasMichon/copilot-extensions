@@ -776,8 +776,8 @@ _ensure_runtime() {
         # egg-info (src/agent_dispatch.egg-info) sits ONE LEVEL DEEPER than
         # the root-level glob below reaches -- a bare "$PLUGIN_DIR"/*.egg-info
         # never matches it, so it survived every cleanup pass and shadowed a
-        # real upstream fix (registrar.py's `no_pair` field) for a live
-        # deployed service (aperture-labs#7440). Clean both locations.
+        # real upstream fix (registrar.py's `no_pair` field) on a live
+        # deployment. Clean both locations.
         rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info \
                "$PLUGIN_DIR"/src/*.egg-info 2>/dev/null || true
         return "$rc"

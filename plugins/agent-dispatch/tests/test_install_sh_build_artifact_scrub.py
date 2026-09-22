@@ -17,8 +17,8 @@ shares the identical "install straight from $PLUGIN_DIR" pattern, so
 branch, success or failure), and must still return the underlying install's
 real exit code. It must also scrub ``$PLUGIN_DIR/src/*.egg-info`` -- the
 src-layout egg-info location a bare root-level glob never reaches, which
-shadowed a real upstream fix and broke a live deployed service for 13 days
-(aperture-labs#7440).
+shadowed a real upstream fix and broke a live deployment for an extended
+period before being caught.
 """
 
 from __future__ import annotations
@@ -100,8 +100,8 @@ def _seed_build_residue(plugin_dir: Path) -> None:
 def _seed_src_layout_egg_info(plugin_dir: Path) -> None:
     """A src-layout package's egg-info (``src/<pkg>.egg-info``) sits one
     level deeper than the root-level glob reaches -- the exact shadow that
-    survived every cleanup pass and broke a live deployed service
-    (aperture-labs#7440): a stale ``src/agent_dispatch.egg-info`` shadowed
+    survived every cleanup pass and broke a live deployment: a stale
+    ``src/agent_dispatch.egg-info`` shadowed
     ``src/agent_dispatch/registrar.py``'s real `no_pair` field with an older
     cached copy that predated it."""
     (plugin_dir / "src" / "some_pkg.egg-info").mkdir(parents=True)
@@ -191,8 +191,8 @@ fi
 
 
 def test_src_layout_egg_info_is_also_scrubbed(tmp_path: Path) -> None:
-    """Regression for aperture-labs#7440: a src-layout egg-info one level
-    below $PLUGIN_DIR must be cleaned too, not just the root-level glob."""
+    """Regression: a src-layout egg-info one level below $PLUGIN_DIR must
+    be cleaned too, not just the root-level glob."""
     plugin_dir = tmp_path / "plugin"
     plugin_dir.mkdir()
     _seed_build_residue(plugin_dir)
