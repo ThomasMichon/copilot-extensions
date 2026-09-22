@@ -1175,5 +1175,5 @@ the Phase 0 runbook, picked up as capacity allows.
   `claimant-liveness --help`, `claimant-liveness anomalous-potato/proj/wt-1`,
   `anchor-check --help`, `hygiene --help`, and the generic top-level
   `agent-worktrees --help`.
-- Version bump for this slice: `agent-worktrees` **`1.5.5-dev224`** and
-  marketplace `metadata.version` **`1.7.7-dev192`**.
+- Version bump for this slice: `agent-worktrees` **`1.5.5-dev228`** and
+  marketplace `metadata.version` **`1.7.7-dev196`**.
