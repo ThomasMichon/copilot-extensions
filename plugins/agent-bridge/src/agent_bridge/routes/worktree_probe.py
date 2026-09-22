@@ -37,6 +37,7 @@ from fastapi import Request
 
 from ..agent_registry import AgentConfig, AgentResolver
 from ..models import SessionStatus
+from ..singleton_anchor import find_singleton_repo, repo_name_from_anchor_key
 
 if TYPE_CHECKING:
     from .worktrees import _WorktreeEntry
@@ -107,6 +108,49 @@ def reassign_worktree_ownership(
         db.reserve_worktree_ownership(worktree_id, session_id, now=time.time(), reclaim=True)
 
 
+async def _singleton_owner(
+    worktree_id: str, resolver: AgentResolver,
+) -> tuple[str, AgentConfig, "_WorktreeEntry"] | None:
+    """Resolve a ``<repo>@anchor`` pseudo-id to its owning local repo agent."""
+    repo_name = repo_name_from_anchor_key(worktree_id)
+    if repo_name is None:
+        return None
+    repo = await asyncio.to_thread(find_singleton_repo, repo_name)
+    if repo is None:
+        return None
+    local_rank = getattr(resolver, "_is_local_loopback_agent", None)
+    match: tuple[int, str, AgentConfig] | None = None
+    from . import worktrees as wt
+
+    for agent_name, config in resolver.agents.items():
+        project = getattr(config, "project", None)
+        if not isinstance(project, str):
+            continue
+        if project.strip().lower().split("/")[-1].replace(".", "-") != (
+            repo.name.lower().split("/")[-1].replace(".", "-")
+        ):
+            continue
+        local = 1 if callable(local_rank) and local_rank(config) else 0
+        rank = (0 if local else 1)
+        if match is None or rank < match[0]:
+            match = (rank, agent_name, config)
+    if match is None:
+        return None
+    _rank, agent_name, config = match
+    return (
+        agent_name,
+        config,
+        wt._WorktreeEntry(
+            id=worktree_id,
+            agent_name=agent_name,
+            machine=config.host or agent_name,
+            path=repo.path,
+            branch="",
+            status="active",
+        ),
+    )
+
+
 async def owning_agent(
     worktree_id: str, request: Request,
 ) -> tuple[str, AgentConfig] | None:
@@ -119,6 +163,9 @@ async def owning_agent(
     resolver = getattr(request.app.state, "resolver", None)
     if resolver is None:
         return None
+    singleton = await _singleton_owner(worktree_id, resolver)
+    if singleton is not None:
+        return singleton[0], singleton[1]
 
     from . import worktrees as wt
 
@@ -245,3 +292,25 @@ async def probe_live_worktree(
             task.cancel()
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
+
+
+async def find_worktree_entry(
+    worktree_id: str, resolver: AgentResolver,
+) -> tuple[str, "_WorktreeEntry"] | tuple[None, None]:
+    """Resolve a worktree or singleton-anchor key to owner + entry."""
+    singleton = await _singleton_owner(worktree_id, resolver)
+    if singleton is not None:
+        return singleton[0], singleton[2]
+
+    from . import worktrees as wt
+
+    cache = wt.get_cache()
+    await cache.crawl_if_empty()
+    for agent_name, worktrees in cache.get_all().items():
+        match = next((entry for entry in worktrees if entry.id == worktree_id), None)
+        if match is not None:
+            return agent_name, match
+    probed = await cache.probe_live(worktree_id, resolver)
+    if probed is not None:
+        return probed
+    return None, None

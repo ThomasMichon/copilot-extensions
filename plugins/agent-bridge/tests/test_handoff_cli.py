@@ -18,14 +18,23 @@ from agent_bridge.client import BridgeClientError
 
 class _FakeClient:
     def __init__(
-        self, *, session_handoff=None, worktree_handoff=None, handoff_request=None
+        self,
+        *,
+        session_handoff=None,
+        worktree_handoff=None,
+        handoff_request=None,
+        agents=None,
     ):
         self._session_handoff = session_handoff
         self._worktree_handoff = worktree_handoff
         self._handoff_request = handoff_request
+        self._agents = list(agents or [])
         self.session_calls: list[tuple[str, str | None, bool]] = []
         self.worktree_calls: list[tuple[str, str | None, bool]] = []
         self.request_calls: list[tuple[str, str, str, str | None]] = []
+
+    def list_agents(self):
+        return list(self._agents)
 
     def handoff_session(self, session_id, *, reason=None, seed=True):
         self.session_calls.append((session_id, reason, seed))
@@ -35,9 +44,14 @@ class _FakeClient:
 
     def handoff_worktree(self, worktree_id, *, reason=None, seed=True):
         self.worktree_calls.append((worktree_id, reason, seed))
-        if isinstance(self._worktree_handoff, Exception):
-            raise self._worktree_handoff
-        return self._worktree_handoff
+        result = (
+            self._worktree_handoff(worktree_id, reason=reason, seed=seed)
+            if callable(self._worktree_handoff)
+            else self._worktree_handoff
+        )
+        if isinstance(result, Exception):
+            raise result
+        return result
 
     def handoff_request(
         self, worktree_id, *, session_id, seed_text, handoff_token=None
@@ -130,6 +144,37 @@ def test_worktree_not_found_reports_and_exits(monkeypatch, capsys):
         m._cmd_handoff(_args("ghost"))
     err = capsys.readouterr().err
     assert "neither a bridge-owned session nor a worktree" in err
+
+
+def test_singleton_repo_handoff_falls_back_to_anchor_key(monkeypatch, capsys):
+    client = _FakeClient(
+        session_handoff=BridgeClientError(404, "not an owned session"),
+        worktree_handoff=lambda worktree_id, **_: (
+            BridgeClientError(404, "no session for worktree")
+            if worktree_id != "llama.cpp@anchor"
+            else {"status": "idle", "session_id": "succ-anchor-2"}
+        ),
+        agents=[{"name": "llama.cpp@Lambda-Core", "project": "llama.cpp"}],
+    )
+    _patch_client(monkeypatch, client)
+    monkeypatch.setattr(
+        "agent_bridge.resume_handoff_cli.find_singleton_repo",
+        lambda target: (
+            type("Repo", (), {"name": "llama.cpp", "path": "/repo/llama.cpp"})()
+            if target == "llama.cpp"
+            else None
+        ),
+    )
+
+    m._cmd_handoff(_args("llama.cpp@Lambda-Core"))
+
+    assert client.worktree_calls == [
+        ("llama.cpp@Lambda-Core", None, True),
+        ("llama.cpp@anchor", None, True),
+    ]
+    assert "Repo llama.cpp handed off -> successor succ-anchor-2 (idle)" in (
+        capsys.readouterr().out
+    )
 
 
 def test_handoff_request_json_round_trips(monkeypatch, capsys):
@@ -512,4 +557,3 @@ class TestHandoffCheckSameCell:
             m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
 
         assert captured == {**captured, **m.no_window_kwargs()}
-
