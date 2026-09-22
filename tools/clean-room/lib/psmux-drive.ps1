@@ -65,8 +65,49 @@ function Start-CrPsmux {
     )
     & psmux kill-session -t $Session 2>$null | Out-Null
     $argLine = ($ExtraArgs -join ' ')
-    $cmdLine = "copilot -i `"$Prompt`" $argLine"
-    & psmux new-session -d -s $Session -c $Cwd -- powershell -NoProfile -Command $cmdLine
+    # `copilot -i "<prompt>"` (a single prompt argument, as opposed to bare
+    # `copilot -i`) runs exactly one turn and then exits on its own -- fast
+    # enough (~2s, confirmed) that the underlying psmux pane's process can be
+    # gone before Wait-CrPsmuxFor's first poll even runs, killing the WHOLE
+    # session out from under it ("psmux: no server running"). Append a long
+    # hold so the pane -- and therefore the session -- outlives copilot's own
+    # exit; Stop-CrPsmux tears it down explicitly once the caller is done.
+    # Write the invocation to a temp .ps1 FILE rather than handing a
+    # pre-quoted command STRING through `psmux new-session ... -- powershell
+    # -Command $cmdLine`: confirmed on a real container that PowerShell's own
+    # native-argv quoting mangles embedded double-quotes across that many
+    # process hops (psmux.exe re-assembling a child command line), so
+    # `copilot` ended up receiving the prompt as bare, unquoted, word-split
+    # tokens ("Invalid command format ... prompt was not quoted"). A file has
+    # no argv-splitting to lose -- the quoting is resolved once, here, when
+    # the file is written.
+    $scriptPath = Join-Path $env:TEMP ("cr-psmux-" + $Session + ".ps1")
+    $scriptBody = "copilot -i `"$Prompt`" $argLine; Start-Sleep -Seconds 300"
+    Set-Content -LiteralPath $scriptPath -Value $scriptBody -Encoding utf8
+    & psmux new-session -d -s $Session -c $Cwd -- powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath
+    Wait-CrPsmuxFolderTrustPrompt -Session $Session
+}
+
+# The FIRST headed launch against any not-yet-trusted cwd blocks on a
+# "Confirm folder trust" TUI prompt before anything else happens (no flag
+# bypasses it as of this writing) -- mirrors
+# _cr_tmux_dismiss_folder_trust_prompt in tmux-drive.sh (confirmed present on
+# the Windows arm too via a real container run). Accepts the prompt's own
+# default ("1. Yes") via a bare Enter; does not opt into "remember this
+# folder", so trust is scoped to the one session under test.
+function Wait-CrPsmuxFolderTrustPrompt {
+    param([Parameter(Mandatory = $true)][string]$Session)
+    $waited = 0
+    while ($waited -lt 10) {
+        $captured = Get-CrPsmuxCapture -Session $Session
+        if ($captured -match 'Confirm folder trust') {
+            & psmux send-keys -t $Session Enter
+            return
+        }
+        Start-Sleep -Milliseconds 500
+        $waited++
+    }
+    # no prompt seen within 5s -- likely already trusted; not an error
 }
 
 function Send-CrPsmuxKeys {

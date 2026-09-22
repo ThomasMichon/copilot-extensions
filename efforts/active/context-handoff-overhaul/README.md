@@ -2740,3 +2740,66 @@ since prior rounds' verification):
     tracked in copilot-agent-runtime#22266) show up on Windows as well --
     which would argue for a genuine Copilot CLI/runtime bug rather than
     anything specific to this plugin or to Linux.
+
+- **Windows arm VALIDATED: clash confirmed reproducible on Windows, 2/2**
+  (run against a real Windows-container Hyper-V-isolated host, `cloud2`).
+  Getting there needed five real, independent bugs fixed -- none of them
+  in the clash mechanism itself, all in getting a genuinely headed Windows
+  session to stand up at all:
+  1. **`Dockerfile.windows` was double-wrapping every `RUN` in its own
+     `powershell -NoProfile -Command "..."`**, even though Docker's
+     Windows default shell already IS powershell -- the outer
+     Docker-injected wrapper parsed (and interpolated `$env:...` inside)
+     the whole instruction as PowerShell code first, mangling the nested
+     quotes before the intended inner invocation ever ran (`setx` lost its
+     quoting outright; a later `[Environment]::SetEnvironmentVariable(...)`
+     call arrived flattened to bare, comma/paren-stripped tokens). Fixed
+     by declaring `SHELL ["powershell", "-NoProfile", "-Command"]` once
+     and writing plain PowerShell in every `RUN`, no second wrapper.
+  2. **MinGit was missing** (`scenario.ps1`'s phase 2 needs a real `git`
+     to duplicate the extension as a project-level source) and, once
+     added, the version/asset-name pair was wrong (git-for-windows' tag
+     and its `MinGit-*.zip` asset name diverge: `v2.55.0.windows.5` vs.
+     `MinGit-2.55.0.5-64-bit.zip`) -- a 404 until corrected against the
+     real release.
+  3. **copilot-extensions itself hit Windows' legacy 260-char `MAX_PATH`**
+     once cloned under the marketplace-cache prefix (`fatal: unable to
+     checkout working tree` after a full clone) -- fixed by enabling both
+     `git config --system core.longpaths true` and the OS-level
+     `HKLM:\...\FileSystem\LongPathsEnabled` registry opt-in in the image.
+  4. **The Windows arm never resolved/forwarded a Copilot token into the
+     container** (unlike `run.sh`'s `resolve_token`/`token_args` on the
+     Linux arm) -- `copilot -i` exited immediately with "No authentication
+     information found," which is why the psmux session never had
+     anything worth capturing. Fixed by mirroring the same pattern in
+     `run.ps1`'s Windows arm: prefer `$env:COPILOT_GITHUB_TOKEN`, else
+     `gh auth token` (`-TokenAccount`-scoped or active account), inject
+     via `-e COPILOT_GITHUB_TOKEN` unless `-NoToken`.
+  5. **`psmux-drive.ps1` itself had two real bugs**, both invisible until
+     the above four were fixed enough to reach it: (a) `copilot -i
+     "<prompt>"` (a single prompt argument) runs one turn and exits in
+     ~2s -- fast enough that the psmux pane's process, and therefore the
+     WHOLE session, could be torn down before `Wait-CrPsmuxFor`'s first
+     poll ever ran (`psmux: no server running on session`); fixed by
+     appending a long `Start-Sleep` after the copilot invocation so the
+     pane outlives it. (b) Handing a pre-quoted command STRING through
+     `psmux new-session -- powershell -NoProfile -Command $cmdLine`
+     mangled the embedded double-quotes around the prompt across that
+     many process hops -- `copilot` received it as bare, word-split
+     tokens ("Invalid command format ... prompt was not quoted"); fixed by
+     writing the invocation to a temp `.ps1` FILE instead (no argv to
+     lose). (c) `psmux-drive.ps1` was also missing the
+     folder-trust-prompt dismissal that `tmux-drive.sh` already has on
+     the Linux arm (`_cr_tmux_dismiss_folder_trust_prompt`) -- confirmed
+     it blocks the FIRST headed launch against any not-yet-trusted cwd on
+     Windows too; ported the same auto-dismiss (bare Enter on "1. Yes",
+     no persisted trust).
+  - With all five fixed, `context-handoff-connection-race` on the Windows
+    arm passed clean, 6/6 checks, **2/2 independent container runs**:
+    `"same-session double-discovery clash REPRODUCED: a second connection
+    was rejected with 'already registered by another connection'"` --
+    **the clash is OS-portable, not Linux/tmux-specific**. The
+    still-open ready-then-self-exit(1) mystery was not separately probed
+    this round (out of scope for this scenario as written; it targets the
+    clash specifically) and remains an open question for a future round
+    or a fresh scenario.
