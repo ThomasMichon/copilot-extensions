@@ -16,8 +16,11 @@ from pydantic import BaseModel
 
 from .config import DEFAULT_HANDOFF_FALLBACK_GRACE, DEFAULT_ORPHAN_GRACE
 from .events import EventBus
+from .identity import name_for_repo
 from .loop_governance import LoopGovernance
+from .procutil import run_agent_worktrees_capture
 from .queue import Status, Task, TaskQueue, machine_matches
+from .worktree_status_relay import WorktreeStatusRelayStore
 
 log = logging.getLogger("agent-dispatch.coordinator")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
@@ -481,6 +484,151 @@ async def _orphan_reap_loop(
                 reaped,
             )
             bus.publish({"type": "task.reaped", "reaped": reaped})
+
+
+def _local_machine_name() -> str | None:
+    from .remote_dispatch import local_machine
+
+    return local_machine()
+
+
+def _owned_worktree_refs_for_machine(
+    queue: TaskQueue,
+    machine: str | None,
+    *,
+    limit: int = 5000,
+) -> list[tuple[str, str]]:
+    """The current owned worktrees this coordinator may legitimately poll."""
+    if not machine:
+        return []
+    refs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for task in queue.list(status=list(Status.OWNED), limit=limit):
+        if task.owner:
+            owner_machine, _sep, owner_worktree = task.owner.partition("/")
+        else:
+            owner_machine = task.target_machine or ""
+            owner_worktree = task.target_worktree or ""
+        if (
+            not task.repo
+            or not owner_machine
+            or not owner_worktree
+            or owner_machine.casefold() != machine.casefold()
+        ):
+            continue
+        key = (task.repo, owner_worktree)
+        if key not in seen:
+            seen.add(key)
+            refs.append(key)
+    return refs
+
+
+def _fetch_worktree_status_bundle(
+    repo: str,
+    worktree_id: str,
+    *,
+    resolve_project_name: Callable[[str | None], str | None] = name_for_repo,
+    capture: Callable[..., Any] = run_agent_worktrees_capture,
+    timeout: float = 60.0,
+) -> dict[str, Any] | None:
+    project = resolve_project_name(repo)
+    if not project:
+        return None
+    result = capture(
+        "worktree-status-bundle",
+        "--project",
+        project,
+        "--worktree",
+        worktree_id,
+        "--json",
+        timeout=timeout,
+    )
+    if result is None or result.returncode != 0:
+        return None
+    try:
+        import json
+
+        payload = json.loads(result.stdout)
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _refresh_worktree_status_relay(
+    queue: TaskQueue,
+    relay: WorktreeStatusRelayStore,
+    *,
+    poll_interval: float,
+    resolve_machine: Callable[[], str | None] = _local_machine_name,
+    fetch_bundle: Callable[[str, str], dict[str, Any] | None] = _fetch_worktree_status_bundle,
+) -> dict[str, int]:
+    machine = resolve_machine()
+    refs = _owned_worktree_refs_for_machine(queue, machine)
+    refreshed = 0
+    for repo, worktree_id in refs:
+        bundle = fetch_bundle(repo, worktree_id)
+        if bundle is None:
+            continue
+        relay.put(
+            repo,
+            worktree_id,
+            bundle,
+            fetched_at=time.time(),
+            poll_interval_seconds=poll_interval,
+        )
+        refreshed += 1
+    return {"checked": len(refs), "updated": refreshed}
+
+
+async def _worktree_status_relay_loop(
+    queue: TaskQueue,
+    interval: float,
+    bus: EventBus,
+    *,
+    relay: WorktreeStatusRelayStore,
+    signal: asyncio.Queue[None],
+    health: LoopHealth,
+    cycle_timeout: float | None = None,
+    governance: LoopGovernance | None = None,
+    run_supervised_cycle: Callable[..., Any] = _run_supervised_cycle,
+    governance_backoff: Callable[..., Any] = _governance_backoff,
+) -> None:
+    """Keep per-worktree relay entries warm off the request/render path."""
+    first_pass = True
+    while True:
+        if not first_pass:
+            try:
+                await asyncio.wait_for(signal.get(), timeout=health.current_interval)
+                while not signal.empty():
+                    signal.get_nowait()
+            except (TimeoutError, asyncio.TimeoutError):
+                pass
+        first_pass = False
+        if await governance_backoff(
+            governance,
+            "iteration-boundary:worktree-status-relay",
+            loop_name="worktree-status relay",
+        ):
+            continue
+        if await governance_backoff(
+            governance,
+            "pre-mutation:worktree-status-relay",
+            loop_name="worktree-status relay",
+        ):
+            continue
+        counts = await run_supervised_cycle(
+            health,
+            lambda: _refresh_worktree_status_relay(
+                queue, relay, poll_interval=interval
+            ),
+            cycle_timeout=cycle_timeout or max(120.0, interval),
+        )
+        counts = counts or {}
+        updated = counts.get("updated", 0)
+        if updated:
+            bus.publish(
+                {"type": "worktree_status.relay_refreshed", **counts}
+            )
 
 
 def _find_stale_handoff_tasks(

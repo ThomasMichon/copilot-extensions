@@ -9,6 +9,7 @@ import platform
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -16,6 +17,7 @@ from pathlib import Path
 from .install_paths import install_dir
 from .procutil import no_window_kwargs as _no_window_kwargs
 from .procutil import windowless_python, windowless_python_env
+from .worktree_status_relay import board_fields_for_task, claimed_identity
 
 #: Operator feedback 2026-09-20: Started is more interesting to inspect at a
 #: glance than Queued (a task not yet running), so it sits right after
@@ -32,6 +34,8 @@ GROUPS = (
 )
 TERMINAL = frozenset({"Completed", "Abandoned"})
 ACTIVITY_TTL_SECONDS = 90.0
+_RELAY_ENDPOINT: str | None = None
+
 
 def _local_machine() -> str | None:
     value = os.environ.get("AGENT_DISPATCH_SUPERVISE_MACHINE")
@@ -156,10 +160,50 @@ def _sort_timestamp(task: dict) -> float:
         return 0.0
 
 
-def _build(tasks: list[dict], *, machine: str, recent_mins: int) -> list[dict]:
+def _relay_fetch(repo: str, worktree_id: str) -> dict | None:
+    endpoint = _RELAY_ENDPOINT or _endpoint()
+    request = urllib.request.Request(
+        f"{endpoint}/worktree-status-relay?"
+        f"{urllib.parse.urlencode({'repo': repo, 'worktree_id': worktree_id})}"
+    )
+    token = os.environ.get("AGENT_DISPATCH_TOKEN")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+    return payload if isinstance(payload, dict) else None
+
+
+def _build(
+    tasks: list[dict],
+    *,
+    machine: str,
+    recent_mins: int,
+    relay_fetch=None,
+) -> list[dict]:
     now = time.time()
     cutoff = now - max(0, recent_mins) * 60
     rows: list[dict] = []
+    relay_cache: dict[tuple[str, str], dict | None] = {}
+
+    fetch = relay_fetch or _relay_fetch
+
+    def _relay_entry(repo: str | None, worktree_id: str | None) -> dict | None:
+        if not repo or not worktree_id:
+            return None
+        key = (repo, worktree_id)
+        if key not in relay_cache:
+            try:
+                relay_cache[key] = fetch(repo, worktree_id)
+            except Exception:
+                relay_cache[key] = None
+        return relay_cache[key]
+
     for task in tasks:
         target = task.get("target_machine")
         if target and str(target).casefold() != machine.casefold():
@@ -178,6 +222,9 @@ def _build(tasks: list[dict], *, machine: str, recent_mins: int) -> list[dict]:
         row["group"] = group
         row["activity"] = _activity(task, now)
         row["wt_live"] = _wt_live(row["activity"], task, now)
+        _claimed_machine, claimed_worktree = claimed_identity(task)
+        if claimed_worktree and not row.get("target_worktree"):
+            row["target_worktree"] = claimed_worktree
         # PR #2913 review: the manifest's mutating/card actions gate on these
         # booleans -- an unpopulated field degrades to falsy in the picker's
         # `when` matcher, so leaving one out doesn't crash anything, but it
@@ -186,7 +233,7 @@ def _build(tasks: list[dict], *, machine: str, recent_mins: int) -> list[dict]:
         # data already on the task; only `cli_openable` and `has_charter`
         # stay hard-`False` pending their own follow-on phases (see the two
         # comments below for exactly why).
-        row["has_worktree"] = bool(task.get("target_worktree"))
+        row["has_worktree"] = bool(claimed_worktree)
         # `embodied` gates Pause/Force-stop: true only for a task with a
         # genuinely LIVE session (`started`). A "Blocked" task's real status
         # is `suspended` (see `set_card`'s own docstring: posting a card with
@@ -218,13 +265,14 @@ def _build(tasks: list[dict], *, machine: str, recent_mins: int) -> list[dict]:
         # field (mirroring `worktree-status`'s own `has_worktree` gate)
         # keeps it schema-visible without showing a broken empty card.
         row["has_charter"] = False
-        # Phase 3 lands the column *plumbing* only; Phase 5 owns the real
-        # claims/artifacts-tracking computation (see the Plan's own note that
-        # the two phases must not both claim this field). Always None today
-        # -- a placeholder so the manifest/column-fit path is exercised now
-        # without duplicating Phase 5's ownership.
-        row["artifacts_summary"] = None
         row.setdefault("repo_name", _repo_name(task.get("repo")))
+        row.update(
+            board_fields_for_task(
+                row,
+                _relay_entry(str(row.get("repo") or ""), claimed_worktree),
+                now=now,
+            )
+        )
         progress = row.get("latest_progress")
         if isinstance(progress, str) and progress:
             try:
@@ -283,7 +331,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.label:
         query["label"] = args.label
     try:
-        url = f"{_endpoint()}/tasks?{urllib.parse.urlencode(query)}"
+        endpoint = _endpoint()
+        url = f"{endpoint}/tasks?{urllib.parse.urlencode(query)}"
         request = urllib.request.Request(url)
         token = os.environ.get("AGENT_DISPATCH_TOKEN")
         if token:
@@ -293,8 +342,15 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(f"agent-dispatch-board: {exc}", file=sys.stderr)
         return 1
+    global _RELAY_ENDPOINT
+    _RELAY_ENDPOINT = endpoint
     json.dump(
-        _build(tasks, machine=args.machine, recent_mins=args.recent_mins),
+        _build(
+            tasks,
+            machine=args.machine,
+            recent_mins=args.recent_mins,
+            relay_fetch=_relay_fetch,
+        ),
         sys.stdout,
         indent=2,
         sort_keys=True,

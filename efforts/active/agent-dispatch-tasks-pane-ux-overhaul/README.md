@@ -895,7 +895,7 @@ the "agent-dispatch-side consumer" this phase also needs: Phase 5's
 `artifacts_summary` is a second reader of that same relay file (see Phase
 8's own numbered design above, step 5) — no separate poll mechanism to
 design here.
-- [ ] Land `artifacts_summary` computation in `board_cli.py` (or wherever
+- [x] Land `artifacts_summary` computation in `board_cli.py` (or wherever
       agent-dispatch tracks claims) and the drill-in claims viewer content
       for the Worktree Status card. (Not duplicated with Phase 3 — Phase 3
       only lands the column plumbing/manifest; the actual claims-tracking
@@ -912,7 +912,7 @@ design here.
       (e.g. task-level, not worktree-level), name and scope that as an
       explicitly different concept before implementing it, rather than
       reusing the word for two different ownership boundaries.
-- [ ] Implement against the same relay file Phase 8 populates (see Phase
+- [x] Implement against the same relay file Phase 8 populates (see Phase
       8's numbered design) — do not stand up a second poller.
 
 ### Phase 6 — Source-repo grouping/filtering
@@ -939,7 +939,7 @@ no lifecycle-control logic invented at this layer.
       backend work beyond the Phase 1 concurrency-fencing requirement.
 
 ### Phase 8 — Worktree Status card (implementation)
-- [ ] Populate `worktree_status.body` from real session-lineage/claims/
+- [x] Populate `worktree_status.body` from real session-lineage/claims/
       commit data instead of the preview's fixed fixture. **Operator
       feedback 2026-09-20:** confirmed against the live coordinator, every
       Worktree Status card currently comes up empty beyond its title — this
@@ -1120,7 +1120,7 @@ no lifecycle-control logic invented at this layer.
       specifically are Phase 5's own field** (see that phase's 2026-09-20
       note) — Phase 8 renders whatever Phase 5 exposes rather than
       computing claims itself.
-- [ ] Implement the relay poller in the coordinator service (step 1-2 above),
+- [x] Implement the relay poller in the coordinator service (step 1-2 above),
       the render-path reader in `board_cli`/`__main__.py`'s `inbox --board`
       (step 3), the cold-start prewarm hook (step 4), and the three
       regression tests (step 6 — render-path no-subprocess, freshness/
@@ -2407,3 +2407,43 @@ Reworded to state plainly that the relay key uses the canonical `repo`
 while the `--project` argument uses the separately-resolved local name —
 no remaining sentence conflates the two.
 
+### 2026-09-21 — Phase 8 + Phase 5 implemented: coordinator-local relay, board consumption, claims reuse
+Implemented the design above as one cohesive `agent-dispatch` change.
+
+- **Coordinator-local relay:** added a new rebuildable SQLite relay store
+  keyed by canonical `(repo, worktree_id)` plus a new
+  `worktree_status_relay` background loop in `coordinator.py`/
+  `coordinator_loops.py`, wired exactly like the existing periodic loops
+  with its own `LoopHealth` entry and shutdown cancellation. The loop only
+  polls worktrees from `Status.OWNED` tasks whose owning machine is the
+  local coordinator itself; it resolves `task.repo` through
+  `identity.name_for_repo()` before invoking
+  `agent-worktrees worktree-status-bundle --project <resolved-name> --worktree <id> --json`,
+  skipping unadopted repos rather than sending an invalid `--project`. Cold
+  start is immediate (the loop's first pass prewarms current owned tasks),
+  and `claim`/`resume`/steer-driven suspended-task resumes now signal the
+  loop immediately through a process-local notifier instead of waiting for
+  the next periodic tick.
+- **Transport + render path:** exposed the relay through a new coordinator
+  HTTP route and `DispatchClient.worktree_status_relay()`. Both
+  `board_cli.py` and `__main__.py`'s `inbox --board` path now read only
+  through that coordinator API, never shelling out to `agent-worktrees` on
+  the render path. The board builds a real `worktree_status` card body from
+  the relayed bundle (git state, liveness, session lineage, claims, and
+  disposition) and treats a missing/stale relay entry as stale/unknown
+  instead of presenting old data as current or blocking the render.
+- **Phase 5 reuse:** `artifacts_summary` now reads the relayed `claims`
+  fact from that same `(repo, worktree_id)` projection; there is no second
+  poller or second cache.
+- **Validation:** added the three scoped regression tests from the design:
+  a board-render no-subprocess test, a relay staleness test, and a
+  cross-machine ownership test. Targeted coverage for the touched surfaces:
+  `run-plugin-tests.py agent-dispatch -k "board_cli or coordinator or inbox"`
+  passed (**189 passed**). Full plugin suite:
+  `run-plugin-tests.py agent-dispatch` reached **751 passed, 2 skipped**;
+  the only failures were the pre-existing Windows bash-path tests
+  `test_bootstrap_check_reconcile_opt_in.py::{test_sh_skips_spawn_without_opt_in,test_sh_proceeds_with_opt_in}`,
+  reproduced unchanged on a stashed clean tree (the same `/bin/bash:
+  C:Users...bootstrap-check.sh: No such file or directory` failure), so
+  they remain unrelated baseline noise rather than regressions from this
+  slice.

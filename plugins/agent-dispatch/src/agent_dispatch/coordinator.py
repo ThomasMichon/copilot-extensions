@@ -16,6 +16,7 @@ import secrets
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -42,6 +43,7 @@ from .coordinator_loops import (
     _reconcile_handoff_fallback,
     _resolve_owner_session_id,
     _run_supervised_cycle,
+    _worktree_status_relay_loop as _loops_worktree_status_relay_loop,
     _self_retire_force_exit_seconds,
     _self_retire_settings,
     _self_update_settings,
@@ -51,10 +53,12 @@ from .coordinator_registries import register_registry_routes
 from .coordinator_spawn import register_spawn_routes
 from .coordinator_status import _slot_descriptor, register_status_routes
 from .coordinator_tasks import register_task_routes
+from .coordinator_worktree_status import register_worktree_status_routes
 from .events import EventBus
 from .loop_governance import LoopGovernance
 from .queue import TaskQueue
 from .satellites import FleetDirectory
+from .worktree_status_relay import WorktreeStatusRelayStore
 
 log = logging.getLogger("agent-dispatch.coordinator")
 
@@ -70,6 +74,7 @@ __all__ = [
     "_gc_loop",
     "_handoff_fallback_loop",
     "_orphan_reap_loop",
+    "_worktree_status_relay_loop",
     "_reconcile_handoff_fallback",
     "_resolve_owner_session_id",
     "_run_supervised_cycle",
@@ -101,6 +106,15 @@ async def _orphan_reap_loop(*args, **kwargs):
 
 async def _handoff_fallback_loop(*args, **kwargs):
     return await _loops_handoff_fallback_loop(
+        *args,
+        **kwargs,
+        run_supervised_cycle=_run_supervised_cycle,
+        governance_backoff=_governance_backoff,
+    )
+
+
+async def _worktree_status_relay_loop(*args, **kwargs):
+    return await _loops_worktree_status_relay_loop(
         *args,
         **kwargs,
         run_supervised_cycle=_run_supervised_cycle,
@@ -157,6 +171,9 @@ def create_app(
         )
     bus = EventBus()
     directory = FleetDirectory()
+    relay = WorktreeStatusRelayStore(
+        Path(queue.db_path).parent / "worktree-status-relay.sqlite3"
+    )
 
     coordinator_mcp = None
     mcp_app = None
@@ -190,6 +207,7 @@ def create_app(
 
         governance = LoopGovernance()
         wake_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
+        worktree_status_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         if wake_interval > 0:
             def _signal_wake() -> None:
                 if wake_signal.empty():
@@ -198,6 +216,13 @@ def create_app(
             queue.set_wake_notifier(
                 lambda: loop.call_soon_threadsafe(_signal_wake)
             )
+        def _signal_worktree_status() -> None:
+            if worktree_status_signal.empty():
+                worktree_status_signal.put_nowait(None)
+
+        queue.set_owned_transition_notifier(
+            lambda: loop.call_soon_threadsafe(_signal_worktree_status)
+        )
         wake_options = {
             "interval": wake_interval,
             "max_attempts": wake_max_attempts,
@@ -221,10 +246,14 @@ def create_app(
         handoff_fallback_health = LoopHealth(
             name="handoff_fallback", base_interval=sweep_interval or 0.0
         )
+        worktree_status_health = LoopHealth(
+            name="worktree_status_relay", base_interval=sweep_interval or 0.0
+        )
         _app.state.loop_health = {
             sweeper_health.name: sweeper_health,
             orphan_health.name: orphan_health,
             handoff_fallback_health.name: handoff_fallback_health,
+            worktree_status_health.name: worktree_status_health,
         }
         sweeper = (
             asyncio.create_task(
@@ -265,6 +294,21 @@ def create_app(
                 )
             )
             if handoff_fallback_enabled and sweep_interval and sweep_interval > 0
+            else None
+        )
+        worktree_status_relay = (
+            asyncio.create_task(
+                _worktree_status_relay_loop(
+                    queue,
+                    sweep_interval,
+                    bus,
+                    relay=relay,
+                    signal=worktree_status_signal,
+                    health=worktree_status_health,
+                    governance=governance,
+                )
+            )
+            if sweep_interval and sweep_interval > 0
             else None
         )
         # Self-retire on supersession (owner-liveness tether). A coordinator that
@@ -606,6 +650,7 @@ def create_app(
                 yield
             finally:
                 queue.set_wake_notifier(None)
+                queue.set_owned_transition_notifier(None)
                 if wake_task is not None:
                     wake_task.cancel()
                     try:
@@ -648,6 +693,12 @@ def create_app(
                         await handoff_fallback_reconciler
                     except asyncio.CancelledError:
                         pass
+                if worktree_status_relay is not None:
+                    worktree_status_relay.cancel()
+                    try:
+                        await worktree_status_relay
+                    except asyncio.CancelledError:
+                        pass
 
     app = FastAPI(
         title="agent-dispatch",
@@ -659,6 +710,7 @@ def create_app(
     app.state.directory = directory
     # Back-compat alias for the pre-generalization attribute name.
     app.state.satellites = directory
+    app.state.worktree_status_relay = relay
     # Graceful-cutover drain gate (docs/patterns/graceful-daemon-cutover.md).
     app.state.drain_gate = DrainGate()
 
@@ -704,6 +756,7 @@ def create_app(
     )
     register_spawn_routes(app, queue, bus)
     register_registry_routes(app, queue)
+    register_worktree_status_routes(app, relay)
 
     if mcp_app is not None:
         # Mounted last so the coordinator's own routes take precedence.

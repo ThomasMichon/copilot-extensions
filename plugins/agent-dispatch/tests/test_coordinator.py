@@ -16,8 +16,10 @@ from agent_dispatch.client import (
     DispatchError,
     DispatchUpgradeRequired,
 )
+from agent_dispatch.coordinator_loops import _refresh_worktree_status_relay
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.queue import Status
+from agent_dispatch.worktree_status_relay import WorktreeStatusRelayStore
 from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
@@ -231,6 +233,26 @@ def test_health(api):
     r = api.get("/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+
+
+def test_worktree_status_relay_route_reads_local_store(api):
+    relay = api.app.state.worktree_status_relay
+    relay.put(
+        TEST_REPO,
+        "wt1",
+        {"facts": {"claims": {"confirmed": True, "value": {"resources": []}}}},
+        fetched_at=123.0,
+        poll_interval_seconds=10.0,
+    )
+
+    response = api.get(
+        "/worktree-status-relay",
+        params={"repo": TEST_REPO, "worktree_id": "wt1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["worktree_id"] == "wt1"
+    assert response.json()["repo"] == TEST_REPO
 
 
 def test_create_app_registers_representative_extracted_route_groups(app):
@@ -1425,6 +1447,40 @@ def test_health_loops_report_handoff_fallback_when_enabled(tmp_path, monkeypatch
         c.close()
     finally:
         stop()
+
+
+def test_worktree_status_relay_refresh_skips_other_machines(tmp_path):
+    q = TaskQueue(tmp_path / "tasks.db")
+    q.create(
+        "local-owned",
+        repo=TEST_REPO,
+        target_worktree="wt-local",
+        claim_as="local/wt-local",
+    )
+    q.create(
+        "remote-owned",
+        repo=TEST_REPO,
+        target_worktree="wt-remote",
+        claim_as="remote/wt-remote",
+    )
+    relay = WorktreeStatusRelayStore(tmp_path / "relay.sqlite3")
+    seen: list[tuple[str, str]] = []
+
+    counts = _refresh_worktree_status_relay(
+        q,
+        relay,
+        poll_interval=10.0,
+        resolve_machine=lambda: "local",
+        fetch_bundle=lambda repo, worktree_id: (
+            seen.append((repo, worktree_id))
+            or {"project": "proj", "worktree_id": worktree_id, "facts": {}}
+        ),
+    )
+
+    assert counts == {"checked": 1, "updated": 1}
+    assert seen == [(TEST_REPO, "wt-local")]
+    assert relay.get(TEST_REPO, "wt-local") is not None
+    assert relay.get(TEST_REPO, "wt-remote") is None
 
 
 def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatch, capsys):

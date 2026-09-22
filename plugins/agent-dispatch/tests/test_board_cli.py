@@ -99,15 +99,69 @@ def test_build_wt_live_reflects_headless_activity_only(monkeypatch):
     assert by_id["cli-embodied"]["wt_live"] is None
 
 
-def test_build_artifacts_summary_is_a_phase3_placeholder(monkeypatch):
-    """Phase 3 lands the column plumbing only; Phase 5 owns the real
-    claims/artifacts computation (see the Plan's own note against the two
-    phases both claiming this field)."""
+def test_build_artifacts_summary_reads_claims_from_relay(monkeypatch):
     monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
     rows = board_cli._build(
-        [{"id": "t1", "status": "queued"}], machine="m1", recent_mins=120
+        [{
+            "id": "t1",
+            "status": "started",
+            "repo": "github.com/example/repo",
+            "owner": "m1/wt1",
+            "target_worktree": "wt1",
+        }],
+        machine="m1",
+        recent_mins=120,
+        relay_fetch=lambda _repo, _worktree: {
+            "repo": "github.com/example/repo",
+            "worktree_id": "wt1",
+            "fetched_at": 995.0,
+            "poll_interval_seconds": 10.0,
+            "bundle": {
+                "facts": {
+                    "claims": {
+                        "confirmed": True,
+                        "observed_at": 995.0,
+                        "value": {"resources": [{"kind": "pr"}], "owner_ref": "abc/def"},
+                    }
+                }
+            },
+        },
     )
-    assert rows[0]["artifacts_summary"] is None
+    assert rows[0]["artifacts_summary"] == "1 claim, owner ref"
+    assert rows[0]["worktree_status"]["status"] == "fresh"
+
+
+def test_build_stale_relay_renders_unknown_worktree_status(monkeypatch):
+    monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
+    rows = board_cli._build(
+        [{
+            "id": "t1",
+            "status": "started",
+            "repo": "github.com/example/repo",
+            "owner": "m1/wt1",
+            "target_worktree": "wt1",
+        }],
+        machine="m1",
+        recent_mins=120,
+        relay_fetch=lambda _repo, _worktree: {
+            "repo": "github.com/example/repo",
+            "worktree_id": "wt1",
+            "fetched_at": 900.0,
+            "poll_interval_seconds": 10.0,
+            "bundle": {
+                "facts": {
+                    "claims": {
+                        "confirmed": True,
+                        "observed_at": 900.0,
+                        "value": {"resources": [{"kind": "pr"}], "owner_ref": None},
+                    }
+                }
+            },
+        },
+    )
+    assert rows[0]["artifacts_summary"] == "stale/unknown"
+    assert rows[0]["worktree_status"]["status"] == "stale"
+    assert "relay stale or cold" in rows[0]["worktree_status"]["body"]
 
 
 def test_main_reads_local_coordinator(monkeypatch, tmp_path, capsys):

@@ -2465,29 +2465,28 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
     # Blocked -> Proposed -> Started -> Queued -> Suspended -> Completed ->
     # Abandoned. Overrides --awaiting-steer / --status.
     if getattr(args, "board", False):
-        import time as _time
-
-        from .queue import machine_matches
+        from . import board_cli as _board_cli
 
         status = "proposed,queued,claimed,started,suspended,completed,abandoned,dead_letter"
         with _client(args) as c:
             tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
-        inbox = [t for t in tasks if machine_matches(t.get("target_machine"), machine)]
-        now = _time.time()
-        cutoff = now - max(0, getattr(args, "recent_mins", 120)) * 60
-        inbox = [t for t in inbox if _board_keep(t, cutoff)]
-        inbox.sort(key=_board_sort_key)
-        # Pure coordinator-state rendering: no agent-worktrees/agent-bridge
-        # subprocesses on the Picker read path.
-        inbox = _enrich(inbox, resolve_repo_names=False)
-        inbox = [
-            {
-                **t,
-                "group": _board_group(t),
-                "activity": _board_activity(t, now=now),
-            }
-            for t in inbox
-        ]
+            relay_cache: dict[tuple[str, str], dict | None] = {}
+
+            def _relay_fetch(repo: str, worktree_id: str) -> dict | None:
+                key = (repo, worktree_id)
+                if key not in relay_cache:
+                    try:
+                        relay_cache[key] = c.worktree_status_relay(repo, worktree_id)
+                    except DispatchError:
+                        relay_cache[key] = None
+                return relay_cache[key]
+
+            inbox = _board_cli._build(
+                tasks,
+                machine=machine,
+                recent_mins=getattr(args, "recent_mins", 120),
+                relay_fetch=_relay_fetch,
+            )
         return _emit(inbox)
     # --awaiting-steer widens the fetch to the owned states (a task blocked on
     # operator steering is `claimed`/`started`, not a filterable "held" -- HELD
