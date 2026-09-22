@@ -71,6 +71,22 @@ import {
   formatConfiguredThreshold,
   formatContextUsage,
 } from "./thresholds.mjs";
+import { createEmergencyLog, installEmergencyDiagnostics } from "./crash-diagnostics.mjs";
+
+// --- Emergency crash diagnostics ---------------------------------------
+// This extension has been observed, on at least one machine, to reach the
+// harness's "ready" state (successful tool registration over the joinSession
+// IPC channel) and then terminate with exit code 1 and NO captured stderr.
+// See crash-diagnostics.mjs (an isolated, @github/copilot-sdk-free module,
+// so it can be exercised directly by subprocess tests -- see
+// tests/crash-diagnostics.test.mjs) for the full rationale and the
+// uninstall-capable implementation. `uninstall()` itself is never called:
+// there is no need to remove these handlers for the life of this process.
+// `markReady()` (called once joinSession() below actually resolves) IS used
+// -- it is an in-memory-only flag, never a durable write on its own; see its
+// own rationale beside installEmergencyDiagnostics() in crash-diagnostics.mjs.
+const emergencyLog = createEmergencyLog();
+const emergencyDiagnostics = installEmergencyDiagnostics(emergencyLog);
 
 // --- State ---
 // This used to be a synchronous `loadContextHandoffConfig(process.cwd())`
@@ -1173,6 +1189,7 @@ const session = await joinSession({
     },
   ],
 });
+emergencyDiagnostics.markReady();
 
 // --- Session lifecycle reconstructed from events (SDK callback hooks removed) ---
 // The native runtime dropped SDK callback hooks ("SDK hook callbacks are no
