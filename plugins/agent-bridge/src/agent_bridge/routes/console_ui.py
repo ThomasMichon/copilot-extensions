@@ -82,6 +82,7 @@ _PAGE = r"""<!doctype html>
 <header>
   <h1>Agent Bridge Console</h1>
   <button id="refresh">Refresh</button>
+  <button id="showall" title="Also show stopped/unreachable sessions">show stopped</button>
   <span id="status" class="muted status"></span>
   <details style="margin-left:.5rem"><summary class="muted status" style="cursor:pointer">token (optional)</summary>
     <input id="token" type="password" placeholder="only needed for non-localhost access" size="34" />
@@ -134,6 +135,7 @@ _PAGE = r"""<!doctype html>
   </div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const TOKEN_KEY = "agentBridgeToken";
@@ -145,6 +147,8 @@ let sel = null;              // {kind:'native'|'main', ...}
 let termConn = null;         // current native terminal connection
 let mainConn = null;         // current live-session SSE
 let role = "writer";
+let showAll = false;              // hide stopped/unreachable execs by default
+const execCache = {};             // execId -> exec (so selecting never re-fetches)
 
 function setStatus(m, e) { const el = $("#status"); el.textContent = m; el.className = "status " + (e ? "err" : "muted"); }
 function esc(s){ return String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
@@ -167,6 +171,8 @@ async function refresh() {
     ]);
     renderLive(live.live_sessions || []);
     const execs = native.executions || [];
+    for (const k in execCache) delete execCache[k];
+    for (const e of execs) execCache[e.executionId] = e;
     renderNative("#cat-codespace", execs.filter(e => (e.provider || "codespace") === "codespace"), "codespace");
     renderNative("#cat-container", execs.filter(e => e.provider === "container"), "container");
     renderWorktrees(worktrees.worktrees || worktrees.list || []);
@@ -212,13 +218,20 @@ async function removeLive(sid){
   try{ await api("/api/v1/live-sessions/"+encodeURIComponent(sid),{method:"DELETE"}); setTimeout(refresh, 300); }
   catch(e){ setStatus(e.message, true); }
 }
+const DEAD_STATES = new Set(["stopped","failed","rejected","stopping","retired","gone","unreachable"]);
 function renderNative(target, list, kind) {
-  $(target).innerHTML = list.map(e => itemHtml(
+  const shown = showAll ? list : list.filter(e => !DEAD_STATES.has((e.state||"").toLowerCase()));
+  const hidden = list.length - shown.length;
+  const body = shown.map(e => itemHtml(
     e.executionId, e.codespace || (e.target||"").split(":")[1] || kind,
     (e.sessionId||"").slice(0,8) + " g:" + (e.generation||"").slice(0,6),
     (e.state||"").toLowerCase(), e.state || "?",
     "native:" + e.executionId
-  )).join("") || `<div class="muted" style="padding:.35rem">No ${kind} sessions.</div>`;
+  )).join("");
+  const note = hidden > 0
+    ? `<div class="muted" style="padding:.35rem;font-size:.72rem">${hidden} stopped/unreachable hidden \u2014 use "show stopped"</div>`
+    : "";
+  $(target).innerHTML = (body || `<div class="muted" style="padding:.35rem">No ${kind} sessions.</div>`) + note;
 }
 function renderWorktrees(list) {
   $("#cat-worktree").innerHTML = (Array.isArray(list) ? list : []).map(w => itemHtml(
@@ -244,6 +257,7 @@ document.addEventListener("click", (e) => {
 function selectWorktree(id) {
   sel = { kind: "worktree", key: "worktree:" + id, id };
   $("#sel-label").textContent = "worktree " + id;
+  markSelection();
   showView("main");
   const log = $("#mainlog");
   log.textContent = "Worktree " + id + "\n(Local worktree — drive it by tasking the main session.)\n";
@@ -255,12 +269,25 @@ function showView(which) {
   $("#term-controls").style.display = which === "term" ? "" : "none";
 }
 
+// Highlight the selected item WITHOUT re-fetching/re-rendering the sidebar --
+// selection must be instant even while the (slow) native-executions list probe
+// is in flight.
+function markSelection() {
+  document.querySelectorAll("#side .item").forEach(it => {
+    it.classList.toggle("sel", !!sel && it.dataset.key === sel.key);
+  });
+}
+
 // ---- xterm helper (with graceful fallback) ----
-let term = null, fitBuf = "";
+let term = null, fitAddon = null;
 function ensureTerm() {
   if (window.Terminal) {
     if (!term) {
       term = new window.Terminal({ convertEol: true, fontSize: 12, scrollback: 5000 });
+      if (window.FitAddon && window.FitAddon.FitAddon) {
+        fitAddon = new window.FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+      }
       term.open($("#term"));
       term.onData(d => { if (termConn) termConn.sendInput(d); });
     }
@@ -271,14 +298,23 @@ function ensureTerm() {
   return { write: (s) => { const p = $("#term pre"); p.textContent += s; p.scrollTop = p.scrollHeight; },
            reset: () => { const p = $("#term pre"); if (p) p.textContent = ""; } };
 }
+// Fit the terminal to the panel AND push the real cols/rows to the remote PTY,
+// so output isn't stuck wrapping at the default 80x24 (the "busted" look).
+function fitTerm() {
+  if (fitAddon) { try { fitAddon.fit(); } catch (e) {} }
+  if (term && term.rows && termConn && termConn.resize) termConn.resize(term.rows, term.cols);
+}
+let fitTimer = null;
+window.addEventListener("resize", () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitTerm, 120); });
 
-async function selectNative(execId) {
-  const list = (await api("/api/v1/native-executions").catch(() => ({executions:[]}))).executions || [];
-  const ex = list.find(e => e.executionId === execId);
-  if (!ex) { setStatus("execution gone", true); return; }
+function selectNative(execId) {
+  // Use the cached exec from the last refresh -- never re-fetch the slow
+  // native-executions list on a click (that was the source of the "hang").
+  const ex = execCache[execId];
+  if (!ex) { setStatus("execution not in the current list; press Refresh", true); return; }
   sel = { kind: "native", key: "native:" + execId, exec: ex };
   $("#sel-label").textContent = (ex.codespace || execId) + "  [" + (ex.state||"") + "]";
-  refresh();
+  markSelection();
   showView("term");
   openTerminal(ex);
 }
@@ -291,7 +327,7 @@ function openTerminal(ex) {
     + `&takeover=${$("#takeover").checked ? "true" : "false"}&after=${lastAck}`;
   ws = new WebSocket(url, token ? ["native.v1", "bearer." + token] : ["native.v1"]);
   ws.binaryType = "arraybuffer";
-  ws.onopen = () => setStatus("terminal connected (" + role + ")");
+  ws.onopen = () => { setStatus("terminal connected (" + role + ")"); setTimeout(fitTerm, 40); };
   ws.onclose = (ev) => { if (closed) return;
     const m = {4409:"writer busy (someone else is writing)",4410:"writer revoked (taken over)",
                4403:"read only (observer)",1008:"auth failed"}[ev.code];
@@ -311,13 +347,14 @@ function openTerminal(ex) {
   termConn = {
     close: () => { closed = true; try { ws.send(JSON.stringify({type:"detach"})); } catch(e){} try { ws.close(); } catch(e){} },
     sendInput: (d) => { try { ws.send(new TextEncoder().encode(d)); } catch(e){} },
+    resize: (rows, cols) => { try { ws.send(JSON.stringify({ type: "resize", rows: rows, columns: cols })); } catch(e){} },
   };
 }
 
 async function selectMain(sid) {
   sel = { kind: "main", key: "main:" + sid, sid };
   $("#sel-label").textContent = "main CLI  " + sid.slice(0,12);
-  refresh();
+  markSelection();
   showView("main");
   openMain(sid);
 }
@@ -375,6 +412,7 @@ async function sendMain() {
 // ---- controls ----
 $("#save").onclick = () => { token = $("#token").value.trim(); localStorage.setItem(TOKEN_KEY, token); refresh(); };
 $("#refresh").onclick = refresh;
+$("#showall").onclick = () => { showAll = !showAll; $("#showall").classList.toggle("on", showAll); refresh(); };
 $("#mainsend").onclick = sendMain;
 $("#mainprompt").addEventListener("keydown", e => { if (e.key === "Enter") sendMain(); });
 document.querySelectorAll("#term-controls button[data-role]").forEach(b => {
