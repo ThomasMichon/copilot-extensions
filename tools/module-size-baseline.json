@@ -41,7 +41,7 @@
   "plugins/agent-dispatch/src/agent_dispatch/queue_spawn_reservations.py": 1048,
   "plugins/agent-dispatch/src/agent_dispatch/registrar_registry.py": 1007,
   "plugins/agent-dispatch/src/agent_dispatch/repository_issue_loops.py": 1810,
-  "plugins/agent-dispatch/src/agent_dispatch/supervisor.py": 3645,
+  "plugins/agent-dispatch/src/agent_dispatch/supervisor.py": 3651,
   "plugins/agent-dispatch/src/agent_dispatch/supervisor_daemon.py": 2207,
   "plugins/agent-index/scripts/cell-runtime.py": 5145,
   "plugins/agent-index/scripts/resolve_effective_config.py": 1051,
