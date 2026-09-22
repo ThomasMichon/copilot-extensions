@@ -1483,6 +1483,38 @@ def test_worktree_status_relay_refresh_skips_other_machines(tmp_path):
     assert relay.get(TEST_REPO, "wt-remote") is None
 
 
+def test_worktree_status_relay_refresh_can_bound_one_worktree_per_cycle(tmp_path):
+    q = TaskQueue(tmp_path / "tasks.db")
+    q.create(
+        "first",
+        repo=TEST_REPO,
+        target_worktree="wt-a",
+        claim_as="local/wt-a",
+    )
+    q.create(
+        "second",
+        repo=TEST_REPO,
+        target_worktree="wt-b",
+        claim_as="local/wt-b",
+    )
+    relay = WorktreeStatusRelayStore(tmp_path / "relay.sqlite3")
+    seen: list[str] = []
+
+    counts = _refresh_worktree_status_relay(
+        q,
+        relay,
+        poll_interval=10.0,
+        resolve_machine=lambda: "local",
+        fetch_bundle=lambda _repo, worktree_id: seen.append(worktree_id) or {
+            "project": "proj", "worktree_id": worktree_id, "facts": {}
+        },
+        max_items=1,
+    )
+
+    assert counts == {"checked": 1, "updated": 1}
+    assert seen == ["wt-b"]
+
+
 def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatch, capsys):
     """``agent-dispatch consume`` drives a proposed handoff to completed and
     prints its payload -- then a second consume of the now-spent baton is

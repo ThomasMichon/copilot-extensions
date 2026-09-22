@@ -561,9 +561,13 @@ def _refresh_worktree_status_relay(
     poll_interval: float,
     resolve_machine: Callable[[], str | None] = _local_machine_name,
     fetch_bundle: Callable[[str, str], dict[str, Any] | None] = _fetch_worktree_status_bundle,
+    refs: list[tuple[str, str]] | None = None,
+    max_items: int | None = None,
 ) -> dict[str, int]:
     machine = resolve_machine()
-    refs = _owned_worktree_refs_for_machine(queue, machine)
+    refs = list(refs or _owned_worktree_refs_for_machine(queue, machine))
+    if max_items is not None:
+        refs = refs[:max_items]
     refreshed = 0
     for repo, worktree_id in refs:
         bundle = fetch_bundle(repo, worktree_id)
@@ -595,33 +599,45 @@ async def _worktree_status_relay_loop(
 ) -> None:
     """Keep per-worktree relay entries warm off the request/render path."""
     first_pass = True
+    pending_refs: list[tuple[str, str]] = []
     while True:
-        if not first_pass:
-            try:
-                await asyncio.wait_for(signal.get(), timeout=health.current_interval)
-                while not signal.empty():
-                    signal.get_nowait()
-            except (TimeoutError, asyncio.TimeoutError):
-                pass
-        first_pass = False
+        if not pending_refs:
+            if not first_pass:
+                try:
+                    await asyncio.wait_for(signal.get(), timeout=health.current_interval)
+                    while not signal.empty():
+                        signal.get_nowait()
+                except (TimeoutError, asyncio.TimeoutError):
+                    pass
+            first_pass = False
+            pending_refs = _owned_worktree_refs_for_machine(queue, _local_machine_name())
+        if not pending_refs:
+            continue
+        current_ref = [pending_refs.pop(0)]
         if await governance_backoff(
             governance,
             "iteration-boundary:worktree-status-relay",
             loop_name="worktree-status relay",
         ):
+            pending_refs = current_ref + pending_refs
             continue
         if await governance_backoff(
             governance,
             "pre-mutation:worktree-status-relay",
             loop_name="worktree-status relay",
         ):
+            pending_refs = current_ref + pending_refs
             continue
         counts = await run_supervised_cycle(
             health,
             lambda: _refresh_worktree_status_relay(
-                queue, relay, poll_interval=interval
+                queue,
+                relay,
+                poll_interval=interval,
+                refs=current_ref,
+                max_items=1,
             ),
-            cycle_timeout=cycle_timeout or max(120.0, interval),
+            cycle_timeout=cycle_timeout or 75.0,
         )
         counts = counts or {}
         updated = counts.get("updated", 0)
