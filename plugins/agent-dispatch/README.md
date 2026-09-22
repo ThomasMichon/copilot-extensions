@@ -1321,6 +1321,7 @@ agent-dispatch supervise --once                       # one cycle (this repo's l
 agent-dispatch supervise --label autopilot            # loop; only spawn opted-in tasks
 agent-dispatch supervise --all-repos --max-active-processes 3
 agent-dispatch supervise --label sweep --headless-label sweep   # embody 'sweep' headless-ACP
+agent-dispatch supervise --label maintenance --script-label maintenance
 agent-dispatch supervise --pool host-a,host-b --origin origin --headless --label sweep
 agent-dispatch supervise --interval 30                          # fixed reconciliation
 agent-dispatch supervise --evaluator eval.json --evaluator-ref repository-review-lifecycle
@@ -1421,14 +1422,31 @@ emitted follow-up's `dedup_key` guards duplicates across restarts — and best-e
 `--evaluator-ref <id>` (or the same field in an evaluator registration) to
 consume only tasks explicitly associated by their producing emitter.
 
-Tasks embody as a mux-wrapped **CLI autopilot** by default. Mark **self-contained
-sweep** labels with `--headless-label L` (repeatable, `--headless-agent` to name the
-agent-bridge agent) to embody *those* labels as a **headless agent-bridge ACP** body
-instead — no human attach, no CLI-start-prompt race — while other labels stay
-CLI-first. Local headless bodies run in the exact reservation worktree
-pre-created and attributed before launch, so failed, yielded, and terminal
-attempts can be conservatively reclaimed without guessing ownership. See the
-design doc's "Per-label embody body" section.
+Tasks embody as **headless ACP** by default, but the lane can mix bodies by
+label: keep **self-contained sweep** labels headless, opt interactive labels to
+the mux-wrapped **CLI autopilot** with `--cli-label L`, or opt deterministic
+maintenance labels to a **plain script subprocess** with `--script-label L`.
+Local headless bodies run in the exact reservation worktree pre-created and
+attributed before launch, so failed, yielded, and terminal attempts can be
+conservatively reclaimed without guessing ownership. Script bodies use no LLM at
+all: they are ordinary subprocesses that drive claim/start/progress/complete/
+abandon through the same lifecycle protocol. See the design doc's
+"Per-label embody body" section.
+
+Script-embodied tasks carry a JSON `payload_inline` that describes what to
+launch:
+
+- `{"path":"C:\\absolute\\worker.py","args":["..."],"env":{"K":"V"}}`
+  runs the file with agent-dispatch's own runtime Python.
+- `{"argv":["some-exe","arg1","arg2"],"cwd":"C:\\absolute\\dir","env":{"K":"V"}}`
+  runs the exact argv directly.
+
+`agent_dispatch.script_worker.ScriptTaskRuntime` is the small helper contract
+for those bodies: it reads the supervisor-injected task/coordinator context from
+environment variables and wraps claim/start/heartbeat/progress/complete/
+abandon. Returning without an explicit terminal call is treated as a protocol
+violation: an orderly exit auto-abandons in the helper, and a confirmed-gone
+process is abandoned by supervisor recovery.
 
 For a remote host pool, `--pool host-a,host-b [--origin <alias>]` dispatches the
 body to the first live pool host. The default body is still CLI/mux embody on

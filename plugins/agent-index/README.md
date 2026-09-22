@@ -146,6 +146,10 @@ non-mutating `inactive` result; before setup in an active repository it returns
 `setup_required`.
 - `agent-index role` — whether this machine is acting as `host` or `client`.
 - `agent-index engine status` — durable engine health, PID, endpoint, and venv.
+- `scripts/maintenance_tick.py` — a host-only deterministic maintenance body
+  for agent-dispatch's script embodiment: health-checks the self-supervised
+  service + durable engine, starts only what is down, then runs incremental
+  `agent-index index` (never engine reprovisioning).
 - Host unavailable: run `agent-index status`, `agent-index deploy --recover`,
   or the installer `start`/`update` path that owns the service cutover. Routine
   service updates do not rebuild the durable engine.

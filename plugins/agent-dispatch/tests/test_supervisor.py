@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import asdict
+from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -255,6 +257,29 @@ class QueueBackedClient:
                 note=note,
                 exclude=exclude,
                 release_spawn=release_spawn,
+            )
+        )
+
+    def abandon(
+        self,
+        task_id,
+        *,
+        worker_id=None,
+        permitted=False,
+        reason=None,
+        expected_status=None,
+        expected_generation=None,
+        expected_owner_session_id=None,
+    ):
+        return asdict(
+            self._q.abandon(
+                task_id,
+                worker_id=worker_id,
+                permitted=permitted,
+                reason=reason,
+                expected_status=expected_status,
+                expected_generation=expected_generation,
+                expected_owner_session_id=expected_owner_session_id,
             )
         )
 
@@ -2366,7 +2391,13 @@ def test_requeued_task_is_not_double_spawned(q, client):
     # path is unchanged only for a headless body (Phase 1 item 2) -- a
     # CLI-embodied one now auto-suspends instead.
     spawn = _ok_spawn({"session": "local-body:sess-1", "worktree": "wt-1"})
-    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        local_body_verdict_fn=lambda _sid: "live",
+    )
     sup.poll_once()  # spawn #1
 
     # simulate: embody claimed + started, then its worker went away -> re-queued
@@ -3368,6 +3399,122 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     assert calls["wait"] is False  # fire-and-forget; the worker drives itself
 
 
+def test_make_script_spawn_launches_runtime_python_with_task_context(monkeypatch, tmp_path):
+    from agent_dispatch import spawn_factories
+    from agent_dispatch.supervisor import make_script_spawn
+
+    script_path = tmp_path / "worker.py"
+    script_path.write_text("print('ok')\n", encoding="utf-8")
+
+    started = {}
+
+    class FakeProcess:
+        pid = 4321
+
+    monkeypatch.setattr(
+        spawn_factories,
+        "subprocess",
+        SimpleNamespace(DEVNULL=None, Popen=lambda argv, **kwargs: started.update(
+            argv=argv, kwargs=kwargs
+        ) or FakeProcess()),
+    )
+    monkeypatch.setattr(
+        spawn_factories,
+        "_process_tree_kwargs",
+        lambda: {"creationflags": 0},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        spawn_factories,
+        "Path",
+        Path,
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.procutil.resolve_own_runtime_python",
+        lambda: "C:\\runtime\\python.exe",
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.companion.process_start_token",
+        lambda pid: f"token-{pid}",
+    )
+
+    spawn = make_script_spawn(route=" --shared", all_repos=False)
+    ok, handle = spawn(
+        {
+            "id": "task-1",
+            "repo": TEST_REPO,
+            "payload_inline": json.dumps({"path": str(script_path)}),
+        }
+    )
+
+    assert ok is True
+    assert started["argv"] == ["C:\\runtime\\python.exe", str(script_path)]
+    env = started["kwargs"]["env"]
+    assert env["AGENT_DISPATCH_SCRIPT_TASK_ID"] == "task-1"
+    assert env["AGENT_DISPATCH_SCRIPT_WORKER_ID"].startswith("script-")
+    assert env["AGENT_DISPATCH_SCRIPT_ROUTE"] == "shared"
+    assert env["AGENT_DISPATCH_SCRIPT_REPO"] == TEST_REPO
+    assert Path(env["AGENT_DISPATCH_SCRIPT_TASK_FILE"]).is_file()
+    parsed = spawn_factories._parse_script_body_handle(handle["session"])
+    assert parsed == (
+        env["AGENT_DISPATCH_SCRIPT_WORKER_ID"],
+        4321,
+        "token-4321",
+        env["AGENT_DISPATCH_SCRIPT_TASK_FILE"],
+    )
+    Path(env["AGENT_DISPATCH_SCRIPT_TASK_FILE"]).unlink(missing_ok=True)
+
+
+def test_make_script_spawn_rejects_missing_inline_payload():
+    from agent_dispatch.supervisor import make_script_spawn
+
+    ok, handle = make_script_spawn()({"id": "task-1", "repo": TEST_REPO})
+
+    assert ok is False
+    assert "payload_inline" in handle["error"]
+
+
+def test_make_script_spawn_clears_repo_for_all_repos(monkeypatch, tmp_path):
+    from agent_dispatch import spawn_factories
+    from agent_dispatch.supervisor import make_script_spawn
+
+    script_path = tmp_path / "worker.py"
+    script_path.write_text("print('ok')\n", encoding="utf-8")
+    started = {}
+
+    class FakeProcess:
+        pid = 4321
+
+    monkeypatch.setattr(
+        spawn_factories,
+        "subprocess",
+        SimpleNamespace(DEVNULL=None, Popen=lambda argv, **kwargs: started.update(
+            argv=argv, kwargs=kwargs
+        ) or FakeProcess()),
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.procutil.resolve_own_runtime_python",
+        lambda: "C:\\runtime\\python.exe",
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.companion.process_start_token",
+        lambda pid: None,
+    )
+
+    ok, handle = make_script_spawn(route="", all_repos=True)(
+        {
+            "id": "task-1",
+            "repo": TEST_REPO,
+            "payload_inline": json.dumps({"path": str(script_path)}),
+        }
+    )
+
+    assert ok is True
+    assert started["kwargs"]["env"]["AGENT_DISPATCH_SCRIPT_REPO"] == ""
+    task_file = spawn_factories._parse_script_body_handle(handle["session"])[3]
+    Path(task_file).unlink(missing_ok=True)
+
+
 def test_make_headless_spawn_resolves_allocation_project_lazily(monkeypatch):
     from agent_dispatch import bridge
     from agent_dispatch.supervisor import make_headless_spawn
@@ -3587,6 +3734,23 @@ def test_make_label_routed_spawn_routes_by_label():
     assert routed({"id": "d"})[1]["session"] == "cli"  # no labels key
     assert routed.allocation_project_for({"labels": ["sweep"]}) == "headless-project"
     assert routed.allocation_project_for({"labels": ["other"]}) == "default-project"
+
+
+def test_make_label_routed_spawn_routes_script_by_label():
+    from agent_dispatch.supervisor import make_label_routed_spawn
+
+    def default(_task):
+        return True, {"session": "headless", "worktree": None}
+
+    def script(_task):
+        return True, {"session": "script", "worktree": None}
+
+    script.allocation_interface = "script"
+    routed = make_label_routed_spawn(default, overrides={"maintenance": script})
+
+    assert routed({"labels": ["maintenance"]})[1]["session"] == "script"
+    assert routed.allocation_interface_for({"labels": ["maintenance"]}) == "script"
+    assert routed({"labels": ["other"]})[1]["session"] == "headless"
 
 
 def test_make_label_routed_spawn_no_overrides_returns_default_unwrapped():
@@ -3844,6 +4008,92 @@ def test_cli_supervise_headless_label_routes(monkeypatch, q, client):
     assert marked.id not in embody_calls
 
 
+def test_cli_supervise_script_label_routes(monkeypatch, q, client):
+    import types
+
+    from agent_dispatch import __main__ as m
+    from agent_dispatch import supervisor as sup_mod
+
+    marked = q.create("maintenance work", labels=["maintenance"])
+    plain = q.create("sweep work")
+
+    headless_calls: list[str] = []
+    script_calls: list[str] = []
+
+    def headless_spawn(task):
+        headless_calls.append(task["id"])
+        return True, {"session": "headless", "worktree": None}
+
+    def script_spawn(task):
+        script_calls.append(task["id"])
+        return True, {"session": "script", "worktree": None}
+
+    monkeypatch.setattr(m, "_client", lambda _args, **_kw: client)
+    monkeypatch.setattr(m, "client_url", lambda: "http://coord")
+    monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
+    monkeypatch.setattr(sup_mod, "make_headless_spawn", lambda **_kw: headless_spawn)
+    monkeypatch.setattr(sup_mod, "make_script_spawn", lambda **_kw: script_spawn)
+
+    args = types.SimpleNamespace(
+        all_repos=False, repo=None, url=None, token=None, label=None,
+        max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
+        no_heartbeat=False, max_attempts=3,
+        embody_backend=None, headless_label=None, cli_label=None, script_label=["maintenance"],
+        headless_agent="task-worker",
+    )
+    assert m._cmd_supervise(args) == 0
+    assert script_calls == [marked.id]
+    assert plain.id in headless_calls
+
+
+def test_cli_supervise_script_backend_is_lane_default(monkeypatch, q, client):
+    import types
+
+    from agent_dispatch import __main__ as m
+    from agent_dispatch import supervisor as sup_mod
+
+    task = q.create("maintenance work")
+    script_calls: list[str] = []
+
+    def script_spawn(task):
+        script_calls.append(task["id"])
+        return True, {"session": "script", "worktree": None}
+
+    monkeypatch.setattr(m, "_client", lambda _args, **_kw: client)
+    monkeypatch.setattr(m, "client_url", lambda: "http://coord")
+    monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
+    monkeypatch.setattr(sup_mod, "make_script_spawn", lambda **_kw: script_spawn)
+
+    args = types.SimpleNamespace(
+        all_repos=False, repo=None, url=None, token=None, label=None,
+        max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
+        no_heartbeat=False, max_attempts=3,
+        embody_backend="script", headless_label=None, cli_label=None, script_label=None,
+        headless_agent="task-worker",
+    )
+    assert m._cmd_supervise(args) == 0
+    assert script_calls == [task.id]
+
+
+def test_cli_supervise_rejects_script_backend_in_pool_mode(monkeypatch, capsys):
+    import types
+
+    from agent_dispatch import __main__ as m
+
+    monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
+
+    args = types.SimpleNamespace(
+        all_repos=False, repo=None, url=None, token=None, label=["maintenance"],
+        max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
+        no_heartbeat=False, max_attempts=3,
+        pool="pool-a", origin="origin", headless=False,
+        embody_backend="script", headless_label=None, cli_label=None, script_label=None,
+        disposable_cli_label=None, headless_agent="task-worker", no_pair=False,
+    )
+    assert m._cmd_supervise(args) == 2
+    assert "script embodiment is supported only for local" in capsys.readouterr().err
+
+
 def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, client):
     """--pool --headless constructs a headless FleetSpawner with the configured
     --headless-agent (the headless-fleet embodiment for a remote pool host)."""
@@ -3895,6 +4145,78 @@ def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, clien
     assert captured["pool"] == ["anomalous-potato-wsl"]
     assert captured["origin"] == "mantis-counter"
 
+
+def test_hold_live_leases_heartbeats_live_script_body(q, client):
+    task = q.create("maintenance")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle='script-body:{"pid":4321,"start_token":"tok","worker_id":"script-1"}',
+        worktree=None,
+    )
+    q.claim_one("script-1", repo=TEST_REPO, task_id=task.id)
+    q.start(task.id, "script-1")
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        script_body_verdict_fn=lambda pid, token: tracking.LIVE,
+    )
+
+    assert sup.hold_live_leases() == 1
+
+
+def test_recover_gone_script_body_abandons_task_without_explicit_terminal_call(q, client, tmp_path):
+    task = q.create("maintenance")
+    reservation, _ = q.reserve_spawn(task.id)
+    task_file = tmp_path / "task-script.json"
+    task_file.write_text("{}", encoding="utf-8")
+    q.record_spawn(
+        reservation.key,
+        session_handle=(
+            '{"pid":4321,"start_token":"tok","task_file":"'
+            + str(task_file).replace("\\", "\\\\")
+            + '","worker_id":"script-1"}'
+        ).join(("script-body:", "")),
+        worktree=None,
+    )
+    q.claim_one("script-1", repo=TEST_REPO, task_id=task.id)
+    q.start(task.id, "script-1")
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        script_body_verdict_fn=lambda pid, token: tracking.GONE,
+    )
+
+    assert sup.recover_gone() == 1
+    assert q.get(task.id).status == Status.ABANDONED
+    assert q.latest_reservation(task.id).state == SpawnState.SETTLED
+    assert not task_file.exists()
+
+
+def test_reconcile_settles_terminal_script_body_and_cleans_task_file(q, client, tmp_path):
+    task = q.create("maintenance")
+    reservation, _ = q.reserve_spawn(task.id)
+    task_file = tmp_path / "task-terminal.json"
+    task_file.write_text("{}", encoding="utf-8")
+    handle = (
+        '{"pid":4321,"start_token":"tok","task_file":"'
+        + str(task_file).replace("\\", "\\\\")
+        + '","worker_id":"script-1"}'
+    ).join(("script-body:", ""))
+    q.record_spawn(reservation.key, session_handle=handle, worktree=None)
+    q.claim_one("script-1", repo=TEST_REPO, task_id=task.id)
+    q.start(task.id, "script-1")
+    q.complete(task.id, "script-1")
+
+    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO)
+
+    assert sup.reconcile() == 1
+    assert q.latest_reservation(task.id).state == SpawnState.SETTLED
+    assert not task_file.exists()
 
 
 # -- Slice 2: liveness-gated auto-recovery -----------------------------------

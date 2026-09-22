@@ -334,7 +334,9 @@ def preflight_headless_agent(
                 (
                     h,
                     embody.remote_registered_agent_record(
-                        h, agent, timeout=remote_timeout
+                        h,
+                        agent=agent,
+                        timeout=remote_timeout,
                     ),
                 )
             )

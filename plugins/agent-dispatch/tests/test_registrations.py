@@ -866,13 +866,15 @@ def test_cli_build_spec_from_lane_flags():
 
     args = _parse(
         ["supervise", "register", "--all-repos", "--label", "code-review",
-         "--embody-backend", "cli",
+         "--embody-backend", "script", "--script-label", "maintenance",
          "--disposable-cli-label", "code-review",
          "--max-attempts", "5"]
     )
     spec = _build_registration_spec(args)
     assert spec["all_repos"] is True
     assert spec["labels"] == ["code-review"]
+    assert spec["embody_backend"] == "script"
+    assert spec["script_labels"] == ["maintenance"]
     assert spec["disposable_cli_labels"] == ["code-review"]
     assert spec["max_attempts"] == 5
 

@@ -4344,15 +4344,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--embody-backend",
-        choices=["headless", "cli"],
+        choices=["headless", "cli", "script"],
         default="headless",
         help="how the supervisor embodies a claimed task by default: 'headless' "
         "(default) -- a headless agent-bridge ACP session (no mux, no "
         "CLI-start-prompt), the right body for self-contained autonomous "
         "sweeps; 'cli' -- a CLI-backed autopilot worktree session (mux, "
-        "attachable). Per-label overrides: --cli-label (force CLI when the "
-        "default is headless) / --headless-label (force headless when the "
-        "default is cli).",
+        "attachable); 'script' -- a plain deterministic subprocess that drives "
+        "the task lifecycle without an LLM. Per-label overrides: --cli-label "
+        "(force CLI when the default is headless/script) / --headless-label "
+        "(force headless when the default is cli/script) / --script-label "
+        "(force script when the default is headless/cli).",
     )
     p.add_argument(
         "--headless-label",
@@ -4370,6 +4372,14 @@ def build_parser() -> argparse.ArgumentParser:
         "(mux, attachable) instead of the default headless body (repeatable). "
         "The opt-out for a lane that is headless-by-default; local "
         "(non-pool) mode only.",
+    )
+    p.add_argument(
+        "--script-label",
+        action="append",
+        metavar="LABEL",
+        help="force queued tasks carrying this label to a plain deterministic "
+        "script subprocess instead of the lane's default body (repeatable; "
+        "local non-pool mode only).",
     )
     p.add_argument(
         "--disposable-cli-label",
@@ -4523,10 +4533,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rp.add_argument(
         "--embody-backend",
-        choices=["headless", "cli"],
+        choices=["headless", "cli", "script"],
         default="headless",
         help="default embody body for the lane: 'headless' (default) "
-        "agent-bridge ACP, or 'cli' autopilot worktree session",
+        "agent-bridge ACP, 'cli' autopilot worktree session, or 'script' "
+        "deterministic subprocess",
     )
     rp.add_argument(
         "--headless-label",
@@ -4541,6 +4552,13 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="LABEL",
         help="force tasks carrying this label to a CLI autopilot instead "
         "of the default headless body (repeatable)",
+    )
+    rp.add_argument(
+        "--script-label",
+        action="append",
+        metavar="LABEL",
+        help="force tasks carrying this label to a deterministic script "
+        "subprocess instead of the lane's default body (repeatable)",
     )
     rp.add_argument(
         "--disposable-cli-label",

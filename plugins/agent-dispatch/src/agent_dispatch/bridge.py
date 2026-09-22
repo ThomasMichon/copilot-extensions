@@ -875,5 +875,3 @@ def resume_steered_owner(
     except (subprocess.SubprocessError, OSError):
         return False
     return proc.returncode == 0
-
-
