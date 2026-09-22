@@ -179,30 +179,44 @@ def _relay_fetch(repo: str, worktree_id: str) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _relay_fetch_many(refs: list[tuple[str, str]]) -> dict[tuple[str, str], dict | None]:
+    if not refs:
+        return {}
+    endpoint = _RELAY_ENDPOINT or _endpoint()
+    payload = json.dumps(
+        [{"repo": repo, "worktree_id": worktree_id} for repo, worktree_id in refs]
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{endpoint}/worktree-status-relays",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    token = os.environ.get("AGENT_DISPATCH_TOKEN")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(request, timeout=5) as response:
+        rows = json.loads(response.read().decode("utf-8"))
+    return {
+        (row["repo"], row["worktree_id"]): row.get("entry")
+        for row in rows
+        if isinstance(row, dict)
+    }
+
+
 def _build(
     tasks: list[dict],
     *,
     machine: str,
     recent_mins: int,
     relay_fetch=None,
+    relay_fetch_many=None,
 ) -> list[dict]:
     now = time.time()
     cutoff = now - max(0, recent_mins) * 60
     rows: list[dict] = []
     relay_cache: dict[tuple[str, str], dict | None] = {}
-
-    fetch = relay_fetch or _relay_fetch
-
-    def _relay_entry(repo: str | None, worktree_id: str | None) -> dict | None:
-        if not repo or not worktree_id:
-            return None
-        key = (repo, worktree_id)
-        if key not in relay_cache:
-            try:
-                relay_cache[key] = fetch(repo, worktree_id)
-            except Exception:
-                relay_cache[key] = None
-        return relay_cache[key]
+    relay_keys: list[tuple[str, str]] = []
 
     for task in tasks:
         target = task.get("target_machine")
@@ -266,13 +280,9 @@ def _build(
         # keeps it schema-visible without showing a broken empty card.
         row["has_charter"] = False
         row.setdefault("repo_name", _repo_name(task.get("repo")))
-        row.update(
-            board_fields_for_task(
-                row,
-                _relay_entry(str(row.get("repo") or ""), claimed_worktree),
-                now=now,
-            )
-        )
+        repo = str(row.get("repo") or "")
+        if repo and claimed_worktree:
+            relay_keys.append((repo, claimed_worktree))
         progress = row.get("latest_progress")
         if isinstance(progress, str) and progress:
             try:
@@ -280,6 +290,30 @@ def _build(
             except (ValueError, TypeError):
                 pass
         rows.append(row)
+    try:
+        if relay_keys:
+            fetch_many = relay_fetch_many or _relay_fetch_many
+            relay_cache = fetch_many(list(dict.fromkeys(relay_keys)))
+    except Exception:
+        relay_cache = {}
+    if not relay_cache and relay_fetch is not None:
+        for repo, worktree_id in dict.fromkeys(relay_keys):
+            try:
+                relay_cache[(repo, worktree_id)] = relay_fetch(repo, worktree_id)
+            except Exception:
+                relay_cache[(repo, worktree_id)] = None
+    for row in rows:
+        _claimed_machine, claimed_worktree = claimed_identity(row)
+        repo = str(row.get("repo") or "")
+        row.update(
+            board_fields_for_task(
+                row,
+                relay_cache.get((repo, claimed_worktree))
+                if repo and claimed_worktree
+                else None,
+                now=now,
+            )
+        )
     rows.sort(
         key=lambda task: (
             GROUPS.index(task["group"]),
@@ -350,6 +384,7 @@ def main(argv: list[str] | None = None) -> int:
             machine=args.machine,
             recent_mins=args.recent_mins,
             relay_fetch=_relay_fetch,
+            relay_fetch_many=_relay_fetch_many,
         ),
         sys.stdout,
         indent=2,

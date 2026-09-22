@@ -76,6 +76,34 @@ class WorktreeStatusRelayStore:
             return None
         return entry if isinstance(entry, dict) else None
 
+    def get_many(
+        self, refs: list[tuple[str, str]]
+    ) -> dict[tuple[str, str], dict[str, Any] | None]:
+        results: dict[tuple[str, str], dict[str, Any] | None] = {
+            ref: None for ref in refs
+        }
+        if not refs:
+            return results
+        try:
+            with _connect(self.db_path) as conn:
+                for repo, worktree_id in refs:
+                    row = conn.execute(
+                        "SELECT entry_json FROM worktree_status_relay"
+                        " WHERE repo = ? AND worktree_id = ?",
+                        (repo, worktree_id),
+                    ).fetchone()
+                    if row is None:
+                        continue
+                    try:
+                        entry = json.loads(row["entry_json"])
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(entry, dict):
+                        results[(repo, worktree_id)] = entry
+        except (sqlite3.Error, OSError):
+            log.debug("relay batch read failed", exc_info=True)
+        return results
+
     def put(
         self,
         repo: str,

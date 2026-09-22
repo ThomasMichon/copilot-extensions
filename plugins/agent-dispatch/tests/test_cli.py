@@ -3489,6 +3489,7 @@ class TestInboxBoard:
         from agent_dispatch import __main__ as m
         from agent_dispatch import board_cli
 
+        seen = {}
         class _Client:
             def __enter__(self):
                 return self
@@ -3506,23 +3507,24 @@ class TestInboxBoard:
                     "updated_at": 10.0,
                 }]
 
-            def worktree_status_relay(self, repo, worktree_id):
-                assert repo == "github.com/example/repo"
-                assert worktree_id == "wt1"
+            def worktree_status_relays(self, refs):
+                seen["refs"] = list(refs)
                 return {
-                    "repo": repo,
-                    "worktree_id": worktree_id,
-                    "fetched_at": 995.0,
-                    "poll_interval_seconds": 10.0,
-                    "bundle": {
-                        "facts": {
-                            "claims": {
-                                "confirmed": True,
-                                "observed_at": 995.0,
-                                "value": {"resources": [], "owner_ref": None},
+                    ("github.com/example/repo", "wt1"): {
+                        "repo": "github.com/example/repo",
+                        "worktree_id": "wt1",
+                        "fetched_at": 995.0,
+                        "poll_interval_seconds": 10.0,
+                        "bundle": {
+                            "facts": {
+                                "claims": {
+                                    "confirmed": True,
+                                    "observed_at": 995.0,
+                                    "value": {"resources": [], "owner_ref": None},
+                                }
                             }
-                        }
-                    },
+                        },
+                    }
                 }
 
         monkeypatch.setattr(m, "_client", lambda _args: _Client())
@@ -3535,6 +3537,7 @@ class TestInboxBoard:
         args = _args(["inbox", "--machine", "m1", "--board"])
         assert args.func(args) == 0
         rows = json.loads(capsys.readouterr().out)
+        assert seen["refs"] == [("github.com/example/repo", "wt1")]
         assert rows[0]["artifacts_summary"] == "none"
 
     def test_board_defaults(self):

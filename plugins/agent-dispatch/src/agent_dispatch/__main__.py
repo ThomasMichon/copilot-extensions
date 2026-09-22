@@ -2470,22 +2470,19 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
         status = "proposed,queued,claimed,started,suspended,completed,abandoned,dead_letter"
         with _client(args) as c:
             tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
-            relay_cache: dict[tuple[str, str], dict | None] = {}
-
-            def _relay_fetch(repo: str, worktree_id: str) -> dict | None:
-                key = (repo, worktree_id)
-                if key not in relay_cache:
-                    try:
-                        relay_cache[key] = c.worktree_status_relay(repo, worktree_id)
-                    except DispatchError:
-                        relay_cache[key] = None
-                return relay_cache[key]
+            def _relay_fetch_many(
+                refs: list[tuple[str, str]]
+            ) -> dict[tuple[str, str], dict | None]:
+                try:
+                    return c.worktree_status_relays(refs)
+                except DispatchError:
+                    return {}
 
             inbox = _board_cli._build(
                 tasks,
                 machine=machine,
                 recent_mins=getattr(args, "recent_mins", 120),
-                relay_fetch=_relay_fetch,
+                relay_fetch_many=_relay_fetch_many,
             )
         return _emit(inbox)
     # --awaiting-steer widens the fetch to the owned states (a task blocked on

@@ -255,6 +255,31 @@ def test_worktree_status_relay_route_reads_local_store(api):
     assert response.json()["repo"] == TEST_REPO
 
 
+def test_worktree_status_relays_route_batches_entries(api):
+    relay = api.app.state.worktree_status_relay
+    relay.put(
+        TEST_REPO,
+        "wt1",
+        {"facts": {"claims": {"confirmed": True, "value": {"resources": []}}}},
+        fetched_at=123.0,
+        poll_interval_seconds=10.0,
+    )
+
+    response = api.post(
+        "/worktree-status-relays",
+        json=[
+            {"repo": TEST_REPO, "worktree_id": "wt1"},
+            {"repo": TEST_REPO, "worktree_id": "wt2"},
+        ],
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"repo": TEST_REPO, "worktree_id": "wt1", "entry": relay.get(TEST_REPO, "wt1")},
+        {"repo": TEST_REPO, "worktree_id": "wt2", "entry": None},
+    ]
+
+
 def test_create_app_registers_representative_extracted_route_groups(app):
     route_paths = {
         route.path for route in app.routes if isinstance(route, APIRoute)
