@@ -16,7 +16,6 @@ from pydantic import BaseModel
 
 from .config import DEFAULT_HANDOFF_FALLBACK_GRACE, DEFAULT_ORPHAN_GRACE
 from .events import EventBus
-from .identity import name_for_repo
 from .loop_governance import LoopGovernance
 from .procutil import run_agent_worktrees_capture
 from .queue import Status, Task, TaskQueue, machine_matches
@@ -523,37 +522,18 @@ def _owned_worktree_refs_for_machine(
     return refs
 
 
-def _owns_worktree_ref(
-    queue: TaskQueue,
-    machine: str | None,
-    repo: str,
-    worktree_id: str,
-    *,
-    limit: int = 200,
-) -> bool:
-    if not machine:
-        return False
-    for task in queue.list(repo=repo, status=list(Status.OWNED), limit=limit):
-        if task.owner:
-            owner_machine, _sep, owner_worktree = task.owner.partition("/")
-        else:
-            owner_machine = task.target_machine or ""
-            owner_worktree = task.target_worktree or ""
-        if (
-            owner_machine
-            and owner_worktree
-            and owner_machine.casefold() == machine.casefold()
-            and owner_worktree == worktree_id
-        ):
-            return True
-    return False
+def _fresh_name_for_repo(canonical: str | None) -> str | None:
+    from . import identity
+
+    identity._repo_registry.cache_clear()
+    return identity.name_for_repo(canonical)
 
 
 def _fetch_worktree_status_bundle(
     repo: str,
     worktree_id: str,
     *,
-    resolve_project_name: Callable[[str | None], str | None] = name_for_repo,
+    resolve_project_name: Callable[[str | None], str | None] = _fresh_name_for_repo,
     capture: Callable[..., Any] = run_agent_worktrees_capture,
     timeout: float = 60.0,
 ) -> dict[str, Any] | None:
@@ -597,11 +577,7 @@ def _refresh_worktree_status_relay(
     current_ref_set = set(current_refs)
     refs = list(refs or current_refs)
     if refs:
-        refs = [
-            ref
-            for ref in refs
-            if _owns_worktree_ref(queue, machine, ref[0], ref[1])
-        ]
+        refs = [ref for ref in refs if ref in current_ref_set]
     if max_items is not None:
         refs = refs[:max_items]
     refreshed = 0
