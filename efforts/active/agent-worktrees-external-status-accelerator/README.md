@@ -1610,3 +1610,46 @@ the narrow round-1 race as the lesser cost rather than reintroducing a
 worse, more frequent one. Updated/removed the tests that had asserted the
 now-reverted padded behavior; all 45 `worktree_status_audit` tests pass.
 
+### 2026-09-22 — PR #3281: found and fixed the real cause of persistent live `cache_freshness_bounds`/`daemon.responsive: false` findings
+The hourly `worktree-status-audit` schedule (running unattended per this
+effort's own monitoring plan) surfaced a genuine, recurring finding across
+several consecutive runs: `daemon.responsive: false` and 4-6 of 6-7
+sampled entries failing `cache_freshness_bounds` (90-175s stale, all
+within their demand window) -- worse than the narrow, already-diagnosed
+demand-lag race PR #3252 accepted above.
+
+Investigated live rather than assuming another instance of the same lag:
+confirmed the resident monitor was alive and TCP-dialable throughout (not
+an idle-exit/boot-latency problem at all), then profiled
+`worktree_status_compute.compute()` directly against a real tracked
+worktree. Found `cfg.load_config()` alone took ~8s of a ~15-40s total
+compute, with `_control_plane_related_pr_map()` -- a control-plane
+related-index scan this compute path never actually needs (it only reads
+`config.default_repo.remote`/`default_branch` for the `fetch=True`
+classify call right below it) -- as the dominant, unnecessary cost.
+Confirmed safe to skip: that map's result only ever merges into a
+per-repo `pr:` overlay (`RepoConfig.pr`), never `remote`/`default_branch`.
+
+Passing `include_control_plane_related_pr=False` dropped total compute to
+~5.4s (git fetch is now the only real cost left). Copilot's PR review
+caught a second, related bug this surfaced: `REQUEST_DEADLINE_S` (3.0s)
+was already tighter than even the *fixed* compute path could reliably
+meet, so an on-demand daemon request would still miss the deadline and
+fall back every time -- defeating the coalescing/caching layer for any
+caller that didn't hit an already-warm sweep entry. Bumped
+`REQUEST_DEADLINE_S` to 8.0s (mirroring `classify_daemon`'s own 5.0s,
+scaled up for this call's slower single-fetch cost) with headroom above
+the measured worst case, rather than trying to force the git fetch itself
+below the old 3s bound.
+
+Added a regression test asserting `load_config` is always called with
+`include_control_plane_related_pr=False` from this path. Full
+`agent-worktrees` suite: 658 passed (10 pre-existing, unrelated
+`test_doctor.py` failures reproduced identically with this change
+stashed out). Bumped `agent-worktrees` to `1.5.5-dev240`.
+
+No user-facing documentation changes needed -- this is an internal
+performance/correctness fix to the accelerator's own compute and timeout
+behavior; the wire contract, cache semantics, and every consumer-facing
+API are unchanged.
+

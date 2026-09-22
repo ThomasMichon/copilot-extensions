@@ -103,6 +103,40 @@ def test_status_via_daemon_uses_live_daemon_when_reachable():
         server.close()
 
 
+def test_status_with_boot_uses_default_request_deadline(monkeypatch):
+    expected_deadline = 8.0
+    observed = {}
+
+    def request(*args, **kwargs):
+        observed["request_deadline_s"] = kwargs["request_deadline_s"]
+        return {"state": "CLEAN"}
+
+    def release(*args, **kwargs):
+        observed["release_timeout"] = kwargs["timeout"]
+
+    monkeypatch.setattr(worktree_status_daemon.wcs_client, "new_client_id", lambda: "client")
+    monkeypatch.setattr(worktree_status_daemon.wcs_client, "request", request)
+    monkeypatch.setattr(worktree_status_daemon.wcs_client, "release", release)
+
+    result = worktree_status_daemon.status_with_boot(
+        read_lock_data=lambda: {
+            "worktree_status_endpoint": "127.0.0.1:1234",
+            "worktree_status_token": "token",
+        },
+        ensure_monitor=None,
+        key="proj|wt-a",
+        payload={"project": "proj", "worktree_id": "wt-a"},
+        fallback=lambda: {"from": "fallback"},
+    )
+
+    assert result == {"state": "CLEAN"}
+    assert worktree_status_daemon.REQUEST_DEADLINE_S == expected_deadline
+    assert observed == {
+        "request_deadline_s": expected_deadline,
+        "release_timeout": expected_deadline,
+    }
+
+
 def test_status_via_daemon_registers_and_releases_a_client_id():
     """Copilot review finding: unlike `status_with_boot`, this no-boot
     helper previously sent no `client_id`, so the server handler never

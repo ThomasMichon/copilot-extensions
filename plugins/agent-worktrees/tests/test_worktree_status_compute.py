@@ -336,6 +336,45 @@ class TestWorktreeStatusComputeIsolated:
         assert bundle["as_of"] >= disposition_observed_at
         assert bundle["started_at"] <= git_observed_at
 
+    def test_load_config_skips_the_expensive_control_plane_pr_overlay(
+        self, monkeypatch, tmp_path
+    ):
+        """Live-diagnosed finding (2026-09-22 hourly audit): this compute path
+        only ever reads `config.default_repo.remote`/`default_branch` -- never
+        any repo's `pr:` overlay, the only thing
+        `_control_plane_related_pr_map()` (the `load_config` default-True
+        path) computes. That control-plane related-index resolution is real,
+        non-negligible per-request cost (observed ~5s on a machine with a
+        nontrivial repo topology) that a per-worktree status read (meant to
+        be fast/coalesced/cached) cannot afford to pay for data it never
+        uses -- it was the dominant cause of live `cache_freshness_bounds`
+        violations and `daemon.responsive: false` findings from the
+        `worktree-status-audit`. This call must always pass
+        `include_control_plane_related_pr=False`."""
+        from agent_worktrees import __main__ as m
+
+        project = "iso-proj"
+        tracking_dir = tmp_path / project / "worktrees"
+        tracking_dir.mkdir(parents=True)
+        wt_path = tmp_path / "wt1"
+        wt_path.mkdir()
+        tracking.save_record(_rec(wt_path), tracking_dir / "wt1.yaml")
+
+        monkeypatch.setattr(m.cfg, "project_dir", lambda name=None: tmp_path / (name or project))
+        _wire_common_internals(monkeypatch, m)
+
+        captured = {}
+
+        def _fake_load_config_capturing(*, path=None, project=None, **kw):
+            captured.update(kw)
+            return _fake_load_config(path=path, project=project, **kw)
+
+        monkeypatch.setattr(m.cfg, "load_config", _fake_load_config_capturing)
+
+        m._worktree_status_compute(project, "wt1")
+
+        assert captured.get("include_control_plane_related_pr") is False
+
     def test_liveness_fact_is_unconfirmed_when_verify_worktree_active_degrades(
         self, monkeypatch, tmp_path
     ):

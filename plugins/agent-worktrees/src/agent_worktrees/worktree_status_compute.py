@@ -69,7 +69,24 @@ def compute(project: str, worktree_id: str) -> dict:
     facts: dict[str, dict] = {}
 
     try:
-        config = cfg.load_config(path=cfg.project_dir(project) / "config.yaml", project=project)
+        # `include_control_plane_related_pr=False`: this call only reads
+        # `config.default_repo.remote`/`default_branch` for the fetch/classify
+        # call below, never any repo's `pr:` overlay -- the ONLY thing
+        # `_control_plane_related_pr_map()` (the default-True path) computes.
+        # That control-plane related-index resolution is real per-request cost
+        # (observed ~5s on a machine with a nontrivial repo topology), which a
+        # per-worktree status read (meant to be fast/coalesced/cached, see the
+        # module docstring) cannot afford to pay for data it never uses --
+        # confirmed live: every one of this session's `worktree-status-audit`
+        # runs found `cache_freshness_bounds` violations and
+        # `daemon.responsive: false` traced to this single unnecessary ~5s
+        # tax stacking with the real ~3-5s `fetch=True` git call, together
+        # blowing well past `REQUEST_DEADLINE_S`/the audit's freshness bound.
+        config = cfg.load_config(
+            path=cfg.project_dir(project) / "config.yaml",
+            project=project,
+            include_control_plane_related_pr=False,
+        )
         repo = config.default_repo
         info = git_ops.classify_worktree(
             record.worktree_path,
