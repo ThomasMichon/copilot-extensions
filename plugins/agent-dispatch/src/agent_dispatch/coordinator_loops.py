@@ -523,6 +523,32 @@ def _owned_worktree_refs_for_machine(
     return refs
 
 
+def _owns_worktree_ref(
+    queue: TaskQueue,
+    machine: str | None,
+    repo: str,
+    worktree_id: str,
+    *,
+    limit: int = 200,
+) -> bool:
+    if not machine:
+        return False
+    for task in queue.list(repo=repo, status=list(Status.OWNED), limit=limit):
+        if task.owner:
+            owner_machine, _sep, owner_worktree = task.owner.partition("/")
+        else:
+            owner_machine = task.target_machine or ""
+            owner_worktree = task.target_worktree or ""
+        if (
+            owner_machine
+            and owner_worktree
+            and owner_machine.casefold() == machine.casefold()
+            and owner_worktree == worktree_id
+        ):
+            return True
+    return False
+
+
 def _fetch_worktree_status_bundle(
     repo: str,
     worktree_id: str,
@@ -549,7 +575,11 @@ def _fetch_worktree_status_bundle(
         payload = json.loads(result.stdout)
     except (TypeError, ValueError):
         return None
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("project") != project:
+        return None
+    return payload
 
 
 def _refresh_worktree_status_relay(
@@ -566,8 +596,12 @@ def _refresh_worktree_status_relay(
     current_refs = _owned_worktree_refs_for_machine(queue, machine)
     current_ref_set = set(current_refs)
     refs = list(refs or current_refs)
-    if refs is not current_refs:
-        refs = [ref for ref in refs if ref in current_ref_set]
+    if refs:
+        refs = [
+            ref
+            for ref in refs
+            if _owns_worktree_ref(queue, machine, ref[0], ref[1])
+        ]
     if max_items is not None:
         refs = refs[:max_items]
     refreshed = 0
