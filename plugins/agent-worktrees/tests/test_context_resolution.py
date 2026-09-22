@@ -644,3 +644,49 @@ def test_get_keys_lists_swapped_keys(adopted_repo, capsys):
     assert rc == 0
     assert "worktree-dir" in out
     assert "worktrees-root" in out
+
+
+def test_get_non_pr_key_skips_control_plane_related_pr(
+    adopted_repo, active_myproj, monkeypatch, capsys,
+):
+    """Regression (copilot-extensions#2660): ``_control_plane_related_pr_map``
+    is a 13-subprocess, ~218-file-read walk over every installed plugin, and
+    it is only ever consulted for the ``pr-*`` keys' values -- every other
+    ``get`` key must skip it (``include_control_plane_related_pr=False``)
+    rather than pay that cost on every single invocation regardless of the
+    key actually requested."""
+    _anchor, _wt_root, wt_path, _wt_id, conf = adopted_repo
+    monkeypatch.chdir(wt_path)
+    calls: list[bool] = []
+
+    def spy_load_config(*a, include_control_plane_related_pr=True, **k):
+        calls.append(include_control_plane_related_pr)
+        return conf
+
+    monkeypatch.setattr(cfg, "load_config", spy_load_config)
+
+    rc = m.cmd_get(types.SimpleNamespace(key="worktree-dir"))
+    assert rc == 0
+    assert calls == [False]
+
+
+def test_get_pr_key_still_includes_control_plane_related_pr(
+    adopted_repo, active_myproj, monkeypatch, capsys,
+):
+    """The four ``pr-*`` keys DO need the control-plane PR-graft overlay, so
+    they must keep requesting it."""
+    _anchor, _wt_root, wt_path, _wt_id, conf = adopted_repo
+    monkeypatch.chdir(wt_path)
+    calls: list[bool] = []
+
+    def spy_load_config(*a, include_control_plane_related_pr=True, **k):
+        calls.append(include_control_plane_related_pr)
+        return conf
+
+    monkeypatch.setattr(cfg, "load_config", spy_load_config)
+
+    for key in ("pr-enabled", "pr-required", "pr-provider", "pr-profile"):
+        calls.clear()
+        rc = m.cmd_get(types.SimpleNamespace(key=key))
+        assert rc == 0
+        assert calls == [True], key
