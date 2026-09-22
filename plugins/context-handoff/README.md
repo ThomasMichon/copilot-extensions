@@ -409,7 +409,15 @@ This file is:
   more, it is **rotated** -- renamed aside to a per-process, uniquely-named
   `.stale-<pid>-<timestamp>-<uuid>` sidecar **in its own dedicated
   `context-handoff-crash-sidecars/` subdirectory** (created on demand next
-  to the log file itself), with a fresh file opened at the original path --
+  to the log file itself, and re-validated on every rotation and purge as
+  a real, non-symlink, privately-owned-and-permissioned (0700 on POSIX)
+  directory before anything is ever renamed into or purged from it -- a
+  plain "create if missing" call alone would otherwise treat an
+  attacker-planted symlink, or a pre-existing directory with permissive
+  group/other bits, as fine to use, silently redirecting rotations
+  elsewhere or exposing sidecars to another local user; a directory that
+  fails this check simply means rotation is skipped for that call, not
+  that diagnostic logging itself fails), with a fresh file opened at the original path --
   rather than truncated in place. This matters because the file is shared
   by every extension instance on the machine (see the next bullet): an
   in-place reset is not serialized across processes, so a second process's

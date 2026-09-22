@@ -25,6 +25,7 @@ import {
   closeSync,
   constants as fsConstants,
   fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   opendirSync,
@@ -57,6 +58,45 @@ const SIDECAR_DIR_NAME = "context-handoff-crash-sidecars";
 
 export function sidecarDirFor(logPath) {
   return join(dirname(logPath), SIDECAR_DIR_NAME);
+}
+
+/**
+ * Creates (if missing) and validates `dir` -- the dedicated sidecar
+ * directory -- as safe to rotate into or purge from, throwing if it is
+ * not. `mkdirSync(..., { recursive: true })` alone is not enough: it
+ * silently succeeds as a no-op against a *pre-existing* path regardless of
+ * what that path actually is, so another local user (or an attacker who
+ * won a creation race before this process's first rotation ever ran)
+ * could plant a symlink at this predictable location -- redirecting every
+ * future rotation's `renameSync()` into a directory this process does not
+ * control -- or leave a directory with permissive group/other bits,
+ * letting another local user read or delete diagnostic sidecars this
+ * module promises are private. This is checked on every call (creation is
+ * a cheap no-op once the directory already exists) so a directory that
+ * was safe at first use but got swapped out from under this process later
+ * is still caught before the next rotation or purge trusts it again.
+ */
+function ensureSidecarDir(dir) {
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  } catch (err) {
+    if (err?.code !== "EEXIST") throw err;
+  }
+  // lstatSync (not statSync) so an existing symlink is reported as one
+  // instead of being followed through to whatever it points at.
+  const stat = lstatSync(dir);
+  if (stat.isSymbolicLink()) {
+    throw new Error(`sidecar directory ${dir} is a symlink, refusing to use it`);
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`sidecar directory ${dir} is not a directory`);
+  }
+  // Ownership/mode bits are POSIX-only; Windows ACLs don't map onto them
+  // and mkdirSync's mode argument is a no-op there anyway (matching the
+  // existing platform split for isPrivateRegularFile()/OPEN_FLAGS above).
+  if (process.platform !== "win32" && (stat.uid !== process.getuid() || (stat.mode & 0o077) !== 0)) {
+    throw new Error(`sidecar directory ${dir} has unsafe ownership or permissions`);
+  }
 }
 
 // A rotated-away `.stale-*` sidecar's rotation timestamp is embedded
@@ -130,6 +170,12 @@ function purgeOldStaleSidecars(logPath, justCreatedSidecar) {
   let dirHandle;
   try {
     const dir = sidecarDirFor(logPath);
+    // Re-validate on every call (see ensureSidecarDir()'s own doc
+    // comment) -- a directory that was safe when this process last
+    // rotated into it could have been swapped for a symlink since; this
+    // throws straight into the catch-all below, which simply skips this
+    // purge attempt like any other best-effort failure.
+    ensureSidecarDir(dir);
     const prefix = `${basename(logPath)}.stale-`;
     const now = Date.now();
     let scanned = 0;
@@ -364,42 +410,47 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
                 // is guaranteed to make real progress against them, rather
                 // than potentially never reaching them behind however many
                 // unrelated entries happen to precede them in os.tmpdir()'s
-                // own enumeration order. mkdirSync() with recursive:true is
-                // a cheap no-op once the directory already exists (which it
-                // will, after this log's very first rotation); a failure
-                // here (e.g. permissions) is left for the rename below to
-                // surface as its own, already-handled failure instead of
-                // being special-cased separately.
+                // own enumeration order. ensureSidecarDir() both creates
+                // this directory on first use and validates it is not a
+                // symlink and is privately owned/permissioned every single
+                // time -- a plain mkdirSync({recursive:true}) would
+                // silently treat an attacker-planted symlink or
+                // loosely-permissioned pre-existing directory as fine to
+                // use, letting the rename below relocate the oversized log
+                // somewhere this process does not control, or letting
+                // another local user read/delete sidecars this module
+                // promises stay private. A validation failure here (thrown
+                // by ensureSidecarDir()) means this rotation is skipped
+                // entirely -- fail closed, rather than rotate into an
+                // unsafe location -- and falls straight through to the
+                // plain reopen below, which still keeps the crash log
+                // itself working, just without rotation for this call.
                 try {
-                  mkdirSync(sidecarDirFor(logPath), { recursive: true });
-                } catch {
-                  // See above -- the rename that follows will fail on its
-                  // own if the directory genuinely could not be created.
-                }
-                // pid+timestamp+uuid: the timestamp is embedded here so
-                // purgeOldStaleSidecars() can read this sidecar's true
-                // rotation age directly from its own name -- atomically
-                // baked in by this same renameSync() call, with no separate
-                // step (and therefore no window) in which a concurrent
-                // process's own purge could observe a stale age before it
-                // was corrected (see STALE_SIDECAR_NAME_PATTERN's own doc
-                // comment for the full rationale: mtime was tried first and
-                // had exactly this cross-process race). The uuid suffix
-                // guards against a same-pid, same-millisecond name
-                // collision, which a bare pid+timestamp could theoretically
-                // hit.
-                const staleSidecar = join(
-                  sidecarDirFor(logPath),
-                  `${basename(logPath)}.stale-${process.pid}-${Date.now()}-${randomUUID()}`,
-                );
-                try {
+                  ensureSidecarDir(sidecarDirFor(logPath));
+                  // pid+timestamp+uuid: the timestamp is embedded here so
+                  // purgeOldStaleSidecars() can read this sidecar's true
+                  // rotation age directly from its own name -- atomically
+                  // baked in by this same renameSync() call, with no
+                  // separate step (and therefore no window) in which a
+                  // concurrent process's own purge could observe a stale
+                  // age before it was corrected (see
+                  // STALE_SIDECAR_NAME_PATTERN's own doc comment for the
+                  // full rationale: mtime was tried first and had exactly
+                  // this cross-process race). The uuid suffix guards
+                  // against a same-pid, same-millisecond name collision,
+                  // which a bare pid+timestamp could theoretically hit.
+                  const staleSidecar = join(
+                    sidecarDirFor(logPath),
+                    `${basename(logPath)}.stale-${process.pid}-${Date.now()}-${randomUUID()}`,
+                  );
                   renameSync(logPath, staleSidecar);
                   justCreatedSidecar = staleSidecar;
                 } catch {
-                  // Lost a narrower race against a concurrent rotation
-                  // between the stat check just above and this rename (or
-                  // the sidecar directory could not be created/reached) --
-                  // fine either way, the open below still creates or reuses
+                  // Either the sidecar directory failed validation (see
+                  // above -- fail closed, no rotation this call), or a
+                  // narrower race against a concurrent rotation was lost
+                  // between the stat check above and this rename -- fine
+                  // either way, the open below still creates or reuses
                   // whatever now exists at `logPath`.
                 }
               }

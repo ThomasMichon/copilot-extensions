@@ -291,6 +291,52 @@ test(
   },
 );
 
+// ensureSidecarDir() must refuse a pre-existing symlink at the sidecar
+// directory's own predictable path rather than following it -- a plain
+// mkdirSync({recursive:true}) treats an existing path as fine regardless of
+// what it actually is, so another local user (or an attacker who won a
+// creation race before this process's first rotation ever ran) could plant
+// a symlink there pointing at a directory this process does not control,
+// redirecting every rotation's renameSync() into it. This simulates that
+// by pre-creating the symlink before the first rotation ever runs, then
+// asserts the untrusted target directory stays empty (nothing was ever
+// rotated into it) while the crash log itself keeps working -- rotation is
+// simply skipped for this call (fail closed) rather than the whole
+// diagnostic failing.
+test(
+  "a pre-existing symlink at the sidecar directory path is never rotated into",
+  { skip: process.platform === "win32" || !RUN_STRESS_CASES },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      const untrustedDir = mkdtempSync(join(tmpdir(), "context-handoff-untrusted-sidecar-"));
+      try {
+        const dir = sidecarDirFor(logPath);
+        symlinkSync(untrustedDir, dir);
+        const oneMiB = 1_048_576;
+        const oldContent = "x".repeat(oneMiB + 10);
+        writeFileSync(logPath, oldContent);
+        chmodSync(logPath, 0o600);
+        const emergencyLog = createEmergencyLog(logPath);
+        emergencyLog("signal", "SIGTERM ready=true");
+        assert.deepEqual(
+          readdirSync(untrustedDir),
+          [],
+          "nothing should have been rotated into the attacker-controlled directory",
+        );
+        // The symlink itself must survive untouched (never unlinked/replaced).
+        assert.ok(statSync(dir).isDirectory());
+        // Rotation was refused, so the live path still holds its old
+        // oversized content, with the new entry appended after it -- the
+        // crash log keeps working, just without rotation for this call.
+        const content = readFileSync(logPath, "utf-8");
+        assert.match(content, /signal: SIGTERM ready=true/);
+      } finally {
+        rmSync(untrustedDir, { recursive: true, force: true });
+      }
+    });
+  },
+);
+
 // purgeOldStaleSidecars() bounds the *cumulative* disk usage many rotations
 // over a long-lived host would otherwise leave unbounded, without risking
 // the destructive-delete race an unconditional cleanup would reintroduce:
@@ -318,9 +364,13 @@ test(
       // prove the purge decision is made from the name, not the mtime.
       // Sidecars live in their own dedicated subdirectory (see
       // sidecarDirFor()); mkdirSync() it first since no real rotation has
-      // happened yet in this test to create it.
+      // happened yet in this test to create it -- mode 0o700 to match what
+      // ensureSidecarDir() itself requires (a plain mkdirSync() without an
+      // explicit mode leaves default-umask group/other bits set, which
+      // ensureSidecarDir()'s own ownership/permission check -- exercised
+      // here via the real purge call below -- would then reject).
       const dir = sidecarDirFor(logPath);
-      mkdirSync(dir, { recursive: true });
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
       const base = logPath.slice(dirname(logPath).length + 1);
       const twoDaysAgoMs = Date.now() - 2 * 24 * 60 * 60 * 1000;
       const oldSidecarName = `${base}.stale-99999-${twoDaysAgoMs}-00000000-0000-0000-0000-000000000000`;
@@ -357,7 +407,7 @@ test(
   async () => {
     await withCrashLog(async (logPath) => {
       const dir = sidecarDirFor(logPath);
-      mkdirSync(dir, { recursive: true });
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
       const base = logPath.slice(dirname(logPath).length + 1);
       const twoDaysAgoMs = Date.now() - 2 * 24 * 60 * 60 * 1000;
       const oldByNameSidecarName = `${base}.stale-12345-${twoDaysAgoMs}-11111111-1111-1111-1111-111111111111`;
