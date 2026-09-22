@@ -15,10 +15,11 @@ from .agent_registry_common import (
     NamespaceAgentInfo,
     _NAMESPACE_LIST_DEFAULT_TTL,
     _NAMESPACE_LIST_OFF,
+    _NAMESPACE_LIST_RESOLVER_DEFAULT_TIMEOUT,
+    _NAMESPACE_LIST_RESOLVER_TIMEOUT_ENV,
+    _NAMESPACE_LIST_TTL_ENV,
     _PROJECTS_YAML_DEFAULT,
     _REPOS_YAML_DEFAULT,
-    _namespace_list_resolver_timeout,
-    _namespace_list_ttl,
     _normalize_repo_basename,
 )
 from .agent_registry_namespace import (
@@ -56,6 +57,34 @@ from .topology import MachineConfig, SshEnvironment
 from .transport import PluginRef, SpawnTarget
 
 log = logging.getLogger("agent-bridge")
+
+
+def _namespace_list_resolver_timeout() -> float:
+    """Resolve the per-resolver ``list()`` timeout from the environment."""
+    raw = str(os.environ.get(_NAMESPACE_LIST_RESOLVER_TIMEOUT_ENV, "")).strip().lower()
+    if raw in _NAMESPACE_LIST_OFF:
+        return 0.0
+    if not raw:
+        return _NAMESPACE_LIST_RESOLVER_DEFAULT_TIMEOUT
+    try:
+        value = float(raw)
+        return value if value > 0 else 0.0
+    except ValueError:
+        return _NAMESPACE_LIST_RESOLVER_DEFAULT_TIMEOUT
+
+
+def _namespace_list_ttl() -> float:
+    """Resolve the namespace-list cache TTL from the environment."""
+    raw = str(os.environ.get(_NAMESPACE_LIST_TTL_ENV, "")).strip().lower()
+    if raw in _NAMESPACE_LIST_OFF:
+        return 0.0
+    if not raw:
+        return _NAMESPACE_LIST_DEFAULT_TTL
+    try:
+        value = float(raw)
+        return value if value > 0 else 0.0
+    except ValueError:
+        return _NAMESPACE_LIST_DEFAULT_TTL
 
 
 def _detect_platform() -> str:
@@ -295,6 +324,9 @@ __all__ = [
     "SshEnvironment",
     "_NAMESPACE_LIST_DEFAULT_TTL",
     "_NAMESPACE_LIST_OFF",
+    "_NAMESPACE_LIST_RESOLVER_DEFAULT_TIMEOUT",
+    "_NAMESPACE_LIST_RESOLVER_TIMEOUT_ENV",
+    "_NAMESPACE_LIST_TTL_ENV",
     "_PROJECTS_YAML_DEFAULT",
     "_REPOS_YAML_DEFAULT",
     "_agent_worktrees_bin",

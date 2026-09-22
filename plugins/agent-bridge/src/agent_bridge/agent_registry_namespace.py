@@ -13,10 +13,7 @@ from abc import ABC, abstractmethod
 
 from agent_procutil import no_window_flags
 
-from .agent_registry_common import (
-    NamespaceAgentInfo,
-    _namespace_list_ttl,
-)
+from .agent_registry_common import NamespaceAgentInfo
 from .transport import PluginRef, SpawnTarget
 
 log = logging.getLogger("agent-bridge")
@@ -146,7 +143,9 @@ class CliNamespaceResolver(NamespaceResolver):
 
     async def list(self, *, timeout: float | None = None) -> list[NamespaceAgentInfo]:
         """Enumerate this namespace's agents."""
-        ttl = _namespace_list_ttl()
+        from . import agent_registry as compat
+
+        ttl = compat._namespace_list_ttl()
         if ttl > 0 and self._list_cache is not None:
             stamped_at, cached = self._list_cache
             if (time.monotonic() - stamped_at) <= ttl:

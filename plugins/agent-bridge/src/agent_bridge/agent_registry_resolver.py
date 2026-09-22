@@ -14,7 +14,6 @@ from dropin_registry import Finding, WarningTracker
 from .agent_registry_common import (
     AgentConfig,
     AmbiguousAgentError,
-    _namespace_list_resolver_timeout,
 )
 from .agent_registry_namespace import (
     CliNamespaceResolver,
@@ -748,10 +747,12 @@ class AgentResolver:
 
     async def list_agents_async(self) -> list[dict[str, Any]]:
         """List all agents including namespace-resolved agents."""
+        from . import agent_registry as compat
+
         self.refresh_provider_resolvers()
         result = self.list_agents()
         prefixes = list(self._namespace_resolvers.keys())
-        resolver_timeout = _namespace_list_resolver_timeout()
+        resolver_timeout = compat._namespace_list_resolver_timeout()
 
         async def _bounded_list(prefix: str) -> Any:
             resolver = self._namespace_resolvers[prefix]

@@ -1541,7 +1541,7 @@ the Phase 0 runbook, picked up as capacity allows.
   depend on those seams now bounce back through the live
   `agent_bridge.agent_registry` module so the historical monkeypatch surface
   keeps steering the real implementation.
-- Result: `agent_registry.py` shrank **2,963 -> 325** lines, fell completely out
+- Result: `agent_registry.py` shrank **2,963 -> 362** lines, fell completely out
   of the shrink-only baseline, and every new sibling module stayed well under
   the 1,000-line cap.
 - Validation matched the runbook's stricter post-`db.py` discipline. The full
