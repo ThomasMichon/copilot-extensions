@@ -398,8 +398,8 @@ class TestSessionRoutes:
     ) -> None:
         """A bare (non-worktree-scoped, `worktree_id=None`) session's
         transcript is answered by the registered cold-store provider --
-        letting a solo-session consumer (e.g. Neuron Forge) retire its
-        own direct Permanent Record transcript dependency."""
+        letting a solo-session consumer retire its own direct historical
+        transcript dependency."""
         from agent_bridge.cold_store import ColdStoreSession
 
         mgr = app.state.session_manager
