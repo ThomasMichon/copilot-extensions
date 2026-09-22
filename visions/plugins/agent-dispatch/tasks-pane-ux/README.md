@@ -181,3 +181,10 @@ schema.
   `worktree-manager/src/worktree_manager/production_picker/picker_tui/pivots.py` ·
   `plugins/agent-dispatch/src/agent_dispatch/` ·
   [`efforts/active/agent-dispatch-tasks-pane-ux-overhaul/README.md`](../../../../efforts/active/agent-dispatch-tasks-pane-ux-overhaul/README.md)
+- Visual reference: the effort README's Journal (see its 2026-09-21 "Checked
+  the Phase 0 preview screenshots" entry) tracks the current dated screenshot
+  baseline and the visual-regression workflow (`render_tasks_preview.py`,
+  diffed against that baseline) for this pane's concrete appearance —
+  screenshots themselves are not committed to this repo (generated binary
+  artifacts), so the effort's own journal is the durable pointer to wherever
+  the current baseline set lives.
