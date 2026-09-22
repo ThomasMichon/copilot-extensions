@@ -323,6 +323,9 @@ class _SessionHandoffMixin:
             session.target,
             agent_name=session.agent_name,
             caller_id=session.caller_id,
+            mcp_servers=[dict(server) for server in session.mcp_servers],
+            model=session.model_override,
+            effort=session.effort_override,
         )
         if successor.status != SessionStatus.IDLE:
             # Spawn failed -- retain the predecessor and surface the failure so
