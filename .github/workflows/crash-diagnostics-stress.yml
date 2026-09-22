@@ -1,14 +1,22 @@
 name: context-handoff crash-diagnostics stress
 
-# Runs the full crash-diagnostics.test.mjs subprocess suite (every case, not
-# just the world-readable-file/symlink/FIFO attack simulations) on a
+# Runs the full crash-diagnostics.test.mjs subprocess suite (every case,
+# including the world-readable-file/symlink/FIFO attack simulations and the
+# 1 MiB rotation fixture -- not just the always-run smoke tier) on a
 # schedule and on manual dispatch, regardless of what any given PR touched.
-# The required `guards + lint` CI lane (ci.yml) only runs this file's full
-# suite when a PR's own diff touches plugins/context-handoff/, and only on
-# ubuntu-latest -- this workflow additionally runs on windows-latest so the
-# Windows-specific branches in crash-diagnostics.mjs (the non-POSIX
-# file-validation skip, and the rotation/reopen path) are exercised too,
-# not just the POSIX-only attack simulations that already skip there.
+# The required `guards + lint` CI lane (ci.yml) runs `node --test` on this
+# whole monorepo's `plugins/*/tests/*.test.mjs` glob unconditionally, for
+# every PR -- but that lane never sets CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS,
+# so it only exercises this file's small, always-run smoke subset (cheap
+# subprocess cases with no external tools) regardless of whether a PR
+# touches context-handoff or not; the stress-gated cases stay skipped there
+# unconditionally. This workflow is what actually runs the full suite,
+# on both ubuntu-latest and windows-latest (two separate jobs, not a
+# templated `runs-on`, which this repo's check-trusted-ci.py guard forbids
+# as a "dynamic runner route") so the Windows-specific branches in
+# crash-diagnostics.mjs (the non-POSIX file-validation skip, and the
+# rotation/reopen path) are exercised too, not just the POSIX-only attack
+# simulations that already skip there.
 
 on:
   schedule:
