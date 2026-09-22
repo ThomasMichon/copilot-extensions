@@ -9,7 +9,6 @@
   "plugins/agent-bridge/src/agent_bridge/__main__.py": 6972,
   "plugins/agent-bridge/src/agent_bridge/_installation_context.py": 9169,
   "plugins/agent-bridge/src/agent_bridge/acp_client.py": 1631,
-  "plugins/agent-bridge/src/agent_bridge/agent_registry.py": 2963,
   "plugins/agent-bridge/src/agent_bridge/app.py": 1113,
   "plugins/agent-bridge/src/agent_bridge/client.py": 1715,
   "plugins/agent-bridge/src/agent_bridge/models.py": 1105,
