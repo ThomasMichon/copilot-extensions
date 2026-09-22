@@ -65,7 +65,14 @@ function Start-CrPsmux {
     )
     & psmux kill-session -t $Session 2>$null | Out-Null
     $argLine = ($ExtraArgs -join ' ')
-    $cmdLine = "copilot -i `"$Prompt`" $argLine"
+    # `copilot -i "<prompt>"` (a single prompt argument, as opposed to bare
+    # `copilot -i`) runs exactly one turn and then exits on its own -- fast
+    # enough (~2s, confirmed) that the underlying psmux pane's process can be
+    # gone before Wait-CrPsmuxFor's first poll even runs, killing the WHOLE
+    # session out from under it ("psmux: no server running"). Append a long
+    # hold so the pane -- and therefore the session -- outlives copilot's own
+    # exit; Stop-CrPsmux tears it down explicitly once the caller is done.
+    $cmdLine = "copilot -i `"$Prompt`" $argLine; Start-Sleep -Seconds 300"
     & psmux new-session -d -s $Session -c $Cwd -- powershell -NoProfile -Command $cmdLine
 }
 
