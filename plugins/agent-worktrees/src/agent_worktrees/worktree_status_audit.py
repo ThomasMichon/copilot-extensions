@@ -313,8 +313,26 @@ def _check_freshness(cache_entry: dict | None, *, now: float) -> list[FieldMisma
     # false positive for exactly the same "confuse a real caller's own
     # tolerated resting state for an outage" mistake this module's
     # daemon-liveness check was redesigned to avoid.
+    #
+    # This durable `demanded_at` can itself lag the cache's true in-memory
+    # demand (Copilot review, 2026-09-21): `get_or_refresh`'s fresh-hit path
+    # deliberately extends demand only in memory, never persisting that
+    # bump on its own -- the persisted value only catches up the next time
+    # this entry is actually recomputed (a miss, or the sweep's own
+    # TTL-triggered refresh, which re-persists whatever `demanded_at` is
+    # then in memory). That lag is bounded by roughly one TTL+sweep cycle,
+    # not unbounded, but treating the boundary as exact would still risk
+    # hiding a real stale-entry mismatch for an entry that is genuinely
+    # still demanded in memory but whose last persisted `demanded_at`
+    # happens to sit just past DEMAND_TTL_SECONDS. Reuse the same
+    # FRESHNESS_SLACK_SECONDS this check already applies to the cache_age
+    # bound below, so an entry is only ever treated as demand-expired (and
+    # exempted here) once it is clearly past that window, not merely at it.
     demanded_at = cache_entry.get("demanded_at")
-    if isinstance(demanded_at, (int, float)) and now - demanded_at > DEMAND_TTL_SECONDS:
+    if (
+        isinstance(demanded_at, (int, float))
+        and now - demanded_at > DEMAND_TTL_SECONDS + FRESHNESS_SLACK_SECONDS
+    ):
         return []
 
     age = now - computed_at

@@ -1559,3 +1559,31 @@ aged_out`); all 45 `worktree_status_audit` tests pass. Bumped
 `agent-worktrees` to `1.5.5-dev235` and the marketplace catalog to
 `1.7.7-dev203`.
 
+### 2026-09-21 — PR #3252 review round 1: the persisted demand timestamp can lag true demand
+Copilot's review caught a real gap in the fix above: `_check_freshness`'s
+new demand-window check reads the *persisted* `demanded_at`, but
+`get_or_refresh`'s fresh-hit path deliberately extends demand only in
+memory and never synchronously persists that bump (see that method's own
+docstring -- durability of the demand timestamp alone isn't worth
+blocking an otherwise memory-only read on SQLite's busy-timeout). The
+persisted value only catches up the next time the entry is actually
+recomputed (a miss, or the sweep's own TTL-triggered refresh, which
+re-persists whatever `demanded_at` is then in memory) -- bounded to
+roughly one TTL+sweep cycle, not unbounded, but treating
+`DEMAND_TTL_SECONDS` as an exact cutoff could still hide a real
+stale-entry mismatch for an entry genuinely still demanded in memory
+whose last persisted `demanded_at` happens to sit just past that bound.
+
+Fixed by reusing this same check's own `FRESHNESS_SLACK_SECONDS` (already
+applied to the `cache_age` bound) on the demand-window check too: an
+entry is now only treated as demand-expired once
+`now - demanded_at > DEMAND_TTL_SECONDS + FRESHNESS_SLACK_SECONDS`, giving
+the persisted timestamp's own lag room to catch up before this check
+stops looking. Updated the "demand has aged out" test to sit clearly past
+the new, larger threshold, and added a new test
+(`test_check_freshness_flags_entry_near_demand_boundary_not_yet_past_
+slack`) asserting an entry just past the bare `DEMAND_TTL_SECONDS` (but
+still within the slack window) is still checked and flagged. All 46
+`worktree_status_audit` tests pass. Bumped `agent-worktrees` to
+`1.5.5-dev236` and the marketplace catalog to `1.7.7-dev204`.
+

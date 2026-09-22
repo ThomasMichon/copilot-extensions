@@ -223,15 +223,37 @@ def test_check_freshness_flags_a_stale_entry_still_within_its_demand_window():
 def test_check_freshness_ok_when_demand_has_aged_out():
     """Copilot review-driven fix: `WorktreeStatusCache.sweep_due` only
     refreshes an entry while it is still demanded -- once nothing has asked
-    about this worktree within `DEMAND_TTL_SECONDS`, the sweep correctly
-    stops keeping it warm (it will be evicted, not endlessly refreshed).
-    A growing cache_age past that point is expected, not a sweep
-    malfunction, and must not be flagged."""
+    about this worktree within `DEMAND_TTL_SECONDS` (plus slack for the
+    persisted `demanded_at`'s own lag behind true in-memory demand -- see
+    the next test), the sweep correctly stops keeping it warm (it will be
+    evicted, not endlessly refreshed). A growing cache_age past that point
+    is expected, not a sweep malfunction, and must not be flagged."""
     from agent_worktrees.worktree_status_cache import DEMAND_TTL_SECONDS
 
     now = time.time()
-    entry = {"computed_at": now - 10_000, "demanded_at": now - (DEMAND_TTL_SECONDS + 30)}
+    entry = {
+        "computed_at": now - 10_000,
+        "demanded_at": now - (DEMAND_TTL_SECONDS + wsa.FRESHNESS_SLACK_SECONDS + 30),
+    }
     assert wsa._check_freshness(entry, now=now) == []
+
+
+def test_check_freshness_flags_entry_near_demand_boundary_not_yet_past_slack():
+    """Copilot review, 2026-09-21: the persisted `demanded_at` can lag the
+    cache's true in-memory demand by roughly one TTL+sweep cycle
+    (`get_or_refresh`'s fresh-hit path extends demand only in memory,
+    never persisting that bump on its own). Treating `DEMAND_TTL_SECONDS`
+    as an exact cutoff could therefore hide a real stale-entry mismatch for
+    an entry that is genuinely still demanded. An entry just past
+    `DEMAND_TTL_SECONDS` but still within the slack window must still be
+    checked (and flagged, since it's also well past the freshness bound)."""
+    from agent_worktrees.worktree_status_cache import DEMAND_TTL_SECONDS
+
+    now = time.time()
+    entry = {"computed_at": now - 10_000, "demanded_at": now - (DEMAND_TTL_SECONDS + 10)}
+    mismatches = wsa._check_freshness(entry, now=now)
+    assert len(mismatches) == 1
+    assert mismatches[0].check == "cache_freshness_bounds"
 
 
 # -- audit_one -------------------------------------------------------------
