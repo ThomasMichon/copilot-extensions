@@ -1042,11 +1042,14 @@ no lifecycle-control logic invented at this layer.
       2. **A local relay cache, keyed by `(repo, worktree_id)` — not
          worktree_id alone**, not a task-row column. (**Correction, Copilot
          review 2026-09-21**: the accelerator's own contract keys its
-         request/cache on `(project, worktree_id)` — `agent-worktrees`'
-         "project" is agent-dispatch's own task-scoping `repo` field: a
-         worktree-id suffix reused across two different adopted repos would
-         otherwise silently overwrite one project's projection with
-         another's.) The coordinator writes each fetched projection (git
+         request/cache on `(project, worktree_id)`. The relay's key uses
+         agent-dispatch's canonical `repo` field — not the locally-resolved
+         project name step 1 passes to `--project` (per the round-4
+         correction above, those are different values; `repo` is stable
+         across machines, the resolved name is not) — so a worktree-id
+         suffix reused across two different adopted repos still cannot
+         silently overwrite one project's projection with another's.) The
+         coordinator writes each fetched projection (git
          state, session lineage, liveness, the claims graph — never message
          history, which stays excluded per *Not a transcript or event
          warehouse*) plus a `fetched_at` timestamp and the accelerator's own
@@ -2395,4 +2398,12 @@ poll on its documented `None` fallback for an unadopted repo) before
 invoking the CLI, while still keying the relay by the canonical `repo`
 (stable across machines, unlike the locally-resolved name) rather than the
 resolved name itself.
+
+### 2026-09-21 — PR #3222 review round 5: reworded a sentence that reintroduced the invalid mapping
+Round 4's fix corrected step 1's CLI call but step 2's keying rationale
+still said "agent-worktrees' 'project' is agent-dispatch's own... `repo`
+field," implying the same direct equivalence round 4 had just rejected.
+Reworded to state plainly that the relay key uses the canonical `repo`
+while the `--project` argument uses the separately-resolved local name —
+no remaining sentence conflates the two.
 
