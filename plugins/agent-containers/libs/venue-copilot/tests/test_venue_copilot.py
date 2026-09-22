@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -116,22 +117,35 @@ class TestReleaseCliMode:
 class TestBuildCopilotRemoteCommand:
     def test_minimal(self) -> None:
         cmd = build_copilot_remote_command("wt-A", ensure_mux=False)
-        assert cmd == "agent-worktrees copilot --worktree-id wt-A"
+        assert cmd == "bash -lc 'agent-worktrees copilot --worktree-id wt-A'"
 
     def test_with_driver_seed_and_ensure_mux(self) -> None:
         cmd = build_copilot_remote_command(
             "wt-A", driver="cli-mode", seed="do the thing", ensure_mux=True,
         )
         assert cmd == (
-            "agent-worktrees copilot --worktree-id wt-A --driver cli-mode "
-            "--seed 'do the thing' --ensure-mux"
+            "bash -lc 'agent-worktrees copilot --worktree-id wt-A --driver "
+            "cli-mode --seed '\"'\"'do the thing'\"'\"' --ensure-mux'"
         )
 
     def test_custom_embody_bin_is_quoted_safely(self) -> None:
         cmd = build_copilot_remote_command(
             "wt-A", embody_bin="/opt/venv/bin/agent-worktrees", ensure_mux=False,
         )
-        assert cmd.startswith("/opt/venv/bin/agent-worktrees copilot")
+        assert cmd.startswith("bash -lc '/opt/venv/bin/agent-worktrees copilot")
+
+    def test_wrapped_in_login_shell_so_remote_path_is_sourced(self) -> None:
+        # Confirmed live (agent-bridge-cli-mode-sessions Phase 4 validation,
+        # a disposable trusted-container venue): OpenSSH's non-interactive
+        # remote-command exec never sources ~/.profile/~/.bashrc, so a
+        # bare (unwrapped) command resolves `agent-worktrees` to nothing even
+        # when it is genuinely, fully installed under ~/.local/bin -- exit
+        # 127, a distinct bug from the already-tracked "venue lacks a full
+        # install" gap. `bash -lc` restores the login-shell PATH.
+        cmd = build_copilot_remote_command("wt-A", ensure_mux=False)
+        assert cmd.startswith("bash -lc ")
+        inner = shlex.split(cmd)[2]
+        assert inner == "agent-worktrees copilot --worktree-id wt-A"
 
 
 class TestRunVenueCopilot:

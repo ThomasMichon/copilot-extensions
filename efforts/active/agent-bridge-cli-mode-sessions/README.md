@@ -553,6 +553,13 @@ mechanism CLI mode binds through.
       a disposable venue to clear that last gap remains open for a future
       session (this session did not write to a shared, non-disposable
       operator CodeSpace to do so).
+      **Closed (2026-09-21/22): installed on a disposable `agent-containers`
+      trusted fleet member, and two further genuine bugs found + fixed --
+      see the dated journal entries below.** The full loop -- reserve,
+      SSH connect with both reverse forwards, run `agent-worktrees copilot`
+      remotely, a real interactive `copilot` TUI coming up inside a real
+      tmux session, observed live via `tmux capture-pane` -- now works
+      end-to-end against a venue with a genuinely full install.
 - [x] **New finding (2026-09-20): `live_sessions` needs a reattach-shaped
       field for remote CLI-mode sessions.** Today's schema (`machine`,
       `cwd`, `worktree_id`, `pid`, ...) has no venue identity or mux-session
@@ -648,9 +655,19 @@ mechanism CLI mode binds through.
       passed (4 new from `test_cli_mode_launch.py`), 28 skipped, the same 3
       pre-existing unrelated failures (bisected via `git stash` to confirm
       they reproduce identically without this change).
-- [ ] A CLI-mode session launched via `agent-codespaces`/`agent-containers`
+- [x] A CLI-mode session launched via `agent-codespaces`/`agent-containers`
       binds, reattaches, and is observed identically to the local case, over
       the existing venue-parity transport.
+      **Closed (2026-09-21/22)** -- see the dated journal entries: a real
+      `copilot` TUI launched via `agent-containers copilot <name>
+      --worktree-id <id>` against a disposable trusted fleet container (with
+      a genuinely full `agent-worktrees` install, not just lean tools) came
+      up inside a real tmux session created by the remote
+      `agent-worktrees copilot` verb, observed live via `tmux capture-pane`,
+      and registered with the container's own local `agent-bridge` daemon
+      (`agent-bridge --json live-sessions list` showed the live session with
+      `driven_by: "cli-mode"`) -- identical mechanism to the local case, no
+      CLI-mode-specific divergence.
 
 ## Proposal
 
@@ -662,6 +679,107 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-09-21/22 — Disposable trusted-container venue install closes Phase 4; two more genuine bugs found and fixed
+
+Resumed from a handoff whose next step was: install a *genuinely full*
+`agent-worktrees` on a real venue (not just lean self-provisioned tools) and
+re-run the live end-to-end validation to close the one remaining documented
+gap. Chose a **disposable `agent-containers` trusted fleet member** over a
+shared operator CodeSpace (lower-risk, matches Phase 3's own Docker
+clean-room precedent): built a scratch image extending the existing
+clean-room `base` image with `openssh-server` (the one thing
+`agent-containers`' trusted-container transport doesn't self-provision --
+everything else, including host-key generation and `authorized_keys`
+projection, it already self-heals). Copied the worktree in as a local
+`copilot plugin marketplace add` directory source, installed
+`agent-worktrees` + `agent-bridge` via their real `scripts/install.sh` (not
+just the lean tools-only path), and confirmed the full install: binstub on
+`PATH`, `agent-worktrees --version` resolving cleanly -- the exact gap the
+prior session's validation stopped at.
+
+Running the real round trip (`agent-containers copilot <name> --worktree-id
+<id>`) surfaced two more genuine, previously-undiscovered bugs, both only
+reachable once a venue actually has a full install (so no prior session's
+validation, which always stopped at "command not found," could have hit
+them):
+
+1. **OpenSSH's non-interactive remote-command exec never sources
+   `~/.profile`/`~/.bashrc`.** `venue_copilot.build_copilot_remote_command`
+   built a bare `agent-worktrees copilot --worktree-id ...` command string.
+   Confirmed directly (`ssh -F <config> <host> 'echo $PATH'` vs. `'bash -lc
+   "echo $PATH"'`): a plain remote-exec shell's `PATH` is the stock
+   `/usr/bin:/bin:...` set, never appended with `~/.local/bin` -- the
+   directory `agent-worktrees`' own install flow adds the binstub into.
+   So even a **fully, correctly installed** remote `agent-worktrees` still
+   resolved to `agent-worktrees: command not found` (exit 127) -- a
+   distinct bug from, and layered directly underneath, the already-tracked
+   "venue lacks a full install" gap; every prior session's validation
+   necessarily stopped at the outer gap before this inner one could ever
+   surface. Fixed by wrapping the remote command in `bash -lc '<cmd>'`
+   (restores the login-shell `PATH`) in the shared `venue_copilot` lib,
+   synced byte-identically to both vendored copies
+   (`agent-containers`/`agent-codespaces`) per
+   `check-vendored-libs-sync.py`'s contract. New/updated unit coverage in
+   both copies' `test_venue_copilot.py`.
+2. **`agent-worktrees copilot` (`cmd_copilot`) never actually parsed
+   `cmd_embody`'s JSON result.** Once the PATH bug above was fixed, the
+   remote command still failed with "could not parse the embodiment
+   result" -- traced to `cmd_copilot` capturing `cmd_embody`'s stdout via
+   `contextlib.redirect_stdout(buf)`, which only swaps `sys.stdout`. But
+   `output._json_output` (the function every JSON-emitting CLI command,
+   including `embody`, actually calls) deliberately writes to
+   `sys.__stdout__` instead -- precisely so its envelope still reaches the
+   real terminal from inside `cmd_embody`'s own `output.stdout_to_stderr()`
+   block (used while creating a fresh worktree). `redirect_stdout` never
+   sees anything written to `sys.__stdout__`, so `buf.getvalue()` came back
+   **empty on every single call**, both locally and remotely -- confirmed
+   by direct in-process reproduction (no SSH, no venue involved) with a
+   local worktree: `cmd_embody`'s own `print()`-based JSON output reached
+   the terminal correctly, but the capturing caller's buffer was always
+   `''`. This is a 100%-reproducible bug in the local `copilot` verb itself
+   (PR #3126, unrelated to Phase 4's remote transport) that had gone
+   unnoticed because no prior validation pass actually exercised
+   `cmd_copilot`'s parse step end-to-end -- Phase 3's live validation used
+   `cli-mode launch` (a different, older verb), not `copilot`. Fixed with a
+   new `output.capture_json_output()` context manager that swaps
+   `sys.__stdout__` itself (the level `_json_output` actually targets);
+   `cmd_copilot` now uses it instead of `redirect_stdout`. Added a
+   dedicated regression test proving ordinary `print()`-based progress
+   noise under `output.stdout_to_stderr()` is *not* captured (only the real
+   JSON envelope is), so a future refactor can't silently reintroduce the
+   `sys.stdout`-vs-`sys.__stdout__` confusion. `tests/test_copilot.py`'s
+   existing fakes were also switched from a bare `print(json.dumps(...))`
+   to `output._json_output(...)` so they exercise the real contract instead
+   of accidentally matching only the buggy capture mechanism.
+
+With both fixed, the full round trip now works end-to-end inside the
+disposable container: `agent-containers copilot clivenue-1 --worktree-id
+<id>` reserved the CLI-mode slot, SSHed in with both reverse forwards
+established, ran `agent-worktrees copilot --worktree-id <id> --ensure-mux`
+remotely, which self-healed a missing `tmux` (`apt-get install tmux`,
+confirmed against a real `apt-get update`d package cache -- the scratch
+image intentionally keeps its apt lists, matching a real CodeSpace
+devcontainer, so this exercises the actual self-heal path rather than a
+manufactured miss) and created a real, detached tmux session running a real
+interactive `copilot` TUI -- observed live via `tmux capture-pane` (the
+folder-trust prompt, then the ready input caret), and confirmed registered
+with the container's own local `agent-bridge` via `agent-bridge --json
+live-sessions list` (`driven_by: "cli-mode"`). This closes both the
+Phase 4 checklist item and its corresponding Validation Plan item with
+genuine end-to-end evidence, not a claimed pass. Full pytest suites for all
+three touched plugins pass with only pre-existing, unrelated failures
+(confirmed via `git stash` bisection): agent-worktrees' `test_doctor.py`
+(a pre-existing Windows/`plat="linux"` path-fixture mismatch, unrelated to
+this change) and the cross-plugin `test_bootstrap_check_reconcile_opt_in.py`
+Windows/bash path-mangling quirk already known from prior sessions.
+Versions bumped: `agent-worktrees` 1.5.5-dev229, `agent-containers`
+0.1.2-dev151, `agent-codespaces` 0.4.0-dev150.
+
+Remaining open for Phase 4/5: `live_sessions.venue` still isn't populated
+end-to-end by a real venue registration (schema/model landed separately,
+nothing yet sets a non-null value); Phase 5's docs/vision-closure pass is
+untouched.
 
 ### 2026-09-20 — Landed `agent-worktrees copilot`; self-hosted tenancy + Picker-as-caller reframe the remaining launch verb
 

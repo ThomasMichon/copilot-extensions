@@ -162,6 +162,18 @@ def build_copilot_remote_command(
     rather than reimplementing attach logic a third time. The venue must
     already carry a *full* ``agent-worktrees`` install (not just its lean
     self-provisioned tools) for this to resolve.
+
+    Wrapped in ``bash -lc`` (a login shell): confirmed live against a real
+    disposable trusted-container venue (agent-bridge-cli-mode-sessions Phase
+    4 validation) that OpenSSH's non-interactive remote-command exec never
+    sources ``~/.profile``/``~/.bashrc`` -- exactly where
+    ``agent-worktrees``'s own install flow appends ``~/.local/bin`` to PATH
+    (its own getting-started doc's "``~/.local/bin`` is on PATH" check is a
+    login-shell-only guarantee). Without this, a fully, correctly installed
+    remote ``agent-worktrees`` binstub still resolves to
+    ``agent-worktrees: command not found`` (exit 127) -- a distinct bug from,
+    and layered underneath, the already-tracked "venue lacks a full install"
+    gap.
     """
     argv = [embody_bin, "copilot", "--worktree-id", worktree_id]
     if driver:
@@ -170,7 +182,8 @@ def build_copilot_remote_command(
         argv += ["--seed", seed]
     if ensure_mux:
         argv.append("--ensure-mux")
-    return " ".join(shlex.quote(part) for part in argv)
+    inner = " ".join(shlex.quote(part) for part in argv)
+    return f"bash -lc {shlex.quote(inner)}"
 
 
 def run_venue_copilot(

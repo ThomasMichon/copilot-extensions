@@ -27,6 +27,43 @@ class TestStdoutToStderr:
         assert sys.stdout is original
 
 
+class TestCaptureJsonOutput:
+    def test_captures_json_output_envelope(self):
+        with output.capture_json_output() as buf:
+            output._json_output({"ok": True, "value": 1})
+        assert '"ok": true' in buf.getvalue()
+        assert '"value": 1' in buf.getvalue()
+
+    def test_restores_real_stdout_on_exit(self):
+        original = sys.__stdout__
+        with output.capture_json_output():
+            assert sys.__stdout__ is not original
+        assert sys.__stdout__ is original
+
+    def test_restores_real_stdout_on_exception(self):
+        original = sys.__stdout__
+        try:
+            with output.capture_json_output():
+                raise RuntimeError("boom")
+        except RuntimeError:
+            pass
+        assert sys.__stdout__ is original
+
+    def test_plain_stdout_write_is_not_captured(self, capfd):
+        # A plain `contextlib.redirect_stdout` would swap `sys.stdout` only,
+        # which `_json_output` deliberately bypasses (writing to
+        # `sys.__stdout__` so it survives `output.stdout_to_stderr()`
+        # elsewhere) -- confirmed live as the actual root cause of
+        # `cmd_copilot` never parsing a genuine `cmd_embody` result
+        # (agent-bridge-cli-mode-sessions Phase 4 validation).
+        # `capture_json_output()` swaps `sys.__stdout__` itself, so an
+        # ordinary `print()` (still targeting `sys.stdout`) is untouched.
+        with output.capture_json_output() as buf:
+            print("ordinary progress noise")
+        assert buf.getvalue() == ""
+        assert "ordinary progress noise" in capfd.readouterr().out
+
+
 class TestFormatters:
     """Test output formatting functions produce expected text."""
 
