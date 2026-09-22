@@ -7,8 +7,9 @@
   worktrees once the design below is approved (same pattern the Tasks-pane
   effort used).
 - **Created:** 2026-09-21
-- **Status:** Active — Phase 0 complete and operator-approved; Phase 1
-  (claims-pecking-order module design, then Codespaces implementation) next.
+- **Status:** Active — Phase 0 fully complete (design, operator-approved
+  committed screenshots, and the shared claims-pecking-order module all
+  done). Phase 1 (Codespaces implementation) next.
 - **Vision:** [`visions/venue-pivots-ux`](../../../visions/venue-pivots-ux/README.md)
 - **Umbrella issue:** _TBD — file before Phase 1 implementation lands._
 - **Sub-issues:** _TBD, one per Plan phase._
@@ -95,18 +96,16 @@ realization.
   until Phase 0 previews are captured and approved; each implementation
   phase gets its own fresh worktree off `main` afterward (Tasks-pane
   precedent).
-- **Current phase:** Phase 0 — **done and operator-approved (2026-09-21).**
-  Grounding, manifest/screenshot design, and the preview tooling are all
-  complete; the operator reviewed the rendered screenshots (flagging and
-  getting the `driven`→`sess` column fix along the way — see Journal), and
-  the approved renders are committed at `design-previews/*.png` (see the
-  section above) as the durable north-star reference for future sessions
-  to diff implementation against. **Remaining before Phase 1:** the shared
-  claims-pecking-order module is still only a design placeholder in the
-  preview (hand-authored `claims_summary` strings, not a real ranking).
-- **Immediate next step:** design the shared claims-pecking-order module
-  (still open — see Plan Phase 0's last unchecked item) before touching the
-  real `pivots/agent-codespaces.json`, then start Phase 1. If any
+- **Current phase:** Phase 0 is **fully complete** (2026-09-21) — grounding,
+  manifest/screenshot design, operator-approved committed screenshots
+  (`design-previews/*.png`), and the shared claims-pecking-order module
+  (`agent_worktrees.claims_rank`, real code + 13 passing tests) are all
+  done. **Phase 1 has not started.**
+- **Immediate next step:** open the umbrella issue (still `_TBD_` at the top
+  of this README), then start Phase 1: wire `pivots/agent-codespaces.json`'s
+  `entry.subtitle` and wire `pool.picker_payload` to call
+  `claims_rank.summarize_claims` for its `claims_summary` field (the
+  module exists; nothing calls it from the real pivot yet). If any
   implementation-phase session changes a row/menu's visual shape, re-run
   the render script (`worktree-manager\.venv\Scripts\python.exe
   worktree-manager\scripts\picker-snapshot\venue-preview\render_venue_preview.py
@@ -260,16 +259,24 @@ note explaining why, whenever the design is deliberately revised.
   detection point from scratch — likely a periodic/triggered check inside
   the CodeSpace's own git activity or an ADO API poll — before it can call
   the existing `claims add pr` verb.
-- **No prominent-claims-selection code exists anywhere yet:** confirmed
-  (grep across `engine.py`/`pivot_manifest.py`) — the Tasks-pane-ux
-  vision's own "Prominent Artifacts" feature has never been implemented,
-  and no other pivot picks "1-2 prominent" claims out of a fuller ledger
-  today. This effort's shared claims-pecking-order module is therefore
-  genuinely new infrastructure, not a wrapper around an existing selector —
-  size and test it accordingly, and place it somewhere both this effort's
-  pivots and a future Tasks-pane-ux implementation can import from (a
-  natural home is `agent-worktrees` itself, since it already owns the
-  ledger being ranked).
+- **No prominent-claims-selection code existed before this effort:**
+  confirmed (grep across `engine.py`/`pivot_manifest.py`) — the
+  Tasks-pane-ux vision's own "Prominent Artifacts" feature has never been
+  implemented, and no other pivot picked "1-2 prominent" claims out of a
+  fuller ledger. **Now implemented:**
+  `plugins/agent-worktrees/src/agent_worktrees/claims_rank.py`
+  (`rank_claims`/`format_claim`/`summarize_claims`) — pure functions over
+  `ResourceClaim`-shaped entries, no I/O, 13 passing unit tests
+  (`tests/test_claims_rank.py`). Placed in `agent-worktrees` since it
+  already owns the ledger being ranked; both this effort's pivots and a
+  future Tasks-pane-ux implementation import the same module rather than
+  each computing their own selection. **Grounded gap recorded in the
+  module's own docstring:** `claims_cli._claims_add`'s `valid_kinds` today
+  is only `{worktree, codespace, container, ssh, workdir, pr, task}` —
+  "bug"/"issue", "effort", "bridge" are not yet claimable kinds; the
+  module ranks whatever is actually present and degrades gracefully
+  (unrecognized kinds sort last, never raise) rather than assuming those
+  kinds exist.
 - **The row grammar needs zero new picker-engine code — confirmed by
   building the Phase 0 preview.** `subtitle_field`/`_column_subtitle`
   already render one composed string; `Column`/`group_field`/
@@ -335,15 +342,18 @@ note explaining why, whenever the design is deliberately revised.
       `LIVE`/`IDLE`/blank) for the one genuinely new signal — session
       liveness. "View driving worktree"/"Worktree status" menu entries
       gated on `sess` being `LIVE` or `IDLE`.
-- [ ] Design the shared claims-pecking-order module: its home (proposed:
-      `agent-worktrees`, since it owns the ledger being ranked), its input
-      shape (a worktree's claim-ledger entries) and output shape (an
-      ordered/truncated "1-2 prominent" list per the ranking), and how a
-      pivot's rendering code calls into it — this is genuinely new
-      infrastructure (confirmed nothing like it exists today), size the
-      design accordingly. **Not yet designed**: the preview's
-      `claims_summary` values are hand-authored placeholders standing in
-      for this module's eventual output, not a working ranking.
+- [x] Design **and implement** the shared claims-pecking-order module:
+      `plugins/agent-worktrees/src/agent_worktrees/claims_rank.py`
+      (`rank_claims`/`format_claim`/`summarize_claims`), pure functions over
+      `ResourceClaim`-shaped entries (objects or plain dicts), no I/O.
+      13 unit tests, all passing (`tests/test_claims_rank.py`). Grounded
+      against the real `valid_kinds` vocabulary while building it — "bug"/
+      "issue", "effort", "bridge" are not yet claimable kinds; the module
+      degrades gracefully (unrecognized kinds rank last, never raise) — see
+      the module's own docstring for the full gap note. **Still preview-only
+      placeholders**: `fake_pool.py`/`fake_fleet.py`'s `claims_summary`
+      values are hand-authored, not wired to the real module yet — Phase 1/2
+      wire `pool.py`/`_cmd_fleet` to actually call `summarize_claims`.
 - [x] Render and review before/after screenshots for both pivots: current
       (real) shape vs. proposed shape (`codespaces-before/after.png`,
       `containers-before/after.png`), plus a menu screenshot for each
@@ -360,9 +370,12 @@ note explaining why, whenever the design is deliberately revised.
       visual-regression/vision-alignment checks.
 
 ### Phase 1 — Codespaces pivot (implementation)
-- [ ] Build the shared claims-pecking-order module (per Phase 0 design) in
-      `agent-worktrees`, and wire Codespaces' claims-list column to select
-      its "1-2 prominent" entries through it rather than an ad hoc choice.
+- [x] ~~Build the shared claims-pecking-order module~~ — done in Phase 0
+      (`claims_rank.py`, see above). Remaining: wire `pool.py`'s
+      `picker_payload` to actually call `claims_rank.summarize_claims`
+      against the driving worktree's real claim ledger for its
+      `claims_summary` entry field, instead of the preview's hand-authored
+      placeholder strings.
 - [ ] Wire `entry.subtitle` into `pivots/agent-codespaces.json` so
       `pool.picker_payload`'s already-computed subtitle (claim/orphan
       detail) actually renders as the durable-title half of line two.
@@ -383,8 +396,8 @@ note explaining why, whenever the design is deliberately revised.
       account").
 - [ ] Wire the existing `lease` field to a `worktree` cross-link exactly
       as Codespaces already does.
-- [ ] Wire Containers' claims-list column to the same Phase 1
-      claims-pecking-order module — no second implementation.
+- [ ] Wire Containers' claims-list column to the same `claims_rank` module
+      Phase 1 wires — no second implementation.
 - [ ] Add gated lifecycle actions analogous to Release/Recycle/Verify,
       built on `lifecycle.py`/`lease.py`/`rescue.py`'s existing
       start/stop/remove/rescue primitives.
@@ -454,6 +467,21 @@ note explaining why, whenever the design is deliberately revised.
 
 ## Journal
 
+- **2026-09-21 (latest+5)** — Implemented the shared claims-pecking-order
+  module for real (the last open Phase 0 item):
+  `plugins/agent-worktrees/src/agent_worktrees/claims_rank.py`
+  (`rank_claims`, `format_claim`, `summarize_claims` — pure functions,
+  `ResourceClaim`-shaped input, no I/O) plus
+  `tests/test_claims_rank.py` (13 tests, all passing; ran the existing
+  `test_claims_cmd.py`/`test_claim_handoffs.py` suites too — 83 total, no
+  regressions). Grounded the exact pecking-order-to-kind mapping against
+  `claims_cli._claims_add`'s real `valid_kinds` set while building it, and
+  recorded in the module's own docstring that "bug"/"issue", "effort", and
+  "bridge" aren't claimable kinds yet — the ranking degrades gracefully
+  (unrecognized kind sorts last) rather than assuming they exist. Phase 0
+  is now fully complete; Phase 1 has not started (the module exists but
+  nothing calls it from the real `pool.py` yet — that's Phase 1's first
+  task).
 - **2026-09-21 (latest+4)** — Operator approved the Phase 0 screenshots and
   asked that they be **committed to the repo**, not left OneDrive-only —
   noting the Tasks-pane-ux effort's own previews never got this treatment

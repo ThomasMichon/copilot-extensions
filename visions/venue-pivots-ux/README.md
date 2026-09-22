@@ -25,6 +25,8 @@
   `LiveSessionVenue`) ·
   `plugins/agent-worktrees/src/agent_worktrees/claims_cli.py` (the existing
   per-worktree claim ledger — `pr`/`codespace`/`container` claim kinds) ·
+  `plugins/agent-worktrees/src/agent_worktrees/claims_rank.py` (the
+  implemented shared claims-pecking-order module) ·
   `efforts/active/picker-venue-pivots/README.md`
 
 ## Purpose & Intent
@@ -313,6 +315,19 @@ ordering, not a frozen spec — the value this vision adds is fixing that
 exactly one such list exists and is shared, not the specific order of any
 one entry.
 
+**Implemented (2026-09-21):** `agent_worktrees.claims_rank`
+(`rank_claims`/`format_claim`/`summarize_claims`) is the real module —
+pure functions over `ResourceClaim`-shaped entries (objects or plain
+dicts), no I/O, fully unit-tested (`tests/test_claims_rank.py`). Grounded
+against the real claim-kind vocabulary while building it:
+`claims_cli._claims_add`'s `valid_kinds` today is only
+`{worktree, codespace, container, ssh, workdir, pr, task}` — "bug"/
+"issue", "effort", and "bridge" are **not yet claimable kinds** at all. The
+module ranks whatever kind is actually present in a ledger (so it degrades
+gracefully today, showing only PR/CodeSpace/container/worktree/task
+claims); adding a "bug"/"issue" claim kind is the odsp-web PR auto-claim
+concept's own prerequisite, not something this module does on its own.
+
 ### Open — into the muxed Copilot instance, over SSH
 
 The single most important action on either pivot is **Open**: for a row that
@@ -493,6 +508,13 @@ demo data source, before any implementation PR — never a hand-drawn mockup.
 
 ## Provenance
 
+- **2026-09-21 (latest+3)** — Implemented the shared claims-pecking-order
+  module for real: `agent_worktrees.claims_rank` (pure functions over
+  `ResourceClaim`-shaped entries, 13 passing unit tests). Grounded against
+  the real claim-kind vocabulary while building it — `bug`/`issue`,
+  `effort`, and `bridge` are not yet claimable kinds in `claims_cli`'s own
+  `valid_kinds` — recorded as an explicit gap the module degrades
+  gracefully around rather than papering over.
 - **2026-09-21 (latest+2)** — Operator reviewed the rendered screenshots and
   flagged the `driven` column as too much real estate for a boolean,
   pointing at the Worktrees pane's own compact, multi-valued `sess`/`live`
