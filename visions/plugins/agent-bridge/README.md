@@ -357,7 +357,12 @@ hosting a live process. Liveness changes *how* the answer is produced (a
 hosted child answers directly; a represented interactive session answers
 through its adapter; neither answers, and a cold-store provider is asked
 instead), never *whether* one is attempted. The caller is never required to
-already know a session is dead before asking for it.
+already know a session is dead before asking for it. This applies to a
+session's **transcript/event content**, not only its metadata — including a
+**solo session with no worktree at all**: the same cold-store answer that
+resolves a worktree-scoped session's content resolves a bare session id's
+content too, so a consumer with only a session id in hand never needs a
+separate archival dependency just to render the transcript.
 
 ### listing-defaults-to-registered-excludes-archived
 
@@ -678,6 +683,15 @@ machine may deliberately gate outbound reach until policy allows it.
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md).
 
 ## Provenance
+
+- **2026-09-21** — Extended *any-session-any-registered-worktree-regardless
+  -of-liveness* to explicitly cover transcript/event content (not only
+  metadata) and solo sessions with no worktree at all. Implemented as a new
+  ``GET /api/v1/sessions/{id}/transcript`` bare route, backed by the same
+  cold-store provider the worktree-scoped transcript route already uses --
+  closing a gap `aperture-labs`' `session-worktree-archive-linkout` Phase 2d
+  flagged as a small, feasible follow-up (letting a solo-session consumer,
+  e.g. Neuron Forge, retire its own direct Permanent Record dependency).
 
 - **2026-09-20** — Added *listing-defaults-to-registered-excludes-archived*
   (Features) and *archived-is-opt-in-never-ambient* (Behaviors): every

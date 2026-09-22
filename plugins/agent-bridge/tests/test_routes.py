@@ -393,6 +393,42 @@ class TestSessionRoutes:
             resp = client.get("/api/v1/sessions/nowhere")
         assert resp.status_code == 404
 
+    def test_get_session_transcript_returns_cold_store_events(
+        self, client, app
+    ) -> None:
+        """A bare (non-worktree-scoped) session's transcript is answered by
+        the registered cold-store provider -- letting a solo-session
+        consumer (e.g. Neuron Forge) retire its own direct Permanent
+        Record transcript dependency."""
+        from agent_bridge.cold_store import ColdStoreSession
+
+        mgr = app.state.session_manager
+        cold = ColdStoreSession(
+            session_id="archived-2",
+            status="ended",
+            worktree_id="wt-2",
+            events=({"type": "message", "text": "hi"},),
+        )
+        with patch.object(
+            mgr, "fetch_cold_store_session", AsyncMock(return_value=cold)
+        ):
+            resp = client.get("/api/v1/sessions/archived-2/transcript")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["session_id"] == "archived-2"
+        assert body["events"] == [{"type": "message", "text": "hi"}]
+        assert body["meta"]["worktree_id"] == "wt-2"
+
+    def test_get_session_transcript_404s_when_no_cold_store_answer(
+        self, client, app
+    ) -> None:
+        mgr = app.state.session_manager
+        with patch.object(
+            mgr, "fetch_cold_store_session", AsyncMock(return_value=None)
+        ):
+            resp = client.get("/api/v1/sessions/nowhere/transcript")
+        assert resp.status_code == 404
+
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session(self, mock_acp_cls, mock_spawn, client) -> None:
