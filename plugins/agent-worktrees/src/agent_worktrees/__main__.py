@@ -2367,7 +2367,8 @@ def _create_worktree_core(
     # revalidate-under-lock shape immediately below; `_carve_paired_
     # knowledge`'s own preflight/revalidation stay in place as defense in
     # depth for the narrower TOCTOU window between here and its own carve.
-    _paired_knowledge_allocation_preflight(config)
+    if kind == "session" and origin in (None, "user"):  # #3198 follow-up
+        _paired_knowledge_allocation_preflight(config)
 
     # Ensure root exists
     Path(repo.worktree_root).mkdir(parents=True, exist_ok=True)
@@ -2547,7 +2548,7 @@ def _create_worktree_core(
     # pair together with this worktree and cross-stamp the linkage. Only for
     # plain session worktrees (never system/bridge), and fully fail-safe -- a
     # pairing failure never breaks the harness carve.
-    if kind == "session":
+    if kind == "session" and origin in (None, "user"):  # #3198 follow-up
         try:
             pair_stamp = _carve_paired_knowledge(
                 config,
