@@ -81,6 +81,16 @@ def add_copilot_subparser(sub) -> None:
              "held by another worktree/machine refuses the connect (matches "
              "`agent-codespaces ssh`'s own claim enforcement).",
     )
+    copilot_parser.add_argument(
+        "--force", action="store_true",
+        help="Take over a same-machine, cross-process SSH target lock held by "
+             "another live local process (e.g. a concurrent `ssh`/`copilot` "
+             "invocation against the same CodeSpace on THIS machine) -- "
+             "terminates that process. Distinct from --force-claim, which "
+             "evicts a different WORKTREE's cross-machine claim; this guards "
+             "the shared credential-relay connection itself (matches "
+             "`agent-codespaces ssh`'s own same-machine serialization).",
+    )
 
 
 def _resolve_anchor_identity(name: str, config) -> str:  # noqa: ANN001
@@ -262,6 +272,17 @@ def cmd_copilot(
     was driven successfully on a CodeSpace a different, still-live worktree
     on another machine had legitimately claimed, disrupting its in-flight
     work.
+
+    Also acquires the SAME same-machine, cross-process ``ssh-manager``
+    ``TargetLock`` ``agent-codespaces ssh`` already does, guarding the
+    shared credential-relay reverse-forward this verb rides just like
+    ``ssh`` does -- previously only ``ssh`` serialized concurrent local
+    processes against this collision (a second local `copilot`/`ssh`
+    invocation against the same CodeSpace could collide on the relay port
+    and collapse the first one's connection); `copilot` never took this
+    lock at all, even though `agent-containers`' own `copilot` verb already
+    does (this fix brings the two venues' `copilot` verbs into consistent
+    parity on this same-machine axis too).
     """
     from .lease import ClaimConflict, CoordinationRejected, claim_for_connect
     from .worktrees import ContextRefused
@@ -294,6 +315,31 @@ def cmd_copilot(
         # Never let a claim-bookkeeping error block a connect.
         print(f"[WARN] CodeSpace claim skipped: {exc}", file=sys.stderr)
 
+    from ssh_manager import TargetBusyError, TargetLock
+
+    target_lock = TargetLock(args.name, op="copilot")
+    try:
+        target_lock.acquire(force=getattr(args, "force", False))
+    except TargetBusyError as busy:
+        print(busy.user_message(), file=sys.stderr)
+        return _BUSY_EXIT
+
+    try:
+        return _cmd_copilot_connect(args, interactive_ssh=interactive_ssh)
+    finally:
+        target_lock.release()
+
+
+def _cmd_copilot_connect(
+    args: argparse.Namespace,
+    *,
+    interactive_ssh: Callable[..., int],
+) -> int:
+    """The actual reserve/connect/release body of ``cmd_copilot``, run only
+    once both the worktree claim and the same-machine target lock are held.
+    Split out purely so ``cmd_copilot`` itself can wrap it in a
+    ``try/finally`` releasing ``target_lock`` regardless of outcome.
+    """
     _ensure_agent_bridge_plugin(args.name)
 
     from venue_copilot import VenueCopilotError, resolve_daemon_port, run_venue_copilot
