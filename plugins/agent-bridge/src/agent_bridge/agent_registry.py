@@ -52,7 +52,8 @@ from .agent_registry_topology import (
     load_local_repos,
     parse_agent_registry,
 )
-from .topology import MachineConfig
+from .topology import MachineConfig, SshEnvironment
+from .transport import PluginRef, SpawnTarget
 
 log = logging.getLogger("agent-bridge")
 
@@ -288,7 +289,10 @@ __all__ = [
     "FileTokenValidator",
     "NamespaceAgentInfo",
     "NamespaceResolver",
+    "PluginRef",
     "RestrictedCliNamespaceResolver",
+    "SpawnTarget",
+    "SshEnvironment",
     "_NAMESPACE_LIST_DEFAULT_TTL",
     "_NAMESPACE_LIST_OFF",
     "_PROJECTS_YAML_DEFAULT",
@@ -319,6 +323,7 @@ __all__ = [
     "load_agent_registry",
     "load_elevated_projects",
     "load_local_repos",
+    "MachineConfig",
     "parse_agent_registry",
     "register_credential_sources",
     "resolve_repo_remote",
