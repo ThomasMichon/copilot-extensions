@@ -56,28 +56,34 @@ from .config import Config
 from .finalize_lock import FinalizeLock
 
 
-def _release_codespace_claims_for_worktree(worktree_id: str) -> None:
-    """Best-effort safety net: release every real ``agent-codespaces`` claim
-    this worktree holds, as the last line of defense before finalize
-    completes.
+def _warn_of_codespace_claims_for_worktree(worktree_id: str) -> None:
+    """Warn-only safety net: report any real ``agent-codespaces`` claim this
+    worktree still holds, with the exact command to release each one --
+    never releases anything itself.
 
-    The ``tracking.release_all_resources`` call this runs alongside only
-    clears THIS repo's own bookkeeping ledger of what a worktree claimed --
-    it never calls back out to the venue plugin that actually enforces
-    exclusivity (``agent-codespaces``' own ``leases.json``). Without this, a
-    worktree that forgot (or crashed before) releasing a CodeSpace claim
-    explicitly would leave that claim live past its own finalization,
-    blocking every future dispatch to that CodeSpace until its TTL sweep
-    eventually reclaims it -- silently, potentially for hours.
+    The calling agent (not this finalize hook) is the one who knows whether
+    the claimed CodeSpace is genuinely done with -- finalize cannot safely
+    assume that on the worktree's behalf. Only two things are ever entitled
+    to self-release automatically at finalize time: the CURRENT session
+    (whose own claim it is unambiguously safe to drop, since finalize is
+    itself sanctioned by that same session) and an ACTIVE HANDOFF's claim
+    (whose successor has already been notified and can reclaim on demand).
+    Everything else is surfaced here for the operator/agent to release
+    explicitly, after confirming it's genuinely no longer needed.
 
-    Shells ``agent-codespaces release-claim --owner <worktree_id> --all``
+    ``tracking.release_all_resources`` (run alongside this) only clears THIS
+    repo's own bookkeeping ledger of what a worktree claimed -- it never
+    calls back out to the venue plugin that actually enforces exclusivity
+    (``agent-codespaces``' own ``leases.json``), so without a warning here a
+    real claim could otherwise be silently forgotten past this worktree's
+    own finalization.
+
+    Shells ``agent-codespaces leases --owner <worktree_id> --json``
     (marketplace-isolation: agent-worktrees never imports a sibling plugin's
-    runtime) rather than trying to resolve which CodeSpace(s) this worktree
-    claimed from the ledger above -- deliberately over-releasing: an
-    already-clear or absent claim is a harmless no-op, and it is always
-    better to over-release than to leave a stale claim behind. Absent
-    binstub / any failure is swallowed -- this must never block finalize.
+    runtime) -- read-only. Absent binstub / any failure is swallowed --
+    this must never block finalize.
     """
+    import json
     import subprocess
 
     from agent_procutil import no_window_flags
@@ -86,13 +92,33 @@ def _release_codespace_claims_for_worktree(worktree_id: str) -> None:
     if not binstub:
         return
     try:
-        subprocess.run(
-            [binstub, "release-claim", "--owner", worktree_id, "--all"],
+        result = subprocess.run(
+            [binstub, "leases", "--owner", worktree_id, "--json"],
             capture_output=True, text=True, timeout=30,
             creationflags=no_window_flags(),
         )
+        claims = json.loads(result.stdout or "[]") if result.returncode == 0 else []
     except Exception:
-        pass
+        return
+    if not claims:
+        return
+    output.warn(
+        f"{len(claims)} live CodeSpace claim(s) are still held by {worktree_id} "
+        "-- finalize does NOT release these for you. Confirm each is genuinely "
+        "no longer needed, then release it explicitly:"
+    )
+    for entry in claims:
+        name = entry.get("codespace") if isinstance(entry, dict) else None
+        if not name:
+            continue
+        print(
+            f"  · {name}: agent-codespaces release-claim {name} "
+            f"--owner {worktree_id}"
+        )
+    print(
+        "    (or release every one of this worktree's claims at once: "
+        f"agent-codespaces release-claim --owner {worktree_id} --all)"
+    )
 
 
 def _has_live_session(record) -> bool:
@@ -1916,20 +1942,17 @@ def validate_and_finalize(
             # orphans governed by their own prune safety.
             released = tracking.release_all_resources(record, save=False)
             tracking.update_status(record, "finalized")
-            # Actually release any real CodeSpace claim(s) this worktree holds
-            # in agent-codespaces' own lease store -- distinct from (and a
-            # necessary complement to) the bookkeeping-only ledger release
-            # just above, which only clears THIS repo's own claim records and
-            # never calls back out to the venue plugin that actually enforces
-            # exclusivity. Without this, a worktree that forgot to release a
-            # CodeSpace claim explicitly (or crashed before doing so) would
-            # leave that claim live in agent-codespaces' leases.json past its
-            # own finalization, blocking every future dispatch to that
-            # CodeSpace until the claim's TTL eventually expired. This is the
-            # "worst case at worktree finalization" backstop: best-effort,
-            # over-release rather than under-release (an already-clear claim
-            # is a harmless no-op), and never blocks finalize on failure.
-            _release_codespace_claims_for_worktree(worktree_id)
+            # Warn about (never auto-release) any real CodeSpace claim(s)
+            # this worktree still holds in agent-codespaces' own lease
+            # store -- distinct from (and a necessary complement to) the
+            # bookkeeping-only ledger release just above, which only clears
+            # THIS repo's own claim records and never even queries the venue
+            # plugin that actually enforces exclusivity. Only the CURRENT
+            # session and an ACTIVE HANDOFF are entitled to self-release a
+            # claim at finalize time; any other still-live claim is
+            # surfaced here, with the exact release command, for the
+            # calling agent to confirm and run explicitly.
+            _warn_of_codespace_claims_for_worktree(worktree_id)
             # Reset the postToolUse disposition-nudge sidecar (#nudge): a
             # finalized worktree's disposition is sealed, so drop its drift
             # counter. Best-effort -- the nudge hook also self-heals on a
