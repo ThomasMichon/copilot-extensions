@@ -58,7 +58,7 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-21, post-`installation_context.py` canonical split)
+### Current pecking order (snapshot, 2026-09-21, post-`engine.py` split)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
 — re-run before starting a phase, this list moves; it already has once per
@@ -67,15 +67,14 @@ table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 9,267 | +8,267 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression); it drifted again while this slice was in flight, so the baseline was manually widened (9191 → 9267) to restore a green full-tree guard pending its own future split |
-| 8,138 | +7,138 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
-| 6,972 | +5,972 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
+| 8,145 | +7,145 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
+| 6,971 | +5,971 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | The live-orchestration CLI-registration giant; still a dedicated-slice item, not a quick opportunistic split |
 | 6,751 | +5,751 | `plugins/agent-bridge/src/agent_bridge/session_manager.py` | |
-| 3,946 | +2,946 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | Partial split landed: the claim/follow-up/orphanage ledger now lives in `tracking_claims.py`, asserted head/handoff/create primitives in `tracking_lifecycle.py`, and the hook/session-registry + repo-freshness helpers in `tracking_session_registry.py`. What's left is the persistence-heavy core: `WorktreeRecord`, YAML load/save/merge, locking/stamp-queue machinery, and the remaining parse/serialize compatibility helpers. |
 | 5,145 | +4,145 | `plugins/agent-index/scripts/cell-runtime.py` | |
-| 4,902 | +3,902 | `plugins/agent-dispatch/src/agent_dispatch/__main__.py` | Already partially split (`producers_cli.py` et al. extracted) — still a strong model for how far a CLI-registration split can continue |
+| 5,022 | +4,022 | `plugins/agent-dispatch/src/agent_dispatch/__main__.py` | Already partially split (`producers_cli.py` et al. extracted) — still a strong model for how far a CLI-registration split can continue |
 | 4,693 | +3,693 | `plugins/agent-codespaces/src/agent_codespaces/__main__.py` | CLI registration surface |
 | 4,508 | +3,508 | `plugins/agent-dispatch/src/agent_dispatch/queue.py` | The original motivating case for the cap itself |
+| 3,946 | +2,946 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | Partial split landed: the claim/follow-up/orphanage ledger now lives in `tracking_claims.py`, asserted head/handoff/create primitives in `tracking_lifecycle.py`, and the hook/session-registry + repo-freshness helpers in `tracking_session_registry.py`. What's left is the persistence-heavy core: `WorktreeRecord`, YAML load/save/merge, locking/stamp-queue machinery, and the remaining parse/serialize compatibility helpers. |
 | 3,514 | +2,514 | `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` | |
 | 2,963 | +1,963 | `plugins/agent-bridge/src/agent_bridge/agent_registry.py` | |
 | 2,680 | +1,680 | `plugins/agent-worktrees/src/agent_worktrees/sessions.py` | |
@@ -87,16 +86,20 @@ table):
 | 2,195 | +1,195 | `plugins/agent-worktrees/src/agent_worktrees/reconcile.py` | |
 | 2,124 | +1,124 | `plugins/agent-worktrees/src/agent_worktrees/session_projection.py` | |
 | 2,107 | +1,107 | `plugins/agent-worktrees/src/agent_worktrees/config.py` | |
+| 2,078 | +1,078 | `worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py` | Now the largest remaining `worktree-manager` / production-picker module after the `engine.py` split; coherent same-package follow-up if the campaign stays in this area |
 
 **Suggested next pick (Phase 2, next slice):** if the priority is still the
 largest remaining production offender overall, take
-`worktree-manager/.../picker_tui/engine.py`. If the operator wants to stay in
-`agent-worktrees`, `tracking.py` is still the clearest partially-resolved
-target: split the persistence/serialization core (`load_record`,
-`_save_record_unlocked`, locking, stamp queue, and the record/PR parse-merge
-helpers) away from the still-large composition root. If the operator prefers a
-fresh `agent-worktrees` file instead of another pass on the same one,
-`pr_ops.py` remains the next best candidate.
+`plugins/agent-worktrees/src/agent_worktrees/__main__.py`. If the operator
+wants to stay in `worktree-manager` / the production-picker package that
+opened this effort, `picker_tui/data_ssh.py` is now the clearest local
+follow-up. If the operator wants to stay in `agent-worktrees`,
+`tracking.py` is still the clearest partially-resolved target: split the
+persistence/serialization core (`load_record`, `_save_record_unlocked`,
+locking, stamp queue, and the record/PR parse-merge helpers) away from the
+still-large composition root. If the operator prefers a fresh
+`agent-worktrees` file instead of another pass on the same one, `pr_ops.py`
+remains the next best candidate.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
 margin of their own ceiling (most likely to tip over next from unrelated
@@ -1283,3 +1286,59 @@ the Phase 0 runbook, picked up as capacity allows.
   within `agent-worktrees`, the most coherent follow-up remains the
   persistence/serialization core left in `tracking.py`.
 
+### 2026-09-21 — Phase 2 continued: `worktree-manager/.../picker_tui/engine.py` split
+- Closed the loop on the file that opened this effort in the first place:
+  read the full `picker_tui/engine.py`, reconciled it to the picker vision's
+  UI-fidelity requirement, and split it along the seams the file itself had
+  already grown into instead of forcing a synthetic midpoint cut. The result is
+  a thin **597-line composition root** plus sibling modules by responsibility:
+  `engine_helpers.py` (596), `engine_regions.py` (527), `engine_focus.py` (99),
+  `engine_dialogs.py` (943), `engine_live_screens.py` (365),
+  `engine_views.py` (743), `engine_profiles_view.py` (517),
+  `engine_pivots.py` (247), `engine_loading.py` (460),
+  `engine_runtime.py` (457), `engine_model.py` (430),
+  `engine_selection.py` (435), `engine_rendering.py` (880),
+  `engine_input.py` (360), `engine_maintenance_actions.py` (426),
+  `engine_worktree_actions.py` (739), and `engine_pivot_actions.py` (627).
+  Every extracted file stays under the 1,000-line cap.
+- The structural shape matches the runbook's "one giant stateful class" advice:
+  `PickerScreen` stays the single state owner, but its method families now live
+  in focused mixins (pivot discovery, live loading, data/model queries,
+  selection/navigation, rendering, maintenance/worktree actions, and
+  registered-pivot actions). The already-separable satellites moved completely
+  out of the root file too: native focus widgets, modal screens, live progress
+  / message viewers, and the four body-view components. `steering.py` now
+  reaches `FocusGroup` through the new focused module instead of importing the
+  entire engine, avoiding a new circular edge while preserving every existing
+  import path the tests and preview scripts use (`engine.py` re-exports the
+  old public surfaces).
+- This slice directly addresses the effort's origin-story failure mode from
+  #2788/#2794. That regression happened because unrelated UX work had only one
+  enormous place to land, so another small feature could quietly push the same
+  already-baselined monolith further over its ceiling. After this split,
+  those concerns have bounded homes: a future tweak to list rendering, modal
+  UX, background loading, or worktree actions no longer has to pile onto a
+  single 9,267-line file just because that's where everything happened to live.
+- Validation/fix-ups mattered here because this is a human-facing TUI, not a
+  backend-only helper. The first extraction pass surfaced exactly the kind of
+  compatibility seams this effort is meant to harden: exported helper symbols
+  (`_resolve_version`, `_idle_timeout_secs`, palette constants, relation icons)
+  and monkeypatch seams (`POLL_SECS`) still had to live at the historical
+  `engine` import surface; `_ZONE_WIDGET` had to remain a class attribute, not
+  disappear into an extracted module; and the property shims onto
+  `profiles_view` had to preserve their getter/setter decorators. Fixed those,
+  re-ran Ruff until the new module graph was clean, then re-ran the full
+  worktree-manager suite until the production-picker corpus was fully green.
+- Final validation for the slice:
+  `test-supervisor -- uv run --extra dev pytest -q` passed
+  **1084 tests** with **3 skipped**;
+  `uv run ruff check --select F,E9 src/worktree_manager/production_picker/picker_tui/engine.py src/worktree_manager/production_picker/picker_tui/engine_*.py src/worktree_manager/production_picker/picker_tui/steering.py`
+  passed; read-only import/dogfood coverage was exercised implicitly by the
+  production-picker test suite plus the worktree-manager CLI tests. Version bump
+  for this slice: `worktree-manager` **`0.1.0-dev61`** in both
+  `worktree-manager/pyproject.toml` and `worktree-manager/src/worktree_manager/__init__.py`.
+- Resulting backlog shift: `engine.py` disappears from the module-size
+  pecking order entirely. The repo's largest remaining baselined offender is
+  now `plugins/agent-worktrees/src/agent_worktrees/__main__.py` at 8,145
+  lines; within the same `worktree-manager` picker package, the next coherent
+  local target is `picker_tui/data_ssh.py` at 2,078 lines.

@@ -23,12 +23,8 @@ from textual.widgets import (
     TextArea,
 )
 
-from .engine import (
-    C_BTN,
-    C_BTN_SEL,
-    C_HEADER,
-    FocusGroup,
-)
+from .engine_focus import FocusGroup
+from .engine_helpers import C_BTN, C_BTN_SEL, C_HEADER
 
 
 def _normalize_form_fields(raw: object) -> list[dict]:
