@@ -885,7 +885,16 @@ first time since Phase 4 landed.
    the original note anticipated; scope and implement as its own follow-up
    rather than folded into this session's item 1-2 fix.
 
-### Phase 5 — Artifacts (claims) surface — BLOCKED on the agent-worktrees accelerator
+### Phase 5 — Artifacts (claims) surface — was BLOCKED on the agent-worktrees accelerator, now UNBLOCKED
+**Status update 2026-09-21:** the `agent-worktrees` accelerator prerequisite
+this phase (and Phase 8) depended on is now built, hardened through 4 PRs
+(#3102, #3147, #3186, #3206), and deployed — including the daemon-liveness
+audit's boot-and-wait redesign that makes its own health signal trustworthy.
+Phase 8's design entry (2026-09-21, see its own Journal writeup) resolves
+the "agent-dispatch-side consumer" this phase also needs: Phase 5's
+`artifacts_summary` is a second reader of that same relay file (see Phase
+8's own numbered design above, step 5) — no separate poll mechanism to
+design here.
 - [ ] Land `artifacts_summary` computation in `board_cli.py` (or wherever
       agent-dispatch tracks claims) and the drill-in claims viewer content
       for the Worktree Status card. (Not duplicated with Phase 3 — Phase 3
@@ -903,18 +912,8 @@ first time since Phase 4 landed.
       (e.g. task-level, not worktree-level), name and scope that as an
       explicitly different concept before implementing it, rather than
       reusing the word for two different ownership boundaries.
-- [ ] **Explicit prerequisite (Copilot review, 2026-09-20):** this phase now
-      depends on the same not-yet-built projection path Phase 8 depends on
-      (an `agent-worktrees` accelerator exposing worktree/claims state, plus
-      agent-dispatch's own consumer of it — neither exists yet). Per this
-      effort's own sequencing rule (land each phase before starting the
-      next), **do not start Phase 5's implementation until that
-      prerequisite work lands** — starting it earlier either produces
-      nothing executable or invites exactly the duplicate-claims-computation
-      fallback this reconciliation forbids. If Phase 5 is picked up before
-      the prerequisite lands, treat Phase 6 (independent of claims) as the
-      next unblocked phase instead, and say so explicitly rather than
-      silently reordering.
+- [ ] Implement against the same relay file Phase 8 populates (see Phase
+      8's numbered design) — do not stand up a second poller.
 
 ### Phase 6 — Source-repo grouping/filtering
 - [ ] The REPO column ships in Phase 3. A dedicated repo filter chip
@@ -988,28 +987,145 @@ no lifecycle-control logic invented at this layer.
       conflicting with `provider-owned-worktrees-surface` (a control plane
       renders without persisting a second copy) and `derive-dont-duplicate`
       (agent-worktrees owns this state). Any read-side design must stay a
-      **non-authoritative, transient view** — read fresh from the
-      accelerator (or a short-lived in-memory cache scoped to a single
-      board render, never a durable task-row column or other persisted
-      copy) — not yet designed or scoped into concrete steps; do that as
-      the next step before writing any Phase 8 code. **Open cold-start
-      question (Copilot review, 2026-09-20):** a subprocess-free consumer
-      still needs the accelerator warm to answer inside its own bounded
-      render/click wait — whether that means an explicit prewarm trigger
-      (e.g. on Picker/Tasks-pivot startup) or a background lifecycle
-      distinct from the render path itself is a real, unresolved
-      implementation question, not something this design pass or the
-      vision (deliberately "Not a specification") settles; scope it
-      explicitly as part of the next step above rather than assuming
-      boot-on-demand alone is fast enough for a render/click deadline.
-      Recent-message
-      history is explicitly NOT part of this cache (pulled on demand from
-      the owning session host instead, per the vision's existing *Not a
-      transcript or event warehouse* non-goal) — Phase 8's card body should
-      treat any "last messages" content, if wanted at all, as a separate
-      on-demand fetch, not a cached field. **Claims specifically are Phase
-      5's own field** (see that phase's 2026-09-20 note) — Phase 8 renders
-      whatever Phase 5 exposes rather than computing claims itself.
+      **non-authoritative, transient view**. **Design resolved 2026-09-21,
+      revised 2026-09-21 (see the Journal entries of the same date for the
+      full writeup, including a Copilot review round that caught real
+      topology/keying/transport/trigger gaps in the first pass) — the
+      "agent-dispatch-side relay" design:**
+
+      1. **A new asyncio task inside EACH machine's own local coordinator
+         service**, never a shared/hosted one (**correction, Copilot review
+         2026-09-21**: agent-dispatch's hybrid topology can serve a task's
+         board row from a shared coordinator, but a worktree only exists on
+         the one machine that actually claimed/embodies it — `agent-
+         worktrees worktree-status-bundle` only ever resolves tracking
+         records local to whatever machine runs it, so a shared coordinator
+         probing it would either fail or, worse, silently read a same-named
+         local worktree instead). `coordinator.py`'s resident ASGI app
+         (alongside its existing `_gc_loop`/`_orphan_reap_loop` tasks) is
+         still the right *kind* of host (**further correction**: not
+         `supervise daemon`, which is optional and owns no liveness
+         reconciliation), but each machine's own local instance only ever
+         polls for worktree ids whose owning machine is itself. A new
+         `_worktree_status_relay_loop` task, wired the same way
+         `sweeper`/`orphan_reaper` already are, scoped to worktree ids from
+         tasks in `Status.OWNED` (`CLAIMED`/`STARTED`/`SUSPENDED` —
+         `queue_records.py`) whose `owner`/`target_machine` is this
+         coordinator's own machine — never the whole fleet, never another
+         machine's rows. **Correction (Copilot review 2026-09-21, "Resolve
+         canonical repo lanes before invoking agent-worktrees"):** a task's
+         `repo` field is agent-dispatch's own canonical remote lane (e.g.
+         `github.com/org/repo`), not the value `agent-worktrees --project`
+         accepts (a locally adopted project *name*) — passing the lane
+         directly would fail project resolution and leave the relay cold
+         for ordinary tasks. Resolve the lane through the existing
+         `identity.name_for_repo(canonical)` mapping (with its documented
+         `None` fallback for an unadopted repo, which simply skips that
+         poll) before invoking the CLI, while still keying the relay by the
+         canonical `repo` (stable across machines) rather than the locally-
+         resolved name (which can vary per machine's own adoption). For
+         each resolved worktree, it calls out to `agent-worktrees
+         worktree-status-bundle --project <resolved-name> --worktree <id>`
+         (the same real-caller path the accelerator's own audit now
+         hardens) from this async task (a subprocess call off the request-
+         handling path, e.g. via `asyncio.create_subprocess_exec` or a
+         thread executor), never the render/click path — so it is not the
+         subprocess-free consumer the pattern doc's named exception
+         describes; it is simply one more ordinary, coalesced caller of the
+         accelerator, exactly as *external-status-consumer-contract*
+         describes. A cross-machine board render (task claimed on machine
+         B, rendered via machine A's shared/local coordinator) reads
+         machine B's relay over the same
+         federation/routing transport the board already uses to reach a
+         remote coordinator for task data (step 3) — no new cross-machine
+         mechanism to invent.
+      2. **A local relay cache, keyed by `(repo, worktree_id)` — not
+         worktree_id alone**, not a task-row column. (**Correction, Copilot
+         review 2026-09-21**: the accelerator's own contract keys its
+         request/cache on `(project, worktree_id)`. The relay's key uses
+         agent-dispatch's canonical `repo` field — not the locally-resolved
+         project name step 1 passes to `--project` (per the round-4
+         correction above, those are different values; `repo` is stable
+         across machines, the resolved name is not) — so a worktree-id
+         suffix reused across two different adopted repos still cannot
+         silently overwrite one project's projection with another's.) The
+         coordinator writes each fetched projection (git
+         state, session lineage, liveness, the claims graph — never message
+         history, which stays excluded per *Not a transcript or event
+         warehouse*) plus a `fetched_at` timestamp and the accelerator's own
+         forwarded per-fact freshness/unconfirmed markers to a small local
+         store (e.g. `worktree-status-relay.json`/sqlite, mirroring the
+         accelerator's own cache-file pattern for concurrent-read safety),
+         keyed by `(repo, worktree_id)` — **this is explicitly not the
+         rejected idea from the Copilot review above.** That review flagged
+         writing the projection into an agent-dispatch **task row** — the
+         task's own durable, schema'd record — as a second, independently-
+         aging copy of worktree state. This relay is not part of any task's
+         record at all: it is a purely rebuildable cache the coordinator
+         may drop or fall behind on at will, with nothing about a task's
+         lifecycle or completion depending on its presence or freshness —
+         the same "warmth, not truth" posture the accelerator's own cache
+         already has one layer in.
+      3. **The render path reads only through the coordinator's existing
+         client API — never a subprocess, never a local file directly.**
+         (**Correction, Copilot review 2026-09-21**: `board_cli` already
+         supports `AGENT_DISPATCH_URL` pointing at a remote coordinator and
+         runs on the client host, so a raw local-file read would silently
+         report every remote worktree as stale/missing even when the
+         coordinator's own relay is warm.) The coordinator exposes the
+         relay projection through a new endpoint on its existing HTTP API
+         (the same transport `board_cli`'s client already uses for
+         `c.mine()`/`c.get()`/etc.), keyed by `(repo, worktree_id)`;
+         `board_cli`'s render function calls that endpoint (a fast local or
+         networked API read, never a subprocess against agent-worktrees
+         itself) for each worktree id it needs. An entry fresher than a
+         render-side staleness ceiling (e.g. 2x the poll cadence) renders
+         with its forwarded freshness markers; a missing or stale entry
+         renders every fact as stale/unknown and moves on — never blocks
+         the render or a card click, matching the pattern doc's own
+         `subprocess-free-consumer-reports-stale-on-timeout` scenario shape
+         exactly.
+      4. **Cold-start prewarm, corrected to a real state-machine event.**
+         (**Correction, Copilot review 2026-09-21**: the original "terminal
+         back to tracked/live" trigger cannot fire — `Status.TERMINAL`
+         (`COMPLETED`/`ABANDONED`/`DEAD_LETTER`) has no further transitions,
+         per `queue_records.py`.) The real trigger is a task **entering**
+         `Status.OWNED` (the `CLAIMED` transition, when `owner`/
+         `target_worktree` is first established, or a `SUSPENDED` task
+         resuming) — that is the actual moment a worktree becomes something
+         worth polling. Schedule that worktree's first poll immediately at
+         that transition (plus once for every already-`OWNED` task on
+         coordinator startup) rather than waiting for the next periodic
+         tick — the same pattern already proven in this exact effort for
+         the `_setup_live_pivots`/`_prewarm_machine_key_map` cold-start fix
+         (see the Phase 4 Journal entries above).
+      5. **Phase 5 reuse:** the claims graph lives in the same per-
+         `(repo, worktree_id)` projection this relay already caches, so
+         Phase 5's `artifacts_summary` is just another reader of the
+         identical relay (via the same coordinator API endpoint) — no
+         second poll mechanism, no second cache.
+      6. **Validation:** a render-path test asserting the board render
+         function never shells out (mirroring existing "Picker read path:
+         no subprocess" assertions elsewhere in this codebase), a relay
+         freshness/staleness test covering the pattern doc's
+         `subprocess-free-consumer-reports-stale-on-timeout` scenario, and
+         a cross-machine test asserting a shared/remote coordinator never
+         polls a worktree it does not own.
+
+      Recent-message history is explicitly NOT part of this cache (pulled
+      on demand from the owning session host instead, per the vision's
+      existing *Not a transcript or event warehouse* non-goal) — Phase 8's
+      card body should treat any "last messages" content, if wanted at all,
+      as a separate on-demand fetch, not a cached field. **Claims
+      specifically are Phase 5's own field** (see that phase's 2026-09-20
+      note) — Phase 8 renders whatever Phase 5 exposes rather than
+      computing claims itself.
+- [ ] Implement the relay poller in the coordinator service (step 1-2 above),
+      the render-path reader in `board_cli`/`__main__.py`'s `inbox --board`
+      (step 3), the cold-start prewarm hook (step 4), and the three
+      regression tests (step 6 — render-path no-subprocess, freshness/
+      staleness, and cross-machine ownership). Wire Phase 5's
+      `artifacts_summary` to the same relay file once this lands (step 5).
 
 ### Phase 9 — Configuration → Registrars viewer/editor (implementation)
 - [ ] Build the Configuration-menu view listing every registration
@@ -2165,4 +2281,129 @@ pointer. **Not implemented this session**: agent-dispatch's own client design
 (Phase 8) and the Phase 5 claims-projection consumption — those remain this
 effort's own next steps, now genuinely unblocked rather than waiting on
 foundational work elsewhere.
+
+### 2026-09-21 — Accelerator hardened + deployed; Phase 8/5 consumer design resolved
+Since the last entry, the `agent-worktrees-external-status-accelerator`
+effort landed 3 more PRs hardening the accelerator itself (not part of this
+effort, but the prerequisite this effort's own Phase 5/8 blockers named):
+**#3147** (follow-up fixes: coalescing-key collisions, subscriber
+registration, `has_active_demand` in-flight detection, a record-identity
+bypass, a cache eviction race), **#3186** (Phase 7 ground-truth auditor +
+telemetry), and **#3206** (redesigned the auditor's own daemon-liveness
+check to boot-and-wait like a real caller, after live scheduled-audit runs
+caught the resident monitor's own idle-exit being misreported as an
+outage). Deployed and confirmed live on the operator's own machine. This
+session picked the effort back up and scoped the design Phase 8 explicitly
+deferred ("not yet designed or scoped into concrete steps... an open
+cold-start question").
+
+**Resolved design: the agent-dispatch-side relay.** Read `board_cli`'s
+render path (`__main__.py`'s `inbox --board`) and the pattern doc's
+`external-status-consumer-contract`/`subprocess-free-consumer-reports-
+stale-on-timeout` sections directly rather than re-deriving from memory.
+The render path's own documented contract ("no agent-worktrees/agent-bridge
+subprocesses on the Picker read path") is absolute — it cannot itself dial
+the accelerator, cold-boot it, or wait on it, per the pattern doc's named
+exception for exactly this shape of caller. The already-resident
+`coordinator.py` service (its own asyncio app, alongside its existing
+`_gc_loop`/`_orphan_reap_loop` tasks) is the natural place to do that
+dialing instead — **correction, Copilot review 2026-09-21:** the design
+originally named `supervise daemon` for this, but that component is
+optional and only reconciles registered subprocesses; `reconcile_liveness`
+actually runs inside `_gc_loop`, an `asyncio.create_task` the coordinator
+itself schedules, so the relay tick belongs alongside that in the same
+always-resident process, not the optional supervisor. A new
+`_worktree_status_relay_loop` task writes what it learns to a small local
+relay file — explicitly **not** the task-row write the 2026-09-20 Copilot
+review rejected (that review's objection was a projection persisted into
+the task's own durable, schema'd record; this relay is keyed by worktree id,
+lives outside any task's record entirely, and is freely rebuildable/
+droppable — the same "warmth, not truth" posture the accelerator's own
+cache already has one layer in). The render path then only ever reads this
+local file (fast, no subprocess), rendering a missing/stale entry as
+explicit stale/unknown rather than blocking. Cold-start is handled by
+scheduling an immediate poll on daemon startup and on any task's
+terminal-to-live transition, mirroring the `_setup_live_pivots`/
+`_prewarm_machine_key_map` pattern this same effort already used to fix an
+analogous cold-start bug in Phase 4's follow-on work. Phase 5's
+`artifacts_summary` becomes a second reader of the identical relay file —
+no separate poll mechanism. Wrote the full numbered design into Phase 8's
+own Plan entry (see above) and updated Phase 5 to point at it instead of
+independently re-deriving the same mechanism. **Not implemented this
+session** (design-only pass, per the operator's explicit choice): the
+poller, the relay file, the render-path reader, the cold-start hook, and
+the three named regression tests remain Phase 8's actual implementation
+work.
+
+### 2026-09-21 — PR #3222 review round 1 + round 2: real design gaps in the relay
+Round 1 (2 findings, both real): the design named `supervise daemon` as the
+relay poller's host, but that component is optional and owns no liveness
+reconciliation — `reconcile_liveness` runs inside `coordinator.py`'s own
+`_gc_loop` asyncio task, so the relay tick belongs alongside that in the
+always-resident coordinator instead. Also removed a concrete internal
+machine hostname the prior entry published, per this repo's identifier-
+neutrality convention.
+
+Round 2 (4 findings, all real — a genuinely under-specified first pass):
+1. **Topology:** the design didn't account for agent-dispatch's hybrid
+   local/shared-coordinator topology — a worktree only exists on the one
+   machine that claimed it, so a shared coordinator polling it directly
+   either fails or risks reading a same-named local worktree instead.
+   Corrected to: each machine's own local coordinator polls only its own
+   machine's owned worktrees; a cross-machine render reads the owning
+   machine's relay over the same routing transport board_cli already uses
+   for cross-machine task data.
+2. **Keying:** the relay was keyed by `worktree_id` alone, but the
+   accelerator's own contract keys on `(project, worktree_id)` — a reused
+   id suffix across two adopted repos could silently overwrite one
+   project's projection with another's. Corrected to key by
+   `(repo, worktree_id)` (agent-dispatch's `repo` field is the same
+   scoping concept as agent-worktrees' `project`).
+3. **Transport:** the design had the render path read a local file, but
+   `board_cli` explicitly supports a remote `AGENT_DISPATCH_URL` coordinator
+   and runs on the client host — a local-file read would report every
+   remote worktree as stale even when the coordinator's relay is warm.
+   Corrected to serve the relay through a new endpoint on the coordinator's
+   existing HTTP API (the same transport the client already uses for task
+   data), never a raw file read.
+4. **Trigger:** the proposed "terminal back to tracked/live" cold-start
+   hook can never fire — `Status.TERMINAL` has no further transitions per
+   `queue_records.py`. Corrected to the real event: a task entering
+   `Status.OWNED` (the `CLAIMED` transition, or a `SUSPENDED` resume) is
+   when a worktree actually becomes worth polling.
+
+All four corrections rewritten into Phase 8's own Plan entry (see above)
+and cross-referenced from Phase 5. This remains a design-only pass — no
+code changes — but the design is now grounded against the actual topology,
+state machine, and transport rather than assumed single-machine/single-
+process shapes.
+
+### 2026-09-21 — PR #3222 review round 3 + round 4: test-count mismatch, then a real repo/project-name gap
+Round 3 (1 finding, real): two other places in the design still said "the
+two named regression tests" while step 6 enumerates three (render-path
+no-subprocess, freshness/staleness, cross-machine ownership) — fixed both
+mentions to match, since the mismatch could have caused the cross-machine
+safety test to be silently dropped at implementation time.
+
+Round 4 (1 "previously missed" finding, real and substantive): the design's
+step 1 called `agent-worktrees worktree-status-bundle --project <repo>`
+directly using agent-dispatch's own `repo` field — but that field holds
+the canonical remote lane (e.g. `github.com/org/repo`), while `agent-
+worktrees --project` expects a locally adopted project *name*, resolved
+per-machine. Passing the lane directly would fail project resolution and
+leave the relay permanently cold for ordinary tasks — a design bug that
+would have shipped completely broken. Fixed by resolving the lane through
+the existing `identity.name_for_repo(canonical)` mapping (skipping that
+poll on its documented `None` fallback for an unadopted repo) before
+invoking the CLI, while still keying the relay by the canonical `repo`
+(stable across machines, unlike the locally-resolved name) rather than the
+resolved name itself.
+
+### 2026-09-21 — PR #3222 review round 5: reworded a sentence that reintroduced the invalid mapping
+Round 4's fix corrected step 1's CLI call but step 2's keying rationale
+still said "agent-worktrees' 'project' is agent-dispatch's own... `repo`
+field," implying the same direct equivalence round 4 had just rejected.
+Reworded to state plainly that the relay key uses the canonical `repo`
+while the `--project` argument uses the separately-resolved local name —
+no remaining sentence conflates the two.
 
