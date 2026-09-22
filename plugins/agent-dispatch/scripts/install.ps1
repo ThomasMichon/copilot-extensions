@@ -961,24 +961,43 @@ function Install-Runtime {
     )
     $installPkg = {
         param([string]$Spec)
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            $refreshFlags = @()
-            foreach ($pkg in $StaleCacheRefreshPackages) {
-                $refreshFlags += @('--reinstall-package', $pkg, '--refresh-package', $pkg)
+        # Installing FROM the pristine payload directory ($PluginDir, under
+        # the plugin install root) leaves setuptools' own build/lib +
+        # *.egg-info staging behind IN that tree -- pip's build isolation
+        # covers the *environment* the build runs in, not where the legacy
+        # build_meta backend writes intermediate files. Left in place, a
+        # stale build/lib/ (or a src-layout package's src/*.egg-info, one
+        # level deeper than a root-level glob reaches) can silently shadow
+        # fresh src/ on a later install if setuptools' incremental-build
+        # mtime check decides nothing "changed". Scrub on every attempt
+        # (success or not) so the payload directory stays the pristine
+        # clone it's supposed to be -- mirrors the POSIX installer's
+        # cleanup in install.sh.
+        try {
+            if (Get-Command uv -ErrorAction SilentlyContinue) {
+                $refreshFlags = @()
+                foreach ($pkg in $StaleCacheRefreshPackages) {
+                    $refreshFlags += @('--reinstall-package', $pkg, '--refresh-package', $pkg)
+                }
+                $out = & uv pip install --python $VenvPython @refreshFlags $Spec 2>&1 | Out-String
+            } else {
+                # The refresh pre-pass's own exit status must gate the real
+                # install: if it fails, letting the plain install below run
+                # anyway could silently succeed from a cached/existing wheel,
+                # defeating the whole stale-wheel guard.
+                $preOut = & $VenvPython -m pip install --force-reinstall --no-deps $Spec 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) {
+                    return [pscustomobject]@{ Code = $LASTEXITCODE; Output = $preOut }
+                }
+                $out = & $VenvPython -m pip install $Spec 2>&1 | Out-String
             }
-            $out = & uv pip install --python $VenvPython @refreshFlags $Spec 2>&1 | Out-String
-        } else {
-            # The refresh pre-pass's own exit status must gate the real
-            # install: if it fails, letting the plain install below run
-            # anyway could silently succeed from a cached/existing wheel,
-            # defeating the whole stale-wheel guard.
-            $preOut = & $VenvPython -m pip install --force-reinstall --no-deps $Spec 2>&1 | Out-String
-            if ($LASTEXITCODE -ne 0) {
-                return [pscustomobject]@{ Code = $LASTEXITCODE; Output = $preOut }
-            }
-            $out = & $VenvPython -m pip install $Spec 2>&1 | Out-String
+            [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
+        } finally {
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+                (Join-Path $PluginDir 'build'), `
+                (Join-Path $PluginDir '*.egg-info'), `
+                (Join-Path $PluginDir 'src\*.egg-info')
         }
-        [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
     }
 
     $mcpResult = & $installPkg "$($PluginDir)[mcp]"

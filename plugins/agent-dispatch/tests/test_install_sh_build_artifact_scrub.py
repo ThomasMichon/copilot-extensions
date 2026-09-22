@@ -15,7 +15,10 @@ shares the identical "install straight from $PLUGIN_DIR" pattern, so
 ``_pip_install`` must scrub ``$PLUGIN_DIR/build`` and
 ``$PLUGIN_DIR/*.egg-info`` after every install attempt (uv or plain-pip
 branch, success or failure), and must still return the underlying install's
-real exit code.
+real exit code. It must also scrub ``$PLUGIN_DIR/src/*.egg-info`` -- the
+src-layout egg-info location a bare root-level glob never reaches, which
+shadowed a real upstream fix and broke a live deployment for an extended
+period before being caught.
 """
 
 from __future__ import annotations
@@ -92,6 +95,17 @@ def _seed_build_residue(plugin_dir: Path) -> None:
     (plugin_dir / "build" / "lib" / "some_pkg" / "mod.py").write_text("x = 1\n", encoding="utf-8")
     (plugin_dir / "some_pkg.egg-info").mkdir()
     (plugin_dir / "some_pkg.egg-info" / "PKG-INFO").write_text("stub\n", encoding="utf-8")
+
+
+def _seed_src_layout_egg_info(plugin_dir: Path) -> None:
+    """A src-layout package's egg-info (``src/<pkg>.egg-info``) sits one
+    level deeper than the root-level glob reaches -- the exact shadow that
+    survived every cleanup pass and broke a live deployment: a stale
+    ``src/agent_dispatch.egg-info`` shadowed
+    ``src/agent_dispatch/registrar.py``'s real `no_pair` field with an older
+    cached copy that predated it."""
+    (plugin_dir / "src" / "some_pkg.egg-info").mkdir(parents=True)
+    (plugin_dir / "src" / "some_pkg.egg-info" / "PKG-INFO").write_text("stub\n", encoding="utf-8")
 
 
 def test_successful_uv_install_scrubs_build_and_egg_info(tmp_path: Path) -> None:
@@ -174,3 +188,27 @@ fi
 """
     result = _run_harness(plugin_dir, uv_stub, extra)
     assert "EXIT:0" in result.stdout
+
+
+def test_src_layout_egg_info_is_also_scrubbed(tmp_path: Path) -> None:
+    """Regression: a src-layout egg-info one level below $PLUGIN_DIR must
+    be cleaned too, not just the root-level glob."""
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    _seed_build_residue(plugin_dir)
+    _seed_src_layout_egg_info(plugin_dir)
+    uv_stub = """
+uv() { echo 'Installed 1 package'; return 0; }
+"""
+    extra = """
+if _pip_install "$PLUGIN_DIR"; then
+    echo "EXIT:0"
+else
+    echo "EXIT:1"
+fi
+"""
+    result = _run_harness(plugin_dir, uv_stub, extra)
+    assert "EXIT:0" in result.stdout
+    assert not (plugin_dir / "build").exists()
+    assert not (plugin_dir / "some_pkg.egg-info").exists()
+    assert not (plugin_dir / "src" / "some_pkg.egg-info").exists()
