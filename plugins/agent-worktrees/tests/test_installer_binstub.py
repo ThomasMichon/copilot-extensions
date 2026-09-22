@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import platform
 import shlex
+import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -45,6 +47,39 @@ def test_binstub_lock_releases_after_reentrant_use(tmp_path: Path, monkeypatch):
     # Re-acquiring after full release must succeed without blocking/raising.
     with inst._binstub_lock("demoproj"):
         pass
+
+
+def test_binstub_lock_serializes_peer_threads():
+    """A second thread contending for the same key must block on the
+    in-process RLock -- not race straight into the OS-level lock, which
+    would hit the same same-process EDEADLK the reentrancy fix closes."""
+    order: list[str] = []
+    started = threading.Event()
+    release = threading.Event()
+
+    def holder():
+        with inst._binstub_lock("peerkey"):
+            order.append("holder-acquired")
+            started.set()
+            release.wait(timeout=5)
+        order.append("holder-released")
+
+    def contender():
+        assert started.wait(timeout=5)
+        with inst._binstub_lock("peerkey"):
+            order.append("contender-acquired")
+
+    t1 = threading.Thread(target=holder)
+    t2 = threading.Thread(target=contender)
+    t1.start()
+    assert started.wait(timeout=5)
+    t2.start()
+    time.sleep(0.1)  # contender must still be blocked behind the holder
+    assert order == ["holder-acquired"]
+    release.set()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+    assert order == ["holder-acquired", "holder-released", "contender-acquired"]
 
 
 def test_platform_installers_honor_structured_runtime_root():

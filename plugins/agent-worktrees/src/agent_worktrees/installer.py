@@ -677,59 +677,67 @@ def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-_binstub_lock_state = threading.local()
+_binstub_lock_registry_guard = threading.Lock()
+_binstub_lock_registry: dict[str, threading.RLock] = {}
+_binstub_lock_depth: dict[str, int] = {}
+
+
+def _binstub_process_lock(key: str) -> threading.RLock:
+    """Process-wide RLock for ``key``, serializing same-process contenders."""
+    with _binstub_lock_registry_guard:
+        return _binstub_lock_registry.setdefault(key, threading.RLock())
 
 
 @contextmanager
 def _binstub_lock(project: str):
-    """Hold the sidecar arbitration lock for ``project``, reentrant per-thread.
+    """Hold the sidecar arbitration lock for ``project``.
 
-    Windows ``msvcrt.locking`` is not reentrant within a process: a duplicate
-    acquisition of an already-held byte range raises ``OSError(EDEADLK,
-    "Resource deadlock avoided")`` instead of blocking. Track held keys
-    per-thread so a nested acquisition is a no-op; only the outermost pair
-    touches the real file lock. Cross-process/cross-thread contention still
-    blocks on the OS lock as before.
+    Windows ``msvcrt.locking`` is not reentrant *within a process*: a
+    duplicate acquisition of an already-held byte range -- even from another
+    thread of the same process -- raises ``OSError(EDEADLK, "Resource
+    deadlock avoided")`` instead of blocking. Serialize same-process
+    contenders (same thread reentering, or a peer thread) through a
+    process-local ``RLock`` per key first, so only the outermost holder ever
+    touches the real OS-level lock; real cross-process contention still
+    blocks on that OS lock as before. ``_binstub_lock_depth`` is only ever
+    mutated while its key's ``RLock`` is held, so it needs no separate guard.
     """
     key = project.casefold() if platform.system() == "Windows" else project
     path = _command_arbitration_dir() / f".{key}.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
-
-    held = getattr(_binstub_lock_state, "held", None)
-    if held is None:
-        held = set()
-        _binstub_lock_state.held = held
-
     resolved_key = str(path)
-    if resolved_key in held:
-        yield  # reentrant no-op: already held higher up this thread's stack
-        return
 
-    held.add(resolved_key)
-    try:
-        with path.open("a+b") as stream:
-            if stream.tell() == 0:
-                stream.write(b"\0")
-                stream.flush()
-            if os.name == "nt":
-                import msvcrt
-
-                stream.seek(0)
-                msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
+    with _binstub_process_lock(resolved_key):
+        _binstub_lock_depth[resolved_key] = _binstub_lock_depth.get(resolved_key, 0) + 1
+        try:
+            if _binstub_lock_depth[resolved_key] > 1:
+                yield  # reentrant: OS lock already held by this thread
+                return
+            with path.open("a+b") as stream:
+                if stream.tell() == 0:
+                    stream.write(b"\0")
+                    stream.flush()
                 if os.name == "nt":
+                    import msvcrt
+
                     stream.seek(0)
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
                 else:
-                    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
-    finally:
-        held.discard(resolved_key)
+                    import fcntl
+
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    if os.name == "nt":
+                        stream.seek(0)
+                        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+        finally:
+            _binstub_lock_depth[resolved_key] -= 1
+            if _binstub_lock_depth[resolved_key] == 0:
+                del _binstub_lock_depth[resolved_key]
 
 
 # A file in ~/.local/bin is one of *our* project binstubs when it carries the
