@@ -294,6 +294,15 @@ Verbatim from the operator:
               are now the task lifecycle/admin surface, the declarative loop
               families, supervise registration wiring, and the
               resolve/run/evaluate/charter family.
+            - `agent-dispatch/__main__.py` fifth slice landed: extracted the
+              parser-registration-only families into tiny sibling modules —
+              `execution_registration_cli.py`, `declaration_loops_cli.py`,
+              `registrar_parser_cli.py`, and `supervise_registration_cli.py` —
+              so the composition root no longer has to inline those giant
+              argparse registration tables. Remaining seams are now the task
+              lifecycle/admin command bodies themselves plus the
+              registrar/execution helper implementations that still live in
+              `__main__.py`.
             - `agent-bridge/__main__.py` slice landed: the file is now a
               **485-line composition root** with focused sibling modules for
               service start/status (`service_start_cli.py`), daemon/process
@@ -1777,3 +1786,44 @@ the Phase 0 runbook, picked up as capacity allows.
 - Remaining seams are now concentrated in the genuinely larger surfaces:
   task lifecycle/admin, the declarative loop / registrar family, supervise
   registration wiring, and the resolve/run/evaluate/charter family.
+
+### 2026-09-22 — Phase 2 continued: `plugins/agent-dispatch/src/agent_dispatch/__main__.py` parser-registration slice
+- Took the safest non-behavioral reduction next: the **argparse registration
+  tables** for the already-extracted command families. Rather than move more
+  command bodies at once, this slice only pulled the parser wiring into four
+  tiny sibling modules:
+  `execution_registration_cli.py` (**56** lines),
+  `declaration_loops_cli.py` (**59**),
+  `registrar_parser_cli.py` (**37**), and
+  `supervise_registration_cli.py` (**105**). `recipes_cli.py` also gained its
+  own `register_recipes_commands(...)` helper. The effect is purely
+  structural/compositional: `__main__.py` still re-exports the historical
+  command symbols and remains the root, but it no longer carries those long
+  parser blocks inline.
+- Net result for the root module: `plugins/agent-dispatch/src/agent_dispatch/__main__.py`
+  shrank **2,945 -> 2,204** lines without touching the actual runtime command
+  implementations. This slice deliberately avoided the higher-risk lifecycle
+  bodies after a failed first draft of a larger extraction showed that the
+  remaining command/helper interdependence is real enough to deserve a tighter,
+  more surgical follow-up rather than another broad automated carve.
+- Validation still met the full plugin bar. `python tools/run-plugin-tests.py
+  agent-dispatch` passed all six sub-suites green:
+  **3,311 passed / 31 skipped total** (sub-suite counts:
+  `761/5`, `418/11`, `641/14`, `663/1`, `732/0`, `96/4`
+  passed/skipped). Focused parser-family follow-up also passed:
+  `python tools/run-plugin-tests.py agent-dispatch -k "recipes or registrar_cli
+  or repository_issue_loop_cli or worker_charter or driver or hibernation or
+  resolution or supervisor or deploy_cli or lazy_start or cli"`
+  -> **835 passed / 5 skipped / 2506 deselected**. Required guards then
+  passed: `ruff check --select F,E9 plugins/agent-dispatch`,
+  `python tools/check-module-size.py`,
+  `python tools/check-module-size.py --refresh-baseline`,
+  `python tools/check-install-contract.py`, and
+  `python tools/check-version-consistency.py`.
+- Version bump for this slice: `agent-dispatch` **`0.1.2-dev179`**. The
+  shrink-only baseline was lowered again, from **2,945** to **2,204** lines
+  for `plugins/agent-dispatch/src/agent_dispatch/__main__.py`.
+- Remaining work is now concentrated almost entirely in the still-heavy command
+  implementation bands: task lifecycle/admin, the registrar helper/runtime
+  surface, and the resolve/run/evaluate helpers. The file is much closer to a
+  true composition root now, but still above the 1,000-line cap.
