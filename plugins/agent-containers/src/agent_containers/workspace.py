@@ -155,3 +155,60 @@ def remove_task_workspace(
             f"git worktree remove failed for task {task_id!r} in {name!r}: "
             f"{(result.stderr or result.stdout).strip()}"
         )
+
+
+def cmd_namespace_workspace_create(args) -> int:
+    """CLI entry for ``namespace-workspace-create`` (kept out of __main__ to
+    stay under its module-size cap)."""
+    import json
+    import sys
+
+    try:
+        path = create_task_workspace(args.name, args.task_id, args.ref)
+    except (WorkspaceError, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(json.dumps({"path": path}))
+    return 0
+
+
+def cmd_namespace_workspace_remove(args) -> int:
+    """CLI entry for ``namespace-workspace-remove``."""
+    import sys
+
+    try:
+        remove_task_workspace(args.name, args.task_id)
+    except (WorkspaceError, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    return 0
+
+
+def dispatch_workspace_command(args) -> int:
+    """Route a parsed ``namespace-workspace-*`` command to its handler."""
+    if args.command == "namespace-workspace-create":
+        return cmd_namespace_workspace_create(args)
+    if args.command == "namespace-workspace-remove":
+        return cmd_namespace_workspace_remove(args)
+    raise ValueError(f"unknown workspace command {args.command!r}")
+
+
+def add_workspace_subparsers(sub) -> None:
+    """Register ``namespace-workspace-{create,remove}`` on ``sub`` (an
+    ``argparse._SubParsersAction``). Kept out of ``__main__`` so its module
+    stays under the repo's module-size cap."""
+    create_p = sub.add_parser(
+        "namespace-workspace-create",
+        help="Create a fresh git worktree for one task inside a running "
+        "container; prints JSON {path}.",
+    )
+    create_p.add_argument("name", help="Container name")
+    create_p.add_argument("--task-id", required=True)
+    create_p.add_argument("--ref", required=True, help="git ref/branch/SHA")
+    remove_p = sub.add_parser(
+        "namespace-workspace-remove",
+        help="Remove one task's worktree inside a running container "
+        "(idempotent if already absent).",
+    )
+    remove_p.add_argument("name", help="Container name")
+    remove_p.add_argument("--task-id", required=True)

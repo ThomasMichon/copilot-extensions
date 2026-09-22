@@ -262,25 +262,8 @@ def main(argv: list[str] | None = None) -> int:
     ns_recreate_p.add_argument("name", help="Container name")
     ns_recreate_p.add_argument("--expected-container-id", required=True)
     ns_recreate_p.add_argument("--timeout", type=float, default=600.0)
-
-    # --- namespace-workspace-* (restricted-venue-targets Phase 5/7: per-task
-    # git-worktree lifecycle inside an already-running fleet container, routed
-    # to the owning provider instead of any local synthetic record).
-    ns_ws_create_p = sub.add_parser(
-        "namespace-workspace-create",
-        help="Create a fresh git worktree for one task inside a running "
-        "container; prints JSON {path}.",
-    )
-    ns_ws_create_p.add_argument("name", help="Container name")
-    ns_ws_create_p.add_argument("--task-id", required=True)
-    ns_ws_create_p.add_argument("--ref", required=True, help="git ref/branch/SHA")
-    ns_ws_remove_p = sub.add_parser(
-        "namespace-workspace-remove",
-        help="Remove one task's worktree inside a running container "
-        "(idempotent if already absent).",
-    )
-    ns_ws_remove_p.add_argument("name", help="Container name")
-    ns_ws_remove_p.add_argument("--task-id", required=True)
+    from .workspace import add_workspace_subparsers
+    add_workspace_subparsers(sub)
 
     # --- relay-profile (declarative credential-relay seam for agent-bridge #892 Inc 2)
     sub.add_parser(
@@ -394,10 +377,9 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_namespace_ensure_ready(args)
         if args.command == "namespace-recreate":
             return _cmd_namespace_recreate(args)
-        if args.command == "namespace-workspace-create":
-            return _cmd_namespace_workspace_create(args)
-        if args.command == "namespace-workspace-remove":
-            return _cmd_namespace_workspace_remove(args)
+        if args.command.startswith("namespace-workspace-"):
+            from .workspace import dispatch_workspace_command
+            return dispatch_workspace_command(args)
         if args.command == "relay-profile":
             return _cmd_relay_profile()
     except RuntimeError as e:
@@ -647,31 +629,6 @@ def _cmd_namespace_recreate(args: argparse.Namespace) -> int:
         }))
         return 2
     print(json.dumps(result))
-    return 0
-
-
-def _cmd_namespace_workspace_create(args: argparse.Namespace) -> int:
-    """Create a fresh per-task git worktree inside a running container."""
-    from .workspace import WorkspaceError, create_task_workspace
-
-    try:
-        path = create_task_workspace(args.name, args.task_id, args.ref)
-    except (WorkspaceError, RuntimeError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    print(json.dumps({"path": path}))
-    return 0
-
-
-def _cmd_namespace_workspace_remove(args: argparse.Namespace) -> int:
-    """Remove one task's worktree inside a running container (idempotent)."""
-    from .workspace import WorkspaceError, remove_task_workspace
-
-    try:
-        remove_task_workspace(args.name, args.task_id)
-    except (WorkspaceError, RuntimeError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
     return 0
 
 
