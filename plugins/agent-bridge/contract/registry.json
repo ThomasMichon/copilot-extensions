@@ -157,7 +157,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "7f0fdd0ead43fca540ca0c20d33e1f3f3cbc02e15c183e864deaaf278b1cfce8",
+          "sha256": "0f873dc1616caf5c38e5a13e98d0c35c8962b5c7b1b54a129445c45df6fcd301",
           "role": "current HTTP range and capability constants",
           "generation": 17
         },
@@ -500,6 +500,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
           "source_git_blob": "8faf41807a6348cc08d425d6fa75d007103e7c9f",
           "capture_method": "Re-attested after fixing the bare transcript and events/range routes to key durable-event lookups on the resolved bridge session.session_id (not the raw, possibly-ACP-aliased path parameter); the pre-resolution initialization refusal this fixture attests is unchanged."
+        },
+        {
+          "commit": "ac05a77966eb7f8ea00da32c33fb8aadcc2ba4df",
+          "plugin_version": "0.4.0-dev537",
+          "generation": 17,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "207a4942572bd3c01dba1f3b3b2c6316165f41da",
+          "capture_method": "Re-attested after neutralizing an internal-organization-name comment mention for public-repo hygiene; HTTP_PROTOCOL_VERSION and BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION content is unchanged."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 17 supported; evidence currently exercises generations 9 through 17 (16 retained only via its own previous-generation health fixture, not the current generation).",
