@@ -223,6 +223,47 @@ class TestDiagnosticRemoteCmd:
         assert "heavy provisioning skipped" in err
         assert "[stage 7/launch-acp] started: remote command" in err
 
+    def test_explicit_stage_plugin_runs_on_minimal_no_staging_path(
+        self, tmp_path, monkeypatch
+    ):
+        # An explicit ``--stage-plugin`` is honored even on the minimal diagnostic
+        # remote-cmd path with ``--no-plugin-staging`` (the native launcher stages
+        # the harness plugins this way during its prepare connection). Those flags
+        # suppress only the AUTOMATIC codespacePlugins lane, not an explicit request.
+        calls: list[str] = []
+        manager = _FakeManager(calls)
+        _patch_ssh_dependencies(monkeypatch, tmp_path, manager)
+
+        async def record(name):
+            calls.append(name)
+
+        async def fake_stage(_manager, _name, sources, **_kw):
+            calls.append("stage:" + ",".join(sources))
+            return []
+
+        monkeypatch.setattr(cli, "_provision_relay_helpers", lambda *_a: record("relay"))
+        monkeypatch.setattr(cli, "_verify_remote_auth", lambda *_a: record("auth"))
+        monkeypatch.setattr(cli, "_provision_dotfiles", lambda *_a: record("dotfiles"))
+        monkeypatch.setattr(cli, "_provision_harness", lambda *_a: record("harness"))
+        monkeypatch.setattr(cli, "_register_codespace_plugins", lambda *_a: record("register"))
+        monkeypatch.setattr(cli, "_provision_repo_hooks", lambda *_a: record("hooks"))
+        monkeypatch.setattr(cli, "_stage_plugins", fake_stage)
+        monkeypatch.setattr(cli, "_warm_remote_auth_cache", lambda *_a, **_kw: record("warm"))
+
+        rc = main([
+            "ssh", "cs-diag", "--remote-cmd", "echo ok", "--timeout", "5",
+            "--no-plugin-staging",
+            "--stage-plugin", "odsp-web-agent@odsp-web-harness",
+            "--stage-plugin", "agency-harness@odsp-web-harness",
+        ])
+
+        assert rc == 0
+        assert "stage:odsp-web-agent@odsp-web-harness,agency-harness@odsp-web-harness" in calls
+        # The automatic lanes stay suppressed by --no-plugin-staging / minimal.
+        assert "register" not in calls
+        assert "dotfiles" not in calls
+        assert "harness" not in calls
+
     def test_auth_cache_warmup_runs_for_stdio_dispatch(
         self, tmp_path, monkeypatch
     ):

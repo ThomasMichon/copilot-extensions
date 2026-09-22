@@ -324,8 +324,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     ssh_parser.add_argument(
         "--no-plugin-staging", action="store_true",
-        help="Skip CodeSpace plugin registration/install and all host plugin payload "
-             "staging, while retaining credential and repository preparation.",
+        help="Skip the AUTOMATIC CodeSpace plugin registration/install and "
+             "codespacePlugins host-payload staging, while retaining credential "
+             "and repository preparation. Explicit --stage-plugin sources are "
+             "still staged (they are an explicit request, not the automatic lane).",
     )
     ssh_parser.add_argument(
         "--require-relay", action="store_true",

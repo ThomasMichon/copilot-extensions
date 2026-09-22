@@ -61,8 +61,10 @@ def test_plugin_staging_is_independent_of_credential_and_repo_preparation(
     for name in ("_provision_relay_helpers", "_provision_dotfiles", "_provision_harness",
                  "_provision_repo_hooks", "_verify_remote_auth", "_warm_remote_auth_cache"):
         steps[name].assert_awaited_once()
-    for name in ("_register_codespace_plugins", "_stage_plugins"):
-        assert steps[name].await_count == (0 if no_staging else 1)
+    # --no-plugin-staging suppresses only the AUTOMATIC codespacePlugins lane;
+    # an explicit --stage-plugin is an explicit request and is always honored.
+    assert steps["_register_codespace_plugins"].await_count == (0 if no_staging else 1)
+    steps["_stage_plugins"].assert_awaited_once()
     assert manager.exec_command.await_count == 2
     assert all("ping" in call.args[1] for call in manager.exec_command.call_args_list)
     assert events.index("relay-start") < events.index("_provision_dotfiles")
@@ -70,7 +72,8 @@ def test_plugin_staging_is_independent_of_credential_and_repo_preparation(
     if stdio:
         steps["interactive"].assert_not_awaited()
         command = manager.open_stdio_channel.call_args.args[1]
-        assert ("--plugin-dir" in command) is not no_staging
+        # The explicitly staged payload dir is folded into the stdio launch.
+        assert "--plugin-dir" in command
     else:
         manager.open_stdio_channel.assert_not_awaited()
         assert "--plugin-dir" not in steps["interactive"].call_args.kwargs["command"]

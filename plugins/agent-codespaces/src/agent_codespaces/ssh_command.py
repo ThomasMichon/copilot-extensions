@@ -490,11 +490,19 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         # fold their --plugin-dir paths into the launch. Best-effort: a staging
         # failure drops that plugin but never blocks the dispatch.
         plugin_dirs: list[str] = list(cs_plugin_dirs)
-        if not args.no_relay and not minimal_provision and not no_plugin_staging:
+        # Explicit ``--stage-plugin`` sources are staged whenever the relay is up,
+        # even under ``--no-plugin-staging`` or the minimal provisioning path: the
+        # caller asked for these specific host payloads (e.g. the native launcher
+        # staging the harness plugins it later loads via ``--plugin-dir``). Those
+        # flags suppress only the AUTOMATIC ``codespacePlugins`` lane, never an
+        # explicit request. The empty-list case stays a no-op, preserving prior
+        # behavior for callers that pass no ``--stage-plugin``.
+        stage_sources = getattr(args, "stage_plugins", []) or []
+        if not args.no_relay and stage_sources:
             plugin_dirs += await _stage_plugins(
                 manager,
                 args.name,
-                getattr(args, "stage_plugins", []),
+                stage_sources,
                 repo_roots=getattr(config, "source_paths", ()) or (),
             )
         # NB: the repo-own ``.ai`` lane is intentionally NOT folded here. A
