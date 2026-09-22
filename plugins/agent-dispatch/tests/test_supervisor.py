@@ -2391,7 +2391,13 @@ def test_requeued_task_is_not_double_spawned(q, client):
     # path is unchanged only for a headless body (Phase 1 item 2) -- a
     # CLI-embodied one now auto-suspends instead.
     spawn = _ok_spawn({"session": "local-body:sess-1", "worktree": "wt-1"})
-    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        local_body_verdict_fn=lambda _sid: "live",
+    )
     sup.poll_once()  # spawn #1
 
     # simulate: embody claimed + started, then its worker went away -> re-queued
