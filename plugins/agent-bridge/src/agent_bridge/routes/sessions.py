@@ -832,9 +832,9 @@ async def get_session_transcript(session_id: str, request: Request) -> dict[str,
     session = mgr.get_session(session_id)
     if session is not None:
         status, at_rest, _liveness = session.public_state()
-        rows = mgr.db.get_events_range(session_id, 0, None)
+        rows = mgr.db.get_events_range(session.session_id, 0, None)
         return {
-            "session_id": session_id,
+            "session_id": session.session_id,
             "events": _rows_to_events(rows),
             "meta": {
                 "worktree_id": session.target.worktree_id,
@@ -1358,9 +1358,9 @@ async def get_events_range(
     session = mgr.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    rows = mgr.db.get_events_range(session_id, start, end)
+    rows = mgr.db.get_events_range(session.session_id, start, end)
     return {
-        "session_id": session_id,
+        "session_id": session.session_id,
         "events": _rows_to_events(rows),
     }
 

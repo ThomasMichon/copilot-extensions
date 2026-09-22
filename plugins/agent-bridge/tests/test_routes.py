@@ -2733,6 +2733,33 @@ class TestAcpAliasResolution:
         resp = client.get("/api/v1/sessions/no-such-ref")
         assert resp.status_code == 404
 
+    def test_transcript_by_acp_id_reads_the_resolved_bridge_session(
+        self, client, app
+    ) -> None:
+        """Addressing the transcript route by the durable ACP id must read
+        events keyed under the resolved bridge session_id, not the raw ACP
+        reference -- otherwise the events table lookup misses silently and
+        returns an empty transcript."""
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt")
+        session = Session("bridge-uuid-3", "cool-brook", target, "test-agent")
+        session.status = SessionStatus.IDLE
+        session.acp_session_id = "acp-alias-transcript"
+        mgr._sessions[session.session_id] = session
+        mgr.db.create_session(
+            session.session_id, "cool-brook", "test-agent", "/wt", "local",
+            "idle", time.time(),
+        )
+        mgr.db.append_event(
+            session.session_id, 1, "agent_message", {"text": "hi"}, time.time()
+        )
+
+        resp = client.get("/api/v1/sessions/acp-alias-transcript/transcript")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["session_id"] == "bridge-uuid-3"
+        assert body["events"][0]["data"] == {"text": "hi"}
+
 
 class TestBackgroundTaskTeardownGate:
     """stop/end refuse (409) while a session hosts active background tasks,

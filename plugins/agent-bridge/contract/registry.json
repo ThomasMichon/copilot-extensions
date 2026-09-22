@@ -52,7 +52,8 @@
         "conditional_idle_end": 12,
         "remote_event_multiplex": 13,
         "remote_commands": 14,
-        "dispatch_task_session": 15
+        "dispatch_task_session": 15,
+        "bare_session_transcript": 17
       },
       "durable_records": [],
       "source_paths": [
@@ -76,7 +77,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "7f21a7dd41ab211d981d1616b04a57532a0841c0a806bd0a6357795a354a1629",
+          "sha256": "fe08b187185a99022b5d6c09c2ec8a00a58fb4a56b2a4712ba42afcc491f8cc9",
           "semantic": true,
           "non_semantic_reason": null
         },
