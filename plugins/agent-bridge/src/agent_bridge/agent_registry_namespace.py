@@ -200,6 +200,8 @@ class CliNamespaceResolver(NamespaceResolver):
         repo: str | None = None,
         repo_remote: str | None = None,
     ) -> SpawnTarget:
+        from . import agent_registry as compat
+
         argv = ["namespace-resolve", name]
         if repo:
             argv += ["--repo", repo]
@@ -212,9 +214,9 @@ class CliNamespaceResolver(NamespaceResolver):
         res = await self._run(argv)
         if res is not None:
             rc, out, err = res
-            if rc == _NS_NOT_FOUND_EXIT:
+            if rc == compat._NS_NOT_FOUND_EXIT:
                 raise KeyError(err.strip() or name)
-            if rc == _NS_BAD_STATE_EXIT:
+            if rc == compat._NS_BAD_STATE_EXIT:
                 raise ValueError(err.strip() or f"{name} is not spawnable")
             if rc == 0:
                 try:
