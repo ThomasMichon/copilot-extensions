@@ -670,9 +670,10 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   [host-resource-providers](../host-resource-providers/README.md) — how any plugin
   registers a named, locally-reachable capability a coordinated session can
   request, generalizing the credential relay's pluggable-source shape;
-  [venue-pivots-ux](../venue-pivots-ux/README.md) — the Picker's Codespaces
-  and Containers pivots, a sibling of `picker` bringing the fabric's remote
-  venue providers to the same two-line row discipline. Further per-plugin leaves
+  [venue-pivots-ux](../venue-pivots-ux/README.md) — overhauling the Picker's
+  already-registered Codespaces and Containers pivots for consistency with
+  each other and fidelity of the information each surfaces, a sibling of
+  `picker`. Further per-plugin leaves
   live under `visions/plugins/<name>/` as authored (e.g.
   [`visions/plugins/agent-bridge/`](../plugins/agent-bridge/README.md) and
   [`visions/plugins/context-handoff/`](../plugins/context-handoff/README.md) —

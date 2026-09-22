@@ -1,9 +1,9 @@
 # Venue Pivots UX (Codespaces & Containers) — Vision
 
-- **Subject:** The Worktree Manager's **Codespaces** and **Containers**
-  pivots — bringing the fabric's remote-venue surfaces to the same
-  presentation discipline the Worktrees pane (and, since its own overhaul,
-  the Tasks pane) already established.
+- **Subject:** The Worktree Manager's already-registered **CodeSpaces**
+  (`agent-codespaces`) and **Containers** (`agent-containers`) pivots —
+  overhauled for presentation consistency with each other and with the
+  Worktrees/Tasks panes, and for fidelity of the information each surfaces.
 - **Scope:** leaf (concrete component; child of
   [agent-fabric](../agent-fabric/README.md), sibling of
   [picker](../picker/README.md))
@@ -11,105 +11,123 @@
 - **Last revised:** 2026-09-21
 - **Reality docs:**
   `worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py`
-  (`WorktreesView`, `TasksView`, `_TASK_PHASE_PALETTE`) ·
-  `worktree-manager/src/worktree_manager/production_picker/picker_tui/pivots.py`
-  (`RegisteredPivot`, `Column`, `PivotAction`) ·
-  `plugins/agent-codespaces/src/agent_codespaces/` (`status.py`, `lease.py`,
-  `pool.py`, `worktrees.py`) ·
-  `plugins/agent-containers/src/agent_containers/` (`fleet.py`,
-  `lifecycle.py`, `resolver.py`) ·
+  (`WorktreesView._row`/`_column_subtitle`, `TasksView`,
+  `_TASK_PHASE_PALETTE`) ·
+  `worktree-manager/src/worktree_manager/production_picker/picker_tui/pivot_manifest.py`
+  (`RegisteredPivot`, `Column`, subtitle/group/worktree field parsing) ·
+  `plugins/agent-codespaces/pivots/agent-codespaces.json` (the CURRENT
+  manifest) · `plugins/agent-codespaces/src/agent_codespaces/pool.py`
+  (`picker_payload`, `build_pool`, `PoolMember`) ·
+  `plugins/agent-containers/pivots/agent-containers.json` (the CURRENT
+  manifest) · `plugins/agent-containers/src/agent_containers/__main__.py`
+  (`_cmd_fleet`) and `fleet.py`/`lease.py` ·
   `plugins/agent-bridge/src/agent_bridge/models.py` (`LiveSessionInfo`,
   `LiveSessionVenue`) ·
   `efforts/active/picker-venue-pivots/README.md`
 
 ## Purpose & Intent
 
-The Worktrees pane earned its discipline the hard way, and the Tasks pane
-followed it: declarative columns, a state-derived colour palette, compact
-status markers, a rich per-row action menu. The fabric's two **remote venue**
-providers — CodeSpaces and local dev containers — power an increasing share
-of where an operator's agents actually run, but the Picker gives them no
-comparable home today: no registered pivot surfaces a CodeSpace or an
-agent-shaped container as a first-class row at all. An operator managing a
-fleet that spans local worktrees, CodeSpaces, and containers has one
-disciplined view (Worktrees), a second now-disciplined view (Tasks), and two
-venues visible only through raw CLI output (`agent-codespaces list`,
-`docker ps`) or not at all.
+**Both pivots already exist and are not greenfield.** `agent-codespaces`
+contributes a genuinely rich CodeSpaces pivot: a live pool view
+(`pool --picker-json`, streamed) grouped by "repo @ account", with
+health/occupancy/safety columns, a claiming-worktree cross-link column, and
+gated Release/Recycle/Verify actions — presentation quality already close to
+the Worktrees pane's own standard. `agent-containers` contributes a Containers
+pivot scoped correctly to **fleet** members only (never a general Docker
+browser — `fleet --json` was already built for exactly this pivot), but at a
+fraction of the CodeSpaces pivot's fidelity: a flat badge list (no columns,
+no grouping, no worktree cross-link, no actions at all), even though its own
+`fleet --json` output already carries a `lease` (holder) field the manifest
+never wires in.
 
-This vision brings **Codespaces** and **Containers** into the Picker as two
-new registered pivots, sharing one presentation grammar: a **two-line row**
-(compact identity/status/claims on the first line, a descriptive string on
-the second) that the Worktrees/Tasks panes are already converging on as the
-picker's house style. Both pivots exist to answer the same question the
-Worktrees pane answers for local checkouts — "what is this venue doing for
-me, is it healthy, and can I get into it" — for a venue whose agent may be
-running somewhere other than this machine.
+Neither pivot surfaces what its own hosted agent is actually doing: agent-bridge
+already tracks a hosted session's `LiveSessionInfo`/`LiveSessionVenue` (title,
+latest reported progress, liveness, the reattach target), but neither
+manifest joins on it. And the CodeSpaces pivot's own `pool.py` computes a rich
+`subtitle` (claim/orphaned-lock detail) that the manifest never maps into
+`entry.subtitle` — a wired-but-unused field, silently dropped today.
 
-Both pivots are scoped to the venues that matter for **agent embodiment**:
-a CodeSpace or container that is (or could be) hosting a driven Copilot
-session, cross-linked to whichever local worktree is currently driving it and
-to whatever agent-bridge knows about the live session inside it. Containers
-used as disposable runtime/validation sandboxes by an agent's own tool calls
-are deliberately out of this surface's frame — see Non-Goals.
+This vision is therefore an **alignment and completion** exercise, not new
+construction: bring the Containers pivot up to the Codespaces pivot's
+presentation fidelity (columns, grouping, worktree cross-link, actions) using
+the *same* vocabulary and column shapes so an operator reads both the same
+way; wire the CodeSpaces pivot's already-computed subtitle into its manifest;
+and add the one genuinely new integration both pivots are missing — the
+agent-bridge live-session join — so either pivot's row shows what its remote
+Copilot session is actually reporting back, not just its container/venue
+lifecycle state.
 
 ## Concepts & Components
 
-### The two-line row — one grammar, three pivots
+### The two-line row — an existing grammar, applied consistently
 
-Worktrees, Tasks, and now Codespaces/Containers converge on the same row
-shape: **line one** carries compact identity (id), a state-palette-coloured
-status, a key-status marker (the venue's own most important secondary
-signal — see below), and a claims summary; **line two** is a single
-descriptive string giving the human-readable "what is this" context a bare
-id/status line can't. A generic two-line renderer (extending the column-fit
-work already landed for declarative pivots) means neither pivot invents its
-own layout — they inherit the same fit/shrink/priority behavior the Tasks
-pivot proved out.
+The Picker already renders a generic two-line row for any declarative pivot:
+a primary line (columns, or an id/title/badges line for non-columnar
+pivots) plus an optional dim second line from `reg.subtitle_field`
+(`WorktreesView._row`/`_column_subtitle`, `RegisteredPivot.subtitle_field`).
+This is not new work — Bridges and Containers already declare a
+`subtitle_field`; Codespaces does not, despite `pool.py` already computing a
+rich subtitle (claim holder, orphaned-lock warning) that the manifest simply
+never maps to `entry.subtitle`. This vision's job is **consistent use** of
+the existing grammar across both pivots — wiring the dropped field, aligning
+which signal lands on line one (identity/status/key-status) vs. line two
+(descriptive detail) — not inventing a new renderer.
 
-### Codespaces: repo-first identity, worktree cross-link, live-session join
+### Codespaces: already repo-grouped; wire the dropped subtitle, add the live-session join
 
-A CodeSpace's primary identity is **the repo it was provisioned for** — that
-is the fact an operator scans for first, ahead of the CodeSpace's own opaque
-name. The row's key status is drawn from `agent-codespaces`' own lifecycle
-vocabulary (`status.py`'s active/recovered/prunable, `lease.py`'s
-borrowed/idle, `pool.py`'s pool membership) — the same kind of palette-worthy
-state the Worktrees pane already trains the operator to read.
+The CodeSpaces pivot (`pivots/agent-codespaces.json`,
+`pool.picker_payload`) already gets most of this right: entries are grouped
+by "repo @ account" (repo-first identity), a compact RUNNING/STALE/STOPPED
+status carries the palette, `health`/`occupancy`/`safe` columns carry
+`agent-codespaces`' own lifecycle vocabulary, a `worktree` column already
+cross-links to the claiming local worktree (resolved to that worktree's task
+title via the picker's own `_worktree_title_map`), and Release/Recycle/Verify
+actions are gated on disposition/safety. Two real gaps remain:
 
-Two cross-links complete the picture, both **derived, not duplicated**, from
-data another layer already owns:
+- **The dropped subtitle.** `picker_payload` computes `subtitle` (claim
+  holder, cross-machine hold, orphaned-lock warning) on every entry, but the
+  manifest's `entry` mapping never declares `"subtitle"`, so
+  `subtitle_field` stays unset and the computed line is silently never
+  rendered. Wiring it in is a one-line manifest fix with real information
+  restored.
+- **No remote-session join.** Nothing today reads agent-bridge's
+  `LiveSessionInfo`/`LiveSessionVenue` for a CodeSpace-hosted session. Where
+  agent-bridge has a live registration keyed by `venue.kind == "codespace"`
+  and `venue.target` matching this entry, the row should surface what
+  agent-bridge already receives back: the session's title, latest reported
+  progress/intent, and liveness — genuinely new information, not a
+  duplication of the existing worktree/task-title cross-link.
 
-- **Driving worktree.** When a local worktree has embodied an agent into this
-  CodeSpace (a CLI-mode Session Host reservation, or an ordinary headless
-  spawn), that worktree's short id is the row's claim-equivalent — the same
-  reverse cross-link `find_claiming_task` already performs for Tasks, joined
-  here on the CodeSpace's own identity instead of a task id.
-- **Remote session state.** Where agent-bridge has a live registration for a
-  session hosted in this CodeSpace (`LiveSessionInfo`/`LiveSessionVenue`,
-  keyed by `venue.kind == "codespace"` and `venue.target`), the row surfaces
-  what agent-bridge already receives back from that session: its title,
-  latest reported intent/progress, turn/liveness state, and driven-by
-  identity — the same `latest_progress` beat the Tasks pane's embodied rows
-  read, joined here by venue target instead of task id.
+### Containers: bring to Codespaces' fidelity; same live-session join
 
-### Containers: fleet-first, agent-venue-scoped
+The Containers pivot (`pivots/agent-containers.json`, `_cmd_fleet`) is
+already correctly scoped to **fleet** members only — `fleet --json` was
+purpose-built for this pivot and was never a general Docker-container
+browser needing narrowing. But its manifest is far thinner than its
+Codespaces sibling: a flat badge list (`id`/`title`/`subtitle`=image,
+badges=[state, fleet]) with no `columns`, no `group`, no worktree
+cross-link, and **zero actions** — even though `fleet --json` already emits
+a `lease` field (the holding effort/worktree, the direct analogue of
+Codespaces' `holder`/`worktree`) that the manifest never maps in. Bringing
+this pivot to parity means:
 
-`agent-containers` already distinguishes a **fleet** (a named pool of
-repo-shaped dev containers built from one devcontainer spec, tagged and kept
-warm for reuse — `fleet.py`) from an ad-hoc container any agent's tool calls
-may spin up for build/test/validation. This pivot makes that distinction a
-first-class UI boundary rather than an internal implementation detail: it
-surfaces **fleet members** — containers that are themselves agent venues
-(built from a repo's devcontainer spec, capable of hosting a driven Copilot
-session, the container analogue of a CodeSpace) — and deliberately does not
-attempt to be a general Docker-container browser. A generic runtime/sandbox
-container an agent used and discarded is not this pivot's subject; see
-Non-Goals.
+- Declaring `columns` mirroring Codespaces' shape (container/fleet, state,
+  lease→worktree, and whatever `security_profile`/`network` signal is
+  genuinely picker-worthy) instead of the current bare badge list.
+  Grouping by fleet (the container analogue of "repo @ account").
+  Wiring `lease` to a `worktree` cross-link the same way Codespaces already
+  does.
+- Adding gated actions analogous to Release/Recycle/Verify — a container
+  fleet member's own lifecycle (`lifecycle.py`, `lease.py`, `rescue.py`
+  already model start/stop/remove/rescue) deserves the same menu treatment
+  Codespaces already has, not a read-only list.
+- The same agent-bridge live-session join as Codespaces, keyed by
+  `venue.kind == "container"` and `venue.target`.
 
-A fleet-member row carries the same three signals as a CodeSpace row: repo
-identity (which fleet/devcontainer spec it was built from), lifecycle key
-status (warm/stopped/removed, borrowed/idle via the same lease broker
-`fleet.py` already describes), and the same driving-worktree /
-agent-bridge-live-session cross-links, joined on `venue.kind == "container"`.
+Both pivots converge on one shared column vocabulary and lifecycle-state
+palette so an operator reads a CodeSpace row and a fleet-container row the
+same way, differing only in the fields each venue actually has (e.g.
+`cores` for Codespaces, `security_profile` for Containers).
 
 ### Claims — the same shared surface Tasks already established
 
@@ -130,7 +148,9 @@ already exists to support, and the natural landing point for the parallel
 **drive-CLI-agents-over-SSH** capability. Opening a row is meant to feel
 identical whether the venue is a CodeSpace, a fleet container, or (today) a
 local worktree — the operator picks *what* to open, not *how* the transport
-works.
+works. Neither pivot has this action today (Codespaces' current actions are
+Release/Recycle/Verify only; Containers has none), so this is genuinely new
+for both, not a realignment of something existing.
 
 ### New codespace / New container — provision, then embody
 
@@ -146,30 +166,31 @@ session into it."
 
 ## Features
 
-### two-line-row-grammar
-Every entry in the Codespaces and Containers pivots renders as a compact
-identity/status/key-status/claims first line and a descriptive second line,
-sharing one generic renderer with Worktrees/Tasks rather than a bespoke
-per-pivot layout.
+### two-line-row-consistency
+Both pivots wire the Picker's existing `subtitle_field` grammar
+consistently: identity/status/key-status/cross-links on the primary
+line/columns, a descriptive second line (claim holder, orphan warnings,
+image/spec detail) — Codespaces gets its already-computed subtitle restored;
+Containers gains one for the first time.
 
-### codespaces-pivot
-A registered Codespaces pivot lists every CodeSpace the operator's account
-can see, keyed by repo, with `agent-codespaces`' own lifecycle state as key
-status, the currently-driving local worktree (if any) as a cross-link, and
-whatever agent-bridge knows about a live session inside it (title, latest
-progress/intent, liveness) surfaced inline.
+### codespaces-pivot-parity
+The CodeSpaces pivot keeps its existing repo-grouped, columnar,
+action-gated shape, with its dropped `subtitle` wired in and a new
+agent-bridge live-session join (title, latest progress/intent, liveness)
+surfaced inline.
 
-### containers-pivot
-A registered Containers pivot lists **fleet** members — repo-shaped,
-devcontainer-spec-built containers capable of hosting a driven Copilot
-session — with the same lifecycle/cross-link/live-session shape as
-Codespaces. General-purpose Docker containers an agent used for build,
-test, or validation are out of this pivot's frame.
+### containers-pivot-parity
+The Containers pivot — already correctly scoped to fleet members only — gains
+the columns, fleet-grouping, worktree/lease cross-link, gated lifecycle
+actions, and agent-bridge live-session join needed to match the CodeSpaces
+pivot's presentation fidelity, using the same shared column vocabulary and
+lifecycle palette.
 
 ### open-into-muxed-session
-Selecting an existing, embodied row on either pivot attaches the operator to
-that session's muxed Copilot instance over the fabric's SSH transport,
-regardless of whether the venue is a CodeSpace or a fleet container.
+A new **Open** action on either pivot attaches the operator to a live row's
+muxed Copilot instance over the fabric's SSH transport, regardless of
+whether the venue is a CodeSpace or a fleet container — neither pivot has
+this today.
 
 ### new-venue-then-embody
 "New codespace" and "New container" (and "New agent" against a dormant
@@ -203,17 +224,21 @@ demo data source, before any implementation PR — never a hand-drawn mockup.
 
 ## Non-Goals / Boundaries
 
-- **Not a general Docker browser.** The Containers pivot does not aim to
-  surface every container on the host, including ones agents spin up
-  transiently for builds, tests, or validation runs. Only fleet members
-  (agent-venue-capable, repo-shaped containers) are in frame.
-- **Not a new venue-lifecycle owner.** This vision adds presentation and a
-  provisioning entry point; it does not change how `agent-codespaces` or
-  `agent-containers` themselves provision, lease, or reclaim venues.
+- **Not a general Docker browser.** The Containers pivot already correctly
+  scopes to fleet members only (`fleet --json` was purpose-built for it);
+  this vision does not change that scope or attempt to surface every
+  container on the host.
+- **Not a new venue-lifecycle owner.** This vision adds presentation, a
+  live-session join, and a provisioning entry point; it does not change how
+  `agent-codespaces` or `agent-containers` themselves provision, lease, or
+  reclaim venues.
 - **Not a new live-session protocol.** Remote session state is read from
   whatever agent-bridge already receives back from a hosted session
   (`LiveSessionInfo`); this vision does not extend what agent-bridge itself
   collects or how a hosted session reports back.
+- **Not a new row-rendering mechanism.** The two-line/columnar row grammar
+  already exists generically (`subtitle_field`, `Column`); this vision uses
+  it consistently rather than building a new renderer.
 
 ## See Also
 
@@ -232,7 +257,11 @@ demo data source, before any implementation PR — never a hand-drawn mockup.
 ## Provenance
 
 - **2026-09-21** — Conceived from an operator request to overhaul the
-  under-served Codespaces/Containers pivots, converging on the two-line row
-  grammar already emerging on Worktrees/Tasks, and grounded against the
-  actual `LiveSessionInfo`/`LiveSessionVenue` cross-venue model and
-  `agent-containers`' existing fleet/generic-container split.
+  under-served Codespaces/Containers pivots. Initially drafted as if
+  neither pivot existed; corrected after re-grounding against the real
+  `pivots/agent-codespaces.json`/`pivots/agent-containers.json` manifests
+  and `pool.py`/`_cmd_fleet` source, which show both pivots already
+  registered but asymmetric in fidelity (Codespaces rich/columnar,
+  Containers thin/badge-only) — reframed as an alignment + completion
+  effort (parity, dropped-field fixes, the missing agent-bridge
+  live-session join) rather than new construction.

@@ -354,10 +354,13 @@ regression is something a test can catch before an operator does.
 - Execution-host sibling: [session-hosting](../session-hosting/README.md) — the
   provider-neutral launch/join/resume/cutover boundary the Picker drives but
   does not implement.
-- Sibling: [venue-pivots-ux](../venue-pivots-ux/README.md) — the concrete
-  UX vision for the Codespaces and Containers pivots (two-line row grammar,
-  worktree/live-session cross-links, Open/New-venue flows), the same kind of
-  pivot-specific overhaul `plugins/agent-dispatch/tasks-pane-ux` did for Tasks.
+- Sibling: [venue-pivots-ux](../venue-pivots-ux/README.md) — overhauling the
+  already-registered Codespaces and Containers pivots for presentation
+  consistency and information fidelity (Containers brought to Codespaces'
+  columnar/action fidelity, a dropped Codespaces subtitle wired back in, a
+  new agent-bridge live-session join, Open/New-venue flows), the same kind
+  of pivot-specific overhaul `plugins/agent-dispatch/tasks-pane-ux` did for
+  Tasks.
 - CodeSpaces-pivot data owner: [agent-codespaces](../plugins/agent-codespaces/README.md)
   — the Picker's **CodeSpaces** pivot renders that venue's pool membership,
   per-venue state (in-use / idle / clean / stale), allocation, and budget
