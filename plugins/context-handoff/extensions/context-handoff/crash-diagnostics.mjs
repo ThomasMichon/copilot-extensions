@@ -227,13 +227,16 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
         }
       }
       if (fd === undefined) return false;
-      writeSync(
-        fd,
-        `${new Date().toISOString()} pid=${process.pid} ${label}: ${detail}\n`,
-        null,
-        "utf-8",
-      );
-      return true;
+      const entry = `${new Date().toISOString()} pid=${process.pid} ${label}: ${detail}\n`;
+      const written = writeSync(fd, entry, null, "utf-8");
+      // writeSync() returns the number of bytes actually written, which
+      // can be less than the full entry (e.g. the filesystem fills up
+      // mid-append) without itself throwing. Reporting success on a short
+      // write would suppress the fd 2 fallback in installEmergencyDiagnostics()
+      // even though the durable entry is truncated/incomplete -- exactly
+      // the kind of partial, misleading diagnostic this module exists to
+      // avoid.
+      return written === Buffer.byteLength(entry, "utf-8");
     } catch {
       // Diagnostic logging must never become a second crash cause.
       return false;

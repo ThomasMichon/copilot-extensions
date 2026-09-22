@@ -4,8 +4,11 @@ name: context-handoff crash-diagnostics stress
 # just the world-readable-file/symlink/FIFO attack simulations) on a
 # schedule and on manual dispatch, regardless of what any given PR touched.
 # The required `guards + lint` CI lane (ci.yml) only runs this file's full
-# suite when a PR's own diff touches plugins/context-handoff/ -- this
-# workflow is what still exercises it periodically otherwise.
+# suite when a PR's own diff touches plugins/context-handoff/, and only on
+# ubuntu-latest -- this workflow additionally runs on windows-latest so the
+# Windows-specific branches in crash-diagnostics.mjs (the non-POSIX
+# file-validation skip, and the rotation/reopen path) are exercised too,
+# not just the POSIX-only attack simulations that already skip there.
 
 on:
   schedule:
@@ -17,9 +20,13 @@ permissions:
 
 jobs:
   stress:
-    name: full subprocess suite
-    runs-on: ubuntu-latest
+    name: full subprocess suite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
