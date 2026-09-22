@@ -21,11 +21,33 @@
 // line is ever written in that case, since SIGKILL and an external
 // process-tree kill bypass it entirely).
 
-import { closeSync, constants as fsConstants, fstatSync, openSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  openSync,
+  writeSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const DEFAULT_CRASH_LOG = join(tmpdir(), "context-handoff-extension-crash.log");
+
+// Bounds this fixed, unrotated, machine-global file's growth. SIGTERM is the
+// Copilot CLI's own routine mechanism for `/clear` and foreground-session
+// replacement (see the "signal" rationale below), so -- unlike the
+// suppressed `code=0` exit path -- ordinary, expected lifecycle churn alone
+// still appends a line every time on a long-lived, handoff-heavy host, with
+// no natural ceiling. Rather than never recording a legitimate signal (which
+// would defeat the entire "distinguish a routine stop from a crash"
+// diagnostic this module exists to provide), the file is truncated back to
+// empty once it crosses this size, checked once per process at the lazy
+// first-open below -- cheap, and sufficient to bound growth across the many
+// separate short-lived processes that are the actual growth vector, even
+// though it does not bound a single pathological process logging in a tight
+// loop (not a real shape for this module: at most a handful of entries are
+// ever logged per process lifetime).
+const MAX_LOG_BYTES = 1_048_576; // 1 MiB
 
 // `os.tmpdir()` is commonly a shared, world-writable directory on POSIX
 // (`/tmp`), so a predictable filename there is both readable by other local
@@ -102,6 +124,31 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
           // and no `process.getuid`) -- skip there.
           if (process.platform === "win32" || isPrivateRegularFile(candidate)) {
             fd = candidate;
+            if (fstatSync(fd).size >= MAX_LOG_BYTES) {
+              // See MAX_LOG_BYTES above: bound growth from routine,
+              // expected signal churn (not just crashes) by resetting an
+              // overgrown file back to empty before this process's first
+              // write. A plain ftruncateSync() on this already-open
+              // O_APPEND descriptor fails with EPERM on Windows
+              // (empirically confirmed: Windows refuses to truncate a
+              // handle opened in append mode) -- so instead, close it,
+              // reopen the same path with O_TRUNC (no O_APPEND) to reset it
+              // to empty, then reopen again in the normal append mode this
+              // function keeps for every later write. `fd` is cleared
+              // first so that if any step here throws (propagating to the
+              // catch below, which marks this process as given up on
+              // diagnostics), a later call never risks reusing an
+              // already-closed descriptor.
+              closeSync(fd);
+              fd = undefined;
+              const truncater = openSync(
+                logPath,
+                fsConstants.O_CREAT | fsConstants.O_WRONLY | fsConstants.O_TRUNC,
+                0o600,
+              );
+              closeSync(truncater);
+              fd = openSync(logPath, OPEN_FLAGS, 0o600);
+            }
           } else {
             closeSync(candidate);
             openFailed = true;
@@ -124,6 +171,30 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
 }
 
 const SIGNALS = ["SIGTERM", "SIGINT", "SIGHUP"];
+
+/**
+ * Best-effort, never-throwing description of an arbitrary thrown/rejected
+ * value. A thrown value is not required to be an `Error` -- reading
+ * `.stack` or coercing with `String()` can run a hostile/buggy user-defined
+ * getter, `toString()`, or `Symbol.toPrimitive` that itself throws. Those
+ * expressions would otherwise run directly inside `uncaughtException`/
+ * `unhandledRejection` handler bodies, outside `emergencyLog`'s own
+ * try/catch (which only guards its own file I/O) -- a second exception
+ * thrown while Node is already dispatching `uncaughtException` is fatal and
+ * bypasses further JS, losing the very diagnostic this module exists to
+ * capture. Every failure path here falls back to a fixed, allocation-free
+ * string.
+ */
+function describeFailure(value) {
+  try {
+    if (value && typeof value === "object" && typeof value.stack === "string") {
+      return value.stack;
+    }
+    return String(value);
+  } catch {
+    return "<failure detail unavailable: describing it threw>";
+  }
+}
 
 /**
  * Registers process-level crash diagnostics using `emergencyLog` (from
@@ -151,30 +222,6 @@ const SIGNALS = ["SIGTERM", "SIGINT", "SIGHUP"];
  * same `(code=null, signal=<signal>)` shape a parent would have seen with no
  * diagnostics installed at all.
  */
-/**
- * Best-effort, never-throwing description of an arbitrary thrown/rejected
- * value. A thrown value is not required to be an `Error` -- reading
- * `.stack` or coercing with `String()` can run a hostile/buggy user-defined
- * getter, `toString()`, or `Symbol.toPrimitive` that itself throws. Those
- * expressions would otherwise run directly inside `uncaughtException`/
- * `unhandledRejection` handler bodies, outside `emergencyLog`'s own
- * try/catch (which only guards its own file I/O) -- a second exception
- * thrown while Node is already dispatching `uncaughtException` is fatal and
- * bypasses further JS, losing the very diagnostic this module exists to
- * capture. Every failure path here falls back to a fixed, allocation-free
- * string.
- */
-function describeFailure(value) {
-  try {
-    if (value && typeof value === "object" && typeof value.stack === "string") {
-      return value.stack;
-    }
-    return String(value);
-  } catch {
-    return "<failure detail unavailable: describing it threw>";
-  }
-}
-
 export function installEmergencyDiagnostics(emergencyLog) {
   // Tracks whether joinSession() has already resolved, purely in memory --
   // NOT written to the durable log on its own. Every successful extension

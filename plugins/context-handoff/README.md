@@ -384,9 +384,24 @@ This file is:
   `uncaughtException`/`unhandledRejection` (+ non-zero `exit`), a caught
   `SIGTERM`/`SIGINT`/`SIGHUP`, or a genuinely non-zero exit for some other
   reason produces an entry.
-- **Not itself instrumented for retention beyond that.** No log-rotation or
-  scheduled cleanup exists for whatever it does accumulate; treat it as a
-  manually-cleared scratch file until/unless that becomes worth adding.
+- **Not itself instrumented for rotation, but size-bounded.** No
+  log-rotation or scheduled cleanup exists; treat it as a manually-cleared
+  scratch file for anything beyond the bound described here. `SIGTERM`
+  specifically is the Copilot CLI's own **routine** mechanism for `/clear`
+  and foreground-session replacement (see "Interpreting an entry" below),
+  so -- unlike the suppressed `code=0` exit path above -- ordinary,
+  expected signal churn alone still appends a line every time, with no
+  natural ceiling on a long-lived, handoff-heavy host. Rather than stop
+  recording a legitimate signal (which would defeat the entire "distinguish
+  a routine stop from a crash" purpose of this file), each process checks
+  the file's size once, at its own first write: if it has grown to 1 MiB or
+  more, it is truncated back to empty before that write proceeds. This
+  bounds growth across the many separate short-lived processes that are
+  the actual growth vector (though not a single pathological process
+  logging in a tight loop -- not a real shape here, since at most a
+  handful of entries are ever logged per process lifetime). A truncation
+  discards whatever history preceded it; treat this file as a rolling
+  window, not a permanent record.
 - **Shared by every extension instance on the machine -- correlate by `pid=`
   and timestamp before drawing a conclusion.** This is one fixed,
   machine-global path, and multiple `context-handoff` processes (across

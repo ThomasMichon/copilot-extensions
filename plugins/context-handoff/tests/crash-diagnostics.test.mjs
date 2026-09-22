@@ -6,16 +6,17 @@
 // the shared `node --test` runner process, since these handlers call
 // process.exit() by design.
 //
-// EVERY case in this file -- not only the world-readable-file/symlink/FIFO
-// attack simulations -- spawns at least one real subprocess, and the
-// required `guards + lint` CI lane runs every `plugins/*/tests/*.test.mjs`
-// file unconditionally, for every PR in this whole monorepo
-// (`.github/workflows/ci.yml`), not just ones that touch context-handoff.
-// Paying that subprocess-spawn cost (and, for the FIFO case, a real
-// `mkfifo` dependency) on every unrelated PR's required CI would be a
-// blast-radius mismatch for a single plugin's regression suite. So this
-// entire file gates on `CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS`, which
-// `ci.yml` sets automatically whenever a PR's own diff touches
+// EVERY case in this file (except one pure-file-I/O truncation check) --
+// not only the world-readable-file/symlink/FIFO attack simulations --
+// spawns at least one real subprocess, and the required `guards + lint` CI
+// lane runs every `plugins/*/tests/*.test.mjs` file unconditionally, for
+// every PR in this whole monorepo (`.github/workflows/ci.yml`), not just
+// ones that touch context-handoff. Paying that subprocess-spawn cost (and,
+// for the FIFO case, a real `mkfifo` dependency) on every unrelated PR's
+// required CI would be a blast-radius mismatch for a single plugin's
+// regression suite. So this entire file gates on
+// `CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS`, which `ci.yml` sets
+// automatically whenever a PR's own diff touches
 // `plugins/context-handoff/` (so this plugin's own PRs still get full
 // coverage in required CI) and which the scheduled/manual
 // `crash-diagnostics-stress.yml` workflow also sets unconditionally
@@ -25,6 +26,7 @@
 // still runs periodically no matter what any given PR touches.
 import { spawn, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -37,6 +39,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createEmergencyLog } from "../extensions/context-handoff/crash-diagnostics.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const harness = join(here, "fixtures", "crash-diagnostics-harness.mjs");
@@ -159,6 +162,41 @@ test(
   },
 );
 
+// createEmergencyLog()'s own truncation guard, exercised in-process
+// (no subprocess needed -- this is pure file I/O, not a
+// process.on(...)-installing call) rather than via the harness: SIGTERM is
+// the CLI's own routine mechanism for /clear and foreground-session
+// replacement, so this file can otherwise grow without bound purely from
+// expected lifecycle churn, never a crash. Gated alongside the rest of this
+// file's cases (see the header comment) since it deliberately writes a
+// multi-megabyte fixture.
+test(
+  "an overgrown crash log is truncated before the next entry, not left to grow forever",
+  { skip: !RUN_STRESS_CASES },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      const oneMiB = 1_048_576;
+      writeFileSync(logPath, "x".repeat(oneMiB + 10));
+      // Must pass isPrivateRegularFile()'s ownership/mode check the same
+      // way the real crash-log file itself would (private, 0600) -- a
+      // plain writeFileSync()'s mode is filtered through this process's
+      // umask, which can otherwise leave permissive group/other bits that
+      // make createEmergencyLog() treat this fixture as an untrusted
+      // pre-existing file and refuse to write to it at all, rather than
+      // truncating it (the behavior actually under test here).
+      chmodSync(logPath, 0o600);
+      const emergencyLog = createEmergencyLog(logPath);
+      emergencyLog("signal", "SIGTERM ready=true");
+      const content = readFileSync(logPath, "utf-8");
+      assert.ok(
+        content.length < oneMiB,
+        `expected the oversized pre-existing content to be truncated away, got ${content.length} bytes`,
+      );
+      assert.match(content, /signal: SIGTERM ready=true/);
+    });
+  },
+);
+
 // A predictable path in a shared os.tmpdir() means another local user could
 // have pre-created an ordinary, world-readable regular file there before
 // this process ever runs. O_NOFOLLOW alone does not protect against this
@@ -173,6 +211,13 @@ test(
   async () => {
     await withCrashLog(async (logPath) => {
       writeFileSync(logPath, "not ours\n", { mode: 0o644 });
+      // writeFileSync()'s mode is filtered through this process's umask
+      // (e.g. a umask of 0o077 would silently produce 0o600, not 0o644),
+      // which would make isPrivateRegularFile() accept this file as private
+      // and defeat the entire point of this simulation. chmodSync() sets
+      // the mode directly, bypassing the umask, so the file is
+      // deterministically world-readable regardless of the host's umask.
+      chmodSync(logPath, 0o644);
       const before = statSync(logPath);
       const result = spawnSync(process.execPath, [harness, "uncaught-exception", logPath], {
         encoding: "utf-8",
