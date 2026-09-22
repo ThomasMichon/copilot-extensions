@@ -85,6 +85,29 @@ function Start-CrPsmux {
     $scriptBody = "copilot -i `"$Prompt`" $argLine; Start-Sleep -Seconds 300"
     Set-Content -LiteralPath $scriptPath -Value $scriptBody -Encoding utf8
     & psmux new-session -d -s $Session -c $Cwd -- powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath
+    Wait-CrPsmuxFolderTrustPrompt -Session $Session
+}
+
+# The FIRST headed launch against any not-yet-trusted cwd blocks on a
+# "Confirm folder trust" TUI prompt before anything else happens (no flag
+# bypasses it as of this writing) -- mirrors
+# _cr_tmux_dismiss_folder_trust_prompt in tmux-drive.sh (confirmed present on
+# the Windows arm too via a real container run). Accepts the prompt's own
+# default ("1. Yes") via a bare Enter; does not opt into "remember this
+# folder", so trust is scoped to the one session under test.
+function Wait-CrPsmuxFolderTrustPrompt {
+    param([Parameter(Mandatory = $true)][string]$Session)
+    $waited = 0
+    while ($waited -lt 10) {
+        $captured = Get-CrPsmuxCapture -Session $Session
+        if ($captured -match 'Confirm folder trust') {
+            Send-CrPsmuxKeys -Session $Session -Keys ''
+            return
+        }
+        Start-Sleep -Milliseconds 500
+        $waited++
+    }
+    # no prompt seen within 5s -- likely already trusted; not an error
 }
 
 function Send-CrPsmuxKeys {
