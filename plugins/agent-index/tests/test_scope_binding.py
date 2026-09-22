@@ -81,7 +81,7 @@ def test_scope_binding_emits_only_valid_effective_sources(
     [None, "indexers: [\n", "indexers:\n  - machine: host-a\n"],
     ids=["missing", "malformed", "no-sources"],
 )
-def test_scope_binding_is_empty_without_active_scopes(
+def test_scope_binding_reports_not_enabled_without_active_scopes(
     tmp_path: Path, shell: str, config: str | None
 ) -> None:
     repo = _repo(tmp_path, config)
@@ -89,4 +89,9 @@ def test_scope_binding_is_empty_without_active_scopes(
     result = _run(shell, repo)
 
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {}
+    payload = json.loads(result.stdout)
+    context = payload["additionalContext"]
+    assert "not enabled" in context
+    assert "grep" in context
+    # Never silently empty: an agent must be told agent-index isn't usable here.
+    assert payload != {}
