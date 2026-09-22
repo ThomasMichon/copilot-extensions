@@ -28,6 +28,7 @@ import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -171,28 +172,36 @@ test(
 // file's cases (see the header comment) since it deliberately writes a
 // multi-megabyte fixture.
 test(
-  "an overgrown crash log is truncated before the next entry, not left to grow forever",
+  "an overgrown crash log is rotated (not destroyed) before the next entry",
   { skip: !RUN_STRESS_CASES },
   async () => {
     await withCrashLog(async (logPath) => {
       const oneMiB = 1_048_576;
-      writeFileSync(logPath, "x".repeat(oneMiB + 10));
+      const oldContent = "x".repeat(oneMiB + 10);
+      writeFileSync(logPath, oldContent);
       // Must pass isPrivateRegularFile()'s ownership/mode check the same
       // way the real crash-log file itself would (private, 0600) -- a
       // plain writeFileSync()'s mode is filtered through this process's
       // umask, which can otherwise leave permissive group/other bits that
       // make createEmergencyLog() treat this fixture as an untrusted
       // pre-existing file and refuse to write to it at all, rather than
-      // truncating it (the behavior actually under test here).
+      // rotating it (the behavior actually under test here).
       chmodSync(logPath, 0o600);
       const emergencyLog = createEmergencyLog(logPath);
       emergencyLog("signal", "SIGTERM ready=true");
       const content = readFileSync(logPath, "utf-8");
       assert.ok(
         content.length < oneMiB,
-        `expected the oversized pre-existing content to be truncated away, got ${content.length} bytes`,
+        `expected the live path's oversized content to be rotated away, got ${content.length} bytes`,
       );
       assert.match(content, /signal: SIGTERM ready=true/);
+      // The rotated-away content must survive under a sidecar, not be
+      // destroyed -- see the "never delete" rationale in crash-diagnostics.mjs.
+      const dir = dirname(logPath);
+      const base = logPath.slice(dir.length + 1);
+      const sidecars = readdirSync(dir).filter((name) => name.startsWith(`${base}.stale-`));
+      assert.equal(sidecars.length, 1, `expected exactly one sidecar, found: ${JSON.stringify(sidecars)}`);
+      assert.equal(readFileSync(join(dir, sidecars[0]), "utf-8"), oldContent);
     });
   },
 );
@@ -442,12 +451,29 @@ test("production extension.mjs calls markReady() only after joinSession() resolv
     /const emergencyDiagnostics = installEmergencyDiagnostics\(emergencyLog\);/,
     "extension.mjs must capture installEmergencyDiagnostics()'s return value",
   );
-  const joinSessionIndex = extension.indexOf("const session = await joinSession({");
-  const markReadyIndex = extension.indexOf("emergencyDiagnostics.markReady();");
-  assert.notEqual(joinSessionIndex, -1, "expected to find the joinSession() call");
-  assert.notEqual(markReadyIndex, -1, "expected to find the markReady() call");
-  assert.ok(
-    markReadyIndex > joinSessionIndex,
-    "markReady() must be called after joinSession(), not before it",
+  assert.match(
+    extension,
+    /const session = await joinSession\(\{/,
+    "expected to find the joinSession() call",
+  );
+  // Merely checking markReady() appears somewhere after the *opening* text
+  // of the joinSession() call is not enough: a regression that moved the
+  // call to inside the (very large) options object literal -- before the
+  // awaited call actually resolves -- would still satisfy that ordering
+  // and mis-tag pre-readiness failures as ready=true, while this test kept
+  // reporting success. Anchor to the actual END of the call instead:
+  // markReady() must be the statement immediately following the line that
+  // closes it (`});`), which only holds true if it runs after joinSession()
+  // has fully returned.
+  const lines = extension.split("\n");
+  const markReadyLineIndex = lines.findIndex(
+    (line) => line.trim() === "emergencyDiagnostics.markReady();",
+  );
+  assert.notEqual(markReadyLineIndex, -1, "expected to find the markReady() call as its own statement");
+  const precedingLine = lines[markReadyLineIndex - 1]?.trim();
+  assert.equal(
+    precedingLine,
+    "});",
+    `expected markReady() to immediately follow the joinSession() call's closing "});", but the preceding line was: ${JSON.stringify(precedingLine)}`,
   );
 });

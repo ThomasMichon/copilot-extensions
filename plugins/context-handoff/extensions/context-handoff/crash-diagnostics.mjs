@@ -27,7 +27,7 @@ import {
   fstatSync,
   openSync,
   renameSync,
-  unlinkSync,
+  statSync,
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -132,7 +132,8 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
           // and no `process.getuid`) -- skip there.
           if (process.platform === "win32" || isPrivateRegularFile(candidate)) {
             fd = candidate;
-            if (fstatSync(fd).size >= MAX_LOG_BYTES) {
+            const preRotationStat = fstatSync(fd);
+            if (preRotationStat.size >= MAX_LOG_BYTES) {
               // See MAX_LOG_BYTES above: bound growth from routine,
               // expected signal churn (not just crashes) by rotating an
               // overgrown file out of the way before this process's first
@@ -148,39 +149,53 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
               //    or FIFO between the close and the reopen.
               // 2. Concurrency: this file is machine-global and multiple
               //    context-handoff processes can each independently decide
-              //    it is oversized at nearly the same time. An in-place
-              //    reset (truncate, or open-with-O_TRUNC on the SAME path)
-              //    is not serialized across processes -- a second process's
-              //    reset can erase the crash entry a first process just
-              //    finished appending after its own reset, silently losing
-              //    the very diagnostic this module exists to capture.
-              //    `renameSync()` is atomic on both POSIX and Windows
-              //    (empirically verified on both): whichever process's
-              //    rename actually succeeds detaches the oversized file
-              //    from `logPath` entirely and instantly, so a second
-              //    process's own rename attempt either loses the race
-              //    (`ENOENT` -- the path is already gone; it just falls
-              //    through to creating a fresh file at `logPath`, the same
-              //    outcome as if it had never needed to reset at all) or
-              //    wins it and gets its own fresh file to append into --
-              //    there is no window where one process's completed reset
-              //    can be clobbered by another's.
-              //
-              // `fd` is cleared first so that if any step here throws
-              // (propagating to the catch below, which marks this process
-              // as given up on diagnostics), a later call never risks
-              // reusing an already-closed descriptor.
+              //    it is oversized at nearly the same time. A *blind*
+              //    rename (rename whatever currently sits at `logPath`,
+              //    with no check that it is still the same file this
+              //    process actually measured) is not safe either: if
+              //    process A has already rotated and is now writing into
+              //    its own fresh file, a later process B's own rename call
+              //    would succeed by renaming A's live, in-use file into B's
+              //    sidecar instead of failing with `ENOENT` -- silently
+              //    detaching A's diagnostics from `logPath` (and, if B were
+              //    to then delete its own sidecar as routine cleanup,
+              //    destroying A's entry outright). So this rename is
+              //    conditioned on an identity check first (POSIX: `dev`+
+              //    `ino` still match what this process actually opened and
+              //    measured as oversized -- Node cannot make this atomic
+              //    without external locking, but it closes the large
+              //    window a blind rename would otherwise leave open), and
+              //    the sidecar this rename produces is **never deleted**
+              //    (see below) specifically so that even a residual,
+              //    narrower race here can, at worst, misfile a live entry
+              //    under an unexpected name -- it can never destroy one.
               closeSync(fd);
               fd = undefined;
-              const staleSidecar = `${logPath}.stale-${process.pid}-${Date.now()}`;
-              try {
-                renameSync(logPath, staleSidecar);
-              } catch {
-                // ENOENT (a concurrent process already rotated this path
-                // away) is expected and fine -- either way, the open below
-                // creates or reuses whatever now exists at `logPath` with
-                // the same protective flags and validation as the very
-                // first open, never trusting the rename to have happened.
+              let stillTheSameOversizedFile = true;
+              if (process.platform !== "win32") {
+                try {
+                  const currentStat = statSync(logPath);
+                  stillTheSameOversizedFile =
+                    currentStat.dev === preRotationStat.dev &&
+                    currentStat.ino === preRotationStat.ino;
+                } catch {
+                  // logPath no longer exists (a concurrent process's own
+                  // rotation already moved it) -- definitely not "still the
+                  // same file"; skip straight to the plain open below,
+                  // which creates a fresh file either way.
+                  stillTheSameOversizedFile = false;
+                }
+              }
+              if (stillTheSameOversizedFile) {
+                const staleSidecar = `${logPath}.stale-${process.pid}-${Date.now()}`;
+                try {
+                  renameSync(logPath, staleSidecar);
+                } catch {
+                  // Lost a narrower race against a concurrent rotation
+                  // between the stat check just above and this rename --
+                  // fine either way, the open below still creates or reuses
+                  // whatever now exists at `logPath`.
+                }
               }
               // Same OPEN_FLAGS (O_NOFOLLOW/O_NONBLOCK included) as the
               // very first open above -- the reset path must not downgrade
@@ -192,14 +207,16 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
                 throw new Error("crash log path is no longer trustworthy after reset");
               }
               fd = reopened;
-              try {
-                unlinkSync(staleSidecar);
-              } catch {
-                // Best-effort cleanup only -- an orphaned `.stale-*`
-                // sidecar (e.g. if the rename above lost its race and this
-                // process never actually created one) must never block the
-                // diagnostic write that follows.
-              }
+              // Deliberately no cleanup/unlink of any `.stale-*` sidecar
+              // here: this process cannot distinguish "a sidecar I just
+              // created from the oversized file I actually measured" from
+              // "a sidecar that, due to the residual race described above,
+              // actually holds another process's live, freshly-written
+              // entry" -- and unlinking the latter would destroy exactly
+              // the diagnostic this module exists to preserve. Leaving
+              // every `.stale-*` sidecar in place is the safe default;
+              // operators can clear them manually (same framing as this
+              // log file's own retention, described above).
             }
           } else {
             closeSync(candidate);

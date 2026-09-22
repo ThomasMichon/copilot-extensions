@@ -369,18 +369,23 @@ This file is:
   to block indefinitely against a pre-created FIFO with no reader). Neither
   flag exists on Windows (no equivalent local-multi-user attack surface
   there in the same shape); the file descriptor, once opened, is reused for
-  every subsequent write in the same process. A pre-existing file that this
-  user does not own, or that grants group/other any access, is refused
-  outright rather than written to or "fixed in place."
+  every subsequent write in the same process. **On POSIX**, a pre-existing
+  file that this user does not own, or that grants group/other any access,
+  is refused outright rather than written to or "fixed in place" -- **this
+  check does not run on Windows** (no POSIX uid/mode model there, and no
+  `process.getuid`), so a pre-existing file at this path on Windows is
+  accepted regardless of its ownership or permissions.
 - **Only records the interesting cases, by design.** A routine `code=0`
   exit is never logged: this extension's own module is dynamically
   re-imported many times over a machine's lifetime (once per discovery
   pass, plus once per reconnect/resume), and logging every uneventful fork
-  would make this fixed, unrotated file grow without bound on a long-lived
-  host -- the existing lifecycle-logging pattern
+  would make this file rotate away its own history far more often than it
+  otherwise would (see the size-rotation bullet below) -- the existing
+  lifecycle-logging pattern
   (`docs/patterns/lifecycle-activity-logging.md`) deliberately bounds or
   reboot-volatilizes every tier it defines, and this file has neither
-  property, so it must not record routine events at all. Only an
+  property beyond its coarse size trigger, so it must not record routine
+  events at all. Only an
   `uncaughtException`/`unhandledRejection` (+ non-zero `exit`), a caught
   `SIGTERM`/`SIGINT`/`SIGHUP`, or a genuinely non-zero exit for some other
   reason produces an entry.
@@ -397,24 +402,32 @@ This file is:
   a routine stop from a crash" purpose of this file), each process checks
   the file's size once, at its own first write: if it has grown to 1 MiB or
   more, it is **rotated** -- renamed aside to a per-process, uniquely-named
-  sidecar and immediately deleted again once a fresh file is safely opened
-  in its place -- rather than truncated in place. This matters because the
-  file is shared by every extension instance on the machine (see the next
-  bullet): an in-place reset is not serialized across processes, so a
-  second process's own reset could otherwise erase the crash entry a first
-  process just finished appending moments earlier. Renaming is atomic on
-  both POSIX and Windows, so whichever process's rename actually succeeds
-  detaches the oversized file from this path instantly; a second process's
-  own rename attempt then either loses the race (the path is already gone,
-  so it just opens/creates a fresh file, the same outcome as if it had
-  never needed to reset at all) or wins it and gets its own fresh file --
-  there is no window where one process's completed reset can be clobbered
-  by another's. This bounds growth across the many separate short-lived
-  processes that are the actual growth vector (though not a single
-  pathological process logging in a tight loop -- not a real shape here,
-  since at most a handful of entries are ever logged per process lifetime).
-  A rotation discards whatever history preceded it; treat this file as a
-  rolling window, not a permanent record.
+  `.stale-<pid>-<timestamp>` sidecar, left in place permanently, with a
+  fresh file opened at the original path -- rather than truncated in place.
+  This matters because the file is shared by every extension instance on
+  the machine (see the next bullet): an in-place reset is not serialized
+  across processes, so a second process's own reset could otherwise erase
+  the crash entry a first process just finished appending moments earlier.
+  The rename is guarded by an identity check first (on POSIX: the file
+  currently at this path must still have the same device+inode this
+  process actually opened and measured as oversized) -- a *blind* rename of
+  whatever currently sits at the path, with no such check, could otherwise
+  rename a different process's already-rotated, already-live fresh file
+  into this process's own sidecar, silently detaching that process's
+  diagnostics from the well-known path. The sidecar this rename produces is
+  **never deleted automatically**, specifically so that even the narrower
+  race the identity check cannot fully close (the file could still change
+  between the check and the rename itself) can, at worst, leave an entry
+  filed under an unexpected sidecar name -- it can never be destroyed by
+  this process's own cleanup, because there is no such cleanup step. This
+  bounds growth across the many separate short-lived processes that are
+  the actual growth vector (though not a single pathological process
+  logging in a tight loop -- not a real shape here, since at most a handful
+  of entries are ever logged per process lifetime). A rotation discards
+  nothing -- the oversized content survives under its sidecar name -- but
+  the live path itself becomes a rolling window, not a permanent record;
+  accumulated `.stale-*` sidecars are manually-cleared scratch files like
+  the log itself.
 - **A failed file write falls back to a best-effort line on stderr, not
   silence.** Since these listeners suppress Node's own default
   uncaught-exception report, a log write that fails for any reason
@@ -504,14 +517,17 @@ above):
   bypassed Node's own signal/exit handling entirely (`SIGKILL`, an external
   whole-process-tree kill -- registering a handler for a given event cannot
   help when the process never gets to run any more JS at all), **or**
-  `createEmergencyLog()`'s own open/write attempt failed and was silently
-  swallowed (its own defensive contract: diagnostic logging
-  must never itself become a second crash cause) -- for example the crash
-  log's directory is missing, the disk is full, or the pre-existing-file
-  ownership/mode check rejected an untrusted file at that path (see the
-  private-file-creation note above). A missing entry does not, by itself,
-  distinguish these; check that the log's parent directory exists and is
-  writable by this user before concluding it must have been a force-kill.
+  `createEmergencyLog()`'s own open/write attempt failed *and* its stderr
+  fallback was unavailable, itself failed, or was simply uncaptured by
+  whatever is holding this process's stderr (its own defensive contract:
+  diagnostic logging must never itself become a second crash cause) -- for
+  example the crash log's directory is missing, the disk is full, or the
+  pre-existing-file ownership/mode check rejected an untrusted file at that
+  path (see the private-file-creation note above), *and* stderr 2 was
+  itself closed/broken or not being captured anywhere. A missing entry does
+  not, by itself, distinguish these; check that the log's parent directory
+  exists and is writable by this user, and check for a captured stderr
+  fallback line, before concluding it must have been a force-kill.
 
 ## Payload-local CLI fallback
 
