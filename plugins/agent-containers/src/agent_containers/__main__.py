@@ -8,6 +8,8 @@ Subcommands:
   rm <fleet>            Remove all containers in a fleet (destructive)
   borrow <effort>       Lease a free container to an effort
   release <target>      Release a lease (by container or effort name)
+  stop <name>           Stop a single running container
+  remove <name>         Remove a single (stopped) container
   leases                Show active leases
   exec <name>           Run the ACP launch command through the venue transport
   ssh-stdio <name>      Serve restricted SSH protocol over provider stdio
@@ -93,23 +95,24 @@ def main(argv: list[str] | None = None) -> int:
         "session-evidence rescue fails. Never overrides active or unknown liveness.",
     )
 
-    for name, helptext in (
-        ("down", "Stop (keep warm) all containers in a fleet"),
-        ("start", "Start all stopped containers in a fleet"),
-        ("rm", "Remove all containers in a fleet (destructive)"),
+    for name, helptext, argname in (
+        ("down", "Stop (keep warm) all containers in a fleet", "fleet"),
+        ("start", "Start all stopped containers in a fleet", "fleet"),
+        ("rm", "Remove all containers in a fleet (destructive)", "fleet"),
+        ("stop", "Stop a single running container", "name"),
+        ("remove", "Remove a single (stopped) container", "name"),
     ):
         p = sub.add_parser(name, help=helptext)
-        p.add_argument("fleet", help="Fleet name")
+        p.add_argument(argname, help="Fleet name" if argname == "fleet" else "Container name")
         if name in {"down", "rm"}:
             p.add_argument("--json", action="store_true", help="Emit operation result JSON")
-        if name in {"down", "rm"}:
             p.add_argument(
                 "--force-abandon",
                 action="store_true",
                 help="Accept unavailable/failed restricted session evidence. "
                 "Never overrides active or unknown liveness.",
             )
-        if name == "rm":
+        if name in {"rm", "remove"}:
             p.add_argument("--force", action="store_true", help="Force removal")
 
     borrow_p = sub.add_parser("borrow", help="Lease a free container to an effort")
@@ -292,7 +295,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "borrow":
             return _cmd_borrow(args)
         if args.command == "release":
-            return _cmd_release(args)
+            from .lifecycle import cmd_release
+            return cmd_release(args.target)
+        if args.command in ("stop", "remove"):
+            from . import lifecycle
+            return (lifecycle.cmd_stop(args.name) if args.command == "stop"
+                    else lifecycle.cmd_remove(args.name, force=args.force))
         if args.command == "leases":
             return _cmd_leases()
         if args.command == "lifecycle-clear":
@@ -646,6 +654,7 @@ def _cmd_relay_profile() -> int:
 
 
 def _cmd_fleet(args: argparse.Namespace) -> int:
+    from . import picker
     from .lease import deploy_hold_status, get_lease
     from .lifecycle import inspect_container, list_containers, restricted_policy_errors
     from .rescue import latest_rescue_status
@@ -725,6 +734,7 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
                 },
                 "rescue": latest_rescue_status(c.name),
             })
+            out[-1].update(picker.picker_fields(c.name, out[-1]["lease"]))
         print(json.dumps(out, indent=2, default=str))
         return 0
     if not containers:
@@ -829,37 +839,6 @@ def _cmd_borrow(args: argparse.Namespace) -> int:
     lease = borrow(config, args.effort, container=args.container, fleet=args.fleet)
     print(lease.container)
     return 0
-
-
-def _cmd_release(args: argparse.Namespace) -> int:
-    from .lease import ProviderAdmissionError, release
-    from .provider_ssh import remove_stale_worktree_sources
-
-    try:
-        released = release(args.target)
-    except ProviderAdmissionError as exc:
-        print(f"Release blocked: {exc}", file=sys.stderr)
-        return _BUSY_EXIT
-    try:
-        removed = remove_stale_worktree_sources(args.target)
-    except (OSError, RuntimeError) as exc:
-        if released:
-            print(f"Released: {args.target}")
-        print(
-            f"Picker source cleanup failed after release: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-    if released:
-        print(f"Released: {args.target}")
-        if removed:
-            print(f"Removed Picker source registrations: {removed}")
-        return 0
-    if removed:
-        print(f"Removed stale Picker source registrations: {removed}")
-        return 0
-    print(f"No lease found for '{args.target}'", file=sys.stderr)
-    return 1
 
 
 def _cmd_leases() -> int:

@@ -2,19 +2,21 @@
 
 - **Slug:** `picker-venue-pivots`
 - **Repo:** copilot-extensions
-- **Branch(es):** `worktree/tmichon-cloud1-win-20260921-183442-d733` (design +
-  preview tooling); implementation phases land on their own per-phase
-  worktrees once the design below is approved (same pattern the Tasks-pane
-  effort used).
+- **Branch(es):** Phase 0+1 landed via
+  `worktree/tmichon-cloud1-win-20260921-183442-d733` (merged,
+  `ThomasMichon/copilot-extensions#3219`); Phase 2 (Containers) is
+  in `worktree/tmichon-cloud1-win-20260922-002606-0a9a`. Each remaining
+  phase gets its own fresh worktree off `main` (Tasks-pane precedent).
 - **Created:** 2026-09-21
-- **Status:** Active — Phase 0 and Phase 1 fully complete (design,
-  operator-approved committed screenshots, the shared claims-pecking-order
-  module, and the Codespaces pivot's claims/subtitle/live-session wiring
-  all done). Phase 2 (Containers implementation) next.
+- **Status:** Active — Phase 0 and Phase 1 fully complete and merged
+  (design, operator-approved committed screenshots, the shared
+  claims-pecking-order module, and the Codespaces pivot's
+  claims/subtitle/live-session wiring). Phase 2 (Containers
+  implementation) complete, pending its own PR.
 - **Vision:** [`visions/venue-pivots-ux`](../../../visions/venue-pivots-ux/README.md)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#3253`
-- **Sub-issues:** Phase 1 `ThomasMichon/copilot-extensions#3254`, Phase 2
-  `ThomasMichon/copilot-extensions#3255`, Phase 3
+- **Sub-issues:** Phase 1 `ThomasMichon/copilot-extensions#3254` (closed),
+  Phase 2 `ThomasMichon/copilot-extensions#3255`, Phase 3
   `ThomasMichon/copilot-extensions#3256`, Phase 4
   `ThomasMichon/copilot-extensions#3257`, Phase 5
   `ThomasMichon/copilot-extensions#3258`.
@@ -96,21 +98,23 @@ realization.
 
 **Read this section FIRST in any new session picking up this effort.**
 
-- **Worktree:** this one
-  (`copilot-extensions.worktrees/tmichon-cloud1-win-20260921-183442-d733`)
-  until Phase 0 previews are captured and approved; each implementation
-  phase gets its own fresh worktree off `main` afterward (Tasks-pane
-  precedent).
-- **Current phase:** Phase 0 and Phase 1 are **fully complete**
-  (2026-09-21). **Phase 2 (Containers) has not started.**
+- **Worktree:** Phase 0+1 landed via
+  `copilot-extensions.worktrees/tmichon-cloud1-win-20260921-183442-d733`
+  (merged, PR #3219). This session is in a **fresh** worktree
+  (`tmichon-cloud1-win-20260922-002606-0a9a`) for Phase 2, per the
+  per-phase-worktree convention (Tasks-pane precedent) -- each remaining
+  phase gets another fresh worktree off `main`.
+- **Current phase:** Phase 0 and Phase 1 are **fully complete and merged**.
+  **Phase 2 (Containers) is fully complete, not yet landed/PR'd.**
 - **Umbrella + sub-issues filed** (2026-09-21):
-  `ThomasMichon/copilot-extensions#3253` (umbrella), `#3254`-`#3258` (Phase
-  1-5 sub-issues, one each).
-- **Phase 1 complete (2026-09-21):** wired `pool.picker_payload`'s
-  `claims_summary` entry field to the shared `agent_worktrees.claims_rank`
-  module (via a new `_claims_summary_for_worktree` helper, lazy-imported the
-  same way `config._registered_repo_paths` already does — degrades to `""`
-  when agent-worktrees isn't installed alongside, never raises); wired
+  `ThomasMichon/copilot-extensions#3253` (umbrella), `#3254` (closed --
+  Phase 1 landed), `#3255`-`#3258` (Phase 2-5, open).
+- **Phase 1 complete and merged (2026-09-21, PR #3219):** wired
+  `pool.picker_payload`'s `claims_summary` entry field to the shared
+  `agent_worktrees.claims_rank` module (via a new
+  `_claims_summary_for_worktree` helper, lazy-imported the same way
+  `config._registered_repo_paths` already does — degrades to `""` when
+  agent-worktrees isn't installed alongside, never raises); wired
   `pivots/agent-codespaces.json`'s `entry.subtitle` + a new `claims_summary`
   column (matching the approved `agent-codespaces.proposed.json` preview
   manifest's width/priority); added the agent-bridge live-session join
@@ -124,11 +128,18 @@ realization.
   agent-codespaces suite is green apart from 2 pre-existing, unrelated
   `test_bootstrap_check_reconcile_opt_in.py` failures (a Windows bash
   path-translation issue, confirmed present on `main` too via `git stash`).
-- **Immediate next step:** Phase 2 — bring `pivots/agent-containers.json` +
-  `_cmd_fleet` up to the CodeSpaces pivot's fidelity (see the Plan's own
-  Phase 2 checklist): `columns`, fleet-based grouping, a `lease`→worktree
-  cross-link, the shared `claims_rank`/live-session-join wiring (reuse, not
-  reimplement), and gated lifecycle actions. If any implementation-phase
+- **Phase 2 complete (2026-09-22), pending its own PR:** brought
+  `pivots/agent-containers.json` + `agent_containers/__main__.py`'s
+  `_cmd_fleet` up to the CodeSpaces pivot's fidelity — full detail in the
+  Plan's own Phase 2 checklist and the Journal below. New
+  `agent_containers/picker.py` module + `stop`/`remove` single-container CLI
+  subcommands. 12 new tests; full agent-containers suite green apart from 7
+  pre-existing, unrelated Windows-POSIX-permission/bash failures (confirmed
+  via `git stash`).
+- **Immediate next step:** open Phase 2's own PR from
+  `tmichon-cloud1-win-20260922-002606-0a9a` (create-pr, mirror #3219's
+  flow), close sub-issue `#3255` on landing, then start Phase 3 (Open into
+  a muxed session over SSH) in a fresh worktree. If any implementation-phase
   session changes a row/menu's visual shape, re-run the render script
   (`worktree-manager\.venv\Scripts\python.exe
   worktree-manager\scripts\picker-snapshot\venue-preview\render_venue_preview.py
@@ -492,21 +503,59 @@ trying to scope it as a manifest change.
       rather than invented here.
 
 ### Phase 2 — Containers pivot (implementation)
-- [ ] Add `columns` to `pivots/agent-containers.json` mirroring
+- [x] Add `columns` to `pivots/agent-containers.json` mirroring
       Codespaces' shape (container/fleet, state, lease→worktree, and
       whatever `security_profile`/`network` signal is picker-worthy per
-      Phase 0 design).
-- [ ] Add fleet-based `group` (the Containers analogue of "repo @
-      account").
-- [ ] Wire the existing `lease` field to a `worktree` cross-link exactly
-      as Codespaces already does.
-- [ ] Wire Containers' claims-list column to the same `claims_rank` module
-      Phase 1 wires — no second implementation.
-- [ ] Add gated lifecycle actions analogous to Release/Recycle/Verify,
+      Phase 0 design). **Done (2026-09-22):** matches the approved
+      `agent-containers.proposed.json` preview manifest exactly (container/
+      fleet/state/sess/lease→worktree/security_profile/worktree_title/
+      claims_summary); dropped the now-redundant `badges` (state/fleet are
+      real columns now).
+- [x] Add fleet-based `group` (the Containers analogue of "repo @
+      account"). **Done:** `entry.group = "fleet"` -- the raw `fleet` field
+      `_cmd_fleet` already emits, no new computed value needed (unlike
+      Codespaces' `repo @ account`, which Containers' single-axis fleet
+      grouping doesn't require).
+- [x] Wire the existing `lease` field to a `worktree` cross-link exactly
+      as Codespaces already does. **Done:** `entry.worktree = "lease"` --
+      again the raw field directly, no derived-field indirection needed.
+- [x] Wire Containers' claims-list column to the same `claims_rank` module
+      Phase 1 wires — no second implementation. **Done:** new
+      `agent_containers.picker.claims_summary_for_worktree` imports
+      `agent_worktrees.claims_rank`/`claim_kinds_registry` exactly like
+      agent-codespaces' `pool._claims_summary_for_worktree` (duplicated
+      glue, shared module -- no plugin-to-plugin Python import exists
+      between agent-containers and agent-codespaces themselves).
+- [x] Add gated lifecycle actions analogous to Release/Recycle/Verify,
       built on `lifecycle.py`/`lease.py`/`rescue.py`'s existing
-      start/stop/remove/rescue primitives.
-- [ ] Same agent-bridge live-session join as Phase 1, joined on
-      `venue.kind == "container"`.
+      start/stop/remove/rescue primitives. **Done:** added single-container
+      `agent-containers stop <name>`/`remove <name>` CLI subcommands
+      (`_cmd_stop`/`_cmd_remove` in `__main__.py`), wired to `lifecycle.py`'s
+      existing `stop_container`/`remove_container` primitives -- the
+      per-container analogue of `down`/`rm`'s existing whole-fleet scope.
+      Both refuse a leased container (same "settle the claim first"
+      discipline `down_fleet`/`remove_fleet` already apply). Manifest gates
+      Stop on `state == "running"` and Remove on `state == "exited"`,
+      matching the approved proposed manifest.
+- [x] Same agent-bridge live-session join as Phase 1, joined on
+      `venue.kind == "container"`. **Done:** new `agent_containers.picker`
+      module (`bridge_client_from_env`/`live_session_for_venue`/
+      `sess_column`/`activity_from_live_session`/`subtitle_for`/
+      `picker_fields`) -- duplicated logic from agent-codespaces' `pool.py`
+      equivalents (no shared glue module between the two independent
+      plugins, consistent with how both already vendor their own separate
+      `copilot_venue.py`). Unlike Codespaces (a dedicated `--picker-json`
+      shape), Containers' manifest reuses the plain `fleet --json` output
+      directly (per the approved Phase 0 design), so `_cmd_fleet` itself
+      merges `picker.picker_fields(name, lease)`'s 3 new fields
+      (`subtitle`/`claims_summary`/`sess`) onto each row.
+      `test_fleet_json_emits_bare_array_with_expected_fields`'s exact-field-
+      set assertion updated to include them -- a deliberate, tracked schema
+      growth on that command's existing consumers, not an accidental break.
+      12 new tests (`test_picker.py` + `test_fleet_json.py` +
+      `test_cli_operations.py`); full agent-containers suite green apart
+      from 7 pre-existing, unrelated Windows-POSIX-permission/bash failures
+      (confirmed present pre-change via `git stash`/`git stash pop`).
 
 ### Phase 3 — Open into a muxed session over SSH
 - [ ] Add an Open action to both pivots (neither has one today), wired to
@@ -574,6 +623,47 @@ trying to scope it as a manifest change.
 
 ## Journal
 
+- **2026-09-22 (latest+9)** — Merged PR #3219 (Phase 0 + Phase 1) after
+  resolving version-field merge conflicts with `origin/main` (agent-worktrees
+  had independently advanced past this branch's own Phase 0 bump; a
+  coincidental identical `agent-codespaces` dev number on both sides for
+  different content, disambiguated). All CI checks green
+  (`mergeStateStatus: CLEAN`); squash-merged via self-merge authority.
+  Closed sub-issue `#3254`. Finalized that worktree and opened a fresh one
+  (`tmichon-cloud1-win-20260922-002606-0a9a`) off the post-merge `main` for
+  Phase 2, per the effort's own per-phase-worktree convention.
+
+  Completed Phase 2 (Containers pivot) in that fresh worktree. Grounded
+  against the approved `agent-containers.proposed.json` preview manifest,
+  which turned out simpler than Codespaces in one respect: `entry.worktree`/
+  `entry.group` map straight to the fleet JSON's already-present `lease`/
+  `fleet` raw fields -- no derived-field indirection needed (unlike
+  Codespaces' computed `worktree`/`group`). Added a new
+  `agent_containers/picker.py` module (`subtitle_for`/
+  `claims_summary_for_worktree`/`bridge_client_from_env`/
+  `live_session_for_venue`/`sess_column`/`activity_from_live_session`/
+  `picker_fields`) -- duplicated logic from agent-codespaces' `pool.py`
+  equivalents (no shared glue module exists between the two independent
+  plugins; consistent with how both already vendor their own separate
+  `copilot_venue.py`/`venue-copilot` lib rather than sharing one).
+  `_cmd_fleet` now merges `picker.picker_fields(name, lease)`'s 3 new fields
+  onto each row -- Containers' manifest reuses the plain `fleet --json`
+  shape directly (per the approved design) rather than a dedicated
+  `--picker-json` command the way Codespaces has, so
+  `test_fleet_json_emits_bare_array_with_expected_fields`'s exact-field-set
+  assertion needed a deliberate, tracked update. Added single-container
+  `stop <name>`/`remove <name>` CLI subcommands (`_cmd_stop`/`_cmd_remove`),
+  wired to `lifecycle.py`'s existing `stop_container`/`remove_container`
+  primitives and gated against removing a leased container -- the
+  per-container analogue of `down`/`rm`'s existing whole-fleet scope, backing
+  the manifest's new gated Stop/Remove actions. Updated
+  `pivots/agent-containers.json` to match the approved proposed manifest
+  (columns, group, worktree cross-link, subtitle, actions), dropping the
+  now-redundant `badges` declaration. 12 new tests (`test_picker.py` +
+  extensions to `test_fleet_json.py`/`test_cli_operations.py`); full
+  agent-containers suite green apart from 7 pre-existing, unrelated
+  Windows-POSIX-permission/bash failures (confirmed identical via
+  `git stash`/`git stash pop`). Not yet landed as its own PR.
 - **2026-09-21 (latest+8)** — Completed Phase 1. Added the agent-bridge
   live-session join to `pool.py`: `_bridge_client_from_env` (a silent,
   never-raising, never-`sys.exit`-ing hand-rolled variant of

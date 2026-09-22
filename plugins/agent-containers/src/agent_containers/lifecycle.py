@@ -484,3 +484,93 @@ def remove_container(
         ) from exc
     if res.returncode != 0:
         raise RuntimeError(f"docker rm {name} failed: {res.stderr.strip()}")
+
+
+def cmd_stop(name: str) -> int:
+    """CLI handler for ``agent-containers stop <name>`` (picker-venue-pivots
+    Phase 2) -- the per-container analogue of "down"'s whole-fleet scope,
+    backing the Containers pivot's gated Stop action. Refuses a leased
+    container (the same "settle the claim first" discipline "down"/"rm"
+    already apply at the fleet level) rather than yanking it out from under
+    an active borrow."""
+    import sys
+
+    from .lease import get_lease
+
+    lease = get_lease(name)
+    if lease:
+        print(
+            f"Container '{name}' is leased to {lease.effort}; release it "
+            f"first (agent-containers release {name}) before stopping.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        stop_container(name)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"Stopped: {name}")
+    return 0
+
+
+def cmd_remove(name: str, *, force: bool = False) -> int:
+    """CLI handler for ``agent-containers remove <name>`` -- the
+    per-container analogue of "rm"'s whole-fleet scope, backing the
+    Containers pivot's gated Remove action. Refuses a leased container for
+    the same reason `cmd_stop` does."""
+    import sys
+
+    from .lease import get_lease
+
+    lease = get_lease(name)
+    if lease:
+        print(
+            f"Container '{name}' is leased to {lease.effort}; release it "
+            f"first (agent-containers release {name}) before removing.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        remove_container(name, force=force)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"Removed: {name}")
+    return 0
+
+
+#: Matches `__main__._BUSY_EXIT` -- the shared "operation deferred/blocked,
+#: retryable" exit code convention this CLI uses across its commands.
+_BUSY_EXIT = 75
+
+
+def cmd_release(target: str) -> int:
+    """CLI handler for ``agent-containers release <target>``."""
+    import sys
+
+    from .lease import ProviderAdmissionError, release
+    from .provider_ssh import remove_stale_worktree_sources
+
+    try:
+        released = release(target)
+    except ProviderAdmissionError as exc:
+        print(f"Release blocked: {exc}", file=sys.stderr)
+        return _BUSY_EXIT
+    try:
+        removed = remove_stale_worktree_sources(target)
+    except (OSError, RuntimeError) as exc:
+        if released:
+            print(f"Released: {target}")
+        print(f"Picker source cleanup failed after release: {exc}", file=sys.stderr)
+        return 1
+    if released:
+        print(f"Released: {target}")
+        if removed:
+            print(f"Removed Picker source registrations: {removed}")
+        return 0
+    if removed:
+        print(f"Removed stale Picker source registrations: {removed}")
+        return 0
+    print(f"No lease found for '{target}'", file=sys.stderr)
+    return 1

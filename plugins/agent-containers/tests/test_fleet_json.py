@@ -79,6 +79,7 @@ def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
         "configured_security_profile", "security_policy_current",
         "security_policy_errors", "network", "environment_names",
         "host_credentials", "lifecycle_hold", "rescue",
+        "subtitle", "claims_summary", "sess",
     }
     assert row["name"] == "aperture-1"
     assert row["state"] == "running"
@@ -104,6 +105,39 @@ def test_fleet_json_lease_is_null_when_unheld(monkeypatch, capsys):
     cli._cmd_fleet(argparse.Namespace(json=True))
     data = json.loads(capsys.readouterr().out)
     assert data[0]["lease"] is None
+
+
+# --- picker-only fields (picker-venue-pivots Phase 2) ----------------------
+
+def test_fleet_json_wires_picker_fields_from_lease(monkeypatch, capsys):
+    """`picker.picker_fields` is called with (container name, lease effort)
+    and its result is merged straight into the row."""
+    _patch(monkeypatch, [_container("aperture-1")], lease_effort="3bac")
+    seen = []
+
+    def fake_picker_fields(name, lease_effort):
+        seen.append((name, lease_effort))
+        return {"subtitle": "claimed by 3bac", "claims_summary": "PR #2481", "sess": "LIVE"}
+
+    import agent_containers.picker as picker
+    monkeypatch.setattr(picker, "picker_fields", fake_picker_fields)
+
+    cli._cmd_fleet(argparse.Namespace(json=True))
+    row = json.loads(capsys.readouterr().out)[0]
+    assert seen == [("aperture-1", "3bac")]
+    assert row["subtitle"] == "claimed by 3bac"
+    assert row["claims_summary"] == "PR #2481"
+    assert row["sess"] == "LIVE"
+
+
+def test_fleet_json_picker_fields_blank_when_unclaimed_and_no_dependencies():
+    """Without agent-worktrees/agent-bridge installed alongside (this
+    plugin's own test venv), the picker fields degrade to blank rather than
+    raising."""
+    from agent_containers.picker import picker_fields
+    assert picker_fields("free-1", None) == {
+        "subtitle": "", "claims_summary": "", "sess": "",
+    }
 
 
 def test_fleet_json_reports_unknown_hold_state_without_failing(monkeypatch, capsys):
