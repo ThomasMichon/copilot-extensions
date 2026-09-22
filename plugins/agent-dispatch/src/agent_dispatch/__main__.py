@@ -16,8 +16,8 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from pathlib import Path as Path  # noqa: F401 -- compatibility export for tests
+from typing import Any
 
 import httpx
 
@@ -197,9 +197,20 @@ from .execution_cli import (  # noqa: F401 -- re-exported for existing call site
     _spawn_detached_waiter,
     _suspend_for_detached_wait,
 )
-
-if TYPE_CHECKING:
-    from .registrar import ProfileDeclaration
+from .registrar_runtime_cli import (  # noqa: F401 -- re-exported for existing call sites/tests
+    _cmd_registrar,
+    _declaration_summary,
+    _reject_worktree_checkout_as_repo_root,
+)
+from .shared_cli import (  # noqa: F401 -- re-exported for existing call sites/tests
+    _DashDashParser,
+    _hold_actor,
+    _owner_from_identity,
+    _read_result,
+    _resolve_owner,
+    _simple,
+    _split_owner,
+)
 
 
 def _emit(value: Any) -> int:
@@ -609,319 +620,6 @@ def _enrich(result: Any, *, resolve_repo_names: bool = True) -> Any:
             for k, v in result.items()
         }
     return one(result)
-
-
-def _split_owner(owner: str | None) -> tuple[str | None, str | None]:
-    """Split a ``machine/worktree`` worker id into its parts.
-
-    The inverse of ``queue.worker_id_for``. A malformed or missing value yields
-    ``(None, None)`` (or ``(value, None)`` when it has no ``/``), never raising,
-    so a reverse-lookup read can't crash on a stray owner string.
-    """
-    if not owner:
-        return (None, None)
-    machine, sep, worktree = owner.partition("/")
-    if not sep:
-        return (owner or None, None)
-    return (machine or None, worktree or None)
-
-
-def _simple(method: str, *arg_names: str):
-    """Build a handler that forwards positional args to a client method."""
-
-    def handler(args: argparse.Namespace) -> int:
-        with _client(args) as c:
-            result = getattr(c, method)(*[getattr(args, n) for n in arg_names])
-        return _emit(result)
-
-    return handler
-
-
-def _owner_from_identity(args: argparse.Namespace) -> str | None:
-    """Compose the canonical ``machine/worktree`` owner from the CWD identity.
-
-    Mirrors the coordinator's ``worker_id_for`` so a worker can address its own
-    task without typing its owner: ``complete <id>`` (no owner) resolves the same
-    ``machine/worktree`` pair it claimed under. Returns None when identity can't
-    be resolved (no agent-worktrees, outside a worktree).
-    """
-    machine, worktree = _identity(args)
-    if machine and worktree:
-        return f"{machine}/{worktree}"
-    return None
-
-
-def _resolve_owner(args: argparse.Namespace, *, verb: str) -> str | None:
-    """Resolve the acting worker's owner for a lease-holding verb.
-
-    Prefers an explicit positional ``worker_id``; otherwise composes
-    ``machine/worktree`` from the CWD identity -- the symmetry that lets an
-    embodied/taken-over worker drive its whole lifecycle
-    (``claim``/``start``/``complete``/``yield``) under its **worktree identity**
-    without typing an owner, so the task's owner stays ``machine/worktree`` and
-    live-session tracking can join it (see :mod:`tracking`). Prints guidance and
-    returns None when neither is available.
-    """
-    worker_id = getattr(args, "worker_id", None) or _owner_from_identity(args)
-    if not worker_id:
-        print(
-            f"agent-dispatch: could not resolve the owner for {verb}. Pass the "
-            f"owner positionally (`{verb} <id> <owner>`) or run inside the "
-            "owning worktree so machine/worktree resolves.",
-            file=sys.stderr,
-        )
-    return worker_id
-
-
-def _hold_actor(args: argparse.Namespace) -> str:
-    """The acting operator identity for a pause/unpause -- an explicit
-    ``--actor``, else whatever worktree identity resolves (for audit-trail
-    legibility only; pause/unpause are operator actions, never owner-gated)."""
-    return getattr(args, "actor", None) or _owner_from_identity(args) or "operator"
-
-
-def _read_result(args: argparse.Namespace) -> object | None:
-    """Read and decode the complete command's optional JSON result."""
-    raw = args.result_json
-    if args.result_file is not None:
-        if args.result_file == "-":
-            raw = sys.stdin.read()
-        else:
-            path = Path(args.result_file).expanduser()
-            raw = path.read_text(encoding="utf-8-sig")
-    if raw is None:
-        return None
-    raw = raw.removeprefix("\ufeff")
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"not valid JSON: {exc}") from exc
-    if result is None:
-        raise ValueError("result must be a JSON object or array, not null")
-    from .queue import ResultTooLargeError, ResultValidationError, encode_result
-
-    try:
-        encode_result(result)
-    except (ResultValidationError, ResultTooLargeError) as exc:
-        raise ValueError(str(exc)) from exc
-    return result
-
-
-#: The `agent-worktrees` worktree-root naming convention observed throughout
-#: this harness: `<project-repo-name>.worktrees/<machine>-<os>-<timestamp>-<hex>`
-#: (e.g. `dotfiles.worktrees\alice-cloud1-win-20260910-171507-5474`). A
-#: worktree checkout's own directory name is per-session/per-machine and is
-#: never a stable repo identity.
-_WORKTREE_PARENT_SUFFIX = ".worktrees"
-
-
-def _reject_worktree_checkout_as_repo_root(repo_root: Path) -> None:
-    """Refuse when ``repo_root`` looks like a worktree checkout, not a repo's
-    registered anchor.
-
-    A worktree's own directory name is per-session and per-machine -- never a
-    stable repo identity. If a reviewer-loop declaration is discovered under a
-    worktree checkout instead of the repo's registered anchor, deriving the
-    registration owner/pointer name from that path (``repo_root.name``) stamps
-    every resulting registration with a throwaway, non-reconciling identity:
-    every fresh worktree that hits this path registers a brand-new pointer
-    that never collides with (and is never cleaned up alongside) the last one,
-    so declared registrations -- and the workers the supervisor spawns for
-    them -- accumulate without bound (#2417).
-
-    Deliberately a **cheap, dependency-free path-pattern check** (does
-    ``repo_root``'s parent directory name end in ``.worktrees``, the naming
-    convention every ``agent-worktrees``-managed worktree root in this harness
-    follows) rather than an authoritative subprocess probe out to
-    ``agent-worktrees``: a per-invocation subprocess round-trip measured ~9s
-    on a busy/loaded host (the same process-count-scales-with-activity
-    pressure #2417/#2300 describe), which would make every reviewer-loop /
-    repository-issue-loop CLI call slow exactly when the host is already
-    struggling -- an unacceptable regression for what is meant to be a fast
-    safety check. This heuristic is best-effort, not a hard guarantee (a repo
-    anchor whose own name happens to end in ``.worktrees`` would be a false
-    positive; a worktree root that does NOT follow this harness's naming
-    convention would be a false negative) -- but it catches the actual
-    observed failure mode with zero added latency and no external dependency,
-    consistent with à-la-carte independence.
-    """
-    if repo_root.parent.name.endswith(_WORKTREE_PARENT_SUFFIX):
-        raise ValueError(
-            f"{repo_root} looks like a worktree checkout (its parent "
-            f"directory, {repo_root.parent.name!r}, follows this harness's "
-            "'<repo>.worktrees' naming convention), not a repo's registered "
-            "anchor. Run this reviewer-loop command from the anchor checkout "
-            "instead: a worktree's directory name is per-session and must "
-            "never be recorded as a repo's stable identity (see "
-            "visions/plugin-services -- repo/agent identity resolves by "
-            "registered NAME only; a filesystem path is never persisted "
-            "outside repos.yaml/projects.yaml)."
-        )
-
-
-class _DashDashParser(argparse.ArgumentParser):
-    """Top-level parser that captures a verbatim ``-- <command...>`` tail robustly.
-
-    argparse's handling of a ``--`` separator before a ``nargs='*'`` positional
-    differs across CPython versions (3.11 raises "unrecognized arguments"; 3.12+
-    consumes it), which broke ``recipes drive --execute -- <cmd>`` on 3.11
-    runtime slots (#383). Rather than depend on that, split everything after the
-    FIRST ``--`` off ourselves, parse the head normally, and expose the verbatim
-    tail via ``_dashdash_tail`` for the ``run`` / ``recipes drive`` handlers.
-
-    Scoped to those two commands (the only ones that take a ``-- <command>``
-    tail) so every other subcommand keeps argparse's native ``--`` "end of
-    options" escape hatch.
-    """
-
-    def parse_known_args(self, args=None, namespace=None):  # type: ignore[override]
-        args = list(sys.argv[1:] if args is None else args)
-        if "--" in args:
-            idx = args.index("--")
-            head, tail = args[:idx], args[idx + 1 :]
-            # Resolve the ACTUAL subcommand from the head (peek parse) rather than
-            # a token-membership test -- a positional VALUE equal to 'run'/'drive'
-            # (e.g. `create run -- ...`) must not trigger interception (#383).
-            try:
-                peek, _ = super().parse_known_args(head, None)
-            except SystemExit:
-                peek = None
-            if peek is not None and getattr(peek, "func", None) in (_cmd_run, _cmd_recipes_drive):
-                ns, extras = super().parse_known_args(head, namespace)
-                ns._dashdash_tail = tail
-                return ns, extras
-        return super().parse_known_args(args, namespace)
-
-
-def _declaration_summary(decl: ProfileDeclaration) -> dict[str, Any]:
-    """A JSON-friendly summary of a discovered declaration (for ``registrar discover``)."""
-    ef = decl.effective_filters()
-    return {
-        "name": decl.name,
-        "owner": decl.owner,
-        "labels": list(decl.labels),
-        "repos": decl.repos,
-        "concurrency": decl.concurrency,
-        "max_active_processes": decl.concurrency,
-        "body": {"type": decl.body.type, "agent": decl.body.agent},
-        "filters": {
-            "permit": {dim: sorted(vals) for dim, vals in ef.permit.items()},
-            "reject": {dim: sorted(vals) for dim, vals in ef.reject.items()},
-        },
-    }
-
-
-def _cmd_registrar(args: argparse.Namespace) -> int:
-    """The declarative-supervision registrar: manage discovery pointers + read the
-    declared profile set. A thin writer/reader over the declared documents (the one
-    source of truth) -- no coordinator round-trip."""
-    from . import registrar_discovery as rd
-    from .registrar import RegistrarError
-
-    try:
-        if args.registrar_command == "doctor":
-            from .registrar_registry import registrar_dropins_dir
-
-            sources = rd.RegistrarSources()
-            report = sources.refresh(emit_warnings=False)
-            combined = report.combined
-            trusted_names = {declaration.name for declaration in combined.trusted}
-            accepted_plugins = [
-                contributed
-                for contributed in combined.plugins.declarations
-                if contributed.declaration.name not in trusted_names
-            ]
-            plugin_retention_possible = (
-                combined.plugins.snapshot.authority.value == "indeterminate"
-                or any(finding.status == "indeterminate" for finding in combined.findings)
-            )
-            payload = {
-                "trusted": {
-                    "registry": "pointers.json",
-                    "path": str(rd.pointers_file()),
-                    "authority": report.trusted_authority.value,
-                    "error": report.trusted_error,
-                    "retention_possible": report.trusted_error is not None,
-                    "declarations": [
-                        _declaration_summary(declaration) for declaration in combined.trusted
-                    ],
-                },
-                "dropins": {
-                    "registry": "registrar.d",
-                    "path": str(registrar_dropins_dir()),
-                    "authority": combined.plugins.snapshot.authority.value,
-                    "active": [
-                        {
-                            **_declaration_summary(contributed.declaration),
-                            "plugin": contributed.plugin,
-                            "entry": contributed.source_path,
-                            "manifest": contributed.manifest_path,
-                        }
-                        for contributed in accepted_plugins
-                    ],
-                    "findings": [finding.to_dict() for finding in combined.findings],
-                    "fix_available": False,
-                    "active_basis": "current-evidence-only",
-                    "retention_possible": plugin_retention_possible,
-                },
-                "active": [
-                    _declaration_summary(declaration) for declaration in combined.declarations
-                ],
-                "active_basis": "current-evidence-only",
-            }
-            failed = bool(report.trusted_error or combined.findings)
-            if args.json:
-                _emit(payload)
-            else:
-                trusted_label = "[WARN]" if report.trusted_error else "[OK]"
-                print(
-                    f"{trusted_label} pointers.json is "
-                    f"{report.trusted_authority.value}; "
-                    f"{len(combined.trusted)} trusted declaration(s) confirmed "
-                    "by current evidence."
-                )
-                if report.trusted_error:
-                    print(f"  {report.trusted_error}")
-                    print("  A running supervisor may retain its last-known trusted declarations.")
-                dropin_label = "[WARN]" if combined.findings else "[OK]"
-                print(
-                    f"{dropin_label} registrar.d is "
-                    f"{combined.plugins.snapshot.authority.value}; "
-                    f"{len(accepted_plugins)} plugin declaration(s) confirmed "
-                    "active by current evidence."
-                )
-                if plugin_retention_possible:
-                    print(
-                        "  A running supervisor may retain matching last-known "
-                        "declarations for indeterminate entries."
-                    )
-                for finding in combined.findings:
-                    target = f" -> {finding.target}" if finding.target else ""
-                    print(f"  - {finding.reason}: {finding.entry}{target}")
-                    if finding.detail:
-                        print(f"    {finding.detail}")
-                    if finding.remedy:
-                        print(f"    {finding.remedy}")
-                print("  Cleanup is report-only; no --fix operation is available.")
-            return 1 if failed else 0
-        if args.registrar_command == "add-pointer":
-            pointer = rd.add_pointer(args.name, args.location, kind=args.kind, owner=args.owner)
-            return _emit(pointer.to_dict())
-        if args.registrar_command == "list":
-            return _emit([p.to_dict() for p in rd.load_pointers()])
-        if args.registrar_command == "remove":
-            return _emit({"removed": rd.remove_pointer(args.name)})
-        if args.registrar_command == "discover":
-            decls = rd.discover()
-            return _emit([_declaration_summary(d) for d in decls])
-        if args.registrar_command == "discover-repo":
-            decls = rd.discover_repo(args.repo_root, owner=args.owner)
-            return _emit([_declaration_summary(d) for d in decls])
-    except RegistrarError as exc:
-        print(f"agent-dispatch registrar: {exc}", file=sys.stderr)
-        return 2
-    raise AssertionError(f"unhandled registrar command {args.registrar_command!r}")
-
 
 
 def build_parser() -> argparse.ArgumentParser:

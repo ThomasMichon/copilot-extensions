@@ -28,7 +28,7 @@
   "plugins/agent-containers/src/agent_containers/provider_ssh.py": 1104,
   "plugins/agent-dispatch/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/agent-dispatch/scripts/versioned_runtime.py": 1245,
-  "plugins/agent-dispatch/src/agent_dispatch/__main__.py": 1221,
+  "plugins/agent-dispatch/src/agent_dispatch/__main__.py": 919,
   "plugins/agent-dispatch/src/agent_dispatch/client.py": 1175,
   "plugins/agent-dispatch/src/agent_dispatch/companion.py": 1421,
   "plugins/agent-dispatch/src/agent_dispatch/embody.py": 1093,

@@ -327,6 +327,11 @@ Verbatim from the operator:
               `task_lifecycle_registration_cli.py`, leaving the root module
               with the registrar/runtime helper band, the dash-dash parser
               shim, and the deliberately retained shared compatibility helpers.
+            - `agent-dispatch/__main__.py` ninth slice landed: extracted the
+              remaining shared CLI helpers into `shared_cli.py` and the
+              registrar/runtime helper band into `registrar_runtime_cli.py`,
+              bringing `__main__.py` down to a **919-line composition root**
+              under the module-size cap.
             - `agent-bridge/__main__.py` slice landed: the file is now a
               **485-line composition root** with focused sibling modules for
               service start/status (`service_start_cli.py`), daemon/process
@@ -1972,3 +1977,43 @@ the Phase 0 runbook, picked up as capacity allows.
   band, the dash-dash parser compatibility shim, and the handful of shared
   utility seams intentionally left on `__main__` because multiple extracted
   families still route through them.
+
+### 2026-09-22 — Phase 2 continued: `plugins/agent-dispatch/src/agent_dispatch/__main__.py` shared-helper + registrar-runtime slice
+- Took the residual compatibility kernel as the final `__main__` reduction
+  pass rather than stopping at "close enough." Extracted a new `shared_cli.py`
+  (**114** lines) for the shared CLI helper/re-export surface
+  (`_split_owner`, `_simple`, `_owner_from_identity`, `_resolve_owner`,
+  `_hold_actor`, `_read_result`, and the dash-dash parser shim) plus a new
+  `registrar_runtime_cli.py` (**162** lines) for the remaining registrar/runtime
+  helper band (`_reject_worktree_checkout_as_repo_root`,
+  `_declaration_summary`, `_cmd_registrar`).
+- The compatibility rule stayed the same as every prior slice: `__main__`
+  still re-exports the historical names, and the moved helpers resolve the
+  live `agent_dispatch.__main__` module at call time for any edge where tests
+  monkeypatch root attributes (`_client`, `_emit`, `_identity`,
+  `_owner_from_identity`, `_cmd_run`, `_cmd_recipes_drive`). The only bug this
+  first exposed was a test that monkeypatches `agent_dispatch.__main__.Path`;
+  fixed by keeping `Path` re-exported from `__main__` even though the actual
+  helper body moved.
+- Net result for the root module:
+  `plugins/agent-dispatch/src/agent_dispatch/__main__.py` shrank
+  **1,221 -> 919** lines. That finally crosses the campaign's target line: the
+  file is now an actual composition root under the 1,000-line cap rather than a
+  grandfathered giant with only the worst bands shaved off.
+- Validation again met the plugin-local bar. Focused follow-up over the moved
+  shared-helper/registrar/runtime seams passed:
+  `python tools/run-plugin-tests.py agent-dispatch -k "registrar or split_owner or owner_from_identity or complete_resolves_owner_from_identity or progress_resolves_owner_from_identity or start_resolves_owner_from_identity or yield_resolves_owner_from_identity or run or recipes or repository_issue_loop or reviewer_loop or cli"`
+  -> **767 passed / 4 skipped / 2575 deselected**. Required guards then passed:
+  `ruff check --select F,E9 plugins/agent-dispatch`,
+  `python tools/check-module-size.py`, and the slice refreshed the shrink-only
+  baseline from **1,221** to **919** lines for
+  `plugins/agent-dispatch/src/agent_dispatch/__main__.py`.
+- Read-only dogfood for this slice will stay to help output only (`--help`,
+  `registrar discover --help`, `run --help`, `recipes drive --help`) in the PR
+  validation step. Version bump for this slice:
+  `agent-dispatch` **`0.1.2-dev183`**.
+- This completes the `agent-dispatch/__main__.py` componentization objective:
+  no oversized residual band remains in the root module. What is left there is
+  the normal composition-root scaffolding (imports, parser assembly, client
+  targeting/bootstrap helpers, and `main()`), not an uncaught command-family
+  seam.
