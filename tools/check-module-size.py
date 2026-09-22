@@ -60,21 +60,29 @@ rule for a file it does consider, and it is meaningless (and rejected) with
 ``--refresh-baseline``, whose whole job is auditing the *entire* tree's
 baseline, never a PR's own diff scope.
 
-**Exception: a diff that touches the baseline JSON itself always falls back
-to the full, unscoped sweep**, regardless of ``--changed-since``. The
-baseline records the ceiling invariant for the *whole* tree, not just the
-``*.py`` files a diff's file list would name -- scoping around a baseline
-edit could let a lowered/removed ceiling silently pass here (nothing else in
-the diff touched the now-over-ceiling file) only to fail the very next
-full-tree sweep on ``main``. A baseline-editing PR is therefore evaluated
-against every tracked module, exactly like a plain, flagless invocation.
+**Exception: a diff that touches the baseline JSON itself also checks every
+baseline entry the diff itself added, changed, or removed** -- in addition
+to the files its own ``*.py`` diff touches -- rather than scoping purely by
+file list. The baseline records the ceiling invariant for the whole tree, so
+scoping around a baseline edit by file list alone could let a lowered/
+removed ceiling silently pass here (nothing else in the diff touched the
+now-over-ceiling file) only to fail the very next full-tree sweep on
+``main``. This still never falls back to a fully unscoped sweep, though: a
+file whose own source *and* baseline entry this diff never touches is
+unrelated organic drift on trunk (the responsibility of a scheduled
+sweep/decomposer, per Phase 2, not this PR) -- exactly the unfair-
+attribution failure mode this flag exists to prevent, and a baseline-
+touching PR would otherwise be blamed for it every single time it lowers
+even one unrelated entry's ceiling.
 
 Usage::
 
     python tools/check-module-size.py                  # enforce (pre-push/CI push/dispatch)
     python tools/check-module-size.py --changed-since REF  # enforce, PR-diff-scoped (CI pull_request);
-                                                             # falls back to a full sweep if REF's diff
-                                                             # touches tools/module-size-baseline.json
+                                                             # if REF's diff touches
+                                                             # tools/module-size-baseline.json, also
+                                                             # checks every entry that diff itself
+                                                             # added/changed/removed
     python tools/check-module-size.py --refresh-baseline  # tighten after shrinking a file
     python tools/check-module-size.py --refresh-baseline --allow-widen  # post-merge only; see above
 
@@ -129,10 +137,10 @@ def _diff_touches_baseline(base_ref: str) -> bool:
     """True when this branch's own commits touch the baseline JSON itself.
 
     A baseline-only edit (or one that edits the baseline alongside files
-    outside ``*.py``) must never be scoped by ``--changed-since``: a ceiling
-    can be lowered/removed for a file the diff's ``*.py``-only file list would
-    otherwise skip entirely, silently passing a now-inconsistent baseline
-    that only the (disabled-for-PRs) full sweep would have caught.
+    outside ``*.py``) must never be scoped by ``--changed-since`` using only
+    its ``*.py`` file list: a ceiling can be lowered/removed for a file that
+    list would otherwise skip entirely. See ``_changed_baseline_keys`` for
+    how that gap is closed without falling back to a fully unscoped sweep.
     """
     out = subprocess.run(
         ["git", "diff", "--name-only", f"{base_ref}...HEAD", "--", str(BASELINE_PATH)],
@@ -181,6 +189,40 @@ def _write_baseline(baseline: dict[str, int]) -> None:
     BASELINE_PATH.write_text(
         json.dumps(ordered, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+
+
+def _changed_baseline_keys(base_ref: str) -> set[str]:
+    """Baseline entries this branch's own commits added, changed, or removed,
+    relative to its merge-base with ``base_ref``.
+
+    Used to keep a baseline-touching diff's own edits fully self-consistent
+    (a lowered/removed ceiling for path X is always re-checked) even when
+    the guard is otherwise scoped to this diff's own files -- without
+    re-litigating every other already-recorded entry the diff never
+    touched (see ``main()``'s ``--changed-since`` handling below).
+    """
+    merge_base = subprocess.run(
+        ["git", "merge-base", base_ref, "HEAD"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    before_result = subprocess.run(
+        ["git", "show", f"{merge_base}:tools/module-size-baseline.json"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+    before: dict[str, int] = {}
+    if before_result.returncode == 0 and before_result.stdout.strip():
+        parsed = json.loads(before_result.stdout)
+        if isinstance(parsed, dict):
+            before = {str(k): int(v) for k, v in parsed.items()}
+    after = _load_baseline()
+    changed = {key for key, value in after.items() if before.get(key) != value}
+    changed.update(key for key in before if key not in after)
+    return changed
 
 
 def check(baseline: dict[str, int], *, only_paths: set[str] | None = None) -> list[str]:
@@ -298,13 +340,26 @@ def main() -> int:
     only_paths = None
     if args.changed_since:
         if _diff_touches_baseline(args.changed_since):
-            # A baseline edit changes the invariant for the WHOLE tree, not
-            # just files this diff's *.py list would name -- always fall back
-            # to a full sweep rather than silently scoping around it.
+            # A baseline edit could change the ceiling for a file this diff's
+            # *.py list wouldn't otherwise name -- but the diff's own baseline
+            # edits are still exactly knowable, so scope to this diff's
+            # changed *.py files PLUS every baseline key it added/changed/
+            # removed, rather than falling back to a fully unscoped sweep.
+            # An unscoped sweep would fail this PR for organic drift on
+            # completely unrelated, already-baselined files elsewhere in the
+            # tree (growth some other, unrelated merged PR caused) -- exactly
+            # the unfair-attribution failure mode --changed-since exists to
+            # prevent in the first place. A file whose own baseline entry
+            # this diff doesn't touch, and whose own source this diff doesn't
+            # touch, is not this diff's responsibility.
+            changed_keys = _changed_baseline_keys(args.changed_since)
             print(
-                f"[INFO] {BASELINE_PATH.relative_to(REPO)} changed -- "
-                "falling back to a full sweep instead of --changed-since scoping."
+                f"[INFO] {BASELINE_PATH.relative_to(REPO)} changed -- scoping "
+                "to this diff's changed files plus its own baseline edits "
+                f"({len(changed_keys)} entr{'y' if len(changed_keys) == 1 else 'ies'}), "
+                "not a fully unscoped sweep."
             )
+            only_paths = _changed_py_files(args.changed_since) | changed_keys
         else:
             only_paths = _changed_py_files(args.changed_since)
     violations = check(baseline, only_paths=only_paths)

@@ -294,7 +294,7 @@ def test_changed_since_is_incompatible_with_refresh_baseline(repo: Path):
     assert "--changed-since is incompatible with --refresh-baseline" in result.stderr
 
 
-def test_changed_since_falls_back_to_full_sweep_when_baseline_itself_changes(
+def test_changed_since_still_checks_a_baseline_entry_this_diff_edits(
     repo: Path,
 ):
     # A baseline-only edit touches no *.py file at all, so a naive *.py-only
@@ -314,8 +314,111 @@ def test_changed_since_falls_back_to_full_sweep_when_baseline_itself_changes(
 
     result = _run(repo, "--changed-since", base_sha)
 
-    # Falls back to the full sweep instead of scoping around the untouched
-    # (but now over its lowered ceiling) src/legacy.py.
+    # Still checked -- the diff's own baseline edit is exactly knowable, so
+    # it's added to the scope even though this diff's *.py file list is
+    # empty. Not a fully unscoped sweep, though (see the next test).
     assert result.returncode == 1, result.stdout + result.stderr
     assert "src/legacy.py" in result.stdout
     assert "[INFO]" in result.stdout
+
+
+def test_changed_since_still_checks_a_baseline_entry_this_diff_removes(
+    repo: Path,
+):
+    # Symmetric with the lowering case above: REMOVING a baseline entry
+    # entirely (not just editing its value) must also be re-checked, even
+    # though the removed key no longer appears in the "after" baseline dict
+    # at all -- _changed_baseline_keys must surface it via the "before-only"
+    # side of the diff, not just the "after" side.
+    _write_lines(repo, "src/legacy.py", 5000)
+    _write_baseline(repo, {"src/legacy.py": 5000})
+    _commit_all(repo)
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    _write_baseline(repo, {})  # bogus/mistaken removal; file is still 5000 lines
+    _commit_all(repo)
+
+    result = _run(repo, "--changed-since", base_sha)
+
+    # A removed entry falls back to the hard 1,000-line cap (no baseline
+    # entry == no grandfathering), so the still-5,000-line file must fail.
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "src/legacy.py" in result.stdout
+    assert "[INFO]" in result.stdout
+
+
+def test_changed_since_with_baseline_touch_does_not_blame_unrelated_drift(
+    repo: Path,
+):
+    """The exact PR #3205 CI failure this guards against: a componentization
+    PR that legitimately lowers ITS OWN file's ceiling must not also be
+    blamed for a completely unrelated, already-baselined file elsewhere that
+    drifted past its own ceiling via some other, unrelated merged PR -- that
+    is organic trunk drift for a scheduled sweep/decomposer to handle (Phase
+    2), not something a fair-attribution PR-time gate should block on."""
+    _write_lines(repo, "src/mine.py", 2000)
+    _write_lines(repo, "src/unrelated.py", 3000)
+    _write_baseline(repo, {"src/mine.py": 2000, "src/unrelated.py": 3000})
+    _commit_all(repo)
+    fork_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    default_branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "switch", "-c", "pr-branch")
+
+    # This PR's own branch shrinks + re-baselines its own file...
+    _write_lines(repo, "src/mine.py", 1500)
+    _write_baseline(repo, {"src/mine.py": 1500, "src/unrelated.py": 3000})
+    _commit_all(repo)
+
+    # ...meanwhile, back on "main", some unrelated, already-merged PR grows a
+    # different file past its already-recorded ceiling (never touching the
+    # baseline entry, exactly the buggy-but-already-landed trunk state Phase
+    # 2's watchdog/decomposer -- not this PR-time gate -- is responsible for).
+    _git(repo, "switch", default_branch)
+    _write_lines(repo, "src/unrelated.py", 3001)
+    _commit_all(repo)
+    main_tip = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    # Rebase the PR branch onto the now-advanced "main" tip, exactly like a
+    # real PR branch does before its CI re-runs.
+    _git(repo, "switch", "pr-branch")
+    _git(repo, "rebase", default_branch)
+
+    result = _run(repo, "--changed-since", main_tip)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "src/unrelated.py" not in result.stdout
+    assert "[INFO]" in result.stdout
+    assert fork_sha  # sanity: fixture actually forked from a real commit
+
+
+def test_changed_since_with_baseline_touch_still_catches_this_diffs_own_growth(
+    repo: Path,
+):
+    """The baseline-touch scoping widening must not become a loophole: a
+    file this diff's own *.py commits touch is still enforced even when the
+    same diff also happens to edit the baseline for an unrelated entry."""
+    _write_lines(repo, "src/mine.py", 999)
+    _write_lines(repo, "src/other.py", 500)
+    _write_baseline(repo, {"src/other.py": 500})
+    _commit_all(repo)
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    _write_lines(repo, "src/mine.py", 1001)  # this diff's own growth, over cap
+    _write_baseline(repo, {"src/other.py": 400})  # unrelated baseline edit
+    _commit_all(repo)
+
+    result = _run(repo, "--changed-since", base_sha)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "src/mine.py" in result.stdout
+

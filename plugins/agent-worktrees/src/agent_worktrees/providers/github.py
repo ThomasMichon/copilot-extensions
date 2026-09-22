@@ -494,6 +494,49 @@ class GitHubProvider:
             "(pr-merge --all is gitea-only today)."
         )
 
+    def find_pull_by_head(
+        self, repo: str, head: str, *, api_base: str = "", token: str | None = None
+    ) -> PullResult | None:
+        """Resolve a PR by its head branch via ``gh pr list --head`` (all states).
+
+        fleet-flows Phase 2 (#2146): heals a tracked record whose active PR has
+        no ``number``. ``gh pr list --head`` scopes to branches in ``repo``
+        itself -- correct here, since every branch this facility opens a PR
+        from lives in the same repo (no cross-fork PRs). Returns ``None`` when
+        no PR (of any state) has that head.
+        """
+        proc = run_cli(
+            [
+                "gh", "pr", "list",
+                "--repo", repo,
+                "--head", head,
+                "--state", "all",
+                "--json", "number,url,state,headRefOid,baseRefName",
+            ],
+            env=self._env(token, host=self.authority_endpoint(api_base)),
+        )
+        if proc.returncode != 0:
+            raise ProviderError(
+                f"gh pr list --head {head} failed for {repo}: "
+                f"{proc.stderr.strip()}"
+            )
+        try:
+            rows = json.loads(proc.stdout)
+        except json.JSONDecodeError as exc:
+            raise ProviderError(f"gh pr list returned non-JSON: {exc}") from exc
+        if not isinstance(rows, list) or not rows:
+            return None
+        data = rows[0]
+        state = str(data.get("state", "open")).lower() or "open"
+        return PullResult(
+            url=str(data.get("url", "")),
+            number=int(data.get("number")),
+            state=state,
+            merged=(state == "merged"),
+            head_sha=str(data.get("headRefOid", "")),
+            base_ref=str(data.get("baseRefName", "")),
+        )
+
     def request_auto_complete(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
         automerge_label: str = "", squash: bool = True,

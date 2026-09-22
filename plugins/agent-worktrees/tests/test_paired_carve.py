@@ -589,6 +589,129 @@ class TestPairedKnowledgeAllocationEarlyPreflight:
         assert not (tmp_path / "harness-worktrees").exists()
 
 
+class TestNonUserOriginSkipsPairing:
+    """Regression: pairing exists to give a human operator a personal
+    knowledge-repo sibling alongside their own interactive work. A
+    non-``"user"`` origin worktree (``"delegate"`` -- a headless dispatch
+    attempt or any other automated/Picker-hidden creation -- or
+    ``"system"`` -- a daemon-owned worktree, independently selectable from
+    ``kind`` via the CLI's own ``--origin`` flag) has no such operator, yet
+    ``kind`` for a dispatch attempt still defaults to the ordinary
+    "session" -- so before this fix, the carve fired for every single
+    dispatch attempt, leaking a full extra, permanently-unreleasable
+    knowledge worktree per attempt (confirmed: 103 orphaned "-k" knowledge
+    worktrees on one operator's machine, most with session_count 0). The
+    guard excludes every non-"user" origin (an allowlist), not merely
+    "delegate" (a denylist), so a "system"-origin `kind="session"`
+    creation is covered too."""
+
+    def _setup(self, monkeypatch, tmp_path):
+        _common_patches(monkeypatch, tmp_path)
+        k_anchor = tmp_path / "knowledge"
+        k_anchor.mkdir()
+        monkeypatch.setattr(
+            m.state_root_mod, "resolve_state_root",
+            lambda c: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
+        )
+        entry = repos_mod.RepoEntry(
+            name="citadel-knowledge", repo_class="worktree",
+            remote="https://example.com/citadel-knowledge.git",
+            default_branch="main",
+        )
+        monkeypatch.setattr(repos_mod, "find_repo", lambda n: entry)
+        monkeypatch.setattr(
+            m.git_ops, "resolve_remote_name", lambda value, *, cwd: "origin",
+        )
+        monkeypatch.setattr(
+            m.git_ops, "prepare_worktree_base",
+            lambda *a, **k: types.SimpleNamespace(
+                start_point="origin/main", fetched=True, fetch_error=None,
+                anchor=types.SimpleNamespace(updated=True, reason="updated", behind=0),
+            ),
+        )
+        from agent_worktrees.codename_config import CodenameConfig
+        knowledge_config = types.SimpleNamespace(
+            default_repo=types.SimpleNamespace(
+                codename=CodenameConfig(),
+                pr=types.SimpleNamespace(
+                    enabled=False, source_attribution_configured=False,
+                ),
+                worktree_root=str(tmp_path / "worktrees"),
+            )
+        )
+        monkeypatch.setattr(m.cfg, "load_config", lambda project=None: knowledge_config)
+        create_worktree_calls: list[object] = []
+        monkeypatch.setattr(
+            m.git_ops, "create_worktree",
+            lambda *a, **k: create_worktree_calls.append((a, k)),
+        )
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+        return create_worktree_calls
+
+    def _harness_config(self, tmp_path):
+        from agent_worktrees import config as cfg_mod
+
+        harness_anchor = tmp_path / "harness-anchor"
+        harness_anchor.mkdir()
+        return cfg_mod.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="linux",
+            repo_name="citadel-harness",
+            repos={
+                "citadel-harness": cfg_mod.RepoConfig(
+                    anchor=str(harness_anchor),
+                    worktree_root=str(tmp_path / "harness-worktrees"),
+                )
+            },
+        )
+
+    def test_default_origin_still_carves(self, monkeypatch, tmp_path):
+        create_worktree_calls = self._setup(monkeypatch, tmp_path)
+        m._create_worktree_core(self._harness_config(tmp_path))
+        # One for the harness worktree, one for its paired knowledge sibling.
+        assert len(create_worktree_calls) == 2
+
+    def test_user_origin_still_carves(self, monkeypatch, tmp_path):
+        create_worktree_calls = self._setup(monkeypatch, tmp_path)
+        m._create_worktree_core(
+            self._harness_config(tmp_path), origin="user",
+        )
+        assert len(create_worktree_calls) == 2
+
+    def test_delegate_origin_does_not_carve(self, monkeypatch, tmp_path):
+        create_worktree_calls = self._setup(monkeypatch, tmp_path)
+        m._create_worktree_core(
+            self._harness_config(tmp_path), origin="delegate",
+        )
+        # Only the (dispatch-owned) worktree itself -- no knowledge sibling.
+        assert len(create_worktree_calls) == 1
+        yaml_files = list((tmp_path / "tracking").glob("*.yaml"))
+        assert len(yaml_files) == 1
+        record = tk.load_record_by_id(
+            yaml_files[0].stem, tracking_path=tmp_path / "tracking",
+        )
+        assert record is not None
+        assert not record.is_paired
+
+    def test_system_origin_does_not_carve(self, monkeypatch, tmp_path):
+        # A "system"-origin worktree can still carry kind="session" (kind
+        # and origin are independent CLI flags) -- must be excluded the
+        # same as "delegate", not just the dispatch-specific case.
+        create_worktree_calls = self._setup(monkeypatch, tmp_path)
+        m._create_worktree_core(
+            self._harness_config(tmp_path), origin="system",
+        )
+        assert len(create_worktree_calls) == 1
+        yaml_files = list((tmp_path / "tracking").glob("*.yaml"))
+        assert len(yaml_files) == 1
+        record = tk.load_record_by_id(
+            yaml_files[0].stem, tracking_path=tmp_path / "tracking",
+        )
+        assert record is not None
+        assert not record.is_paired
+
+
 class TestCreatePairPluginComposition:
     def test_stamps_pair_before_composing_plugins(self, monkeypatch, tmp_path):
         record = tk.WorktreeRecord(
