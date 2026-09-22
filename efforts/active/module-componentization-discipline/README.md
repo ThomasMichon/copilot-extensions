@@ -2017,3 +2017,10 @@ the Phase 0 runbook, picked up as capacity allows.
   the normal composition-root scaffolding (imports, parser assembly, client
   targeting/bootstrap helpers, and `main()`), not an uncaught command-family
   seam.
+- PR status for the final under-cap slice set: **#3283 open, not merged**.
+  Review reached **approval recommended** and the PR itself is mergeable, but
+  the required `guards + lint` check is still failing for the same pre-existing
+  repo-wide blocker already tracked in **#3276** (`agent-pull-requests` missing
+  `payload-invocation.json`). The current `main` branch fails the same
+  `Payload invocation foundation tests` step, so this PR remains blocked on the
+  unrelated red-main condition rather than on the `agent-dispatch` diff.
