@@ -132,8 +132,8 @@ def test_status_with_boot_uses_default_request_deadline(monkeypatch):
     assert result == {"state": "CLEAN"}
     assert worktree_status_daemon.REQUEST_DEADLINE_S == expected_deadline
     assert observed == {
-        "request_deadline_s": worktree_status_daemon.REQUEST_DEADLINE_S,
-        "release_timeout": worktree_status_daemon.REQUEST_DEADLINE_S,
+        "request_deadline_s": expected_deadline,
+        "release_timeout": expected_deadline,
     }
 
 
