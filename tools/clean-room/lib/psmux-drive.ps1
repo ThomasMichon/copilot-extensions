@@ -101,7 +101,7 @@ function Wait-CrPsmuxFolderTrustPrompt {
     while ($waited -lt 10) {
         $captured = Get-CrPsmuxCapture -Session $Session
         if ($captured -match 'Confirm folder trust') {
-            Send-CrPsmuxKeys -Session $Session -Keys ''
+            & psmux send-keys -t $Session Enter
             return
         }
         Start-Sleep -Milliseconds 500
