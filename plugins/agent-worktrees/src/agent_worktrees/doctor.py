@@ -75,6 +75,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -479,6 +480,77 @@ def _overlay_findings(
 # Diagnose / reconcile
 # ---------------------------------------------------------------------------
 
+def _agent_rt_root_findings(fix: bool) -> list[Finding]:
+    """Flag a persisted ``AGENT_RT_ROOT`` as unexpected drift.
+
+    ``AGENT_RT_ROOT`` is a shared runtime-resolution override every plugin's
+    ``resolve-runtime.ps1``/``.sh`` accepts; the contract is that a binstub
+    sets it itself, per-invocation, immediately before dot-sourcing the
+    resolver -- it should never persist beyond a single process. A stray
+    persisted value (typically left over from ad-hoc debugging) silently
+    hijacks any later invocation of a plugin resolver that -- unlike this
+    plugin's own binstub (fixed alongside this check) -- trusts an inherited
+    value instead of scoping its own. See
+    ThomasMichon/copilot-extensions#3220.
+    """
+    findings: list[Finding] = []
+    if sys.platform == "win32":
+        import winreg  # local import; Windows-only stdlib module
+
+        for scope, hive, subkey in (
+            ("User", winreg.HKEY_CURRENT_USER, "Environment"),
+            ("Machine", winreg.HKEY_LOCAL_MACHINE,
+             r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+        ):
+            try:
+                with winreg.OpenKey(hive, subkey) as key:
+                    value, _ = winreg.QueryValueEx(key, "AGENT_RT_ROOT")
+            except OSError:
+                continue
+            fixed = False
+            if fix:
+                try:
+                    with winreg.OpenKey(hive, subkey, 0, winreg.KEY_SET_VALUE) as wkey:
+                        winreg.DeleteValue(wkey, "AGENT_RT_ROOT")
+                    fixed = True
+                except OSError:
+                    fixed = False
+            findings.append(Finding(
+                repo="*",
+                kind="leaked_agent_rt_root",
+                severity=SEV_WARNING,
+                detail=(
+                    f"persisted {scope}-scope AGENT_RT_ROOT={value!r} found in "
+                    "the Windows registry; this should only ever be a "
+                    "transient, per-invocation process variable a binstub "
+                    "sets itself -- a persisted value silently hijacks any "
+                    "plugin resolver that trusts an inherited value"
+                ),
+                fixable=True,
+                fix_detail=f"clear {scope}-scope AGENT_RT_ROOT from the registry",
+                fixed=fixed,
+            ))
+    else:
+        # A process-level check can't tell "exported in this process only"
+        # apart from "exported by a shell rc file"; report only -- blind-
+        # editing an operator's rc file is unsafe.
+        if os.environ.get("AGENT_RT_ROOT"):
+            findings.append(Finding(
+                repo="*",
+                kind="leaked_agent_rt_root",
+                severity=SEV_WARNING,
+                detail=(
+                    "AGENT_RT_ROOT is set in this process' environment; if "
+                    "it is exported from a shell rc file rather than set "
+                    "per-invocation by a binstub, remove it there -- a "
+                    "persisted value silently hijacks any plugin resolver "
+                    "that trusts an inherited value"
+                ),
+                fixable=False,
+            ))
+    return findings
+
+
 def reconcile(fix: bool = False, plat: str | None = None) -> list[Finding]:
     """Diagnose drift and, when ``fix`` is set, reconcile the data-only cases.
 
@@ -490,6 +562,7 @@ def reconcile(fix: bool = False, plat: str | None = None) -> list[Finding]:
     registry = repos.read_registry()
     projects = _read_projects()
     findings: list[Finding] = []
+    findings.extend(_agent_rt_root_findings(fix))
 
     # Index repos.yaml entries by normalized current-platform path for
     # collision detection.
