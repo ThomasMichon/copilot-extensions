@@ -383,7 +383,6 @@ def main(argv: list[str] | None = None) -> int:
             tasks,
             machine=args.machine,
             recent_mins=args.recent_mins,
-            relay_fetch=_relay_fetch,
             relay_fetch_many=_relay_fetch_many,
         ),
         sys.stdout,

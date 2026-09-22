@@ -185,17 +185,17 @@ def test_main_reads_local_coordinator(monkeypatch, tmp_path, capsys):
         def read(self):
             return json.dumps([{"id": "t1", "status": "queued"}]).encode()
 
-    captured = {}
+    captured = {"urls": []}
 
     def open_request(request, timeout):
-        captured["url"] = request.full_url
+        captured["urls"].append(request.full_url)
         captured["timeout"] = timeout
         return Response()
 
     monkeypatch.setattr(board_cli.urllib.request, "urlopen", open_request)
     assert board_cli.main(["--machine", "m1"]) == 0
     assert json.loads(capsys.readouterr().out)[0]["id"] == "t1"
-    assert captured["url"].startswith("http://127.0.0.1:1234/tasks?")
+    assert captured["urls"][0].startswith("http://127.0.0.1:1234/tasks?")
     assert captured["timeout"] == 3
 
 

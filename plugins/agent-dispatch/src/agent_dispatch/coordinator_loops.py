@@ -536,8 +536,6 @@ def _fetch_worktree_status_bundle(
         return None
     result = capture(
         "worktree-status-bundle",
-        "--project",
-        project,
         "--worktree",
         worktree_id,
         "--json",
@@ -565,7 +563,11 @@ def _refresh_worktree_status_relay(
     max_items: int | None = None,
 ) -> dict[str, int]:
     machine = resolve_machine()
-    refs = list(refs or _owned_worktree_refs_for_machine(queue, machine))
+    current_refs = _owned_worktree_refs_for_machine(queue, machine)
+    current_ref_set = set(current_refs)
+    refs = list(refs or current_refs)
+    if refs is not current_refs:
+        refs = [ref for ref in refs if ref in current_ref_set]
     if max_items is not None:
         refs = refs[:max_items]
     refreshed = 0
@@ -581,7 +583,8 @@ def _refresh_worktree_status_relay(
             poll_interval_seconds=poll_interval,
         )
         refreshed += 1
-    return {"checked": len(refs), "updated": refreshed}
+    pruned = relay.prune(keep=current_ref_set)
+    return {"checked": len(refs), "updated": refreshed, "pruned": pruned}
 
 
 async def _worktree_status_relay_loop(
@@ -610,7 +613,16 @@ async def _worktree_status_relay_loop(
                 except (TimeoutError, asyncio.TimeoutError):
                     pass
             first_pass = False
-            pending_refs = _owned_worktree_refs_for_machine(queue, _local_machine_name())
+            try:
+                pending_refs = _owned_worktree_refs_for_machine(
+                    queue, _local_machine_name()
+                )
+            except Exception:
+                log.warning(
+                    "worktree-status relay snapshot failed", exc_info=True
+                )
+                await asyncio.sleep(_GOVERNANCE_BACKOFF_SECONDS)
+                continue
         if not pending_refs:
             continue
         current_ref = [pending_refs.pop(0)]

@@ -22,6 +22,7 @@ log = logging.getLogger("agent-dispatch.worktree-status-relay")
 
 _BUSY_TIMEOUT_MS = 5000
 DEFAULT_STALE_AFTER_SECONDS = 40.0
+DEFAULT_RETENTION_SECONDS = 3600.0
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS worktree_status_relay (
@@ -133,6 +134,35 @@ class WorktreeStatusRelayStore:
                 )
         except (sqlite3.Error, OSError):
             log.warning("relay write failed for %s/%s", repo, worktree_id, exc_info=True)
+
+    def prune(
+        self,
+        *,
+        keep: set[tuple[str, str]] | None = None,
+        retention_seconds: float = DEFAULT_RETENTION_SECONDS,
+        now: float | None = None,
+    ) -> int:
+        keep = keep or set()
+        cutoff = (time.time() if now is None else now) - max(0.0, retention_seconds)
+        removed = 0
+        try:
+            with _connect(self.db_path) as conn:
+                rows = conn.execute(
+                    "SELECT repo, worktree_id FROM worktree_status_relay WHERE fetched_at < ?",
+                    (cutoff,),
+                ).fetchall()
+                for row in rows:
+                    key = (row["repo"], row["worktree_id"])
+                    if key in keep:
+                        continue
+                    conn.execute(
+                        "DELETE FROM worktree_status_relay WHERE repo = ? AND worktree_id = ?",
+                        key,
+                    )
+                    removed += 1
+        except (sqlite3.Error, OSError):
+            log.debug("relay prune failed", exc_info=True)
+        return removed
 
 
 def claimed_identity(task: Mapping[str, object]) -> tuple[str | None, str | None]:

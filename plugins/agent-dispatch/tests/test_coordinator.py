@@ -1502,10 +1502,39 @@ def test_worktree_status_relay_refresh_skips_other_machines(tmp_path):
         ),
     )
 
-    assert counts == {"checked": 1, "updated": 1}
+    assert counts["checked"] == 1
+    assert counts["updated"] == 1
     assert seen == [(TEST_REPO, "wt-local")]
     assert relay.get(TEST_REPO, "wt-local") is not None
     assert relay.get(TEST_REPO, "wt-remote") is None
+
+
+def test_worktree_status_relay_refresh_revalidates_explicit_refs(tmp_path):
+    q = TaskQueue(tmp_path / "tasks.db")
+    q.create(
+        "remote-owned",
+        repo=TEST_REPO,
+        target_worktree="wt-remote",
+        claim_as="remote/wt-remote",
+    )
+    relay = WorktreeStatusRelayStore(tmp_path / "relay.sqlite3")
+    seen: list[tuple[str, str]] = []
+
+    counts = _refresh_worktree_status_relay(
+        q,
+        relay,
+        poll_interval=10.0,
+        resolve_machine=lambda: "local",
+        refs=[(TEST_REPO, "wt-remote")],
+        fetch_bundle=lambda repo, worktree_id: (
+            seen.append((repo, worktree_id))
+            or {"project": "proj", "worktree_id": worktree_id, "facts": {}}
+        ),
+    )
+
+    assert counts["checked"] == 0
+    assert counts["updated"] == 0
+    assert seen == []
 
 
 def test_worktree_status_relay_refresh_can_bound_one_worktree_per_cycle(tmp_path):
@@ -1536,8 +1565,25 @@ def test_worktree_status_relay_refresh_can_bound_one_worktree_per_cycle(tmp_path
         max_items=1,
     )
 
-    assert counts == {"checked": 1, "updated": 1}
+    assert counts["checked"] == 1
+    assert counts["updated"] == 1
     assert seen == ["wt-b"]
+
+
+def test_worktree_status_relay_prunes_stale_rows(tmp_path):
+    relay = WorktreeStatusRelayStore(tmp_path / "relay.sqlite3")
+    relay.put(
+        TEST_REPO,
+        "wt-stale",
+        {"facts": {}},
+        fetched_at=10.0,
+        poll_interval_seconds=10.0,
+    )
+
+    removed = relay.prune(retention_seconds=5.0, now=20.0)
+
+    assert removed == 1
+    assert relay.get(TEST_REPO, "wt-stale") is None
 
 
 def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatch, capsys):
