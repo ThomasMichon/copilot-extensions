@@ -355,6 +355,67 @@ class _SessionParityMixin:
         with contextlib.suppress(Exception):
             lock.release()
 
+    def _acquire_codespace_lock(self, session_id: str, name: str) -> None:
+        """Same-machine mirror of :meth:`_acquire_container_lock` for a
+        CodeSpace target -- see ``session_core``'s ``_codespace_locks``
+        docstring for why this exists alongside the cross-machine
+        ``_claim_codespace`` claim. Keyed by the bare CodeSpace name (no
+        ``container:`` prefix), matching exactly how ``agent-codespaces
+        ssh``/``copilot`` key their own ``TargetLock`` acquisitions, so a
+        local CLI invocation and this daemon's own Session-Host dispatch
+        contend for the SAME lock.
+        """
+        if session_id in self._codespace_lock_sessions:
+            return
+        existing = self._codespace_locks.get(name)
+        if existing is not None:
+            raise RuntimeError(
+                f"CodeSpace '{name}' is already owned by bridge session "
+                f"{existing[1]}"
+            )
+        from ssh_manager import TargetLock
+
+        lock = TargetLock(name, op="session-host")
+        lock.acquire()
+        self._codespace_locks[name] = (lock, session_id)
+        self._codespace_lock_sessions[session_id] = name
+
+    def _transfer_codespace_lock(
+        self,
+        old_session_id: str,
+        new_session_id: str,
+        name: str,
+    ) -> None:
+        """Move one held CodeSpace target lock without an unlocked window."""
+        entry = self._codespace_locks.get(name)
+        if (
+            self._codespace_lock_sessions.get(old_session_id) != name
+            or entry is None
+            or entry[1] != old_session_id
+        ):
+            raise RuntimeError(
+                f"CodeSpace '{name}' is not owned by bridge session "
+                f"{old_session_id}"
+            )
+        lock, _owner = entry
+        self._codespace_lock_sessions.pop(old_session_id, None)
+        self._codespace_lock_sessions[new_session_id] = name
+        self._codespace_locks[name] = (lock, new_session_id)
+
+    def _release_codespace_lock(self, session_id: str) -> None:
+        name = self._codespace_lock_sessions.pop(session_id, None)
+        if name is None:
+            return
+        entry = self._codespace_locks.get(name)
+        if entry is None:
+            return
+        lock, owner_session = entry
+        if owner_session != session_id:
+            return
+        self._codespace_locks.pop(name, None)
+        with contextlib.suppress(Exception):
+            lock.release()
+
     def _set_container_launch_pending(
         self,
         session_id: str,

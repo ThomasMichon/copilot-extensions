@@ -124,6 +124,18 @@ class _SessionCoreMixin:
         # and follows the remote Host record's lifetime.
         self._container_locks: dict[str, tuple[Any, str]] = {}
         self._container_lock_sessions: dict[str, str] = {}
+        # Same-machine, cross-process ownership for a CodeSpace's shared
+        # credential-relay reverse-forward, mirroring the container locks
+        # above (claim-consistency sweep, agent-bridge-cli-mode-sessions
+        # Phase 4 follow-up): Session-Host dispatch to a CodeSpace never runs
+        # ``agent-codespaces ssh``/``copilot`` (the CLI verbs that already
+        # take this lock), so without this the daemon's own headless dispatch
+        # could still collide with a local `ssh`/`copilot` invocation against
+        # the same CodeSpace on this machine, even after the cross-machine
+        # ``_claim_codespace`` claim above was already closing the
+        # cross-worktree half of this gap.
+        self._codespace_locks: dict[str, tuple[Any, str]] = {}
+        self._codespace_lock_sessions: dict[str, str] = {}
         # Strong refs to in-flight best-effort remote-reap tasks (so they are not
         # GC'd mid-flight); each removes itself on completion.
         self._remote_reap_tasks: set[Any] = set()
