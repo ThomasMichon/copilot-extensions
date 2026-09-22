@@ -689,9 +689,10 @@ machine may deliberately gate outbound reach until policy allows it.
   metadata) and solo sessions with no worktree at all. Implemented as a new
   ``GET /api/v1/sessions/{id}/transcript`` bare route, backed by the same
   cold-store provider the worktree-scoped transcript route already uses --
-  closing a gap `aperture-labs`' `session-worktree-archive-linkout` Phase 2d
-  flagged as a small, feasible follow-up (letting a solo-session consumer,
-  e.g. Neuron Forge, retire its own direct Permanent Record dependency).
+  closing a gap a downstream consumer's session-worktree-archive-linkout
+  effort (Phase 2d) flagged as a small, feasible follow-up (letting a
+  solo-session consumer, e.g. Neuron Forge, retire its own direct
+  Permanent Record dependency).
 
 - **2026-09-20** — Added *listing-defaults-to-registered-excludes-archived*
   (Features) and *archived-is-opt-in-never-ambient* (Behaviors): every

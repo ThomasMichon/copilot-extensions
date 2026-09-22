@@ -59,7 +59,7 @@
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "51dfd96306b8529b3b60b0691d8925bf74fd03d1caa252ab92d619118cd234fa",
+          "sha256": "986944538359e87a37969ffddec4630d763dea54c4c3625e9c24e120ca000928",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -443,7 +443,7 @@
           "generation": 16,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
           "source_git_blob": "ec555b7e3f762ff7b0c83b346d46785b140cbd9a",
-          "capture_method": "Re-attested after adding a bare (non-worktree-scoped) session transcript route (session-worktree-archive-linkout Phase 2d follow-up, aperture-labs) and trimming pre-existing docstrings/comments for the module-size ceiling; the 503-initializing error response this fixture attests is unchanged."
+          "capture_method": "Re-attested after adding a bare (non-worktree-scoped) session transcript route (a downstream consumer's session-worktree-archive-linkout Phase 2d follow-up) and trimming pre-existing docstrings/comments for the module-size ceiling; the 503-initializing error response this fixture attests is unchanged."
         },
         {
           "commit": "b25684c9ad7dfaa9b2a013db481acd7f76f615ab",
@@ -451,7 +451,7 @@
           "generation": 17,
           "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
           "source_git_blob": "37099b9eb82b021464b50c036025339ffb8d3ab9",
-          "capture_method": "Read production constants from this exact source revision -- HTTP_PROTOCOL_VERSION bumped to 17 for the new bare session transcript route (session-worktree-archive-linkout Phase 2d follow-up, aperture-labs); BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION added."
+          "capture_method": "Read production constants from this exact source revision -- HTTP_PROTOCOL_VERSION bumped to 17 for the new bare session transcript route (a downstream consumer's session-worktree-archive-linkout Phase 2d follow-up); BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION added."
         },
         {
           "commit": "b25684c9ad7dfaa9b2a013db481acd7f76f615ab",

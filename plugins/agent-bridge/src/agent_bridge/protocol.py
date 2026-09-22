@@ -92,8 +92,8 @@ DISPATCH_TASK_SESSION_PROTOCOL_VERSION = 15
 # First version that exposes a bare (non-worktree-scoped) session transcript
 # route -- GET /api/v1/sessions/{id}/transcript -- letting a solo session
 # (one with no worktree_id) retire a direct archival-provider dependency in
-# favor of agent-bridge's own cold-store fallback (session-worktree-archive
-# -linkout Phase 2d follow-up, aperture-labs).
+# favor of agent-bridge's own cold-store fallback (a downstream consumer's
+# session-worktree-archive-linkout Phase 2d follow-up).
 BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION = 17
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
