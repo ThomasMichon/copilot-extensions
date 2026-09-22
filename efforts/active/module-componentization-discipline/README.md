@@ -261,12 +261,12 @@ Verbatim from the operator:
             Bumped every consuming plugin:
             `agent-bridge` `0.4.0-dev537`, `agent-codespaces`
             `0.4.0-dev151`, `agent-containers` `0.1.2-dev152`,
-            `agent-dispatch` `0.1.2-dev164`, `agent-index` `0.1.0-dev195`,
+            `agent-dispatch` `0.1.2-dev165`, `agent-index` `0.1.0-dev196`,
             `agent-logger` `0.1.2-dev30`, `agent-machines`
             `0.1.0-dev132`, `agent-mcp` `0.2.0-dev133`, `agent-ssh`
-            `0.1.0-dev100`, `agent-vault` `0.1.0-dev111`, and
+            `0.1.0-dev100`, `agent-vault` `0.1.0-dev112`, and
             `agent-worktrees` `1.5.5-dev230` (with marketplace
-            `metadata.version` `1.7.7-dev198`).
+            `metadata.version` `1.7.7-dev199`).
 
 ### Phase 3 — cross-language cap
 - [ ] Design what "module size" means for `.sh`/`.ps1`/`.ts` (line count vs.
@@ -1282,3 +1282,4 @@ the Phase 0 runbook, picked up as capacity allows.
   offender is now `worktree-manager/.../picker_tui/engine.py` at 9,267 lines;
   within `agent-worktrees`, the most coherent follow-up remains the
   persistence/serialization core left in `tracking.py`.
+
