@@ -508,12 +508,13 @@ def _find_reusable_session(mgr, agent_name, caller_id):
 def _enforce_worktree_head_guard(worktree_id: str, mgr=None) -> None:
     """Refuse a create into a worktree with an active head or pending handoff.
 
-    Derives the head from agent-worktrees (see :mod:`..worktree_head`). When the
-    worktree is occupied by a current session or handoff, raises an ``HTTPException``
-    409 whose structured detail enumerates the three deliberate resolutions
-    (reuse / handoff / sunset) plus the ``reclaim`` break-glass. Fails **open**:
-    an untracked worktree or an unreadable ground layer yields ``occupied=False``
-    and this returns without raising, so create proceeds exactly as before.
+    Derives the head from agent-worktrees (see :mod:`..worktree_head`). When
+    occupied by a current session or handoff, raises ``HTTPException`` 409
+    enumerating the three deliberate resolutions (reuse / handoff / sunset);
+    ``create`` has no break-glass of its own -- the sole take-over mechanism
+    is ``resume ... --force`` (agent-bridge-cold-resume Phase 3). Fails
+    **open**: an untracked worktree or an unreadable ground layer yields
+    ``occupied=False`` and this returns without raising.
 
     An asserted ``active`` head naming a specific session id is additionally
     cross-checked, when ``mgr`` is supplied, against agent-bridge's own live
@@ -560,15 +561,15 @@ def _enforce_worktree_head_guard(worktree_id: str, mgr=None) -> None:
                 (
                     f"Worktree {worktree_id} has a pending handoff; starting "
                     "another session could race the intended successor. "
-                    "Consume or explicitly supersede the handoff, or pass "
-                    "reclaim=true to take over."
+                    "Consume or explicitly supersede the handoff, or take "
+                    "over per 'override' below."
                 )
                 if pending else
                 (
                     f"Worktree {worktree_id} already has a current session "
                     f"({head.head_session}); starting a new one would run in "
                     "parallel with it. Resolve the incumbent first (reuse / "
-                    "handoff / sunset), or pass reclaim=true to take over."
+                    "handoff / sunset), or take over per 'override' below."
                 )
             ),
             "choices": [
@@ -598,7 +599,7 @@ def _enforce_worktree_head_guard(worktree_id: str, mgr=None) -> None:
                     ),
                 },
             ],
-            "override": "reclaim=true",
+            "override": f"agent-bridge resume {worktree_id} --force",
         },
     )
 
@@ -682,17 +683,16 @@ async def start_session(req: StartSessionRequest, request: Request):
     # roll) whose ground-layer head is still ``active`` would silently spawn a
     # second, parallel session in a worktree that already has a current one.
     # Refuse it: the caller must reuse (preferred), hand off, or sunset the
-    # incumbent -- ``reclaim=true`` is the deliberate break-glass take-over. The
-    # head is *derived* from agent-worktrees (the ground-layer owner); agent-
-    # bridge keeps no rival pointer (``derive-dont-duplicate``). Fails open: if
-    # the ground layer can't be read, ``active`` is False and create proceeds.
+    # incumbent. ``create`` has no break-glass of its own
+    # (agent-bridge-cold-resume Phase 3) -- the sole take-over mechanism is
+    # ``resume ... --force``. The head is *derived* from agent-worktrees
+    # (``derive-dont-duplicate``); fails open if the ground layer can't be read.
     #
-    # This is the create-time sibling of the ``resume_worktree`` liveness guard
-    # (409 ``live_cli_holds_worktree``, also reclaim-bypassed): that one refuses
-    # owning a worktree a live *process* holds; this one refuses spawning atop a
-    # worktree an *asserted* head owns. Together they are one story -- a worktree
-    # has one current session, and taking it over is an explicit act.
-    if req.worktree_id and not req.reclaim:
+    # Create-time sibling of the ``resume_worktree`` liveness guard (409
+    # ``live_cli_holds_worktree``): that refuses owning a worktree a live
+    # process holds; this refuses spawning atop one an asserted head owns.
+    # Taking over a worktree is an explicit act via ``resume`` only.
+    if req.worktree_id:
         _enforce_worktree_head_guard(req.worktree_id, mgr)
 
     if agent_name:

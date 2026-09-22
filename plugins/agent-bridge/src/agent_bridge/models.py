@@ -207,15 +207,6 @@ class StartSessionRequest(BaseModel):
     # supported value only for an exclusive ``venue-parity:`` caller using
     # ``force_new``; ordinary callers cannot alter the far-side ACP command.
     parity_fault: str | None = None
-    # Break-glass override for the session-lifecycle head guard (agent-fabric
-    # `single-current-session-per-worktree`). When targeting an *existing*
-    # worktree (``worktree_id`` set) whose ground-layer head is active or whose
-    # numbered handoff is pending, create is refused (409). ``reclaim=true`` is
-    # the deliberate take-over: it
-    # bypasses the head guard, mirroring the ``reclaim`` break-glass on
-    # ``POST /worktrees/{id}/resume``. Distinct from ``force_new`` (which only
-    # opts out of caller-affinity reuse, and does NOT bypass the head guard).
-    reclaim: bool = False
     # Per-session model / reasoning-effort override for THIS session only. Copilot
     # ignores the ``--model`` launch flag in ``--acp`` mode, so agent-bridge sets
     # the model per-session via ``session/set_config_option``; these fields feed

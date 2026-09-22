@@ -3,7 +3,6 @@
 Used by CLI commands to talk to a running agent-bridge service.
 Uses only stdlib (urllib) to avoid adding runtime dependencies.
 """
-
 from __future__ import annotations
 
 import json
@@ -16,10 +15,9 @@ from typing import TYPE_CHECKING, Any, Iterator
 
 import yaml
 
+from .client_worktree_restart import WorktreeRestartMixin
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-
 DEFAULT_RESTART_GRACE = 30.0
 DEFAULT_SESSION_SETTLE_GRACE = 5.0
 
@@ -144,7 +142,7 @@ class SseStream(Iterator[dict[str, Any]]):
             response.close()
 
 
-class BridgeClient:
+class BridgeClient(WorktreeRestartMixin):
     """Sync HTTP client for the agent-bridge REST API."""
 
     def __init__(
@@ -1019,7 +1017,6 @@ class BridgeClient:
         force_new: bool = False,
         parity_fault: str | None = None,
         worktree_id: str | None = None,
-        reclaim: bool = False,
         env: dict[str, str] | None = None,
         model: str | None = None,
         effort: str | None = None,
@@ -1027,12 +1024,12 @@ class BridgeClient:
     ) -> dict[str, Any]:
         """POST /api/v1/sessions
 
-        ``worktree_id`` targets an *existing* worktree (a session roll). When it
-        is set, the server enforces the session-lifecycle head guard: a create
+        ``worktree_id`` targets an *existing* worktree (a session roll). When
+        set, the server enforces the session-lifecycle head guard: a create
         into a worktree whose ground-layer head is active or whose numbered
         handoff is pending is refused (409 ``worktree_head_active`` /
-        ``worktree_head_pending``) unless ``reclaim=true`` -- the
-        break-glass take-over (sibling of ``resume_worktree(reclaim=...)``).
+        ``worktree_head_pending``) with no break-glass of its own (Phase 3)
+        -- ``resume_worktree(reclaim=True)`` resumes-or-creates it instead.
 
         ``env`` sets per-session environment overrides merged onto the resolved
         agent's declared env and applied to the spawned Copilot CLI -- e.g. BYOK
@@ -1066,8 +1063,6 @@ class BridgeClient:
             body["parity_fault"] = parity_fault
         if worktree_id:
             body["worktree_id"] = worktree_id
-        if reclaim:
-            body["reclaim"] = True
         if env:
             body["env"] = env
         if model:

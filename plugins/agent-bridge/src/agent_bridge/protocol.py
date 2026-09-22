@@ -28,7 +28,7 @@ The daemon advertises both on ``/health``; ``BridgeClient`` reads them (see
 from __future__ import annotations
 
 # Current HTTP wire-contract version this build speaks.
-HTTP_PROTOCOL_VERSION = 15
+HTTP_PROTOCOL_VERSION = 16
 
 # First version that exposes the harness-owned relay interruption capability.
 RELAY_INTERRUPT_PROTOCOL_VERSION = 2
@@ -81,6 +81,13 @@ REMOTE_EVENT_MULTIPLEX_PROTOCOL_VERSION = 13
 # (agent-dispatch-session-worktree-history Phase 2, resolve-by-any-origin-
 # reference).
 DISPATCH_TASK_SESSION_PROTOCOL_VERSION = 15
+
+# Generation 16: POST /api/v1/sessions no longer honors a "reclaim" request
+# field (agent-bridge-cold-resume Phase 3, #6744) -- create's own session-
+# lifecycle head-guard bypass was removed; the sole take-over primitive left
+# is POST /worktrees/{id}/resume?reclaim=true. No new capability constant is
+# exported for this (nothing to *gain*-detect) -- the generation bump alone
+# signals the behavior change to a version-aware client.
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

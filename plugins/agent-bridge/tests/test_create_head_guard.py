@@ -3,9 +3,11 @@
 
 Creating a session *into an existing worktree* whose ground-layer head is still
 ``active`` is refused with a structured 409 enumerating reuse / handoff /
-sunset; ``reclaim=true`` is the break-glass that bypasses it. The head is
-*derived* from agent-worktrees (via ``worktree_head.resolve_head``) -- the guard
-keeps no rival pointer and fails **open** when the ground layer can't be read.
+sunset. ``create`` has no break-glass override of its own
+(agent-bridge-cold-resume Phase 3) -- the guard's ``override`` field points at
+``resume ... --force`` instead. The head is *derived* from agent-worktrees (via
+``worktree_head.resolve_head``) -- the guard keeps no rival pointer and fails
+**open** when the ground layer can't be read.
 
 This is the create-time sibling of the ``resume_worktree`` liveness guard
 (``live_cli_holds_worktree``); together they enforce one current session per
@@ -85,7 +87,7 @@ def test_guard_raises_on_active_head(monkeypatch):
     assert [c["action"] for c in detail["choices"]] == [
         "reuse", "handoff", "sunset"]
     assert detail["choices"][0]["preferred"] is True
-    assert "reclaim" in detail["override"]
+    assert "resume" in detail["override"] and "--force" in detail["override"]
 
 
 def test_guard_permits_when_inactive(monkeypatch):
@@ -229,7 +231,23 @@ def test_route_refuses_create_into_active_head(client, monkeypatch):
     detail = r.json()["detail"]
     assert detail["reason"] == "worktree_head_active"
     assert detail["head_session"] == "sess-A"
+    assert "resume" in detail["override"] and "--force" in detail["override"]
     # The guard fired *before* any spawn.
+    assert client._mgr.started is False
+
+
+def test_route_ignores_legacy_reclaim_field(client, monkeypatch):
+    # agent-bridge-cold-resume Phase 3: create no longer has a break-glass of
+    # its own. A stale/legacy caller still sending "reclaim" in the body is
+    # simply ignored (extra field) -- the guard still fires 409.
+    monkeypatch.setattr(
+        worktree_head, "resolve_head",
+        lambda wid: HeadInfo(active=True, occupied=True, head_session="sess-A",
+                             state="active", tracked=True),
+    )
+    r = client.post(
+        "/api/v1/sessions", json={"worktree_id": "wt-a", "reclaim": True})
+    assert r.status_code == 409
     assert client._mgr.started is False
 
 
@@ -250,24 +268,6 @@ def test_route_permits_create_when_head_session_is_a_bridge_ghost(monkeypatch):
     r = tc.post("/api/v1/sessions", json={"worktree_id": "wt-a"})
     assert r.status_code == 201
     assert mgr.started is True
-
-
-def test_route_reclaim_bypasses_guard(client, monkeypatch):
-    called = {"resolve": False}
-
-    def _resolve(wid):
-        called["resolve"] = True
-        return HeadInfo(active=True, occupied=True, head_session="sess-A", state="active",
-                        tracked=True)
-
-    monkeypatch.setattr(worktree_head, "resolve_head", _resolve)
-    # reclaim=true skips the guard entirely: resolve_head is never consulted and
-    # the (stubbed) spawn proceeds to a 201.
-    r = client.post(
-        "/api/v1/sessions", json={"worktree_id": "wt-a", "reclaim": True})
-    assert r.status_code == 201
-    assert called["resolve"] is False
-    assert client._mgr.started is True
 
 
 def test_route_no_worktree_id_skips_guard(client, monkeypatch):
