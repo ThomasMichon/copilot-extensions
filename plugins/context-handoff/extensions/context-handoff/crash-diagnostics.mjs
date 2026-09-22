@@ -104,6 +104,11 @@ function isPrivateRegularFile(fd) {
 export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
   let fd;
   let openFailed = false;
+  // Returns true if this call actually appended the entry, false if it was
+  // silently swallowed (see the module doc comment) -- callers that need to
+  // know whether the diagnostic actually landed anywhere (so they can fall
+  // back to something else) check this return value; nothing here changes
+  // behavior for a caller that ignores it.
   return function emergencyLog(label, detail) {
     try {
       if (fd === undefined && !openFailed) {
@@ -132,22 +137,41 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
               // O_APPEND descriptor fails with EPERM on Windows
               // (empirically confirmed: Windows refuses to truncate a
               // handle opened in append mode) -- so instead, close it,
-              // reopen the same path with O_TRUNC (no O_APPEND) to reset it
-              // to empty, then reopen again in the normal append mode this
-              // function keeps for every later write. `fd` is cleared
-              // first so that if any step here throws (propagating to the
-              // catch below, which marks this process as given up on
+              // reopen the same path to reset it, then reopen again in the
+              // normal append mode this function keeps for every later
+              // write. Both reset-path opens keep the exact same
+              // O_NOFOLLOW/O_NONBLOCK protective flags as the very first
+              // open above (closing the original fd reopens a TOCTOU
+              // window: `logPath` could have been replaced with a symlink
+              // or FIFO in between), and each new fd is independently
+              // revalidated with `isPrivateRegularFile()` -- a reset must
+              // not silently downgrade to writing through an
+              // attacker-substituted path just because the *original*
+              // open already proved trustworthy. `fd` is cleared first so
+              // that if any step here throws (propagating to the catch
+              // below, which marks this process as given up on
               // diagnostics), a later call never risks reusing an
               // already-closed descriptor.
               closeSync(fd);
               fd = undefined;
-              const truncater = openSync(
-                logPath,
-                fsConstants.O_CREAT | fsConstants.O_WRONLY | fsConstants.O_TRUNC,
-                0o600,
-              );
+              const resetFlags =
+                fsConstants.O_CREAT |
+                fsConstants.O_WRONLY |
+                fsConstants.O_TRUNC |
+                (fsConstants.O_NOFOLLOW ?? 0) |
+                (fsConstants.O_NONBLOCK ?? 0);
+              const truncater = openSync(logPath, resetFlags, 0o600);
+              if (process.platform !== "win32" && !isPrivateRegularFile(truncater)) {
+                closeSync(truncater);
+                throw new Error("crash log path is no longer trustworthy after reset");
+              }
               closeSync(truncater);
-              fd = openSync(logPath, OPEN_FLAGS, 0o600);
+              const reopened = openSync(logPath, OPEN_FLAGS, 0o600);
+              if (process.platform !== "win32" && !isPrivateRegularFile(reopened)) {
+                closeSync(reopened);
+                throw new Error("crash log path is no longer trustworthy after reopen");
+              }
+              fd = reopened;
             }
           } else {
             closeSync(candidate);
@@ -157,15 +181,17 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
           openFailed = true;
         }
       }
-      if (fd === undefined) return;
+      if (fd === undefined) return false;
       writeSync(
         fd,
         `${new Date().toISOString()} pid=${process.pid} ${label}: ${detail}\n`,
         null,
         "utf-8",
       );
+      return true;
     } catch {
       // Diagnostic logging must never become a second crash cause.
+      return false;
     }
   };
 }
@@ -235,12 +261,34 @@ export function installEmergencyDiagnostics(emergencyLog) {
   // whether a captured crash happened before or after readiness, without
   // paying for a write on the overwhelmingly common all-is-well path.
   let ready = false;
+  // emergencyLog() deliberately swallows every open/write failure (missing
+  // directory, full disk, an untrusted pre-existing path, ...) so that
+  // diagnostic logging itself can never become a second crash cause -- but
+  // installing these listeners at all suppresses Node's own default
+  // uncaught-exception report to stderr. Put those two together and a
+  // logging failure on an uncaughtException/unhandledRejection would leave
+  // NEITHER a file entry NOR any stderr output: the exact silent-exit
+  // symptom this module exists to diagnose, just moved one layer down. This
+  // wrapper checks emergencyLog()'s own success/failure return and, only on
+  // failure, falls back to a best-effort synchronous stderr write (itself
+  // wrapped in try/catch, so a failing stderr write -- e.g. a closed/broken
+  // fd 2 -- still cannot crash the handler that is already mid-failure).
+  const logOrFallback = (label, detail) => {
+    if (emergencyLog(label, detail)) return;
+    try {
+      process.stderr.write(
+        `context-handoff emergency diagnostics (log write failed): ${label}: ${detail}\n`,
+      );
+    } catch {
+      // Nothing further can be done; see the module doc comment.
+    }
+  };
   const onUncaughtException = (err) => {
-    emergencyLog("uncaughtException", `ready=${ready} ${describeFailure(err)}`);
+    logOrFallback("uncaughtException", `ready=${ready} ${describeFailure(err)}`);
     process.exit(1);
   };
   const onUnhandledRejection = (reason) => {
-    emergencyLog("unhandledRejection", `ready=${ready} ${describeFailure(reason)}`);
+    logOrFallback("unhandledRejection", `ready=${ready} ${describeFailure(reason)}`);
     process.exit(1);
   };
   // Only a non-zero exit is logged. This module's own extension.mjs is
@@ -255,14 +303,17 @@ export function installEmergencyDiagnostics(emergencyLog) {
   // property, so it must not record routine, uninteresting events at all).
   // A normal exit carries no diagnostic value on its own here: the
   // interesting signal is the *presence* of an uncaughtException/
-  // unhandledRejection/signal line, not the routine absence of one.
+  // unhandledRejection/signal line, not the routine absence of one. Not
+  // itself routed through logOrFallback(): a routine, uninteresting event
+  // has no fallback message worth ever printing to stderr, unlike an actual
+  // failure above.
   const onExit = (code) => {
     if (code !== 0) emergencyLog("exit", `code=${code} ready=${ready}`);
   };
   const signalHandlers = new Map();
   for (const signal of SIGNALS) {
     const handler = () => {
-      emergencyLog("signal", `${signal} ready=${ready}`);
+      logOrFallback("signal", `${signal} ready=${ready}`);
       process.off(signal, handler);
       process.kill(process.pid, signal);
     };

@@ -223,11 +223,15 @@ test(
         encoding: "utf-8",
       });
       // The crash-log write is refused, but the process's own crash
-      // handling (log-then-exit) is otherwise unaffected.
+      // handling (log-then-exit) is otherwise unaffected -- and, since the
+      // log write failed, logOrFallback() must have printed a best-effort
+      // stderr message instead of leaving this failure completely silent
+      // (the exact symptom this module exists to diagnose).
       assert.equal(result.status, 1);
       const after = statSync(logPath);
       assert.equal(readFileSync(logPath, "utf-8"), "not ours\n");
       assert.equal(after.mode, before.mode);
+      assert.match(result.stderr, /emergency diagnostics \(log write failed\): uncaughtException/);
     });
   },
 );

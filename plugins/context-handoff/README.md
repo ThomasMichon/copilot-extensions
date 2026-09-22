@@ -433,6 +433,18 @@ exit). Because the re-raised signal kills the process before Node's own
 following `exit: code=...` line is the *expected* shape for this legitimate,
 host-initiated stop** -- not evidence of a crash.
 
+**On Windows, this same routine host-initiated stop leaves no entry in this
+file at all.** `child_process`/`process.kill()`-delivered `SIGTERM` on
+Windows terminates the target process unconditionally at the OS level,
+bypassing any registered `process.on('SIGTERM', ...)` JS listener entirely
+(empirically confirmed against this repo's actual Node/Windows runtime --
+see the tests) -- so the signal handler above never runs, and a routine
+`/clear`/foreground-session-replacement stop on this platform is
+indistinguishable, from this file alone, from the "no entry at all" cases
+below. This is a genuine platform gap, not a bug in this module: Windows
+gives a JS process no hook into a routine external `SIGTERM` in the first
+place.
+
 So, reading a launch's entries in this file (if any) -- **always match `pid=`
 between the lines being compared first** (see the correlation bullet
 above):
@@ -442,19 +454,29 @@ above):
   replaced, or a real Ctrl+C/HUP). Given how handoff/session-switch-heavy
   some workflows are, this may explain a large share of historical `exit
   code=1 disposition=stopped-normally` launch-log entries that were never
-  actually crashes.
+  actually crashes. **POSIX only** -- see the Windows note above.
 - `uncaughtException`/`unhandledRejection` (with a stack), followed by
   `exit: code=1` **for that same `pid=`** -- a genuine bug in this
   extension's own code. The stack is the actual diagnostic payoff; the
   trailing `ready=true`/`ready=false` on both lines says whether the bug hit
-  before or after this instance reached readiness.
+  before or after this instance reached readiness. If the crash log's own
+  write also failed (missing directory, full disk, an untrusted
+  pre-existing path, ...), look for a
+  `context-handoff emergency diagnostics (log write failed): ...` line on
+  stderr instead -- a best-effort fallback specifically so a logging
+  failure never reproduces the original silent-exit symptom this module
+  exists to diagnose.
 - **No entry at all for a launch whose own harness log shows it reached
-  `ready` and then stopped** -- three distinct possibilities, not just one:
+  `ready` and then stopped** -- four distinct possibilities, not just one:
   the ordinary case is simply a routine `code=0` exit, which is never logged
-  by design (see above); beyond that, either something bypassed Node's own
-  signal/exit handling entirely (`SIGKILL`, an external whole-process-tree
-  kill -- registering a handler for a given event cannot help when the
-  process never gets to run any more JS at all), **or**
+  by design (see above); on Windows specifically, a routine `SIGTERM`
+  host-initiated stop is *also* never logged, since the signal never reaches
+  the JS handler at all (see the Windows note above) -- check the stderr
+  fallback described just above before assuming a missing entry means
+  something worse. Beyond those two routine cases, either something
+  bypassed Node's own signal/exit handling entirely (`SIGKILL`, an external
+  whole-process-tree kill -- registering a handler for a given event cannot
+  help when the process never gets to run any more JS at all), **or**
   `createEmergencyLog()`'s own open/write attempt failed and was silently
   swallowed (its own defensive contract: diagnostic logging
   must never itself become a second crash cause) -- for example the crash
