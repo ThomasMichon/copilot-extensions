@@ -13,8 +13,14 @@ human can recognize and act on by its own external identity (a PR number, a
 bug number) outranks one that is only ever meaningful inside this fabric (a
 dispatch task id has no independently-referenceable identity outside it).
 
-Starting order (operator-supplied 2026-09-21; explicitly tunable -- change
-``_PECKING_ORDER`` below, every consumer picks up the new order identically):
+Starting order (operator-supplied 2026-09-21; explicitly tunable). Two ways
+to tune it: edit ``DEFAULT_PECKING_ORDER`` below directly (repo-local), or
+-- since 2026-09-21 -- let any installed plugin **contribute** its own
+priority via a ``claim-kinds/*.json`` drop-in, discovered by the companion
+``claim_kinds_registry`` module and passed into ``rank_claims``'s
+``pecking_order=`` parameter. Either way every consumer (Worktrees, Tasks,
+Codespaces, Containers) picks up the same order identically -- this module
+itself never reads a plugin drop-in (stays pure/I/O-free; see below).
 
     PR > bug/issue > effort > bridge > CodeSpace/container > child worktree
     > machine SSH > dispatch task
@@ -27,6 +33,15 @@ ranks whatever kind is actually present in a ledger; a kind this repo cannot
 yet produce a claim for simply never appears here (no fabrication). Adding a
 "bug"/"issue" claim kind is a prerequisite of the vision's own odsp-web PR
 auto-claim work, not something this module does.
+
+**Deliberately pure, no I/O.** This module never scans a filesystem, reads
+a plugin's installed files, or imports anything beyond the standard library
+-- it is pecking-order *arithmetic* only. A plugin contributing a new
+claimable kind (and the priority it should rank at) is a *discovery*
+concern, owned by the sibling ``claim_kinds_registry`` module (a ``.d/``
+drop-in scanner mirroring the Worktree Picker's own ``pivots/<name>.json``
+contribution pattern) -- that module does the I/O and hands this one a
+plain ``{kind: priority}`` mapping via ``pecking_order=``.
 """
 from __future__ import annotations
 
@@ -34,11 +49,11 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 # Lower rank == more prominent. A kind absent from this table (including one
-# not yet in claims_cli's own `valid_kinds`) falls back to `_DEFAULT_RANK` --
-# ranked below every named tier, but never raises -- so an unrecognized or
-# future claim kind degrades gracefully instead of breaking every consuming
-# pivot.
-_PECKING_ORDER: dict[str, int] = {
+# not yet in claims_cli's own `valid_kinds`) falls back to the lowest rank in
+# whichever table is actually in effect (see `_default_rank`) -- ranked below
+# every named tier, but never raises -- so an unrecognized or future claim
+# kind degrades gracefully instead of breaking every consuming pivot.
+DEFAULT_PECKING_ORDER: dict[str, int] = {
     "pr": 0,
     "bug": 1,
     "issue": 1,        # same tier as "bug" -- both are ADO/GitHub work items
@@ -51,7 +66,6 @@ _PECKING_ORDER: dict[str, int] = {
     "task": 7,         # a dispatch task -- lowest: no independently
                        # referenceable id outside this fabric
 }
-_DEFAULT_RANK = len(_PECKING_ORDER)
 
 # The same "still held" vocabulary `tracking_claims.ResourceClaim.is_live`
 # uses (active/at-rest are live; released/abandoned are not). Duplicated
@@ -83,8 +97,17 @@ def _is_live(claim: Any) -> bool:
     return state in _LIVE_STATES
 
 
-def _rank_of(kind: str) -> int:
-    return _PECKING_ORDER.get(kind, _DEFAULT_RANK)
+def _default_rank(pecking_order: Mapping[str, int]) -> int:
+    """One past the lowest (least-prominent) rank actually declared in
+    ``pecking_order`` -- so an unrecognized kind always sorts after every
+    declared tier in *whichever* table is in effect (the built-in default,
+    or a caller-supplied/plugin-augmented one), never a stale constant sized
+    to a different table."""
+    return (max(pecking_order.values()) + 1) if pecking_order else 0
+
+
+def _rank_of(kind: str, pecking_order: Mapping[str, int]) -> int:
+    return pecking_order.get(kind, _default_rank(pecking_order))
 
 
 def rank_claims(
@@ -92,17 +115,25 @@ def rank_claims(
     *,
     limit: int | None = 2,
     live_only: bool = True,
+    pecking_order: Mapping[str, int] | None = None,
 ) -> list[tuple[str, str]]:
     """The ``limit`` most prominent ``(kind, ref)`` pairs from ``claims``,
-    ordered by the shared pecking order. Ties (same kind) keep their
-    original ledger order (stable sort). ``limit=None`` returns every live
-    claim, fully ordered -- the "full graph on drill-in" case.
+    ordered by ``pecking_order`` (default: :data:`DEFAULT_PECKING_ORDER`).
+    Ties (same kind) keep their original ledger order (stable sort).
+    ``limit=None`` returns every live claim, fully ordered -- the "full
+    graph on drill-in" case.
 
     ``claims`` is any iterable of ``ResourceClaim``-like objects or plain
     dicts carrying at least ``kind``/``ref`` (and, when ``live_only``, a
     ``state``/``is_live`` signal). A claim missing ``kind`` or ``ref`` is
     silently skipped -- never raises on a malformed ledger entry.
+
+    Pass ``pecking_order=claim_kinds_registry.effective_pecking_order()`` to
+    include any installed plugin's own claim-kind contributions; omit it to
+    use the built-in table alone (this module never scans for contributions
+    itself -- see the module docstring).
     """
+    table = pecking_order if pecking_order is not None else DEFAULT_PECKING_ORDER
     items: list[tuple[str, str]] = []
     for claim in claims:
         kind = _field(claim, "kind")
@@ -112,27 +143,43 @@ def rank_claims(
         if live_only and not _is_live(claim):
             continue
         items.append((str(kind), str(ref)))
-    ranked = sorted(enumerate(items), key=lambda pair: (_rank_of(pair[1][0]), pair[0]))
+    ranked = sorted(
+        enumerate(items), key=lambda pair: (_rank_of(pair[1][0], table), pair[0])
+    )
     ordered = [item for _, item in ranked]
     return ordered if limit is None else ordered[:limit]
 
 
-_LABEL_PREFIX: dict[str, str] = {
+DEFAULT_LABEL_PREFIX: dict[str, str] = {
     "pr": "PR",
     "bug": "bug",
     "issue": "bug",
 }
 
 
-def format_claim(kind: str, ref: str) -> str:
+def format_claim(
+    kind: str,
+    ref: str,
+    *,
+    label_overrides: Mapping[str, str] | None = None,
+) -> str:
     """A short, human-readable label for one ``(kind, ref)`` claim, e.g.
     ``"PR #2481"`` from ``kind="pr", ref="acme-org/sample-repo#2481"``.
 
     Prefers a trailing ``#<number>`` already present in ``ref`` (the common
     PR/issue reference shape); falls back to the bare ``ref`` for a claim
     kind with no such convention (a CodeSpace name, a worktree id).
+
+    ``label_overrides`` (e.g.
+    ``claim_kinds_registry.effective_label_overrides()``) takes precedence
+    over :data:`DEFAULT_LABEL_PREFIX` for a kind it names; a kind in
+    neither falls back to its own bare name as the prefix.
     """
-    prefix = _LABEL_PREFIX.get(kind, kind)
+    prefix = (
+        label_overrides[kind]
+        if label_overrides and kind in label_overrides
+        else DEFAULT_LABEL_PREFIX.get(kind, kind)
+    )
     if "#" in ref:
         _, _, number = ref.rpartition("#")
         number = number.strip()
@@ -147,11 +194,19 @@ def summarize_claims(
     limit: int = 2,
     sep: str = " \u00b7 ",
     live_only: bool = True,
+    pecking_order: Mapping[str, int] | None = None,
+    label_overrides: Mapping[str, str] | None = None,
 ) -> str:
     """The row-ready ``claims_summary`` string a Codespaces/Containers/Tasks
     pivot's own backend command computes and hands to the Picker (e.g.
     ``"PR #2481 \u00b7 bug #2410"``) -- ``rank_claims`` + ``format_claim``,
     joined. ``""`` for an empty/all-non-live ledger (graceful-absence, never
-    a placeholder)."""
-    top = rank_claims(claims, limit=limit, live_only=live_only)
-    return sep.join(format_claim(kind, ref) for kind, ref in top)
+    a placeholder). See :func:`rank_claims` for ``pecking_order`` and
+    :func:`format_claim` for ``label_overrides``."""
+    top = rank_claims(
+        claims, limit=limit, live_only=live_only, pecking_order=pecking_order
+    )
+    return sep.join(
+        format_claim(kind, ref, label_overrides=label_overrides) for kind, ref in top
+    )
+

@@ -101,6 +101,41 @@ def test_format_claim_extracts_trailing_number():
     assert claims_rank.format_claim("issue", "acme-org/sample-repo#2410") == "bug #2410"
 
 
+def test_rank_claims_accepts_a_custom_pecking_order():
+    claims = [
+        ResourceClaim(kind="task", ref="task-1"),
+        ResourceClaim(kind="pr", ref="r1#1"),
+    ]
+    # A caller-supplied table (e.g. a plugin-augmented one) can invert the
+    # default order entirely -- this module never hardcodes it.
+    custom = {"task": 0, "pr": 1}
+    assert claims_rank.rank_claims(claims, limit=None, pecking_order=custom) == [
+        ("task", "task-1"),
+        ("pr", "r1#1"),
+    ]
+
+
+def test_rank_claims_custom_pecking_order_unknown_kind_ranks_last():
+    claims = [
+        ResourceClaim(kind="brand-new-kind", ref="x#1"),
+        ResourceClaim(kind="pr", ref="r1#1"),
+    ]
+    custom = {"pr": 0}
+    ranked = claims_rank.rank_claims(claims, limit=None, pecking_order=custom)
+    assert ranked == [("pr", "r1#1"), ("brand-new-kind", "x#1")]
+
+
+def test_summarize_claims_accepts_a_custom_pecking_order():
+    claims = [
+        ResourceClaim(kind="task", ref="task-1"),
+        ResourceClaim(kind="pr", ref="r1#1"),
+    ]
+    custom = {"task": 0, "pr": 1}
+    assert claims_rank.summarize_claims(claims, pecking_order=custom) == (
+        "task task-1 \u00b7 PR #1"
+    )
+
+
 def test_format_claim_falls_back_to_bare_ref_with_no_hash():
     assert claims_rank.format_claim("codespace", "cs-a1c4-relay") == "codespace cs-a1c4-relay"
     assert claims_rank.format_claim("worktree", "a1c4") == "worktree a1c4"

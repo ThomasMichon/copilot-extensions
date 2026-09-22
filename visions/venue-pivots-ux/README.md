@@ -27,6 +27,8 @@
   per-worktree claim ledger — `pr`/`codespace`/`container` claim kinds) ·
   `plugins/agent-worktrees/src/agent_worktrees/claims_rank.py` (the
   implemented shared claims-pecking-order module) ·
+  `plugins/agent-worktrees/src/agent_worktrees/claim_kinds_registry.py`
+  (the implemented `.d/` drop-in registry) ·
   `efforts/active/picker-venue-pivots/README.md`
 
 ## Purpose & Intent
@@ -328,6 +330,37 @@ gracefully today, showing only PR/CodeSpace/container/worktree/task
 claims); adding a "bug"/"issue" claim kind is the odsp-web PR auto-claim
 concept's own prerequisite, not something this module does on its own.
 
+### Claim-kind extensibility — a `.d/` drop-in registry, mirroring pivots
+
+The pecking order's tiers name kinds this repo cannot yet produce a claim
+for at all (bug/issue, effort, bridge). Rather than hardcoding every future
+kind into `claims_rank`'s own table as each becomes claimable, this vision
+adopts the **same cross-plugin contribution pattern the Picker's own pivot
+system already uses**: a plugin drops one small file declaring what it
+contributes, a discovery layer finds every installed plugin's drop-ins, and
+every consumer picks up the merged result identically — no plugin ever
+edits another plugin's file, and no consumer hardcodes a fixed plugin list.
+
+Concretely (implemented, 2026-09-21):
+`agent_worktrees.claim_kinds_registry` scans every installed plugin's own
+`<plugin_root>/claim-kinds/*.json` (`{"kind", "priority", "label"?}`) and
+merges the contributions onto `claims_rank.DEFAULT_PECKING_ORDER` — a
+plugin can override an existing tier's priority or declare a brand-new
+kind, and `claims_rank` itself never scans a filesystem to find out (stays
+pure; the registry module does the I/O and hands it a plain mapping). This
+is a **deliberately lighter** drop-in contract than the pivot registry's
+own — no identity verification, no legacy-manifest migration, no separate
+materialized-runtime-directory step — because a claim-kind declaration
+carries no executable command to spoof; that machinery's entire reason to
+exist doesn't apply to a bare priority integer and an optional label.
+
+The practical payoff: when a future plugin (or this vision's own odsp-web
+PR auto-claim work) needs a `bug`/`issue` claim kind to actually exist, it
+does not touch `claims_rank.py` at all — it ships its own
+`claim-kinds/bug.json` declaring the kind, its priority, and how it should
+be labeled ("bug"), and every claims-showing pivot picks it up identically
+the next time it resolves the effective pecking order.
+
 ### Open — into the muxed Copilot instance, over SSH
 
 The single most important action on either pivot is **Open**: for a row that
@@ -401,6 +434,12 @@ Containers) selects its "1-2 prominent" entries from one shared
 prominence ranking (PR > bug/issue > effort > bridge > CodeSpace/container
 > child worktree > machine SSH > dispatch task, tunable), not a
 per-pivot ad hoc choice.
+
+### claim-kind-dropin-registry
+Any installed plugin can contribute a new claimable kind (and its
+pecking-order priority/label) via a `claim-kinds/*.json` drop-in, mirroring
+the Picker's own pivot-contribution pattern — no consuming pivot or the
+ranking module itself hardcodes a fixed plugin list.
 
 ### open-into-muxed-session
 A new **Open** action on either pivot attaches the operator to a live row's
@@ -508,6 +547,17 @@ demo data source, before any implementation PR — never a hand-drawn mockup.
 
 ## Provenance
 
+- **2026-09-21 (latest+4)** — Operator proposed a `.d/` drop-in system for
+  claim-kind metadata, mirroring the Picker's own pivot-contribution
+  pattern, so any plugin can declare a new claimable kind + priority
+  without editing `claims_rank.py`. Implemented as
+  `agent_worktrees.claim_kinds_registry` (scans installed plugins'
+  `claim-kinds/*.json`, merges onto `claims_rank.DEFAULT_PECKING_ORDER`),
+  with `claims_rank` itself gaining an optional `pecking_order=`/
+  `label_overrides=` parameter so it stays pure/I/O-free while still
+  consuming plugin contributions. 12 new tests, all passing (28 total
+  across both modules). Added as the "Claim-kind extensibility" concept
+  and `claim-kind-dropin-registry` feature.
 - **2026-09-21 (latest+3)** — Implemented the shared claims-pecking-order
   module for real: `agent_worktrees.claims_rank` (pure functions over
   `ResourceClaim`-shaped entries, 13 passing unit tests). Grounded against

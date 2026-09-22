@@ -277,6 +277,20 @@ note explaining why, whenever the design is deliberately revised.
   module ranks whatever is actually present and degrades gracefully
   (unrecognized kinds sort last, never raise) rather than assuming those
   kinds exist.
+- **The pecking order is itself now a `.d/` drop-in registry, mirroring
+  the Picker's own pivot-contribution pattern:**
+  `plugins/agent-worktrees/src/agent_worktrees/claim_kinds_registry.py`
+  scans every installed plugin's own `claim-kinds/*.json`
+  (`{"kind", "priority", "label"?}`) and merges the contributions onto
+  `claims_rank.DEFAULT_PECKING_ORDER`. Deliberately lighter than the pivot
+  registry's own contract (no identity verification, no legacy migration,
+  no separate materialized-runtime-directory step) — a claim-kind
+  declaration carries no executable command to spoof, so that machinery's
+  reason to exist doesn't apply. `claims_rank` gained optional
+  `pecking_order=`/`label_overrides=` parameters so it stays pure/I/O-free
+  while still consuming a plugin's contributions (the registry module does
+  the scanning; `claims_rank` never touches a filesystem). 12 new tests,
+  all passing (28 total across both modules).
 - **The row grammar needs zero new picker-engine code — confirmed by
   building the Phase 0 preview.** `subtitle_field`/`_column_subtitle`
   already render one composed string; `Column`/`group_field`/
@@ -354,6 +368,18 @@ note explaining why, whenever the design is deliberately revised.
       placeholders**: `fake_pool.py`/`fake_fleet.py`'s `claims_summary`
       values are hand-authored, not wired to the real module yet — Phase 1/2
       wire `pool.py`/`_cmd_fleet` to actually call `summarize_claims`.
+- [x] **Operator-proposed extension:** a `.d/` drop-in registry so any
+      plugin can contribute a new claimable kind + priority without editing
+      `claims_rank.py` — mirroring the Picker's own pivot-contribution
+      pattern. Implemented as
+      `plugins/agent-worktrees/src/agent_worktrees/claim_kinds_registry.py`
+      (scans `<plugin_root>/claim-kinds/*.json` across every installed
+      plugin, merges onto `claims_rank.DEFAULT_PECKING_ORDER`); `claims_rank`
+      gained `pecking_order=`/`label_overrides=` parameters to consume the
+      merged result while staying pure/I/O-free itself. 12 new tests, all
+      passing (28 total across both modules, including an end-to-end test
+      proving a plugin-contributed kind actually re-ranks and re-labels a
+      claim with no `claims_rank.py` code change).
 - [x] Render and review before/after screenshots for both pivots: current
       (real) shape vs. proposed shape (`codespaces-before/after.png`,
       `containers-before/after.png`), plus a menu screenshot for each
@@ -437,7 +463,7 @@ note explaining why, whenever the design is deliberately revised.
 
 ## Validation Plan
 
-- [ ] Before/after preview screenshots reviewed and approved by the
+- [x] Before/after preview screenshots reviewed and approved by the
       operator before any implementation PR opens (Phase 0 gate).
 - [ ] Unit tests confirming the Codespaces manifest's `subtitle` actually
       renders `pool.picker_payload`'s computed value (a regression test for
@@ -446,10 +472,13 @@ note explaining why, whenever the design is deliberately revised.
       link against `test_fleet_json.py`'s existing fixture shape.
 - [ ] Unit tests for the Codespaces/Containers agent-bridge live-session
       joins against fixed fixtures (venue-target match, no match).
-- [ ] Unit tests for the shared claims-pecking-order module: correct
-      ordering across a mixed ledger (PR + bug + child worktree, etc.),
-      correct truncation to "1-2 prominent," and stable behavior with an
-      empty ledger.
+- [x] Unit tests for the shared claims-pecking-order module: correct
+      ordering across a mixed ledger, correct truncation to "1-2
+      prominent," stable behavior with an empty ledger, and (added with the
+      `.d/` registry) a plugin-contributed kind actually re-ranking and
+      re-labeling a claim end-to-end — 28 tests total
+      (`test_claims_rank.py` + `test_claim_kinds_registry.py`), all
+      passing.
 - [ ] A live/manual check against a real CodeSpace and a real fleet
       container (not just fixtures) before Phase 1/2 are considered done,
       per this repo's "validate beyond unit tests" policy.
@@ -467,6 +496,24 @@ note explaining why, whenever the design is deliberately revised.
 
 ## Journal
 
+- **2026-09-21 (latest+6)** — Operator proposed a `.d/` drop-in system so
+  any module/plugin can declare claim-type metadata (kind + priority),
+  "so any system can offer claims and play" — mirroring the Picker's own
+  pivot-contribution pattern (`pivots/<name>.json` drop-ins). Implemented
+  `agent_worktrees.claim_kinds_registry`: scans every installed plugin's
+  own `claim-kinds/*.json`, merges onto `claims_rank.DEFAULT_PECKING_ORDER`
+  (override an existing tier or add a brand-new kind). Deliberately
+  lighter-weight than the pivot registry's own contract — no identity
+  verification, no legacy migration, no materialized-runtime-directory
+  step — since a claim-kind declaration carries no executable command to
+  spoof. `claims_rank` gained `pecking_order=`/`label_overrides=`
+  parameters so it stays pure/I/O-free while consuming the merged result.
+  12 new tests (28 total across both modules), including an end-to-end
+  test proving a plugin-contributed kind re-ranks and re-labels a claim
+  with zero `claims_rank.py` changes. Reused `dropin_registry`'s own
+  `scan_directory`/`EntryDecision`/`Finding` primitives (the same shared
+  library the pivot registry builds on) rather than reinventing directory
+  scanning.
 - **2026-09-21 (latest+5)** — Implemented the shared claims-pecking-order
   module for real (the last open Phase 0 item):
   `plugins/agent-worktrees/src/agent_worktrees/claims_rank.py`
