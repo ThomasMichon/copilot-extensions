@@ -396,17 +396,17 @@ class TestSessionRoutes:
     def test_get_session_transcript_returns_cold_store_events(
         self, client, app
     ) -> None:
-        """A bare (non-worktree-scoped) session's transcript is answered by
-        the registered cold-store provider -- letting a solo-session
-        consumer (e.g. Neuron Forge) retire its own direct Permanent
-        Record transcript dependency."""
+        """A bare (non-worktree-scoped, `worktree_id=None`) session's
+        transcript is answered by the registered cold-store provider --
+        letting a solo-session consumer (e.g. Neuron Forge) retire its
+        own direct Permanent Record transcript dependency."""
         from agent_bridge.cold_store import ColdStoreSession
 
         mgr = app.state.session_manager
         cold = ColdStoreSession(
             session_id="archived-2",
             status="ended",
-            worktree_id="wt-2",
+            worktree_id=None,
             events=({"type": "message", "text": "hi"},),
         )
         with patch.object(
@@ -417,7 +417,7 @@ class TestSessionRoutes:
         body = resp.json()
         assert body["session_id"] == "archived-2"
         assert body["events"] == [{"type": "message", "text": "hi"}]
-        assert body["meta"]["worktree_id"] == "wt-2"
+        assert body["meta"]["worktree_id"] is None
         assert body["meta"]["read_only"] is True
         assert body["meta"]["at_rest"] is True
 
