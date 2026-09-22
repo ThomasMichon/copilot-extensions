@@ -216,7 +216,7 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                 _fail(f"Cannot release installation lock '{self.path}': {error}")
         self.acquired = False
 
-    def __enter__(self) -> _DirectoryLock:
+    def __enter__(self) -> "_DirectoryLock":
         self.acquire()
         return self
 

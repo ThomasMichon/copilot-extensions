@@ -29,7 +29,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 CANONICAL_DIR = REPO / "libs" / "installation-context"
 FILES = (
-    "installation_context.py",
     "_installation_context_base.py",
     "_installation_context_files.py",
     "_installation_context_source.py",
@@ -44,6 +43,7 @@ FILES = (
     "_installation_context_legacy_retirement.py",
     "_installation_context_maintenance.py",
     "_installation_context_mode_cli.py",
+    "installation_context.py",
     "installation-context.sh",
     "installation-context.ps1",
     "json-query.awk",
