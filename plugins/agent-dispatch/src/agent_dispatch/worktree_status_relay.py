@@ -148,18 +148,21 @@ class WorktreeStatusRelayStore:
         try:
             with _connect(self.db_path) as conn:
                 rows = conn.execute(
-                    "SELECT repo, worktree_id FROM worktree_status_relay WHERE fetched_at < ?",
+                    "SELECT repo, worktree_id, fetched_at"
+                    " FROM worktree_status_relay WHERE fetched_at < ?",
                     (cutoff,),
                 ).fetchall()
                 for row in rows:
                     key = (row["repo"], row["worktree_id"])
                     if key in keep:
                         continue
-                    conn.execute(
-                        "DELETE FROM worktree_status_relay WHERE repo = ? AND worktree_id = ?",
-                        key,
+                    deleted = conn.execute(
+                        "DELETE FROM worktree_status_relay"
+                        " WHERE repo = ? AND worktree_id = ? AND fetched_at = ?",
+                        (row["repo"], row["worktree_id"], row["fetched_at"]),
                     )
-                    removed += 1
+                    if deleted.rowcount:
+                        removed += 1
         except (sqlite3.Error, OSError):
             log.debug("relay prune failed", exc_info=True)
         return removed

@@ -624,6 +624,7 @@ async def _worktree_status_relay_loop(
                 await asyncio.sleep(_GOVERNANCE_BACKOFF_SECONDS)
                 continue
         if not pending_refs:
+            relay.prune()
             continue
         current_ref = [pending_refs.pop(0)]
         if await governance_backoff(

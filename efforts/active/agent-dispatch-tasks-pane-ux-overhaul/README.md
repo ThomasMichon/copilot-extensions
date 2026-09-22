@@ -2417,10 +2417,10 @@ Implemented the design above as one cohesive `agent-dispatch` change.
   with its own `LoopHealth` entry and shutdown cancellation. The loop only
   polls worktrees from `Status.OWNED` tasks whose owning machine is the
   local coordinator itself; it resolves `task.repo` through
-  `identity.name_for_repo()` before invoking
-  `agent-worktrees worktree-status-bundle --project <resolved-name> --worktree <id> --json`,
-  skipping unadopted repos rather than sending an invalid `--project`. Cold
-  start is immediate (the loop's first pass prewarms current owned tasks),
+  `identity.name_for_repo()` as the local adoption gate before invoking
+  `agent-worktrees worktree-status-bundle --worktree <id> --json`,
+  skipping unadopted repos rather than probing a repo this machine does not
+  track. Cold start is immediate (the loop's first pass prewarms current owned tasks),
   and `claim`/`resume`/steer-driven suspended-task resumes now signal the
   loop immediately through a process-local notifier instead of waiting for
   the next periodic tick.
