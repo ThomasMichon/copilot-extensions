@@ -684,16 +684,12 @@ _binstub_lock_state = threading.local()
 def _binstub_lock(project: str):
     """Hold the sidecar arbitration lock for ``project``, reentrant per-thread.
 
-    A caller that already holds this exact lock (e.g. ``__registries__``
-    nested inside another ``__registries__`` acquisition, or a project whose
-    name happens to collide with a lock already held higher up the same
-    call stack) must not re-acquire the OS-level lock: on Windows,
-    ``msvcrt.locking`` is *not* reentrant within a process, and a duplicate
-    acquisition of the same byte range raises ``OSError(EDEADLK, "Resource
-    deadlock avoided")`` instead of blocking. Track held keys per-thread so a
-    nested acquisition is a no-op and only the outermost acquire/release pair
-    touches the real file lock -- real cross-process/cross-thread contention
-    still blocks on the OS lock as before.
+    Windows ``msvcrt.locking`` is not reentrant within a process: a duplicate
+    acquisition of an already-held byte range raises ``OSError(EDEADLK,
+    "Resource deadlock avoided")`` instead of blocking. Track held keys
+    per-thread so a nested acquisition is a no-op; only the outermost pair
+    touches the real file lock. Cross-process/cross-thread contention still
+    blocks on the OS lock as before.
     """
     key = project.casefold() if platform.system() == "Windows" else project
     path = _command_arbitration_dir() / f".{key}.lock"
@@ -706,8 +702,7 @@ def _binstub_lock(project: str):
 
     resolved_key = str(path)
     if resolved_key in held:
-        # Already held by this thread further up the stack -- reentrant no-op.
-        yield
+        yield  # reentrant no-op: already held higher up this thread's stack
         return
 
     held.add(resolved_key)
