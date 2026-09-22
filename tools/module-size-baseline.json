@@ -21,6 +21,7 @@
   "plugins/agent-codespaces/scripts/versioned_runtime.py": 1245,
   "plugins/agent-codespaces/src/agent_codespaces/__main__.py": 4767,
   "plugins/agent-codespaces/src/agent_codespaces/config.py": 2583,
+  "plugins/agent-codespaces/src/agent_codespaces/pool.py": 1310,
   "plugins/agent-containers/libs/ssh-manager/src/ssh_manager/carrier.py": 1313,
   "plugins/agent-containers/scripts/versioned_runtime.py": 1245,
   "plugins/agent-containers/src/agent_containers/__main__.py": 1171,
