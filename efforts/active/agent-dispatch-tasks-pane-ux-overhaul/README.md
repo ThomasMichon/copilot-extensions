@@ -987,79 +987,114 @@ no lifecycle-control logic invented at this layer.
       conflicting with `provider-owned-worktrees-surface` (a control plane
       renders without persisting a second copy) and `derive-dont-duplicate`
       (agent-worktrees owns this state). Any read-side design must stay a
-      **non-authoritative, transient view**. **Design resolved 2026-09-21
-      (see the Journal entry of the same date for the full writeup) — the
+      **non-authoritative, transient view**. **Design resolved 2026-09-21,
+      revised 2026-09-21 (see the Journal entries of the same date for the
+      full writeup, including a Copilot review round that caught real
+      topology/keying/transport/trigger gaps in the first pass) — the
       "agent-dispatch-side relay" design:**
 
-      1. **A new asyncio task inside the coordinator service** (`coordinator.py`'s
-         resident ASGI app — the always-running process every client
-         including `board_cli` actually talks to), alongside its existing
-         `_gc_loop`/`_orphan_reap_loop` tasks (**correction, Copilot review
-         2026-09-21**: the design originally named `supervise daemon` for
-         this, but that component is optional, only reconciles registered
-         subprocesses, and does not own liveness reconciliation at all —
-         `LivenessMixin.reconcile_liveness` runs inside `_gc_loop`, itself an
-         `asyncio.create_task` the coordinator schedules directly, per
-         `coordinator.py`'s own `serve()`; the relay tick belongs alongside
-         that, in the same always-resident process, not the optional
-         supervisor). A new `_worktree_status_relay_loop` task, wired the
-         same way `sweeper`/`orphan_reaper` already are, scoped only to
-         worktree ids currently referenced by a non-terminal task (`owner`'s
-         worktree, or a pinned `target_worktree` for an unclaimed task) —
-         never the whole fleet. For each, it calls out to `agent-worktrees
-         worktree-status-bundle --worktree <id>` (the same real-caller path
-         the accelerator's own audit now hardens) — from this async task
-         (a subprocess call off the request-handling path, e.g. via
-         `asyncio.create_subprocess_exec` or a thread executor), never the
-         render/click path — so it is not the subprocess-free consumer the
-         pattern doc's named exception describes; it is simply one more
+      1. **A new asyncio task inside EACH machine's own local coordinator
+         service**, never a shared/hosted one (**correction, Copilot review
+         2026-09-21**: agent-dispatch's hybrid topology can serve a task's
+         board row from a shared coordinator, but a worktree only exists on
+         the one machine that actually claimed/embodies it — `agent-
+         worktrees worktree-status-bundle` only ever resolves tracking
+         records local to whatever machine runs it, so a shared coordinator
+         probing it would either fail or, worse, silently read a same-named
+         local worktree instead). `coordinator.py`'s resident ASGI app
+         (alongside its existing `_gc_loop`/`_orphan_reap_loop` tasks) is
+         still the right *kind* of host (**further correction**: not
+         `supervise daemon`, which is optional and owns no liveness
+         reconciliation), but each machine's own local instance only ever
+         polls for worktree ids whose owning machine is itself. A new
+         `_worktree_status_relay_loop` task, wired the same way
+         `sweeper`/`orphan_reaper` already are, scoped to worktree ids from
+         tasks in `Status.OWNED` (`CLAIMED`/`STARTED`/`SUSPENDED` —
+         `queue_records.py`) whose `owner`/`target_machine` is this
+         coordinator's own machine — never the whole fleet, never another
+         machine's rows. For each, it calls out to `agent-worktrees
+         worktree-status-bundle --project <repo> --worktree <id>` (the same
+         real-caller path the accelerator's own audit now hardens) from this
+         async task (a subprocess call off the request-handling path, e.g.
+         via `asyncio.create_subprocess_exec` or a thread executor), never
+         the render/click path — so it is not the subprocess-free consumer
+         the pattern doc's named exception describes; it is simply one more
          ordinary, coalesced caller of the accelerator, exactly as
-         *external-status-consumer-contract* describes.
-      2. **A local relay cache, not a task-row column.** The coordinator
-         writes each fetched projection (git state, session lineage,
-         liveness, the claims graph — never message history, which stays
-         excluded per *Not a transcript or event warehouse*) plus a
-         `fetched_at` timestamp and the accelerator's own forwarded per-fact
-         freshness/
-         unconfirmed markers to a small file under agent-dispatch's own
-         runtime state dir (e.g. `worktree-status-relay.json`/sqlite,
-         mirroring the accelerator's own cache-file pattern for concurrent-
-         read safety) — **this is explicitly not the rejected idea from the
-         Copilot review above.** That review flagged writing the projection
-         into an agent-dispatch **task row** — the task's own durable,
-         schema'd record — as a second, independently-aging copy of
-         worktree state. This relay is not part of any task's record at
-         all: it is a keyed-by-worktree-id, purely rebuildable cache the
-         coordinator may drop or fall behind on at will, with nothing about
-         a task's lifecycle or completion depending on its presence or
-         freshness — the same "warmth, not truth" posture the accelerator's
-         own cache already has one layer in.
-      3. **The render path reads only this local file — never a
-         subprocess.** `board_cli`'s render function reads the relay file
-         (a fast local read) for each worktree id it needs. An entry
-         fresher than a render-side staleness ceiling (e.g. 2x the poll
-         cadence) renders with its forwarded freshness markers; a missing
-         or stale entry renders every fact as stale/unknown and moves on —
-         never blocks the render or a card click, matching the pattern
-         doc's own `subprocess-free-consumer-reports-stale-on-timeout`
-         scenario shape exactly.
-      4. **Cold-start prewarm resolves the open question below:** on
-         coordinator startup, and whenever a task transitions from terminal
-         back to a tracked/live state, that worktree's first poll is
-         scheduled immediately rather than waiting for the next periodic
+         *external-status-consumer-contract* describes. A cross-machine
+         board render (task claimed on machine B, rendered via machine A's
+         shared/local coordinator) reads machine B's relay over the same
+         federation/routing transport the board already uses to reach a
+         remote coordinator for task data (step 3) — no new cross-machine
+         mechanism to invent.
+      2. **A local relay cache, keyed by `(repo, worktree_id)` — not
+         worktree_id alone**, not a task-row column. (**Correction, Copilot
+         review 2026-09-21**: the accelerator's own contract keys its
+         request/cache on `(project, worktree_id)` — `agent-worktrees`'
+         "project" is agent-dispatch's own task-scoping `repo` field: a
+         worktree-id suffix reused across two different adopted repos would
+         otherwise silently overwrite one project's projection with
+         another's.) The coordinator writes each fetched projection (git
+         state, session lineage, liveness, the claims graph — never message
+         history, which stays excluded per *Not a transcript or event
+         warehouse*) plus a `fetched_at` timestamp and the accelerator's own
+         forwarded per-fact freshness/unconfirmed markers to a small local
+         store (e.g. `worktree-status-relay.json`/sqlite, mirroring the
+         accelerator's own cache-file pattern for concurrent-read safety),
+         keyed by `(repo, worktree_id)` — **this is explicitly not the
+         rejected idea from the Copilot review above.** That review flagged
+         writing the projection into an agent-dispatch **task row** — the
+         task's own durable, schema'd record — as a second, independently-
+         aging copy of worktree state. This relay is not part of any task's
+         record at all: it is a purely rebuildable cache the coordinator
+         may drop or fall behind on at will, with nothing about a task's
+         lifecycle or completion depending on its presence or freshness —
+         the same "warmth, not truth" posture the accelerator's own cache
+         already has one layer in.
+      3. **The render path reads only through the coordinator's existing
+         client API — never a subprocess, never a local file directly.**
+         (**Correction, Copilot review 2026-09-21**: `board_cli` already
+         supports `AGENT_DISPATCH_URL` pointing at a remote coordinator and
+         runs on the client host, so a raw local-file read would silently
+         report every remote worktree as stale/missing even when the
+         coordinator's own relay is warm.) The coordinator exposes the
+         relay projection through a new endpoint on its existing HTTP API
+         (the same transport `board_cli`'s client already uses for
+         `c.mine()`/`c.get()`/etc.), keyed by `(repo, worktree_id)`;
+         `board_cli`'s render function calls that endpoint (a fast local or
+         networked API read, never a subprocess against agent-worktrees
+         itself) for each worktree id it needs. An entry fresher than a
+         render-side staleness ceiling (e.g. 2x the poll cadence) renders
+         with its forwarded freshness markers; a missing or stale entry
+         renders every fact as stale/unknown and moves on — never blocks
+         the render or a card click, matching the pattern doc's own
+         `subprocess-free-consumer-reports-stale-on-timeout` scenario shape
+         exactly.
+      4. **Cold-start prewarm, corrected to a real state-machine event.**
+         (**Correction, Copilot review 2026-09-21**: the original "terminal
+         back to tracked/live" trigger cannot fire — `Status.TERMINAL`
+         (`COMPLETED`/`ABANDONED`/`DEAD_LETTER`) has no further transitions,
+         per `queue_records.py`.) The real trigger is a task **entering**
+         `Status.OWNED` (the `CLAIMED` transition, when `owner`/
+         `target_worktree` is first established, or a `SUSPENDED` task
+         resuming) — that is the actual moment a worktree becomes something
+         worth polling. Schedule that worktree's first poll immediately at
+         that transition (plus once for every already-`OWNED` task on
+         coordinator startup) rather than waiting for the next periodic
          tick — the same pattern already proven in this exact effort for
          the `_setup_live_pivots`/`_prewarm_machine_key_map` cold-start fix
          (see the Phase 4 Journal entries above).
-      5. **Phase 5 reuse:** the claims graph lives in the same per-worktree
-         projection this relay already caches, so Phase 5's
-         `artifacts_summary` is just another reader of the identical relay
-         file, keyed the same way — no second poll mechanism, no second
-         cache.
+      5. **Phase 5 reuse:** the claims graph lives in the same per-
+         `(repo, worktree_id)` projection this relay already caches, so
+         Phase 5's `artifacts_summary` is just another reader of the
+         identical relay (via the same coordinator API endpoint) — no
+         second poll mechanism, no second cache.
       6. **Validation:** a render-path test asserting the board render
          function never shells out (mirroring existing "Picker read path:
-         no subprocess" assertions elsewhere in this codebase), plus a
-         relay freshness/staleness test covering the pattern doc's
-         `subprocess-free-consumer-reports-stale-on-timeout` scenario.
+         no subprocess" assertions elsewhere in this codebase), a relay
+         freshness/staleness test covering the pattern doc's
+         `subprocess-free-consumer-reports-stale-on-timeout` scenario, and
+         a cross-machine test asserting a shared/remote coordinator never
+         polls a worktree it does not own.
 
       Recent-message history is explicitly NOT part of this cache (pulled
       on demand from the owning session host instead, per the vision's
@@ -2282,4 +2317,47 @@ session** (design-only pass, per the operator's explicit choice): the
 poller, the relay file, the render-path reader, the cold-start hook, and
 the two named regression tests remain Phase 8's actual implementation
 work.
+
+### 2026-09-21 — PR #3222 review round 1 + round 2: real design gaps in the relay
+Round 1 (2 findings, both real): the design named `supervise daemon` as the
+relay poller's host, but that component is optional and owns no liveness
+reconciliation — `reconcile_liveness` runs inside `coordinator.py`'s own
+`_gc_loop` asyncio task, so the relay tick belongs alongside that in the
+always-resident coordinator instead. Also removed a concrete internal
+machine hostname the prior entry published, per this repo's identifier-
+neutrality convention.
+
+Round 2 (4 findings, all real — a genuinely under-specified first pass):
+1. **Topology:** the design didn't account for agent-dispatch's hybrid
+   local/shared-coordinator topology — a worktree only exists on the one
+   machine that claimed it, so a shared coordinator polling it directly
+   either fails or risks reading a same-named local worktree instead.
+   Corrected to: each machine's own local coordinator polls only its own
+   machine's owned worktrees; a cross-machine render reads the owning
+   machine's relay over the same routing transport board_cli already uses
+   for cross-machine task data.
+2. **Keying:** the relay was keyed by `worktree_id` alone, but the
+   accelerator's own contract keys on `(project, worktree_id)` — a reused
+   id suffix across two adopted repos could silently overwrite one
+   project's projection with another's. Corrected to key by
+   `(repo, worktree_id)` (agent-dispatch's `repo` field is the same
+   scoping concept as agent-worktrees' `project`).
+3. **Transport:** the design had the render path read a local file, but
+   `board_cli` explicitly supports a remote `AGENT_DISPATCH_URL` coordinator
+   and runs on the client host — a local-file read would report every
+   remote worktree as stale even when the coordinator's relay is warm.
+   Corrected to serve the relay through a new endpoint on the coordinator's
+   existing HTTP API (the same transport the client already uses for task
+   data), never a raw file read.
+4. **Trigger:** the proposed "terminal back to tracked/live" cold-start
+   hook can never fire — `Status.TERMINAL` has no further transitions per
+   `queue_records.py`. Corrected to the real event: a task entering
+   `Status.OWNED` (the `CLAIMED` transition, or a `SUSPENDED` resume) is
+   when a worktree actually becomes worth polling.
+
+All four corrections rewritten into Phase 8's own Plan entry (see above)
+and cross-referenced from Phase 5. This remains a design-only pass — no
+code changes — but the design is now grounded against the actual topology,
+state machine, and transport rather than assumed single-machine/single-
+process shapes.
 
