@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-phase PRs (see Coordination)
 - **Created:** 2026-09-12
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** extends `visions/plugin-services` §Features/`self-contained-runtime`
   + §Features/`immutable-versioned-runtime` (see Context)
 - **Umbrella issue:** _TBD — file once this effort's plan clears review_
@@ -181,7 +181,7 @@ as independent per-plugin PRs; see Coordination._
 ## Plan
 
 ### Phase 0 — Audit the real shared surface (no code changes)
-- [ ] Diff `New-SignedVenv` / `Ensure-Uv` / `Invoke-UvVenvResilient` /
+- [x] Diff `New-SignedVenv` / `Ensure-Uv` / `Invoke-UvVenvResilient` /
       `Invoke-UvPipInstallResilient` / `Invoke-NativeCapture` /
       `Test-IsSreModuleMismatch` / `Test-IsVenvCorruption` / binstub-writing /
       deploy-manifest-writing / scheduled-task functions across all ~13
@@ -189,7 +189,7 @@ as independent per-plugin PRs; see Coordination._
       exists, else `init.ps1` (`agent-containers`, `agent-mcp`,
       `agent-machines`) — PowerShell first; `.sh` mirrors (`install.sh`/
       `init.sh`) after the shape is settled.
-- [ ] Classify every duplicated function as: **(a) byte-identical or
+- [x] Classify every duplicated function as: **(a) byte-identical or
       near-identical already** (pure engine — safe to collapse verbatim),
       **(b) same shape, different constants** (needs a config parameter, e.g.
       package name, Python version pin), or **(c) genuinely per-service**
@@ -197,7 +197,7 @@ as independent per-plugin PRs; see Coordination._
       service, agent-index's separate torch-stack engine venv, agent-codespaces'
       ssh-manager+cred-relay+config-migrate installs — these stay in the
       per-plugin config/wrapper, not the engine).
-- [ ] Write the findings into `## Proposal` below before starting Phase 1 —
+- [x] Write the findings into `## Proposal` below before starting Phase 1 —
       this determines the engine's real function surface and config schema.
 
 ### Design decision — vendoring over git-fetch (resolved 2026-09-12)
@@ -251,6 +251,31 @@ offline-failure questions get real answers in a future effort. This phase
 does not have to bet on both problems (duplication *and* how it's delivered)
 at once.
 
+### Design decision — `agent-pull-requests` as the Phase 1 pilot instead of `agent-bridge` (resolved 2026-09-22)
+
+The Plan below originally named `agent-bridge` (a live production daemon,
+deployed on real operator machines) as the Phase 1 reference conversion. A
+new, unrelated effort (`agent-pull-requests`, a brand-new small on-demand CLI
+plugin with no daemon, no scheduled task, and no live production traffic)
+needed a real installer at the same time this effort was still Draft with
+zero engine code written. The operator explicitly approved reordering: build
+the real engine now and make `agent-pull-requests` the first pilot
+conversion, ahead of `agent-bridge`.
+
+Rationale: proving the engine's shape against a brand-new, low-risk,
+zero-existing-users plugin is strictly safer than a first cut against a live
+daemon other sessions/machines already depend on. `agent-bridge`'s own
+conversion (Phase 1's originally-planned reference) remains open follow-through
+and should still happen — its test-suite migration
+(`test_install_sre_retry.py`, `test_install_venv_corruption_retry.py`,
+`test_installer_powershell51.py`) is real work this reordering does not
+remove, it only postpones ahead of an even lower-risk proof. This means the
+Validation Plan's "net corpus size actually shrinks" criterion does **not**
+apply to this reorder step — `agent-pull-requests` is a brand-new plugin,
+not a converted existing one, so there is no pre-conversion baseline to
+shrink against yet. That criterion still applies, unchanged, once
+`agent-bridge`/the Phase 2+ set actually convert.
+
 **Explicit non-goal this decision implies for Phase 1:** don't let the
 vendored corpus balloon back into what it's replacing. The whole point is
 fewer lines to fix N times, not the same line count moved one directory over.
@@ -266,7 +291,7 @@ Concretely:
 - Track the vendored engine's own line count in the Validation Plan (below) —
   growth there is exactly the failure mode to watch for.
 
-- [ ] **Critical: adapt `tools/check-install-contract.py` (lines ~280-368) to
+- [x] **Critical: adapt `tools/check-install-contract.py` (lines ~280-368) to
       the composed engine/wrapper split *before* converting any plugin.**
       That guard currently text-scans each plugin's own `install.*`/`init.*`
       for specific literal markers — `uv pip install`, the
@@ -279,13 +304,33 @@ Concretely:
       each plugin's thin wrapper itself (not just the engine). Add regression
       coverage for whichever approach is chosen — this must land in the same
       PR as the first engine/wrapper conversion, not after.
-- [ ] Create `libs/installer-engine/installer-engine.ps1` and
+      **Landed:** kept the required literal marker seams (self-stage/smoke-seam
+      v4 blocks, `Get-SourceKind`/source-kind, `install-contract:v3
+      versioned-venv`) in each plugin's own thin wrapper; `check-install-contract.py`
+      was given a narrow, non-loophole addition that accepts a wrapper's
+      `uv pip install`/schema-v3-manifest requirements as satisfied only when
+      the wrapper both (a) dot-sources the vendored engine AND (b) actually
+      calls the specific engine function (`Invoke-UvPipInstallResilient`/
+      `Write-DeployManifest`) — merely referencing the engine file is not
+      sufficient to pass. It also now calls `tools/sync-installer-engine.py`'s
+      own drift check as part of the same run.
+- [x] Create `libs/installer-engine/installer-engine.ps1` and
       `installer-engine.sh` — the canonical (a) and (b) functions from Phase 0,
       parameterized by a small config object/associative-array (service name,
       package dir(s), launch command, `SupportsScheduledTask`,
       `SupportsZddCutover`, `SupportsDraining`, Python version pin, sibling
       installs list, etc.).
-- [ ] Write `tools/sync-installer-engine.py` mirroring
+      **Landed** with the minimal-CLI-plugin function set the Phase 0 audit
+      identified as necessary: `Invoke-NativeCapture`, `Test-IsSreModuleMismatch`,
+      `Test-IsVenvCorruption`, `Invoke-UvPipInstallResilient`,
+      `Invoke-UvVenvResilient`, `Ensure-Uv`, `New-SignedVenv`,
+      `Write-DeployManifest`, and a newly-written `Write-SimpleBinstub`
+      (no shared function for this existed anywhere yet). Scheduled-task
+      functions were correctly left out of the engine per Phase 0's (c)
+      classification — `agent-pull-requests` needs none, and the
+      per-service semantics genuinely differ (agent-dispatch/agent-logger/
+      agent-index/agent-vault all have irreducibly different task lifecycles).
+- [x] Write `tools/sync-installer-engine.py` mirroring
       `sync-versioned-runtime.py` exactly: canonical source ->
       byte-identical fan-out to `plugins/<plugin>/scripts/installer-engine.*`,
       `--check` mode for CI/pre-push, **opt-in adoption** (only plugins that
@@ -295,7 +340,15 @@ Concretely:
     - Consider whether this should be a mode of `sync-versioned-runtime.py`
       (both vendor from `libs/` into `scripts/`) or a fully separate tool —
       decide during Phase 1, record the decision here.
-- [ ] Wire the new sync tool's `--check` into `tools/check-install-contract.py`
+      **Decided:** a separate `tools/sync-installer-engine.py` tool, structured
+      like `sync-versioned-runtime.py` (single canonical pair of files ->
+      explicit adopter fan-out, `--check` drift detection), rather than a mode
+      flag on the existing tool — the two sync targets (`versioned_runtime.py`
+      vs. `installer-engine.ps1`/`.sh`) have independent adoption timelines
+      (a plugin can adopt versioned-runtime without the installer engine, and
+      vice versa) and keeping them as separate tools keeps that independence
+      obvious.
+- [x] Wire the new sync tool's `--check` into `tools/check-install-contract.py`
       and/or CI (`guards + lint`), matching how `versioned_runtime.py`
       byte-identity is already enforced.
 - [ ] Convert `agent-bridge`'s `install.ps1`/`install.sh` to source the vendored
@@ -306,8 +359,14 @@ Concretely:
       extract functions from the vendored engine file instead of `install.ps1`
       directly (or the engine file needs its own equivalent test suite that
       plugin tests then just reference/import).
-- [ ] PR this phase; get it through the automated review gate; merge; deploy
-      + verify agent-bridge before starting Phase 2.
+      **Not done — deliberately reordered** (see the Design decision above):
+      `agent-pull-requests` (new, no daemon, no existing users) became the
+      first real pilot conversion instead, to de-risk the engine's shape
+      before touching a live production daemon. `agent-bridge`'s conversion
+      remains open follow-through, unchanged in scope.
+- [x] PR this phase; get it through the automated review gate; merge; deploy
+      + verify **`agent-pull-requests`** (the reordered pilot) before starting
+      Phase 2 / `agent-bridge`'s conversion.
 
 ### Phase 2+ — Roll remaining plugins onto the engine, one small batch per PR
 
@@ -390,7 +449,45 @@ engine under this effort.
 
 ## Proposal
 
-_Pending — Phase 0's audit findings land here before Phase 1 starts._
+**Phase 0 audit findings (2026-09-22):**
+
+| Function / concern | Classification | Notes |
+|---|---|---|
+| `Invoke-NativeCapture` | (a) | Byte-identical shape across `agent-bridge`/`agent-worktrees`/`agent-logger`: capture scriptblock output, return `{ExitCode; Output}`. |
+| `Test-IsSreModuleMismatch` | (a) | One-arg predicate matching "SRE module mismatch". |
+| `Test-IsVenvCorruption` | (a) | One-arg predicate matching "failed to locate pyvenv.cfg" / "exit code:\s*106". |
+| `Invoke-UvPipInstallResilient` | (a), minor variation | Real source is `agent-bridge`/`agent-logger` (not the smaller pilots) — 3/6/10s retry on SRE mismatch. |
+| `Invoke-UvVenvResilient` | (a)/(b) | Same source; retries SRE mismatch + missing pyvenv.cfg. Venv path + uv args are the real parameters. |
+| `Ensure-Uv` | (b) | Policy varies per plugin (PATH check, tool dir, index resolution, repair) — needs config params (InstallRoot, ToolDirectory, AcquireIfMissing). |
+| `New-SignedVenv` | (b) | Signed-base-Python preference + Authenticode validation + uv fallback is shared; Python pin and validation hooks vary — needs real parameters. |
+| Binstub writing | (b) minimal path, (c) service-heavy | No clean shared function existed anywhere; `Write-SimpleBinstub` is genuinely new code, generalized from the simplest existing self-provisioning launcher pattern (`budget-guidance`), cross-checked against `agent-ssh`/`agent-vault`. |
+| Deploy manifest writing | (b) | Schema-version-3 shape + `source` block is shared; service-specific fields vary — needs an `AdditionalFields` escape hatch. |
+| Scheduled-task functions | (c) | Not shared — agent-dispatch/agent-logger/agent-index/agent-vault each have irreducibly different task lifecycles. Out of scope for the engine entirely (a minimal on-demand CLI plugin needs none). |
+| Versioned-runtime slot handling | already a shared primitive | `libs/versioned-runtime/versioned_runtime.py`, synced via the pre-existing `tools/sync-versioned-runtime.py` (opt-in: any plugin with `pyproject.toml` + an installer is auto-discovered as an adopter — no registry edit needed to add a new plugin). The installer engine calls this primitive rather than reimplementing it. |
+
+**`tools/check-install-contract.py`'s pre-existing enforced contract** (verified
+by reading the file, not just this table): both install.ps1+install.sh (or
+init.ps1+init.sh); literal `uv pip install`; no runtime `PYTHONPATH` into a
+package `lib/` dir; schema-version-3 manifest with a `source` block; Windows
+launchers must avoid unsigned console-script `.exe` trampolines and invoke
+the venv Python with `-m`; byte-identical `scripts/versioned_runtime.py` +
+literal `install-contract:v3 versioned-venv` marker; `stamp`/`provision`
+actions; byte-identical `Get-SourceKind`/source-kind blocks and v4
+self-stage/smoke-seam blocks per language.
+
+**Existing sync-tool templates evaluated:** `tools/sync-versioned-runtime.py`
+(closest match — single canonical file pair, explicit/auto-discovered
+adopters, byte-identical fan-out, `--check` drift detection) and
+`tools/sync-installation-context.py` (better for multiple files per adopter,
+not needed here since the engine is exactly two files). Followed the
+`sync-versioned-runtime.py` shape for `tools/sync-installer-engine.py`.
+
+**Minimal function set a small new CLI plugin actually needs** (proven live
+by `agent-pull-requests`): `Ensure-Uv` -> `New-SignedVenv` ->
+`Invoke-UvPipInstallResilient` (package install) -> `Write-SimpleBinstub` ->
+`Write-DeployManifest`, plus the pre-existing `versioned_runtime.py` for the
+immutable-versioned-runtime slot contract. No scheduled task, no sibling
+installs, no service-specific config needed for this class of plugin.
 
 ## Journal
 
@@ -439,3 +536,55 @@ _Pending — Phase 0's audit findings land here before Phase 1 starts._
 - Added an explicit non-goal + Validation Plan item: the vendored corpus must
   actually shrink per converted plugin, not just relocate the same line count
   — tracking before/after line counts per plugin going forward.
+
+### 2026-09-22 — Phase 0 audit landed; Phase 1 engine built, `agent-pull-requests` as reordered pilot
+
+- Ran the Phase 0 audit for real (see `## Proposal` above): read the actual
+  `install.ps1`/`install.sh` bodies in `agent-bridge`, `agent-logger`,
+  `agent-vault`, `agent-ssh`, `agent-worktrees`, and `budget-guidance` rather
+  than assuming the effort's own guessed classification was correct going in.
+  One correction found: the resilient uv retry helpers
+  (`Invoke-UvPipInstallResilient`/`Invoke-UvVenvResilient`) actually live in
+  `agent-bridge`/`agent-logger`, not the smaller `agent-vault`/`agent-ssh`
+  pilots as initially assumed — used the real source for extraction.
+- **Reordered Phase 1's pilot**: operator explicitly approved building the
+  real engine now and converting `agent-pull-requests` (new, no daemon, no
+  existing users) first, instead of `agent-bridge` as originally planned —
+  see the Design decision recorded above Phase 1. `agent-bridge`'s own
+  conversion remains open, unscoped-down follow-through.
+- Landed `libs/installer-engine/installer-engine.ps1`/`.sh` (the (a)/(b)
+  functions from the audit, plus a newly-written `Write-SimpleBinstub` that
+  didn't exist anywhere yet), `tools/sync-installer-engine.py` (mirrors
+  `sync-versioned-runtime.py`'s shape), and a narrow, non-loophole addition to
+  `tools/check-install-contract.py` (accepts a wrapper's `uv pip
+  install`/schema-v3-manifest requirements as satisfied only when it both
+  vendors the engine AND actually calls the specific resilient-install/
+  manifest-writer functions — not merely referencing the engine file).
+- Converted `plugins/agent-pull-requests` into a real runtime plugin: kept
+  every contract-required literal seam (v4 self-stage/smoke-seam,
+  `Get-SourceKind`, `install-contract:v3 versioned-venv`, stamp/provision
+  actions) in its own thin wrapper, dot-sourcing the vendored engine only for
+  the genuinely shared helper bodies. Added it to `tools/sync-versioned-runtime.py`'s
+  adopter set automatically (auto-discovered by `pyproject.toml` + installer
+  presence — no registry edit needed).
+- **Validated for real, not just asserted**: `tools/sync-installer-engine.py
+  --check` correctly fails before syncing and passes after;
+  `tools/sync-versioned-runtime.py --check` passes across all 13 plugins;
+  `tools/check-install-contract.py` passes (13 plugins, unchanged pass for
+  the other 12); `tools/check-version-consistency.py`/`check-docs-consistency.py`
+  clean; the plugin's own 5-test pytest suite passes. Removed a stray manual
+  `pip install`-ed copy of `agent-pull-requests` from this machine's global
+  Python first, then ran the **real** `install.ps1` end-to-end: it vendored
+  uv, built a signed venv, installed the package, wrote a schema-v3 deploy
+  manifest, and deployed a real binstub at `<home>\.local\bin\agent-pull-requests.ps1`.
+  Invoked that exact binstub directly: `agent-pull-requests status --repo
+  <owner>/<repo> --number <n>` returned real live PR data — proving
+  the whole chain end-to-end through the real installer, not a manual
+  workaround.
+- **Not done in this slice** (tracked, not forgotten): `agent-bridge`'s actual
+  conversion (Phase 1's original reference target) and all of Phase 2+'s
+  remaining adopters. The live end-to-end proof above was Windows-only; a
+  POSIX (`install.sh`) live-install proof is still open, worth deciding
+  whether each future adopter phase requires one rather than only repo-level
+  guards.
+
