@@ -6,12 +6,15 @@
   `worktree/tmichon-cloud1-win-20260921-183442-d733` (merged,
   `ThomasMichon/copilot-extensions#3219`); Phase 2 (Containers) landed via
   `worktree/tmichon-cloud1-win-20260922-002606-0a9a` (merged,
-  `ThomasMichon/copilot-extensions#3268`); Phase 3 (Open action) is in
-  `worktree/tmichon-cloud1-win-20260922-022834-a59b`. Each remaining phase
+  `ThomasMichon/copilot-extensions#3268`); Phase 3 (Open action) landed via
+  `worktree/tmichon-cloud1-win-20260922-022834-a59b` (merged,
+  `ThomasMichon/copilot-extensions#3279`); Phase 4 is in
+  `worktree/tmichon-cloud1-win-20260922-113718-4a4e`. Each remaining phase
   gets its own fresh worktree off `main` (Tasks-pane precedent).
 - **Created:** 2026-09-21
-- **Status:** Active — Phase 0, Phase 1, and Phase 2 fully complete and
-  merged. Phase 3 (Open into a muxed session) complete, pending its own PR.
+- **Status:** Active — Phase 0, Phase 1, Phase 2, and Phase 3 fully
+  complete and merged. Phase 4 (driving-worktree navigation + odsp-web PR
+  auto-claim) complete, pending its own PR.
 - **Vision:** [`visions/venue-pivots-ux`](../../../visions/venue-pivots-ux/README.md)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#3253`
 - **Sub-issues:** Phase 1 `ThomasMichon/copilot-extensions#3254` (closed),
@@ -98,13 +101,15 @@ realization.
 **Read this section FIRST in any new session picking up this effort.**
 
 - **Worktree:** Phase 0+1 (`tmichon-cloud1-win-20260921-183442-d733`, PR
-  #3219) and Phase 2 (`tmichon-cloud1-win-20260922-002606-0a9a`, PR #3268)
-  are merged. This session is in a **fresh** worktree
-  (`tmichon-cloud1-win-20260922-022834-a59b`) for Phase 3, per the
+  #3219), Phase 2 (`tmichon-cloud1-win-20260922-002606-0a9a`, PR #3268),
+  and Phase 3 (`tmichon-cloud1-win-20260922-022834-a59b`, PR #3279) are
+  merged. This session is in a **fresh** worktree
+  (`tmichon-cloud1-win-20260922-113718-4a4e`) for Phase 4, per the
   per-phase-worktree convention (Tasks-pane precedent) -- each remaining
   phase gets another fresh worktree off `main`.
-- **Current phase:** Phase 0, 1, and 2 are **fully complete and merged**.
-  **Phase 3 (Open action) is fully complete, not yet landed/PR'd.**
+- **Current phase:** Phase 0, 1, 2, and 3 are **fully complete and
+  merged**. **Phase 4 (driving-worktree navigation + odsp-web PR
+  auto-claim) is fully complete, not yet landed/PR'd.**
 - **Umbrella + sub-issues filed** (2026-09-21):
   `ThomasMichon/copilot-extensions#3253` (umbrella), `#3254`/`#3255`
   (closed -- Phase 1/2 landed), `#3256`-`#3258` (Phase 3-5, open).
@@ -117,7 +122,7 @@ realization.
   live-session join, gated Stop/Remove actions) via a new
   `agent_containers/picker.py` module. See the Plan's own Phase 2
   checklist for full detail.
-- **Phase 3 complete (2026-09-22), pending its own PR:** added the
+- **Phase 3 complete and merged (PR #3279):** added the
   picker-engine `open-venue` internal action (worktree-manager) backing
   both pivots' new Open action -- see the Plan's own Phase 3 checklist and
   the Journal below for the full grounding (the real gap was
@@ -125,11 +130,11 @@ realization.
   interactive TTY to a remote venue). 12 new tests; full worktree-manager
   suite green (1 pre-existing unrelated flake confirmed by isolated
   re-run) plus the real-manifest contract test.
-- **Immediate next step:** open Phase 3's own PR from
-  `tmichon-cloud1-win-20260922-022834-a59b` (create-pr, mirror #3219/
-  #3268's flow), close sub-issue `#3256` on landing, then start Phase 4
-  (driving-worktree navigation + odsp-web PR auto-claim) in a fresh
-  worktree. If any implementation-phase session changes a row/menu's
+- **Immediate next step:** open Phase 4's own PR from
+  `tmichon-cloud1-win-20260922-113718-4a4e` (create-pr, mirror #3219/
+  #3268/#3279's flow), close sub-issue `#3257` on landing, then start
+  Phase 5 (design-only new-venue → embody handoff) in a fresh worktree. If
+  any implementation-phase session changes a row/menu's
   visual shape, re-run the render script (`worktree-manager\.venv\Scripts\
   python.exe worktree-manager\scripts\picker-snapshot\venue-preview\
   render_venue_preview.py --out-dir worktree-manager\scripts\picker-snapshot
@@ -277,12 +282,12 @@ note explaining why, whenever the design is deliberately revised.
   `container`), `claims release`/`settle`/`sweep`. This effort's
   claims-list column reads that ledger through the driving-worktree
   cross-link — **no new claim storage or rendering**; the only new piece
-  is a *producer* (Phase 5's odsp-web PR auto-claim) calling the existing
+  is a *producer* (Phase 4's odsp-web PR auto-claim) calling the existing
   `claims add pr <ref>` verb.
 - **odsp-web PR detection has no existing hook yet:** nothing in
   `agent-codespaces` today watches for a pushed ADO branch turning into a
   PR (`codespace_assets/ado-auth-helper-relay`/`ado-auth-helper-wrapper`
-  handle ADO *auth*, not PR detection). Phase 5 needs to design this
+  handle ADO *auth*, not PR detection). Phase 4 needs to design this
   detection point from scratch — likely a periodic/triggered check inside
   the CodeSpace's own git activity or an ADO API poll — before it can call
   the existing `claims add pr` verb.
@@ -600,20 +605,50 @@ trying to scope it as a manifest change.
       coincidence of testing.
 
 ### Phase 4 — Driving-worktree navigation + odsp-web PR auto-claim
-- [ ] Implement the reserved driving-worktree mark on both pivots (stat
+- [x] Implement the reserved driving-worktree mark on both pivots (stat
       slot or `[mark]` glyph per Phase 0 decision) and its two menu
       actions: jump to the driving worktree's Worktrees-pivot entry, and
-      open its Worktree Status card directly.
-- [ ] Confirm the claims-list column already reads the driving worktree's
+      open its Worktree Status card directly. **Done (2026-09-22):** both
+      manifests now surface Phase 4's two drill-in verbs gated on an
+      explicit `has_driving_worktree` row field, reusing the existing
+      `jump-host` internal picker action plus a row-supplied
+      `worktree_status` card payload. Because `jump-host` resolves by full
+      tracked id (not the short/beacon token already shown in the row's
+      worktree column), venue rows now carry a separate `worktree_id`
+      drill-in field and the picker's internal action dispatch falls back
+      to it before the display-side `worktree` token. Codespaces prefixes
+      the second line with the reserved `→` mark whenever a row is backed
+      by a resolvable local driving worktree; Containers uses the same
+      field/mark contract through `picker_fields`.
+- [x] Confirm the claims-list column already reads the driving worktree's
       existing `agent-worktrees` claim ledger with no new storage (should
       require no new code beyond the existing cross-link, per Phase 1/2).
-- [ ] Design and implement the odsp-web push→PR detection point (new: no
+      **Confirmed:** no new ledger/store was added. Phase 4 continues to
+      read the same Phase 1/2 `claims_summary` cross-link via
+      `agent_worktrees.claims_rank`; only a new producer (`journal_claim`
+      -> existing `claims add pr`) feeds it.
+- [x] Design and implement the odsp-web push→PR detection point (new: no
       existing hook watches for this) that calls
       `agent-worktrees claims add pr <ref>` on the driving worktree when a
-      CodeSpace's pushed ADO branch produces a PR.
-- [ ] Confirm the auto-claimed PR shows up in the claims-list with no
+      CodeSpace's pushed ADO branch produces a PR. **Done:** detection is a
+      best-effort, read-triggered probe in `pool.picker_payload` for
+      `microsoft/odsp-web` rows backed by a resolvable local driving
+      worktree. It reuses the host's existing Codespaces + ADO auth lanes:
+      probe the CodeSpace's current `remote.origin.url` over
+      `gh codespace ssh`, parse the ADO repo coordinates, query active PRs
+      for the current branch via an ADO REST bearer minted from the same
+      injected-token / host-az sources `auth_preflight` already uses, then
+      journal the PR onto the worktree through a new
+      `coordination.journal_claim("pr", ref, owner_ref)` thin wrapper over
+      the existing `claims add` verb. No new claim storage exists here, and
+      `claims add`'s own de-dup keeps the probe idempotent.
+- [x] Confirm the auto-claimed PR shows up in the claims-list with no
       manual step, and that it is visually indistinguishable from a
-      manually-claimed one (same ledger, same rendering).
+      manually-claimed one (same ledger, same rendering). **Done in unit
+      coverage:** `picker_payload` now runs the auto-claim probe before it
+      resolves `claims_summary`, and the fixed-fixture test mutates a fake
+      ledger through the probe path to prove the rendered claims list is the
+      same `PR #2481` string a pre-existing/manual claim would render.
 
 ### Phase 5 — New-venue → embody design handoff (design only)
 - [ ] Record the finalized create→embody flow design (target-info prompt,
@@ -648,7 +683,7 @@ trying to scope it as a manifest change.
 - [ ] Confirm the Containers pivot still never surfaces a non-fleet
       container after the parity changes (no regression on the existing
       fleet-only scoping).
-- [ ] Unit tests for the driving-worktree mark/menu-navigation actions
+- [x] Unit tests for the driving-worktree mark/menu-navigation actions
       (jump-to-worktree, worktree-status-card) against fixed fixtures with
       and without a driving worktree.
 - [ ] A live/manual check on a real odsp-web CodeSpace: push a real ADO
@@ -658,6 +693,87 @@ trying to scope it as a manifest change.
       fixture).
 
 ## Journal
+
+- **2026-09-22 (latest+11)** — Completed Phase 4 in fresh worktree
+  `tmichon-cloud1-win-20260922-113718-4a4e`. Grounded the
+  driving-worktree drill-in against the already-landed Tasks-pane
+  precedent in three places: the picker's generic internal navigation
+  surface (`engine_worktree_actions._internal_pivot_action` /
+  `_jump_to_worktree`), the generic read-only card surface
+  (`kind:"card"` -> `PivotCardScreen`), and the Worktrees-pane exact-id
+  requirement from the Tasks-pane reverse-cross-link tests (`jump-host`
+  resolves by stable full worktree id, not a 4-char display token). That
+  exact-id requirement is the key Phase 4 grounding decision: the
+  Codespaces/Containers rows keep their existing display-side
+  `worktree`/`lease` tokens for title + claims correlation, but now also
+  carry a separate `worktree_id` drill-in field plus an explicit
+  `has_driving_worktree` gate. Both real pivot manifests add two new
+  per-entry actions gated on that flag: **View driving worktree** (reuses
+  the existing `jump-host` internal action; the picker now falls back to
+  `ctx["worktree_id"]` before the display token) and **Worktree status**
+  (a real `kind:"card"` action sourcing a new row-supplied
+  `worktree_status` payload). The claims-list column needed **no new
+  storage**: it still reads the same worktree claim ledger through the
+  existing Phase 1/2 cross-link; Phase 4 only adds a producer.
+
+  The reserved line-two driving-worktree mark landed as the Phase 0
+  `[mark]` slot, not a new stat column: Codespaces prefixes the composed
+  subtitle with `→` when a row is backed by a resolvable local driving
+  worktree (and retains `⚠` for the orphaned-lock case); Containers uses
+  the same mark contract through `picker_fields`. The Worktree Status card
+  payloads are provider-computed row data, mirroring agent-dispatch's own
+  Tasks-pane shape rather than inventing a new picker engine. Each card is
+  built from the existing agent-worktrees state already available to the
+  host: the tracked worktree record plus the existing
+  `status-segment --json` facts (`status_bar_cli._status_segment_json`),
+  summarized into repo/worktree/branch/turn/live/git/closure/claims.
+
+  Implemented the odsp-web PR auto-claim as a **read-triggered, idempotent
+  producer** in `agent_codespaces.pool` (the one new mechanism Phase 4
+  actually needed). There was still no pre-existing hook for "branch push
+  became PR", so the minimal consistent detection point is the codespace row
+  materialization itself: for a `microsoft/odsp-web` row backed by a
+  resolvable local driving worktree, `picker_payload` now probes the
+  CodeSpace's current `remote.origin.url` over `gh codespace ssh`, parses
+  ADO repo coordinates (`ssh.dev.azure.com`, `dev.azure.com`, and
+  `*.visualstudio.com` forms), queries active PRs for the current branch
+  via an ADO REST bearer minted from the same injected-token / host-az
+  sources `auth_preflight` already uses, then journals the result through
+  a new `coordination.journal_claim(kind, ref, owner_ref)` wrapper over the
+  existing `agent-worktrees claims add <kind> <ref>` verb. Because the
+  producer runs before `claims_summary` is resolved, the row's claims list
+  reads an auto-claimed PR **exactly** the same way as a manual claim
+  (same ledger, same `claims_rank` rendering) -- proved by fixed-fixture
+  unit coverage.
+
+  Validation: new unit coverage in all three affected suites --
+  `agent-codespaces` (10 new tests around the reserved mark, worktree
+  status card payload, ADO remote parsing, auto-claim journaling, and the
+  "auto-claimed looks manual" ledger/render contract),
+  `agent-containers` (6 new tests around the mark/drill-in fields and
+  unavailable-vs-resolved Worktree Status payload), and worktree-manager
+  (an internal-action fallback test plus a generic manifest gate test for
+  `has_driving_worktree`). Ran:
+  `uv run --extra dev pytest plugins/agent-codespaces/tests/test_pool.py`
+  (74 passed),
+  `uv run --extra dev pytest plugins/agent-containers/tests/test_picker.py plugins/agent-containers/tests/test_fleet_json.py`
+  (20 passed),
+  `uv run --extra dev pytest plugins/agent-worktrees/tests/test_claims_cmd.py plugins/agent-worktrees/tests/test_claims_rank.py`
+  (63 passed),
+  `uv run --extra dev pytest worktree-manager/tests/production_picker/test_pivots.py worktree-manager/tests/production_picker/test_picker_tui.py worktree-manager/tests/test_plugin_contracts.py worktree-manager/tests/test_production_picker_transplant.py`
+  (394 passed),
+  then the full `worktree-manager` suite
+  (1099 passed, 1 skipped). Also reran the venue-preview renderer after the
+  row/menu changes; all six outputs regenerated successfully and preserved
+  the committed dimensions, but byte-differed from the approved
+  `design-previews/*.png` (small renderer drift across all six, with the
+  Phase-4 menu lane naturally differing most). The north-star design itself
+  was not intentionally revised in this phase, so I recorded the
+  comparison here rather than replacing the committed approved previews.
+  **Still outstanding:** the Validation Plan's real odsp-web live/manual
+  push→PR check remains unchecked; I confirmed odsp-web CodeSpaces are
+  accessible from this machine, but did not mutate a real branch/PR from a
+  live venue inside this phase worktree.
 
 - **2026-09-22 (latest+10)** — Merged PR #3268 (Phase 2), closed `#3255`,
   and started Phase 3 in a fresh worktree after the operator reported

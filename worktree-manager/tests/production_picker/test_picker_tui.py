@@ -1798,6 +1798,37 @@ def test_jump_to_worktree_unknown_id_is_safe(tmp_path):
     asyncio.run(run())
 
 
+def test_internal_jump_host_prefers_worktree_id_context():
+    """picker-venue-pivots Phase 4: a registered pivot row may keep its
+    display-side `worktree` token as a short/beacon id while supplying the
+    full tracked worktree id separately as `worktree_id`; `jump-host` must
+    prefer that stable id for the actual drill-in."""
+    src = _bridge_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.t0 = 0
+            scr.show_hidden = True
+            scr.machine_idx = 0
+            await pilot.pause()
+            ok, msg = scr._internal_pivot_action(
+                "jump-host",
+                {
+                    "id": "codespace-row-id",
+                    "worktree": "2222",
+                    "worktree_id": "emancipation-cube-win-bridge-2222",
+                },
+            )
+            assert ok is True
+            assert "jumped to" in msg
+            landed = scr.list_records()[scr.sel[1]]
+            assert (landed.get("raw") or {}).get("id") == "emancipation-cube-win-bridge-2222"
+
+    asyncio.run(run())
+
+
 def test_jump_to_worktree_clears_a_hiding_filter(tmp_path):
     """PR #2911 review: "Jump to host"/"Jump to caller" must resolve the
     target by stable id against the FULL set, then clear an active "/"

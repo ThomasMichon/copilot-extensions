@@ -5,10 +5,12 @@ from __future__ import annotations
 from agent_containers.picker import (
     activity_from_live_session,
     claims_summary_for_worktree,
+    driving_worktree_id_for,
     live_session_for_venue,
     picker_fields,
     sess_column,
     subtitle_for,
+    worktree_status_for_worktree,
 )
 
 
@@ -55,7 +57,17 @@ def test_activity_from_live_session_composes_phase_and_summary():
 
 def test_picker_fields_shape_when_unclaimed():
     assert picker_fields("free-1", None) == {
-        "subtitle": "", "claims_summary": "", "sess": "",
+        "subtitle": "",
+        "claims_summary": "",
+        "sess": "",
+        "worktree_id": "",
+        "has_driving_worktree": "false",
+        "worktree_status": {
+            "title": "Worktree status unavailable",
+            "status": "unknown",
+            "link": None,
+            "body": "No tracked driving worktree is recorded for this container.",
+        },
     }
 
 
@@ -64,10 +76,19 @@ def test_picker_fields_shape_when_claimed(monkeypatch):
 
     monkeypatch.setattr(picker, "live_session_for_venue", lambda kind, target: None)
     monkeypatch.setattr(picker, "claims_summary_for_worktree", lambda wt: "PR #2481")
+    monkeypatch.setattr(picker, "driving_worktree_id_for", lambda wt: "host-win-20260922-111111-a1c4")
+    monkeypatch.setattr(
+        picker,
+        "worktree_status_for_worktree",
+        lambda wt: {"title": "Worktree a1c4", "status": "active", "link": None, "body": "- Claims: PR #2481"},
+    )
     fields = picker_fields("box-1", "3bac")
-    assert fields["subtitle"] == "claimed by 3bac"
+    assert fields["subtitle"] == "→ claimed by 3bac"
     assert fields["claims_summary"] == "PR #2481"
     assert fields["sess"] == "IDLE"
+    assert fields["worktree_id"] == "host-win-20260922-111111-a1c4"
+    assert fields["has_driving_worktree"] == "true"
+    assert fields["worktree_status"]["title"] == "Worktree a1c4"
 
 
 def test_picker_fields_appends_live_activity(monkeypatch):
@@ -81,8 +102,9 @@ def test_picker_fields_appends_live_activity(monkeypatch):
             "latest_progress": {"phase": "impl", "summary": "wiring"},
         },
     )
+    monkeypatch.setattr(picker, "driving_worktree_id_for", lambda wt: "host-win-20260922-111111-a1c4")
     fields = picker_fields("box-1", "3bac")
-    assert fields["subtitle"] == "claimed by 3bac - impl: wiring"
+    assert fields["subtitle"] == "→ claimed by 3bac - impl: wiring"
     assert fields["sess"] == "LIVE"
 
 
@@ -99,3 +121,14 @@ def test_picker_fields_activity_without_claim_uses_container_name(monkeypatch):
     )
     fields = picker_fields("box-1", None)
     assert fields["subtitle"] == "box-1 - spinning up"
+
+
+def test_driving_worktree_id_for_degrades_without_agent_worktrees():
+    assert driving_worktree_id_for(None) == ""
+    assert driving_worktree_id_for("maybe-effort") == ""
+
+
+def test_worktree_status_for_worktree_unavailable_when_unresolvable():
+    payload = worktree_status_for_worktree("maybe-effort")
+    assert payload["status"] == "unknown"
+    assert "No tracked driving worktree" in payload["body"]

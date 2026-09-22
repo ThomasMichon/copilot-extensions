@@ -283,6 +283,28 @@ def _bookkeeping_run(args: list[str]) -> subprocess.CompletedProcess[str] | None
         return None
 
 
+def journal_claim(kind: str, ref: str, holder_ref: str | None) -> bool:
+    """Journal any existing agent-worktrees claim kind onto ``holder_ref``.
+
+    Best-effort + degrade-safe, matching :func:`journal_obligation`: no
+    holder-ref, no binstub, a context refusal, or a non-zero `claims add`
+    result all degrade to ``False`` without raising. Idempotent because the
+    underlying `claims add` verb deduplicates by ref.
+    """
+    if not kind or not ref or not holder_ref or not holder_ref.strip():
+        return False
+    proc = _bookkeeping_run(
+        ["claims", "add", kind, ref, "--owner-ref", holder_ref.strip(), "--json"],
+    )
+    if proc is None:
+        return False
+    if proc.returncode != 0:
+        log.debug("claims add %s %s degraded (exit %s): %s",
+                  kind, ref, proc.returncode, (proc.stderr or "").strip())
+        return False
+    return True
+
+
 def journal_obligation(name: str, holder_ref: str | None) -> bool:
     """Journal a CodeSpace obligation onto the BORROWING worktree's ledger.
 
@@ -297,18 +319,7 @@ def journal_obligation(name: str, holder_ref: str | None) -> bool:
     (deferred to the lease mirror), or any error -> ``False`` (never raises,
     never blocks the connect). Idempotent (``claims add`` dedups by ref).
     """
-    if not holder_ref or not holder_ref.strip():
-        return False
-    proc = _bookkeeping_run(
-        ["claims", "add", KIND, name, "--owner-ref", holder_ref.strip(), "--json"],
-    )
-    if proc is None:
-        return False
-    if proc.returncode != 0:
-        log.debug("claims add for %s degraded (exit %s): %s",
-                  name, proc.returncode, (proc.stderr or "").strip())
-        return False
-    return True
+    return journal_claim(KIND, name, holder_ref)
 
 
 def settle_obligation(
