@@ -1,5 +1,12 @@
 name: context-handoff crash-diagnostics stress
 
+# Runs the full crash-diagnostics.test.mjs subprocess suite (every case, not
+# just the world-readable-file/symlink/FIFO attack simulations) on a
+# schedule and on manual dispatch, regardless of what any given PR touched.
+# The required `guards + lint` CI lane (ci.yml) only runs this file's full
+# suite when a PR's own diff touches plugins/context-handoff/ -- this
+# workflow is what still exercises it periodically otherwise.
+
 on:
   schedule:
     - cron: "37 10 * * *"
@@ -10,12 +17,12 @@ permissions:
 
 jobs:
   stress:
-    name: attack-simulation subprocess cases
+    name: full subprocess suite
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Run the world-readable-file/symlink/FIFO stress cases
+      - name: Run the full crash-diagnostics subprocess suite
         env:
           CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS: "1"
         run: >-

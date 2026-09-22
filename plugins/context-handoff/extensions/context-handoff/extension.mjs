@@ -80,10 +80,13 @@ import { createEmergencyLog, installEmergencyDiagnostics } from "./crash-diagnos
 // See crash-diagnostics.mjs (an isolated, @github/copilot-sdk-free module,
 // so it can be exercised directly by subprocess tests -- see
 // tests/crash-diagnostics.test.mjs) for the full rationale and the
-// uninstall-capable implementation. Not retained here: no need to ever
-// uninstall these handlers for the life of this process.
+// uninstall-capable implementation. `uninstall()` itself is never called:
+// there is no need to remove these handlers for the life of this process.
+// `markReady()` (called once joinSession() below actually resolves) IS used
+// -- it is an in-memory-only flag, never a durable write on its own; see its
+// own rationale beside installEmergencyDiagnostics() in crash-diagnostics.mjs.
 const emergencyLog = createEmergencyLog();
-installEmergencyDiagnostics(emergencyLog);
+const emergencyDiagnostics = installEmergencyDiagnostics(emergencyLog);
 
 // --- State ---
 // This used to be a synchronous `loadContextHandoffConfig(process.cwd())`
@@ -1186,7 +1189,7 @@ const session = await joinSession({
     },
   ],
 });
-emergencyLog("joinSession-resolved", "ok");
+emergencyDiagnostics.markReady();
 
 // --- Session lifecycle reconstructed from events (SDK callback hooks removed) ---
 // The native runtime dropped SDK callback hooks ("SDK hook callbacks are no

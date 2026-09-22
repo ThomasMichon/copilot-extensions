@@ -341,12 +341,18 @@ was actually a crash at all* -- see "interpreting an entry" below.
 `extension.mjs` registers `process.on('uncaughtException'
 /'unhandledRejection'/'exit'/'SIGTERM'/'SIGINT'/'SIGHUP')` handlers (added
 directly above the `--- State ---` section) that write a synchronous,
-durable diagnostic line the instant anything goes wrong, plus a
-`joinSession-resolved` marker immediately after `joinSession()` succeeds, to
+durable diagnostic line the instant anything goes wrong to
 `<os.tmpdir()>/context-handoff-extension-crash.log` (e.g.
 `/tmp/context-handoff-extension-crash.log` on Linux/macOS,
 `%TEMP%\context-handoff-extension-crash.log` on Windows). Read this file
 after a suspected crash.
+
+Every line is stamped `<ISO timestamp> pid=<pid> <label>: <detail>`, and
+`<detail>` for the exit/exception/rejection/signal handlers always includes
+`ready=true`/`ready=false` -- an in-memory-only flag (never itself written
+on its own) set once `joinSession()` actually resolves, so a captured
+failure's line says whether it happened before or after this instance
+reached readiness.
 
 This file is:
 
@@ -377,6 +383,19 @@ This file is:
 - **Not itself instrumented for retention beyond that.** No log-rotation or
   scheduled cleanup exists for whatever it does accumulate; treat it as a
   manually-cleared scratch file until/unless that becomes worth adding.
+- **Shared by every extension instance on the machine -- correlate by `pid=`
+  and timestamp before drawing a conclusion.** This is one fixed,
+  machine-global path, and multiple `context-handoff` processes (across
+  different worktrees, sessions, or simply overlapping discovery/reconnect
+  forks) can each append to it independently, interleaved in whatever order
+  they actually wrote. A `signal: ...` line followed somewhere later in the
+  file by an `exit: code=...` line does **not** by itself mean that exit
+  belongs to the same process that received the signal -- it can belong to
+  an unrelated instance, or (rarely) a later instance that reused the same
+  PID after the first exited. Always check that the `pid=` value matches
+  between the lines you are comparing, and that their timestamps are close
+  enough in sequence to plausibly be the same launch, before concluding
+  whether a given signal was followed by an exit or not.
 
 **Interpreting an entry -- a `SIGTERM`/`SIGINT`/`SIGHUP` line does not by
 itself mean a crash.** The Copilot CLI's own documented extension lifecycle
@@ -395,17 +414,21 @@ exit). Because the re-raised signal kills the process before Node's own
 following `exit: code=...` line is the *expected* shape for this legitimate,
 host-initiated stop** -- not evidence of a crash.
 
-So, reading a launch's entries in this file (if any):
+So, reading a launch's entries in this file (if any) -- **always match `pid=`
+between the lines being compared first** (see the correlation bullet
+above):
 
-- `signal: SIGTERM`/`SIGINT`/`SIGHUP`, no `exit` line -- an expected,
-  host-initiated stop (`/clear`, foreground session replaced, or a real
-  Ctrl+C/HUP). Given how handoff/session-switch-heavy some workflows are,
-  this may explain a large share of historical `exit code=1
-  disposition=stopped-normally` launch-log entries that were never actually
-  crashes.
+- `signal: SIGTERM`/`SIGINT`/`SIGHUP`, no `exit` line **for that same
+  `pid=`** -- an expected, host-initiated stop (`/clear`, foreground session
+  replaced, or a real Ctrl+C/HUP). Given how handoff/session-switch-heavy
+  some workflows are, this may explain a large share of historical `exit
+  code=1 disposition=stopped-normally` launch-log entries that were never
+  actually crashes.
 - `uncaughtException`/`unhandledRejection` (with a stack), followed by
-  `exit: code=1` -- a genuine bug in this extension's own code. The stack
-  is the actual diagnostic payoff.
+  `exit: code=1` **for that same `pid=`** -- a genuine bug in this
+  extension's own code. The stack is the actual diagnostic payoff; the
+  trailing `ready=true`/`ready=false` on both lines says whether the bug hit
+  before or after this instance reached readiness.
 - **No entry at all for a launch whose own harness log shows it reached
   `ready` and then stopped** -- three distinct possibilities, not just one:
   the ordinary case is simply a routine `code=0` exit, which is never logged

@@ -176,12 +176,24 @@ function describeFailure(value) {
 }
 
 export function installEmergencyDiagnostics(emergencyLog) {
+  // Tracks whether joinSession() has already resolved, purely in memory --
+  // NOT written to the durable log on its own. Every successful extension
+  // instance (this module is re-imported many times per machine lifetime:
+  // once per discovery pass, plus once per reconnect/resume) would otherwise
+  // append an unconditional "reached readiness" line to this fixed,
+  // unrotated, machine-global file even when nothing ever goes wrong --
+  // exactly the unbounded-growth failure mode the onExit code=0 skip below
+  // already guards against. Instead, this flag is folded into whichever
+  // failure entry (if any) actually gets logged, so a reader can still tell
+  // whether a captured crash happened before or after readiness, without
+  // paying for a write on the overwhelmingly common all-is-well path.
+  let ready = false;
   const onUncaughtException = (err) => {
-    emergencyLog("uncaughtException", describeFailure(err));
+    emergencyLog("uncaughtException", `ready=${ready} ${describeFailure(err)}`);
     process.exit(1);
   };
   const onUnhandledRejection = (reason) => {
-    emergencyLog("unhandledRejection", describeFailure(reason));
+    emergencyLog("unhandledRejection", `ready=${ready} ${describeFailure(reason)}`);
     process.exit(1);
   };
   // Only a non-zero exit is logged. This module's own extension.mjs is
@@ -198,12 +210,12 @@ export function installEmergencyDiagnostics(emergencyLog) {
   // interesting signal is the *presence* of an uncaughtException/
   // unhandledRejection/signal line, not the routine absence of one.
   const onExit = (code) => {
-    if (code !== 0) emergencyLog("exit", `code=${code}`);
+    if (code !== 0) emergencyLog("exit", `code=${code} ready=${ready}`);
   };
   const signalHandlers = new Map();
   for (const signal of SIGNALS) {
     const handler = () => {
-      emergencyLog("signal", signal);
+      emergencyLog("signal", `${signal} ready=${ready}`);
       process.off(signal, handler);
       process.kill(process.pid, signal);
     };
@@ -217,12 +229,19 @@ export function installEmergencyDiagnostics(emergencyLog) {
     process.on(signal, handler);
   }
 
-  return function uninstall() {
-    process.off("uncaughtException", onUncaughtException);
-    process.off("unhandledRejection", onUnhandledRejection);
-    process.off("exit", onExit);
-    for (const [signal, handler] of signalHandlers) {
-      process.off(signal, handler);
-    }
+  return {
+    // Called once joinSession() actually resolves; purely an in-memory
+    // flag, see the `ready` rationale above -- never itself a durable write.
+    markReady() {
+      ready = true;
+    },
+    uninstall() {
+      process.off("uncaughtException", onUncaughtException);
+      process.off("unhandledRejection", onUnhandledRejection);
+      process.off("exit", onExit);
+      for (const [signal, handler] of signalHandlers) {
+        process.off(signal, handler);
+      }
+    },
   };
 }

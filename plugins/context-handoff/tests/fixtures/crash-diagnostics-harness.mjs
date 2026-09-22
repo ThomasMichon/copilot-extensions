@@ -10,7 +10,7 @@ import { createEmergencyLog, installEmergencyDiagnostics } from "../../extension
 
 const [, , scenario, logPath] = process.argv;
 const emergencyLog = createEmergencyLog(logPath);
-installEmergencyDiagnostics(emergencyLog);
+const diagnostics = installEmergencyDiagnostics(emergencyLog);
 process.stdout.write("READY\n");
 
 switch (scenario) {
@@ -20,6 +20,17 @@ switch (scenario) {
   case "uncaught-exception":
     setImmediate(() => {
       throw new Error("boom-uncaught");
+    });
+    break;
+  case "uncaught-exception-after-ready":
+    // Regression case for markReady(): once joinSession() (or, here, the
+    // harness standing in for it) has resolved, a subsequent captured
+    // failure's log entry must reflect ready=true -- proving the flag
+    // actually threads through to installEmergencyDiagnostics()'s handlers
+    // rather than only ever defaulting to false.
+    diagnostics.markReady();
+    setImmediate(() => {
+      throw new Error("boom-after-ready");
     });
     break;
   case "unhandled-rejection":

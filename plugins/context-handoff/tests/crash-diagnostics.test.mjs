@@ -6,20 +6,23 @@
 // the shared `node --test` runner process, since these handlers call
 // process.exit() by design.
 //
-// The world-readable-file/symlink/FIFO pre-creation cases below are
-// attack-simulation stress cases, not core exception/signal-handling smoke
-// coverage -- and the required `guards + lint` CI lane runs every
-// `plugins/*/tests/*.test.mjs` file unconditionally, for every PR in this
-// whole monorepo (`.github/workflows/ci.yml`), not just ones that touch
-// context-handoff. Spawning several extra real subprocesses (including an
-// external `mkfifo` binary) in that shared required lane would tax every
-// unrelated PR's CI time and add a POSIX-toolchain dependency no other test
-// here needs. They run only when `CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS`
-// is set (mirroring `INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS`'s existing
+// EVERY case in this file -- not only the world-readable-file/symlink/FIFO
+// attack simulations -- spawns at least one real subprocess, and the
+// required `guards + lint` CI lane runs every `plugins/*/tests/*.test.mjs`
+// file unconditionally, for every PR in this whole monorepo
+// (`.github/workflows/ci.yml`), not just ones that touch context-handoff.
+// Paying that subprocess-spawn cost (and, for the FIFO case, a real
+// `mkfifo` dependency) on every unrelated PR's required CI would be a
+// blast-radius mismatch for a single plugin's regression suite. So this
+// entire file gates on `CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS`, which
+// `ci.yml` sets automatically whenever a PR's own diff touches
+// `plugins/context-handoff/` (so this plugin's own PRs still get full
+// coverage in required CI) and which the scheduled/manual
+// `crash-diagnostics-stress.yml` workflow also sets unconditionally
+// (mirroring `INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS`'s existing
 // scheduled/manual-only pattern -- see
-// `.github/workflows/installation-context-full.yml` and its context-handoff
-// counterpart, `crash-diagnostics-stress.yml`), keeping the required lane to
-// a small, always-run exception/signal smoke contract.
+// `.github/workflows/installation-context-full.yml`), so the full suite
+// still runs periodically no matter what any given PR touches.
 import { spawn, spawnSync } from "node:child_process";
 import {
   mkdtempSync,
@@ -57,53 +60,87 @@ function readLogSafe(logPath) {
   }
 }
 
-test("clean exit records nothing at all -- routine exits are not logged", async () => {
-  await withCrashLog(async (logPath) => {
-    const result = spawnSync(process.execPath, [harness, "clean-exit", logPath], {
-      encoding: "utf-8",
+test(
+  "clean exit records nothing at all -- routine exits are not logged",
+  { skip: !RUN_STRESS_CASES },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      const result = spawnSync(process.execPath, [harness, "clean-exit", logPath], {
+        encoding: "utf-8",
+      });
+      assert.equal(result.status, 0);
+      // A routine code=0 exit is deliberately never logged (see the rationale
+      // beside onExit in crash-diagnostics.mjs): this extension is
+      // re-imported many times per machine lifetime, and logging every
+      // uneventful fork would make this fixed, unrotated file grow without
+      // bound. readLogSafe() returning "" also covers the file never having
+      // been created at all, since createEmergencyLog() only opens it lazily
+      // on first actual write.
+      assert.equal(readLogSafe(logPath), "");
     });
-    assert.equal(result.status, 0);
-    // A routine code=0 exit is deliberately never logged (see the rationale
-    // beside onExit in crash-diagnostics.mjs): this extension is
-    // re-imported many times per machine lifetime, and logging every
-    // uneventful fork would make this fixed, unrotated file grow without
-    // bound. readLogSafe() returning "" also covers the file never having
-    // been created at all, since createEmergencyLog() only opens it lazily
-    // on first actual write.
-    assert.equal(readLogSafe(logPath), "");
-  });
-});
+  },
+);
 
-test("an uncaught exception is logged with its stack, then exits 1", async () => {
-  await withCrashLog(async (logPath) => {
-    const result = spawnSync(process.execPath, [harness, "uncaught-exception", logPath], {
-      encoding: "utf-8",
+test(
+  "an uncaught exception is logged with its stack, then exits 1",
+  { skip: !RUN_STRESS_CASES },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      const result = spawnSync(process.execPath, [harness, "uncaught-exception", logPath], {
+        encoding: "utf-8",
+      });
+      assert.equal(result.status, 1);
+      const log = readLogSafe(logPath);
+      assert.match(log, /uncaughtException: ready=false Error: boom-uncaught/);
+      // The stack trace is multi-line; confirm more than just the message
+      // survived (i.e. `err.stack`, not `String(err)`, was actually logged).
+      assert.match(log, /at /);
+      assert.match(log, /\bexit: code=1\b/);
     });
-    assert.equal(result.status, 1);
-    const log = readLogSafe(logPath);
-    assert.match(log, /uncaughtException: Error: boom-uncaught/);
-    // The stack trace is multi-line; confirm more than just the message
-    // survived (i.e. `err.stack`, not `String(err)`, was actually logged).
-    assert.match(log, /at /);
-    assert.match(log, /\bexit: code=1\b/);
-  });
-});
+  },
+);
 
 // A thrown value is not required to be an Error. Reading a hostile/buggy
 // .stack getter runs arbitrary user code that can itself throw -- that must
 // not crash describeFailure() (and lose the diagnostic) while it is already
 // handling the original failure.
-test("a hostile throwing .stack getter does not itself crash the handler", async () => {
-  await withCrashLog(async (logPath) => {
-    const result = spawnSync(process.execPath, [harness, "throw-hostile-getter", logPath], {
-      encoding: "utf-8",
+test(
+  "a hostile throwing .stack getter does not itself crash the handler",
+  { skip: !RUN_STRESS_CASES },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      const result = spawnSync(process.execPath, [harness, "throw-hostile-getter", logPath], {
+        encoding: "utf-8",
+      });
+      assert.equal(result.status, 1);
+      const log = readLogSafe(logPath);
+      assert.match(log, /uncaughtException: ready=false <failure detail unavailable: describing it threw>/);
+      assert.match(log, /\bexit: code=1\b/);
     });
-    assert.equal(result.status, 1);
-    const log = readLogSafe(logPath);
-    assert.match(log, /uncaughtException: <failure detail unavailable: describing it threw>/);
-    assert.match(log, /\bexit: code=1\b/);
-  });
-});
+  },
+);
+
+// markReady() is purely in-memory (see installEmergencyDiagnostics() in
+// crash-diagnostics.mjs) -- it must never write a durable line on its own,
+// but a failure captured *after* it was called must reflect ready=true, not
+// the ready=false default asserted by the other cases above.
+test(
+  "a failure after markReady() logs ready=true",
+  { skip: !RUN_STRESS_CASES },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      const result = spawnSync(
+        process.execPath,
+        [harness, "uncaught-exception-after-ready", logPath],
+        { encoding: "utf-8" },
+      );
+      assert.equal(result.status, 1);
+      const log = readLogSafe(logPath);
+      assert.match(log, /uncaughtException: ready=true Error: boom-after-ready/);
+      assert.match(log, /\bexit: code=1\b/);
+    });
+  },
+);
 
 // A predictable path in a shared os.tmpdir() means another local user could
 // have pre-created an ordinary, world-readable regular file there before
@@ -190,18 +227,22 @@ test(
   },
 );
 
-test("an unhandled rejection is logged with its stack, then exits 1", async () => {
-  await withCrashLog(async (logPath) => {
-    const result = spawnSync(process.execPath, [harness, "unhandled-rejection", logPath], {
-      encoding: "utf-8",
+test(
+  "an unhandled rejection is logged with its stack, then exits 1",
+  { skip: !RUN_STRESS_CASES },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      const result = spawnSync(process.execPath, [harness, "unhandled-rejection", logPath], {
+        encoding: "utf-8",
+      });
+      assert.equal(result.status, 1);
+      const log = readLogSafe(logPath);
+      assert.match(log, /unhandledRejection: ready=false Error: boom-rejected/);
+      assert.match(log, /at /);
+      assert.match(log, /\bexit: code=1\b/);
     });
-    assert.equal(result.status, 1);
-    const log = readLogSafe(logPath);
-    assert.match(log, /unhandledRejection: Error: boom-rejected/);
-    assert.match(log, /at /);
-    assert.match(log, /\bexit: code=1\b/);
-  });
-});
+  },
+);
 
 // Windows does not deliver a real POSIX signal to a JS handler when the
 // signal is sent via `(child)process.kill()`: Node's own Windows emulation
@@ -216,7 +257,7 @@ test("an unhandled rejection is logged with its stack, then exits 1", async () =
 // document SIGTERM as inert on Windows for the same reason.
 test(
   "SIGTERM is logged, then re-raised so the process still dies BY that signal",
-  { skip: process.platform === "win32" },
+  { skip: process.platform === "win32" || !RUN_STRESS_CASES },
   async () => {
     await withCrashLog(async (logPath) => {
       const child = spawn(process.execPath, [harness, "wait-for-signal", logPath], {

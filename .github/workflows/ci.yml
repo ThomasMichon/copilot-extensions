@@ -205,12 +205,27 @@ jobs:
         # plugins/<name>/tests/*.test.mjs -- there is no pytest suite to carry
         # them. Run any that exist; a clean no-op when there are none, so this
         # step costs nothing until a plugin adds JS tests.
+        #
+        # context-handoff's crash-diagnostics.test.mjs spawns several real
+        # subprocesses per case; that cost/POSIX-toolchain dependency has no
+        # business landing on every unrelated PR in the monorepo just because
+        # this glob is unconditional. Its full suite only runs here when this
+        # PR's own diff actually touches plugins/context-handoff/ -- otherwise
+        # it self-gates behind CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS (unset
+        # here) and every one of its cases skips. The scheduled/dispatch
+        # `crash-diagnostics-stress.yml` workflow still exercises it
+        # periodically regardless of what any given PR touches.
         run: |
           shopt -s nullglob
           suites=(plugins/*/tests/*.test.mjs)
           if [ ${#suites[@]} -eq 0 ]; then
             echo "no JS test suites found; skipping"
             exit 0
+          fi
+          if [ "${{ github.event_name }}" = "pull_request" ] && \
+             git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD -- plugins/context-handoff/ | grep -q .; then
+            echo "plugins/context-handoff/ changed in this PR; running its full subprocess suite"
+            export CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS=1
           fi
           echo "running ${#suites[@]} JS test file(s): ${suites[*]}"
           node --test "${suites[@]}"
