@@ -44,6 +44,24 @@ def add_parsers(sub) -> None:
         help="Emit JSON (default; accepted for caller compatibility)",
     )
 
+    # session-tail -- last N message-bearing turns for one session
+    sp = sub.add_parser(
+        "session-tail",
+        help="Show a session's last N message-bearing turns and ending state (JSON)",
+    )
+    sp.add_argument("session_id", help="Copilot session ID")
+    sp.add_argument(
+        "--limit",
+        type=int,
+        default=3,
+        help="How many of the most recent message-bearing turns to return (default: 3)",
+    )
+    sp.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON (default; accepted for caller compatibility)",
+    )
+
     # head-session -- a worktree's asserted head session + lifecycle state (JSON)
     sp = sub.add_parser(
         "head-session",
@@ -888,6 +906,14 @@ def cmd_session_transcript(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_session_tail(args: argparse.Namespace) -> int:
+    """Emit one session's last N message-bearing turns as JSON."""
+    session_id = args.session_id
+    payload = sessions.session_message_tail(session_id, limit=getattr(args, "limit", 3))
+    _core()._json_output(payload)
+    return 0
+
+
 def cmd_recent_messages(args: argparse.Namespace) -> int:
     """Emit a worktree's latest session's last N conversation messages as JSON.
 
@@ -895,7 +921,10 @@ def cmd_recent_messages(args: argparse.Namespace) -> int:
     agent-asserted summary never accumulated, this derives recent context
     straight from the worktree's newest session ``events.jsonl``. Accepts a full
     worktree id or its 4-char suffix. An unknown worktree is a JSON error; a
-    known worktree with no session yields an empty ``messages`` list.
+    known worktree with no session yields an empty ``messages`` list. The
+    payload also carries the same ending-state signal as ``session-tail`` so a
+    caller can distinguish a cleanly finished last turn from a cut-off
+    assistant turn or an unanswered assistant offer.
     """
     wt_id = _core()._resolve_worktree_id(args.worktree_id)
     records = tracking.list_records(cfg.tracking_dir())
