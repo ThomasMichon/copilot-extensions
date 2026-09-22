@@ -93,6 +93,76 @@ def test_env_override_wins(tmp_path, monkeypatch) -> None:
     assert [s.name for s in specs] == ["git:only"]
 
 
+def test_current_repo_layers_union_sources_and_preserve_overlay_indexer(
+    tmp_path, monkeypatch
+) -> None:
+    aw = tmp_path / ".agent-worktrees"
+    _write(aw / "projects.yaml", "schema_version: 2\nprojects: {}\n")
+    _write(aw / "repos.yaml", "schema_version: 1\nrepos: {}\n")
+    root = tmp_path / "harness"
+    _write(root / ".agent-index" / "config.yaml", """\
+        corpus:
+          sources:
+            - name: github:gim-home/odsp-web-harness
+              trust_domain: harness
+    """)
+    _write(root / ".copilot-extensions" / "agent-index" / "config.yaml", """\
+        indexer:
+          machine: boxA
+        corpus:
+          sources:
+            - name: github:ThomasMichon/copilot-extensions
+              trust_domain: marketplace
+    """)
+    monkeypatch.setenv("AGENT_WORKTREES_HOME", str(aw))
+    monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(cfg, "repo_root", lambda explicit=None: root)
+
+    assert cfg.read_indexer(root) == {"machine": "boxA"}
+    sources = cfg.read_corpus_sources()
+    assert [s["name"] for s in sources] == [
+        "github:gim-home/odsp-web-harness",
+        "github:ThomasMichon/copilot-extensions",
+    ]
+
+
+def test_current_repo_duplicate_source_name_keeps_base_entry(
+    tmp_path, monkeypatch
+) -> None:
+    aw = tmp_path / ".agent-worktrees"
+    _write(aw / "projects.yaml", "schema_version: 2\nprojects: {}\n")
+    _write(aw / "repos.yaml", "schema_version: 1\nrepos: {}\n")
+    root = tmp_path / "harness"
+    _write(root / ".agent-index" / "config.yaml", """\
+        corpus:
+          sources:
+            - name: git:dotfiles
+              repo: dotfiles
+              trust_domain: shareable
+    """)
+    _write(root / ".copilot-extensions" / "agent-index" / "config.yaml", """\
+        corpus:
+          sources:
+            - name: git:dotfiles
+              repo: override
+              trust_domain: overlay
+    """)
+    monkeypatch.setenv("AGENT_WORKTREES_HOME", str(aw))
+    monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(cfg, "repo_root", lambda explicit=None: root)
+
+    sources = cfg.read_corpus_sources()
+    assert sources == [
+        {
+            "name": "git:dotfiles",
+            "repo": "dotfiles",
+            "trust_domain": "shareable",
+            "_repo_path": str(root),
+            "_contributed_by": "effective-config",
+        }
+    ]
+
+
 def test_default_when_no_registry(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AGENT_WORKTREES_HOME", str(tmp_path / "nope"))
     monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))

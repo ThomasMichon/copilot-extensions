@@ -57,7 +57,7 @@ stays on the host and is resolved there.
 | Durable index/task data | `~/.agent-index/data/` | shared across service versions |
 | Durable engine runtime | `~/.agent-index/engine/.venv` | heavy embedding stack |
 | Machine config | `~/.agent-index/config.yaml` or `AGENT_INDEX_CONFIG` | role, device, client endpoints |
-| Repo config | `<repo>/.copilot-extensions/agent-index/config.yaml` (legacy fallback: `<repo>/.agent-index/config.yaml`) | indexer designation and corpus scopes |
+| Repo config | Checked-in defaults: `<repo>/.agent-index/config.yaml`; repo-local overlay: `<repo>/.copilot-extensions/agent-index/config.yaml` | corpus defaults, optional local indexer designation, and additive corpus overlays |
 
 Host service replacement follows
 `../../../docs/patterns/graceful-daemon-cutover.md`, while the durable engine
@@ -70,13 +70,21 @@ routine service update or host replacement.
 
 Activation is repository-scoped and fail-closed:
 
-1. One resolver selects a valid current-repository
-`.copilot-extensions/agent-index/config.yaml`, falling back to legacy
-`.agent-index/config.yaml`. If none exists, and only if the repository requires
-an external state root, it may select the valid config from the bound knowledge
-repo. A present invalid local config, an unsafe path, a conflicting
-singular/plural indexer declaration, a missing required binding, or an
-unavailable resolver leaves the plugin inactive.
+1. One resolver builds the effective current-repository config from layered
+inputs: checked-in `<repo>/.agent-index/config.yaml` defaults, then an
+optional repo-local `<repo>/.copilot-extensions/agent-index/config.yaml`
+overlay, then an optional marketplace overlay under
+`.copilot-extensions/agent-index/marketplaces/<marketplace>/config.yaml`.
+`corpus.sources` is unioned by source `name` (first contributor wins); other
+keys keep ordinary overlay semantics. If the repository requires an external
+state root and the bound knowledge repo carries `<knowledge>/.agent-index/
+config.yaml`, its `corpus.sources` are appended as an additional non-blocking
+overlay while a valid local base remains authoritative. If no local repo config
+exists, the resolver preserves the earlier fail-closed fallback: it may adopt
+the bound knowledge repo's own effective config as the only activator. A
+present invalid local config, an unsafe path, a conflicting singular/plural
+indexer declaration, a missing required binding for external-only activation, or
+an unavailable resolver leaves the plugin inactive.
 2. Session-start hooks only emit retrieval guidance while that resolver reports
 active; they never stamp or provision a runtime, or start a service. Retrieval
 guidance belongs in the exact-session guidance file when a session-file writer
@@ -189,18 +197,23 @@ operator-configured work-item queries and pull-request queries. No query means
 that side indexes nothing, by design.
 
 Corpus config is intentionally outside the runtime. A repository activates
-agent-index by carrying a valid
-`.copilot-extensions/agent-index/config.yaml` (legacy
-`.agent-index/config.yaml` remains readable during the compatibility window);
-mere plugin enablement leaves the capability inactive and does not start or
-probe a service. For a repository that requires an external state root, the
-bound knowledge repo's config is eligible only when no local config is
-present. For multi-repo harness use,
-`.copilot-extensions/agent-index/config.yaml` `corpus.sources` is swept from
-locally adopted projects via the sibling agent-worktrees registry; machine-local
-`~/.agent-index/config.yaml` can add supplemental sources. The session-start
-scope-binding hook reads only the effective config selected by the activation
-resolver.
+agent-index by carrying a valid checked-in `<repo>/.agent-index/config.yaml`
+or, during the compatibility window, a legacy
+`<repo>/.copilot-extensions/agent-index/config.yaml`. Mere plugin enablement
+leaves the capability inactive and does not start or probe a service. When both
+repo files exist, the checked-in `.agent-index/config.yaml` is the shareable
+base and `.copilot-extensions/agent-index/config.yaml` is a personal/machine
+overlay: `corpus.sources` unions by `name` while local indexer designation or
+other scalar config can stay private. For repositories that require an external
+state root, the bound knowledge repo's checked-in `.agent-index/config.yaml`
+can contribute additional `corpus.sources`, and if no local repo config exists
+it remains the fail-closed external-only fallback. For multi-repo harness use,
+the runtime sweeps effective layered repo configs from locally adopted projects
+via the sibling agent-worktrees registry; machine-local `~/.agent-index/
+config.yaml` can add supplemental sources. The session-start scope-binding hook
+reads the same repo-local layering and appends the bound knowledge repo's
+shareable sources when present, so advertised and indexed corpora stay aligned
+in the common adopted-knowledge-repo case.
 
 ## Embedding engine and query behavior
 

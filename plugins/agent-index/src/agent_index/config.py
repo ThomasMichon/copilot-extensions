@@ -27,10 +27,11 @@ REPO_ENV = "AGENT_INDEX_REPO"
 VALID_ROLES = ("host", "client")
 UNCONFIGURED_ROLE = "unconfigured"
 CONFIG_FILENAME = "config.yaml"
-CANONICAL_CONFIG_DIR = Path(".copilot-extensions") / "agent-index"
-REPO_CONFIG_RELPATH = str(CANONICAL_CONFIG_DIR / CONFIG_FILENAME)
-LEGACY_REPO_CONFIG_RELPATH = ".agent-index/config.yaml"
-MARKETPLACE_OVERLAYS_DIR = CANONICAL_CONFIG_DIR / "marketplaces"
+SHAREABLE_CONFIG_DIR = Path(".agent-index")
+OVERLAY_CONFIG_DIR = Path(".copilot-extensions") / "agent-index"
+REPO_CONFIG_RELPATH = str(SHAREABLE_CONFIG_DIR / CONFIG_FILENAME)
+LEGACY_REPO_CONFIG_RELPATH = str(OVERLAY_CONFIG_DIR / CONFIG_FILENAME)
+MARKETPLACE_OVERLAYS_DIR = OVERLAY_CONFIG_DIR / "marketplaces"
 INSTALLATION_CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 
 
@@ -112,6 +113,47 @@ def _deep_merge_dicts(base: dict, override: dict) -> dict:
     return merged
 
 
+def _merge_sources(base: list, overlay: list) -> list:
+    merged = list(base)
+    seen = {
+        item["name"].casefold()
+        for item in merged
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    }
+    for item in overlay:
+        if isinstance(item, dict) and isinstance(item.get("name"), str):
+            folded = item["name"].casefold()
+            if folded in seen:
+                continue
+            seen.add(folded)
+        merged.append(item)
+    return merged
+
+
+def _merge_repo_config_dicts(base: dict, override: dict) -> dict:
+    merged = _deep_merge_dicts(base, override)
+    if "indexers" in override and "indexer" not in override:
+        merged.pop("indexer", None)
+        merged["indexers"] = override["indexers"]
+    if "indexer" in override and "indexers" not in override:
+        merged.pop("indexers", None)
+        merged["indexer"] = override["indexer"]
+    base_corpus = base.get("corpus")
+    override_corpus = override.get("corpus")
+    if (
+        isinstance(base_corpus, dict)
+        and isinstance(override_corpus, dict)
+        and isinstance(base_corpus.get("sources"), list)
+        and isinstance(override_corpus.get("sources"), list)
+    ):
+        corpus = dict(merged.get("corpus") or {})
+        corpus["sources"] = _merge_sources(
+            base_corpus["sources"], override_corpus["sources"]
+        )
+        merged["corpus"] = corpus
+    return merged
+
+
 def _load_installation_context() -> dict | None:
     raw = os.environ.get(INSTALLATION_CONTEXT_ENV, "").strip()
     if not raw:
@@ -138,11 +180,19 @@ def _installation_marketplace_id() -> str | None:
 
 def _repo_base_config_path(root: Path) -> Path | None:
     for candidate in (
-        root / CANONICAL_CONFIG_DIR / CONFIG_FILENAME,
+        root / REPO_CONFIG_RELPATH,
         root / LEGACY_REPO_CONFIG_RELPATH,
     ):
         if candidate.exists():
             return candidate
+    return None
+
+
+def _repo_local_overlay_path(root: Path) -> Path | None:
+    base = root / REPO_CONFIG_RELPATH
+    overlay = root / LEGACY_REPO_CONFIG_RELPATH
+    if base.exists() and overlay.exists():
+        return overlay
     return None
 
 
@@ -159,6 +209,9 @@ def _repo_config_layers(root: Path) -> list[Path]:
     base = _repo_base_config_path(root)
     if base is not None:
         layers.append(base)
+    overlay = _repo_local_overlay_path(root)
+    if overlay is not None:
+        layers.append(overlay)
     overlay = _repo_marketplace_overlay_path(root)
     if overlay is not None:
         layers.append(overlay)
@@ -187,7 +240,7 @@ def _load_effective_config_path(path: Path) -> dict:
     for layer in _repo_config_layers(repo_root):
         loaded = _load_yaml(layer)
         if isinstance(loaded, dict):
-            merged = _deep_merge_dicts(merged, loaded)
+            merged = _merge_repo_config_dicts(merged, loaded)
     return merged
 
 
@@ -206,7 +259,7 @@ def _load_effective_repo_config(root: Path | None) -> dict:
     for layer in layers:
         loaded = _load_yaml(layer)
         if isinstance(loaded, dict):
-            merged = _deep_merge_dicts(merged, loaded)
+            merged = _merge_repo_config_dicts(merged, loaded)
     return merged
 
 
@@ -271,12 +324,12 @@ def repo_root(explicit: str | None = None) -> Path | None:
 
 
 def repo_config_path(root: Path) -> Path:
-    """The canonical repo-committed adoption config path."""
-    return root / CANONICAL_CONFIG_DIR / CONFIG_FILENAME
+    """The repo-local writable overlay path used by setup/adoption flows."""
+    return root / LEGACY_REPO_CONFIG_RELPATH
 
 
 def repo_has_config(root: Path) -> bool:
-    """Whether the repo carries a base config or an explicit marketplace overlay."""
+    """Whether the repo carries a base config or any recognized overlay."""
     return bool(_repo_config_layers(root))
 
 
@@ -343,9 +396,10 @@ def read_corpus_sources() -> list[dict]:
        registry (``~/.agent-worktrees/projects.yaml`` — the set of repos that have
        a project binstub), resolving each to its checkout path via
        ``repos.yaml``.
-    2. Read each project's committed canonical
-       ``<repo>/.copilot-extensions/agent-index/config.yaml`` with legacy
-       ``<repo>/.agent-index/config.yaml`` fallback, then graft its
+    2. Read each project's effective layered repo config: checked-in
+       ``<repo>/.agent-index/config.yaml`` defaults, optional repo-local
+       ``<repo>/.copilot-extensions/agent-index/config.yaml`` overlay, and
+       marketplace overlay when present. Then graft its
        ``corpus.sources`` into one list, deduped by source ``name`` (first
        contributor wins). The originating project's checkout path is attached as
        ``_repo_path`` so a ``git`` source resolves without a second lookup.
@@ -494,10 +548,10 @@ def machine_device() -> str | None:
 def write_indexer_designation(
     root: Path, machine: str, *, ssh: str | None = None, endpoint: str | None = None
 ) -> Path:
-    """Record the shared indexer designation into the canonical repo config."""
+    """Record the repo-local indexer designation into the writable overlay."""
     path = repo_config_path(root)
-    source = _repo_base_config_path(root) or path
-    data = _load_yaml(source)
+    source = path if path.exists() else None
+    data = _load_yaml(source) if source is not None else {}
     ind: dict = {"machine": machine}
     if ssh:
         ind["ssh"] = ssh
@@ -509,10 +563,10 @@ def write_indexer_designation(
 
 
 def write_indexers_designation(root: Path, indexers: list[dict]) -> Path:
-    """Record an ordered multi-indexer designation into the canonical repo config."""
+    """Record ordered multi-indexer designations into the writable overlay."""
     path = repo_config_path(root)
-    source = _repo_base_config_path(root) or path
-    data = _load_yaml(source)
+    source = path if path.exists() else None
+    data = _load_yaml(source) if source is not None else {}
     norm: list[dict] = []
     for it in indexers:
         if not isinstance(it, dict):
