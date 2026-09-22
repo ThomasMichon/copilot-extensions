@@ -168,8 +168,18 @@ def register_steering_commands(sub) -> None:
     ssm.add_argument("--field", action="append", metavar="KEY=VALUE", help="one answer field (repeatable)")
     ssm.add_argument("--sender", help="who is answering (default: resolved identity)")
     ssm.add_argument("--message", help="override the wake nudge text")
-    ssm.add_argument("--expected-status", dest="expected_status", help="reject if the task's current status doesn't match")
-    ssm.add_argument("--no-wake", dest="wake", action="store_false", help="do not send an agent-bridge wake nudge")
+    ssm.add_argument(
+        "--expected-status",
+        dest="expected_status",
+        help="reject with 'task changed; refresh and retry' if the task's "
+        "current status doesn't match this (a stale cached row)",
+    )
+    ssm.add_argument(
+        "--no-wake",
+        dest="wake",
+        action="store_false",
+        help="do not send an agent-bridge wake nudge to the owning worktree",
+    )
     ssm.set_defaults(func=_core()._cmd_steer, wake=True)
 
     stk = ssub.add_parser("take", help="consume the next pending steer for a task you own (the wake-side read); identity auto-resolved from CWD")
