@@ -25,6 +25,7 @@ import {
   closeSync,
   constants as fsConstants,
   fstatSync,
+  mkdirSync,
   openSync,
   opendirSync,
   renameSync,
@@ -37,6 +38,26 @@ import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 export const DEFAULT_CRASH_LOG = join(tmpdir(), "context-handoff-extension-crash.log");
+
+// Rotated-away sidecars live in their own dedicated subdirectory of
+// dirname(logPath) (normally os.tmpdir()), never directly alongside
+// logPath in that shared directory. os.tmpdir() commonly holds entries
+// from every application on the host, in an enumeration order that is not
+// under this module's control and, on many filesystems, stays effectively
+// fixed for a static set of surrounding files -- so a purge call bounded
+// to MAX_DIR_ENTRIES_SCANNED_PER_CALL entries scanned from the start of
+// that shared directory could keep landing on the same leading, unrelated
+// entries every single time and never reach this log's own sidecars at
+// all, no matter how many separate rotations ever run (empirically a real
+// risk, not merely theoretical, on a sufficiently large/busy shared temp
+// directory). A directory used for nothing but this log's own sidecars has
+// no such adversarial population ahead of them, so the same bounded scan
+// is actually sufficient to make progress against it over time.
+const SIDECAR_DIR_NAME = "context-handoff-crash-sidecars";
+
+export function sidecarDirFor(logPath) {
+  return join(dirname(logPath), SIDECAR_DIR_NAME);
+}
 
 // A rotated-away `.stale-*` sidecar's rotation timestamp is embedded
 // directly in its own filename (`.stale-<pid>-<timestamp>-<uuid>`, baked
@@ -68,20 +89,21 @@ const STALE_SIDECAR_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 // which must log and re-raise the signal within the CLI's own documented
 // five-second SIGKILL grace period (see the signal rationale below) -- an
 // unbounded readdir() sweep over a directory that accumulated many entries
-// (`os.tmpdir()` is commonly large and shared across every application on
-// the host, not just this log's own sidecars) could otherwise delay that
-// re-raise past the deadline and lose the very lifecycle diagnostic this
-// path exists to preserve. This caps the number of directory *entries*
-// actually read via `readSync()` -- not merely the number of matching
-// sidecars found -- so a directory containing few or no matches still
-// cannot be scanned without bound; reaching either cap just stops early
-// for this call. The whole sidecar backlog still clears over enough
-// separate rotation events; it just never risks doing all of it -- or
-// scanning an unrelated, much larger directory in full -- in one call.
+// could otherwise delay that re-raise past the deadline and lose the very
+// lifecycle diagnostic this path exists to preserve. This caps the number
+// of directory *entries* actually read via `readSync()` -- not merely the
+// number of matching sidecars found -- so a directory containing few or no
+// matches still cannot be scanned without bound; reaching either cap just
+// stops early for this call. Combined with the dedicated sidecar directory
+// above (which this log's own rotations are the *only* thing that ever
+// populates), this bound genuinely guarantees eventual progress against
+// the whole backlog over enough separate rotation events, rather than
+// merely capping the cost of any one call in isolation.
 const MAX_DIR_ENTRIES_SCANNED_PER_CALL = 200;
 
 /**
- * Best-effort removal of this log's own `.stale-*` sidecars older than
+ * Best-effort removal of this log's own `.stale-*` sidecars, in their
+ * dedicated directory (see {@link sidecarDirFor}), older than
  * {@link STALE_SIDECAR_MAX_AGE_MS} (per the rotation timestamp embedded in
  * each sidecar's own filename -- see {@link STALE_SIDECAR_NAME_PATTERN} --
  * never the filesystem mtime, which is racy across processes). Uses
@@ -91,21 +113,23 @@ const MAX_DIR_ENTRIES_SCANNED_PER_CALL = 200;
  * {@link MAX_DIR_ENTRIES_SCANNED_PER_CALL} entries are read regardless of
  * how many (if any) actually match this log's own sidecar naming pattern
  * (see that constant's own doc comment for why counting only matches is not
- * enough). `justCreatedSidecar` -- the sidecar path *this specific
- * rotation* just produced -- is always skipped outright as an extra guard
- * against a same-process, same-call self-purge, though the name-based
- * timestamp alone already makes that essentially impossible (a sidecar
- * this fresh cannot itself be older than the purge threshold). Every other
- * failure (missing directory, permissions, a sidecar vanishing between
- * listing and unlinking, an unparseable name that doesn't match the
- * expected pattern, ...) is swallowed -- this is a bounded courtesy
- * cleanup, never a correctness requirement, and it must never itself
- * become a crash-handler failure mode.
+ * enough, and the dedicated-directory comment above for why this bound
+ * only guarantees real progress when the directory is not shared with
+ * unrelated, adversarially-many entries). `justCreatedSidecar` -- the
+ * sidecar path *this specific rotation* just produced -- is always skipped
+ * outright as an extra guard against a same-process, same-call self-purge,
+ * though the name-based timestamp alone already makes that essentially
+ * impossible (a sidecar this fresh cannot itself be older than the purge
+ * threshold). Every other failure (missing directory, permissions, a
+ * sidecar vanishing between listing and unlinking, an unparseable name
+ * that doesn't match the expected pattern, ...) is swallowed -- this is a
+ * bounded courtesy cleanup, never a correctness requirement, and it must
+ * never itself become a crash-handler failure mode.
  */
 function purgeOldStaleSidecars(logPath, justCreatedSidecar) {
   let dirHandle;
   try {
-    const dir = dirname(logPath);
+    const dir = sidecarDirFor(logPath);
     const prefix = `${basename(logPath)}.stale-`;
     const now = Date.now();
     let scanned = 0;
@@ -334,6 +358,24 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
               // call's own doc comment.
               let justCreatedSidecar;
               if (stillTheSameOversizedFile) {
+                // Sidecars live in their own dedicated directory (see
+                // sidecarDirFor()'s own doc comment) -- not directly
+                // alongside logPath -- specifically so a bounded purge scan
+                // is guaranteed to make real progress against them, rather
+                // than potentially never reaching them behind however many
+                // unrelated entries happen to precede them in os.tmpdir()'s
+                // own enumeration order. mkdirSync() with recursive:true is
+                // a cheap no-op once the directory already exists (which it
+                // will, after this log's very first rotation); a failure
+                // here (e.g. permissions) is left for the rename below to
+                // surface as its own, already-handled failure instead of
+                // being special-cased separately.
+                try {
+                  mkdirSync(sidecarDirFor(logPath), { recursive: true });
+                } catch {
+                  // See above -- the rename that follows will fail on its
+                  // own if the directory genuinely could not be created.
+                }
                 // pid+timestamp+uuid: the timestamp is embedded here so
                 // purgeOldStaleSidecars() can read this sidecar's true
                 // rotation age directly from its own name -- atomically
@@ -346,13 +388,17 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
                 // guards against a same-pid, same-millisecond name
                 // collision, which a bare pid+timestamp could theoretically
                 // hit.
-                const staleSidecar = `${logPath}.stale-${process.pid}-${Date.now()}-${randomUUID()}`;
+                const staleSidecar = join(
+                  sidecarDirFor(logPath),
+                  `${basename(logPath)}.stale-${process.pid}-${Date.now()}-${randomUUID()}`,
+                );
                 try {
                   renameSync(logPath, staleSidecar);
                   justCreatedSidecar = staleSidecar;
                 } catch {
                   // Lost a narrower race against a concurrent rotation
-                  // between the stat check just above and this rename --
+                  // between the stat check just above and this rename (or
+                  // the sidecar directory could not be created/reached) --
                   // fine either way, the open below still creates or reuses
                   // whatever now exists at `logPath`.
                 }

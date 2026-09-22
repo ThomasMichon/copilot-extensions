@@ -407,37 +407,51 @@ This file is:
   a routine stop from a crash" purpose of this file), each process checks
   the file's size once, at its own first write: if it has grown to 1 MiB or
   more, it is **rotated** -- renamed aside to a per-process, uniquely-named
-  `.stale-<pid>-<timestamp>-<uuid>` sidecar, with a fresh file opened at the
-  original path -- rather than truncated in place. This matters because the
-  file is shared by every extension instance on the machine (see the next
-  bullet): an in-place reset is not serialized across processes, so a
-  second process's own reset could otherwise erase the crash entry a first
-  process just finished appending moments earlier. The rename is guarded by
-  an identity check first (the file currently at this path must still have
-  the same device+inode this process actually opened and measured as
-  oversized -- empirically confirmed reliable on both POSIX and Windows) --
-  a *blind* rename of whatever currently sits at the path, with no such
-  check, could otherwise rename a different process's already-rotated,
-  already-live fresh file into this process's own sidecar, silently
-  detaching that process's diagnostics from the well-known path.
+  `.stale-<pid>-<timestamp>-<uuid>` sidecar **in its own dedicated
+  `context-handoff-crash-sidecars/` subdirectory** (created on demand next
+  to the log file itself), with a fresh file opened at the original path --
+  rather than truncated in place. This matters because the file is shared
+  by every extension instance on the machine (see the next bullet): an
+  in-place reset is not serialized across processes, so a second process's
+  own reset could otherwise erase the crash entry a first process just
+  finished appending moments earlier. The rename is guarded by an identity
+  check first (the file currently at this path must still have the same
+  device+inode this process actually opened and measured as oversized --
+  empirically confirmed reliable on both POSIX and Windows) -- a *blind*
+  rename of whatever currently sits at the path, with no such check, could
+  otherwise rename a different process's already-rotated, already-live
+  fresh file into this process's own sidecar, silently detaching that
+  process's diagnostics from the well-known path.
   Immediately after a rotation, the same process also opportunistically
-  purges any of this log's own sidecars whose age -- **read from the
-  rotation timestamp embedded directly in the sidecar's own filename**
-  (`.stale-<pid>-<timestamp>-<uuid>`), never the filesystem's mtime -- is
-  older than 24 hours. mtime was tried first, but is observable (and
-  mutable) by every other process on the host from the instant a rename
-  completes: a concurrent process's own purge could run against a
-  brand-new sidecar before this process got a chance to separately
-  re-stamp its mtime, see the oversized source file's old, pre-rotation
-  mtime, and delete it immediately -- a genuine cross-process race. Baking
-  the timestamp into the name atomically, in the very same `renameSync()`
-  call that creates the sidecar, removes that window entirely: there is no
-  longer a separate step (and therefore no race) between "this sidecar
-  exists" and "its age is correctly and immutably knowable" by any process
-  that reads its name. This age gate bounds the *cumulative* disk usage
-  many rotations over a long-lived host would otherwise leave unbounded,
-  without reintroducing the destructive race a blind/unconditional delete
-  would risk. This bounds growth across
+  purges old sidecars from that same dedicated subdirectory (never the
+  shared parent directory the log file itself lives in -- see below for
+  why), by age -- **read from the rotation timestamp embedded directly in
+  the sidecar's own filename** (`.stale-<pid>-<timestamp>-<uuid>`), never
+  the filesystem's mtime -- older than 24 hours. mtime was tried first, but
+  is observable (and mutable) by every other process on the host from the
+  instant a rename completes: a concurrent process's own purge could run
+  against a brand-new sidecar before this process got a chance to
+  separately re-stamp its mtime, see the oversized source file's old,
+  pre-rotation mtime, and delete it immediately -- a genuine cross-process
+  race. Baking the timestamp into the name atomically, in the very same
+  `renameSync()` call that creates the sidecar, removes that window
+  entirely: there is no longer a separate step (and therefore no race)
+  between "this sidecar exists" and "its age is correctly and immutably
+  knowable" by any process that reads its name. The dedicated subdirectory
+  matters for a second, independent reason: this purge is bounded to a
+  fixed number of directory entries read per call (see the module's own
+  comments for why), since it can run synchronously inside a
+  signal-handling path with a hard termination deadline -- but a bounded
+  scan of the log's own *shared parent* directory (commonly `os.tmpdir()`,
+  populated by every other application on the host too) could keep landing
+  on the same leading, unrelated entries every single call and never reach
+  this log's own sidecars at all, no matter how many rotations ever ran. A
+  directory that holds nothing but this log's own sidecars has no such
+  adversarial population ahead of them, so the same bounded scan is
+  actually guaranteed to make progress. This age gate bounds the
+  *cumulative* disk usage many rotations over a long-lived host would
+  otherwise leave unbounded, without reintroducing the destructive race a
+  blind/unconditional delete would risk. This bounds growth across
   the many separate short-lived processes that are the actual growth vector
   (though not a single pathological process logging in a tight loop -- not
   a real shape here, since at most a handful of entries are ever logged per

@@ -36,6 +36,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -49,7 +50,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createEmergencyLog } from "../extensions/context-handoff/crash-diagnostics.mjs";
+import { createEmergencyLog, sidecarDirFor } from "../extensions/context-handoff/crash-diagnostics.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const harness = join(here, "fixtures", "crash-diagnostics-harness.mjs");
@@ -281,8 +282,8 @@ test(
       assert.match(content, /signal: SIGTERM ready=true/);
       // The rotated-away content must survive under a sidecar, not be
       // destroyed -- see the "never delete" rationale in crash-diagnostics.mjs.
-      const dir = dirname(logPath);
-      const base = logPath.slice(dir.length + 1);
+      const dir = sidecarDirFor(logPath);
+      const base = logPath.slice(dirname(logPath).length + 1);
       const sidecars = readdirSync(dir).filter((name) => name.startsWith(`${base}.stale-`));
       assert.equal(sidecars.length, 1, `expected exactly one sidecar, found: ${JSON.stringify(sidecars)}`);
       assert.equal(readFileSync(join(dir, sidecars[0]), "utf-8"), oldContent);
@@ -315,26 +316,26 @@ test(
       // a rotation long ago. Its actual mtime (whatever writeFileSync()
       // gives it, i.e. right now) is deliberately left alone/untouched, to
       // prove the purge decision is made from the name, not the mtime.
+      // Sidecars live in their own dedicated subdirectory (see
+      // sidecarDirFor()); mkdirSync() it first since no real rotation has
+      // happened yet in this test to create it.
+      const dir = sidecarDirFor(logPath);
+      mkdirSync(dir, { recursive: true });
+      const base = logPath.slice(dirname(logPath).length + 1);
       const twoDaysAgoMs = Date.now() - 2 * 24 * 60 * 60 * 1000;
-      const oldSidecar = `${logPath}.stale-99999-${twoDaysAgoMs}-00000000-0000-0000-0000-000000000000`;
-      writeFileSync(oldSidecar, "ancient rotated content\n");
+      const oldSidecarName = `${base}.stale-99999-${twoDaysAgoMs}-00000000-0000-0000-0000-000000000000`;
+      writeFileSync(join(dir, oldSidecarName), "ancient rotated content\n");
 
       const emergencyLog = createEmergencyLog(logPath);
       emergencyLog("signal", "SIGTERM ready=true");
 
-      const dir = dirname(logPath);
-      const base = logPath.slice(dir.length + 1);
       const sidecars = readdirSync(dir).filter((name) => name.startsWith(`${base}.stale-`));
       assert.equal(
         sidecars.length,
         1,
         `expected the ancient sidecar purged and exactly one fresh one left, found: ${JSON.stringify(sidecars)}`,
       );
-      assert.notEqual(
-        sidecars[0],
-        `${base}.stale-99999-${twoDaysAgoMs}-00000000-0000-0000-0000-000000000000`,
-        "the ancient sidecar should have been purged",
-      );
+      assert.notEqual(sidecars[0], oldSidecarName, "the ancient sidecar should have been purged");
     });
   },
 );
@@ -355,11 +356,14 @@ test(
   { skip: !RUN_STRESS_CASES },
   async () => {
     await withCrashLog(async (logPath) => {
+      const dir = sidecarDirFor(logPath);
+      mkdirSync(dir, { recursive: true });
+      const base = logPath.slice(dirname(logPath).length + 1);
       const twoDaysAgoMs = Date.now() - 2 * 24 * 60 * 60 * 1000;
-      const oldByNameSidecar = `${logPath}.stale-12345-${twoDaysAgoMs}-11111111-1111-1111-1111-111111111111`;
+      const oldByNameSidecarName = `${base}.stale-12345-${twoDaysAgoMs}-11111111-1111-1111-1111-111111111111`;
       // writeFileSync() gives this file a real, current mtime -- freshly
       // written, same as any genuine rotation's sidecar would have.
-      writeFileSync(oldByNameSidecar, "old-by-name, fresh-by-mtime\n");
+      writeFileSync(join(dir, oldByNameSidecarName), "old-by-name, fresh-by-mtime\n");
 
       const oneMiB = 1_048_576;
       writeFileSync(logPath, "x".repeat(oneMiB + 10));
@@ -367,8 +371,6 @@ test(
       const emergencyLog = createEmergencyLog(logPath);
       emergencyLog("signal", "SIGTERM ready=true");
 
-      const dir = dirname(logPath);
-      const base = logPath.slice(dir.length + 1);
       const sidecars = readdirSync(dir).filter((name) => name.startsWith(`${base}.stale-`));
       assert.equal(
         sidecars.length,
