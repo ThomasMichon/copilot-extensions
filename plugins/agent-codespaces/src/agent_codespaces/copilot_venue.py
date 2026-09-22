@@ -15,6 +15,13 @@ import sys
 import threading
 from collections.abc import Callable
 
+# Mirrors __main__._BUSY_EXIT / __main__._COORDINATION_EXIT exactly (kept as a
+# separate copy, not an import, to preserve this module's existing no-
+# circular-import-with-__main__ constraint -- see cmd_copilot's own docstring
+# on interactive_ssh being injected for the same reason).
+_BUSY_EXIT = 75
+_COORDINATION_EXIT = 78
+
 
 def add_copilot_subparser(sub) -> None:
     """Register the ``copilot`` subcommand on the shared subparsers group."""
@@ -59,6 +66,20 @@ def add_copilot_subparser(sub) -> None:
     copilot_parser.add_argument(
         "--no-relay", action="store_true",
         help="Skip the credential-relay reverse forward",
+    )
+    copilot_parser.add_argument(
+        "--effort", default=None,
+        help="Explicit claim-owner worktree id (for a dispatched invocation "
+             "whose cwd is not the caller's own worktree). Forwarded to the "
+             "same exclusive-claim resolution `agent-codespaces ssh` uses.",
+    )
+    copilot_parser.add_argument(
+        "--force-claim", dest="force_claim", action="store_true",
+        help="Take over this CodeSpace's exclusive claim even if a different, "
+             "still-live worktree holds it -- evicts that owner's claim; its "
+             "in-flight work may be disrupted. Without this, a live claim "
+             "held by another worktree/machine refuses the connect (matches "
+             "`agent-codespaces ssh`'s own claim enforcement).",
     )
 
 
@@ -230,7 +251,49 @@ def cmd_copilot(
     a single-shot prep step so an operator/caller never has to run
     ``agent-codespaces doctor --fix`` by hand before their first CLI-mode
     session on a given CodeSpace.
+
+    Also enforces the SAME exclusive, worktree-keyed CodeSpace claim
+    ``agent-codespaces ssh`` already does (via the shared
+    ``lease.claim_for_connect`` choke point) before ever attempting to
+    connect. Previously this verb never claimed at all: a live claim held by
+    one worktree/machine was silently bypassable simply by using `copilot`
+    instead of `ssh` to drive the same CodeSpace -- confirmed live
+    (agent-bridge-cli-mode-sessions Phase 4 follow-up): a CLI-mode session
+    was driven successfully on a CodeSpace a different, still-live worktree
+    on another machine had legitimately claimed, disrupting its in-flight
+    work.
     """
+    from .lease import ClaimConflict, CoordinationRejected, claim_for_connect
+    from .worktrees import ContextRefused
+
+    try:
+        claim_for_connect(
+            args.name,
+            force=getattr(args, "force_claim", False),
+            effort=getattr(args, "effort", None),
+        )
+    except ClaimConflict as exc:
+        print(
+            f"[BUSY] {exc}\n"
+            f"       A CodeSpace is fronted by a single bridge, so a second "
+            f"worktree cannot drive it concurrently. Options:\n"
+            f"       - let the owner finish, or dispatch to a different "
+            f"CodeSpace; or\n"
+            f"       - take over with --force-claim (evicts the current "
+            f"owner's claim -- its in-flight work may be disrupted).",
+            file=sys.stderr,
+        )
+        return _BUSY_EXIT
+    except (CoordinationRejected, ContextRefused) as exc:
+        print(
+            f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
+            file=sys.stderr,
+        )
+        return _COORDINATION_EXIT
+    except RuntimeError as exc:
+        # Never let a claim-bookkeeping error block a connect.
+        print(f"[WARN] CodeSpace claim skipped: {exc}", file=sys.stderr)
+
     _ensure_agent_bridge_plugin(args.name)
 
     from venue_copilot import VenueCopilotError, resolve_daemon_port, run_venue_copilot

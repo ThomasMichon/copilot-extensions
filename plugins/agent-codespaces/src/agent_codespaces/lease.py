@@ -628,6 +628,78 @@ def claim(
         return lease
 
 
+def claim_for_connect(
+    codespace: str,
+    *,
+    force: bool = False,
+    effort: str | None = None,
+    session_id: str | None = None,
+) -> str | None:
+    """Resolve the calling worktree and acquire the exclusive, worktree-keyed
+    CodeSpace claim (#897) before ANY caller connects to/drives ``codespace``.
+
+    This is the single choke point every connect path is expected to go
+    through -- originally only ``agent-codespaces ssh`` called :func:`claim`
+    directly; the CLI-mode ``copilot`` verb's own interactive connect
+    (``_interactive_ssh``, a bare ``gh codespace ssh`` wrapper) never did,
+    so a live claim held by one worktree was silently bypassed by a second
+    worktree/machine driving the *same* CodeSpace through ``copilot`` instead
+    of ``ssh`` -- confirmed live (agent-bridge-cli-mode-sessions Phase 4
+    follow-up): a CLI-mode session was driven successfully on a CodeSpace a
+    different, still-live worktree on another machine had legitimately
+    claimed, disrupting its in-flight work. Every connect path must call
+    this exact function so the claim is enforced identically regardless of
+    which verb happens to be used.
+
+    Journals the CodeSpace as an outbound obligation on the resolved holder
+    ref (resource-obligation-settlement Ph3b-wiring/2) once a claim is
+    actually taken, exactly as the original ``ssh`` call site already did.
+
+    Returns the resolved ``fence_holder_ref`` (``None`` when not running
+    inside a worktree) for the caller's own downstream use (e.g. settling the
+    obligation on a clean disconnect, if the caller implements that).
+    Degrade-safe: when no worktree resolves, claiming is skipped entirely
+    (connect proceeds exactly as before this function existed) -- a bare
+    coordination preflight check still runs when a fence ref *is* available.
+
+    Raises :class:`ClaimConflict`, :class:`CoordinationRejected`, or
+    ``agent_codespaces.worktrees.ContextRefused`` exactly as :func:`claim`/
+    ``coordination.preflight`` do -- the caller is expected to catch these
+    and print its own refusal message/exit code (kept caller-side so each
+    verb's exact wording and process exit code stay under its own control).
+    A claim-bookkeeping ``RuntimeError`` also propagates uncaught here (the
+    original ``ssh`` call site treats it as non-fatal and merely warns --
+    callers wanting that same degrade-safe behavior should catch it
+    themselves, exactly as that call site does).
+    """
+    from . import coordination
+
+    fence_holder_ref = coordination.owner_ref(session_id=session_id)
+    if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
+        return fence_holder_ref
+    claim_owner = resolve_owner_worktree(explicit=effort, session_id=session_id)
+    if not claim_owner:
+        if fence_holder_ref:
+            readiness = coordination.preflight(fence_holder_ref)
+            if readiness.rejected:
+                raise CoordinationRejected(
+                    f"{readiness.code}: {readiness.detail}"
+                )
+        return fence_holder_ref
+    claim(
+        codespace, claim_owner, force=force,
+        active=active_worktree_ids(), holder_ref=fence_holder_ref,
+    )
+    if fence_holder_ref and coordination.journal_obligation(
+        codespace, fence_holder_ref,
+    ):
+        log.info(
+            "Journaled CodeSpace %s as an obligation on %s",
+            codespace, fence_holder_ref,
+        )
+    return fence_holder_ref
+
+
 def lease_token_for(codespace: str, ttl: float = DEFAULT_TTL) -> str | None:
     """Return the cross-machine (L2) fencing token this box holds for ``codespace``.
 
