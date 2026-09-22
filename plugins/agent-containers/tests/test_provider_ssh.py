@@ -14,8 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_containers import __main__ as containers_cli
 from agent_containers import lease as lease_mod
+from agent_containers import lifecycle as lifecycle_mod
 from agent_containers import provider_launcher, provider_ssh
 from agent_containers.config import ContainersConfig, FleetConfig
 from agent_containers.resolver import LiveExecTarget
@@ -715,9 +715,7 @@ def test_release_reports_busy_provider_admission(monkeypatch, capsys):
         lambda _target: pytest.fail("blocked release must not clean registrations"),
     )
 
-    result = containers_cli._cmd_release(
-        SimpleNamespace(target="sandbox-1")
-    )
+    result = lifecycle_mod.cmd_release("sandbox-1")
 
     assert result == 75
     assert "Release blocked: active provider session" in capsys.readouterr().err
