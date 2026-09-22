@@ -28,6 +28,9 @@ from .install_paths import effective_config_dir, scheduled_task_name, systemd_un
 no_window_kwargs = _no_window_kwargs
 windowless_daemon_kwargs = _windowless_daemon_kwargs
 
+if __name__ == "__main__":
+    sys.modules.setdefault("agent_bridge.__main__", sys.modules[__name__])
+
 
 def _json_out(data: Any) -> None:
     print(json.dumps(data, indent=2, default=str))
