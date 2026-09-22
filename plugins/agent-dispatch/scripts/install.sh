@@ -772,8 +772,14 @@ _ensure_runtime() {
         # "changed" (the exact failure mode that crashed agent-bridge's
         # deployed daemon in a restart loop -- aperture-labs#7281/#7279).
         # Scrub on every attempt (success or not) so the payload directory
-        # stays the pristine clone it's supposed to be.
-        rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info 2>/dev/null || true
+        # stays the pristine clone it's supposed to be. The src-layout
+        # egg-info (src/agent_dispatch.egg-info) sits ONE LEVEL DEEPER than
+        # the root-level glob below reaches -- a bare "$PLUGIN_DIR"/*.egg-info
+        # never matches it, so it survived every cleanup pass and shadowed a
+        # real upstream fix (registrar.py's `no_pair` field) for a live
+        # deployed service (aperture-labs#7440). Clean both locations.
+        rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info \
+               "$PLUGIN_DIR"/src/*.egg-info 2>/dev/null || true
         return "$rc"
     }
     if _pip_install "${PLUGIN_DIR}[mcp]" >/dev/null 2>&1; then
