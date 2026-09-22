@@ -378,7 +378,6 @@ test(
           reject(err);
         });
       });
-      child.kill("SIGTERM");
       const [code, signal] = await new Promise((resolve, reject) => {
         // Bounded: if the signal re-raise regresses (e.g. a stray listener
         // survives and swallows the re-sent signal instead of letting the
@@ -397,6 +396,12 @@ test(
           clearTimeout(timer);
           resolve([exitCode, exitSignal]);
         });
+        // Sent only after the listeners above are already attached: sending
+        // the signal first and registering the 'exit' listener afterward
+        // would risk missing an 'exit' that fires in between, intermittently
+        // waiting out the full 5s timeout above and failing even when the
+        // signal re-raise itself is completely correct.
+        child.kill("SIGTERM");
       });
       // installEmergencyDiagnostics() deliberately does NOT call
       // process.exit() for a signal: it logs, removes its own listener for
