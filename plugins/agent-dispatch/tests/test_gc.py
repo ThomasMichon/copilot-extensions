@@ -372,31 +372,29 @@ def test_reconcile_probes_held_tasks_concurrently_not_serially(q):
     and cold reservations pile up unreaped indefinitely (the root cause
     behind a real production `liveness_gc: cycle exceeded 60.0s` incident).
 
-    Probing must therefore run concurrently: wall-clock time for N held tasks
-    each with a slow resolver should track the slowest single probe, not the
-    sum of all of them.
+    Probing must therefore run concurrently. Proved deterministically (not via
+    a wall-clock timing bound, which can be flaky under a slow/contended CI
+    runner) with a `threading.Barrier`: every probe call waits on the same
+    barrier, which only releases once *all* of them have arrived. A serial
+    implementation calls one probe at a time, so the barrier never fills and
+    reliably breaks on timeout; a concurrent implementation dispatches them
+    together, so the barrier fills and releases quickly.
     """
-    import time
+    import threading
 
     n = 6
-    delay = 0.2
+    barrier = threading.Barrier(n, timeout=2.0)
     for i in range(n):
         t = q.create(f"t{i}", now=1000.0 + i)
         _claim_and_start(q, t.id, wt=f"wt{i}", session=f"S{i}", now=1001.0 + i)
 
-    def slow_resolver(wt, mc, sid):
-        time.sleep(delay)
+    def barrier_resolver(wt, mc, sid):
+        barrier.wait()  # raises BrokenBarrierError if not all n arrive in time
         return "live"
 
-    started = time.monotonic()
-    counts = q.reconcile_liveness(slow_resolver, now=9999.0)
-    elapsed = time.monotonic() - started
+    counts = q.reconcile_liveness(barrier_resolver, now=9999.0)
 
     assert counts["checked"] == n and counts["live"] == n
-    # Serial would take >= n * delay (1.2s here); concurrent should stay well
-    # under half that -- generous enough to avoid CI flakiness while still
-    # failing hard against a serial implementation.
-    assert elapsed < (n * delay) / 2
 
 
 def test_reconcile_uses_a_shared_process_wide_probe_executor(q):
