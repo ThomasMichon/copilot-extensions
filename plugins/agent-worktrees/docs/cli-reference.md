@@ -136,6 +136,9 @@ continue to work unchanged.
 | `session-lineage` | Read one exact session projection and validate every retained worktree relation against authoritative records. Reports restored evidence, missing records, unsupported or invalid projections, schema/history completeness, relation overflow, full-key v1 or opaque-digest v2 tombstones, and tombstone overflow without enumerating the live session-state root |
 | `head-session` | Project-agnostic replay of a worktree's monotonic head-transition ledger, including pending handoffs (JSON; fail-open when untracked) |
 | `worktree-lineage` | Project-agnostic, bounded graph of one authoritative worktree's sessions, transitions, handoffs, controllers, normalized reciprocal presentation, projection health, and explicit terminal/fork/cycle/missing-session findings (JSON) |
+| `fleet` | Aggregate `list --json` across every reachable machine × environment -- one SSH/local process per target, never per-worktree. `--json` returns host rows (`machine` / `env` / `reachable` / `worktrees`) and annotates delegate edges with `caller_state`, `delegate_finalizable`, and reverse `delegates` lists. |
+| `reconcile` | Force-refresh PR state for every tracked worktree (including `finalized`) out of band, so `list` stays a pure file read |
+| `delegates` | Focused cross-machine delegate/caller query built on the fleet snapshot. Dry-run by default: reports every `caller_worktree` delegate plus whether its host is `resolved`, `gone`, `unreachable`, or `ambiguous`, and whether the delegate became finalizable because the host is `finalized` / `complete(d)` / gone. `--execute` finalizes every currently eligible delegate through the owning host. |
 | `conclude-session` / `link-succession` | Project-agnostic write primitives for explicit session conclusion and exact-token handoff succession links (JSON) |
 | `conclude-disposable` | Project-agnostic, exact-id terminal conclusion for an explicitly disposable CLI worker. Requires `--policy disposable-cli` and `--owner`; preserves live sessions, all dirty work (including generated local overlays), local commits, follow-ups, claims, pairs, and open PRs. A clean branch with zero commits ahead of upstream may remain behind without being rewritten, then the command marks the record managed/final. `--remove` immediately runs the conservative managed-GC verdict for only that exact id, with fresh lifecycle/liveness checks; an already-removed id is idempotent success. |
 | `session-transcript` | Emit a Copilot session's renderable transcript events by session id (JSON) |
@@ -258,6 +261,17 @@ compact summary: `bound-here`, `controlled-elsewhere`, `handed-off`, `terminal`,
 unambiguous. Unknown, restored-stale, unsupported, incomplete, or conflicting
 evidence reports `ambiguous` with no action. These fields never alter the
 record's head, liveness, occupancy, or resume target.
+
+When a row carries `caller_worktree`, `list --json` also adds a normalized
+`caller_state` object so consumers do not re-derive the host relationship: the
+host worktree id plus the best-known `state` (`resolved`, `gone`,
+`unreachable`, or `ambiguous`) and, when resolved, the host's machine/platform,
+path, and tracking status. Every such delegate row also carries
+`delegate_finalizable` + `delegate_finalizable_reason`, encoding the manual
+inheritance rule now made programmatic: a delegate becomes finalizable once its
+host is `finalized`, `complete(d)`, or gone. The reverse edge is surfaced on
+host rows as `delegates` (the delegate worktree ids plus their own
+finalizable/not-finalizable verdicts).
 
 When a worktree record carries profile-assignment history, the ordinary
 `list --json` row includes `current_profile_assignment`: the bound assignment
