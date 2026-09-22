@@ -14,8 +14,18 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from .queue_records import SpawnState, Status
+
+#: Upper bound on concurrent per-task liveness probes in one
+#: :meth:`LivenessMixin.reconcile_liveness` pass. Each probe is a blocking
+#: subprocess/SSH call (``tracking.liveness_verdict`` et al, 3-6s timeout);
+#: running them concurrently bounds a pass's wall-clock cost by the slowest
+#: single probe rather than the sum of every held task's timeout budget. The
+#: cap keeps a large held backlog from spawning dozens of simultaneous
+#: bridge/SSH subprocesses at once.
+_LIVENESS_PROBE_CONCURRENCY = 8
 
 
 class LivenessMixin:
@@ -155,37 +165,58 @@ class LivenessMixin:
                 " FROM tasks WHERE status IN (?, ?)",
                 (Status.CLAIMED, Status.STARTED),
             ).fetchall()
-            # (task_id, verdict, owner_session_id, generation, attempts, status,
-            #  cli_embodied) per held task -- probed inside the same connection
-            # (read-only, no write lock) so the headless-reservation lookup sees
-            # a consistent snapshot alongside the held-task read above.
-            probed: list[tuple[str, str, str | None, int, int, str, bool]] = []
+            # Phase 1 (fast, DB-only): classify each held task by which probe
+            # applies, using the shared connection -- read-only, no write lock,
+            # so this snapshot stays consistent with the held-task read above.
+            specs = []
             for row in held:
-                counts["checked"] += 1
                 machine, _sep, worktree = (row["owner"] or "").partition("/")
                 handle = self._active_headless_handle(conn, row["id"])
                 local_sid = _parse_local_body_handle(handle)
                 fleet = _parse_fleet_body_handle(handle)
-                if local_sid is not None:
-                    verdict = headless_local_verdict(local_sid)
-                    cli_embodied = False
-                elif fleet is not None:
-                    host, bridge_sid = fleet
-                    verdict = headless_fleet_verdict(host, bridge_sid)
-                    cli_embodied = False
-                elif not worktree:
-                    verdict = self.LIVENESS_UNKNOWN
-                    cli_embodied = True
-                else:
-                    verdict = resolver(worktree, machine or None, row["owner_session_id"])
-                    cli_embodied = True
-                counts[verdict] = counts.get(verdict, 0) + 1
-                probed.append(
-                    (
-                        row["id"], verdict, row["owner_session_id"], row["generation"],
-                        row["attempts"], row["status"], cli_embodied,
+                specs.append((row, local_sid, fleet, worktree, machine))
+
+        def _probe(
+            spec: tuple[sqlite3.Row, str | None, tuple[str, str] | None, str, str],
+        ) -> tuple[sqlite3.Row, str, bool]:
+            row, local_sid, fleet, worktree, machine = spec
+            if local_sid is not None:
+                return row, headless_local_verdict(local_sid), False
+            if fleet is not None:
+                host, bridge_sid = fleet
+                return row, headless_fleet_verdict(host, bridge_sid), False
+            if not worktree:
+                return row, self.LIVENESS_UNKNOWN, True
+            return (
+                row,
+                resolver(worktree, machine or None, row["owner_session_id"]),
+                True,
+            )
+
+        # Phase 2: the actual liveness probes are blocking subprocess/SSH calls,
+        # each with its own multi-second timeout (`tracking.liveness_verdict`:
+        # 3-6s). Running them concurrently (not one after another) bounds this
+        # pass's wall-clock cost by the slowest single probe rather than the sum
+        # of every held task's timeout -- previously, a large-enough held
+        # backlog could serially exceed the loop's cycle_timeout, and because
+        # verdicts were only written after *every* probe finished, a mid-loop
+        # timeout meant none of that cycle's transitions landed at all. That
+        # was the exact mechanism letting `held_unknown` tasks and cold
+        # reservations pile up unreaped indefinitely.
+        probed: list[tuple[str, str, str | None, int, int, str, bool]] = []
+        if specs:
+            max_workers = min(len(specs), _LIVENESS_PROBE_CONCURRENCY)
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                for row, verdict, cli_embodied in pool.map(_probe, specs):
+                    counts["checked"] += 1
+                    counts[verdict] = counts.get(verdict, 0) + 1
+                    probed.append(
+                        (
+                            row["id"], verdict, row["owner_session_id"],
+                            row["generation"], row["attempts"], row["status"],
+                            cli_embodied,
+                        )
                     )
-                )
         if not probed:
             return counts
         with self._connect() as conn:

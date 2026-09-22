@@ -362,6 +362,43 @@ def test_reconcile_ignores_unheld_tasks(q):
     assert counts["checked"] == 0 and counts["requeued"] == 0
 
 
+def test_reconcile_probes_held_tasks_concurrently_not_serially(q):
+    """Each held task's liveness probe is a blocking call with its own
+    multi-second real-world timeout (``tracking.liveness_verdict``: 3-6s SSH/
+    bridge subprocess). A large held backlog probed one-at-a-time could
+    serially exceed a GC loop's overall cycle timeout -- and since verdicts
+    were only written after *every* probe finished, a mid-loop timeout meant
+    none of that cycle's transitions landed, letting stale/`unknown` tasks
+    and cold reservations pile up unreaped indefinitely (the root cause
+    behind a real production `liveness_gc: cycle exceeded 60.0s` incident).
+
+    Probing must therefore run concurrently: wall-clock time for N held tasks
+    each with a slow resolver should track the slowest single probe, not the
+    sum of all of them.
+    """
+    import time
+
+    n = 6
+    delay = 0.2
+    for i in range(n):
+        t = q.create(f"t{i}", now=1000.0 + i)
+        _claim_and_start(q, t.id, wt=f"wt{i}", session=f"S{i}", now=1001.0 + i)
+
+    def slow_resolver(wt, mc, sid):
+        time.sleep(delay)
+        return "live"
+
+    started = time.monotonic()
+    counts = q.reconcile_liveness(slow_resolver, now=9999.0)
+    elapsed = time.monotonic() - started
+
+    assert counts["checked"] == n and counts["live"] == n
+    # Serial would take >= n * delay (1.2s here); concurrent should stay well
+    # under half that -- generous enough to avoid CI flakiness while still
+    # failing hard against a serial implementation.
+    assert elapsed < (n * delay) / 2
+
+
 def test_reconcile_default_resolver_safe_without_bridge(q, monkeypatch):
     monkeypatch.setattr(tracking, "agent_bridge_launch_prefix", lambda: None)
     t = q.create("x", now=1000.0)
