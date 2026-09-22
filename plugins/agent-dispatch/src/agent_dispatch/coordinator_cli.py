@@ -56,6 +56,14 @@ def _core_helper(name: str, local):
     return local
 
 
+def _client_token_value() -> str | None:
+    """Honor ``agent_dispatch.__main__.client_token`` monkeypatches."""
+
+    cli = _resolve_cli_module()
+    provider = getattr(cli, "client_token", _config.client_token)
+    return provider()
+
+
 def _federation_rendezvous(args: argparse.Namespace):
     """Resolve the rendezvous a federation command targets: an explicit ``--url``,
     else the hosted (shared) coordinator. Errors loudly when neither exists."""
@@ -63,7 +71,7 @@ def _federation_rendezvous(args: argparse.Namespace):
 
     url = getattr(args, "url", None)
     if url:
-        return build_rendezvous(url, token=getattr(args, "token", None) or _config.client_token())
+        return build_rendezvous(url, token=getattr(args, "token", None) or _client_token_value())
     rv = hosted_rendezvous()
     if rv is None:
         print(
@@ -304,7 +312,7 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     reap_abandoned = _core_helper("_reap_abandoned_passive", _reap_abandoned_passive)
     reap_superseded = _core_helper("_reap_superseded_coordinators", _reap_superseded_coordinators)
     cfg = _config.load_config()
-    token = _config.client_token()
+    token = _client_token_value()
     wildcard_v4 = ".".join(("0", "0", "0", "0"))
     host = cfg.host if cfg.host not in (wildcard_v4, "", "::", "[::]") else "127.0.0.1"
     if cfg.host in ("::", "[::]"):
