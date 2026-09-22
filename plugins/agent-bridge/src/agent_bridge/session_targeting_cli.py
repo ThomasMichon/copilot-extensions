@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import socket
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -389,7 +391,74 @@ def _match_agents(target: str, agents: list[dict]) -> list[str]:
     return matches
 
 
+# agent-bridge-cli-mode-sessions Phase 4: --cli dispatches to a venue's own
+# CLI-mode `copilot` verb instead of the ordinary headless ACP session this
+# command otherwise creates. Deliberately NOT a provider-registry action
+# (agent-bridge never imports sibling plugins -- process-boundary CLI seam,
+# #892/#1643): a namespaced target's prefix maps directly to its owning
+# plugin's binstub by the same fixed convention `codespace:`/`container:`
+# already use everywhere else in this codebase.
+_CLI_MODE_VENUE_BINSTUBS = {"codespace": "agent-codespaces", "container": "agent-containers"}
+
+
+def _cmd_create_cli(target: str, prompt: str | None, driver: str | None) -> None:
+    """``agent-bridge create <target> "<prompt>" --cli``: deliver a live,
+    human-attachable CLI-mode Copilot session on the venue ``target`` names,
+    optionally seeded with ``prompt`` as its first turn.
+
+    Resolves ``target``'s ``<prefix>:<name>`` the same way every other
+    namespaced target in this codebase does, then hands off entirely to that
+    provider's own venue `copilot` verb (`agent-codespaces copilot <name>` /
+    `agent-containers copilot <name>`) -- this command owns none of the
+    reserve/connect/attach mechanics itself, just the target-prefix ->
+    binstub resolution. Defaults to anchor mode on the remote venue (neither
+    verb requires --worktree-id): a CodeSpace/trusted container is
+    conventionally anchor-only, so this is the zero-ceremony common case.
+
+    A bare (unprefixed) target is refused with a pointer to
+    `agent-worktrees copilot` directly -- a *local* CLI-mode session needs no
+    agent-bridge mediation at all; inventing a redundant local-dispatch path
+    here would only be a second, divergent way to do what that verb already
+    does.
+    """
+    prefix, sep, name = target.partition(":")
+    binstub = _CLI_MODE_VENUE_BINSTUBS.get(prefix) if sep else None
+    if not binstub or not name:
+        print(
+            f"[FAIL] --cli requires a namespaced venue target "
+            f"({'/'.join(f'{p}:<name>' for p in _CLI_MODE_VENUE_BINSTUBS)}), "
+            f"got {target!r}.\n"
+            "       For a local session, use `agent-worktrees copilot "
+            "--anchor` (or `--worktree-id <id>`) directly -- agent-bridge's "
+            "mediation isn't needed on this machine.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    resolved = shutil.which(binstub)
+    if not resolved:
+        print(
+            f"[FAIL] '{binstub}' not found on PATH -- is it installed?",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    argv = [resolved, "copilot", name]
+    if prompt:
+        argv += ["--seed", prompt]
+    if driver:
+        argv += ["--driver", driver]
+    # Inherits this process's stdio directly (no capture): the child becomes
+    # the interactive session, exactly like the venue verbs' own os.execvp
+    # mux-attach handoff -- this process just needs to block until it exits.
+    sys.exit(subprocess.run(argv).returncode)
+
+
 def _cmd_create(args: argparse.Namespace) -> None:
+    if getattr(args, "cli", False):
+        _cmd_create_cli(
+            args.target, _resolve_prompt(args, required=False),
+            getattr(args, "driver", None),
+        )
+        return
     core = _core()
     client = core._get_client()
     target = args.target
@@ -539,5 +608,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     create_p.add_argument("--effort", dest="effort", default=None, metavar="EFFORT", help="Reasoning-effort override for THIS session (e.g. low|medium|high), applied the same per-session way as --model.")
     create_p.add_argument("--target-dir", dest="target_dir", default=None, metavar="PATH", help="Run this agent session in an existing checkout directory.")
     create_p.add_argument("--worktree-id", dest="worktree_id", default=None, metavar="ID", help="Bind the created session to an existing agent-worktrees worktree id.")
+    create_p.add_argument("--cli", action="store_true", help="Deliver a live, human-attachable CLI-mode Copilot session on the venue TARGET names (codespace:<name> or container:<name>) instead of an ordinary headless ACP session -- hands off entirely to that provider's own `copilot` verb, optionally seeded with the positional prompt as its first turn (agent-bridge-cli-mode-sessions Phase 4). Defaults to anchor mode on the venue (no worktree required). Refused for a bare/unprefixed TARGET -- use `agent-worktrees copilot` directly for a local session.")
+    create_p.add_argument("--driver", default=None, metavar="LABEL", help="With --cli: forwarded to the remote `agent-worktrees copilot --driver` (stamps the 'driven by' banner).")
     core._add_stream_args(create_p)
     create_p.set_defaults(func=_cmd_create)
