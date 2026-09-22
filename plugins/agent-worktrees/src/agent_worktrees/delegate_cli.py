@@ -410,12 +410,13 @@ def run_delegates(argv: list[str]) -> int:
         return 1
 
     candidates = _delegate_candidates(hosts)
-    eligible = [
-        row for row in candidates
-        if bool(row.get("delegate_finalizable"))
-        and str(row.get("status") or "") != "finalized"
-    ]
-    blocked = [row for row in candidates if row not in eligible]
+    eligible: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+    for row in candidates:
+        if bool(row.get("delegate_finalizable")) and str(row.get("status") or "") != "finalized":
+            eligible.append(row)
+        else:
+            blocked.append(row)
     payload: dict[str, Any] = {
         "version": 1,
         "checked": len(candidates),
