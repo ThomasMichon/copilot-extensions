@@ -421,3 +421,33 @@ test(
     });
   },
 );
+
+// Every case above exercises installEmergencyDiagnostics()'s markReady()
+// entirely through this test file's own harness -- none of them proves the
+// real production extension.mjs actually calls it, in the right place,
+// after the real joinSession() resolves. If that wiring were ever moved or
+// deleted, every crash captured after real readiness would be silently
+// mis-tagged ready=false while every test above kept passing. A full
+// integration test would need a real joinSession()/SDK harness this plugin
+// does not have; this source-contract check (reading extension.mjs as text,
+// the same technique tests/guidance.test.mjs already uses for other
+// production wiring in this same file) is the pragmatic alternative: it
+// fails if the markReady() call is ever removed, or reordered to sit before
+// the joinSession() call instead of after it. Always runs (no subprocess).
+test("production extension.mjs calls markReady() only after joinSession() resolves", () => {
+  const extensionPath = join(here, "..", "extensions", "context-handoff", "extension.mjs");
+  const extension = readFileSync(extensionPath, "utf-8");
+  assert.match(
+    extension,
+    /const emergencyDiagnostics = installEmergencyDiagnostics\(emergencyLog\);/,
+    "extension.mjs must capture installEmergencyDiagnostics()'s return value",
+  );
+  const joinSessionIndex = extension.indexOf("const session = await joinSession({");
+  const markReadyIndex = extension.indexOf("emergencyDiagnostics.markReady();");
+  assert.notEqual(joinSessionIndex, -1, "expected to find the joinSession() call");
+  assert.notEqual(markReadyIndex, -1, "expected to find the markReady() call");
+  assert.ok(
+    markReadyIndex > joinSessionIndex,
+    "markReady() must be called after joinSession(), not before it",
+  );
+});

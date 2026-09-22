@@ -384,9 +384,10 @@ This file is:
   `uncaughtException`/`unhandledRejection` (+ non-zero `exit`), a caught
   `SIGTERM`/`SIGINT`/`SIGHUP`, or a genuinely non-zero exit for some other
   reason produces an entry.
-- **Not itself instrumented for rotation, but size-bounded.** No
-  log-rotation or scheduled cleanup exists; treat it as a manually-cleared
-  scratch file for anything beyond the bound described here. `SIGTERM`
+- **Size-rotated at a coarse 1 MiB threshold, no other retention.** No
+  scheduled or calendar-based cleanup exists beyond that size trigger;
+  treat it as a manually-cleared scratch file for anything the size-based
+  rotation described below does not already handle. `SIGTERM`
   specifically is the Copilot CLI's own **routine** mechanism for `/clear`
   and foreground-session replacement (see "Interpreting an entry" below),
   so -- unlike the suppressed `code=0` exit path above -- ordinary,

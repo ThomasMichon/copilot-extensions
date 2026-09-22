@@ -35,15 +35,16 @@ import { join } from "node:path";
 
 export const DEFAULT_CRASH_LOG = join(tmpdir(), "context-handoff-extension-crash.log");
 
-// Bounds this fixed, unrotated, machine-global file's growth. SIGTERM is the
-// Copilot CLI's own routine mechanism for `/clear` and foreground-session
+// Bounds this fixed, machine-global file's growth. SIGTERM is the Copilot
+// CLI's own routine mechanism for `/clear` and foreground-session
 // replacement (see the "signal" rationale below), so -- unlike the
 // suppressed `code=0` exit path -- ordinary, expected lifecycle churn alone
 // still appends a line every time on a long-lived, handoff-heavy host, with
 // no natural ceiling. Rather than never recording a legitimate signal (which
 // would defeat the entire "distinguish a routine stop from a crash"
-// diagnostic this module exists to provide), the file is truncated back to
-// empty once it crosses this size, checked once per process at the lazy
+// diagnostic this module exists to provide), the file is rotated (see the
+// size-check site below for the actual rename-based mechanism, not a
+// truncate) once it crosses this size, checked once per process at the lazy
 // first-open below -- cheap, and sufficient to bound growth across the many
 // separate short-lived processes that are the actual growth vector, even
 // though it does not bound a single pathological process logging in a tight
@@ -281,9 +282,9 @@ export function installEmergencyDiagnostics(emergencyLog) {
   // instance (this module is re-imported many times per machine lifetime:
   // once per discovery pass, plus once per reconnect/resume) would otherwise
   // append an unconditional "reached readiness" line to this fixed,
-  // unrotated, machine-global file even when nothing ever goes wrong --
-  // exactly the unbounded-growth failure mode the onExit code=0 skip below
-  // already guards against. Instead, this flag is folded into whichever
+  // machine-global file even when nothing ever goes wrong -- exactly the
+  // unbounded-growth failure mode the onExit code=0 skip below already
+  // guards against. Instead, this flag is folded into whichever
   // failure entry (if any) actually gets logged, so a reader can still tell
   // whether a captured crash happened before or after readiness, without
   // paying for a write on the overwhelmingly common all-is-well path.
@@ -342,8 +343,9 @@ export function installEmergencyDiagnostics(emergencyLog) {
   // machine's lifetime -- once per discovery pass, plus once per
   // reconnect/resume -- and the ordinary outcome of nearly all of those
   // forks is a routine `process.exit(0)`. Logging every one of them would
-  // make this fixed, unrotated, machine-global scratch file grow without
-  // bound over a long-lived host (the existing lifecycle-logging pattern --
+  // make this fixed, machine-global scratch file rotate away its own
+  // history far more often than it otherwise would (see MAX_LOG_BYTES
+  // above) over a long-lived host (the existing lifecycle-logging pattern --
   // see docs/patterns/lifecycle-activity-logging.md -- deliberately bounds
   // or reboot-volatilizes every tier it defines; this file has neither
   // property, so it must not record routine, uninteresting events at all).
