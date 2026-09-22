@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import os
 import sys
@@ -27,6 +28,31 @@ def _json_error(message: str, exit_code: int = 1) -> int:
     """Emit a JSON error envelope and return the exit code."""
     _json_output({"error": message})
     return exit_code
+
+
+@contextlib.contextmanager
+def capture_json_output() -> Iterator[io.StringIO]:
+    """Capture a nested command's :func:`_json_output` result in-process.
+
+    ``_json_output`` deliberately writes to ``sys.__stdout__`` (not
+    ``sys.stdout``) so its envelope still reaches the real terminal from
+    inside a :func:`stdout_to_stderr` block -- which means a plain
+    ``contextlib.redirect_stdout`` (which only swaps ``sys.stdout``) never
+    sees it: ``buf.getvalue()`` comes back empty every time, confirmed live
+    (agent-bridge-cli-mode-sessions Phase 4 validation) both locally and over
+    a remote venue SSH session. A caller that needs to inspect a nested JSON
+    CLI command's result in-process (e.g. `` `copilot` `` reusing ``embody``'s
+    create-or-resume result) must swap ``sys.__stdout__`` itself for the
+    duration, exactly the level ``_json_output`` actually writes to.
+    """
+    buf = io.StringIO()
+    saved = sys.__stdout__
+    sys.__stdout__ = buf
+    try:
+        yield buf
+    finally:
+        sys.__stdout__ = saved
+
 
 
 def ensure_utf8_stdio() -> None:

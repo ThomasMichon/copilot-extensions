@@ -3944,10 +3944,17 @@ def cmd_copilot(args: argparse.Namespace) -> int:
     # Reuse embody's full target-resolution/preflight/create-or-resume logic
     # in-process rather than duplicating it -- only its JSON result is wanted
     # here, not its stdout (which is about to become the mux client's TTY).
-    import io
-
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
+    # `embody`'s JSON goes through `_json_output`, which deliberately writes
+    # to `sys.__stdout__` (not `sys.stdout`) so it still reaches the real
+    # terminal from inside `output.stdout_to_stderr` -- a plain
+    # `contextlib.redirect_stdout` (which only swaps `sys.stdout`) never
+    # captures it, so `buf.getvalue()` came back empty every single call
+    # (confirmed live, agent-bridge-cli-mode-sessions Phase 4 validation:
+    # 100% reproducible both locally and over a remote venue SSH session --
+    # `copilot` never actually attached to the mux session it had just
+    # created). `output.capture_json_output()` swaps `sys.__stdout__` itself,
+    # the level `_json_output` actually writes to.
+    with output.capture_json_output() as buf:
         rc = cmd_embody(args)
     if rc != 0:
         # embody already wrote its JSON error to buf; surface it for a human
