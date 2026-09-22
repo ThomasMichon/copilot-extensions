@@ -3669,6 +3669,8 @@ def _cmd_create(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         sys.exit(2)
+    from .resume_handoff_cli import reject_singleton_create
+    reject_singleton_create(client=client, target=target, match_agents=_match_agents)
 
     try:
         session_id = _resolve_target(
@@ -5219,173 +5221,31 @@ def _cmd_end(args: argparse.Namespace) -> None:
 
 
 def _cmd_resume(args: argparse.Namespace) -> None:
-    """Resume a stopped session, or load/take-over a still-recognized worktree.
+    """Resume a bridge session, worktree, or singleton anchor target."""
+    from .resume_handoff_cli import run_resume
 
-    The positional accepts either an **ACP session id** (owned by the bridge)
-    or a **worktree handle**. Resolution order:
-
-      1. Try to resume it as a bridge-owned ACP session (the historical
-         behavior).
-      2. On 404 (no such owned session), treat it as a **worktree handle** and
-         ensure that worktree has a live owned session -- resuming its latest
-         session, or, for a *dormant* worktree (its interactive CLI stopped,
-         e.g. after a reboot), adopting the on-disk worktree with a fresh owned
-         session. This is just a **note**: no confirmation needed.
-
-    **Break-glass for a LIVE worktree.** If a *fresh live* interactive CLI still
-    holds the worktree, taking it over would spawn a second controller on the
-    same checkout, so the bridge refuses (409 ``live_cli_holds_worktree``).
-    Stopping the live CLI first, then re-running with ``--force``, performs the
-    affirmative take-over. ``--json`` returns the session id machine-readably
-    (the sole headless take-over primitive since ``create --reclaim`` is gone).
-    """
-    from .client import BridgeClientError
-
-    client = _get_client()
-    target = args.session_id
-    reclaim = bool(getattr(args, "force", False))
-    as_json = bool(getattr(args, "json", False))
-
-    def _fail(message: str, *, reason: str = "") -> None:
-        if as_json:
-            _json_out({"error": message, **({"reason": reason} if reason else {})})
-        else:
-            print(f"[FAIL] {message}", file=sys.stderr)
-        sys.exit(1)
-
-    # 1. Try the historical owned-ACP-session resume first. A worktree handle
-    #    is not an owned session id, so this 404s and we fall through.
-    if not reclaim:
-        try:
-            result = client.resume_session(
-                target,
-                request_timeout=_startup_request_timeout(resume=True),
-            )
-            status = result.get("status", "")
-            if as_json:
-                _json_out({"session_id": target, "status": status, "verb": "resumed"})
-            else:
-                print(f"[OK] Session {target} resumed ({status})")
-            return
-        except BridgeClientError as exc:
-            if exc.status != 404:
-                _fail(f"Could not resume session {target}: {exc.detail}")
-            # 404 -> not an owned session; fall through to worktree resolution.
-
-    # 2. Treat the target as a worktree handle: load it (dormant = a note) or
-    #    take it over (--force past a live holder = break-glass).
-    try:
-        result = client.resume_worktree(
-            target,
-            reclaim=reclaim,
-            request_timeout=_startup_request_timeout(
-                resume=True,
-                fresh_fallback=True,
-            ),
-        )
-    except BridgeClientError as exc:
-        if exc.status == 409:
-            detail = exc.detail
-            reason = detail.get("reason") if isinstance(detail, dict) else None
-            if reason == "live_cli_holds_worktree":
-                holder = detail.get("session_id") if isinstance(detail, dict) else None
-                if as_json:
-                    _json_out({
-                        "error": f"a live interactive CLI ({holder}) still holds "
-                        f"worktree {target}",
-                        "reason": reason, "session_id": holder,
-                    })
-                else:
-                    print(
-                        f"[BREAK-GLASS] A live interactive CLI (session {holder}) "
-                        f"still holds worktree {target}.\n"
-                        "  Taking it over would run a second controller on the same "
-                        "checkout.\n"
-                        "  Stop that CLI first, then re-run with --force to take it "
-                        "over.",
-                        file=sys.stderr,
-                    )
-                sys.exit(1)
-            _fail(f"Could not resume worktree {target}: {exc.detail}", reason=reason or "")
-        if exc.status == 404:
-            _fail(
-                f"{target} is neither a bridge-owned session nor a recognized "
-                "worktree. Pass a worktree handle (e.g. '<machine>-<env>-<ts>-"
-                "<id>') to load a dormant worktree."
-            )
-        _fail(f"Could not resume worktree {target}: {exc.detail}")
-
-    status = result.get("status", "")
-    sid = result.get("session_id", "") or target
-    verb = "took over" if reclaim else "loaded"
-    if as_json:
-        _json_out({"session_id": sid, "status": status, "verb": verb, "worktree_id": target})
-    else:
-        print(f"[OK] Worktree {target} {verb} as owned session {sid} ({status})")
+    run_resume(
+        client=_get_client(),
+        target=args.session_id,
+        reclaim=bool(getattr(args, "force", False)),
+        as_json=bool(getattr(args, "json", False)),
+        json_out=_json_out,
+        match_agents=_match_agents,
+        startup_request_timeout=_startup_request_timeout,
+    )
 
 
 def _cmd_handoff(args: argparse.Namespace) -> None:
-    """Hand a session (or worktree) off to a fresh successor in place.
+    """Hand a session, worktree, or singleton anchor off in place."""
+    from .resume_handoff_cli import run_handoff
 
-    The positional accepts either a bridge-owned **ACP session id** or a
-    **worktree handle** (mirroring ``resume``): a session id is handed off
-    directly; a worktree handle resolves to that worktree's current session.
-    The retiring session authors a continuation brief, a successor is spawned
-    in the same worktree, a ``session_handoff`` event announces the changeover,
-    and the successor resumes seeded with the brief.
-    """
-    from .client import BridgeClientError
-
-    client = _get_client()
-    target = args.session_id
-    reason = getattr(args, "reason", None)
-    seed = not getattr(args, "no_seed", False)
-
-    def _report(result: dict, kind: str) -> None:
-        sid = result.get("session_id", "") or "(unknown)"
-        status = result.get("status", "")
-        print(
-            f"[OK] {kind} {target} handed off -> successor {sid} ({status})"
-        )
-
-    # 1. Try a bridge-owned-session handoff first. A worktree handle is not an
-    #    owned session id, so this 404s and we fall through.
-    try:
-        result = client.handoff_session(target, reason=reason, seed=seed)
-        _report(result, "Session")
-        return
-    except BridgeClientError as exc:
-        if exc.status == 404:
-            pass  # not an owned session; try worktree resolution below.
-        elif exc.status == 409:
-            print(f"[FAIL] Cannot hand off {target}: {exc.detail}", file=sys.stderr)
-            sys.exit(1)
-        else:
-            print(
-                f"[FAIL] Could not hand off session {target}: {exc.detail}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-    # 2. Treat the target as a worktree handle.
-    try:
-        result = client.handoff_worktree(target, reason=reason, seed=seed)
-    except BridgeClientError as exc:
-        if exc.status == 404:
-            print(
-                f"[FAIL] {target} is neither a bridge-owned session nor a "
-                "worktree with a current session to hand off.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        if exc.status == 409:
-            print(f"[FAIL] Cannot hand off worktree {target}: {exc.detail}",
-                  file=sys.stderr)
-            sys.exit(1)
-        print(f"[FAIL] Could not hand off worktree {target}: {exc.detail}",
-              file=sys.stderr)
-        sys.exit(1)
-    _report(result, "Worktree")
+    run_handoff(
+        client=_get_client(),
+        target=args.session_id,
+        reason=getattr(args, "reason", None),
+        seed=not getattr(args, "no_seed", False),
+        match_agents=_match_agents,
+    )
 
 
 def _cmd_handoff_request(args: argparse.Namespace) -> None:

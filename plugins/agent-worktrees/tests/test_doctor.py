@@ -516,3 +516,96 @@ def test_overlay_absent_is_noop(home: Path):
     _adopted(home, repo_dir, cfg_dir)
     kinds = _kinds(doctor.diagnose(plat="linux"))
     assert not any(k.startswith("overlay_") for k in kinds)
+
+
+# --------------------------------------------------------------------------
+# Leaked AGENT_RT_ROOT (#3220)
+# --------------------------------------------------------------------------
+
+class _FakeWinreg:
+    """Minimal fake of the ``winreg`` surface ``_agent_rt_root_findings`` uses."""
+
+    HKEY_CURRENT_USER = "HKCU"
+    HKEY_LOCAL_MACHINE = "HKLM"
+    KEY_SET_VALUE = 0x2
+
+    def __init__(self, values: dict[tuple[str, str], str]):
+        # values: {(hive, subkey): "AGENT_RT_ROOT value"}
+        self._values = dict(values)
+        self.deleted: list[tuple[str, str]] = []
+
+    def OpenKey(self, hive, subkey, *args, **kwargs):
+        return _FakeWinregKey(self, (hive, subkey))
+
+    def QueryValueEx(self, key_ctx, name):
+        assert name == "AGENT_RT_ROOT"
+        value = self._values.get(key_ctx.key)
+        if value is None:
+            raise FileNotFoundError(name)
+        return (value, 1)
+
+    def DeleteValue(self, key_ctx, name):
+        assert name == "AGENT_RT_ROOT"
+        self._values.pop(key_ctx.key, None)
+        self.deleted.append(key_ctx.key)
+
+
+class _FakeWinregKey:
+    def __init__(self, mod: _FakeWinreg, key: tuple[str, str]):
+        self._mod = mod
+        self.key = key
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_no_leaked_agent_rt_root_when_registry_clean(monkeypatch):
+    fake = _FakeWinreg({})
+    monkeypatch.setattr(doctor.sys, "platform", "win32")
+    monkeypatch.setitem(__import__("sys").modules, "winreg", fake)
+    findings = doctor._agent_rt_root_findings(fix=False)
+    assert findings == []
+
+
+def test_leaked_user_scope_agent_rt_root_reported(monkeypatch):
+    fake = _FakeWinreg({("HKCU", "Environment"): r"C:\Users\x\.agent-ssh"})
+    monkeypatch.setattr(doctor.sys, "platform", "win32")
+    monkeypatch.setitem(__import__("sys").modules, "winreg", fake)
+    findings = doctor._agent_rt_root_findings(fix=False)
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.kind == "leaked_agent_rt_root"
+    assert finding.severity == doctor.SEV_WARNING
+    assert finding.fixable
+    assert not finding.fixed
+    assert fake.deleted == []  # diagnose-only must not mutate the registry
+
+
+def test_leaked_agent_rt_root_fixed_clears_registry(monkeypatch):
+    fake = _FakeWinreg({("HKCU", "Environment"): r"C:\Users\x\.agent-ssh"})
+    monkeypatch.setattr(doctor.sys, "platform", "win32")
+    monkeypatch.setitem(__import__("sys").modules, "winreg", fake)
+    findings = doctor._agent_rt_root_findings(fix=True)
+    assert len(findings) == 1
+    assert findings[0].fixed
+    assert fake.deleted == [("HKCU", "Environment")]
+    # A second pass finds nothing left to fix.
+    assert doctor._agent_rt_root_findings(fix=False) == []
+
+
+def test_leaked_agent_rt_root_posix_report_only(monkeypatch):
+    monkeypatch.setattr(doctor.sys, "platform", "linux")
+    monkeypatch.setenv("AGENT_RT_ROOT", "/home/x/.agent-ssh")
+    findings = doctor._agent_rt_root_findings(fix=True)
+    assert len(findings) == 1
+    assert findings[0].kind == "leaked_agent_rt_root"
+    assert not findings[0].fixable
+
+
+def test_no_leaked_agent_rt_root_posix_when_unset(monkeypatch):
+    monkeypatch.setattr(doctor.sys, "platform", "linux")
+    monkeypatch.delenv("AGENT_RT_ROOT", raising=False)
+    assert doctor._agent_rt_root_findings(fix=False) == []
