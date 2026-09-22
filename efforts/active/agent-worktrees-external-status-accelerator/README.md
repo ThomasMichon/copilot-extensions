@@ -1474,3 +1474,20 @@ real):
    down to well under a second. Whole-module test time dropped from
    ~36s to ~24s.
 
+### 2026-09-21 — PR #3206 review round 6: 1 more real gap, rest stale carryovers
+All 4 "Open" findings from round 5 were re-flagged again this round --
+3 confirmed stale carryovers (already fixed), plus 1 genuine miss the
+round-5 fix left behind:
+
+1. **The round-2 stale-lock-with-probe test still paid the full 4s
+   wait.** `test_daemon_liveness_stale_lock_with_probe_reports_
+   unresponsive_not_rendezvous` supplies an `ensure_monitor` that never
+   publishes a replacement lock -- round 5's speed pass only touched
+   the two tests explicitly named in that review's headline text and
+   missed this one, which has the identical shape. Added the same
+   `boot_wait_s=0.2` override used everywhere else.
+
+Whole-module test time held at ~22-24s (this test's own 4s was already
+counted in the "before" figure from round 5's entry, since it wasn't
+fixed until now).
+

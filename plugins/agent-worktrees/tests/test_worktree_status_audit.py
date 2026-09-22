@@ -444,6 +444,7 @@ def test_daemon_liveness_stale_lock_with_probe_reports_unresponsive_not_rendezvo
     liveness = wsa.check_daemon_liveness(
         lock_path, probe=("proj", "wt1"),
         ensure_monitor=lambda: ensure_monitor_calls.append(1) or True,
+        boot_wait_s=0.2,
     )
     assert ensure_monitor_calls == [1]
     assert liveness.responsive is False
