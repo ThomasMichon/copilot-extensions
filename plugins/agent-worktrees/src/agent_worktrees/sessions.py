@@ -1096,14 +1096,6 @@ def read_session_transcript(session_id: str) -> list[dict]:
         return []
     return events
 
-
-# The event types that carry an actual conversational turn (as opposed to the
-# tool/lifecycle chatter in ``_RENDERABLE_EVENT_TYPES``). The recent-messages
-# viewer shows only these -- the human-readable back-and-forth.
-_CONVERSATION_EVENT_TYPES = {"user.message": "user",
-                             "assistant.message": "assistant"}
-
-
 def _event_text(ev: dict) -> str:
     """Extract the displayable text from a user/assistant message event.
 
@@ -1118,49 +1110,34 @@ def _event_text(ev: dict) -> str:
     return content.strip() if isinstance(content, str) else ""
 
 
+def session_message_tail(session_id: str, *, limit: int = 3) -> dict:
+    """Return the last *limit* message-bearing turns for one session as JSON."""
+    from . import session_tail as session_tail_mod
+
+    return session_tail_mod.session_message_tail(session_id, limit=limit)
+
+
 def recent_worktree_messages(record, *, limit: int = 3) -> dict:
-    """The last *limit* conversational messages of a worktree's latest session.
-
-    The read-side companion to the disposition ``summary`` overlay (see
-    ``tracking.set_disposition``): when the agent-asserted summary is missing or
-    stale, this derives *what the worktree was actually doing* straight from the
-    latest session's ``events.jsonl`` -- the last human/assistant turns, newest
-    last. Owned by the same session/summary layer that stores the disposition so
-    the Picker has a single place to ask "what is this worktree?".
-
-    Picks the worktree's newest session (``list_worktree_sessions`` is sorted
-    newest-first), then returns its final *limit* ``user.message`` /
-    ``assistant.message`` turns that carry text (tool-only assistant turns are
-    skipped). Never raises: a worktree with no session / no transcript yields an
-    empty ``messages`` list and a ``None`` ``session_id``.
-
-    Returns a JSON-ready dict::
-
-        {"session_id": "<id>|None",
-         "messages": [{"role": "user|assistant",
-                       "text": "...",
-                       "timestamp": "<iso>"}, ...],
-         "count": <int>}          # messages returned (<= limit)
-    """
+    """The latest session's last *limit* message-bearing turns as JSON."""
     lim = max(1, int(limit))
     sess_list = list_worktree_sessions(record)
     if not sess_list:
-        return {"session_id": None, "messages": [], "count": 0}
+        return {
+            "session_id": None,
+            "messages": [],
+            "count": 0,
+            "ending": {"state": "complete", "cut_off_mid_turn": False,
+                       "ended_on_unanswered_offer": False,
+                       "last_event_type": None, "last_event_timestamp": ""},
+        }
     session_id = sess_list[0]["id"]
-
-    messages: list[dict] = []
-    for ev in read_session_transcript(session_id):
-        role = _CONVERSATION_EVENT_TYPES.get(ev.get("type", ""))
-        if role is None:
-            continue
-        text = _event_text(ev)
-        if not text:
-            continue
-        messages.append({"role": role, "text": text,
-                         "timestamp": str(ev.get("timestamp", ""))})
-
-    tail = messages[-lim:]
-    return {"session_id": session_id, "messages": tail, "count": len(tail)}
+    payload = session_message_tail(session_id, limit=lim)
+    return {
+        "session_id": session_id,
+        "messages": payload["turns"],
+        "count": payload["count"],
+        "ending": payload["ending"],
+    }
 
 
 @dataclass
