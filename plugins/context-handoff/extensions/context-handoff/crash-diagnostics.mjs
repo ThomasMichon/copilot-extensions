@@ -161,31 +161,30 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
               //    detaching A's diagnostics from `logPath` (and, if B were
               //    to then delete its own sidecar as routine cleanup,
               //    destroying A's entry outright). So this rename is
-              //    conditioned on an identity check first (POSIX: `dev`+
-              //    `ino` still match what this process actually opened and
-              //    measured as oversized -- Node cannot make this atomic
-              //    without external locking, but it closes the large
-              //    window a blind rename would otherwise leave open), and
-              //    the sidecar this rename produces is **never deleted**
+              //    conditioned on an identity check first (`dev`+`ino` still
+              //    match what this process actually opened and measured as
+              //    oversized -- empirically confirmed reliable on Windows
+              //    too via NTFS file IDs, not just POSIX -- Node cannot make
+              //    this atomic without external locking, but it closes the
+              //    large window a blind rename would otherwise leave open),
+              //    and the sidecar this rename produces is **never deleted**
               //    (see below) specifically so that even a residual,
               //    narrower race here can, at worst, misfile a live entry
               //    under an unexpected name -- it can never destroy one.
               closeSync(fd);
               fd = undefined;
-              let stillTheSameOversizedFile = true;
-              if (process.platform !== "win32") {
-                try {
-                  const currentStat = statSync(logPath);
-                  stillTheSameOversizedFile =
-                    currentStat.dev === preRotationStat.dev &&
-                    currentStat.ino === preRotationStat.ino;
-                } catch {
-                  // logPath no longer exists (a concurrent process's own
-                  // rotation already moved it) -- definitely not "still the
-                  // same file"; skip straight to the plain open below,
-                  // which creates a fresh file either way.
-                  stillTheSameOversizedFile = false;
-                }
+              let stillTheSameOversizedFile;
+              try {
+                const currentStat = statSync(logPath);
+                stillTheSameOversizedFile =
+                  currentStat.dev === preRotationStat.dev &&
+                  currentStat.ino === preRotationStat.ino;
+              } catch {
+                // logPath no longer exists (a concurrent process's own
+                // rotation already moved it) -- definitely not "still the
+                // same file"; skip straight to the plain open below,
+                // which creates a fresh file either way.
+                stillTheSameOversizedFile = false;
               }
               if (stillTheSameOversizedFile) {
                 // pid+timestamp alone could theoretically collide (two
@@ -279,10 +278,13 @@ function describeFailure(value) {
 
 /**
  * Registers process-level crash diagnostics using `emergencyLog` (from
- * {@link createEmergencyLog}). Returns an `uninstall()` function that
- * removes exactly the listeners this call added, so a test (or any future
- * caller needing to swap diagnostics) can clean up without disturbing
- * listeners installed elsewhere.
+ * {@link createEmergencyLog}). Returns `{ markReady, uninstall }`:
+ * `markReady()` records (in memory only -- see its own call site) that
+ * `joinSession()` has resolved, so a later failure entry can report
+ * `ready=true` instead of the default `ready=false`; `uninstall()` removes
+ * exactly the listeners this call added, so a test (or any future caller
+ * needing to swap diagnostics) can clean up without disturbing listeners
+ * installed elsewhere.
  *
  * Registering `uncaughtException`/`unhandledRejection` listeners suppresses
  * Node's own default auto-exit-on-crash behavior; each handler re-exits
