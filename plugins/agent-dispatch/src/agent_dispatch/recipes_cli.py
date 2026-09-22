@@ -273,3 +273,62 @@ def _cmd_recipes_drive(args: argparse.Namespace) -> int:
     report["executed"] = False
     report["note"] = "WORK is the agent's to perform; re-run drive with the next signal"
     return _emit(report)
+
+
+def register_recipes_commands(sub) -> None:
+    rp = sub.add_parser(
+        "recipes",
+        help="loop recipes -- the packaged shapes of long-running agentic work (reviewer / conflict-resolution / goal-driven), kickable ad-hoc",
+    )
+    rsub = rp.add_subparsers(dest="recipes_command", required=True)
+
+    lp = rsub.add_parser("list", help="list the available recipes")
+    lp.set_defaults(func=_resolve_cli_module()._cmd_recipes_list)
+
+    dp = rsub.add_parser("describe", help="show a recipe's full descriptor")
+    dp.add_argument("name", help="recipe name (see 'recipes list')")
+    dp.set_defaults(func=_resolve_cli_module()._cmd_recipes_describe)
+
+    rr = rsub.add_parser(
+        "render",
+        help="render a recipe with parameters (prints the fields; creates nothing)",
+    )
+    rr.add_argument("name")
+    rr.add_argument(
+        "--param",
+        action="append",
+        metavar="KEY=VALUE",
+        help="a recipe parameter (repeatable), e.g. --param repo=owner/name --param pr=42",
+    )
+    rr.set_defaults(func=_resolve_cli_module()._cmd_recipes_render)
+
+    kp = rsub.add_parser(
+        "kick",
+        help="carve an ad-hoc task from a recipe (optionally spawn a worker to drive it) -- the no-wrapper-service path",
+    )
+    kp.add_argument("name")
+    kp.add_argument("--param", action="append", metavar="KEY=VALUE", help="a recipe parameter (repeatable)")
+    kp.add_argument("--repo", help="lane (repo) for the task: a local repo name or remote URL (default: the calling repo)")
+    kp.add_argument("--dedup-key", help="override the derived reserved-work dedup key")
+    kp.add_argument("--label", action="append", metavar="LABEL", help="extra label(s) to stamp on the kicked task (repeatable), merged with the recipe's own labels")
+    kp.add_argument("--spawn", action="store_true", help="after creating, spawn a worker to drive the loop (best effort)")
+    kp.add_argument("--spawn-backend", choices=["bridge", "embody"], default="embody")
+    kp.add_argument("--spawn-agent", default="task-worker")
+    kp.add_argument("--async", dest="run_async", action="store_true")
+    kp.add_argument("--verify-timeout", type=int, default=0)
+    kp.add_argument("--dry-run", action="store_true")
+    kp.set_defaults(func=_resolve_cli_module()._cmd_recipes_kick)
+
+    dr = rsub.add_parser(
+        "drive",
+        help="decide the next loop step for a recipe given a --signal (the executable work/suspend/resolve rhythm); --execute performs the suspend + resolve legs",
+    )
+    dr.add_argument("name")
+    dr.add_argument("--signal", required=True)
+    dr.add_argument("--resume", metavar="WORKTREE")
+    dr.add_argument("--task", metavar="ID")
+    dr.add_argument("--base", metavar="BRANCH")
+    dr.add_argument("--source", metavar="REF")
+    dr.add_argument("--execute", action="store_true")
+    dr.add_argument("wait_cmd", nargs="*", help="for --execute on a SUSPEND, the blocking wait command after '--'")
+    dr.set_defaults(func=_resolve_cli_module()._cmd_recipes_drive)
