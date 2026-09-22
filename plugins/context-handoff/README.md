@@ -507,9 +507,13 @@ above):
   code=1 disposition=stopped-normally` launch-log entries that were never
   actually crashes. **POSIX only** -- see the Windows note above.
 - `uncaughtException`/`unhandledRejection` (with a stack), followed by
-  `exit: code=1` **for that same `pid=`** -- a genuine bug in this
-  extension's own code. The stack is the actual diagnostic payoff; the
-  trailing `ready=true`/`ready=false` on both lines says whether the bug hit
+  `exit: code=1` **for that same `pid=`** -- a genuine bug, but not
+  necessarily in this extension's own code: these handlers observe the
+  entire process, so the stack can equally point into the bundled SDK, the
+  CLI's own harness/runtime, or another dependency loaded into the same
+  process. Read the stack itself to identify the actual source rather than
+  assuming this extension's code is always at fault; the trailing
+  `ready=true`/`ready=false` on both lines says whether the failure hit
   before or after this instance reached readiness. If the crash log's own
   write also failed (missing directory, full disk, an untrusted
   pre-existing path, ...), look for a

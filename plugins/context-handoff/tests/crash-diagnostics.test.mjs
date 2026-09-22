@@ -240,6 +240,40 @@ test(
   },
 );
 
+// Regression: renameSync() preserves the moved file's own mtime -- the
+// timestamp of its *last write*, not of the rotation itself. A log that
+// grows slowly can easily go unwritten for well over 24h before finally
+// crossing the 1 MiB threshold; without re-stamping the sidecar's mtime at
+// rotation time, purgeOldStaleSidecars() would immediately purge the
+// sidecar THIS rotation just created, seconds old, because it inherited an
+// already-stale mtime from before the rotation. Backdates the oversized
+// source file itself (not a fake pre-existing sidecar) to simulate this.
+test(
+  "a rotation's own fresh sidecar survives even if the source file's mtime was already old",
+  { skip: !RUN_STRESS_CASES },
+  async () => {
+    await withCrashLog(async (logPath) => {
+      const oneMiB = 1_048_576;
+      writeFileSync(logPath, "x".repeat(oneMiB + 10));
+      chmodSync(logPath, 0o600);
+      const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+      utimesSync(logPath, twoDaysAgo, twoDaysAgo);
+
+      const emergencyLog = createEmergencyLog(logPath);
+      emergencyLog("signal", "SIGTERM ready=true");
+
+      const dir = dirname(logPath);
+      const base = logPath.slice(dir.length + 1);
+      const sidecars = readdirSync(dir).filter((name) => name.startsWith(`${base}.stale-`));
+      assert.equal(
+        sidecars.length,
+        1,
+        `expected this rotation's own sidecar to survive despite the source's old mtime, found: ${JSON.stringify(sidecars)}`,
+      );
+    });
+  },
+);
+
 // A predictable path in a shared os.tmpdir() means another local user could
 // have pre-created an ordinary, world-readable regular file there before
 // this process ever runs. O_NOFOLLOW alone does not protect against this

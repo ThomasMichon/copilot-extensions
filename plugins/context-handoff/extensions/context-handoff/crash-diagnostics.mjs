@@ -30,6 +30,7 @@ import {
   renameSync,
   statSync,
   unlinkSync,
+  utimesSync,
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -241,6 +242,25 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
                 const staleSidecar = `${logPath}.stale-${process.pid}-${Date.now()}-${randomUUID()}`;
                 try {
                   renameSync(logPath, staleSidecar);
+                  // renameSync() preserves the moved file's own mtime --
+                  // the timestamp of its *last write*, which reflects when
+                  // the oversized file was last appended to, not when this
+                  // rotation happened. A log that grew slowly could easily
+                  // have gone unwritten for well over 24h before finally
+                  // crossing the threshold, in which case the sidecar
+                  // purgeOldStaleSidecars() below would treat as "old" and
+                  // immediately purge would be the one THIS rotation just
+                  // created, seconds ago. Stamp it to the current time so
+                  // its mtime actually reflects rotation age, the semantic
+                  // the purge logic depends on.
+                  const now = new Date();
+                  try {
+                    utimesSync(staleSidecar, now, now);
+                  } catch {
+                    // Best-effort; a failed re-stamp only risks this one
+                    // sidecar being purged earlier than ideal, never a
+                    // correctness problem for the write that follows.
+                  }
                 } catch {
                   // Lost a narrower race against a concurrent rotation
                   // between the stat check just above and this rename --
