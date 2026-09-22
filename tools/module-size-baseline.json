@@ -39,7 +39,6 @@
   "plugins/agent-dispatch/scripts/versioned_runtime.py": 1245,
   "plugins/agent-dispatch/src/agent_dispatch/__main__.py": 4902,
   "plugins/agent-dispatch/src/agent_dispatch/_installation_context.py": 9169,
-  "plugins/agent-dispatch/src/agent_dispatch/bridge.py": 1167,
   "plugins/agent-dispatch/src/agent_dispatch/client.py": 1173,
   "plugins/agent-dispatch/src/agent_dispatch/companion.py": 1421,
   "plugins/agent-dispatch/src/agent_dispatch/embody.py": 1082,
