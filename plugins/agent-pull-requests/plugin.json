@@ -1,6 +1,6 @@
 {
   "name": "agent-pull-requests",
-  "description": "Cross-repository pull-request CLI for API-driven create/status/merge/wait flows, initially mediated through agent-worktrees account resolution.",
+  "description": "Cross-repository pull-request CLI for API-driven create/status/merge/wait flows, initially mediated through agent-worktrees account resolution. No runtime install script yet: marketplace install vendors the payload only; run via 'pip install -e' + 'python -m agent_pull_requests' until a binstub-deploying installer lands.",
   "version": "0.1.0-dev1",
   "runtimeScope": "universal",
   "author": {

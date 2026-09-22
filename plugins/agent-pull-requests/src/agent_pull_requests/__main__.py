@@ -67,10 +67,33 @@ def _run_agent_worktrees_gh(repo: str, gh_args: list[str]) -> dict[str, Any]:
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout).strip() or "unknown gh failure"
         raise RuntimeError(detail)
+    return _parse_json_tail(proc.stdout)
+
+
+def _parse_json_tail(stdout: str) -> dict[str, Any]:
+    """Parse the JSON payload from gh output that may be preceded by warnings.
+
+    'agent-worktrees repos gh' can write a diagnostic (e.g. an ambient-auth
+    token-fallback warning) to stdout ahead of the actual JSON response. Fall
+    back to locating the last top-level JSON object/array in the output
+    rather than assuming the whole stream is JSON.
+    """
+    stripped = stdout.strip()
     try:
-        return json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("agent-worktrees repos gh returned non-JSON output") from exc
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        pass
+    for marker in ("{", "["):
+        idx = stripped.rfind(marker)
+        while idx != -1:
+            candidate = stripped[idx:]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                idx = stripped.rfind(marker, 0, idx)
+    raise RuntimeError(
+        "agent-worktrees repos gh returned non-JSON output: " + stripped[:200]
+    )
 
 
 def _github_status(repo: str, number: int) -> dict[str, Any]:

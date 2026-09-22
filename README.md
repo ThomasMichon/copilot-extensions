@@ -50,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 | Plugin | Type | What it gives you |
 |--------|------|-------------------|
 | [agent-worktrees](plugins/agent-worktrees/) | Session tool | Each Copilot CLI session runs in its own git worktree — no branch conflicts, no stale state. Install this first. |
-| [agent-pull-requests](plugins/agent-pull-requests/) | Cross-repo PR CLI | Query and eventually drive pull requests by explicit `owner/repo`, even when no local checkout exists. This first slice ships a standalone `status` verb and stages the broader extraction from `agent-worktrees`. |
+| [agent-pull-requests](plugins/agent-pull-requests/) | Cross-repo PR CLI (payload-only for now) | Query and eventually drive pull requests by explicit `owner/repo`, even when no local checkout exists. This first slice ships a standalone `status` verb and stages the broader extraction from `agent-worktrees`; marketplace install vendors the payload only until a binstub-deploying installer lands. |
 | [agent-bridge](plugins/agent-bridge/) | Persistent service | Converse with and steer live agents across worktree, repository, machine, CodeSpace, and container boundaries. |
 | [agent-codespaces](plugins/agent-codespaces/) | CLI + relay | Create/manage GitHub Codespaces, address them as bridge agents (`codespace:<name>`), and forward git/GitHub/Azure credentials into them. |
 | [agent-containers](plugins/agent-containers/) | CLI + resolver | Manage a fleet of local Docker dev containers, borrow/release them per effort, and address them as bridge agents (`container:<name>`). |

@@ -12,6 +12,19 @@ API-first surface. In this scaffold slice:
 - `create`, `merge`, and `wait` are reserved as planned verbs and currently
   return a clear "not implemented yet" error.
 
+## Installation (payload-only for now)
+
+Marketplace install (`copilot plugin install agent-pull-requests@copilot-extensions`)
+only vendors this payload today -- there is no `scripts/install.*`/`init.*`
+runtime installer, so no `~/.local/bin/agent-pull-requests` binstub is deployed
+yet (that lands in a follow-up slice, matching `agent-worktrees`' own install
+contract). Until then, run it directly from a checkout:
+
+```bash
+pip install -e plugins/agent-pull-requests
+python -m agent_pull_requests status --repo <owner/repo> --number <n>
+```
+
 ## Current constraint
 
 The initial GitHub implementation shells out through:
