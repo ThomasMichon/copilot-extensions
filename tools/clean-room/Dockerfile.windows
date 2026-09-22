@@ -75,10 +75,13 @@ RUN [Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentV
 # git -- scenario.ps1's phase 2 (duplicating the extension as a project-level
 # source) needs a real repo; MinGit is the portable, no-installer Git for
 # Windows distribution (avoids an interactive/elevated .exe installer inside
-# the build).
-ARG MINGIT_VERSION=2.47.0.2
+# the build). Tag and asset-name formats diverge (tag is
+# v<MINGIT_TAG_VERSION>.windows.<N>, asset is MinGit-<MINGIT_TAG_VERSION>.<N>-<arch>.zip)
+# -- confirm both against the actual release before bumping either ARG.
+ARG MINGIT_TAG_VERSION=2.55.0
+ARG MINGIT_PATCH=5
 RUN $ErrorActionPreference = 'Stop'; \
-    Invoke-WebRequest -Uri ('https://github.com/git-for-windows/git/releases/download/v' + $env:MINGIT_VERSION + '.windows.1/MinGit-' + $env:MINGIT_VERSION + '-64-bit.zip') -OutFile C:\mingit.zip; \
+    Invoke-WebRequest -Uri ('https://github.com/git-for-windows/git/releases/download/v' + $env:MINGIT_TAG_VERSION + '.windows.' + $env:MINGIT_PATCH + '/MinGit-' + $env:MINGIT_TAG_VERSION + '.' + $env:MINGIT_PATCH + '-64-bit.zip') -OutFile C:\mingit.zip; \
     Expand-Archive -LiteralPath C:\mingit.zip -DestinationPath C:\mingit; \
     Remove-Item C:\mingit.zip
 RUN [Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';C:\mingit\cmd', 'Machine')
