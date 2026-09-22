@@ -21,6 +21,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -676,32 +677,64 @@ def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+_binstub_lock_state = threading.local()
+
+
 @contextmanager
 def _binstub_lock(project: str):
+    """Hold the sidecar arbitration lock for ``project``, reentrant per-thread.
+
+    A caller that already holds this exact lock (e.g. ``__registries__``
+    nested inside another ``__registries__`` acquisition, or a project whose
+    name happens to collide with a lock already held higher up the same
+    call stack) must not re-acquire the OS-level lock: on Windows,
+    ``msvcrt.locking`` is *not* reentrant within a process, and a duplicate
+    acquisition of the same byte range raises ``OSError(EDEADLK, "Resource
+    deadlock avoided")`` instead of blocking. Track held keys per-thread so a
+    nested acquisition is a no-op and only the outermost acquire/release pair
+    touches the real file lock -- real cross-process/cross-thread contention
+    still blocks on the OS lock as before.
+    """
     key = project.casefold() if platform.system() == "Windows" else project
     path = _command_arbitration_dir() / f".{key}.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+b") as stream:
-        if stream.tell() == 0:
-            stream.write(b"\0")
-            stream.flush()
-        if os.name == "nt":
-            import msvcrt
 
-            stream.seek(0)
-            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
+    held = getattr(_binstub_lock_state, "held", None)
+    if held is None:
+        held = set()
+        _binstub_lock_state.held = held
 
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
+    resolved_key = str(path)
+    if resolved_key in held:
+        # Already held by this thread further up the stack -- reentrant no-op.
+        yield
+        return
+
+    held.add(resolved_key)
+    try:
+        with path.open("a+b") as stream:
+            if stream.tell() == 0:
+                stream.write(b"\0")
+                stream.flush()
             if os.name == "nt":
+                import msvcrt
+
                 stream.seek(0)
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
             else:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+                import fcntl
+
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if os.name == "nt":
+                    stream.seek(0)
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+    finally:
+        held.discard(resolved_key)
 
 
 # A file in ~/.local/bin is one of *our* project binstubs when it carries the
