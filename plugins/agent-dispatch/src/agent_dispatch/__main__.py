@@ -165,6 +165,28 @@ from .declaration_loops_cli import register_declaration_loop_commands
 from .registrar_parser_cli import register_registrar_commands
 from .supervise_registration_cli import register_supervise_commands
 
+from .task_lifecycle_cli import (  # noqa: F401 -- re-exported for existing call sites/tests
+    _cmd_abandon,
+    _cmd_claim,
+    _cmd_claimant,
+    _cmd_complete,
+    _cmd_embody_interactive,
+    _cmd_focus,
+    _cmd_force_stop,
+    _cmd_pause,
+    _cmd_progress,
+    _cmd_reattach,
+    _cmd_release,
+    _cmd_reset,
+    _cmd_resume,
+    _cmd_show,
+    _cmd_start,
+    _cmd_suspend,
+    _cmd_unpause,
+    _cmd_worktree_status,
+    _cmd_yield,
+)
+
 if TYPE_CHECKING:
     from .registrar import ProfileDeclaration
 
@@ -578,78 +600,6 @@ def _enrich(result: Any, *, resolve_repo_names: bool = True) -> Any:
     return one(result)
 
 
-def _cmd_claim(args: argparse.Namespace) -> int:
-    # The positional is the TASK id (consistent with start/complete/yield/abandon,
-    # which all take the task id first); ``--task`` is kept as a back-compat alias.
-    # The owner/worker id -- rarely needed, since identity resolves from CWD -- is
-    # the explicit ``--worker``/``--as`` flag. This removes the old ambiguity where
-    # a bare ``claim <id>`` bound <id> to the worker slot and silently leased an
-    # arbitrary task under it.
-    task_id = args.task_id or args.task
-    if args.task_id and args.task and args.task_id != args.task:
-        print(
-            f"agent-dispatch claim: conflicting task ids (positional '{args.task_id}' "
-            f"vs --task '{args.task}'). Pass the task id once.",
-            file=sys.stderr,
-        )
-        return 2
-    machine, worktree = _identity(args)
-    all_repos = bool(getattr(args, "all_repos", False))
-    repo = None if all_repos else _scope_repo(args)
-    if not all_repos and not repo:
-        print(_REPO_UNRESOLVED, file=sys.stderr)
-        return 2
-    with _client(args) as c:
-        task = c.claim(
-            worker_id=args.worker_id,
-            capabilities=args.capability or [],
-            repo=repo,
-            all_repos=all_repos,
-            machine=machine,
-            worktree=worktree,
-            task_id=task_id,
-            lease_seconds=args.lease_seconds,
-            evaluation=getattr(args, "evaluation", False),
-        )
-    if task is None:
-        print("no claimable task", file=sys.stderr)
-        return 3
-    return _emit(_enrich(task))
-
-
-def _cmd_worktree_status(args: argparse.Namespace) -> int:
-    machine, worktree = _identity(args)
-    if not machine or not worktree:
-        print(
-            "agent-dispatch: could not resolve worktree identity — pass --machine and --worktree "
-            "(agent-worktrees not found, or not inside a worktree)",
-            file=sys.stderr,
-        )
-        return 2
-    repo = _scope_repo(args)
-    if not repo:
-        print(_REPO_UNRESOLVED, file=sys.stderr)
-        return 2
-    with _client(args) as c:
-        inbox = c.mine(machine, worktree, repo=repo)
-    return _emit(_enrich({"machine": machine, "worktree": worktree, "repo": repo, **inbox}))
-
-
-def _cmd_show(args: argparse.Namespace) -> int:
-    with _client(args) as c:
-        task = c.get(args.task_id)
-        # Surface the accumulated append-only progress log alongside the task, so
-        # a (re-)embodied worker reads its goal, done-criteria, AND recorded
-        # progress in one call and resumes from it rather than restarting.
-        task = dict(task)
-        task["progress_log"] = c.progress_log(args.task_id)
-        if getattr(args, "history", False):
-            task["attachments"] = c.attachments(args.task_id)
-    from . import tracking
-
-    return _emit(tracking.enrich_task(_enrich(task)))
-
-
 def _split_owner(owner: str | None) -> tuple[str | None, str | None]:
     """Split a ``machine/worktree`` worker id into its parts.
 
@@ -665,41 +615,6 @@ def _split_owner(owner: str | None) -> tuple[str | None, str | None]:
     return (machine or None, worktree or None)
 
 
-def _cmd_claimant(args: argparse.Namespace) -> int:
-    """task -> claiming worktree: resolve which worktree owns a task.
-
-    The inbound-ledger reverse of ``worktree-status`` (worktree -> its tasks).
-    Returns a focused record: the actual claimant (``owner`` = machine/worktree,
-    once the task is claimed/started), or -- for a not-yet-claimed task -- the
-    pinned ``target`` worktree, with ``claimed`` distinguishing the two.
-    """
-    with _client(args) as c:
-        task = c.get(args.task_id)
-    status = task.get("status")
-    owner = task.get("owner")
-    claimed = bool(owner) and status in ("claimed", "started", "suspended", "completed")
-    if claimed:
-        machine, worktree = _split_owner(owner)
-        source = "owner"
-    else:
-        # Not yet claimed -- surface the pin (intended claimant), if any.
-        machine = task.get("target_machine")
-        worktree = task.get("target_worktree")
-        source = "target" if worktree else None
-    result = {
-        "task_id": args.task_id,
-        "status": status,
-        "claimed": claimed,
-        "worker_id": owner if claimed else None,
-        "machine": machine,
-        "worktree": worktree,
-        "resolved_from": source,
-        "owner_session_id": task.get("owner_session_id"),
-        "repo": task.get("repo"),
-    }
-    return _emit(_enrich(result))
-
-
 def _simple(method: str, *arg_names: str):
     """Build a handler that forwards positional args to a client method."""
 
@@ -709,21 +624,6 @@ def _simple(method: str, *arg_names: str):
         return _emit(result)
 
     return handler
-
-
-def _cmd_yield(args: argparse.Namespace) -> int:
-    worker_id = _resolve_owner(args, verb="yield")
-    if worker_id is None:
-        return 2
-    exclude = args.exclude
-    if not exclude and getattr(args, "exclude_self", None):
-        machine, worktree = _identity(args)
-        if args.exclude_self == "worktree" and worktree:
-            exclude = f"worktree:{worktree}"
-        elif args.exclude_self == "machine" and machine:
-            exclude = f"machine:{machine}"
-    with _client(args) as c:
-        return _emit(c.yield_task(args.task_id, worker_id, note=args.note, exclude=exclude))
 
 
 def _owner_from_identity(args: argparse.Namespace) -> str | None:
@@ -762,243 +662,11 @@ def _resolve_owner(args: argparse.Namespace, *, verb: str) -> str | None:
     return worker_id
 
 
-def _cmd_start(args: argparse.Namespace) -> int:
-    worker_id = _resolve_owner(args, verb="start")
-    if worker_id is None:
-        return 2
-    with _client(args) as c:
-        return _emit(c.start(args.task_id, worker_id))
-
-
-def _cmd_suspend(args: argparse.Namespace) -> int:
-    worker_id = _resolve_owner(args, verb="suspend")
-    if worker_id is None:
-        return 2
-    with _client(args) as c:
-        return _emit(c.suspend(args.task_id, worker_id, reason=args.reason))
-
-
-def _cmd_resume(args: argparse.Namespace) -> int:
-    worker_id = _resolve_owner(args, verb="resume")
-    if worker_id is None:
-        return 2
-    with _client(args) as c:
-        return _emit(
-            c.resume(
-                args.task_id,
-                worker_id,
-                wake=args.wake,
-                message=args.message,
-            )
-        )
-
-
-def _cmd_release(args: argparse.Namespace) -> int:
-    worker_id = _resolve_owner(args, verb="release")
-    if worker_id is None:
-        return 2
-    with _client(args) as c:
-        return _emit(c.release(args.task_id, worker_id, reason=args.reason))
-
-
 def _hold_actor(args: argparse.Namespace) -> str:
     """The acting operator identity for a pause/unpause -- an explicit
     ``--actor``, else whatever worktree identity resolves (for audit-trail
     legibility only; pause/unpause are operator actions, never owner-gated)."""
     return getattr(args, "actor", None) or _owner_from_identity(args) or "operator"
-
-
-def _cmd_pause(args: argparse.Namespace) -> int:
-    with _client(args) as c:
-        return _emit(
-            c.set_hold(
-                args.task_id,
-                reason=args.reason,
-                actor=_hold_actor(args),
-                expected_status=args.expected_status,
-            )
-        )
-
-
-def _cmd_unpause(args: argparse.Namespace) -> int:
-    with _client(args) as c:
-        return _emit(
-            c.clear_hold(
-                args.task_id,
-                actor=_hold_actor(args),
-                expected_status=args.expected_status,
-            )
-        )
-
-
-def _cmd_embody_interactive(args: argparse.Namespace) -> int:
-    """Run Phase 1's interactive-embodiment transaction and print its result.
-
-    The caller (an operator's own shell, or the Picker acting on their
-    behalf) is the machine the new/resumed worktree lives on -- resolved from
-    CWD via agent-worktrees, or an explicit ``--machine`` override for a
-    CWD-neutral caller (e.g. a service acting on an operator's request).
-    """
-    from .identity import resolve_machine
-    from .interactive_embody import InteractiveEmbodimentError, launch_interactive_embodiment
-
-    machine = getattr(args, "machine", None) or resolve_machine()
-    if not machine:
-        print(
-            "agent-dispatch: could not resolve this machine's identity "
-            "(agent-worktrees absent?). Pass --machine explicitly.",
-            file=sys.stderr,
-        )
-        return 2
-    with _client(args) as c:
-        try:
-            result = launch_interactive_embodiment(
-                c,
-                args.task_id,
-                machine=machine,
-                project=args.project,
-            )
-        except InteractiveEmbodimentError as exc:
-            print(f"agent-dispatch: {exc}", file=sys.stderr)
-            return 1
-    return _emit(result)
-
-
-def _cmd_force_stop(args: argparse.Namespace) -> int:
-    from .force_stop import ForceStopError, force_stop
-    from .identity import resolve_machine
-
-    actor = getattr(args, "actor", None) or _owner_from_identity(args)
-    with _client(args) as c:
-        try:
-            result = force_stop(
-                c,
-                args.task_id,
-                local_machine=getattr(args, "machine", None) or resolve_machine(),
-                actor=actor,
-            )
-        except ForceStopError as exc:
-            print(f"agent-dispatch: {exc}", file=sys.stderr)
-            return 1
-    return _emit(result)
-
-
-def _cmd_reset(args: argparse.Namespace) -> int:
-    if args.to != "proposed":
-        print(
-            f"agent-dispatch: reset only supports --to proposed today, not {args.to!r}",
-            file=sys.stderr,
-        )
-        return 2
-    with _client(args) as c:
-        return _emit(
-            c.reset(
-                args.task_id,
-                reason=args.reason,
-                expected_status=args.expected_status,
-            )
-        )
-
-
-def _cmd_progress(args: argparse.Namespace) -> int:
-    worker_id = _resolve_owner(args, verb="progress")
-    if worker_id is None:
-        return 2
-    with _client(args) as c:
-        return _emit(
-            c.progress(
-                args.task_id,
-                worker_id,
-                phase=args.phase or "",
-                summary=args.summary,
-                blocker=args.blocker,
-                pr=args.pr,
-            )
-        )
-
-
-
-def _cmd_focus(args: argparse.Namespace) -> int:
-    # worktree-status-core convergence: a worktree's "focus" IS its status-core
-    # summary on the worktree record (the single owning layer). There is no
-    # parallel focus store -- writes forward through the `agent-worktrees status`
-    # verb (single-writer contract) and reads DERIVE from `agent-worktrees list
-    # --json`. `progress` stays task-scoped; only this worktree-scoped focus
-    # converges.
-    from .identity import aw_list_records, aw_set_summary
-
-    def _focus_row(w: dict) -> dict:
-        return {
-            "machine": w.get("machine"),
-            "worktree": w.get("id"),
-            "focus": (w.get("summary") or "").strip(),
-            "updated_at": w.get("status_note_at"),
-        }
-
-    if args.list:
-        rows = [
-            _focus_row(w)
-            for w in aw_list_records(machine=args.machine)
-            if (w.get("summary") or "").strip()
-        ]
-        return _emit(rows)
-
-    machine, worktree = _identity(args)
-    if not machine or not worktree:
-        print(
-            "agent-dispatch: could not resolve this worktree's identity — run "
-            "inside a worktree, or pass --machine and --worktree.",
-            file=sys.stderr,
-        )
-        return 2
-
-    if not args.focus_text:
-        # Show this worktree's current focus (its status-core summary).
-        mine = [w for w in aw_list_records(machine=machine) if w.get("id") == worktree]
-        return _emit(
-            _focus_row(mine[0]) if mine and (mine[0].get("summary") or "").strip() else {}
-        )
-
-    # Write-through to the status core (never a parallel store). The write
-    # always targets the CWD worktree via the `agent-worktrees status` verb.
-    if not aw_set_summary(args.focus_text):
-        print(
-            "agent-dispatch: focus write-through failed (agent-worktrees status "
-            "unavailable, or not inside a worktree).",
-            file=sys.stderr,
-        )
-        return 2
-    return _emit(
-        {
-            "machine": machine,
-            "worktree": worktree,
-            "focus": args.focus_text.strip(),
-        }
-    )
-
-
-def _cmd_complete(args: argparse.Namespace) -> int:
-    # Owner is optional: a worker that claimed under its CWD identity can
-    # complete with just the task id -- we resolve the same machine/worktree
-    # owner. This is what lets a taken-over successor finish a handoff task with
-    # one clean command (`agent-dispatch complete <id>`) once the goal is met.
-    worker_id = _resolve_owner(args, verb="complete")
-    if worker_id is None:
-        return 2
-    try:
-        result = _read_result(args)
-    except (OSError, ValueError) as exc:
-        print(f"agent-dispatch: invalid result: {exc}", file=sys.stderr)
-        return 2
-    with _client(args) as c:
-        return _emit(
-            c.complete(
-                args.task_id,
-                worker_id,
-                result_ref=args.result_ref,
-                result=result,
-            )
-        )
 
 
 def _read_result(args: argparse.Namespace) -> object | None:
@@ -1026,34 +694,6 @@ def _read_result(args: argparse.Namespace) -> object | None:
     except (ResultValidationError, ResultTooLargeError) as exc:
         raise ValueError(str(exc)) from exc
     return result
-
-
-def _cmd_abandon(args: argparse.Namespace) -> int:
-    from . import reattach as _reattach
-
-    with _client(args) as c:
-        try:
-            result = _reattach.cli_abandon(c, args)
-        except _reattach.AbandonRefused as exc:
-            print(f"agent-dispatch abandon: {exc}", file=sys.stderr)
-            return 2
-    return _emit(result)
-
-
-def _cmd_reattach(args: argparse.Namespace) -> int:
-    """Reattach a terminal task's still-live session (Phase 9 / copilot-extensions#2884)."""
-    from . import reattach as _reattach
-
-    with _client(args) as c:
-        try:
-            result = _reattach.reattach(
-                c, args.task_id, args.session_id, host=args.host, resume=not args.no_resume
-            )
-        except _reattach.ReattachError as exc:
-            print(f"agent-dispatch reattach: {exc}", file=sys.stderr)
-            return 1
-    return _emit(result.as_dict())
-
 
 
 #: The `agent-worktrees` worktree-root naming convention observed throughout
