@@ -31,6 +31,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from .config import _repo_matches_codespace
 from .lease import Lease, list_leases
@@ -640,6 +641,150 @@ def _short_claim_ref(ref: str) -> str:
     return f"{worktree}@{machine}" if machine else worktree
 
 
+def _claims_summary_for_worktree(worktree_id: str) -> str:
+    """The ranked ``claims_summary`` for the worktree claiming this box
+    (picker-venue-pivots Phase 1), via the shared ``agent_worktrees.claims_rank``
+    module -- the same ranking every claims-showing pivot consumes.
+
+    Lazily imports ``agent_worktrees`` (mirroring ``config
+    ._registered_repo_paths``'s own cross-plugin pattern): agent-codespaces
+    does not declare a hard dependency on agent-worktrees, so an environment
+    where it is not installed alongside still renders a full payload -- just
+    without a ``claims_summary``. Never raises: an empty/unknown ``worktree_id``,
+    a missing record, or an import failure all degrade to ``""``.
+    """
+    if not worktree_id:
+        return ""
+    try:
+        from agent_worktrees import claim_kinds_registry, claims_rank, tracking
+    except ImportError:
+        return ""
+    try:
+        record = tracking.load_record_by_id(worktree_id)
+    except Exception:
+        return ""
+    if record is None:
+        return ""
+    try:
+        pecking_order = claim_kinds_registry.effective_pecking_order()
+        label_overrides = claim_kinds_registry.effective_label_overrides()
+    except Exception:
+        pecking_order = None
+        label_overrides = None
+    try:
+        return claims_rank.summarize_claims(
+            record.resources,
+            pecking_order=pecking_order,
+            label_overrides=label_overrides,
+        )
+    except Exception:
+        return ""
+
+
+#: agent-bridge liveness labels (``LiveSessionInfo.liveness`` /
+#: ``routes.live_sessions._live_liveness``) that read as "a turn is actually
+#: running right now" for the picker's compact ``sess`` column -- "stalled"
+#: still means a turn is in flight (just silent past the stall threshold), so
+#: it counts as LIVE alongside "active"; only "idle"/None do not.
+_LIVE_TURN_LIVENESS = frozenset({"active", "stalled"})
+
+
+def _bridge_client_from_env() -> Any | None:
+    """A ``BridgeClient`` dialed at the locally-configured agent-bridge
+    daemon, or ``None`` when agent-bridge isn't installed alongside, has no
+    auth token yet (not started), or any other resolution step fails.
+
+    Deliberately **not** ``BridgeClient.from_config()`` -- that classmethod
+    prints to stderr and calls ``sys.exit(1)`` when the auth token is
+    missing, which is correct for a one-shot CLI command but would corrupt
+    (or kill) `agent-codespaces pool --picker-json`'s own output merely
+    because agent-bridge happens not to be running. This replicates its
+    config/port/token resolution (routing-table re-resolution omitted --
+    per the original's own comment, that's "an optimization, never a hard
+    dependency") but degrades to ``None`` instead of exiting.
+    """
+    try:
+        import yaml
+        from agent_bridge.client import BridgeClient
+        from agent_bridge.config import config_dir
+        from agent_bridge.models import default_port
+    except ImportError:
+        return None
+    try:
+        cfg_path = config_dir() / "config.yaml"
+        auth_path = config_dir() / "auth.yaml"
+        if not auth_path.exists():
+            return None
+        auth_data = yaml.safe_load(auth_path.read_text(encoding="utf-8")) or {}
+        token = auth_data.get("token")
+        if not token:
+            return None
+        port = default_port()
+        bind = "127.0.0.1"
+        if cfg_path.exists():
+            data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+            port = data.get("port") or port
+            bind = data.get("bind", bind) or bind
+        if bind in ("0.0.0.0", ""):
+            bind = "127.0.0.1"
+        elif bind == "::":
+            bind = "::1"
+        return BridgeClient(f"http://{bind}:{port}", str(token), timeout=5)
+    except Exception:
+        return None
+
+
+def _live_session_for_venue(kind: str, target: str) -> dict[str, Any] | None:
+    """The registered agent-bridge live session whose ``venue`` targets this
+    ``kind``/``target`` (e.g. ``"codespace"``/a CodeSpace name), or ``None``
+    when agent-bridge is unreachable/not installed or no session matches.
+
+    Never raises -- an offline or absent agent-bridge simply means no
+    live-session join, not a broken pool listing (picker-venue-pivots
+    Phase 1)."""
+    if not target:
+        return None
+    client = _bridge_client_from_env()
+    if client is None:
+        return None
+    try:
+        sessions = client.list_live_sessions(include_dead=False)
+    except Exception:
+        return None
+    for session in sessions or []:
+        venue = (session or {}).get("venue") or {}
+        if venue.get("kind") == kind and venue.get("target") == target:
+            return session
+    return None
+
+
+def _sess_column(live_session: dict[str, Any] | None, worktree_id: str) -> str:
+    """The Worktrees pane's own compact ``sess``/``live`` column vocabulary
+    (picker-venue-pivots design), reused as-is: ``"LIVE"`` when agent-bridge
+    reports an actually-running turn, ``"IDLE"`` when a worktree is driving
+    but no turn is live, else ``""`` when nothing is driving at all."""
+    if live_session and live_session.get("liveness") in _LIVE_TURN_LIVENESS:
+        return "LIVE"
+    if worktree_id:
+        return "IDLE"
+    return ""
+
+
+def _activity_from_live_session(live_session: dict[str, Any] | None) -> str:
+    """The transient-activity half of line two: the live session's most
+    recent ``latest_progress`` beat (``"{phase}: {summary}"``, or just
+    ``summary`` with no phase), or ``""`` when there is no live session or
+    it hasn't reported one yet (graceful-absence, never a placeholder)."""
+    if not live_session:
+        return ""
+    progress = live_session.get("latest_progress") or {}
+    summary = progress.get("summary") if isinstance(progress, dict) else None
+    if not summary:
+        return ""
+    phase = progress.get("phase")
+    return f"{phase}: {summary}" if phase else str(summary)
+
+
 def picker_payload(
     members: list[PoolMember],
     budget: Budget,
@@ -712,6 +857,16 @@ def picker_payload(
             # 3b: make the stale lock legible on the fallback subtitle too.
             gone = "\u26a0 holder worktree gone (orphaned lock)"
             subtitle = f"{subtitle} · {gone}" if subtitle else gone
+        # Phase 1 (picker-venue-pivots): the agent-bridge live-session join,
+        # keyed on venue.kind == "codespace" + venue.target == this box's own
+        # name -- the transient-activity half of line two, and the sess/live
+        # column signal. "" / "" / blank when agent-bridge is unreachable, not
+        # installed, or no session is registered for this box (see
+        # _live_session_for_venue / _activity_from_live_session / _sess_column).
+        live_session = _live_session_for_venue("codespace", m.name)
+        activity = _activity_from_live_session(live_session)
+        if activity:
+            subtitle = f"{subtitle} - {activity}" if subtitle else f"{friendly} - {activity}"
         entries.append({
             "id": m.name,
             "name": m.name,            # durable GitHub-assigned id
@@ -720,6 +875,14 @@ def picker_payload(
             "status": status,          # RUNNING / STALE / STOPPED (compact STATE)
             "worktree": worktree,      # claiming worktree short id (-> TASK title)
             "subtitle": subtitle,      # optional 2nd line (durable id + claim)
+            # Phase 1 (picker-venue-pivots): the claiming worktree's own ranked
+            # claims-list (PR/bug/etc.), via the shared claims_rank module --
+            # "" when unclaimed, unresolvable, or agent-worktrees isn't
+            # installed alongside (see _claims_summary_for_worktree).
+            "claims_summary": _claims_summary_for_worktree(worktree),
+            # Phase 1: the Worktrees pane's own compact sess/live column,
+            # reused as-is -- LIVE/IDLE/blank (see _sess_column).
+            "sess": _sess_column(live_session, worktree),
             "repository": m.repository,
             "repo": _short_repo(m.repository),
             "branch": m.branch,
