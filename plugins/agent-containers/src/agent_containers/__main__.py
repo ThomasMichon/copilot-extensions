@@ -262,6 +262,8 @@ def main(argv: list[str] | None = None) -> int:
     ns_recreate_p.add_argument("name", help="Container name")
     ns_recreate_p.add_argument("--expected-container-id", required=True)
     ns_recreate_p.add_argument("--timeout", type=float, default=600.0)
+    from .workspace import add_workspace_subparsers
+    add_workspace_subparsers(sub)
 
     # --- relay-profile (declarative credential-relay seam for agent-bridge #892 Inc 2)
     sub.add_parser(
@@ -375,6 +377,9 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_namespace_ensure_ready(args)
         if args.command == "namespace-recreate":
             return _cmd_namespace_recreate(args)
+        if args.command.startswith("namespace-workspace-"):
+            from .workspace import dispatch_workspace_command
+            return dispatch_workspace_command(args)
         if args.command == "relay-profile":
             return _cmd_relay_profile()
     except RuntimeError as e:
