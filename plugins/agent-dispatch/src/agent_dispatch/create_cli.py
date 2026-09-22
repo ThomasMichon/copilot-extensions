@@ -715,14 +715,14 @@ def register_create_commands(sub) -> None:
         parents=[create_parent],
         help="enqueue a task (write a self-contained title + --prompt so a producer sweeping existing tasks can judge duplication)",
     )
-    p.set_defaults(func=_cmd_create)
+    p.set_defaults(func=_core()._cmd_create)
 
     p = sub.add_parser(
         "propose",
         parents=[create_parent],
         help="draft an unclaimable 'proposed' task (the propose -> queue lifecycle): like create but always proposed, never claimed or spawned; run 'queue <id>' to make it claimable",
     )
-    p.set_defaults(func=_cmd_propose)
+    p.set_defaults(func=_core()._cmd_propose)
 
     p = sub.add_parser(
         "approve", aliases=["queue"], help="move a proposed task to queued (commit it to binding)"
@@ -741,7 +741,7 @@ def register_create_commands(sub) -> None:
         help="canonical repo lane (default: the calling repo)",
     )
     fp.add_argument("--source", required=True)
-    fp.set_defaults(func=_cmd_producer_fence)
+    fp.set_defaults(func=_core()._cmd_producer_fence)
     fp = fence_sub.add_parser(
         "handoff",
         help="retire generation N and activate N+1 for one selected producer",
@@ -757,4 +757,4 @@ def register_create_commands(sub) -> None:
         "--required-label",
         help="immutable label requirement set on initial scope activation",
     )
-    fp.set_defaults(func=_cmd_producer_fence)
+    fp.set_defaults(func=_core()._cmd_producer_fence)
