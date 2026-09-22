@@ -2505,9 +2505,9 @@ validation re-ran green at **193 passed**.
 
 ### 2026-09-21 — Checked the Phase 0 preview screenshots; found and fixed a manifest drift
 The operator asked to check the Phase 0 design-preview screenshots (captured
-2026-09-17, `2026/09.17 agent-dispatch Tasks Pane UX Overhaul Previews` —
-OneDrive per this session's own evidence-organization convention) for use as
-visual-regression and vision-alignment assets going forward.
+2026-09-17, kept in the operator's own local evidence-storage location,
+outside this repo) for use as visual-regression and vision-alignment assets
+going forward.
 
 Reviewed all 10 images directly. Every layout/interaction rule they document
 still holds against the current engine: the phase-colour palette, the
@@ -2549,13 +2549,12 @@ engine rather than trusting five-day-old images. Diffing the two sets found:
    data, unrelated to engine behavior.
 
 **Going forward, this is the visual-regression workflow**: rerun
-`render_tasks_preview.py` and diff by eye against the latest dated OneDrive
-baseline folder before merging any change that touches `engine.py`'s
-render/column-fit path, `pivots.py`'s manifest contract, or this pivot's own
-manifest -- there is no committed-to-git baseline (this repo's own
-`tasks-preview/.gitignore` deliberately keeps generated PNGs out of git as
-binary artifacts), so the OneDrive-dated-folder convention is the durable
-home for both the regression baseline and the vision's own visual
-reference. Archived today's fresh, manifest-fixed set to
-`2026/09.21 agent-dispatch Tasks Pane UX Overhaul Previews (current
-baseline)` superseding the 09.17 set as the current reference.
+`render_tasks_preview.py` and diff by eye against the latest dated reference
+set before merging any change that touches `engine.py`'s render/column-fit
+path, `pivots.py`'s manifest contract, or this pivot's own manifest -- there
+is no committed-to-git baseline (this repo's own `tasks-preview/.gitignore`
+deliberately keeps generated PNGs out of git as binary artifacts), so a
+dated local-evidence folder (outside this repo, per the operator's own
+storage convention) is the durable home for both the regression baseline
+and the vision's own visual reference. Archived today's fresh, manifest-
+fixed set as the new current reference, superseding the 2026-09-17 set.
