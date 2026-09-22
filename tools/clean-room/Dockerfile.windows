@@ -85,3 +85,12 @@ RUN $ErrorActionPreference = 'Stop'; \
     Expand-Archive -LiteralPath C:\mingit.zip -DestinationPath C:\mingit; \
     Remove-Item C:\mingit.zip
 RUN [Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';C:\mingit\cmd', 'Machine')
+
+# copilot-extensions itself has deep nested paths (skills/plugins trees) that
+# can exceed Windows' legacy 260-char MAX_PATH once cloned under a long
+# marketplace-cache prefix (confirmed: phase-1 marketplace add failed with
+# "fatal: unable to checkout working tree" after a full clone). Enable git's
+# own long-path support AND the OS-level opt-in so both the git client and
+# the Win32 file APIs it calls agree paths over 260 chars are legal.
+RUN C:\mingit\cmd\git.exe config --system core.longpaths true
+RUN New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1 -PropertyType DWORD -Force | Out-Null
