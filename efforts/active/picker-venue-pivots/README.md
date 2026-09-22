@@ -8,13 +8,17 @@
   `worktree/tmichon-cloud1-win-20260922-002606-0a9a` (merged,
   `ThomasMichon/copilot-extensions#3268`); Phase 3 (Open action) landed via
   `worktree/tmichon-cloud1-win-20260922-022834-a59b` (merged,
-  `ThomasMichon/copilot-extensions#3279`); Phase 4 is in
-  `worktree/tmichon-cloud1-win-20260922-113718-4a4e`. Each remaining phase
-  gets its own fresh worktree off `main` (Tasks-pane precedent).
+  `ThomasMichon/copilot-extensions#3279`); Phase 4 landed via
+  `worktree/tmichon-cloud1-win-20260922-113718-4a4e` (merged,
+  `ThomasMichon/copilot-extensions#3285`); Phase 5 + Phase 4 follow-ups are
+  in `worktree/tmichon-cloud1-win-20260922-123333-e9c8`. Each remaining phase
+  or follow-up slice gets its own fresh worktree off `main`
+  (Tasks-pane precedent).
 - **Created:** 2026-09-21
-- **Status:** Active — Phase 0, Phase 1, Phase 2, and Phase 3 fully
-  complete and merged. Phase 4 (driving-worktree navigation + odsp-web PR
-  auto-claim) complete, pending its own PR.
+- **Status:** Active — Phases 0-5 are complete, but the effort still has one
+  outstanding live/manual validation item: a real odsp-web CodeSpace
+  push→PR check proving the auto-claimed PR appears in the claims list with
+  no manual claim step.
 - **Vision:** [`visions/venue-pivots-ux`](../../../visions/venue-pivots-ux/README.md)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#3253`
 - **Sub-issues:** Phase 1 `ThomasMichon/copilot-extensions#3254` (closed),
@@ -102,14 +106,15 @@ realization.
 
 - **Worktree:** Phase 0+1 (`tmichon-cloud1-win-20260921-183442-d733`, PR
   #3219), Phase 2 (`tmichon-cloud1-win-20260922-002606-0a9a`, PR #3268),
-  and Phase 3 (`tmichon-cloud1-win-20260922-022834-a59b`, PR #3279) are
-  merged. This session is in a **fresh** worktree
-  (`tmichon-cloud1-win-20260922-113718-4a4e`) for Phase 4, per the
-  per-phase-worktree convention (Tasks-pane precedent) -- each remaining
-  phase gets another fresh worktree off `main`.
-- **Current phase:** Phase 0, 1, 2, and 3 are **fully complete and
-  merged**. **Phase 4 (driving-worktree navigation + odsp-web PR
-  auto-claim) is fully complete, not yet landed/PR'd.**
+  Phase 3 (`tmichon-cloud1-win-20260922-022834-a59b`, PR #3279), and Phase 4
+  (`tmichon-cloud1-win-20260922-113718-4a4e`, PR #3285) are merged. This
+  session is in a **fresh** worktree
+  (`tmichon-cloud1-win-20260922-123333-e9c8`) for Phase 5 (design-only) plus
+  the deferred Phase 4 follow-ups, per the per-phase-worktree convention
+  (Tasks-pane precedent).
+- **Current phase:** Phases 0-5 are **complete**. The effort itself remains
+  open only because one Validation Plan item is still outstanding: the
+  live/manual odsp-web CodeSpace push→PR verification.
 - **Umbrella + sub-issues filed** (2026-09-21):
   `ThomasMichon/copilot-extensions#3253` (umbrella), `#3254`/`#3255`
   (closed -- Phase 1/2 landed), `#3256`-`#3258` (Phase 3-5, open).
@@ -130,22 +135,19 @@ realization.
   interactive TTY to a remote venue). 12 new tests; full worktree-manager
   suite green (1 pre-existing unrelated flake confirmed by isolated
   re-run) plus the real-manifest contract test.
-- **Immediate next step:** open Phase 4's own PR from
-  `tmichon-cloud1-win-20260922-113718-4a4e` (create-pr, mirror #3219/
-  #3268/#3279's flow), close sub-issue `#3257` on landing, then start
-  Phase 5 (design-only new-venue → embody handoff) in a fresh worktree. If
-  any implementation-phase session changes a row/menu's
-  visual shape, re-run the render script (`worktree-manager\.venv\Scripts\
-  python.exe worktree-manager\scripts\picker-snapshot\venue-preview\
-  render_venue_preview.py --out-dir worktree-manager\scripts\picker-snapshot
-  \venue-preview\out`) and diff the fresh output against the committed
-  `design-previews/*.png` — a deliberate difference is fine (update the
-  committed copies + note why in the Journal); an unnoticed one is exactly
-  the drift this comparison exists to catch. Note: this fresh worktree's
-  `worktree-manager/.venv` and its `svg2png.mjs` node deps are **not**
-  pre-built here (unlike the Phase 0 worktree) -- run `uv sync --extra dev`
-  and `npm install` under `worktree-manager/scripts/picker-snapshot/`
-  first if you need to actually render, not just validate manifests.
+- **Immediate next step:** run the remaining live/manual odsp-web validation
+  in a dedicated odsp-web session that is explicitly positioned to create and
+  clean up a real ADO topic branch/PR, then check off the final Validation
+  Plan item, close umbrella issue `#3253`, and archive this effort. The
+  Phase 5 design note is recorded at
+  [`phase5-new-venue-embody-design.md`](phase5-new-venue-embody-design.md)
+  and cross-linked to
+  [`agent-bridge-cli-mode-sessions`](../agent-bridge-cli-mode-sessions/README.md);
+  it is input to that parallel implementation effort, not further work here.
+  The Phase 4 preview follow-up is also now resolved conclusively: a fresh
+  re-render is pixel-identical to the committed approved PNGs, and the
+  byte-only drift comes from the PNG IDAT stream encoding, not a visual
+  regression, so the committed `design-previews/*.png` remain unchanged.
 
 ## Context
 
@@ -376,6 +378,16 @@ embodied Copilot session) is already recorded in the vision's own
 "New codespace / New container — provision, then embody" section; this
 note's contribution is the concrete engine-level gap discovered while
 trying to scope it as a manifest change.
+
+### Phase 5 design note: finalized create→embody handoff
+
+The finalized design note for the deferred New-venue flow now lives in
+[`phase5-new-venue-embody-design.md`](phase5-new-venue-embody-design.md).
+It makes explicit that this effort owns only the picker-side UX contract
+(target-info prompt → provider-specific provision call → hand-off into the
+already-existing venue `copilot` path), while
+[`agent-bridge-cli-mode-sessions`](../agent-bridge-cli-mode-sessions/README.md)
+owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
 
 ## Plan
 
@@ -651,18 +663,31 @@ trying to scope it as a manifest change.
       same `PR #2481` string a pre-existing/manual claim would render.
 
 ### Phase 5 — New-venue → embody design handoff (design only)
-- [ ] Record the finalized create→embody flow design (target-info prompt,
+- [x] Record the finalized create→embody flow design (target-info prompt,
       provisioning call, hand-off into a fresh Copilot session) as a design
       note in this effort, explicitly scoped as **input to** the parallel
       drive-CLI-agents-over-SSH effort rather than an implementation
-      obligation of this effort.
-- [ ] Cross-link that design note from both efforts once the other effort
-      exists / is identified.
+      obligation of this effort. **Done (2026-09-22):** recorded in
+      [`phase5-new-venue-embody-design.md`](phase5-new-venue-embody-design.md),
+      grounded against the already-landed venue `copilot` verbs and
+      `agent-bridge-cli-mode-sessions`' CLI-mode launch path.
+- [x] Cross-link that design note from both efforts once the other effort
+      exists / is identified. **Done:** the "parallel drive-CLI-agents-over-SSH"
+      effort is the active
+      [`agent-bridge-cli-mode-sessions`](../agent-bridge-cli-mode-sessions/README.md)
+      campaign; both effort READMEs now link the shared design note.
 
 ## Validation Plan
 
 - [x] Before/after preview screenshots reviewed and approved by the
       operator before any implementation PR opens (Phase 0 gate).
+- [x] Re-render the six approved venue-preview PNGs after the Phase 4
+      row/menu changes and confirm that any byte diff is either
+      pixel-identical PNG encoding drift or a deliberate design change with
+      updated committed copies. **Resolved (2026-09-22):** all six
+      regenerated previews were pixel-identical to the committed approved
+      PNGs; only the PNG IDAT stream bytes changed, so the approved copies
+      remain unchanged.
 - [ ] Unit tests confirming the Codespaces manifest's `subtitle` actually
       renders `pool.picker_payload`'s computed value (a regression test for
       the exact dropped-field bug this effort fixes).
@@ -690,9 +715,70 @@ trying to scope it as a manifest change.
       topic branch, open the resulting PR, and confirm it appears in the
       row's claims-list with no manual claim step (Phase 4's own
       "validate beyond unit tests" case, not just a mocked push→PR
-      fixture).
+      fixture). **Still outstanding:** see the 2026-09-22 Journal entries
+      below for the exact venue/access probing and why this remains an
+      explicit operator/manual follow-up rather than a completed check.
 
 ## Journal
+
+- **2026-09-22 (latest+14)** — Completed Phase 5's design-only closeout in
+  fresh worktree `tmichon-cloud1-win-20260922-123333-e9c8`. Searched the
+  active effort tree for the parallel "drive-CLI-agents-over-SSH" work and
+  identified [`agent-bridge-cli-mode-sessions`](../agent-bridge-cli-mode-sessions/README.md)
+  as the real counterpart: it already owns the provider-agnostic
+  venue-`copilot` reserve/connect/release path and the underlying
+  CLI-mode Session Host launch contract (`agent-bridge live-sessions
+  cli-mode launch` -> `agent-worktrees embody`). Recorded the finalized
+  New-venue design note as
+  [`phase5-new-venue-embody-design.md`](phase5-new-venue-embody-design.md):
+  picker-side **target-info prompt → provider-specific provision call
+  (`agent-codespaces create ...` / `agent-containers up ...`) → hand off to
+  the same provider `copilot <name>` path Phase 3 already uses for Open**,
+  with the still-open pivot-registry gap called out explicitly (a true
+  row-independent/pivot-level action slot is still needed to surface "New
+  codespace"/"New container" declaratively). Cross-linked the note from both
+  efforts and checked off Phase 5's remaining Plan items. The effort is now
+  phase-complete; only validation remains open.
+
+- **2026-09-22 (latest+13)** — Resolved the deferred Phase 4 preview-diff
+  question conclusively in the Phase 5 worktree. Built the fresh
+  `worktree-manager` preview environment here (`uv sync --extra dev` plus
+  `npm install` under `worktree-manager/scripts/picker-snapshot/`), reran
+  `render_venue_preview.py`, and compared each regenerated PNG against the
+  committed approved copy with a real pixel diff (Pillow `ImageChops
+  .difference`, not just hashes). Result: **all six pairs are RGBA-identical**
+  (`bbox=None` for every comparison) and still match in dimensions; the only
+  difference is byte-level drift inside the PNG `IDAT` stream
+  (same `IHDR`/`IEND`, no metadata chunks). So the Phase 4 row/menu work did
+  **not** silently change the approved visuals in this worktree, and the
+  committed `design-previews/*.png` stay untouched to avoid meaningless diff
+  noise. Added the Validation Plan check above so future sessions can close
+  the same question explicitly rather than rediscovering it from the Journal.
+
+- **2026-09-22 (latest+12)** — Investigated the remaining live/manual
+  odsp-web validation honestly instead of hand-waving it. Using the exact
+  session-catalog `agent-worktrees` / `agent-codespaces` binstubs,
+  `agent-worktrees related resolve odsp-web` confirmed the preferred locus
+  is a CodeSpace with checkout `/workspaces/odsp-web`; `gh codespace list`
+  showed existing odsp-web CodeSpaces; `agent-codespaces check
+  friendly-eureka-x55xwv59xrwfv6qx --json` proved at least one venue is
+  fully CLI-mode ready; and `agent-codespaces ssh` against the available
+  venues showed two separate blockers to *this* session doing the full
+  push→real-PR validation itself:
+  (1) the two already-available CodeSpaces were both under other live
+  worktrees' exclusive claims, so using them would require an explicit
+  `--force-claim` takeover of someone else's active venue; and
+  (2) a separate shutdown CodeSpace
+  (`weekly-update-page-tools-6697r9j7qgp3wxp`) could be started and
+  inspected safely enough to confirm the real odsp-web checkout and push
+  remote (`/workspaces/odsp-web`, ADO push URL present, host-side ADO bearer
+  minting available), but completing the actual Validation Plan item from
+  here would still mean mutating a real odsp-web topic branch and opening a
+  real ADO PR from an unattended copilot-extensions session with no
+  sanctioned cleanup/ownership context. I therefore left the checkbox
+  unchecked and recorded the exact commands + facts here so a dedicated
+  odsp-web session (or the operator directly) can run the real branch/PR
+  drill before closing the umbrella.
 
 - **2026-09-22 (latest+11)** — Completed Phase 4 in fresh worktree
   `tmichon-cloud1-win-20260922-113718-4a4e`. Grounded the
