@@ -99,6 +99,35 @@ def test_build_wt_live_reflects_headless_activity_only(monkeypatch):
     assert by_id["cli-embodied"]["wt_live"] is None
 
 
+def test_build_cli_openable_matches_interactive_embody_statuses(monkeypatch):
+    monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
+    rows = board_cli._build(
+        [
+            {"id": "proposed", "status": "proposed", "updated_at": 10},
+            {"id": "queued", "status": "queued", "updated_at": 9},
+            {"id": "suspended", "status": "suspended", "updated_at": 8},
+            {"id": "blocked", "status": "suspended", "awaiting_steer": True, "updated_at": 7},
+            {"id": "pooled", "status": "queued", "pool": {"kind": "headless"}, "updated_at": 6},
+            {"id": "held", "status": "queued", "hold_reason": "pause", "updated_at": 5},
+            {"id": "claimed", "status": "claimed", "updated_at": 4},
+            {"id": "started", "status": "started", "updated_at": 3},
+            {"id": "completed", "status": "completed", "updated_at": 2},
+        ],
+        machine="m1",
+        recent_mins=120,
+    )
+    by_id = {row["id"]: row for row in rows}
+    assert by_id["proposed"]["cli_openable"] is True
+    assert by_id["queued"]["cli_openable"] is True
+    assert by_id["suspended"]["cli_openable"] is True
+    assert by_id["blocked"]["cli_openable"] is False
+    assert by_id["pooled"]["cli_openable"] is False
+    assert by_id["held"]["cli_openable"] is False
+    assert by_id["claimed"]["cli_openable"] is False
+    assert by_id["started"]["cli_openable"] is False
+    assert by_id["completed"]["cli_openable"] is False
+
+
 def test_build_artifacts_summary_reads_claims_from_relay(monkeypatch):
     monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
     rows = board_cli._build(
@@ -111,20 +140,22 @@ def test_build_artifacts_summary_reads_claims_from_relay(monkeypatch):
         }],
         machine="m1",
         recent_mins=120,
-        relay_fetch=lambda _repo, _worktree: {
-            "repo": "github.com/example/repo",
-            "worktree_id": "wt1",
-            "fetched_at": 995.0,
-            "poll_interval_seconds": 10.0,
-            "bundle": {
-                "facts": {
-                    "claims": {
-                        "confirmed": True,
-                        "observed_at": 995.0,
-                        "value": {"resources": [{"kind": "pr"}], "owner_ref": "abc/def"},
+        relay_fetch_many=lambda refs: {
+            ("github.com/example/repo", "wt1"): {
+                "repo": "github.com/example/repo",
+                "worktree_id": "wt1",
+                "fetched_at": 995.0,
+                "poll_interval_seconds": 10.0,
+                "bundle": {
+                    "facts": {
+                        "claims": {
+                            "confirmed": True,
+                            "observed_at": 995.0,
+                            "value": {"resources": [{"kind": "pr"}], "owner_ref": "abc/def"},
+                        }
                     }
-                }
-            },
+                },
+            }
         },
     )
     assert rows[0]["artifacts_summary"] == "1 claim, owner ref"
@@ -143,20 +174,22 @@ def test_build_stale_relay_renders_unknown_worktree_status(monkeypatch):
         }],
         machine="m1",
         recent_mins=120,
-        relay_fetch=lambda _repo, _worktree: {
-            "repo": "github.com/example/repo",
-            "worktree_id": "wt1",
-            "fetched_at": 900.0,
-            "poll_interval_seconds": 10.0,
-            "bundle": {
-                "facts": {
-                    "claims": {
-                        "confirmed": True,
-                        "observed_at": 900.0,
-                        "value": {"resources": [{"kind": "pr"}], "owner_ref": None},
+        relay_fetch_many=lambda refs: {
+            ("github.com/example/repo", "wt1"): {
+                "repo": "github.com/example/repo",
+                "worktree_id": "wt1",
+                "fetched_at": 900.0,
+                "poll_interval_seconds": 10.0,
+                "bundle": {
+                    "facts": {
+                        "claims": {
+                            "confirmed": True,
+                            "observed_at": 900.0,
+                            "value": {"resources": [{"kind": "pr"}], "owner_ref": None},
+                        }
                     }
-                }
-            },
+                },
+            }
         },
     )
     assert rows[0]["artifacts_summary"] == "stale/unknown"

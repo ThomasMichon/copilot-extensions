@@ -64,9 +64,9 @@
       "key": "open-cli",
       "label": "Open into a CLI session",
       "kind": "internal",
-      "verb": "open-cli",
+      "verb": "embody-cli",
       "when": {"cli_openable": "true"},
-      "description": "PROPOSED — not yet wired. Would open (or, for Proposed/Queued, create) this task's worktree into an interactive Copilot CLI session via Phase 1 item 3's ownership transaction (`agent-dispatch embody --interactive`). Currently gated off (`board_cli`'s `cli_openable` is hard-`False`): the generic Worktrees `open-cli` internal verb this action currently names has no `target_worktree` to find for a Proposed/Queued task and bypasses the ownership transaction for a Suspended one. Needs its own dedicated internal verb before this can be safely enabled -- Phase 7's own scope (pure UI wiring onto Phase 2's now-landed CLI verbs)."
+      "description": "Runs the task's interactive-embodiment transaction (`agent-dispatch embody --interactive`): Proposed/Queued tasks create or claim a worktree first, Suspended tasks rebind their existing one, then the picker exits into that worktree's normal CLI resume flow. Failure stays in-picker with the transaction's own error instead of crashing the action dispatch."
     },
     {
       "key": "kick",
