@@ -104,6 +104,7 @@ def test_status_via_daemon_uses_live_daemon_when_reachable():
 
 
 def test_status_with_boot_uses_default_request_deadline(monkeypatch):
+    expected_deadline = 8.0
     observed = {}
 
     def request(*args, **kwargs):
@@ -129,9 +130,10 @@ def test_status_with_boot_uses_default_request_deadline(monkeypatch):
     )
 
     assert result == {"state": "CLEAN"}
+    assert worktree_status_daemon.REQUEST_DEADLINE_S == expected_deadline
     assert observed == {
-        "request_deadline_s": 8.0,
-        "release_timeout": 8.0,
+        "request_deadline_s": worktree_status_daemon.REQUEST_DEADLINE_S,
+        "release_timeout": worktree_status_daemon.REQUEST_DEADLINE_S,
     }
 
 
