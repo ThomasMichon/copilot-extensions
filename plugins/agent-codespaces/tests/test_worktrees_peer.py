@@ -191,9 +191,12 @@ def test_packaged_shared_bytes_are_canonical():
     assert (root / "libs" / "peer-launch" / "peer_launch.py").read_bytes() == (
         Path(worktrees.__file__).with_name("_peer_launch.py").read_bytes()
     )
-    assert (root / "libs" / "installation-context" / "installation_context.py").read_bytes() == (
+    context_dir = root / "libs" / "installation-context"
+    assert (context_dir / "installation_context.py").read_bytes() == (
         Path(worktrees.__file__).with_name("_installation_context.py").read_bytes()
     )
+    for fragment in sorted(context_dir.glob("_installation_context_*.py")):
+        assert fragment.read_bytes() == Path(worktrees.__file__).with_name(fragment.name).read_bytes()
 
 
 def test_session_writer_uses_source_hook_not_legacy_wrappers(monkeypatch, tmp_path):

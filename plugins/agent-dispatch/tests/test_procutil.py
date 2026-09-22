@@ -222,10 +222,11 @@ def _make_live_peer(cell: Path, plugin: str, version: str) -> Path:
     source = Path(__file__).resolve().parents[2] / plugin / "scripts"
     for name in ("resolve-runtime.ps1", "resolve-runtime.sh"):
         shutil.copyfile(source / name, scripts / name)
-    shutil.copyfile(
-        source / "installation-context" / "installation_context.py",
-        scripts / "installation-context" / "installation_context.py",
-    )
+    for primitive in (source / "installation-context").glob("*.py"):
+        shutil.copyfile(
+            primitive,
+            scripts / "installation-context" / primitive.name,
+        )
     environment, _ = installation_context._current_environment(
         environment=os.environ, os_profile=None, platform=None, wsl_distro=None,
     )

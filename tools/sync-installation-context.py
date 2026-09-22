@@ -29,6 +29,20 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 CANONICAL_DIR = REPO / "libs" / "installation-context"
 FILES = (
+    "_installation_context_base.py",
+    "_installation_context_files.py",
+    "_installation_context_source.py",
+    "_installation_context_receipts.py",
+    "_installation_context_snapshot.py",
+    "_installation_context_runtime_slot_ownership.py",
+    "_installation_context_runtime_slot_completion.py",
+    "_installation_context_resolution.py",
+    "_installation_context_activation.py",
+    "_installation_context_legacy_attribution.py",
+    "_installation_context_legacy_transition.py",
+    "_installation_context_legacy_retirement.py",
+    "_installation_context_maintenance.py",
+    "_installation_context_mode_cli.py",
     "installation_context.py",
     "installation-context.sh",
     "installation-context.ps1",
@@ -77,15 +91,17 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
         for name in FILES
     ] + [
         (
-            CANONICAL_DIR / "installation_context.py",
+            CANONICAL_DIR / name,
             REPO / "plugins" / plugin / "src" / plugin.replace("-", "_")
-            / "_installation_context.py",
+            / ("_installation_context.py" if name == "installation_context.py" else name),
         )
         for plugin in ADOPTERS
         if plugin in {
             "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
             "agent-logger", "agent-index", "agent-machines",
         }
+        for name in FILES
+        if name.endswith(".py")
     ] + [
         (
             CANONICAL_DIR / name,
@@ -95,10 +111,12 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
         for name in LEGACY_ENTRYPOINT_FILES
     ] + [
         (
-            CANONICAL_DIR / "installation_context.py",
-            REPO / relative_dir / "_installation_context.py",
+            CANONICAL_DIR / name,
+            REPO / relative_dir / ("_installation_context.py" if name == "installation_context.py" else name),
         )
         for relative_dir, _label in STANDALONE_PYTHON_ADOPTERS
+        for name in FILES
+        if name.endswith(".py")
     ]
 
 

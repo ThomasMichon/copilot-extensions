@@ -11,7 +11,9 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def test_all_packaged_launchers_and_validators_match():
     canonical = ROOT / "libs" / "peer-launch" / "peer_launch.py"
-    primitive = ROOT / "libs" / "installation-context" / "installation_context.py"
+    primitive_dir = ROOT / "libs" / "installation-context"
+    primitive = primitive_dir / "installation_context.py"
+    fragments = sorted(path.name for path in primitive_dir.glob("_installation_context_*.py"))
     for plugin, filename in (
         ("agent-bridge", "_peer_launch.py"),
         ("agent-dispatch", "peer_launch.py"), ("agent-codespaces", "_peer_launch.py"),
@@ -21,6 +23,8 @@ def test_all_packaged_launchers_and_validators_match():
         package = ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
         assert (package / filename).read_bytes() == canonical.read_bytes()
         assert (package / "_installation_context.py").read_bytes() == primitive.read_bytes()
+        for fragment in fragments:
+            assert (package / fragment).read_bytes() == (primitive_dir / fragment).read_bytes()
 
 
 def _import_roots(source: str) -> set[str]:

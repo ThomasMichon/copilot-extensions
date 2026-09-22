@@ -480,10 +480,13 @@ def test_packaged_peer_launch_bytes_are_canonical() -> None:
     root = Path(__file__).resolve().parents[3]
     packaged = PLUGIN / "src" / "agent_index" / "_peer_launch.py"
     assert (root / "libs" / "peer-launch" / "peer_launch.py").read_bytes() == packaged.read_bytes()
+    context_dir = root / "libs" / "installation-context"
     assert (
-        (root / "libs" / "installation-context" / "installation_context.py").read_bytes()
+        (context_dir / "installation_context.py").read_bytes()
         == (PLUGIN / "src" / "agent_index" / "_installation_context.py").read_bytes()
     )
+    for fragment in sorted(context_dir.glob("_installation_context_*.py")):
+        assert fragment.read_bytes() == (PLUGIN / "src" / "agent_index" / fragment.name).read_bytes()
 
 
 def test_invalid_local_config_never_falls_through(

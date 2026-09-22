@@ -15,7 +15,23 @@ authors = [
 dependencies = []
 
 [tool.setuptools]
-py-modules = ["installation_context"]
+py-modules = [
+    "installation_context",
+    "_installation_context_base",
+    "_installation_context_files",
+    "_installation_context_source",
+    "_installation_context_receipts",
+    "_installation_context_snapshot",
+    "_installation_context_runtime_slot_ownership",
+    "_installation_context_runtime_slot_completion",
+    "_installation_context_resolution",
+    "_installation_context_activation",
+    "_installation_context_legacy_attribution",
+    "_installation_context_legacy_transition",
+    "_installation_context_legacy_retirement",
+    "_installation_context_maintenance",
+    "_installation_context_mode_cli",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
