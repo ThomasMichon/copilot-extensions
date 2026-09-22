@@ -26,6 +26,8 @@ from .agent_registry_namespace import (
     CliNamespaceResolver,
     NamespaceResolver,
     RestrictedCliNamespaceResolver,
+    _NS_BAD_STATE_EXIT,
+    _NS_NOT_FOUND_EXIT,
 )
 from .agent_registry_relay import (
     FileTokenAuthorizer,
@@ -322,6 +324,8 @@ __all__ = [
     "RestrictedCliNamespaceResolver",
     "SpawnTarget",
     "SshEnvironment",
+    "_NS_BAD_STATE_EXIT",
+    "_NS_NOT_FOUND_EXIT",
     "_NAMESPACE_LIST_DEFAULT_TTL",
     "_NAMESPACE_LIST_OFF",
     "_NAMESPACE_LIST_RESOLVER_DEFAULT_TIMEOUT",
