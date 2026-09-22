@@ -703,6 +703,53 @@ from the host's).
 
 ## Journal
 
+### 2026-09-22 — Unified `agent-bridge create <target> --cli`, anchor-mode default, and registration-identity fix
+
+Follow-up request after the live CodeSpace validation below: the operator
+wanted a single, natural command shape for delivering a remote CLI-mode
+session -- not a raw `gh codespace ssh` command, not a manually-composed
+`agent-bridge live-sessions cli-mode reserve` + venue-verb pairing (which
+turn out to *conflict*, since `create_cli_mode_reservation` refuses a
+second reserve for the same identity regardless of claimed status), and
+critically **not requiring a worktree at the far end** -- a CodeSpace's
+anchor checkout is what the existing headless ACP dispatch already drives
+directly, and CLI mode needed to match that same contract rather than
+inventing a worktree requirement headless dispatch never had.
+
+Landed in three stacked pieces (PR ThomasMichon/copilot-extensions#3245,
+two commits, then PR #3249):
+
+1. **`agent-worktrees --anchor` mode** (`embody`/`copilot`): a new
+   mutually-exclusive `--anchor` flag that embodies directly in the active
+   project's anchor checkout, no worktree created or required, session id
+   synthesized as `anchor-<repo_name>`. Turned out to need almost no new
+   plumbing -- `_build_launch_cmd`/`_build_env`/`_repo_session_env`/
+   `_preflight_launch` were already generic over an arbitrary `work_dir`
+   string.
+2. **Anchor-default venue verbs + registration-identity fix**:
+   `--worktree-id` changed from required to optional on `agent-codespaces
+   copilot`/`agent-containers copilot` (omitting it now resolves an
+   `anchor-<repo_name>` identity and forwards `--anchor` remotely instead);
+   added `agent-worktrees get session-scope-id` (worktree id, or
+   `anchor-<repo_name>` when in the anchor) and switched `agent-bridge`'s
+   `metadata.mjs` to read it directly instead of deriving `worktree_id`
+   from `basename(worktree-dir)` (empty in the anchor -- would have
+   silently broken self-registration for every anchor-mode session).
+3. **`agent-bridge create <target> "<prompt>" --cli`** (this repo's actual
+   ask all along, per the operator's explicit "this is exactly what I was
+   asking for for this whole effort"): resolves a namespaced target's
+   `<prefix>:<name>` to its owning plugin's binstub
+   (`codespace:` → `agent-codespaces`, `container:` → `agent-containers`,
+   fixed mapping, no in-process import of either -- preserves the existing
+   agent-bridge/sibling-plugin process-boundary CLI seam, #892/#1643) and
+   execs `<binstub> copilot <name>` with inherited stdio, forwarding
+   `--seed`/`--driver`. A bare/unprefixed target is refused with a pointer
+   to `agent-worktrees copilot` directly (no agent-bridge mediation needed
+   locally). 8 new tests (`test_create_cli_mode.py`); full agent-bridge
+   suite otherwise unchanged (569 passed, 2 pre-existing unrelated
+   failures). Closes the "unified CLI-mode dispatch" feature request that
+   turned out to be this whole session's real thread, start to finish.
+
 ### 2026-09-22 — Full live validation against a real odsp-web CodeSpace: 2 more bugs found and fixed; Phase 4 genuinely done end-to-end
 
 Continued from the container-only validation above with a request to prove
