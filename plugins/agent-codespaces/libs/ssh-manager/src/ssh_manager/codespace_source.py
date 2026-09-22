@@ -60,6 +60,24 @@ class CodespaceConfigSource:
     def codespace_name(self) -> str:
         return self._codespace_name
 
+    @property
+    def gh_env(self) -> dict | None:
+        """The pinned ``gh`` subprocess environment, or ``None`` (ambient).
+
+        Read by :class:`~ssh_manager.manager.ConnectionManager` (duck-typed
+        via ``getattr(config_source, "gh_env", None)``, so a plain
+        ``ConfigSource`` without this property is unaffected) and threaded
+        onto every SSH subprocess for the resulting connection -- not just
+        this source's own ``gh codespace ssh --config`` fetch. Without this,
+        the config fetch could be correctly pinned to the CodeSpace's owning
+        account while the actual connection (and, on Windows, the embedded
+        ProxyCommand's ``gh cs ssh --stdio`` child) silently fell back to
+        the ambient/active ``gh`` account -- a confusing 404 ("getting full
+        codespace details") whenever that ambient account differs from the
+        CodeSpace's owner.
+        """
+        return self._gh_env
+
     def get_ssh_config(self) -> SSHConfig:
         if self._config is not None:
             return self._config

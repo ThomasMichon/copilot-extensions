@@ -161,6 +161,22 @@ class ConnectionInfo:
     port_forwards: list[str] = field(default_factory=list)
     connection_identity: str = ""
     child_processes: list[asyncio.subprocess.Process] = field(default_factory=list)
+    # Environment override for every SSH subprocess spawned for this
+    # connection (control master, exec_command, open_stdio_channel,
+    # disconnect's ``-O exit``, and -- critically -- the Windows proxy
+    # broker's actual ProxyCommand child, e.g. ``gh cs ssh --stdio``).
+    # Sourced from the ``ConfigSource`` used to establish this connection
+    # (see ``ensure_connected``): a multi-account ``ConfigSource`` such as
+    # ``CodespaceConfigSource``/``CodespaceSource`` already pins its own
+    # *config-fetch* subprocess (``gh codespace ssh --config``) to the
+    # right account via this same env, but until this field existed nothing
+    # threaded it onward to the actual connection -- every SSH spawn after
+    # that point silently fell back to the ambient process environment's gh
+    # identity, producing a confusing 404 ("getting full codespace details")
+    # whenever that ambient account differs from the CodeSpace's owner.
+    # ``None`` preserves the historical ambient-inherit behavior for any
+    # ``ConfigSource`` that doesn't expose one.
+    env: dict[str, str] | None = None
 
     @property
     def multiplexed(self) -> bool:
@@ -255,13 +271,16 @@ class ConnectionManager:
 
             # Establish new connection
             config = await asyncio.to_thread(config_source.get_ssh_config)
-            return await self._connect(host, config, forwards)
+            env = getattr(config_source, "gh_env", None)
+            return await self._connect(host, config, forwards, env=env)
 
     async def _connect(
         self,
         host: str,
         config: SSHConfig,
         port_forwards: list[str],
+        *,
+        env: dict[str, str] | None = None,
     ) -> ConnectionInfo:
         """Establish a new master SSH connection."""
         ensure_socket_dir(self._platform)
@@ -275,7 +294,9 @@ class ConnectionManager:
         )
 
         if self._platform.supports_control_master:
-            proc = await self._start_control_master(config, socket, port_forwards)
+            proc = await self._start_control_master(
+                config, socket, port_forwards, env=env,
+            )
         else:
             # Direct mode -- no persistent master process
             proc = None
@@ -292,6 +313,7 @@ class ConnectionManager:
             platform=self._platform,
             port_forwards=port_forwards,
             connection_identity=config.connection_identity,
+            env=env,
         )
         self._connections[host] = info
 
@@ -308,6 +330,8 @@ class ConnectionManager:
         config: SSHConfig,
         socket: Path,
         port_forwards: list[str],
+        *,
+        env: dict[str, str] | None = None,
     ) -> asyncio.subprocess.Process:
         """Start an SSH ControlMaster process."""
         args = self._base_ssh_args(config)
@@ -331,6 +355,7 @@ class ConnectionManager:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
 
         # Wait briefly for connection to establish or fail
@@ -445,6 +470,7 @@ class ConnectionManager:
             ),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=info.env,
         )
 
         timed_out = False
@@ -511,6 +537,7 @@ class ConnectionManager:
                 if discard_stderr
                 else asyncio.subprocess.PIPE
             ),
+            env=info.env,
             # POSIX: give the ssh child its own session/process group so
             # teardown signals only the ssh process tree -- never the parent's
             # group. Windows uses taskkill /T against the root pid.
@@ -718,6 +745,7 @@ class ConnectionManager:
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
+                    env=info.env,
                 )
                 await asyncio.wait_for(proc.wait(), timeout=5.0)
             except (TimeoutError, asyncio.TimeoutError) as e:
