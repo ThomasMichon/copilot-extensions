@@ -265,3 +265,95 @@ def test_build_stage_command_large_payload_keeps_command_tiny(tmp_path: Path):
     assert len(cmd) < 1024
     # The payload (on stdin) is large; that's fine because it never hits argv.
     assert len(payload_b64) > 200_000
+
+
+# --- transient SSH/tunnel retry hardening (_exec_with_retry) ---
+
+import asyncio  # noqa: E402
+
+from agent_codespaces import __main__ as cli  # noqa: E402
+
+
+class _Res:
+    def __init__(self, exit_code, stderr="", timed_out=False):
+        self.exit_code = exit_code
+        self.stderr = stderr
+        self.timed_out = timed_out
+
+
+def test_is_transient_ssh_failure_classification():
+    assert cli._is_transient_ssh_failure(_Res(255))
+    assert cli._is_transient_ssh_failure(_Res(-1, timed_out=True))
+    assert cli._is_transient_ssh_failure(_Res(1, "kex_exchange_identification: connection reset"))
+    assert cli._is_transient_ssh_failure(_Res(1, "wsarecv: An existing connection was forcibly closed"))
+    # A genuine nonzero exit from the remote command is NOT transient.
+    assert not cli._is_transient_ssh_failure(_Res(0))
+    assert not cli._is_transient_ssh_failure(_Res(2, "bash: command not found"))
+
+
+def test_exec_with_retry_recovers_from_transient(monkeypatch):
+    async def _nosleep(_d):
+        return
+    monkeypatch.setattr(cli.asyncio, "sleep", _nosleep)
+    calls = []
+    reconnects = []
+
+    class M:
+        async def exec_command(self, name, command, **kw):
+            calls.append(kw)
+            return _Res(255, "forcibly closed") if len(calls) == 1 else _Res(0, "ok")
+
+    async def reconnect():
+        reconnects.append(True)
+
+    res = asyncio.run(cli._exec_with_retry(
+        M(), "cs", "rm -rf d && mkdir d", input_bytes=b"payload", reconnect=reconnect,
+    ))
+    assert res.exit_code == 0
+    assert len(calls) == 2  # retried once, then succeeded
+    assert reconnects == [True]  # reconnected between attempts
+    assert calls[0].get("input_bytes") == b"payload"  # input forwarded on retry
+
+
+def test_exec_with_retry_gives_up_after_attempts(monkeypatch):
+    async def _nosleep(_d):
+        return
+    monkeypatch.setattr(cli.asyncio, "sleep", _nosleep)
+    calls = []
+
+    class M:
+        async def exec_command(self, name, command, **kw):
+            calls.append(1)
+            return _Res(255, "forcibly closed")
+
+    res = asyncio.run(cli._exec_with_retry(M(), "cs", "x", attempts=3))
+    assert res.exit_code == 255  # returns the last result, never raises
+    assert len(calls) == 3
+
+
+def test_exec_with_retry_no_retry_on_genuine_error():
+    calls = []
+
+    class M:
+        async def exec_command(self, name, command, **kw):
+            calls.append(1)
+            return _Res(2, "real command error")
+
+    res = asyncio.run(cli._exec_with_retry(M(), "cs", "x"))
+    assert res.exit_code == 2
+    assert len(calls) == 1  # a genuine failure is not retried
+
+
+def test_exec_with_retry_omits_input_bytes_when_absent():
+    seen = []
+
+    class M:
+        # No input_bytes kwarg -- mirrors register/read callers whose exec_command
+        # signature does not accept it.
+        async def exec_command(self, name, command, *, timeout=None):
+            seen.append(timeout)
+            return _Res(0)
+
+    res = asyncio.run(cli._exec_with_retry(M(), "cs", "x", timeout=240.0))
+    assert res.exit_code == 0
+    assert seen == [240.0]

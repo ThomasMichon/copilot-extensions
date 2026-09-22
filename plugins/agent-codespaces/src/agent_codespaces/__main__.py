@@ -26,6 +26,7 @@ import json
 import logging
 import math
 import os
+import re
 import shlex
 import shutil
 import stat
@@ -1260,12 +1261,85 @@ async def _settle_codespace_on_disconnect(
     return False
 
 
+# SSH exit code 255 means the ssh client itself failed (connection/tunnel), not
+# the remote command. Combined with these stderr markers it identifies the
+# intermittent Azure dev-tunnel resets (~10% of ops on this cluster) that must be
+# retried rather than treated as a hard failure.
+_TRANSIENT_SSH_EXIT = 255
+_TRANSIENT_SSH_STDERR = re.compile(
+    r"forcibly closed|connection reset|broken pipe|closed network connection|"
+    r"connection closed|wsarecv|kex_exchange_identification|"
+    r"error getting tunnel|Connection timed out|Timeout, server .* not responding",
+    re.IGNORECASE,
+)
+
+
+def _is_transient_ssh_failure(result) -> bool:
+    """True when a CommandResult reflects a transient SSH/tunnel failure (not a
+    genuine nonzero exit from the remote command)."""
+    if getattr(result, "timed_out", False):
+        return True
+    if result.exit_code == _TRANSIENT_SSH_EXIT:
+        return True
+    return bool(
+        result.exit_code not in (0, None)
+        and _TRANSIENT_SSH_STDERR.search(result.stderr or "")
+    )
+
+
+async def _exec_with_retry(
+    manager,
+    name: str,
+    command: str,
+    *,
+    timeout: float | None = 60.0,
+    input_bytes: bytes | None = None,
+    attempts: int = 3,
+    reconnect=None,
+):
+    """``exec_command`` with retry-and-backoff on transient SSH/tunnel failures.
+
+    Only for IDEMPOTENT commands -- a retry may re-run the command. The dev-tunnel
+    cluster resets ~10% of connections, and a single reset otherwise fails a whole
+    stage/register/read op that would have succeeded on a second try. Retries on an
+    SSH connection failure (exit 255), a timeout, or connection-reset stderr; a
+    genuine nonzero exit from the remote command is returned immediately. Between
+    attempts it best-effort ``reconnect``s to heal a dropped ControlMaster (a
+    no-op for direct-SSH, where each exec is a fresh connection).
+    """
+    delay = 2.0
+    # Only forward input_bytes when provided, so callers/mocks whose exec_command
+    # does not accept it (register/read paths) keep working unchanged.
+    kwargs = {"timeout": timeout}
+    if input_bytes is not None:
+        kwargs["input_bytes"] = input_bytes
+    result = await manager.exec_command(name, command, **kwargs)
+    for attempt in range(1, attempts):
+        if not _is_transient_ssh_failure(result):
+            return result
+        log.warning(
+            "Transient SSH failure on %s (attempt %d/%d, exit %s); retrying in %.0fs: %s",
+            name, attempt, attempts, result.exit_code, delay,
+            (result.stderr or "").strip()[:200],
+        )
+        if reconnect is not None:
+            try:
+                await reconnect()
+            except Exception as exc:
+                log.debug("Reconnect before retry on %s failed: %s", name, exc)
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, 8.0)
+        result = await manager.exec_command(name, command, **kwargs)
+    return result
+
+
 async def _stage_plugins(
     manager,
     name: str,
     sources: list[str],
     *,
     repo_roots=(),
+    reconnect=None,
 ) -> list[str]:
     """Stage related-repo plugin payloads onto the CodeSpace over SSH.
 
@@ -1292,8 +1366,9 @@ async def _stage_plugins(
         dest = dest_dir(source)
         try:
             command, payload_b64 = build_stage_command(payload, dest)
-            result = await manager.exec_command(
-                name, command, timeout=60.0, input_bytes=payload_b64
+            result = await _exec_with_retry(
+                manager, name, command, timeout=60.0,
+                input_bytes=payload_b64, reconnect=reconnect,
             )
             if result.exit_code == 0:
                 dirs.append(dest)
@@ -1531,7 +1606,7 @@ async def _provision_harness(manager, name: str, config) -> None:
 
 
 async def _register_codespace_plugins(
-    manager, name: str, repo: str | None, config
+    manager, name: str, repo: str | None, config, *, reconnect=None
 ) -> list[str]:
     """Register CodeSpace-scoped plugins into the CodeSpace + return their dirs.
 
@@ -1619,7 +1694,11 @@ async def _register_codespace_plugins(
             wrapped = f"bash -l -c {shlex.quote(command)}"
             # Settings merge is quick; the pre-install (`copilot plugin install`)
             # clones the marketplace over the relay, so allow a generous window.
-            result = await manager.exec_command(name, wrapped, timeout=240.0)
+            # Idempotent (the merge is CAS-like and installs are best-effort), so
+            # retry through a transient tunnel reset.
+            result = await _exec_with_retry(
+                manager, name, wrapped, timeout=240.0, reconnect=reconnect,
+            )
             if result.exit_code == 0:
                 log.info(
                     "Registered %d CodeSpace-scoped plugin(s) on %s: %s",
@@ -1643,6 +1722,7 @@ async def _register_codespace_plugins(
                 name,
                 [s.source for s in local_specs],
                 repo_roots=getattr(config, "source_paths", ()) or (),
+                reconnect=reconnect,
             )
             if staged:
                 log.info(

@@ -301,18 +301,32 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             return True
         from .relay_readiness import remote_relay_ready
 
-        serving = (
-            _owner.owner_serves_relay(args.name) if defer_to_owner
-            else relay_forward is not None and relay_forward.is_alive
-        )
-        if not serving or not await remote_relay_ready(manager, args.name, relay_port):
-            print(
-                "[FAIL] Required credential relay is not serving through the "
-                "CodeSpace reverse forward; refusing to launch.",
-                file=sys.stderr,
+        # The dev-tunnel cluster resets ~10% of connections, so a single readiness
+        # probe (or the proxy handshake behind it) can transiently fail even when
+        # the relay is healthy. Re-check a few times with backoff before failing
+        # closed -- the supervised forward self-heals a dropped proxy connection.
+        delay = 1.5
+        for attempt in range(1, 4):
+            serving = (
+                _owner.owner_serves_relay(args.name) if defer_to_owner
+                else relay_forward is not None and relay_forward.is_alive
             )
-            return False
-        return True
+            if serving and await remote_relay_ready(manager, args.name, relay_port):
+                return True
+            if attempt < 3:
+                log.info(
+                    "Credential relay not yet serving on %s (attempt %d/3); "
+                    "re-checking in %.1fs",
+                    args.name, attempt, delay,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 6.0)
+        print(
+            "[FAIL] Required credential relay is not serving through the "
+            "CodeSpace reverse forward; refusing to launch.",
+            file=sys.stderr,
+        )
+        return False
 
     async def _relay_serving_probe() -> bool:
         from .relay_readiness import remote_relay_ready
@@ -366,6 +380,14 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 1.5, 20.0)
+
+        # Heal a dropped ControlMaster between retryable idempotent execs (plugin
+        # staging / registration). ensure_connected is idempotent: it reconnects
+        # only if the master died, and no-ops for a healthy or direct-SSH link.
+        async def _reconnect() -> None:
+            await manager.ensure_connected(
+                args.name, source, port_forwards, preserve_existing_forwards=True,
+            )
 
         # Deferring to the Connection Owner: wait briefly for it to bring up this
         # CodeSpace's relay before any git-dependent provisioning runs, so auth
@@ -456,6 +478,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             if not args.no_relay and not no_plugin_staging:
                 cs_plugin_dirs = await _register_codespace_plugins(
                     manager, args.name, getattr(args, "repo", None), config,
+                    reconnect=_reconnect,
                 )
 
             # Run repo-declared provision hooks (by-convention extras from the
@@ -504,6 +527,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 args.name,
                 stage_sources,
                 repo_roots=getattr(config, "source_paths", ()) or (),
+                reconnect=_reconnect,
             )
         # NB: the repo-own ``.ai`` lane is intentionally NOT folded here. A
         # CodeSpace ACP dispatch never runs through this front-owns-stdio ``ssh``
