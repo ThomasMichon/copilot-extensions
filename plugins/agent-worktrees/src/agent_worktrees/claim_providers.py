@@ -58,6 +58,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import stat
 import subprocess
 from dataclasses import dataclass
@@ -410,16 +411,40 @@ def _run_callback(
     return data
 
 
+#: Namespace and identifier characters this module ever passes through to a
+#: callback command line. Deliberately conservative (matches typical
+#: CodeSpace/container/task-id shapes: alnum plus a small, unambiguous
+#: punctuation set) -- rejecting anything else, rather than trying to escape
+#: it, is what actually closes the injection risk described below rather
+#: than merely narrowing it.
+_SAFE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+
+
 def split_namespaced_ref(ref: str) -> tuple[str, str] | None:
     """Split ``"<namespace>:<identifier>"`` into its two parts, or ``None``
     if ``ref`` carries no recognizable namespace prefix (a legacy,
-    pre-namespacing claim ref)."""
+    pre-namespacing claim ref) or either part contains a character outside
+    :data:`_SAFE_TOKEN_RE`.
+
+    The identifier ultimately reaches a callback command line -- on
+    Windows, `.cmd`/`.bat` callbacks are routed through ``cmd.exe``, whose
+    metacharacter parsing (``&``, ``|``, ``<``, ``>``, ``^``, ``%``, ``!``)
+    happens independently of, and before, any C-runtime argv quoting
+    (`subprocess.list2cmdline`) -- so a crafted ref such as
+    ``"codespace:foo&whoami"`` could otherwise terminate the intended
+    command and inject another. Rejecting any ref whose namespace or
+    identifier contains such a character (rather than attempting to escape
+    it perfectly for cmd.exe's own parser) closes this off at the source,
+    for every platform, not just Windows.
+    """
     if ":" not in ref:
         return None
     namespace, _, identifier = ref.partition(":")
     namespace = namespace.strip()
     identifier = identifier.strip()
     if not namespace or not identifier:
+        return None
+    if not _SAFE_TOKEN_RE.match(namespace) or not _SAFE_TOKEN_RE.match(identifier):
         return None
     return namespace, identifier
 
@@ -435,14 +460,19 @@ def resolve_claim_status(
     "..."}"`` on any absence, malformed manifest, or callback failure."""
     split = split_namespaced_ref(ref)
     if split is None:
-        return {"available": False, "reason": "ref has no namespace prefix"}
+        return {"available": False, "reason": "ref has no namespace prefix, or contains unsafe characters"}
     namespace, identifier = split
     providers, _findings = discover_claim_providers(plugins_root)
     provider = providers.get(namespace)
-    if provider is None or provider.status_command is None:
+    if provider is None:
         return {
             "available": False,
             "reason": f"no claim provider registered for namespace '{namespace}:'",
+        }
+    if provider.status_command is None:
+        return {
+            "available": False,
+            "reason": f"{provider.plugin} is a claim provider for '{namespace}:' but declares no status_command",
         }
     result = _run_callback(
         (*provider.status_command, "claim-status", identifier),
@@ -469,14 +499,19 @@ def resolve_claim_reclaim(
     failure. Without ``apply``, the provider must not act (dry-run)."""
     split = split_namespaced_ref(ref)
     if split is None:
-        return {"available": False, "reason": "ref has no namespace prefix"}
+        return {"available": False, "reason": "ref has no namespace prefix, or contains unsafe characters"}
     namespace, identifier = split
     providers, _findings = discover_claim_providers(plugins_root)
     provider = providers.get(namespace)
-    if provider is None or provider.reclaim_command is None:
+    if provider is None:
         return {
             "available": False,
             "reason": f"no claim provider registered for namespace '{namespace}:'",
+        }
+    if provider.reclaim_command is None:
+        return {
+            "available": False,
+            "reason": f"{provider.plugin} is a claim provider for '{namespace}:' but declares no reclaim_command",
         }
     argv = [*provider.reclaim_command, "claim-reclaim", identifier]
     if apply:

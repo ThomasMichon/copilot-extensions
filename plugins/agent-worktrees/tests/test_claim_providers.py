@@ -279,6 +279,18 @@ def test_duplicate_namespace_keeps_first_and_records_a_finding(tmp_path):
         ("legacy-unnamespaced-ref", None),
         ("codespace:", None),
         (":my-box-1", None),
+        # Regression: cmd.exe metacharacters (and other shell-significant
+        # characters) in either half must be rejected outright, not passed
+        # through to a callback command line.
+        ("codespace:foo&whoami", None),
+        ("codespace:foo|whoami", None),
+        ("codespace:foo;rm -rf", None),
+        ("codespace:foo`id`", None),
+        ("codespace:foo$(id)", None),
+        ("codespace:foo^whoami", None),
+        ("codespace:foo%PATH%", None),
+        ('codespace:foo"bar', None),
+        ("codespace:foo bar", None),
     ],
 )
 def test_split_namespaced_ref(ref, expected):
@@ -298,7 +310,7 @@ def test_resolve_claim_status_degrades_when_no_provider_registered(tmp_path):
 
 def test_resolve_claim_status_degrades_on_unnamespaced_ref(tmp_path):
     result = cp.resolve_claim_status("legacy-ref", plugins_root=tmp_path)
-    assert result == {"available": False, "reason": "ref has no namespace prefix"}
+    assert result == {"available": False, "reason": "ref has no namespace prefix, or contains unsafe characters"}
 
 
 def test_resolve_claim_status_invokes_the_callback_and_parses_json(tmp_path, monkeypatch):
@@ -434,6 +446,10 @@ def test_resolve_claim_reclaim_omits_apply_flag_in_dry_run(tmp_path, monkeypatch
 
 
 def test_resolve_claim_reclaim_degrades_when_no_reclaim_command_declared(tmp_path, monkeypatch):
+    """Regression: a provider that exists but only declares status_command
+    must be distinguished from an absent provider entirely -- the reason
+    must name the actual configuration gap, not falsely claim no provider
+    is registered at all."""
     def fake_discover(_plugins_root):
         provider = cp.ClaimProviderManifest(
             namespace="codespace",
@@ -446,7 +462,25 @@ def test_resolve_claim_reclaim_degrades_when_no_reclaim_command_declared(tmp_pat
     monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
     result = cp.resolve_claim_reclaim("codespace:my-box-1", apply=True, plugins_root=tmp_path)
     assert result["available"] is False
-    assert "no claim provider registered" in result["reason"]
+    assert "no claim provider registered" not in result["reason"]
+    assert "declares no reclaim_command" in result["reason"]
+
+
+def test_resolve_claim_status_degrades_when_no_status_command_declared(tmp_path, monkeypatch):
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            reclaim_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.resolve_claim_status("codespace:my-box-1", plugins_root=tmp_path)
+    assert result["available"] is False
+    assert "no claim provider registered" not in result["reason"]
+    assert "declares no status_command" in result["reason"]
 
 
 # --- _windows_batch_argv --------------------------------------------------
