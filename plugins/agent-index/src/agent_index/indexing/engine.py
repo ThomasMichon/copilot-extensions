@@ -264,6 +264,7 @@ def run_reindex(
     total_deleted = 0
     total_files_crawled = 0
     failed_sources: list[dict[str, str]] = []
+    sources_purged: list[str] = []
     start = time.monotonic()
 
     try:
@@ -331,6 +332,35 @@ def run_reindex(
                     profile.model_id, exc_info=True,
                 )
 
+    # Purge sources removed from the CURRENT corpus config (a harness's own
+    # checked-in defaults, a knowledge-repo overlay, or a personal/machine
+    # override) -- distinct from `gc_stale_sources`'s abandoned-naming-scheme
+    # cleanup below, and unlike it, cheap and safe on EVERY reindex (not just
+    # `--full`). Runs only when `source` names the whole configured set (an
+    # explicit single `--source` invocation doesn't see the full set, so it
+    # would otherwise purge every OTHER configured source). This is what lets
+    # a config change -- e.g. removing a source from `.agent-index/config.yaml`
+    # -- take effect on the very next routine reindex tick, with no full
+    # reindex and no service restart required.
+    if source is None and os.environ.get("AGENT_INDEX_REINDEX_GC", "1") != "0":
+        try:
+            from agent_index.indexing.gc import gc_unconfigured_sources
+
+            configured_names = frozenset(spec.name for spec in sources_to_index)
+            gc_summary = gc_unconfigured_sources(
+                multi_store, path_index, state, configured_names=configured_names,
+            )
+            purged = gc_summary["purged"]
+            if purged:
+                print("\nPurging sources removed from config...")
+                for src, cnt in sorted(purged.items()):
+                    print(f"  purged {src}: {cnt} chunks")
+                total_deleted += gc_summary["chunks_deleted"]
+                sources_purged = sorted(purged)
+        except Exception:
+            logger.warning("Unconfigured-source GC failed", exc_info=True)
+            print("  WARNING: unconfigured-source GC failed (see logs)")
+
     if full:
         state.last_full_reindex = time.time()
 
@@ -385,6 +415,8 @@ def run_reindex(
     }
     if failed_sources:
         result["sources_failed"] = failed_sources
+    if sources_purged:
+        result["sources_purged"] = sources_purged
 
     # Refresh the similarity-cluster artifact from the just-updated vectors.
     # Reuses stored embeddings (no re-embedding), so it runs post-index in the
