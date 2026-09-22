@@ -32,6 +32,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 export const DEFAULT_CRASH_LOG = join(tmpdir(), "context-handoff-extension-crash.log");
 
@@ -187,7 +188,13 @@ export function createEmergencyLog(logPath = DEFAULT_CRASH_LOG) {
                 }
               }
               if (stillTheSameOversizedFile) {
-                const staleSidecar = `${logPath}.stale-${process.pid}-${Date.now()}`;
+                // pid+timestamp alone could theoretically collide (two
+                // rotations from the same pid in the same millisecond, or a
+                // pid reused across an implausibly tight window); a
+                // randomUUID() suffix makes each sidecar name unique
+                // regardless, so a name collision can never overwrite an
+                // earlier, still-undeleted sidecar's diagnostics.
+                const staleSidecar = `${logPath}.stale-${process.pid}-${Date.now()}-${randomUUID()}`;
                 try {
                   renameSync(logPath, staleSidecar);
                 } catch {
