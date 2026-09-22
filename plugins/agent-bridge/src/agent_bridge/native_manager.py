@@ -10,6 +10,7 @@ import contextlib
 import json
 import os
 import re
+import time
 import uuid
 from pathlib import Path, PurePosixPath
 
@@ -20,6 +21,11 @@ from .native_venue import key as venue_key, venue, record_venue
 
 CAPABILITY = "codespace-native-control-v1"
 _LIVE = ("starting", "ready", "unrepresented", "unreachable")
+# A native execution continuously unreachable for this long is treated as a dead
+# venue (deleted CodeSpace / permanently gone) and force-retired by the monitor,
+# so the store + UI stop listing it. Conservative: transient dev-tunnel resets
+# recover in seconds, far inside this window; only a truly gone venue reaches it.
+_REAP_UNREACHABLE_SECONDS = 600.0
 
 # Bound how long a stop will wait to (re)establish a retirement transport before
 # it stops hanging. A dead/deleted venue used to block up to 30 min re-connecting
@@ -249,6 +255,10 @@ class NativeManager:
         self.monitor_task = None
         self.resource_tasks = {}
         self._host_resources = None
+        # execId -> monotonic time it was first seen continuously unreachable, so
+        # the monitor can reap a genuinely-dead venue (deleted/permanently gone)
+        # after a grace window without evicting a transiently-reset live one.
+        self._unreachable_since = {}
 
     def host_resources(self):
         if self._host_resources is None:
@@ -770,6 +780,28 @@ class NativeManager:
             raise NativeError("identity_mismatch", "Native session identity changed")
         return await self.transports[execution_id].request(operation, params)
 
+    async def _monitor_row(self, row) -> None:
+        current = await self.status(row["id"], row["generation"])
+        state = current["state"]
+        if state == "stopping":
+            await self.stop(row["id"], row["generation"])
+        elif state == "unreachable":
+            # Reap a venue that stays unreachable past the grace window (a
+            # deleted/permanently-gone CodeSpace), so it stops lingering in the
+            # store + console list and no longer churns doomed recovery each pass.
+            first = self._unreachable_since.setdefault(row["id"], time.monotonic())
+            if time.monotonic() - first >= _REAP_UNREACHABLE_SECONDS:
+                self._unreachable_since.pop(row["id"], None)
+                with contextlib.suppress(Exception):
+                    await self._forced_retirement(
+                        self.store().get(row["id"], row["generation"]),
+                        "reaped: venue continuously unreachable beyond grace",
+                    )
+        else:
+            # Any reachable/live state resets the unreachable clock so a
+            # transiently-reset box is never reaped.
+            self._unreachable_since.pop(row["id"], None)
+
     def start_monitor(self) -> None:
         async def monitor():
             while True:
@@ -779,9 +811,7 @@ class NativeManager:
                     continue
                 for row in self.records():
                     try:
-                        current = await self.status(row["id"], row["generation"])
-                        if current["state"] == "stopping":
-                            await self.stop(row["id"], row["generation"])
+                        await self._monitor_row(row)
                     except Exception:
                         continue
         self.monitor_task = asyncio.create_task(monitor())

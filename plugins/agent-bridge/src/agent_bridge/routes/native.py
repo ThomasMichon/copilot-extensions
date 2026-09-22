@@ -10,7 +10,7 @@ import json
 from fastapi import APIRouter, Body, HTTPException, Request, WebSocket
 
 from ..native_manager import CAPABILITY
-from ..native_store import NativeError
+from ..native_store import NativeError, receipt
 from ..session_host.client import SessionHostClient, TerminalOwnershipError
 from ..session_host.protocol import pack_frame
 from .acp_ws import _provided_token
@@ -52,8 +52,13 @@ async def resolve(request: Request, target: str):
 
 @router.get("")
 async def list_executions(request: Request):
+    # A cheap store read: return the last-known receipt per record WITHOUT a live
+    # probe per execution. The background monitor already refreshes state every 3s
+    # (and reaps dead venues), so the list stays accurate to within a monitor pass
+    # while a fleet with dead/unreachable execs no longer makes this endpoint (and
+    # the console it backs) hang. Live truth is still one GET /{id} away on select.
     owner = manager(request)
-    return {"executions": [await invoke(owner.status(row["id"])) for row in owner.records()]}
+    return {"executions": [receipt(row) for row in owner.records()]}
 
 
 @router.post("")

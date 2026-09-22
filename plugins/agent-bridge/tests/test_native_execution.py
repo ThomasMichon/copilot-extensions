@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -70,6 +71,32 @@ async def prepared(manager, value):
     result = await manager.start(value)
     await asyncio.gather(*list(manager.tasks.values()))
     return await manager.status(result["executionId"], result["generation"])
+
+
+@pytest.mark.asyncio
+async def test_monitor_reaps_venue_unreachable_past_grace(tmp_path, monkeypatch):
+    """A venue continuously unreachable past the grace is force-retired; a fresh
+    (transient) unreachable is left alone so a reset box is never evicted."""
+    from agent_bridge import native_manager as nm
+
+    manager = NativeManager(tmp_path / "controller", lambda: ["provider"])
+    monkeypatch.setattr(manager, "_schedule", lambda row, **kwargs: None)  # no background recovery
+    reaped = AsyncMock()
+    monkeypatch.setattr(manager, "_forced_retirement", reaped)
+    store = manager.store(create=True)
+    # A recorded execution with no transport/task reads as unreachable via status().
+    store.reserve("exec-dead", "gen-dead", "req-dead", "dead-space", str(tmp_path), "sig", {"spec": {}})
+
+    # First pass: unreachable but within grace -> clock starts, NOT reaped.
+    await manager._monitor_row(store.get("exec-dead", "gen-dead"))
+    assert not reaped.called
+    assert "exec-dead" in manager._unreachable_since
+
+    # Past the grace window -> reaped via forced retirement, clock cleared.
+    manager._unreachable_since["exec-dead"] = time.monotonic() - nm._REAP_UNREACHABLE_SECONDS - 1
+    await manager._monitor_row(store.get("exec-dead", "gen-dead"))
+    assert reaped.called
+    assert "exec-dead" not in manager._unreachable_since
 
 
 @pytest.mark.asyncio
