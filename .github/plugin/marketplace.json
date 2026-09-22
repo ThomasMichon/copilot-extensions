@@ -31,7 +31,7 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev159",
+      "version": "0.4.0-dev160",
       "source": "plugins/agent-codespaces"
     },
     {
