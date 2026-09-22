@@ -25,6 +25,13 @@
   CLI-mode session; the two compose (a CLI-mode session, once running, is
   discoverable through #2530's primitives like any other) but neither depends
   on the other.
+- **Related design input (picker-side, deferred implementation):**
+  [`picker-venue-pivots` Phase 5 design note](../picker-venue-pivots/phase5-new-venue-embody-design.md)
+  — records the venue-picker contract for **New codespace / New container**
+  (target-info prompt -> provider provision call -> hand off to the existing
+  venue `copilot` path). That note is intentionally design-only there; this
+  effort owns the reusable CLI-mode session-launch machinery the handoff
+  should land on.
 - **Deferred out (tracked separately, not blocking):**
   [#2971](https://github.com/ThomasMichon/copilot-extensions/issues/2971) —
   a represented interactive session's `ask_user`/elicitation remaining
