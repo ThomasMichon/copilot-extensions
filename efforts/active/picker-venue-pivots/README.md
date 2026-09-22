@@ -7,9 +7,10 @@
   worktrees once the design below is approved (same pattern the Tasks-pane
   effort used).
 - **Created:** 2026-09-21
-- **Status:** Active — Phase 0 fully complete (design, operator-approved
-  committed screenshots, and the shared claims-pecking-order module all
-  done). Phase 1 (Codespaces implementation) in progress.
+- **Status:** Active — Phase 0 and Phase 1 fully complete (design,
+  operator-approved committed screenshots, the shared claims-pecking-order
+  module, and the Codespaces pivot's claims/subtitle/live-session wiring
+  all done). Phase 2 (Containers implementation) next.
 - **Vision:** [`visions/venue-pivots-ux`](../../../visions/venue-pivots-ux/README.md)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#3253`
 - **Sub-issues:** Phase 1 `ThomasMichon/copilot-extensions#3254`, Phase 2
@@ -100,31 +101,36 @@ realization.
   until Phase 0 previews are captured and approved; each implementation
   phase gets its own fresh worktree off `main` afterward (Tasks-pane
   precedent).
-- **Current phase:** Phase 0 is **fully complete** (2026-09-21) — grounding,
-  manifest/screenshot design, operator-approved committed screenshots
-  (`design-previews/*.png`), and the shared claims-pecking-order module
-  (`agent_worktrees.claims_rank`, real code + 13 passing tests) are all
-  done. **Phase 1 is in progress.**
+- **Current phase:** Phase 0 and Phase 1 are **fully complete**
+  (2026-09-21). **Phase 2 (Containers) has not started.**
 - **Umbrella + sub-issues filed** (2026-09-21):
   `ThomasMichon/copilot-extensions#3253` (umbrella), `#3254`-`#3258` (Phase
   1-5 sub-issues, one each).
-- **Phase 1 progress (2026-09-21):** wired `pool.picker_payload`'s
+- **Phase 1 complete (2026-09-21):** wired `pool.picker_payload`'s
   `claims_summary` entry field to the shared `agent_worktrees.claims_rank`
   module (via a new `_claims_summary_for_worktree` helper, lazy-imported the
   same way `config._registered_repo_paths` already does — degrades to `""`
-  when agent-worktrees isn't installed alongside, never raises) and wired
+  when agent-worktrees isn't installed alongside, never raises); wired
   `pivots/agent-codespaces.json`'s `entry.subtitle` + a new `claims_summary`
   column (matching the approved `agent-codespaces.proposed.json` preview
-  manifest's width/priority). 65 pool tests pass (3 new); full
+  manifest's width/priority); added the agent-bridge live-session join
+  (`_bridge_client_from_env`/`_live_session_for_venue`/`_sess_column`/
+  `_activity_from_live_session` in `pool.py`, a silent hand-rolled variant
+  of `BridgeClient.from_config()` since that classmethod prints + exits on
+  a missing auth token) wiring the `sess` column and the transient-activity
+  half of the subtitle; resolved the New-codespace entry point as
+  design-only with a named pivot-registry gap (see "Design note: New-venue
+  entry point"). 78 pool tests pass (16 new across the phase); full
   agent-codespaces suite is green apart from 2 pre-existing, unrelated
   `test_bootstrap_check_reconcile_opt_in.py` failures (a Windows bash
   path-translation issue, confirmed present on `main` too via `git stash`).
-- **Immediate next step:** remaining Phase 1 checklist items — additional
-  columns worth surfacing from `pool.picker_payload`'s fuller entry dict,
-  the agent-bridge live-session join (`sess` column + transient-activity
-  half of the subtitle), and the design-only New-codespace entry point. If
-  any implementation-phase session changes a row/menu's visual shape,
-  re-run the render script (`worktree-manager\.venv\Scripts\python.exe
+- **Immediate next step:** Phase 2 — bring `pivots/agent-containers.json` +
+  `_cmd_fleet` up to the CodeSpaces pivot's fidelity (see the Plan's own
+  Phase 2 checklist): `columns`, fleet-based grouping, a `lease`→worktree
+  cross-link, the shared `claims_rank`/live-session-join wiring (reuse, not
+  reimplement), and gated lifecycle actions. If any implementation-phase
+  session changes a row/menu's visual shape, re-run the render script
+  (`worktree-manager\.venv\Scripts\python.exe
   worktree-manager\scripts\picker-snapshot\venue-preview\render_venue_preview.py
   --out-dir worktree-manager\scripts\picker-snapshot\venue-preview\out`,
   both venvs already built in this worktree) and diff the fresh output
@@ -333,6 +339,35 @@ note explaining why, whenever the design is deliberately revised.
   **dropped entirely** — it was redundant with the already-present
   `worktree` cross-link column (non-blank already means driven).
 
+### Design note: New-venue entry point (Phase 1 closure, design-only)
+
+Grounded (2026-09-21) against `pivot_manifest.py`: the pivot-registry
+contract has **no notion of a pivot-level action** — every `PivotAction`
+in a manifest's `actions` list is inherently per-*entry* (its `run` command
+interpolates `{id}`/other row fields, and its `when` clause gates against
+that row's own field values). There is no "always show this action once,
+regardless of row count" concept, and no defined behavior for an action on
+an *empty* pivot (0 entries -> 0 rows -> 0 opportunities to attach a
+per-entry action). This means "New codespace" cannot be expressed as a
+`pivots/agent-codespaces.json` snippet today, contradicting the Phase 1
+checklist's original "manifest/action shape only" framing (Phase 0 never
+actually produced such a snippet either — the proposed manifest has no
+"New codespace" action).
+
+Closing this out as **design-only, with a named gap** rather than
+inventing an ad hoc mechanism: a genuine "New codespace"/"New container"/
+"New agent" implementation needs a **pivot-registry schema addition** (a
+pivot-level, row-independent action slot) before it can be expressed
+declaratively at all — that schema work belongs to whichever effort
+actually implements the create→embody flow (deferred per this effort's own
+Guiding Intent item 7, to land alongside the parallel
+drive-CLI-agents-over-SSH capability), not this effort. The flow's own
+*behavior* (prompt for target info, provision, hand off into a fresh
+embodied Copilot session) is already recorded in the vision's own
+"New codespace / New container — provision, then embody" section; this
+note's contribution is the concrete engine-level gap discovered while
+trying to scope it as a manifest change.
+
 ## Plan
 
 ### Phase 0 — Design + review-ready previews (this worktree)
@@ -426,13 +461,35 @@ note explaining why, whenever the design is deliberately revised.
       detail) actually renders as the durable-title half of line two.
       **Done (2026-09-21)**, alongside a new `claims_summary` column
       (matching the approved proposed-manifest width/priority).
-- [ ] Add any additional columns worth surfacing from `pool.picker_payload`'s
-      fuller entry dict (per Phase 0 design note).
-- [ ] agent-bridge live-session join keyed on
+- [x] Add any additional columns worth surfacing from `pool.picker_payload`'s
+      fuller entry dict (per Phase 0 design note). **Resolved (2026-09-21):**
+      no further column beyond `sess`/`claims_summary` was actually
+      identified in Phase 0's design artifacts (the proposed manifest adds
+      only those two) — nothing else to add.
+- [x] agent-bridge live-session join keyed on
       `venue.kind == "codespace"` + `venue.target`, surfaced as the
-      transient-activity half of line two.
-- [ ] (Manifest/action shape only, per Phase 0 design) the New-codespace
-      entry point.
+      transient-activity half of line two. **Done (2026-09-21):** added
+      `_bridge_client_from_env`/`_live_session_for_venue`/`_sess_column`/
+      `_activity_from_live_session` to `pool.py` (a hand-rolled, silent
+      variant of `BridgeClient.from_config()` -- that classmethod prints +
+      `sys.exit(1)`s on a missing auth token, which is wrong for an inline
+      pool-listing call; this degrades to `None` instead). Grounded
+      `latest_progress`'s exact shape (`{"phase", "summary"}`) against
+      `inventory_cli._live_session_summary_line` and liveness values
+      (`"active"`/`"stalled"`/`"idle"`/`None`) against
+      `routes.live_sessions._live_liveness` — the open Phase 0 grounding
+      item is now resolved. 8 new tests.
+- [x] (Manifest/action shape only, per Phase 0 design) the New-codespace
+      entry point. **Resolved as design-only (2026-09-21):** see "Design
+      note: New-venue entry point" below — the current pivot-registry
+      contract (`pivot_manifest.py`) has **no concept of a pivot-level
+      action independent of a row** (every `PivotAction` is per-entry,
+      gated by that entry's own `when` clause), so "New codespace" cannot
+      be expressed as a manifest/action snippet today without a schema
+      change. Recorded as a genuine gap for whichever effort implements the
+      real create→embody flow (per this effort's own Guiding Intent item 7,
+      deferred alongside the parallel drive-CLI-agents-over-SSH capability)
+      rather than invented here.
 
 ### Phase 2 — Containers pivot (implementation)
 - [ ] Add `columns` to `pivots/agent-containers.json` mirroring
@@ -517,6 +574,29 @@ note explaining why, whenever the design is deliberately revised.
 
 ## Journal
 
+- **2026-09-21 (latest+8)** — Completed Phase 1. Added the agent-bridge
+  live-session join to `pool.py`: `_bridge_client_from_env` (a silent,
+  never-raising, never-`sys.exit`-ing hand-rolled variant of
+  `BridgeClient.from_config()` -- that classmethod prints to stderr and
+  exits on a missing auth token, wrong for an inline pool-listing call),
+  `_live_session_for_venue` (matches `venue.kind`/`venue.target` across
+  `list_live_sessions()`), `_sess_column` (`LIVE`/`IDLE`/`""` per the
+  vision's exact rule), and `_activity_from_live_session` (the
+  `{phase}: {summary}` transient half). Grounded `latest_progress`'s shape
+  and the liveness vocabulary against `inventory_cli._live_session_summary_line`
+  and `routes.live_sessions._live_liveness` -- the one open Phase 0
+  grounding item, now resolved. Added the `sess` column to
+  `pivots/agent-codespaces.json` matching the approved proposed manifest.
+  8 new tests. Resolved the New-codespace entry point as design-only:
+  grounded that the pivot-registry contract has no pivot-level (row-
+  independent) action concept today, so it genuinely cannot be expressed
+  as a manifest snippet -- recorded as a named schema gap for whichever
+  effort implements the real create→embody flow, per this effort's own
+  Guiding Intent item 7 deferral, rather than inventing a workaround here.
+  78 pool tests total (16 new across the whole phase); full
+  agent-codespaces suite still green apart from the same 2 pre-existing
+  unrelated failures. Phase 2 (Containers) is next, in a fresh worktree per
+  the effort's own per-phase-PR sequencing.
 - **2026-09-21 (latest+7)** — Filed the umbrella issue
   (`ThomasMichon/copilot-extensions#3253`) and one sub-issue per Plan phase
   (`#3254`-`#3258`), the last open Phase 0 housekeeping item. Started Phase

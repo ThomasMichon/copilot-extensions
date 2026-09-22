@@ -581,6 +581,94 @@ def test_claims_summary_for_worktree_degrades_gracefully_without_agent_worktrees
     assert _claims_summary_for_worktree("some-worktree-id") == ""
 
 
+# --- agent-bridge live-session join (picker-venue-pivots Phase 1) ---------
+
+def test_sess_column_live_when_liveness_active_or_stalled():
+    from agent_codespaces.pool import _sess_column
+    assert _sess_column({"liveness": "active"}, "3bac") == "LIVE"
+    assert _sess_column({"liveness": "stalled"}, "3bac") == "LIVE"
+
+
+def test_sess_column_idle_when_driving_but_not_live():
+    from agent_codespaces.pool import _sess_column
+    assert _sess_column(None, "3bac") == "IDLE"
+    assert _sess_column({"liveness": "idle"}, "3bac") == "IDLE"
+
+
+def test_sess_column_blank_when_nothing_driving():
+    from agent_codespaces.pool import _sess_column
+    assert _sess_column(None, "") == ""
+    assert _sess_column({"liveness": "active"}, "") == "LIVE"  # a live session
+    # with no resolved worktree id still reads LIVE -- the signal itself is
+    # authoritative; only the *absence* of both falls back to blank.
+
+
+def test_activity_from_live_session_composes_phase_and_summary():
+    from agent_codespaces.pool import _activity_from_live_session
+    assert _activity_from_live_session(None) == ""
+    assert _activity_from_live_session({"latest_progress": None}) == ""
+    assert _activity_from_live_session({"latest_progress": {}}) == ""
+    assert (
+        _activity_from_live_session(
+            {"latest_progress": {"summary": "wiring claims_summary"}}
+        )
+        == "wiring claims_summary"
+    )
+    assert (
+        _activity_from_live_session(
+            {"latest_progress": {"phase": "impl", "summary": "wiring claims_summary"}}
+        )
+        == "impl: wiring claims_summary"
+    )
+
+
+def test_bridge_client_from_env_degrades_gracefully_without_agent_bridge():
+    """agent-codespaces does not depend on agent-bridge either; the lookup
+    must degrade to ``None`` rather than raise or exit."""
+    from agent_codespaces.pool import _bridge_client_from_env, _live_session_for_venue
+    assert _bridge_client_from_env() is None
+    assert _live_session_for_venue("codespace", "held") is None
+
+
+def test_picker_payload_live_session_join_wires_sess_and_activity(monkeypatch):
+    """The ``sess``/``subtitle`` fields reflect a matching agent-bridge live
+    session, looked up by ``venue.kind == "codespace"`` + this box's own name."""
+    import time as _t
+    from agent_codespaces.pool import picker_payload
+    now = _t.time()
+    lease = Lease(codespace="held", effort="3bac", pid=1, host="dev6",
+                  acquired_at=now, heartbeat_at=now)
+    held = CodespaceInfo(name="held", display_name="held", repository="o/web-cs",
+                         branch="main", state="Available", machine="premiumLinux",
+                         account="a", last_used_at="")
+    members, budget = build_pool(now=now, codespaces=[held], leases=[lease], markers={})
+    seen = []
+
+    def fake_join(kind, target):
+        seen.append((kind, target))
+        return {"liveness": "active", "latest_progress": {"phase": "impl", "summary": "wiring"}}
+
+    monkeypatch.setattr("agent_codespaces.pool._live_session_for_venue", fake_join)
+    e = picker_payload(members, budget)["entries"][0]
+    assert seen == [("codespace", "held")]
+    assert e["sess"] == "LIVE"
+    assert e["subtitle"].endswith("impl: wiring")
+    assert "claimed by 3bac on dev6" in e["subtitle"]  # durable half preserved
+
+
+def test_picker_payload_sess_blank_and_no_activity_when_no_live_session():
+    import time as _t
+    from agent_codespaces.pool import picker_payload
+    now = _t.time()
+    free = CodespaceInfo(name="free", display_name="", repository="o/web-cs",
+                         branch="main", state="Shutdown", machine="premiumLinux",
+                         account="a", last_used_at="")
+    members, budget = build_pool(now=now, codespaces=[free], leases=[], markers={})
+    e = picker_payload(members, budget)["entries"][0]
+    assert e["sess"] == ""
+    assert e["subtitle"] == ""
+
+
 # --- picker_stream_frames + diff_entries (D2 NDJSON streaming) -------------
 
 def test_picker_stream_frames_envelope_order_and_rows():
