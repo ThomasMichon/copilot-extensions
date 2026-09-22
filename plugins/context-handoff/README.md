@@ -347,12 +347,16 @@ durable diagnostic line the instant anything goes wrong to
 `%TEMP%\context-handoff-extension-crash.log` on Windows). Read this file
 after a suspected crash.
 
-Every line is stamped `<ISO timestamp> pid=<pid> <label>: <detail>`, and
-`<detail>` for the exit/exception/rejection/signal handlers always includes
-`ready=true`/`ready=false` -- an in-memory-only flag (never itself written
-on its own) set once `joinSession()` actually resolves, so a captured
-failure's line says whether it happened before or after this instance
-reached readiness.
+Each log entry begins with a line stamped `<ISO timestamp> pid=<pid>
+<label>: <detail>`; an `uncaughtException`/`unhandledRejection` entry's
+`<detail>` is a multi-line `Error.stack`, and only that first, stamped line
+carries the timestamp/pid/label prefix -- the stack's own trailing `at ...`
+lines that follow are not individually stamped, so correlate by that first
+line. `<detail>` for the exit/exception/rejection/signal handlers always
+includes `ready=true`/`ready=false` -- an in-memory-only flag (never itself
+written on its own) set once `joinSession()` actually resolves, so a
+captured failure's line says whether it happened before or after this
+instance reached readiness.
 
 This file is:
 

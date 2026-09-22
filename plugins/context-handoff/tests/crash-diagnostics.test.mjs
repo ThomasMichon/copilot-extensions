@@ -60,6 +60,17 @@ function readLogSafe(logPath) {
   }
 }
 
+// Each real log entry starts a fresh line stamped `<ISO timestamp>
+// pid=<pid> <label>: ...` (see emergencyLog() in crash-diagnostics.mjs);
+// a multi-line Error.stack's trailing `at ...` lines are NOT themselves
+// separately stamped, so counting stamped lines counts entries, not raw
+// lines. Used to assert an exact entry count -- e.g. that no extra,
+// unconditional marker entry (such as the old per-instance
+// `joinSession-resolved` write this PR removed) has been reintroduced.
+function logEntryLabels(log) {
+  return [...log.matchAll(/^\S+ pid=\d+ (\S+):/gm)].map((m) => m[1]);
+}
+
 test(
   "clean exit records nothing at all -- routine exits are not logged",
   { skip: !RUN_STRESS_CASES },
@@ -138,6 +149,12 @@ test(
       const log = readLogSafe(logPath);
       assert.match(log, /uncaughtException: ready=true Error: boom-after-ready/);
       assert.match(log, /\bexit: code=1\b/);
+      // Guard against a regression to the old per-instance
+      // `joinSession-resolved` write (or any other unconditional marker):
+      // markReady() itself must never append a durable line, so exactly
+      // these two entries -- the failure and the resulting exit -- may
+      // exist, nothing else.
+      assert.deepEqual(logEntryLabels(log), ["uncaughtException", "exit"]);
     });
   },
 );
@@ -264,16 +281,42 @@ test(
         stdio: ["ignore", "pipe", "inherit"],
       });
       await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          reject(new Error("harness did not print READY within 5s"));
+        }, 5_000);
         let buffered = "";
         child.stdout.on("data", (chunk) => {
           buffered += chunk;
-          if (buffered.includes("READY\n")) resolve();
+          if (buffered.includes("READY\n")) {
+            clearTimeout(timer);
+            resolve();
+          }
         });
-        child.on("error", reject);
+        child.on("error", (err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
       });
       child.kill("SIGTERM");
-      const [code, signal] = await new Promise((resolve) => {
-        child.on("exit", (exitCode, exitSignal) => resolve([exitCode, exitSignal]));
+      const [code, signal] = await new Promise((resolve, reject) => {
+        // Bounded: if the signal re-raise regresses (e.g. a stray listener
+        // survives and swallows the re-sent signal instead of letting the
+        // OS's default disposition terminate the process), this must fail
+        // loudly within a fixed window rather than hang the required CI job
+        // indefinitely waiting for an 'exit' that will never come.
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          reject(new Error("harness did not exit within 5s of receiving SIGTERM"));
+        }, 5_000);
+        child.on("error", (err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+        child.on("exit", (exitCode, exitSignal) => {
+          clearTimeout(timer);
+          resolve([exitCode, exitSignal]);
+        });
       });
       // installEmergencyDiagnostics() deliberately does NOT call
       // process.exit() for a signal: it logs, removes its own listener for
