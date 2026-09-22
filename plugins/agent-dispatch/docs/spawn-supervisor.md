@@ -627,18 +627,37 @@ out:
   stays headless-by-default (the common opt-out).
 
 The routing is **per label within one supervisor**, so a single service can
-embody self-contained sweeps headless (the default) while opting a "kick a
-session" interactive label out to CLI. The headless body reuses the **same
-autopilot seed** as the CLI backend (claim-under-identity, contract-net
-evaluation, deferred completion), so a headless-embodied task is *driven*
-identically; only its body differs. A headless body is not a worktree, so the
-worktree-keyed lease heartbeat does not apply to it (bounded sweeps drive their
-own lifecycle to completion); reconciliation still settles its reservation on the
-task's terminal state. `--embody-backend`/`--cli-label`/`--headless-label` apply
-to **local** (non-pool) spawn. In fleet (`--pool`) mode the body choice is
-**fleet-wide** instead: fleet bodies are headless by default too (only
-`--embody-backend cli` makes them CLI on the pool host; the legacy `--headless`
-flag remains an explicit force), and the per-label flags are ignored.
+embody self-contained sweeps headless (the default), opt a "kick a session"
+interactive label out to CLI, or opt a deterministic maintenance label out to a
+plain script subprocess. The headless body reuses the **same autopilot seed**
+as the CLI backend (claim-under-identity, contract-net evaluation, deferred
+completion), so a headless-embodied task is *driven* identically; only its body
+differs. The script body is deliberately non-agentic: a plain subprocess that
+claims, starts, heartbeats, reports progress, requests steering, and explicitly
+completes/abandons through the ordinary lifecycle client surface. A headless or
+script body is not a worktree, so the worktree-keyed lease heartbeat does not
+apply to it; reconciliation still settles its reservation on the task's
+terminal state. `--embody-backend`/`--cli-label`/`--headless-label`/
+`--script-label` apply to **local** (non-pool) spawn. In fleet (`--pool`) mode
+the body choice is **fleet-wide** instead: fleet bodies are headless by default
+too (only `--embody-backend cli` makes them CLI on the pool host; the legacy
+`--headless` flag remains an explicit force), and the per-label flags are
+ignored.
+
+**Script payload contract.** A script-embodied task carries a JSON
+`payload_inline` describing what to launch:
+
+- `{"path":"C:\\absolute\\worker.py","args":["..."],"env":{"K":"V"}}`
+  runs the file with agent-dispatch's own runtime Python.
+- `{"argv":["some-exe","arg1","arg2"],"cwd":"C:\\absolute\\dir","env":{"K":"V"}}`
+  runs the exact argv directly.
+
+`agent_dispatch.script_worker.ScriptTaskRuntime` is the small helper contract
+for those bodies. It reads the supervisor-injected task/coordinator context from
+environment variables, wraps claim/start/heartbeat/progress/complete/abandon,
+and treats a return without an explicit terminal call as a protocol violation:
+an orderly exit auto-abandons in the helper, and a confirmed-gone process is
+abandoned by supervisor recovery.
 
 The local supervisor and every worker use the ordinary `agent-dispatch` client
 discovery path. The supervisor resolves a fresh client for every coordinator

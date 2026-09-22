@@ -64,6 +64,7 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     LocalResumeFn,
     NudgeFn,
     RedriveFn,
+    ScriptBodyVerdictFn,
     SpawnFn,
     SpawnPreparationRetained,
     VerdictFn,
@@ -84,11 +85,13 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     _default_local_resume,
     _default_nudge,
     _default_redrive,
+    _default_script_body_verdict,
     _default_verdict,
     _default_worktree_directory_present,
     _machine_from_owner,
     _parse_fleet_body_handle,
     _parse_local_body_handle,
+    _parse_script_body_handle,
     _reservation_made_progress,
     _target_directory_missing,
     _tracking,
@@ -97,6 +100,7 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     make_embody_spawn,
     make_headless_spawn,
     make_label_routed_spawn,
+    make_script_spawn,
     make_redrive_sender,
     request_failed_created_spawn_release,
 )
@@ -179,6 +183,7 @@ class Supervisor:
         local_body_activity_fn: LocalBodyActivityFn | None = None,
         local_acp_session_fn: LocalAcpSessionFn | None = None,
         local_body_target_dir_fn: LocalBodyTargetDirFn | None = None,
+        script_body_verdict_fn: ScriptBodyVerdictFn | None = None,
         local_cold_fn: LocalColdFn | None = None,
         local_end_fn: LocalEndFn | None = None,
         local_resume_fn: LocalResumeFn | None = None,
@@ -291,6 +296,10 @@ class Supervisor:
         self.local_body_activity_fn = local_body_activity_fn or _default_local_body_activity
         self.local_acp_session_fn = local_acp_session_fn or _default_local_acp_session
         self.local_body_target_dir_fn = local_body_target_dir_fn or _default_local_body_target_dir
+        #: Tri-state verdict resolver for a **local deterministic script body**
+        #: (PID + process-start-token fence). Used by :meth:`recover_gone`,
+        #: :meth:`hold_live_leases`, and :meth:`reconcile_reserving`.
+        self.script_body_verdict_fn = script_body_verdict_fn or _default_script_body_verdict
         self.local_cold_fn = local_cold_fn or _default_local_cold
         self.local_end_fn = local_end_fn or _default_local_end
         self.local_resume_fn = local_resume_fn or _default_local_resume
@@ -576,6 +585,13 @@ class Supervisor:
                     return self.local_body_verdict_fn(local_sid) != _tracking().GONE
                 except Exception:
                     return True
+            script_handle = _parse_script_body_handle(reservation.get("session_handle"))
+            if script_handle is not None:
+                _worker_id, pid, start_token = script_handle
+                try:
+                    return self.script_body_verdict_fn(pid, start_token) != _tracking().GONE
+                except Exception:
+                    return True
             worktree = _worktree_from_reservation(
                 reservation,
                 task.get("owner"),
@@ -608,6 +624,13 @@ class Supervisor:
         if local_sid is not None:
             try:
                 return self.local_body_verdict_fn(local_sid) != _tracking().GONE
+            except Exception:
+                return True
+        script_handle = _parse_script_body_handle(reservation.get("session_handle"))
+        if script_handle is not None:
+            _worker_id, pid, start_token = script_handle
+            try:
+                return self.script_body_verdict_fn(pid, start_token) != _tracking().GONE
             except Exception:
                 return True
         # CLI suspension hands its process to the hibernation layer.
@@ -959,6 +982,42 @@ class Supervisor:
                     reconciled += 1
                 except DispatchError:
                     log.exception("failed to release gone reserving body %s", res["key"])
+                continue
+
+            script_handle = _parse_script_body_handle(res.get("session_handle"))
+            if script_handle is not None:
+                worker_id, pid, start_token = script_handle
+                try:
+                    verdict = self.script_body_verdict_fn(pid, start_token)
+                except Exception:
+                    verdict = _tracking().UNKNOWN
+                if verdict == _tracking().UNKNOWN:
+                    continue
+                if verdict == _tracking().LIVE:
+                    try:
+                        self.client.record_spawn(
+                            res["key"],
+                            session_handle=res.get("session_handle"),
+                            worktree=res.get("worktree"),
+                        )
+                        reconciled += 1
+                    except DispatchError:
+                        log.exception(
+                            "failed to promote live reserving script body %s",
+                            res["key"],
+                        )
+                    continue
+                try:
+                    self.client.fail_spawn(
+                        res["key"],
+                        detail=(
+                            "script body confirmed gone while reserving "
+                            f"(worker {worker_id}, pid {pid})"
+                        ),
+                    )
+                    reconciled += 1
+                except DispatchError:
+                    log.exception("failed to release gone reserving script body %s", res["key"])
                 continue
 
             worktree = _worktree_from_reservation(res, task.get("owner"))
@@ -2728,6 +2787,35 @@ class Supervisor:
                     except DispatchError:
                         pass
                 continue
+            script_handle = _parse_script_body_handle(res.get("session_handle"))
+            if script_handle is not None:
+                _worker_id, pid, start_token = script_handle
+                if self.publish_activity:
+                    try:
+                        verdict = self.script_body_verdict_fn(pid, start_token)
+                    except Exception:
+                        verdict = _tracking().UNKNOWN
+                    try:
+                        self.client.set_activity(
+                            task["id"],
+                            "ACTIVE" if verdict == _tracking().LIVE else None,
+                            reservation_key=res["key"],
+                        )
+                    except DispatchError:
+                        pass
+                if task.get("status") not in _LEASED or not owner:
+                    continue
+                try:
+                    sverdict = self.script_body_verdict_fn(pid, start_token)
+                except Exception:
+                    sverdict = _tracking().UNKNOWN
+                if sverdict == _tracking().LIVE and self.heartbeat:
+                    try:
+                        self.client.heartbeat(task["id"], owner)
+                        held += 1
+                    except DispatchError:
+                        pass
+                continue
             if task.get("status") not in _LEASED:
                 if self.publish_activity:
                     try:
@@ -2935,6 +3023,40 @@ class Supervisor:
                     except DispatchError:
                         log.exception("recovery release failed for reservation %s", res["key"])
                 continue  # local body handled -> don't fall to the worktree path
+            script_handle = _parse_script_body_handle(res.get("session_handle"))
+            if script_handle is not None:
+                worker_id, pid, start_token = script_handle
+                try:
+                    sverdict = self.script_body_verdict_fn(pid, start_token)
+                except Exception:
+                    sverdict = tracking.UNKNOWN
+                if sverdict == tracking.GONE:
+                    detail = (
+                        "script body exited without explicit complete/abandon "
+                        f"(worker {worker_id}, pid {pid})"
+                    )
+                    try:
+                        self.client.abandon(
+                            task["id"],
+                            worker_id=worker_id,
+                            permitted=True,
+                            reason=detail,
+                            expected_generation=task.get("generation"),
+                            expected_owner_session_id=task.get("owner_session_id"),
+                        )
+                    except DispatchError:
+                        log.exception("failed to abandon gone script task %s", task["id"])
+                    try:
+                        self.client.settle_spawn(res["key"], detail=detail)
+                        recovered += 1
+                        log.info(
+                            "abandoned gone script body for task %s (%s)",
+                            task["id"],
+                            res["key"],
+                        )
+                    except DispatchError:
+                        log.exception("failed to settle gone script reservation %s", res["key"])
+                continue
             worktree = _worktree_from_reservation(res, owner)
             if not worktree:
                 continue  # headless / no worktree handle -> not recoverable here
@@ -3010,6 +3132,8 @@ class Supervisor:
             if _parse_fleet_body_handle(res.get("session_handle")) is not None:
                 continue
             if _parse_local_body_handle(res.get("session_handle")) is not None:
+                continue
+            if _parse_script_body_handle(res.get("session_handle")) is not None:
                 continue
             try:
                 task = self.client.get(res["task_id"])
