@@ -900,6 +900,14 @@ class TestValidateSessionId:
         assert validate_session_id(None) is None
         assert validate_session_id("") is None
 
+    def test_none_for_path_traversal_input(self, tmp_session_state_dir: Path):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            assert validate_session_id("../escape") is None
+            assert validate_session_id("nested/session") is None
+
 
 # ---------------------------------------------------------------------------
 # recent_worktree_messages (read-side companion to the disposition summary)

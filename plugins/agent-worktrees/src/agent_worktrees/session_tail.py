@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import deque
 
 from . import sessions
 
@@ -20,8 +21,11 @@ _OFFER_HINTS = (
 
 def _read_session_events(session_id: str) -> list[dict]:
     """Return every parsed event recorded for a single Copilot session."""
+    valid_session_id = sessions.validate_session_id(session_id)
+    if valid_session_id is None:
+        return []
     session_dir = sessions._session_state_dir()
-    events_file = session_dir / session_id / "events.jsonl"
+    events_file = session_dir / valid_session_id / "events.jsonl"
     if not events_file.is_file():
         return []
 
@@ -66,7 +70,7 @@ def _looks_like_offer(text: str) -> bool:
 def session_message_tail(session_id: str, *, limit: int = 3) -> dict:
     """Return the last *limit* message-bearing turns for one session as JSON."""
     lim = max(1, int(limit))
-    ordered_turns: list[dict] = []
+    tail: deque[dict] = deque(maxlen=lim)
     assistant_turns: dict[str, dict] = {}
     assistant_seq = 0
     last_event_type: str | None = None
@@ -109,7 +113,7 @@ def session_message_tail(session_id: str, *, limit: int = 3) -> dict:
         if typ == "user.message":
             text = sessions._event_text(ev)
             if text:
-                ordered_turns.append(
+                tail.append(
                     {
                         "role": "user",
                         "text": text,
@@ -131,7 +135,7 @@ def session_message_tail(session_id: str, *, limit: int = 3) -> dict:
                 if not parts or parts[-1] != text:
                     parts.append(text)
                 if not turn["materialized"]:
-                    ordered_turns.append(turn)
+                    tail.append(turn)
                     turn["materialized"] = True
             continue
 
@@ -144,11 +148,14 @@ def session_message_tail(session_id: str, *, limit: int = 3) -> dict:
             continue
 
         if typ == "assistant.turn_end":
-            turn = _ensure_assistant_turn(data.get("turnId"), ts)
-            turn["closed"] = True
+            key = _assistant_key(data.get("turnId"))
+            turn = assistant_turns.get(key)
+            if turn is not None:
+                turn["closed"] = True
+                assistant_turns.pop(key, None)
 
     turns: list[dict] = []
-    for turn in ordered_turns:
+    for turn in tail:
         if turn["role"] == "assistant":
             text = "\n\n".join(turn["text_parts"]).strip()
             if not text:
@@ -164,15 +171,7 @@ def session_message_tail(session_id: str, *, limit: int = 3) -> dict:
             continue
         turns.append(turn)
 
-    open_turn = None
-    for turn in sorted(
-        assistant_turns.values(),
-        key=lambda item: (int(not bool(item["closed"])), int(item["ordinal"])),
-        reverse=True,
-    ):
-        if not turn["closed"]:
-            open_turn = turn
-            break
+    open_turn = next((turn for turn in assistant_turns.values() if not turn["closed"]), None)
 
     ending_state = "complete"
     if open_turn is not None:
@@ -180,11 +179,10 @@ def session_message_tail(session_id: str, *, limit: int = 3) -> dict:
     elif turns and turns[-1]["role"] == "assistant" and _looks_like_offer(turns[-1]["text"]):
         ending_state = "assistant_offer_pending"
 
-    tail = turns[-lim:]
     return {
         "session_id": session_id,
-        "turns": tail,
-        "count": len(tail),
+        "turns": turns,
+        "count": len(turns),
         "ending": {
             "state": ending_state,
             "cut_off_mid_turn": ending_state == "assistant_turn_in_progress",

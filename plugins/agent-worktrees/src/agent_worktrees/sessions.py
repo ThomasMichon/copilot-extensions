@@ -688,6 +688,8 @@ def validate_session_id(session_id: str | None) -> str | None:
     """
     if not session_id:
         return None
+    if "/" in session_id or "\\" in session_id or ".." in session_id:
+        return None
     sdir = _session_state_dir() / session_id
     if not sdir.is_dir():
         return None
@@ -1074,8 +1076,11 @@ def read_session_transcript(session_id: str) -> list[dict]:
     view (see ``_RENDERABLE_EVENT_TYPES``).  Returns an empty list if the
     session or its event log is absent.
     """
+    valid_session_id = validate_session_id(session_id)
+    if valid_session_id is None:
+        return []
     session_dir = _session_state_dir()
-    events_file = session_dir / session_id / "events.jsonl"
+    events_file = session_dir / valid_session_id / "events.jsonl"
     if not events_file.is_file():
         return []
 
