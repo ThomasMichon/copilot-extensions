@@ -82,7 +82,19 @@ def coalescing_key(project: str, worktree_id: str) -> str:
 #: subprocess/filesystem work, not free. Kept short since a render/click
 #: caller has its own bounded wait and must never stall behind a boot.
 BOOT_WAIT_S = 4.0
-REQUEST_DEADLINE_S = 3.0
+#: Live-measured (2026-09-22, `worktree-status-audit` investigation): a real
+#: bundle's dominant cost is `worktree_status_compute.compute`'s own
+#: `fetch=True` git classify call, ~3-5s depending on remote/host load, for a
+#: total compute time of ~5.4s after fixing the unrelated
+#: `_control_plane_related_pr_map` tax (see that module's history). The prior
+#: 3.0s value was tighter than the real compute path could ever meet even in
+#: the healthy case, so every on-demand daemon request reliably missed this
+#: deadline and fell back to the (now equally slow) uncoalesced path --
+#: defeating the coalescing/caching this daemon exists for. Set with headroom
+#: above the observed worst case, mirroring `classify_daemon.REQUEST_DEADLINE_S`
+#: (5.0s for a whole-fleet batch pass) scaled up for this call's own slower
+#: single-fetch cost plus request/response wire overhead.
+REQUEST_DEADLINE_S = 8.0
 KIND = "worktree_status"
 
 #: Shorter than classify's linger/TTL: a status-bundle caller is typically a
