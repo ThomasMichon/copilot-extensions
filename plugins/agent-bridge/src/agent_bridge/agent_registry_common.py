@@ -1,8 +1,7 @@
-"""Shared agent-registry constants, helpers, and value types."""
+"""Shared agent-registry constants and value types."""
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -15,34 +14,6 @@ _NAMESPACE_LIST_OFF = frozenset({"0", "off", "false", "no"})
 
 _NAMESPACE_LIST_RESOLVER_TIMEOUT_ENV = "AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT"
 _NAMESPACE_LIST_RESOLVER_DEFAULT_TIMEOUT = 8.0
-
-
-def _namespace_list_resolver_timeout() -> float:
-    """Resolve the per-resolver ``list()`` timeout from the environment."""
-    raw = str(os.environ.get(_NAMESPACE_LIST_RESOLVER_TIMEOUT_ENV, "")).strip().lower()
-    if raw in _NAMESPACE_LIST_OFF:
-        return 0.0
-    if not raw:
-        return _NAMESPACE_LIST_RESOLVER_DEFAULT_TIMEOUT
-    try:
-        value = float(raw)
-        return value if value > 0 else 0.0
-    except ValueError:
-        return _NAMESPACE_LIST_RESOLVER_DEFAULT_TIMEOUT
-
-
-def _namespace_list_ttl() -> float:
-    """Resolve the namespace-list cache TTL from the environment."""
-    raw = str(os.environ.get(_NAMESPACE_LIST_TTL_ENV, "")).strip().lower()
-    if raw in _NAMESPACE_LIST_OFF:
-        return 0.0
-    if not raw:
-        return _NAMESPACE_LIST_DEFAULT_TTL
-    try:
-        value = float(raw)
-        return value if value > 0 else 0.0
-    except ValueError:
-        return _NAMESPACE_LIST_DEFAULT_TTL
 
 
 def _normalize_repo_basename(name: str) -> str:

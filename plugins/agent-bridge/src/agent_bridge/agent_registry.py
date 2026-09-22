@@ -60,6 +60,91 @@ from .transport import PluginRef, SpawnTarget
 
 log = logging.getLogger("agent-bridge")
 
+_parse_agent_registry_impl = parse_agent_registry
+_load_agent_registry_impl = load_agent_registry
+_discover_local_agents_impl = discover_local_agents
+_load_elevated_projects_impl = load_elevated_projects
+_enrich_local_agents_impl = _enrich_local_agents
+_find_covering_agent_impl = _find_covering_agent
+_short_machine_agent_name_impl = _short_machine_agent_name
+_match_machine_shortname_impl = _match_machine_shortname
+_split_repo_venue_impl = _split_repo_venue
+_load_related_entries_impl = _load_related_entries
+_load_local_repos_impl = load_local_repos
+_infer_control_plane_project_impl = infer_control_plane_project
+_derive_topology_agents_impl = derive_topology_agents
+_effective_spawn_defaults_impl = _effective_spawn_defaults
+
+
+def parse_agent_registry(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _parse_agent_registry_impl(*args, **kwargs)
+
+
+def load_agent_registry(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _load_agent_registry_impl(*args, **kwargs)
+
+
+def discover_local_agents(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _discover_local_agents_impl(*args, **kwargs)
+
+
+def load_elevated_projects(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _load_elevated_projects_impl(*args, **kwargs)
+
+
+def _enrich_local_agents(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _enrich_local_agents_impl(*args, **kwargs)
+
+
+def _find_covering_agent(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _find_covering_agent_impl(*args, **kwargs)
+
+
+def _short_machine_agent_name(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _short_machine_agent_name_impl(*args, **kwargs)
+
+
+def _match_machine_shortname(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _match_machine_shortname_impl(*args, **kwargs)
+
+
+def _split_repo_venue(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _split_repo_venue_impl(*args, **kwargs)
+
+
+def _load_related_entries(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _load_related_entries_impl(*args, **kwargs)
+
+
+def load_local_repos(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _load_local_repos_impl(*args, **kwargs)
+
+
+def infer_control_plane_project(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _infer_control_plane_project_impl(*args, **kwargs)
+
+
+def derive_topology_agents(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _derive_topology_agents_impl(*args, **kwargs)
+
+
+def _effective_spawn_defaults(*args, **kwargs):
+    """Compatibility wrapper for the historical root import path."""
+    return _effective_spawn_defaults_impl(*args, **kwargs)
+
 
 def _namespace_list_resolver_timeout() -> float:
     """Resolve the per-resolver ``list()`` timeout from the environment."""
