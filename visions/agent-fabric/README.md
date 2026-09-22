@@ -669,7 +669,10 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   ambient self-registration;
   [host-resource-providers](../host-resource-providers/README.md) — how any plugin
   registers a named, locally-reachable capability a coordinated session can
-  request, generalizing the credential relay's pluggable-source shape. Further per-plugin leaves
+  request, generalizing the credential relay's pluggable-source shape;
+  [venue-pivots-ux](../venue-pivots-ux/README.md) — the Picker's Codespaces
+  and Containers pivots, a sibling of `picker` bringing the fabric's remote
+  venue providers to the same two-line row discipline. Further per-plugin leaves
   live under `visions/plugins/<name>/` as authored (e.g.
   [`visions/plugins/agent-bridge/`](../plugins/agent-bridge/README.md) and
   [`visions/plugins/context-handoff/`](../plugins/context-handoff/README.md) —
