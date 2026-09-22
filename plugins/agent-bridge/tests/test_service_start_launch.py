@@ -53,3 +53,34 @@ def test_launch_argv_falls_back_to_binstub_on_path(monkeypatch, tmp_path):
     monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-bridge")
     argv = m._daemon_launch_argv()
     assert argv == ["/usr/bin/agent-bridge", "start"]
+
+
+def test_cmd_start_imports_cleanly_on_this_platform(monkeypatch):
+    """``_cmd_start`` crashed the daemon on Linux (#3238 follow-up): a
+    ``windows_proactor.resilient_loop_factory`` import at the top of the
+    function was unconditional even though its only use is inside an
+    ``if sys.platform == "win32":`` guard further down -- ``windows_proactor``
+    only defines that name inside its own matching guard, so any non-Windows
+    platform hit an immediate ``ImportError`` before the daemon could even
+    bind a socket. Exercise the real function up through every one of its
+    top-of-body imports (stopping cleanly at the first controllable exit
+    point, the singleton guard) rather than re-deriving the import list,
+    so a reintroduced unconditional import fails this test the same way it
+    failed the real daemon."""
+    import argparse
+
+    from agent_bridge import service_start_cli
+    from agent_bridge.singleton import AlreadyRunningError, SingleInstance
+
+    def _fake_acquire(self):
+        raise AlreadyRunningError(lock_path=self.lock_path, holder_pid=1234)
+
+    monkeypatch.setattr(SingleInstance, "acquire", _fake_acquire)
+
+    args = argparse.Namespace(
+        port=0, bind=None, idle_shutdown=None, passive=False,
+    )
+    # No exception at all (in particular no ImportError) -- the function
+    # returns as soon as the (mocked) singleton guard reports another
+    # instance already holds the lock.
+    service_start_cli._cmd_start(args)
