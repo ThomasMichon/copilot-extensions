@@ -611,6 +611,13 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
+        if getattr(args, "no_pair", False):
+            print(
+                "agent-dispatch supervise: --no-pair is supported only for "
+                "local worker bodies.",
+                file=sys.stderr,
+            )
+            return 2
         fleet = FleetSpawner(
             pool,
             origin=origin,
@@ -652,11 +659,13 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             agent=getattr(args, "headless_agent", None) or "task-worker",
             route=route,
             all_repos=all_repos,
+            no_pair=bool(getattr(args, "no_pair", False)),
         )
         embody_spawn = make_embody_spawn(
             verify_timeout=getattr(args, "verify_timeout", 0) or 0,
             route=route,
             all_repos=all_repos,
+            no_pair=bool(getattr(args, "no_pair", False)),
         )
         watched = set(args.label or [])
         disposable = set(disposable_cli_labels)
