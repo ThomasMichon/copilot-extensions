@@ -190,3 +190,23 @@ default duration) need resolving before Phase 2 code starts._
 - Handing off to a fresh session to execute Phase 1's remaining design
   question (idle-timeout trigger semantics + default duration) through
   Phase 4 (landed + #3876 closed).
+
+### 2026-09-23 — Effort PR opened; blocked on unrelated pre-existing CI break
+- Opened PR #3406 (this effort's plan, submitted for review per the
+  `planning-efforts` skill's gate before Phase 2 code starts). Along the
+  way, caught and fixed a genuinely pre-existing, unrelated version-consistency
+  drift on `main` (`worktree-manager` `__init__.py` lagging `pyproject.toml`
+  by one dev increment) as a trivial inline fix.
+- **PR #3406 is currently blocked on a second, separate pre-existing `main`
+  breakage** this PR did not cause and is out of scope to fix blind:
+  `libs/peer-launch/tests/test_packaging.py::test_converted_codespaces_paths_have_no_unexplained_sibling_launches`
+  fails on `main` itself (an `agent_codespaces/__main__.py` ambient-PATH
+  resolution the peer-launch packaging test flags), failing CI on every PR
+  regardless of content. Filed as tmichon/aperture-labs#7491 (not fixed here
+  -- needs agent-codespaces-specific judgment on the correct fix shape).
+- **Next session:** check #7491/CI status first -- if `main`'s CI is green
+  again (someone else fixed it, or it was itself fixed upstream), rebase/
+  re-run this PR's checks and proceed to merge before starting Phase 2. If
+  still red, Phase 2 implementation work can still proceed locally
+  (uncommitted/on this branch) while the PR waits, but do not force-merge
+  around a genuinely broken CI gate.
