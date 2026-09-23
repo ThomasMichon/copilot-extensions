@@ -81,11 +81,37 @@ def test_read_and_mutating_operations_use_distinct_http_generations(monkeypatch)
 
     assert calls[0][2]["required_protocol"] == 11
     assert calls[1][2]["required_protocol"] == 11
-    assert "required_protocol" not in calls[2][2]
+    assert calls[2][2]["required_protocol"] == 14
     assert calls[3][0:2] == (
         "POST",
         "/api/v1/remote/host-a/sessions/session-a/end",
     )
+
+
+def test_create_session_requires_a_higher_protocol_for_a_charter(monkeypatch):
+    """A charter overlay (rendered as copilot_args) is only honored by a newer
+    daemon -- gate on that capability so an older one fails closed instead of
+    silently dropping the charter."""
+    calls = []
+
+    def request(_self, method, path, **kwargs):
+        calls.append((method, path, kwargs))
+        return {}
+
+    monkeypatch.setattr(LocalBridgeRemoteClient, "_request", request)
+    client = LocalBridgeRemoteClient()
+
+    client.create_session(
+        "host-a",
+        agent="task-worker",
+        prompt="work",
+        caller_id="fleet-task-a",
+        timeout=120.0,
+        charter="cab-charter",
+    )
+
+    assert calls[0][2]["required_protocol"] == 18
+    assert calls[0][2]["body"]["copilot_args"] == ["--agent", "cab-charter"]
 
 
 def test_malformed_auth_degrades_as_unavailable(tmp_path, monkeypatch):

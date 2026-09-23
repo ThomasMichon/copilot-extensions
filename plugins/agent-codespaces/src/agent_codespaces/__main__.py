@@ -4695,7 +4695,7 @@ def _resolve_dev_slot_owner() -> str:
     worktree-dir`, falling back to this package's own installed source
     directory when that CLI is unavailable.
     """
-    agent_worktrees = shutil.which("agent-worktrees")
+    agent_worktrees = shutil.which("agent-worktrees")  # marketplace-isolation: allow dev-slot owner resolution falls back when unavailable
     if agent_worktrees:
         try:
             proc = subprocess.run(

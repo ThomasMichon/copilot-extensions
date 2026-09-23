@@ -170,6 +170,7 @@ def _start_agent_session(
     force: bool = False,
     model: str | None = None,
     effort: str | None = None,
+    charter: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
 ) -> str:
@@ -203,6 +204,7 @@ def _start_agent_session(
     try:
         resp = client.start_session(
             agent=agent_name,
+            charter=charter,
             target_dir=target_dir,
             caller_id=caller_id,
             sender_repo=core._sender_repo(),
@@ -239,6 +241,9 @@ def _start_agent_session(
                     force=False,
                     model=model,
                     effort=effort,
+                    charter=charter,
+                    target_dir=target_dir,
+                    worktree_id=worktree_id,
                 )
             if session.get("status", "") == "running":
                 if not force:
@@ -257,6 +262,9 @@ def _start_agent_session(
                     force=False,
                     model=model,
                     effort=effort,
+                    charter=charter,
+                    target_dir=target_dir,
+                    worktree_id=worktree_id,
                 )
             return _reuse_existing(client, session, agent_name)
         raise

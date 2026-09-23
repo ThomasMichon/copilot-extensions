@@ -3229,6 +3229,7 @@ def test_make_embody_spawn_records_handle_on_success(monkeypatch):
         repo=None,
         all_repos=False,
         verify_timeout=0,
+        charter=None,
     ):
         return subprocess.CompletedProcess(
             args=[], returncode=0,
@@ -3541,6 +3542,22 @@ def test_make_headless_spawn_exposes_allocation_agent():
     spawn = make_headless_spawn(agent="review-worker")
 
     assert spawn.allocation_agent == "review-worker"
+
+
+def test_make_headless_spawn_charter_overrides_allocation_agent():
+    """Regression for the venue/charter split: the worktree
+    binding (`agent-worktrees create --agent <name>`, exposed here as
+    `allocation_agent`) must bind the CHARTER when one is set, not the venue
+    -- a pool's venue (`agent=`) is where it spawns, never what persona
+    drives it. A pool with no charter still falls back to the venue,
+    preserving pre-split behavior."""
+    from agent_dispatch.supervisor import make_headless_spawn
+
+    with_charter = make_headless_spawn(agent="Lambda-Core-wsl", charter="cab-sweep-reconciler")
+    assert with_charter.allocation_agent == "cab-sweep-reconciler"
+
+    without_charter = make_headless_spawn(agent="Lambda-Core-wsl")
+    assert without_charter.allocation_agent == "Lambda-Core-wsl"
 
 
 @pytest.mark.parametrize(
@@ -4109,12 +4126,12 @@ def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, clien
     class FakeFleet:
         def __init__(
             self, pool, *, origin, headless=False, agent="task-worker",
-            all_repos=False, verify_timeout=0,
+            charter=None, all_repos=False, verify_timeout=0,
         ):
             self.pool = list(pool)
             captured.update(
                 pool=pool, origin=origin, headless=headless, agent=agent,
-                all_repos=all_repos,
+                charter=charter, all_repos=all_repos,
             )
 
         def __call__(self, task):

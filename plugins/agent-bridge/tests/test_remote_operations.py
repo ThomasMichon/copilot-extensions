@@ -286,6 +286,7 @@ async def test_mutating_operations_proxy_structured_bridge_calls() -> None:
             "agent": "task-worker",
             "caller_id": "fleet-task-a",
             "force_new": True,
+            "copilot_args": None,
         },
         ("created-a", "do the work", {"caller_id": "fleet-task-a"}),
     ]
@@ -309,6 +310,102 @@ async def test_mutating_operations_proxy_structured_bridge_calls() -> None:
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_session_create_threads_copilot_args_charter_overlay() -> None:
+    """A charter overlay (rendered client-side as copilot_args) must reach the
+    remote host's own client.start_session call unchanged."""
+    client = _RemoteClient()
+    router = CarrierRequestRouter(lambda: client)
+
+    await router(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id="create",
+            payload={
+                "operation": "session.create",
+                "version": 3,
+                "agent": "task-worker",
+                "prompt": "do the work",
+                "caller_id": "fleet-task-a",
+                "copilot_args": ["--agent", "cab-charter"],
+            },
+        )
+    )
+
+    assert client.create_calls[0] == {
+        "agent": "task-worker",
+        "caller_id": "fleet-task-a",
+        "force_new": True,
+        "copilot_args": ["--agent", "cab-charter"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_session_create_rejects_copilot_args_below_min_version() -> None:
+    """An older carrier (version 2) must refuse rather than silently drop
+    copilot_args -- a rolling upgrade must never lose a requested charter."""
+    response = await CarrierRequestRouter(lambda: _RemoteClient())(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id="create",
+            payload={
+                "operation": "session.create",
+                "version": 2,
+                "agent": "task-worker",
+                "prompt": "do the work",
+                "caller_id": "fleet-task-a",
+                "copilot_args": ["--agent", "cab-charter"],
+            },
+        )
+    )
+
+    assert response.type is EnvelopeType.ERROR
+    assert response.payload["code"] == "unsupported_version"
+
+
+@pytest.mark.asyncio
+async def test_session_create_rejects_malformed_copilot_args() -> None:
+    response = await CarrierRequestRouter(lambda: _RemoteClient())(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id="create",
+            payload={
+                "operation": "session.create",
+                "version": 3,
+                "agent": "task-worker",
+                "prompt": "do the work",
+                "caller_id": "fleet-task-a",
+                "copilot_args": "not-a-list",
+            },
+        )
+    )
+
+    assert response.type is EnvelopeType.ERROR
+    assert response.payload["code"] == "invalid_request"
+
+
+@pytest.mark.asyncio
+async def test_remote_operation_service_forwards_copilot_args_in_envelope() -> None:
+    requests: list[dict] = []
+
+    async def fake_request(host, payload, *, timeout):
+        requests.append(payload)
+        return {"result": {"session_id": "created-a"}}
+
+    service = RemoteOperationService.__new__(RemoteOperationService)
+    service._request = fake_request  # type: ignore[attr-defined]
+
+    await service.create_session(
+        "wheatley",
+        agent="task-worker",
+        prompt="do the work",
+        caller_id="fleet-task-a",
+        copilot_args=["--agent", "cab-charter"],
+    )
+
+    assert requests[-1]["copilot_args"] == ["--agent", "cab-charter"]
 
 
 @pytest.mark.asyncio
@@ -1052,8 +1149,21 @@ async def test_service_preserves_v1_for_reads_and_uses_v2_for_mutations(
         "example-host", "session-a", "consumer-a"
     )
     await service.end_session("example-host", "session-a")
+    await service.create_session(
+        "example-host",
+        agent="task-worker",
+        prompt="do the work",
+        caller_id="fleet-task-a",
+    )
+    await service.create_session(
+        "example-host",
+        agent="task-worker",
+        prompt="do the work",
+        caller_id="fleet-task-a",
+        copilot_args=["--agent", "cab-charter"],
+    )
 
-    assert [call["version"] for call in lease.carrier.calls] == [1, 2]
+    assert [call["version"] for call in lease.carrier.calls] == [1, 2, 2, 3]
 
 
 @pytest.mark.asyncio

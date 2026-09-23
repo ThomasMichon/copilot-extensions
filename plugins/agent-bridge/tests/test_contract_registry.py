@@ -99,6 +99,9 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
         "bare_session_transcript": (
             bridge_protocol.BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION
         ),
+        "remote_session_copilot_args": (
+            bridge_protocol.REMOTE_SESSION_COPILOT_ARGS_PROTOCOL_VERSION
+        ),
     }
 
 

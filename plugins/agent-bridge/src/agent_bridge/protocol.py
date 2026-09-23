@@ -28,7 +28,7 @@ The daemon advertises both on ``/health``; ``BridgeClient`` reads them (see
 from __future__ import annotations
 
 # Current HTTP wire-contract version this build speaks.
-HTTP_PROTOCOL_VERSION = 17
+HTTP_PROTOCOL_VERSION = 18
 
 # First version that exposes the harness-owned relay interruption capability.
 RELAY_INTERRUPT_PROTOCOL_VERSION = 2
@@ -95,6 +95,13 @@ DISPATCH_TASK_SESSION_PROTOCOL_VERSION = 15
 # favor of agent-bridge's own cold-store fallback (a downstream consumer's
 # session-worktree-archive-linkout Phase 2d follow-up).
 BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION = 17
+
+# First version whose remote fleet-carrier session.create request honors an
+# optional copilot_args field (a charter-overlay --agent <charter> pass
+# -through, mirroring BridgeClient.start_session's own copilot_args). Lets a
+# newer agent-dispatch caller detect the capability and refuse cleanly rather
+# than silently losing a requested charter against an older daemon.
+REMOTE_SESSION_COPILOT_ARGS_PROTOCOL_VERSION = 18
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

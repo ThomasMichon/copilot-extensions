@@ -468,6 +468,7 @@ def spawn_embodied_worker(
     verify_timeout: int = 0,
     timeout: float | None = None,
     seed: str | None = None,
+    charter: str | None = None,
 ) -> subprocess.CompletedProcess:
     """Spawn a CLI-backed autopilot worker via ``agent-worktrees embody``.
 
@@ -492,7 +493,15 @@ def spawn_embodied_worker(
     launch the SAME CLI-backed session mechanism with a deliberately lighter,
     non-railroaded ``--interactive`` seed instead of the autopilot one. Every
     existing call site (which never passes ``seed``) is unaffected.
+
+    ``charter`` is accepted for interface parity but raises: ``agent-worktrees
+    embody`` has no charter flag, so it never silently launches unscoped.
     """
+    if charter:
+        raise EmbodyUnavailable(
+            "spawn_embodied_worker: --charter unsupported for CLI-embodied "
+            "workers; use a headless pool"
+        )
     exe_prefix = _agent_worktrees_launch_prefix()
     if exe_prefix is None:
         raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
@@ -609,6 +618,7 @@ def spawn_fleet_headless_worker(
     owner: str,
     worker_id: str,
     agent: str = DEFAULT_HEADLESS_AGENT,
+    charter: str | None = None,
     repo: str | None = None,
     all_repos: bool = False,
     timeout: float | None = None,
@@ -655,6 +665,7 @@ def spawn_fleet_headless_worker(
         created = bridge_remote.LocalBridgeRemoteClient().create_session(
             host,
             agent=agent,
+            charter=charter,
             prompt=seed,
             caller_id=owner,
             timeout=timeout if timeout is not None else 120.0,
@@ -668,12 +679,19 @@ def spawn_fleet_headless_worker(
     except bridge_remote.RemoteBridgeUnavailable:
         pass
     except bridge_remote.RemoteBridgeOperationError as exc:
-        return subprocess.CompletedProcess(
-            args=[],
-            returncode=1,
-            stdout="",
-            stderr=str(exc),
-        )
+        # A far-side carrier still on the old REMOTE_OPERATION_VERSION (2)
+        # rejects a chartered request with 426 unsupported_version even when
+        # the LOCAL daemon already passed its own capability gate above --
+        # treat that specific carrier-skew case as unavailable too, so it
+        # falls through to the SSH `create --charter` fallback below instead
+        # of failing the spawn outright.
+        if not (charter and exc.status == 426 and exc.code == "unsupported_version"):
+            return subprocess.CompletedProcess(
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr=str(exc),
+            )
 
     exe = shutil.which("ssh")
     if exe is None:
@@ -698,6 +716,8 @@ def spawn_fleet_headless_worker(
         "--caller",
         owner,
     ]
+    if charter:
+        remote_argv += ["--charter", charter]
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
     # `host` is the SSH alias (never a raw IP). BatchMode so a missing key
     # fails fast instead of hanging on a password prompt.

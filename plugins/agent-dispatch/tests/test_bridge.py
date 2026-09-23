@@ -149,6 +149,32 @@ def test_spawn_worker_invokes_agent_bridge_create(monkeypatch):
     assert cmd[-1] == "--no-wait"  # wait=False -> --no-wait
 
 
+def test_spawn_worker_charter_appends_to_direct_create(monkeypatch):
+    """Regression for the venue/charter split: `charter` must
+    ride the direct `agent-bridge create <venue> <prompt> --charter <charter>`
+    call -- independent of, and never substituting for, the venue target."""
+    calls = {}
+
+    def fake_run(cmd, **kwargs):
+        calls["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+
+    result = bridge.spawn_worker(
+        "task42", agent="Lambda-Core-wsl", charter="cab-sweep-reconciler",
+        worker_id="w1", wait=False,
+    )
+    assert result.returncode == 0
+    cmd = calls["cmd"]
+    assert cmd[:3] == ["/usr/bin/agent-bridge", "create", "Lambda-Core-wsl"]
+    assert "--charter" in cmd
+    assert cmd[cmd.index("--charter") + 1] == "cab-sweep-reconciler"
+
+
 def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkeypatch):
     calls: list[tuple[list[str], dict]] = []
 

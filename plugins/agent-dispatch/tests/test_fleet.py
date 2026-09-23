@@ -78,6 +78,7 @@ def _fake_headless_spawn(record: list | None = None, *, ok: bool = True, rc: int
         owner,
         worker_id,
         agent,
+        charter=None,
         repo=None,
         all_repos=False,
     ):
@@ -155,6 +156,18 @@ def test_empty_pool_rejected():
         fleet.FleetSpawner([], origin="orig")
     with pytest.raises(ValueError):
         fleet.FleetSpawner(["a"], origin="  ")
+
+
+def test_charter_rejected_for_cli_embodied_fleet():
+    """A non-headless (CLI-embodied) fleet has no charter-binding path -- fail
+    fast at construction rather than silently dropping the requested charter
+    when spawn_fleet_embodied_worker is invoked without it."""
+    with pytest.raises(embody.EmbodyUnavailable):
+        fleet.FleetSpawner(
+            ["a"], origin="orig", headless=False, charter="cab-charter"
+        )
+    # A headless fleet accepts the same charter without complaint.
+    fleet.FleetSpawner(["a"], origin="orig", headless=True, charter="cab-charter")
 
 
 # -- FleetSpawner.__call__ (SpawnFn contract) --------------------------------
@@ -616,6 +629,7 @@ def test_headless_call_encodes_fleet_body_recovery_handle():
         owner,
         worker_id,
         agent,
+        charter=None,
         repo=None,
         all_repos=False,
     ):
@@ -647,6 +661,7 @@ def test_headless_call_without_session_id_falls_back_to_owner():
         owner,
         worker_id,
         agent,
+        charter=None,
         repo=None,
         all_repos=False,
     ):
