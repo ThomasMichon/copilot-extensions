@@ -2918,3 +2918,49 @@ github/copilot-agent-runtime#22266 (issuecomment-5793199437):
   session-scoped timeout; should `external_tool.requested` fail fast when
   blocked on client-side seeding rather than genuine extension work).
   Round 2 concludes here pending upstream response.
+
+
+### 2026-09-23 (cont.) -- Local mitigation shipped: pre-approve extension-permission-access at worktree creation
+
+Two more live occurrences surfaced during this same investigation window
+(both sibling sessions in a separate internal repo on this machine): one
+recovered on its own (16s, no hang), one hit the identical "Tool reference ... not
+found" surface via a **faster, permission-prompt-free** path (tool
+confirmed present at T, gone by T+2s, no `permission.requested` /
+`external_tool.requested` logged at all) -- added as a second corroborating
+comment on #22266 (issuecomment-5800303409), evidencing at least two
+distinct routes to the same disconnected/not-found surface (the queued
+permission-seed delay, and a bare connection-reload race).
+
+Traced the actual local, force-settable mitigation while investigating the
+delay: `~/.copilot/permissions-config.json`'s `locations.<path>.tool_approvals`
+array is exactly the persisted store the interactive
+`extension-permission-access` approval writes to (`location_persistence.rs`,
+`shared_api/permissions.rs:4871`'s `location_permissions_file_path`,
+matched via `rule_matches_extension_permission_access` in
+`permissions/service.rs:1125`). Pre-writing
+`{"kind": "extension-permission-access", "extensionName": "plugin:<x>:<x>"}`
+for a location BEFORE any session ever runs there skips the interactive
+prompt (and therefore the whole queue-delay path) entirely.
+
+agent-worktrees already had the exact precedented pattern for this class of
+fix: `add_trusted_folder` pre-seeds `trustedFolders` in `config.json` before
+first launch specifically to suppress a different startup-triggered
+extension reload. Shipped the same treatment for the permission-access gate:
+`copilot-extensions` PR #3440 (`fix/extension-permission-access-preseed`) adds
+`permissions.ensure_extension_permission_approvals()`, called alongside
+`add_trusted_folder` at both worktree-creation call sites (the normal
+`create` path and the paired knowledge-worktree carve), pre-approving
+`agent-bridge`/`context-handoff`/`agent-worktrees` (the plugins that
+actually register a JS extension connection) for every newly created
+worktree. Additive/idempotent, mirrors the existing pattern's tests and
+docstring conventions. 67/67 tests passed (test_permissions.py +
+test_launch_cmd.py); ruff clean on the new content.
+
+This is a **local mitigation, not a fix for the upstream mechanism** --
+the unpartitioned `permissionsConfigQueueRef` and the underlying
+registry-churn race both still need an upstream resolution (tracked on
+#22266). But it closes the practical gap for every facility-created
+worktree going forward: the gate can no longer block on a location this
+plugin itself just created.
+
