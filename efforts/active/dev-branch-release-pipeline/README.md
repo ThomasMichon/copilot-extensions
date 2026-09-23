@@ -229,13 +229,45 @@ Round 2 (operator's response to that evaluation):
   - Not yet wired into CI or required by any guard — that's Phase 2 (retiring
     `check-version-bump.py`'s manual-bump requirement in favor of a
     changefile-presence check).
-- [ ] Build the local **"preview a release"** CLI on top of the generator
+- [x] Build the local **"preview a release"** CLI on top of the generator
       (must be the same code path CI uses, not a parallel implementation).
-- [ ] Design and prototype the **dev-slot local override**: an opt-in,
+  - **Shipped:** `tools/preview_release.py` builds a scratch copy of one
+    plugin, materializing its vendored `libs/<lib>` copies **into that
+    scratch copy only** (never the real `plugins/<plugin>/libs/<lib>` in
+    this checkout), and reports the version it would get if pending
+    changefiles were consumed — read-only against the real repo otherwise.
+    22 passing tests across the two tools.
+  - **Caught and fixed a real bug before landing:** the first draft invoked
+    `sync-vendored-libs.py --materialize` as a subprocess against the real
+    repo, which would have silently mutated real `plugins/*/libs/*` content
+    as a side effect of building a "preview." Verified the fix with a live
+    `git status`-before/after smoke test against a real plugin with known
+    drifted libs (`agent-bridge`) — confirmed zero real-repo diff.
+- [x] Design and prototype the **dev-slot local override**: an opt-in,
       clearly-logged config switch that overwrites a machine's installed
       plugin content with a locally-generated preview; auto-expires or is
       superseded by the next real release pull; the enabling agent holds a
       claim and is responsible for tidying it up when done.
+  - **Superseded by a concurrently-merged, better-designed pattern —
+    withdrawn, not shipped.** Mid-session, while diagnosing an unrelated CI
+    failure, discovered `ThomasMichon/copilot-extensions#3376` ("mutable
+    dev slot") had just landed to `main`: a first-class `versions/dev/`
+    runtime slot per plugin, rebuilt in place, gated by a
+    `dev-claim.json` sidecar (schema `copilot-extensions.dev-slot-claim`,
+    owner = absolute worktree path, no TTL, released explicitly) —
+    integrated directly into `libs/versioned-runtime`'s existing
+    immutable-slot machinery. See `docs/patterns/mutable-dev-slot.md` and
+    `efforts/active/mutable-dev-slot/README.md`. This is exactly this
+    effort's Phase 1 item, done more correctly (a real runtime-slot
+    primitive, not a from-scratch installed-plugins-directory copy-and-claim
+    hack) — and it predates my draft by the same session's timestamp.
+    **Withdrew `tools/dev_slot.py` before merging** (removed from PR #3380
+    prior to landing); this Plan item is resolved by cross-referencing that
+    pattern rather than building a parallel one. `tools/preview_release.py`
+    is kept — it answers a different question (what would this plugin's
+    *promoted* payload + version look like) than mutable-dev-slot (iterate
+    against the currently-deployed CLI with live, uncommitted code), so the
+    two are complementary, not duplicative.
 - [ ] _(agent-recommended; not explicitly re-confirmed by the operator)_
       Confirm Copilot CLI's actual update-detection behavior empirically
       (version-string diff only, no semver range awareness) — do not assume;
@@ -243,6 +275,13 @@ Round 2 (operator's response to that evaluation):
 - [ ] Draft CONTRIBUTING.md / AGENTS.md rewrite content in-repo as a doc
       (not yet the live contract) describing the new contributor flow:
       changefile-only PRs, no manual version edits, no vendoring copies.
+  - **Drafted:** [`contributing-draft.md`](contributing-draft.md) — a
+    before/after table, the changefile workflow, the "wait, and how to
+    preview past it" section (cross-referencing `preview_release.py` and
+    the mutable-dev-slot pattern instead of the withdrawn `dev_slot.py`),
+    and an explicit list of what still has to land first (Phase 2/3, the
+    canonical-libs restoration). Marked DRAFT/not-yet-authoritative; landing
+    it as the live CONTRIBUTING.md/AGENTS.md replacement is a Phase 2 item.
 - [x] Investigate and close the auto-updater coverage gap: enumerate which
       copilot-extensions plugins a harness worktree actually keeps current
       via `agent-worktrees update` (or equivalent), confirm whether
@@ -427,3 +466,62 @@ generator contract details here or in a linked sub-doc._
 - Next: the local "preview a release" CLI (compose `sync-vendored-libs.py
   --materialize` + `accumulate_bumps.py --dry-run` into one preview command),
   then the dev-slot local override design.
+
+### 2026-09-23 — Preview CLI + dev-slot override
+- Shipped `tools/preview_release.py` and `tools/dev_slot.py` (see Plan).
+  Only two Phase 1 items remain: the CONTRIBUTING.md/AGENTS.md draft, and
+  empirically confirming Copilot CLI's update-detection semantics (still
+  deliberately deferred to Phase 3's dry-run, per the earlier Journal entry
+  — no safe scratch environment for it yet).
+- Self-caught, before landing, a real design bug: the first `preview_release`
+  draft would have run the materializer against the real checkout as a
+  subprocess, silently writing real vendored-lib changes as a side effect of
+  building a "preview." Fixed by loading `sync-vendored-libs.py`'s helpers
+  in-process and scoping every write to the scratch preview copy; verified
+  with a live before/after `git status` smoke test against a plugin with
+  known-drifted libs.
+- Deliberately did not exercise `dev_slot.py install`/`clean` against this
+  machine's own real `~/.copilot/installed-plugins` — too risky to mutate a
+  live, currently-loaded plugin tree from within this session. Fully covered
+  by tests against fake target roots instead.
+
+### 2026-09-23 — Superseded discovery: withdrew tools/dev_slot.py
+- While diagnosing a CI "guards + lint" failure on PR #3380 (traced to an
+  unrelated, pre-existing baseline break on `main` — see below — not caused
+  by this effort), found `ThomasMichon/copilot-extensions#3376` had just
+  merged the "mutable dev slot" pattern: a proper `versions/dev/`
+  runtime-slot primitive with claim-file GC protection, built into
+  `libs/versioned-runtime` itself. This resolves the same Phase 1 item my
+  `tools/dev_slot.py` was built for, more correctly. Removed
+  `tools/dev_slot.py` + its tests from PR #3380 before landing; kept
+  `tools/preview_release.py` (a distinct, complementary concern). Recovered
+  cleanly from a self-inflicted `git stash pop` mishap while investigating
+  (accidentally popped an unrelated stash entry belonging to a different
+  worktree, sharing this repo's stash ref; `git reset --hard HEAD` restored
+  a clean state with no damage to that other worktree's stash).
+- **Separately confirmed the CI failure itself is pre-existing on `main`,
+  not introduced by this effort's PRs**: `check-version-consistency.py`
+  (worktree-manager version skew) and `check-module-size.py` (several
+  `versioned_runtime.py` copies now over their grandfathered line-count
+  ceiling — plausibly from #3376's own +174-line change) both fail
+  identically against `origin/main` directly, with none of this effort's
+  files in the diff. Not fixing this here (out of scope, unrelated,
+  someone else's baseline to repair) — but it currently blocks *any* PR's
+  "guards + lint" required check from going green, including PR #3380.
+  Flagging for operator awareness rather than merging around it.
+- **Operator confirmed this is a live, unplanned case study for this
+  effort's own premise**: an unrelated merge broke the one branch every
+  consumer polls, and every subsequent PR (including this effort's own
+  #3380) is now blocked behind it with no coordinated review of the
+  breakage — exactly the "checkins land on main, then breakage is
+  discovered" failure mode the dev/main split exists to prevent. Operator
+  has another agent fixing the break directly; PR #3380 stays open,
+  unmerged, until main is green again. Continuing with the one remaining
+  Phase 1 item that doesn't depend on a merge (the CONTRIBUTING.md/AGENTS.md
+  draft) in the meantime.
+- Drafted `contributing-draft.md` (see Plan). Every Phase 1 Plan item is now
+  either done, withdrawn-with-reason, or deliberately deferred
+  (Copilot-CLI update-semantics). Phase 1 is functionally complete pending
+  operator review; next real step is Phase 2 (cutting the `dev` branch),
+  which needs the operator's go-ahead since it changes the repo's branch
+  topology.

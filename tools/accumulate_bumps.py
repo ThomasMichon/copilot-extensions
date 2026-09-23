@@ -85,7 +85,7 @@ def pending_bumps() -> dict[str, list[str]]:
     return grouped
 
 
-def _read_plugin_json_version(plugin: str) -> str | None:
+def read_plugin_json_version(plugin: str) -> str | None:
     pj = PLUGINS_DIR / plugin / "plugin.json"
     if not pj.exists():
         return None
@@ -130,7 +130,7 @@ def compute(grouped: dict[str, list[str]]) -> dict[str, tuple[str, str]]:
     """Map ``plugin -> (old_version, new_version)`` for every pending plugin."""
     result: dict[str, tuple[str, str]] = {}
     for plugin, types in sorted(grouped.items()):
-        current = _read_plugin_json_version(plugin)
+        current = read_plugin_json_version(plugin)
         if current is None:
             print(f"accumulate-bumps: skipping {plugin} -- no plugin.json/version found",
                   file=sys.stderr)
