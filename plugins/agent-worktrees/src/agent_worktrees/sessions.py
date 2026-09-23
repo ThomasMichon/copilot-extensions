@@ -480,6 +480,47 @@ def _count_user_turns(entry: Path) -> int:
     return turns
 
 
+def _session_entry_lock_state(
+    state_dir: Path, session_id: str,
+) -> tuple[int | None, list[int]]:
+    """Return ``(live_pid_or_None, stale_pids)`` for one session's lock dir.
+
+    Shared read of the ``inuse.<pid>.lock`` contract, factored out of
+    :func:`worktree_session_lock_state` (which aggregates it over every
+    session on a record) so :func:`session_id_is_live` (Phase 8,
+    worktree-finality-and-obligations) can answer the SAME question scoped to
+    exactly one session id, without re-deriving the lock-file/PID-liveness
+    logic.
+    """
+    sdir = state_dir / session_id
+    if not sdir.is_dir():
+        return None, []
+    # Detached parent-continuation runs reuse a foreign cwd -- never a live
+    # signal for THIS worktree (mirrors _enrich_session_dir).
+    if _is_detached_session(sdir):
+        return None, []
+    try:
+        lock_files = list(sdir.glob("inuse.*.lock"))
+    except OSError:
+        return None, []
+    stale_pids: list[int] = []
+    for lock_file in lock_files:
+        parts = lock_file.stem.split(".")
+        if len(parts) < 2:
+            continue
+        try:
+            pid = int(parts[1])
+        except ValueError:
+            continue
+        # _is_copilot_process is alive-AND-copilot in one call (OpenProcess
+        # fails for a dead pid), so a stale lock from a crashed session does
+        # not count.
+        if _is_copilot_process(pid):
+            return pid, stale_pids
+        stale_pids.append(pid)
+    return None, stale_pids
+
+
 def worktree_session_lock_state(rec) -> tuple[bool, list[int]]:
     """Return live-binding presence and stale lock PIDs for one worktree.
 
@@ -502,32 +543,33 @@ def worktree_session_lock_state(rec) -> tuple[bool, list[int]]:
         sid = getattr(entry, "session_id", None)
         if not sid:
             continue
-        sdir = state_dir / sid
-        if not sdir.is_dir():
-            continue
-        # Detached parent-continuation runs reuse a foreign cwd -- never a live
-        # signal for THIS worktree (mirrors _enrich_session_dir).
-        if _is_detached_session(sdir):
-            continue
-        try:
-            lock_files = list(sdir.glob("inuse.*.lock"))
-        except OSError:
-            continue
-        for lock_file in lock_files:
-            parts = lock_file.stem.split(".")
-            if len(parts) < 2:
-                continue
-            try:
-                pid = int(parts[1])
-            except ValueError:
-                continue
-            # _is_copilot_process is alive-AND-copilot in one call (OpenProcess
-            # fails for a dead pid), so a stale lock from a crashed session does
-            # not count.
-            if _is_copilot_process(pid):
-                return True, stale_pids
-            stale_pids.append(pid)
+        pid, stale = _session_entry_lock_state(state_dir, sid)
+        if pid is not None:
+            return True, stale_pids
+        stale_pids.extend(stale)
     return False, stale_pids
+
+
+def session_id_is_live(rec, session_id: str) -> bool:
+    """Per-session ACTIVE check, scoped to exactly ``session_id``.
+
+    Unlike :func:`worktree_has_live_session` (any session on this worktree),
+    this answers "is THIS specific session's Copilot process alive" -- the
+    probe the Phase 8 (worktree-finality-and-obligations) sweep session-claim
+    branch needs to corroborate a ``kind="session"`` claim's liveness before
+    treating it as gone. A session id not present on ``rec`` at all is
+    conservatively not-live (``False``).
+    """
+    sessions_list = getattr(rec, "sessions", None)
+    if not sessions_list or not any(
+        getattr(entry, "session_id", None) == session_id for entry in sessions_list
+    ):
+        return False
+    state_dir = _session_state_dir()
+    if not state_dir.exists():
+        return False
+    pid, _stale = _session_entry_lock_state(state_dir, session_id)
+    return pid is not None
 
 
 def worktree_has_live_session(rec) -> bool:

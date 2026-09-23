@@ -589,23 +589,27 @@ reviewed/buildable, replaces the prior proposal-only list):
   claim; never resurrects an already-`released` claim (a raced
   `deregister_session`), mirroring `finalize.py`'s
   `_settle_current_session_claim` guard.
-- [ ] Extend the existing never-wedge sweep resolvers `claim_gone`/
-  `claim_safe` (`sweep.py:397-431`, dispatched from `make_resolvers`/
-  `self_heal`, `sweep.py:432-472`) with a `claim.kind == "session"` branch,
-  reusing `session_catalog._maybe_reap_fsmonitor`'s liveness-transition
-  pattern (`session_catalog.py:379-417`): level-triggered (act on the
-  current non-live observation, not an edge), cooldown-throttled, and
-  corroborated against a real PID/process check for that specific session
-  id before the claim is treated as gone -- so a crashed/killed session
-  cannot wedge finalize forever, same invariant every other claim kind
-  already gets from this sweep. `claim_safe` for `kind == "session"` mirrors
-  `claim_gone`'s own verdict (gone implies safe) rather than running a
-  second, separate probe: unlike the `worktree` kind (which must prove the
-  child's branch landed upstream before calling it safe), a session claim
-  carries no separate at-risk payload of its own -- any uncommitted work the
-  session left behind is exactly what Phase 9's `local_dirtiness`/
-  `open_claims` facts already surface independently, so there is nothing
-  further for this claim kind's own `safe_of` to check.
+- [x] Extend the existing never-wedge sweep resolvers `claim_gone`/
+  `claim_safe` with a `claim.kind == "session"` branch
+  (`session_claim_gone`, dispatched from both `claim_gone` and
+  `claim_safe`): corroborated against a real PID/process check for that
+  SPECIFIC session id (`sessions.session_id_is_live`, factored out of
+  `worktree_session_lock_state`'s "any session" check) -- so a
+  crashed/killed session cannot wedge finalize forever, same invariant
+  every other claim kind already gets from this sweep. `claim_safe` for
+  `kind == "session"` mirrors `claim_gone`'s own verdict (gone implies
+  safe) rather than running a second, separate probe: unlike the
+  `worktree` kind (which must prove the child's branch landed upstream
+  before calling it safe), a session claim carries no separate at-risk
+  payload of its own -- any uncommitted work the session left behind is
+  exactly what Phase 9's `local_dirtiness`/`open_claims` facts already
+  surface independently, so there is nothing further for this claim
+  kind's own `safe_of` to check. (The design's "cooldown-throttled"
+  framing describes the resident-daemon `_maybe_reap_fsmonitor` pattern
+  this reuses the corroboration idea from; `claim_gone`/`claim_safe`
+  themselves are stateless pure functions called only from the manual
+  `claims sweep` verb and finalize's synchronous self-heal, neither a
+  tight loop, so no separate cooldown state was added here.)
 - [ ] Register a `userPromptSubmit` hook in `hooks.json` alongside the
   existing `sessionStart`/`sessionEnd` entries (`hooks.json:20-33`): a new
   lightweight command hook invoking a new CLI subcommand (e.g.
@@ -2078,4 +2082,53 @@ The approved design is the faceted model in [design.md](design.md):
 - Remaining Phase 8 bullets: the sweep `claim_gone`/`claim_safe` session
   branch, and the `userPromptSubmit` reopen hook -- each its own next
   slice/worktree.
+
+### 2026-09-22 (continued) - Phase 8 build continued: sweep session-claim branch
+
+- Third Phase 8 sub-slice, in a fresh worktree per the same one-slice
+  pattern: extended the never-wedge sweep (`sweep.py`) with a
+  `claim.kind == "session"` branch.
+- Added `sweep.session_claim_gone(claim, config)`: a session claim's ref is
+  self-referential (`format_claim_ref(machine, project, worktree_id,
+  session=session_id)` names the SAME worktree holding the claim, not a
+  child), so the existing `load_claim_child_record` resolves it correctly
+  with zero special-casing -- an owning record that's gone entirely is a
+  stronger positive "gone" signal than any per-session PID check; otherwise
+  gone is the negation of a real, corroborated per-session liveness probe.
+  Wired it into both `claim_gone` and `claim_safe` for `kind == "session"`
+  -- `claim_safe` mirrors `claim_gone`'s own verdict rather than running a
+  second probe, per the design (a session claim carries no separate
+  at-risk payload; Phase 9's dirtiness/open-claims facts already cover
+  that).
+- Added `sessions.session_id_is_live(rec, session_id)`, factored out of
+  `worktree_session_lock_state` (which only ever answered "is ANY session
+  on this worktree live") via a new shared `_session_entry_lock_state`
+  helper -- `worktree_session_lock_state`'s own aggregate behavior
+  (including its `stale_pids` collection) is unchanged, just reading the
+  same per-session lock-file/PID-liveness logic through the shared helper
+  instead of duplicating it inline.
+- Added 4 targeted tests to `test_sweep.py` covering `session_claim_gone`
+  (dead process, live process, owning record entirely gone, cross-machine
+  spare, and a ref with no session id also spares), the `claim_gone`/
+  `claim_safe` dispatch for `kind == "session"`, and an end-to-end
+  `self_heal` reclaim of a session claim whose process is confirmed dead.
+  Added 4 targeted tests to `test_sessions.py` for `session_id_is_live`
+  (live, stale/dead, scoped-to-the-right-session-id even when another
+  session on the same worktree IS live, and no sessions on record at all).
+  Full `test_sweep.py` + `test_sessions.py` run: 94 passed. A broader
+  regression pass (`test_sweep`, `test_sessions`, `test_finalize`,
+  `test_handoff_cutover`, `test_register_session`, `test_tracking`): 623
+  passed (the `worktree_session_lock_state` refactor is behavior-preserving
+  -- no existing test needed a change). `ruff check` on all four touched
+  files shows the same pre-existing counts as `main` (0 + 6 + 1 + 8 = 15
+  errors both before and after, confirmed via `git stash` diff) once the
+  two lint findings my own edit introduced (an import-sort drift from the
+  new test imports, an unused unpacked test variable) were fixed. Widened
+  `tools/module-size-baseline.json`'s `sessions.py` ceiling from 2662 to
+  2704 (the file's real current line count after the refactor + new
+  function); `sweep.py` stays under the 1000-line cap, no baseline entry
+  needed.
+- Remaining Phase 8 bullet: the `userPromptSubmit` reopen hook -- the last
+  one, its own next slice/worktree. Once merged, Phase 8 (and this whole
+  effort) is done pending the umbrella-issue close-out.
 
