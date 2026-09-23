@@ -311,6 +311,25 @@ Verbatim from the operator:
             (not just guards) green before and after, given their live-
             orchestration blast radius. Do not rush these late in a long
             session; each deserves a fresh-context pass.
+            - **2026-09-22 pattern-shift caveat (operator-flagged):** CLI
+              `__main__.py` files are shifting toward a new pattern — on-demand
+              (lazy) per-subcommand script loading, to accelerate CLI startup —
+              rather than the eager-import compatibility-root shape this
+              effort's `agent-bridge`/`agent-worktrees`/`agent-dispatch` slices
+              have used so far (sibling module extracted, then eagerly
+              imported/re-exported from `__main__.py` for compatibility).
+              Landing more `__main__.py` splits with the *old* eager-import
+              pattern now risks a near-term rework once the lazy-loading
+              pattern lands repo-wide. Before starting any further
+              `__main__.py` CLI-registration slice (e.g. `agent-codespaces`
+              4,767 or any future `agent-worktrees` follow-up), check whether
+              the lazy-loading pattern has a design doc / skill / reference
+              implementation yet, and prefer adopting *that* shape directly
+              rather than the eager-import shape, or hold off entirely until
+              it's decided. Non-`__main__.py` targets (large classes, CLI-
+              adjacent free-function modules, test suites) are unaffected by
+              this caveat and remain safe to tackle with the existing
+              mixin/free-function patterns.
             - `agent-dispatch/__main__.py` first slice landed: extracted the
               coordinator/service family into `coordinator_cli.py`
               (serve/deploy/cutover, federation, installer-readiness,
