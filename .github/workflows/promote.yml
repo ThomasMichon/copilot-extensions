@@ -1,49 +1,46 @@
 name: Promote dev to main
 
-# Phase 3 of the dev-branch-release-pipeline effort
-# (ThomasMichon/copilot-extensions#3336): once `CI` (.github/workflows/ci.yml)
-# finishes GREEN on `dev`, generate a single wholesale-replace commit onto
-# `main` -- never a merge of `dev` into `main` -- via tools/promote_release.py.
-# See that effort's README (Plan > Phase 3, and the Phase 2 sequencing note)
-# for the full design and for what remains deliberately NOT wired yet
-# (the changefile-presence guard, CONTRIBUTING.md/AGENTS.md going live, and
-# branch protection on `main` are all still gated on this pipeline being
-# demonstrated end-to-end first).
+# Phase 3/5 of the dev-branch-release-pipeline effort
+# (ThomasMichon/copilot-extensions#3336): once `Validation Gate`
+# (.github/workflows/validation-gate.yml, itself chained after `CI` going
+# green) finishes GREEN on `dev`, generate a single wholesale-replace commit
+# onto `main` -- never a merge of `dev` into `main` -- via
+# tools/promote_release.py. See that effort's README (Plan > Phase 3/5) for
+# the full design.
 #
-# Admin-escalation gate (Phase 3's last checklist item): this job runs under
-# the `main-promotion` GitHub Environment. That environment itself is NOT
-# something this workflow file can configure -- a repo admin must add
-# required reviewers to it (Settings > Environments > main-promotion) before
-# this can ever auto-promote unattended. Until that's done, this workflow
-# will simply wait indefinitely for that environment's approval on every run,
-# which is the intended fail-safe default, not a bug.
+# Admin-escalation gate: this job runs under the `main-promotion` GitHub
+# Environment. That environment itself is NOT something this workflow file
+# can configure -- a repo admin must add required reviewers to it
+# (Settings > Environments > main-promotion) before this gate actually
+# blocks anything unattended. Until that's done, the job runs without a
+# human approval step (but every other guard below still applies).
 #
-# A SECOND, deliberate belt-and-suspenders layer on top of that (not required
-# by the Plan): the automatic `workflow_run` trigger always runs in
-# report-only mode (no `--push`), regardless of environment approval. Real
-# pushes to `main` only ever happen from an explicit `workflow_dispatch` with
-# `push: true`.
+# Live as of Phase 5 cutover (2026-09-23): `dev` is now this repo's default
+# branch and the real PR target, so the automatic `workflow_run` trigger
+# pushes for real (`--push`) rather than staying report-only. Emergency
+# rollback: `python tools/rollback_release.py pause --reason "..." --push`
+# BEFORE `revert --reason "..." --push` -- see tools/rollback_release.py's
+# own docstring for the full procedure. `tools/promote_release.py` itself
+# refuses to run while paused, and refuses to re-promote the exact `dev`
+# state a rollback just reverted (the non-incremental-update guard) unless
+# `--force` is passed after `dev` has moved forward with a real fix.
 #
-# This is not just extra caution -- it is currently load-bearing. A real
-# dry run (2026-09-23) against this repo's actual origin/dev confirmed
-# origin/main is running AHEAD of origin/dev (nobody targets `dev` yet, so
-# it goes stale relative to real development). Flipping the automatic
-# trigger to `--push` before Phase 5's real cutover (once `dev` is the
-# trunk every PR actually targets) would regress `main` to `dev`'s older
-# content. Do not flip this until Phase 5 is live -- update this comment and
-# the effort's Plan/Journal in the same change when it is.
+# `main`'s branch protection restricts direct pushes to the `github-actions`
+# app identity this job runs as (repo admins retain bypass for genuine
+# emergencies) -- see the dev-branch-release-pipeline effort's Journal for
+# when/how that was configured.
 
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["Validation Gate"]
     branches: [dev]
     types: [completed]
   workflow_dispatch:
     inputs:
       push:
-        description: "Push the generated commit + tag to main (default: dry run)"
+        description: "Push the generated commit + tag to main (default: true)"
         required: false
-        default: "false"
+        default: "true"
 
 concurrency:
   group: promote-dev-to-main
@@ -70,11 +67,14 @@ jobs:
           python-version: "3.12"
       - name: Configure git identity for the generated commit
         run: |
-          git config user.name "copilot-extensions-release-bot"
-          git config user.email "release-bot@users.noreply.github.com"
-      - name: Dry run (report only; no push)
-        if: github.event_name == 'workflow_run' || github.event.inputs.push != 'true'
-        run: python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main
-      - name: Promote (push generated commit + tag)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.push == 'true'
-        run: python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main --push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Promote
+        env:
+          PUSH_INPUT: ${{ github.event.inputs.push }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
+            python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main
+          else
+            python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main --push
+          fi

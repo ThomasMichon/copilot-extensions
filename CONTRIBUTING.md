@@ -21,16 +21,26 @@ its destination.
 
 ## Contribution flow (PR-required)
 
-**Every change lands through a pull request — direct pushes to `main` are
-blocked.** This is enforced on three layers that agree:
+**PRs target `dev`, not `main`.** `main` is regenerated wholesale by a CI
+promotion pipeline (`.github/workflows/promote.yml`,
+dev-branch-release-pipeline effort, ThomasMichon/copilot-extensions#3336) —
+it is never a place a PR merges into directly. `dev` is this repo's default
+branch, so an ordinary PR already targets it without needing to specify a
+base branch.
+
+**Every change lands through a pull request — direct pushes to `dev` are
+blocked, and `main` accepts pushes only from the promotion pipeline (or
+explicit admin escalation).** This is enforced on three layers that agree:
 
 1. **Tooling** — `.agent-worktrees/config.yaml` sets `pr.required: true`, so
-   `agent-worktrees push-changes` refuses direct-to-`main` and the PR-workflow
-   git-hooks block committing to `main` / pushing a worktree branch directly.
+   `agent-worktrees push-changes` refuses direct-to-`dev` and the PR-workflow
+   git-hooks block committing to `dev` / pushing a worktree branch directly.
 2. **Branch policy** — a GitHub repository ruleset ("Default-branch policy:
    PR-required + non-blocking Copilot review") carries a `pull_request` rule (+
-   `non_fast_forward`) that blocks direct pushes to `main` server-side, for
-   everyone (no bypass).
+   `non_fast_forward`) that blocks direct pushes to `dev` server-side, for
+   everyone (no bypass). A separate branch-protection rule on `main` restricts
+   pushes to the promotion pipeline's own identity, with repo-admin escalation
+   retained for genuine emergencies (see Release & Versioning below).
 3. **Review** — the same ruleset's `copilot_code_review` rule auto-requests a
    **non-blocking** Copilot review on every PR (it is a review, not a required
    status check, so it never gates the merge).
@@ -171,21 +181,43 @@ MAJOR.MINOR.PATCH[-devN]
 - **Major** bumps (`1.x -> 2.0`) — breaking changes. **Only when the
   maintainer decides.**
 
-### Default: bump patch with `-devN`
+### Contributing a change: add a changefile, don't hand-pick a version
 
-When committing changes that warrant a version bump, use the **patch**
-level with a `-devN` suffix:
+**You never hand-edit a version number.** Instead, once per touched plugin,
+run:
 
+```bash
+python tools/changefile.py add --plugin <name> --type patch --comment "<summary>"
+# one PR touching two plugins with one shared reason:
+python tools/changefile.py add \
+  --plugin agent-worktrees --type patch \
+  --plugin agent-bridge --type dev \
+  --comment "Shared fix for Y"
+python tools/changefile.py list   # see what's pending
 ```
-1.0.1 -> 1.0.2-dev1 -> 1.0.2-dev2 -> ... -> 1.0.2 (release)
-```
 
-Do **not** bump minor or major versions unless explicitly instructed.
+Default to **`patch`** (or `dev` for an iterative fixup within an
+already-in-flight patch). Do **not** request `minor`/`major` unless the
+maintainer explicitly says so. Multiple changefiles may target the same
+plugin (e.g. two different PRs merged close together); whichever carries the
+biggest bump type wins when they're all consumed together
+(`tools/accumulate_bumps.py`'s `highest_bump`) — you never need to
+coordinate with another PR author over the exact number, which is the
+structural fix for ThomasMichon/copilot-extensions#182's parallel-PR
+`-devN` collisions.
 
-### Where the version lives (ALL THREE must be bumped together)
+This closes a changefile's "PR at PR-time" side of the story; consuming it
+into a real version number is Release & Versioning's next concern, not
+yours as a contributor — see "The wait, and how to preview past it" below
+for what actually happens between your merge to `dev` and a real version
+landing on `main`.
 
-Each plugin has its own version triplet. Bump only the files for the
-plugin you changed.
+### Where the mechanically-applied bump lands (reference — you never edit these by hand)
+
+Each plugin has its own version triplet. The CI promotion pipeline's
+`tools/accumulate_bumps.py` is what actually writes these, consuming
+whatever changefiles are pending; nothing here is something a contributor
+edits directly.
 
 > **General rule (applies to every plugin, present and future).** For a plugin
 > `<p>`: bump `plugins/<p>/plugin.json` (`version`), `plugins/<p>/pyproject.toml`
@@ -210,17 +242,19 @@ plugin you changed.
 > versions disagree — the guard added after #65 bumped only `pyproject.toml` and
 > wedged the Picker's "Update available" indicator into a permanent loop.
 >
-> **Enforced by `tools/check-version-bump.py`** (pre-push + CI, PR-diff scoped):
-> it fails the push/PR if a plugin's content changed **without** a version bump.
-> A change to **any file under `plugins/<p>/`** (its `src/`, `skills/`,
-> `agents/`, own `docs/`, tests, manifests) requires bumping `<p>`; a change to a
-> **shared, vendored `libs/<lib>/`** requires bumping **every** plugin that
-> vendors it (a lib change reaches every consumer's payload — see
-> `check-vendored-libs-sync.py`). This closes the silent stale-deploy gap where
-> new code ships under an unchanged version and the version-gated runtime install
-> never redeploys it (dotfiles #1025). Repo-root files not vendored into any
-> plugin (`tools/`, `.github/`, repo-root `docs/`, `CONTRIBUTING.md`,
-> `README.md`) need no bump. Build artifacts under a plugin are ignored.
+> **Enforced by `tools/check-changefile-presence.py`** (pre-push + CI,
+> PR-diff scoped, against `dev`): it fails the push/PR if a plugin's content
+> changed **without** a pending changefile naming it. A change to **any file
+> under `plugins/<p>/`** (its `src/`, `skills/`, `agents/`, own `docs/`,
+> tests, manifests) requires a changefile for `<p>`; a change to a **shared,
+> vendored `libs/<lib>/`** requires one for **every** plugin that vendors it
+> (a lib change reaches every consumer's payload — see
+> `check-vendored-libs-sync.py`). This closes the silent stale-deploy gap
+> where new code ships under an unchanged version and the version-gated
+> runtime install never redeploys it (dotfiles #1025). Repo-root files not
+> vendored into any plugin (`tools/`, `.github/`, repo-root `docs/`,
+> `CONTRIBUTING.md`, `README.md`) need no changefile. Build artifacts under a
+> plugin are ignored.
 >
 > **Before editing a shared lib, find every REAL copy first: `python
 > tools/check-vendored-libs-sync.py --list`.** A shared lib such as
@@ -287,21 +321,47 @@ file is out of sync:
   version; machines checking for updates won't see the new version.
 - Stale `pyproject.toml` — runtime `--version` output is wrong.
 
-### When to bump
+### When to add a changefile
 
-- After a set of changes is committed and ready to push.
-- Before pushing to GitHub — the push is the "release."
-- One bump per push is fine; don't bump on every commit.
-- **On a hot plugin with concurrent agents** (several agents landing PRs to the
-  same plugin within minutes of each other — `agent-worktrees` is the frequent
-  case), the version you read is stale the moment another PR merges. Don't
-  precompute the bump early and carry it through several commits: re-fetch
-  `origin/main` and set the version to *(current main's version) + 1*
-  immediately before your final push, and again after any rebase the
-  `check-version-bump` CI gate forces on you. A collision here isn't
-  data loss — `check-version-bump`/`check-version-consistency` catch it every
-  time and force a quick re-bump — but re-checking right before push avoids
-  the wasted round trip.
+- After a set of changes is committed and ready to push — one changefile per
+  PR is fine; don't add one on every commit.
+- **A hot plugin with concurrent agents is no longer a coordination
+  problem.** Under the old hand-bump scheme, several agents landing PRs to
+  the same plugin within minutes of each other (`agent-worktrees` was the
+  frequent case) had to race to read-then-write the same version number.
+  Changefiles remove that race entirely: each PR just declares its own
+  intent (`patch`/`minor`/`major`/`dev`), several changefiles for the same
+  plugin can coexist peacefully, and `tools/accumulate_bumps.py` merges them
+  (biggest bump wins) into one real version only when the CI promotion
+  pipeline actually consumes them — you never need to re-fetch `dev` and
+  guess at a number before pushing.
+
+## The wait, and how to preview past it
+
+Merging to `dev` is not the same as shipping. Every consumer still only ever
+polls `main`. The CI promotion pipeline
+(`.github/workflows/promote.yml`/`validation-gate.yml`) is **triggered by a
+green `dev` build, not a schedule** — but there is a real wait between your
+merge landing on `dev` and a promotion actually shipping it to `main`, not
+an instant release.
+
+Two tools close the impatience gap without waiting on a real promotion:
+
+- **`python tools/preview_release.py <plugin>`** builds a scratch copy of
+  that plugin's payload — with its vendored `libs/<lib>` materialized from
+  canonical, and the version it would get if its pending changefiles were
+  consumed right now — entirely read-only against your real checkout. Good
+  for "what would ship" without touching anything.
+- **For actually running your own uncommitted/unmerged code against the real
+  deployed CLI**, use the **mutable-dev-slot** pattern:
+  `docs/patterns/mutable-dev-slot.md` (ThomasMichon/copilot-extensions#3376).
+  It gives each plugin a claimed, first-class `versions/dev/` runtime slot
+  rebuilt in place, GC-protected by a `dev-claim.json` sidecar.
+
+If something promoted to `main` turns out to be bad, see
+`tools/rollback_release.py` (pause the pipeline, revert the generated
+commit, then resume once `dev` has an actual fix) rather than hand-editing
+`main`.
 
 ## Deploying: one command — `<repo> update`
 
@@ -364,8 +424,9 @@ independently.
 Changes follow this exact sequence — no shortcuts:
 
 1. **Commit** changes in `plugins/agent-worktrees/`
-2. **Bump the version** in all three files (see "Where the version lives")
-3. **Push** to `main` on GitHub: `git push origin main`
+2. **Add a changefile** for `agent-worktrees` (see "Adding a changefile")
+3. **Open a PR targeting `dev`** — never push to `main` directly; `main` is
+   regenerated by the CI promotion pipeline (`.github/workflows/promote.yml`)
 4. **Update on each machine** via `agent-worktrees update`
    (over SSH for remote machines)
 
@@ -414,8 +475,9 @@ flow.
 ### The Deployment Pipeline
 
 1. **Commit** changes in `plugins/agent-bridge/`
-2. **Bump the version** in all three files (see "Where the version lives")
-3. **Push** to `main` on GitHub: `git push origin main`
+2. **Add a changefile** for `agent-bridge` (see "Adding a changefile")
+3. **Open a PR targeting `dev`** — never push to `main` directly; `main` is
+   regenerated by the CI promotion pipeline (`.github/workflows/promote.yml`)
 4. **Update on each machine** via the installer (see below)
 
 The installer resolves the local checkout via `~/.git-repos`, installs
@@ -465,8 +527,9 @@ management.
 ### The Deployment Pipeline
 
 1. **Commit** changes in `plugins/agent-codespaces/`
-2. **Bump the version** in all three files (see "Where the version lives")
-3. **Push** to `main` on GitHub: `git push origin main`
+2. **Add a changefile** for `agent-codespaces` (see "Adding a changefile")
+3. **Open a PR targeting `dev`** — never push to `main` directly; `main` is
+   regenerated by the CI promotion pipeline (`.github/workflows/promote.yml`)
 4. **Update on each machine** via the installer
 
 ### Install / Update
@@ -525,8 +588,9 @@ CLI for local Docker dev-container fleet and lease management.
 ### The Deployment Pipeline
 
 1. **Commit** changes in `plugins/agent-containers/`
-2. **Bump the version** in all three files (see "Where the version lives")
-3. **Push** to `main` on GitHub: `git push origin main`
+2. **Add a changefile** for `agent-containers` (see "Adding a changefile")
+3. **Open a PR targeting `dev`** — never push to `main` directly; `main` is
+   regenerated by the CI promotion pipeline (`.github/workflows/promote.yml`)
 4. **Update on each machine** by re-running the init script
 
 ### Install / Update
@@ -560,8 +624,9 @@ MCP server.
 ### The Deployment Pipeline
 
 1. **Commit** changes in `plugins/agent-mcp/`
-2. **Bump the version** in all three files (see "Where the version lives")
-3. **Push** to `main` on GitHub: `git push origin main`
+2. **Add a changefile** for `agent-mcp` (see "Adding a changefile")
+3. **Open a PR targeting `dev`** — never push to `main` directly; `main` is
+   regenerated by the CI promotion pipeline (`.github/workflows/promote.yml`)
 4. **Update on each machine** by re-running the init script
 
 ### Install / Update
@@ -775,7 +840,7 @@ the opposite reason: stdin-EOF and parent-death correctly answer "is my
 *physical* parent still alive?" — but never "has the *logical* operation I
 exist to serve concluded?", when that operation is a bounded scope nested
 *inside* the still-live parent. `agent-mcp`'s stdio `Bridge.run()` idle
-self-reap (tmichon/aperture-labs#3876) is the exemplar: a sub-agent
+self-reap (#3876) is the exemplar: a sub-agent
 delegation finishing does not close the bridge's stdin or kill the top-level
 session that holds it open, so neither existing signal ever fires. Any
 change spawning a per-invocation child under a longer-lived host process
