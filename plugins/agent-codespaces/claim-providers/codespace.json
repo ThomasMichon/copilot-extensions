@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "namespace": "codespace",
+  "status_command": ["agent-codespaces"],
+  "reclaim_command": ["agent-codespaces"],
+  "description": "GitHub Codespaces (codespace: claim refs)"
+}

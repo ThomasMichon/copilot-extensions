@@ -1,0 +1,89 @@
+"""Claim-provider callback commands (claim-provider-pattern effort).
+
+``claim-status``/``claim-reclaim`` for the ``container:`` namespace
+agent-worktrees' claim-provider registry (``agent_worktrees.claim_providers``)
+resolves -- never ambient ``PATH``, always this plugin's own payload-local
+``bin/agent-containers`` binstub. Not human-facing; split out of
+``__main__.py`` to stay under its grandfathered module-size ceiling.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+
+from . import lifecycle
+
+
+def add_claim_provider_parsers(sub) -> None:
+    """Register the ``claim-status``/``claim-reclaim`` subcommands.
+
+    Not human-facing: the callback contract agent-worktrees' claim-provider
+    registry invokes for the ``container:`` namespace (never ambient
+    ``PATH`` -- resolved to this plugin's own payload-local binstub)."""
+    claim_status_p = sub.add_parser(
+        "claim-status",
+        help="claim-provider callback: does container NAME exist "
+        "(for agent-worktrees' 'container:' claim provider registry entry)",
+    )
+    claim_status_p.add_argument("name", help="Container name")
+    claim_status_p.set_defaults(func=cmd_claim_status)
+
+    claim_reclaim_p = sub.add_parser(
+        "claim-reclaim",
+        help="claim-provider callback: reclaim (remove) container NAME -- "
+        "dry-run unless --apply (for agent-worktrees' 'container:' claim "
+        "provider registry entry)",
+    )
+    claim_reclaim_p.add_argument("name", help="Container name")
+    claim_reclaim_p.add_argument(
+        "--apply", action="store_true", help="Actually remove (default: dry-run preview)",
+    )
+    claim_reclaim_p.set_defaults(func=cmd_claim_reclaim)
+
+
+def _container_looks_gone(detail: str) -> bool:
+    """Heuristic: does a failed remove mean the container is already gone?
+
+    ``docker rm`` on a non-existent container exits non-zero with a "No such
+    container" message -- the resource is *already* reclaimed."""
+    return "no such container" in detail.lower()
+
+
+def cmd_claim_status(args: argparse.Namespace) -> int:
+    """``claim-status <name>``: does container NAME exist?
+
+    Returns the small envelope ``agent_worktrees.claim_providers`` documents
+    -- ``exists`` (required) plus ``state`` when known. Never raises."""
+    try:
+        state = lifecycle.inspect_state(args.name)
+    except Exception as exc:
+        print(json.dumps({"exists": False, "detail": f"inspect failed: {exc}"}))
+        return 0
+    if state is None:
+        print(json.dumps({"exists": False}))
+        return 0
+    print(json.dumps({"exists": True, "state": state}))
+    return 0
+
+
+def cmd_claim_reclaim(args: argparse.Namespace) -> int:
+    """``claim-reclaim <name> [--apply]``: reclaim (remove) container NAME.
+
+    Without ``--apply`` this is a dry-run preview only (never removes), per
+    the callback contract. Idempotent: a remove failing because the
+    container is already gone ("no such container") still reports
+    ``reclaimed: true``."""
+    if not args.apply:
+        print(json.dumps({"reclaimed": True, "detail": f"would remove container {args.name}"}))
+        return 0
+    try:
+        lifecycle.remove_container(args.name, force=True)
+    except RuntimeError as exc:
+        detail = str(exc)
+        if _container_looks_gone(detail):
+            print(json.dumps({"reclaimed": True, "detail": f"container {args.name} already gone"}))
+            return 0
+        print(json.dumps({"reclaimed": False, "detail": detail}))
+        return 0
+    print(json.dumps({"reclaimed": True, "detail": f"removed container {args.name}"}))
+    return 0

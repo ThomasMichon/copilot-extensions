@@ -422,6 +422,34 @@ def discover_claim_providers(
     return providers, tuple(findings)
 
 
+def resolve_provider_argv(
+    namespace: str,
+    *,
+    kind: str = "status",
+    plugins_root: str | os.PathLike[str] | None = None,
+) -> tuple[str, ...] | None:
+    """Resolve a claim provider's registered binstub argv (Windows-batch
+    wrapped as needed), for a caller that needs to drive a DIFFERENT
+    subcommand than the standard ``claim-status``/``claim-reclaim`` contract
+    (e.g. agent-worktrees' own pre-existing ``worktree-status``/``delete``
+    call sites, converted by the claim-provider-pattern effort to stop
+    resolving these sibling binstubs via ambient ``PATH``). ``kind`` selects
+    ``status_command`` or ``reclaim_command``. Returns ``None`` when no
+    provider is registered for ``namespace``, or it declares no command of
+    the requested ``kind`` -- the caller degrades exactly as it would for an
+    absent ambient binstub."""
+    if kind not in ("status", "reclaim"):
+        raise ValueError("kind must be 'status' or 'reclaim'")
+    providers, _findings = discover_claim_providers(plugins_root)
+    provider = providers.get(namespace)
+    if provider is None:
+        return None
+    command = provider.status_command if kind == "status" else provider.reclaim_command
+    if command is None:
+        return None
+    return tuple(_windows_batch_argv(command))
+
+
 def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
     """Route a ``.cmd``/``.bat`` command through ``cmd.exe`` on Windows.
 

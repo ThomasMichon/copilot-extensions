@@ -168,6 +168,7 @@ from .task_lifecycle_registration_cli import register_task_lifecycle_commands
 from .task_lifecycle_cli import (  # noqa: F401 -- re-exported for existing call sites/tests
     _cmd_abandon,
     _cmd_claim,
+    _cmd_claim_status,
     _cmd_claimant,
     _cmd_complete,
     _cmd_embody_interactive,

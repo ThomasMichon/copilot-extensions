@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING
 
 from . import pool as pool_mod
 from . import relay_launch
+from . import claim_provider_cli
 from .worktrees import ContextRefused, validate_context
 from .codespace_config import CodespaceSource
 from .config import (
@@ -361,6 +362,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Skip the pre-delete Copilot session recovery",
     )
 
+    claim_provider_cli.add_claim_provider_parsers(
+        sub, release_lease_quietly=_release_lease_quietly)
     # --- finalize ---
     finalize_parser = sub.add_parser(
         "finalize",
@@ -923,6 +926,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
+        if getattr(args, "func", None) is not None:
+            return args.func(args)
         if args.command == "ssh":
             return _cmd_ssh(args)
         if args.command == "copilot":

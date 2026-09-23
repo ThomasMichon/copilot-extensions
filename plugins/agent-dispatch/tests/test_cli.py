@@ -2046,6 +2046,59 @@ def test_claimant_falls_back_to_target_when_unclaimed(monkeypatch):
     assert out["worker_id"] is None
 
 
+# ── claim-status (claim-provider-pattern effort: dispatch-task: callback) ────
+
+def test_claim_status_exists(monkeypatch):
+    import argparse
+    import contextlib
+    import io
+    import json
+
+    from agent_dispatch import __main__
+
+    class _FakeClient:
+        def get(self, task_id):
+            return {"id": task_id, "status": "started", "owner": "m/wt-abc"}
+
+    @contextlib.contextmanager
+    def _fake_client(args, **kw):
+        yield _FakeClient()
+
+    monkeypatch.setattr(__main__, "_client", _fake_client)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = __main__._cmd_claim_status(argparse.Namespace(task_id="t1"))
+    assert rc == 0
+    out = json.loads(buf.getvalue())
+    assert out == {"exists": True, "state": "started", "detail": "m/wt-abc"}
+
+
+def test_claim_status_not_found(monkeypatch):
+    import argparse
+    import contextlib
+    import io
+    import json
+
+    from agent_dispatch import __main__
+    from agent_dispatch.client import DispatchError
+
+    class _FakeClient:
+        def get(self, task_id):
+            raise DispatchError(404, "no such task")
+
+    @contextlib.contextmanager
+    def _fake_client(args, **kw):
+        yield _FakeClient()
+
+    monkeypatch.setattr(__main__, "_client", _fake_client)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = __main__._cmd_claim_status(argparse.Namespace(task_id="t404"))
+    assert rc == 0
+    out = json.loads(buf.getvalue())
+    assert out == {"exists": False, "detail": "no such task"}
+
+
 def test_identity_flags_take_precedence(monkeypatch):
     import argparse
 

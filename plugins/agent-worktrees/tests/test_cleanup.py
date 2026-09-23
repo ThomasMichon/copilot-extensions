@@ -116,6 +116,34 @@ def test_reclaim_codespace_empty_name(monkeypatch):
     assert r.status == "failed"
 
 
+# ── _run_codespaces: resolves via the claim-provider registry ───────────────
+# (claim-provider-pattern effort: no more ambient `shutil.which`)
+
+def test_run_codespaces_no_provider_registered(monkeypatch):
+    from agent_worktrees import claim_providers
+    monkeypatch.setattr(claim_providers, "discover_claim_providers",
+                        lambda *a, **k: ({}, ()))
+    assert cleanup._run_codespaces(["delete", "cs-x", "--force"]) is None
+
+
+def test_run_codespaces_uses_providers_reclaim_command(monkeypatch):
+    from agent_worktrees import claim_providers
+    provider = claim_providers.ClaimProviderManifest(
+        namespace="codespace", plugin="agent-codespaces@marketplace",
+        plugin_root="/x", reclaim_command=("agent-codespaces",))
+    monkeypatch.setattr(claim_providers, "discover_claim_providers",
+                        lambda *a, **k: ({"codespace": provider}, ()))
+    captured = {}
+
+    def _run(cmd, **kw):
+        captured["cmd"] = cmd
+        return _proc(0)
+    monkeypatch.setattr(cleanup.subprocess, "run", _run)
+    proc = cleanup._run_codespaces(["delete", "cs-x", "--force"])
+    assert proc.returncode == 0
+    assert captured["cmd"] == ["agent-codespaces", "delete", "cs-x", "--force"]
+
+
 # ── reclaim_worktree ─────────────────────────────────────────────────────────
 
 def _repo(anchor="D:/anchor"):

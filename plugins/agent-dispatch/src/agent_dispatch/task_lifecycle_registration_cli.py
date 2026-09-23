@@ -69,6 +69,15 @@ def register_task_lifecycle_commands(sub) -> None:
     p.set_defaults(func=_core()._cmd_worktree_status)
 
     p = sub.add_parser(
+        "claim-status",
+        help="claim-provider callback (claim-provider-pattern effort): does "
+        "task TASK_ID exist, for agent-worktrees' 'dispatch-task:' claim "
+        "provider registry entry -- not a human-facing command",
+    )
+    p.add_argument("task_id")
+    p.set_defaults(func=_core()._cmd_claim_status)
+
+    p = sub.add_parser(
         "start", help="mark a claimed task started (identity auto-resolved from CWD)"
     )
     p.add_argument("task_id")

@@ -67,6 +67,29 @@ def _cmd_worktree_status(args: argparse.Namespace) -> int:
         inbox = c.mine(machine, worktree, repo=repo)
     return _core()._emit(_core()._enrich({"machine": machine, "worktree": worktree, "repo": repo, **inbox}))
 
+def _cmd_claim_status(args: argparse.Namespace) -> int:
+    """Claim-provider callback (claim-provider-pattern effort): ``claim-status
+    <task_id>`` for the ``dispatch-task:`` namespace agent-worktrees'
+    claim-provider registry resolves. Returns the small envelope
+    ``agent_worktrees.claim_providers`` documents -- ``exists`` (required),
+    plus ``state``/``detail`` when the task is known -- never raises even
+    when the coordinator itself is unreachable (degrades to
+    ``exists: False`` with a ``detail`` explaining why, which the registry's
+    own caller treats as a callback failure only on a non-JSON/non-zero
+    exit, not on this JSON envelope).
+    """
+    from .client import DispatchError
+
+    try:
+        with _core()._client(args) as c:
+            task = c.get(args.task_id)
+    except DispatchError as exc:
+        if exc.status_code == 404:
+            return _core()._emit({"exists": False, "detail": "no such task"})
+        return _core()._emit({"exists": False, "detail": f"HTTP {exc.status_code}: {exc.detail}"})
+    return _core()._emit({"exists": True, "state": task.get("status"), "detail": task.get("owner") or ""})
+
+
 def _cmd_show(args: argparse.Namespace) -> int:
     with _core()._client(args) as c:
         task = c.get(args.task_id)

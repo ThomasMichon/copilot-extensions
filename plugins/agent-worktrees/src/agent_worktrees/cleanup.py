@@ -70,13 +70,22 @@ def _creationflags() -> int:
 
 
 def _run_codespaces(args: list[str], *, timeout: float = 300.0):
-    """Run ``agent-codespaces <args>``; return the process, or None if unrunnable."""
-    binstub = shutil.which("agent-codespaces")
-    if not binstub:
+    """Run agent-codespaces ``<args>`` via the identity-verified ``codespace:``
+    claim-provider registry (claim-provider-pattern effort); return the
+    process, or None if unrunnable. Resolves the provider's own
+    payload-local binstub -- never an ambient ``PATH`` lookup -- closing the
+    tier-3 -> tier-8 upward call this effort exists to fix. Degrades
+    identically to the prior ``shutil.which`` behavior when no provider is
+    registered (e.g. agent-codespaces not installed): returns None.
+    """
+    from . import claim_providers
+
+    command = claim_providers.resolve_provider_argv("codespace", kind="reclaim")
+    if command is None:
         return None
     try:
         return subprocess.run(
-            [binstub, *args],
+            [*command, *args],
             capture_output=True, text=True, timeout=timeout,
             creationflags=_creationflags(),
         )
