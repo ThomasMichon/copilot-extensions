@@ -7127,7 +7127,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     session_binding_cli.add_parsers(sub)
     session_inspection_cli.add_parsers(sub)
-    session_reopen_nudge_cli.add_parsers(sub)
 
     session_tracking_cli.add_parsers(sub)
     worktree_status_audit.add_parsers(sub)
@@ -7339,7 +7338,6 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'session-lineage': ('session_inspection_cli', 'cmd_session_lineage'),
     'session-lock': ('session_metadata_cli', 'cmd_session_lock'),
     'session-recovery': ('session_inspection_cli', 'cmd_session_recovery'),
-    'session-reopen-nudge': ('session_reopen_nudge_cli', 'cmd_session_reopen_nudge'),
     'session-role': ('session_metadata_cli', 'cmd_session_role'),
     'session-tail': ('session_tracking_cli', 'cmd_session_tail'),
     'session-transcript': ('session_tracking_cli', 'cmd_session_transcript'),
@@ -7508,7 +7506,7 @@ def _load_full_command_surface() -> None:
     global cmd_pr_research_dispatch, cmd_pr_status, cmd_pr_watch_dispatch, cmd_pre_launch, cmd_profiles, cmd_push_changes, cmd_reap_sessions, cmd_reap_shells
     global cmd_recent_messages, cmd_reclaim, cmd_reconcile_binstubs, cmd_reconcile_marketplaces, cmd_reconcile_plugins, cmd_reconcile_sessions, cmd_register, cmd_register_project_entry
     global cmd_register_session, cmd_related_dispatch, cmd_remove_system, cmd_remux, cmd_repair, cmd_repos_dispatch, cmd_restart, cmd_run
-    global cmd_services_dispatch, cmd_session_binding, cmd_session_lifecycle, cmd_session_lineage, cmd_session_lock, cmd_session_recovery, cmd_session_reopen_nudge, cmd_session_role
+    global cmd_services_dispatch, cmd_session_binding, cmd_session_lifecycle, cmd_session_lineage, cmd_session_lock, cmd_session_recovery, cmd_session_role
     global cmd_session_tail
     global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment
     global cmd_status_updater, cmd_sync, cmd_terminal_fragment, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
@@ -7516,7 +7514,7 @@ def _load_full_command_surface() -> None:
     global handoff_cli, handoff_diagnostics, installation_cli, list_cli, maintenance_cli, picker_profiles_cli, plan_pre_launch, pr_cli
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
     global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
-    global session_reopen_nudge_cli, session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
+    global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
     global sweep_managed_worktrees
     global sync_one, terminal_conclusion, update_cli, worktree_ops_cli
     from . import (
@@ -7549,7 +7547,6 @@ def _load_full_command_surface() -> None:
         session_inspection_cli,
         services_cli,
         session_metadata_cli,
-        session_reopen_nudge_cli,
         session_tracking_cli,
         status_bar_cli,
         status_cli,
@@ -7655,7 +7652,6 @@ def _load_full_command_surface() -> None:
     cmd_session_binding = session_inspection_cli.cmd_session_binding
     cmd_session_recovery = session_inspection_cli.cmd_session_recovery
     cmd_session_lineage = session_inspection_cli.cmd_session_lineage
-    cmd_session_reopen_nudge = session_reopen_nudge_cli.cmd_session_reopen_nudge
     _resolve_repo_remote = pr_config._resolve_repo_remote
     _pr_flow_profile = pr_config._pr_flow_profile
     _sweep_orphans_on_exit = finalize_cli._sweep_orphans_on_exit
@@ -7981,7 +7977,6 @@ def _load_full_command_surface() -> None:
         "session-binding": cmd_session_binding,
         "session-recovery": cmd_session_recovery,
         "session-lineage": cmd_session_lineage,
-        "session-reopen-nudge": cmd_session_reopen_nudge,
         "bind-session": cmd_bind_session,
         "bind-nudge": cmd_bind_nudge,
         "history-digest": cmd_history_digest,
