@@ -186,6 +186,12 @@ def load_manifest(path: Path) -> dict[str, object]:
     if (
         not isinstance(boot_trace_log_file, str)
         or not _BOOT_TRACE_LOG_FILE.fullmatch(boot_trace_log_file)
+        # The character-class regex above permits an empty path component
+        # (e.g. "logs//boot.jsonl", a leading/trailing "/") since "/" is a
+        # valid character anywhere in the class; reject those explicitly,
+        # since an empty component would silently break the writer's
+        # directory-creation logic at runtime (Copilot review, PR #3310).
+        or not all(boot_trace_log_file.split("/"))
         or ".." in Path(boot_trace_log_file).parts
     ):
         raise ValueError(

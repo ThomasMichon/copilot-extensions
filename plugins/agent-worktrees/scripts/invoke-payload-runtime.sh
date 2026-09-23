@@ -56,9 +56,16 @@ boot_trace_log() {
     [[ -n "${RUNTIME_ROOT:-}" ]] || return 0
     # Never force-create the LEGACY root purely to write a boot-trace
     # record -- see invoke-payload-runtime.ps1's own identical guard for
-    # the full rationale (Copilot review follow-up, PR #3310).
+    # the full rationale (Copilot review follow-up, PR #3310). A genuine
+    # first-ever legacy install is NOT suppressed: WILL_PROVISION is set
+    # true as soon as self-provisioning is actually committed to (see the
+    # call site below), which creates the legacy root eagerly so even the
+    # earlier `resolver-loaded`/`shim-start` phases -- emitted before
+    # `provision-start`'s own explicit `mkdir -p` -- are captured instead
+    # of silently dropped.
     if [[ "$RUNTIME_ROOT" == "$LEGACY_ROOT" && ! -d "$RUNTIME_ROOT" ]]; then
-        return 0
+        [[ -n "${WILL_PROVISION:-}" ]] || return 0
+        mkdir -p "$RUNTIME_ROOT" 2>/dev/null || return 0
     fi
     local phase="$1" now_ms="$2" dispatch_path="${3-}"
     local log_path="$RUNTIME_ROOT/logs/activity.jsonl"
@@ -399,6 +406,16 @@ installation_resolution_current() {
 }
 
 resolve_runtime
+# Commit to self-provisioning (and, in doing so, permit boot_trace_log to
+# eagerly create a not-yet-existing legacy root) as soon as we actually
+# know provisioning will happen -- i.e. no runtime resolved AND
+# self-provisioning isn't disabled -- so the traces below, which fire
+# strictly before `provision-start`'s own `mkdir -p`, are captured on a
+# genuine first-ever launch instead of silently dropped (Copilot review
+# follow-up, PR #3310).
+if [[ -z "${AGENT_RT_PY:-}" && -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then
+    WILL_PROVISION=1
+fi
 boot_trace resolver-loaded
 # Log the outer dispatcher template's own `shim-start` phase here, now
 # that RUNTIME_ROOT reflects whichever root (legacy or an active

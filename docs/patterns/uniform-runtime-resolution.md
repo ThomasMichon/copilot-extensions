@@ -64,8 +64,11 @@ The canonical phase names are:
 
 ### Boot-trace channels and durable log schema
 
-The durable channel is **always on** and records every phase whether or not
-`COPILOT_EXTENSIONS_BOOT_TRACE` is set.
+The durable channel is **on by default** and records every phase whether or
+not `COPILOT_EXTENSIONS_BOOT_TRACE` is set -- with one narrow, named
+exception: see the `installationContext: required` caveat below, where nine
+plugins' own inner dispatchers do not yet consume the forwarded shim-start
+timestamp and so do not yet emit a durable `shim-start`/`dispatch` record.
 
 - **Generated payload shims + canonical resolvers** append JSONL to
   `~/.<plugin>/logs/boot-trace.jsonl`.

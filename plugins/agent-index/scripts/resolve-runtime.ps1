@@ -49,25 +49,25 @@ if ($_rtRoot) {
     try {
       [IO.Directory]::CreateDirectory((Split-Path -Parent $_rtBootTraceLogPath)) | Out-Null
       $parts = [System.Collections.Generic.List[string]]::new()
-      $parts.Add('"ts":"' + (_Rt-EscapeBootTraceJson (_Rt-BootTraceIsoTimestamp)) + '"')
-      $parts.Add('"event":"boot_trace"')
-      $parts.Add('"plugin":"' + (_Rt-EscapeBootTraceJson $_rtBootTracePlugin) + '"')
-      $parts.Add('"phase":"' + (_Rt-EscapeBootTraceJson $phase) + '"')
-      $parts.Add('"t_ms":' + $timestampMs)
-      $parts.Add('"pid":' + $PID)
+      [void]$parts.Add('"ts":"' + (_Rt-EscapeBootTraceJson (_Rt-BootTraceIsoTimestamp)) + '"')
+      [void]$parts.Add('"event":"boot_trace"')
+      [void]$parts.Add('"plugin":"' + (_Rt-EscapeBootTraceJson $_rtBootTracePlugin) + '"')
+      [void]$parts.Add('"phase":"' + (_Rt-EscapeBootTraceJson $phase) + '"')
+      [void]$parts.Add('"t_ms":' + $timestampMs)
+      [void]$parts.Add('"pid":' + $PID)
       $hostName = [Environment]::MachineName
       if ($hostName) {
-        $parts.Add('"host":"' + (_Rt-EscapeBootTraceJson $hostName) + '"')
+        [void]$parts.Add('"host":"' + (_Rt-EscapeBootTraceJson $hostName) + '"')
       }
-      $parts.Add('"source":"resolver"')
+      [void]$parts.Add('"source":"resolver"')
       if ($resolutionSource) {
-        $parts.Add('"resolution_source":"' + (_Rt-EscapeBootTraceJson $resolutionSource) + '"')
+        [void]$parts.Add('"resolution_source":"' + (_Rt-EscapeBootTraceJson $resolutionSource) + '"')
       }
       if ($result) {
-        $parts.Add('"result":"' + (_Rt-EscapeBootTraceJson $result) + '"')
+        [void]$parts.Add('"result":"' + (_Rt-EscapeBootTraceJson $result) + '"')
       }
       if ($version) {
-        $parts.Add('"version":"' + (_Rt-EscapeBootTraceJson $version) + '"')
+        [void]$parts.Add('"version":"' + (_Rt-EscapeBootTraceJson $version) + '"')
       }
       $line = '{' + ($parts -join ',') + '}'
       [IO.File]::AppendAllText(
@@ -88,9 +88,9 @@ if ($_rtRoot) {
     _Rt-WriteBootTraceRecord $phase $timestampMs $resolutionSource $result $version
     if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return }
     $extras = [System.Collections.Generic.List[string]]::new()
-    if ($resolutionSource) { $extras.Add("source=$resolutionSource") }
-    if ($result) { $extras.Add("result=$result") }
-    if ($version) { $extras.Add("version=$version") }
+    if ($resolutionSource) { [void]$extras.Add("source=$resolutionSource") }
+    if ($result) { [void]$extras.Add("result=$result") }
+    if ($version) { [void]$extras.Add("version=$version") }
     $line = "::boot-trace:: plugin=$_rtBootTracePlugin phase=$phase t=$timestampMs"
     if ($extras.Count) { $line += " " + ($extras -join ' ') }
     [Console]::Error.WriteLine($line)

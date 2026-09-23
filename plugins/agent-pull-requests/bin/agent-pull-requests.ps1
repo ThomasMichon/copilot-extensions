@@ -34,28 +34,28 @@ function Write-BootTraceRecord(
     try {
         [IO.Directory]::CreateDirectory((Split-Path -Parent $_bootTraceLogPath)) | Out-Null
         $parts = [System.Collections.Generic.List[string]]::new()
-        $parts.Add('"ts":"' + (Escape-BootTraceJson (Get-BootTraceIsoTimestamp)) + '"')
-        $parts.Add('"event":"boot_trace"')
-        $parts.Add('"plugin":"' + (Escape-BootTraceJson $_plugin) + '"')
-        $parts.Add('"phase":"' + (Escape-BootTraceJson $Phase) + '"')
-        $parts.Add('"t_ms":' + $TimestampMs)
-        $parts.Add('"pid":' + $PID)
+        [void]$parts.Add('"ts":"' + (Escape-BootTraceJson (Get-BootTraceIsoTimestamp)) + '"')
+        [void]$parts.Add('"event":"boot_trace"')
+        [void]$parts.Add('"plugin":"' + (Escape-BootTraceJson $_plugin) + '"')
+        [void]$parts.Add('"phase":"' + (Escape-BootTraceJson $Phase) + '"')
+        [void]$parts.Add('"t_ms":' + $TimestampMs)
+        [void]$parts.Add('"pid":' + $PID)
         $hostName = [Environment]::MachineName
         if ($hostName) {
-            $parts.Add('"host":"' + (Escape-BootTraceJson $hostName) + '"')
+            [void]$parts.Add('"host":"' + (Escape-BootTraceJson $hostName) + '"')
         }
-        $parts.Add('"source":"' + (Escape-BootTraceJson $Emitter) + '"')
+        [void]$parts.Add('"source":"' + (Escape-BootTraceJson $Emitter) + '"')
         if ($ResolutionSource) {
-            $parts.Add('"resolution_source":"' + (Escape-BootTraceJson $ResolutionSource) + '"')
+            [void]$parts.Add('"resolution_source":"' + (Escape-BootTraceJson $ResolutionSource) + '"')
         }
         if ($Result) {
-            $parts.Add('"result":"' + (Escape-BootTraceJson $Result) + '"')
+            [void]$parts.Add('"result":"' + (Escape-BootTraceJson $Result) + '"')
         }
         if ($Version) {
-            $parts.Add('"version":"' + (Escape-BootTraceJson $Version) + '"')
+            [void]$parts.Add('"version":"' + (Escape-BootTraceJson $Version) + '"')
         }
         if ($DispatchPath) {
-            $parts.Add('"path":"' + (Escape-BootTraceJson $DispatchPath) + '"')
+            [void]$parts.Add('"path":"' + (Escape-BootTraceJson $DispatchPath) + '"')
         }
         $line = '{' + ($parts -join ',') + '}'
         [IO.File]::AppendAllText(
@@ -90,10 +90,10 @@ function Write-BootTrace(
         $_plugin
     }
     $extras = [System.Collections.Generic.List[string]]::new()
-    if ($ResolutionSource) { $extras.Add("source=$ResolutionSource") }
-    if ($Result) { $extras.Add("result=$Result") }
-    if ($Version) { $extras.Add("version=$Version") }
-    if ($DispatchPath) { $extras.Add("path=$DispatchPath") }
+    if ($ResolutionSource) { [void]$extras.Add("source=$ResolutionSource") }
+    if ($Result) { [void]$extras.Add("result=$Result") }
+    if ($Version) { [void]$extras.Add("version=$Version") }
+    if ($DispatchPath) { [void]$extras.Add("path=$DispatchPath") }
     $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$timestampMs"
     if ($extras.Count) { $line += " " + ($extras -join ' ') }
     [Console]::Error.WriteLine($line)

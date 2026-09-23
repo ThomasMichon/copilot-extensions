@@ -38,31 +38,38 @@ function Write-BootTraceRecord(
     # effect-free, an invariant this repo tests extensively (Copilot
     # review follow-up, PR #3310 -- distinct from the namespaced-cell
     # case below, where a resolved ACTIVE context is always expected to
-    # get its own directory touched regardless). A real first-ever legacy
-    # install still gets fully traced: `provision-start`/`provision-end`
-    # explicitly `New-Item` the legacy root before emitting those phases,
-    # so this guard only ever suppresses the narrow window before any
-    # real provisioning has begun.
+    # get its own directory touched regardless). A genuine first-ever
+    # legacy install is NOT suppressed by this guard: `$script:willProvision`
+    # is set true as soon as self-provisioning is actually committed to
+    # (see the call site below), which creates the legacy root eagerly so
+    # even the earlier `resolver-loaded`/`shim-start` phases -- emitted
+    # before `provision-start`'s own explicit `New-Item` -- are captured
+    # instead of silently dropped (Copilot review follow-up, PR #3310).
     if ($runtimeRoot -eq $legacyRoot -and -not (Test-Path -LiteralPath $runtimeRoot)) {
-        return
+        if (-not $script:willProvision) { return }
+        try {
+            New-Item -ItemType Directory -Path $runtimeRoot -Force -ErrorAction Stop | Out-Null
+        } catch {
+            return
+        }
     }
     $bootTraceLogPath = Join-Path $runtimeRoot 'logs\activity.jsonl'
     try {
         [IO.Directory]::CreateDirectory((Split-Path -Parent $bootTraceLogPath)) | Out-Null
         $parts = [System.Collections.Generic.List[string]]::new()
-        $parts.Add('"ts":"' + (Escape-BootTraceJson (Get-BootTraceIsoTimestamp)) + '"')
-        $parts.Add('"event":"boot_trace"')
-        $parts.Add('"plugin":"agent-worktrees"')
-        $parts.Add('"phase":"' + (Escape-BootTraceJson $Phase) + '"')
-        $parts.Add('"t_ms":' + $TimestampMs)
-        $parts.Add('"pid":' + $PID)
+        [void]$parts.Add('"ts":"' + (Escape-BootTraceJson (Get-BootTraceIsoTimestamp)) + '"')
+        [void]$parts.Add('"event":"boot_trace"')
+        [void]$parts.Add('"plugin":"agent-worktrees"')
+        [void]$parts.Add('"phase":"' + (Escape-BootTraceJson $Phase) + '"')
+        [void]$parts.Add('"t_ms":' + $TimestampMs)
+        [void]$parts.Add('"pid":' + $PID)
         $hostName = [Environment]::MachineName
         if ($hostName) {
-            $parts.Add('"host":"' + (Escape-BootTraceJson $hostName) + '"')
+            [void]$parts.Add('"host":"' + (Escape-BootTraceJson $hostName) + '"')
         }
-        $parts.Add('"source":"launcher"')
+        [void]$parts.Add('"source":"launcher"')
         if ($DispatchPath) {
-            $parts.Add('"path":"' + (Escape-BootTraceJson $DispatchPath) + '"')
+            [void]$parts.Add('"path":"' + (Escape-BootTraceJson $DispatchPath) + '"')
         }
         $line = '{' + ($parts -join ',') + '}'
         [IO.File]::AppendAllText(
@@ -96,12 +103,12 @@ function Invoke-BootTraceMaybePrune([string]$LogPath) {
             # record as unparseable, retaining them forever (Copilot
             # review, PR #3310).
             $match = [regex]::Match($line, '"ts"\s*:\s*"')
-            if (-not $match.Success) { $kept.Add($line); continue }
+            if (-not $match.Success) { [void]$kept.Add($line); continue }
             $rest = $line.Substring($match.Index + $match.Length)
             $endIdx = $rest.IndexOf('"')
-            if ($endIdx -lt 0) { $kept.Add($line); continue }
+            if ($endIdx -lt 0) { [void]$kept.Add($line); continue }
             $ts = $rest.Substring(0, $endIdx)
-            if ([string]::CompareOrdinal($ts, $cutoff) -ge 0) { $kept.Add($line) }
+            if ([string]::CompareOrdinal($ts, $cutoff) -ge 0) { [void]$kept.Add($line) }
         }
         [IO.File]::WriteAllLines($tmp, $kept, [Text.UTF8Encoding]::new($false))
         Move-Item -LiteralPath $tmp -Destination $LogPath -Force
@@ -381,6 +388,14 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
 }
 
 $python = Resolve-AgentWorktreesRuntime
+# Commit to self-provisioning (and, in doing so, permit the boot-trace
+# writer to eagerly create a not-yet-existing legacy root) as soon as we
+# actually know provisioning will happen -- i.e. no runtime resolved AND
+# self-provisioning isn't disabled -- so the traces below, which fire
+# strictly before `provision-start`'s own `New-Item`, are captured on a
+# genuine first-ever launch instead of silently dropped (Copilot review
+# follow-up, PR #3310).
+$script:willProvision = (-not $python) -and (-not $env:AGENT_WORKTREES_NO_SELFPROVISION)
 Write-BootTrace 'resolver-loaded'
 # Log the outer dispatcher template's own 'shim-start' phase here, now
 # that $runtimeRoot reflects whichever root (legacy or an active

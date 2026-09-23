@@ -1653,3 +1653,72 @@ performance/correctness fix to the accelerator's own compute and timeout
 behavior; the wire contract, cache semantics, and every consumer-facing
 API are unchanged.
 
+
+### 2026-09-22 — PR #3310 review round 4: first-use trace loss (real fix), PowerShell output contamination, and drift cleanup
+Addressed 8 findings from the latest Copilot review round on PR #3310:
+
+- **First-use trace loss, fixed properly this time.** The round-3 fix
+  deferred the durable write from the outer dispatcher to the inner,
+  installation-context-aware dispatcher, but the inner dispatcher's own
+  legacy-root-existence guard still suppressed `resolver-loaded`,
+  `shim-start`, and `provision-start` on a genuine first-ever launch, since
+  those all fire before `provision-start`'s own `mkdir -p`/`New-Item`
+  creates the root. Fixed by committing to self-provisioning explicitly
+  (`$script:willProvision`/`WILL_PROVISION`) as soon as it's known -- no
+  runtime resolved and self-provisioning isn't disabled -- and letting the
+  boot-trace writer eagerly create the not-yet-existing legacy root once
+  that commitment is made, in both `invoke-payload-runtime.ps1` and
+  `invoke-payload-runtime.sh`. An ordinary read-only `--version` against an
+  already-resolved runtime still never creates anything (the root already
+  exists in that case), preserving the tested side-effect-free invariant.
+- **PowerShell output-stream contamination.** Every bare
+  `[System.Collections.Generic.List[string]]::Add(...)` call across
+  `powershell-shim.tmpl`, `resolve-runtime.ps1`, and
+  `invoke-payload-runtime.ps1` (30+ call sites, plus 3 inline
+  `if (...) { $x.Add($y); continue }` sites in the retention pruner) now
+  suppresses its return value with `[void]`, matching the existing
+  `| Out-Null` convention already used elsewhere in these same templates.
+  `List<T>.Add` is technically `void` in .NET, so this couldn't actually
+  leak a value in practice -- but the fix is free and defensive, and
+  removes any doubt.
+- **`generate.py`'s `bootTraceLogFile` validation** now rejects empty path
+  components (`logs//boot.jsonl`, a leading/trailing `/`) via an explicit
+  `all(boot_trace_log_file.split("/"))` check alongside the existing regex
+  and `..`-traversal guard.
+- **`docs/patterns/uniform-runtime-resolution.md`** reworded its top-level
+  "always on" claim to "on by default ... with one narrow, named exception"
+  and points at the existing caveat paragraph below it (which already
+  correctly scoped the gap to the nine `installationContext: required`
+  plugins whose own inner dispatchers don't yet consume the forwarded
+  shim-start timestamp) -- the two sections previously contradicted each
+  other.
+- **`tools/module-size-baseline.json`** on this PR's branch still carried an
+  unrelated `worktree-manager/libs/plugin-activation/src/plugin_activation/resolver.py`
+  entry (not present on `origin/main`, and untouched by this PR); resolved
+  by taking `origin/main`'s copy of the file verbatim, same pattern as
+  PR #3348's equivalent fix.
+- **`test_installer_binstub.py`'s `test_payload_shims_propagate_ownership_root`**
+  asserted the durable JSONL write (`"event":"boot_trace"` etc.) against the
+  *outer* shim files, which -- per the round-3 architectural fix -- no
+  longer perform that write at all. Updated the test to check the outer
+  shim only for the env-var forwarding, and check the *inner* dispatcher
+  (`invoke-payload-runtime.sh`/`.ps1`) for the actual durable-write content.
+- Bumped `.github/plugin/marketplace.json`'s top-level `metadata.version`
+  (`1.7.7-dev214` -> `1.7.7-dev215`), which had drifted stale again across
+  the rebases in this round.
+- Verified: `check-version-consistency.py`, `check-version-bump.py`,
+  `check-module-size.py`, and `check-agent-bridge-contracts.py` all pass;
+  targeted `agent-worktrees` pytest run (`boot_trace or activity or
+  installer_binstub or payload`) -- 177 passed, 4 skipped; PowerShell/bash
+  syntax-checked the touched launcher/resolver files directly.
+- Regenerated every plugin's shipped binstub
+  (`libs/payload-invocation/generate.py --all`) and re-synced the vendored
+  versioned-runtime resolvers (`tools/sync-versioned-runtime.py`) so the
+  `[void]` suppression and JSON-escaping fixes propagate to every
+  `installationContext: required` plugin's own copy, not just the
+  canonical template/library source.
+
+No further consumer-facing documentation changes needed beyond the doc
+caveat reword above -- the wire contract and every consumer-facing API are
+unchanged; this round was entirely launcher/resolver-internals and doc
+precision.
