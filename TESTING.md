@@ -21,6 +21,20 @@ python tools/run-plugin-tests.py agent-bridge --guards  # just the fast @pytest.
 python tools/run-plugin-tests.py agent-bridge -k picker # pass-through pytest -k filter
 ```
 
+> **A cached venv is not editable.** A vendored path dependency (e.g.
+> `agent-ssh-manager` under `plugins/<p>/libs/<lib>/`) installs into
+> `.test-venvs/<platform>/<p>` as a normal copy, not an editable link —
+> editing `libs/<lib>/src/...` does nothing to a suite you run against an
+> already-built venv until you pass `--reinstall`. This also means a shared
+> lib's **own** test suite (its top-level `libs/<lib>/tests/`, as opposed to
+> any plugin's `tests/`) is never run by this runner at all — it belongs to
+> no single plugin. Validate it directly against one specific vendored copy by
+> shadowing the venv's stale install on `PYTHONPATH` (the `SSH_MANAGER_WINDOWS_PROXY_TEST`
+> example just below does exactly this). See CONTRIBUTING.md's *Hot-patching a
+> deployed venv for fast pre-merge iteration* gotcha for the fuller loop,
+> including validating a fix against the real deployed CLI (not just this test
+> venv) before a PR merges.
+
 Every invocation is contained by default. The runner redirects user, Copilot,
 plugin, XDG, and temporary state beneath a per-run sandbox; owns the pytest
 process job/group and its ordinary descendants; and enforces budgets at three
