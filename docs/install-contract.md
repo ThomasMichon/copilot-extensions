@@ -1782,6 +1782,45 @@ A plugin's own `scripts/*` and `src/<pkg>/installer.py` ship together, so they
 may share freely. Secondary entry points (e.g. `init.ps1`/`init.sh`) should
 delegate to the canonical `install.*` rather than duplicate the deploy logic.
 
+## Shared installer-engine helpers (`libs/installer-engine/`)
+
+A canonical pair of files, `libs/installer-engine/installer-engine.ps1` and
+`.sh`, carries the installer logic that was mechanically duplicated across
+every Python runtime plugin's own `install.*` before this existed: native
+command capture, the transient-uv-race retry helpers (SRE module mismatch
+`#6785`, `pyvenv.cfg` corruption `#6852`), signed-venv creation, `uv`
+self-bootstrap, schema-version-3 deploy-manifest writing, and a minimal
+self-provisioning binstub writer (`Write-SimpleBinstub`) for a plugin with no
+scheduled-task/service lifecycle. Adoption is **opt-in and byte-vendored, not
+imported**: an adopting plugin's own `scripts/installer-engine.{ps1,sh}` is a
+byte-identical copy of the canonical pair, kept in sync by
+`tools/sync-installer-engine.py` (`--check` verifies in CI/pre-push; edit the
+canonical files and re-run the tool without `--check` to fan the update out).
+`tools/sync-installer-engine.py`'s own `unregistered_adopters()` check also
+fails closed if a plugin's `scripts/` carries an installer-engine copy without
+being registered in the tool's `ADOPTERS` tuple, so a hand-copied file cannot
+drift silently forever.
+
+The engine deliberately does **not** cover per-service concerns that
+genuinely differ across plugins — scheduled-task/service lifecycle,
+sibling-plugin installs, or any bespoke per-service config — those stay in
+each plugin's own `install.*`, which sources the vendored engine file for the
+shared primitives and supplies its own config/parameters around it. Vendoring
+(byte-copy + `--check` drift detection) was chosen over a runtime
+git-fetch/import specifically to preserve this doc's existing
+self-containment constraint (a plugin's installer must not reach across a
+plugin boundary at install time) — see the `vendored-installer-engine`
+effort's Journal for the full git-fetch-vs-vendoring reasoning.
+
+Only a plugin explicitly opted into `tools/sync-installer-engine.py`'s
+`ADOPTERS` tuple is expected to carry (and keep in sync) the vendored engine
+files; this is a phased rollout, not a blanket requirement for every runtime
+plugin yet. `agent-worktrees` carries a standing, permanent exception (it is
+the control-plane plugin, by far the largest and most bespoke installer, and
+already opts out of the related `versioned_runtime.py` fan-out for the same
+specialization reason) — it is not expected to adopt this engine, now or
+later.
+
 ## Runtime self-reconcile and command glossary (session-start hooks)
 
 A Python runtime plugin currently installs a legacy `~/.local/bin/<name>`
@@ -1847,6 +1886,11 @@ runtime entrypoint (`install.*` if present, else `init.*`):
 - each Python runtime's `scripts/versioned_runtime.py` is byte-identical to the
   canonical `libs/versioned-runtime/versioned_runtime.py` (edit the canonical and
   run `python tools/sync-versioned-runtime.py`; `--check` verifies in CI/pre-push),
+- an adopting plugin's `scripts/installer-engine.{ps1,sh}` is byte-identical to
+  the canonical `libs/installer-engine/installer-engine.{ps1,sh}`, and no
+  unregistered plugin carries a drifted copy (`python
+  tools/sync-installer-engine.py --check`, wired into CI's `guards + lint`
+  job; see [Shared installer-engine helpers](#shared-installer-engine-helpers-libsinstaller-engine)),
 - each Python runtime wires the **session-start reconcile hook** above
   (`plugin.json` `hooks` → a `sessionStart` `bootstrap-check`), unless its
   payload manifest explicitly sets `sessionStartBootstrap: false` for a
