@@ -196,23 +196,20 @@ def _resolve_username(cwd: str | None) -> str:
             if slug:
                 return slug
     return "user"
-
-
 def resolve_head_pattern(prcfg) -> str:
-    """The PR head-name template for *prcfg* (explicit override or scheme default).
+    """The PR head-name template for *prcfg* (explicit override or default).
 
-    An explicit ``head_pattern`` wins.  Otherwise the default depends on the
-    scheme: ``refspec`` uses the clean ``pr/{slug}-{suffix}`` namespace, while
-    ``snapshot`` keeps today's ``{prefix}/{slug}-{suffix}`` (``feature/<slug>``)
-    names byte-for-byte.
+    An explicit ``head_pattern`` wins. Azure DevOps otherwise defaults to
+    ``user/{username}/{slug}-{suffix}`` regardless of ``head_scheme``; other
+    providers keep the existing scheme defaults: ``refspec`` uses ``pr/{slug}-{suffix}``
+    and ``snapshot`` keeps ``{prefix}/{slug}-{suffix}`` (``feature/<slug>``).
     """
     if getattr(prcfg, "head_pattern", ""):
         return prcfg.head_pattern
+    if getattr(prcfg, "provider", "") == "azure-devops": return "user/{username}/{slug}-{suffix}"
     if getattr(prcfg, "head_scheme", "snapshot") == "refspec":
         return "pr/{slug}-{suffix}"
     return "{prefix}/{slug}-{suffix}"
-
-
 def audit_attribution_risk(config: Config) -> list[str]:
     """Migration audit (pr-attribution-codenames Phase 5): flag this repo's
     configured ``pr.head_pattern`` for the branch-name leak class.
@@ -242,8 +239,6 @@ def audit_attribution_risk(config: Config) -> list[str]:
         source_attribution=reported_attribution,
         head_pattern=getattr(prcfg, "head_pattern", "") or "",
     )
-
-
 def pr_head_name(
     prcfg, title: str, worktree_id: str, *, cwd: str | None = None, machine: str = "",
 ) -> str:
@@ -863,7 +858,9 @@ def create_pr(
                 git_ops.remote_branch_exists(publish_remote, feature_branch, cwd=worktree_path):
             return {**base, "error": (
                 f"Feature branch '{feature_branch}' already exists locally or on "
-                f"'{publish_remote}'. Pass --branch to choose a different name."
+                f"'{publish_remote}'. If this is a different mini-task within the same "
+                f"effort/worktree, retry with an explicit --branch that adds a "
+                f"distinguishing suffix (for example '{feature_branch}-2' or a short task token)."
             )}
 
     if not ahead:

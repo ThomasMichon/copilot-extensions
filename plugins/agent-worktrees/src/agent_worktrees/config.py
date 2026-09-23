@@ -199,13 +199,13 @@ class PRConfig:
     #   ``worktree/<id>`` keeps the squashed commit either way (sits ahead of
     #   master while the PR is open; a later ``git sync`` reconciles it on merge).
     #
-    # ``head_pattern`` is the PR head-name template (tokens ``{prefix}``,
-    # ``{slug}``, ``{suffix}``, ``{username}``, ``{machine}``). Empty means the
-    # scheme default: ``pr/{slug}-{suffix}`` under ``refspec`` and
-    # ``{prefix}/{slug}-{suffix}`` under ``snapshot`` (``feature/<slug>``).
-    # Repos that want e.g. ``user/<username>/<slug>-<suffix>`` set it explicitly.
+    # ``head_pattern`` is the PR head-name template (tokens ``{prefix}``, ``{slug}``,
+    # ``{suffix}``, ``{username}``, ``{machine}``). Empty means the provider-aware
+    # default: Azure DevOps uses ``user/{username}/{slug}-{suffix}``; all other
+    # providers fall back to the scheme default (``pr/{slug}-{suffix}`` under
+    # ``refspec`` and ``{prefix}/{slug}-{suffix}`` under ``snapshot`` / ``feature/<slug>``).
     head_scheme: str = "refspec"   # refspec (default) | snapshot
-    head_pattern: str = ""         # empty -> scheme default (see above)
+    head_pattern: str = ""         # empty -> provider-aware default (see above)
     # Provider-plugin settings (PR creation via a provider CLI). ``api_base``
     # is the hosting endpoint -- required for self-hosted Gitea
     # (e.g. https://host/gitea) and Azure DevOps org URLs; GitHub defaults to
