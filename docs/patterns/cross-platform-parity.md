@@ -40,7 +40,10 @@ parsing. Dashes in prose/comments/strings are fine.
 **Binstub shape.** On Windows, ship a single `.cmd` binstub (and remove any stale
 same-named `.ps1` that would shadow it): a `.cmd` forwards `stdin` verbatim, which
 a stdio MCP server requires, and launches the venv `python -m <pkg>`. On POSIX,
-ship a bash stub doing the same.
+ship a bash stub doing the same. When a shared launcher/binstub template
+**relocates** to a different plugin's install tree, sweep the whole repo for the
+retired path literal, not just the cutover site's own call sites — see
+[uniform-runtime-resolution](uniform-runtime-resolution.md)'s relocation gotcha.
 
 **The WSL/Windows boundary.** Under WSL mirrored networking the guest and host
 share one `127.0.0.1`, so any host+guest pair of the *same* service must deconflict
@@ -58,4 +61,5 @@ installer/binstub/supervisor edge keeps the behavioral core single-sourced.
 ## See Also
 
 - Intent: [`visions/plugin-services/`](../../visions/plugin-services/README.md)
-- Hub: [`docs/patterns/`](README.md) · Endpoint boundary: [local-endpoint-discovery](local-endpoint-discovery.md)
+- Hub: [`docs/patterns/`](README.md) · Endpoint boundary: [local-endpoint-discovery](local-endpoint-discovery.md) ·
+  Relocation sweeps: [uniform-runtime-resolution](uniform-runtime-resolution.md)
