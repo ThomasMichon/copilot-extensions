@@ -335,7 +335,7 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts", lambda: ())
 
-        def fake_under(name, account):
+        def fake_under(name, account, **_kwargs):
             if account == "acct-b":
                 return True, "Available"
             raise RuntimeError(f"gh api codespace lookup for {name} failed: HTTP 404: Not Found")
@@ -350,7 +350,8 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts", lambda: ())
         monkeypatch.setattr(
-            lifecycle, "_get_codespace_status_under", lambda name, account: (False, None))
+            lifecycle, "_get_codespace_status_under",
+            lambda name, account, **_kwargs: (False, None))
         exists, state = lifecycle.get_codespace_status("cs-missing")
         assert exists is False and state is None
 
@@ -363,7 +364,7 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts", lambda: ())
 
-        def fake_under(name, account):
+        def fake_under(name, account, **_kwargs):
             if account == "acct-a":
                 raise RuntimeError("HTTP 503: service unavailable")
             return False, None
