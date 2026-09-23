@@ -304,6 +304,35 @@ def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, m
     assert calls == [], f"{command!r} ({module_name}) must not load the cluster"
 
 
+def test_worktree_status_audit_monitor_enabled_path_skips_cluster(monkeypatch):
+    """Copilot review on #3473: `worktree_status_audit`'s handler reaches
+    `status_monitor_runtime._ensure_status_monitor()`, whose OWN body (when
+    the resident monitor is enabled, the default) calls
+    `_spawn_detached()` -> `_background_environment()`/`_runtime_superseded()`
+    -- both owned by `status_updater_cli`. The handler-body test above
+    exercises this with `--no-log` but doesn't force the monitor-enabled
+    branch specifically; this test does, forcing `_status_monitor_enabled`
+    True and letting the real `_ensure_status_monitor()` run end-to-end."""
+    from agent_worktrees import status_monitor_runtime
+
+    module_name, _ = m._LAZY_DISPATCH_TABLE["worktree-status-audit"]
+    assert module_name in m._CLUSTER_FREE_MODULES
+
+    for name in _deferred_only_global_names():
+        monkeypatch.delitem(m.__dict__, name, raising=False)
+    monkeypatch.setattr(m, "_FULL_SURFACE_LOADED", False, raising=False)
+    monkeypatch.setattr(m, "_CLUSTER_LOADED", False, raising=False)
+
+    calls = []
+    monkeypatch.setattr(m, "_ensure_cluster_loaded", lambda: calls.append(1))
+    monkeypatch.setattr(m, "_load_full_command_surface", lambda: calls.append(1))
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+
+    result = status_monitor_runtime._ensure_status_monitor()
+    assert isinstance(result, bool)
+    assert calls == [], "the monitor-enabled path must not load the cluster"
+
+
 @pytest.mark.parametrize("command", ["get", "worktree-lineage", "session-lifecycle"])
 def test_not_yet_decoupled_command_still_loads_cluster(command, monkeypatch):
     """A command whose module is NOT in `_CLUSTER_FREE_MODULES` must still

@@ -7393,21 +7393,17 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 })
 
 
-# A module is "cluster-free" when every `_core()`-reached attribute (direct,
-# via a var, or via `_core_helper()`) is bound at module level BEFORE the
-# deferred `_load_full_command_surface()` block, AND no __main__-native
-# function it reaches transitively touches a name bound only inside that
-# block (`find_transitively_unsafe_functions()` in
-# `tests/_core_cluster_scan.py` checks this). Skips `_ensure_cluster_
-# loaded()` in `_dispatch_lazy()` for these modules only. Regenerate/diff
-# via that file's `compute_cluster_free_modules()` -- never hand-edit,
-# never trust a regex-only scan (one shipped a live `create-pr`
-# regression). `session_inspection_cli` (and, as of Stage B,
-# `cleanup_gc_cli`/`reap_cli`/`finalize_cli`/`worktree_ops_cli`/`list_cli`)
-# stay off this list for exactly the transitive reason above -- their own
-# `_core()` accesses are cheap, but a __main__-native function they reach
-# still isn't. Adding a module requires exercising its real commands
-# end-to-end, not just `--help`.
+# A module is "cluster-free" when every `_core()`-reached name (direct, via
+# a var, or via `_core_helper()`) is bound at module level BEFORE the
+# deferred `_load_full_command_surface()` block, AND no function it reaches
+# transitively (in __main__.py or a sibling module) touches a name bound
+# only inside that block. Skips `_ensure_cluster_loaded()` in
+# `_dispatch_lazy()` for these modules only. Regenerate/diff via
+# `tests/_core_cluster_scan.py`'s `compute_cluster_free_modules()` -- never
+# hand-edit, never trust static analysis alone (a regex scan shipped
+# `create-pr`'s regression; this transitive class needs runtime exercise
+# too -- see the effort's Journal). Adding a module requires running its
+# real commands end-to-end, not just `--help`.
 _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "claims_cli",
     "follow_ups_cli",
@@ -7459,14 +7455,6 @@ def _dispatch_lazy(command: str, args_list: list[str]) -> int:
     return handler(args)
 
 
-# A cluster of ~18 CLI submodules cross-reference each other's helpers through
-# `_core()` (this __main__ module) rather than importing one another
-# directly -- a pre-existing pattern discovered while implementing lazy
-# dispatch (see the agent-cli-lazy-dispatch effort's Journal). Any of the
-# _LAZY_DISPATCH_TABLE-fast-tracked handlers below might reach for one of
-# these names, so the cluster is resolved together, once, before dispatching
-# into it -- still far short of the full ~35-module eager surface (the
-# _load_full_command_surface() fallback below), and this is itself Phase 1's
 # A cluster of CLI submodules cross-reference each other's helpers through
 # `_core()` (this __main__ module) rather than importing one another
 # directly -- a pre-existing pattern discovered while implementing lazy

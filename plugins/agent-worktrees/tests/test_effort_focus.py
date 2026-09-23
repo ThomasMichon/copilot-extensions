@@ -9,6 +9,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import effort_focus as ef
+from agent_worktrees import session_metadata_cli
 from agent_worktrees import tracking
 
 
@@ -703,7 +704,7 @@ def test_history_digest_includes_bounded_effort_pointer(
         relative, "Driver", "Phase 2 - Bind active effort"
     )
     tracking.save_record(record, tracking_dir / f"{record.worktree_id}.yaml")
-    monkeypatch.setattr(m, "_resolve_worktree_for_read", lambda *_args: record.worktree_id)
+    monkeypatch.setattr(session_metadata_cli, "_resolve_worktree_for_read", lambda *_args: record.worktree_id)
 
     assert m.cmd_history_digest(
         argparse.Namespace(worktree_id=None, worktree_dir=None, session_id=None, limit=8)

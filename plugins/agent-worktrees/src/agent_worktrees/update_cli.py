@@ -48,7 +48,7 @@ def _refresh_terminal_profiles(*args, **kwargs):
 
 
 def _resolve_environment(*args, **kwargs):
-    return services_cli._resolve_environment(*args, **kwargs)
+    return _core_helper("_resolve_environment", services_cli._resolve_environment)(*args, **kwargs)
 
 
 def _find_repo_dir(*args, **kwargs):

@@ -55,11 +55,11 @@ def _normalize_path(*args, **kwargs):
 
 
 def _status_monitor_enabled(*args, **kwargs):
-    return status_monitor_runtime._status_monitor_enabled(*args, **kwargs)
+    return _core_helper("_status_monitor_enabled", status_monitor_runtime._status_monitor_enabled)(*args, **kwargs)
 
 
 def _ensure_status_monitor(*args, **kwargs):
-    return status_monitor_runtime._ensure_status_monitor(*args, **kwargs)
+    return _core_helper("_ensure_status_monitor", status_monitor_runtime._ensure_status_monitor)(*args, **kwargs)
 
 
 def _worktree_to_dict(*args, **kwargs):
