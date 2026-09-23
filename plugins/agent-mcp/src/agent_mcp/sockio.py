@@ -42,10 +42,21 @@ class HostUnreachableError(OSError):
     """
 
 
+def default_home_dir() -> Path:
+    """The stable ``$AGENT_MCP_HOME`` directory (default ``~/.agent-mcp``).
+
+    The one canonical, always-durable directory for this process -- never an
+    ephemeral worktree, an install-time backup dir, or any other directory
+    that can vanish out from under a long-lived resident daemon while it is
+    still running (see :func:`default_socket_path`'s own handle, which
+    already lives here).
+    """
+    return Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp"))
+
+
 def default_socket_path() -> Path:
     """The default serve socket handle: ``$AGENT_MCP_HOME/serve.sock``."""
-    home = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp"))
-    return home / "serve.sock"
+    return default_home_dir() / "serve.sock"
 
 
 def _endpoint_path(socket_path: str | Path) -> Path:

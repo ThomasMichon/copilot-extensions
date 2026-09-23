@@ -595,7 +595,31 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         return 2
 
     socket_path = args.socket or str(ipc.default_socket_path())
+    # Resolve BEFORE the chdir below, in case a caller ever passes a relative
+    # --socket -- it must still mean "relative to the caller's cwd", not to
+    # the daemon's own (about to change) cwd.
+    socket_path = str(Path(socket_path).resolve())
     control_token = os.environ.get("AGENT_MCP_CONTROL_TOKEN") or None
+
+    # Pin the resident daemon's CWD to the stable AGENT_MCP_HOME directory
+    # before doing anything else. This process runs for a very long time
+    # (days), and every relative-path subprocess it spawns on a caller's
+    # behalf (a bridge's `auth.command`, a CLI tool invocation, ...) resolves
+    # against ITS cwd, not the caller's -- so whatever transient directory
+    # happened to be current when `serve`/`cutover` launched it (a worktree
+    # later finalized, an install-time backup dir later cleaned up, ...)
+    # becomes a ticking time bomb: once that directory is removed, every
+    # relative-path subprocess this daemon spawns fails with ENOENT, silently,
+    # for the rest of its (long) life -- confirmed live (aperture-labs, the
+    # daemon's cwd resolved to a deleted `~/.copilot/.agent-mcp.bak-*`
+    # install-backup directory, breaking auth-token minting for every bridge
+    # that had not already cached a token, across every session on the host).
+    # AGENT_MCP_HOME already always exists (ipc/sockio's own socket lives
+    # there) and is never a directory anything else deletes.
+    home_dir = ipc.default_home_dir()
+    home_dir.mkdir(parents=True, exist_ok=True)
+    os.chdir(home_dir)
+
     server = _serve.Server(
         socket_path, idle_timeout=args.idle_timeout,
         passive=args.passive, control_port=args.control_port,
