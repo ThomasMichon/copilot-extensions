@@ -42,6 +42,15 @@ Commands (all take ``--root <dir>``; ``--json`` for machine output)::
                                     live process running from the slot, and -- if
                                     a positive N is passed -- not younger than N
                                     days (an optional backstop; default off)
+    dev-claim --owner REF [--force]
+                                    claim the mutable "dev" slot for REF (a
+                                    worktree/session owner ref); refuses if a
+                                    different owner already holds a live claim
+    dev-release --owner REF [--force]
+                                    release REF's claim on the "dev" slot;
+                                    prints the version current-version should
+                                    be restored to (its value before the claim)
+    dev-status                      print the current dev-slot claim (or null)
 
 Exit code is 0 on success, non-zero on error; errors print to stderr.
 """
@@ -52,6 +61,7 @@ import argparse
 import errno
 import json
 import os
+import platform
 import re
 import shutil
 import sys
@@ -78,6 +88,23 @@ LAST_KNOWN_GOOD_FILE = "last-known-good"
 # The single place the "where is the slot's python" answer lives, so every
 # resolver (this module, the shell resolvers, the binstubs) agrees.
 SLOT_PYTHON_SUBPATHS = ("bin/python", "Scripts/python.exe")
+
+# The one well-known, mutable slot name (dotfiles / mutable-dev-slot pattern):
+# unlike every other version, `versions/dev/` is meant to be rebuilt in place
+# (e.g. an editable/`-e` install from a live worktree checkout) rather than
+# treated as an immutable, once-built artifact. It still uses the same
+# completion-marker / activate machinery as any other slot -- an installer
+# marks it complete after a healthy (re)build, same as always -- the only
+# structural differences are: (1) GC never reclaims it while a claim is live
+# (see `gc`'s `read_dev_claim` check), and (2) a claim (below) gates who may
+# rebuild/activate it, so two worktrees can't silently clobber each other's
+# mutable install.
+DEV_VERSION = "dev"
+# The dev-slot claim record, a sibling of `current-version`/`last-known-good`.
+# Schema-versioned like the runtime-slot-ownership marker family so a future
+# reader can validate/evolve it without guessing.
+DEV_CLAIM_FILE = "dev-claim.json"
+DEV_CLAIM_SCHEMA = "copilot-extensions.dev-slot-claim"
 
 
 # --------------------------------------------------------------------------
@@ -901,8 +928,9 @@ def gc(root: Path, keep: list[str] | None = None,
 
     Never removes: the ``current`` version, any name in ``keep`` (e.g. the
     previous-good for rollback), any version a live process is running from (when
-    ``protect_pids``), and -- if a positive ``min_age_days`` is passed -- any slot
-    younger than that (an optional backstop; see
+    ``protect_pids``), the ``dev`` slot while a live claim exists (see
+    :func:`read_dev_claim`), and -- if a positive ``min_age_days`` is passed --
+    any slot younger than that (an optional backstop; see
     :data:`DEFAULT_GC_MIN_AGE_DAYS`).
 
     ``protect_pids`` is now **precise**: it protects exactly the versions whose
@@ -922,6 +950,8 @@ def gc(root: Path, keep: list[str] | None = None,
     cur = current_version(root, link_name)
     if cur:
         keep_set.add(cur)
+    if read_dev_claim(root) is not None:
+        keep_set.add(DEV_VERSION)
 
     if protect_pids:
         in_use = _versions_with_live_process(root)
@@ -952,6 +982,116 @@ def gc(root: Path, keep: list[str] | None = None,
         if _remove_slot(d, label="gc"):
             removed.append(v)
     return removed
+
+
+# --------------------------------------------------------------------------
+# Dev-slot claim (mutable-dev-slot pattern): who owns `versions/dev` right now
+# --------------------------------------------------------------------------
+# `versions/dev` is the one slot an installer may rebuild in place (typically
+# an editable/`-e` install pointed at a live worktree checkout) instead of
+# treating it as an immutable, once-built artifact. Because it is a SINGLE
+# shared mutable slot per plugin per host, at most one owner (a worktree or
+# session ref, matching the shape already used for cross-machine CodeSpace
+# claims) may hold it at a time -- otherwise a second worktree's rebuild would
+# silently clobber the first's, or two owners might disagree about what
+# `current-version` should be restored to on release. The claim is a plain
+# JSON file, not a live-process lock: it is meant to persist across many
+# process lifetimes (a worktree may claim dev mode for hours/days across many
+# sessions) and is only ever removed by an explicit release (or an operator's
+# `--force`), never by liveness/timeout.
+
+
+class DevClaimConflict(RuntimeError):
+    """Raised when a dev-slot claim/release is attempted by a non-owner."""
+
+    def __init__(self, existing: dict):
+        owner = existing.get("owner")
+        super().__init__(f"dev slot is already claimed by {owner!r}")
+        self.existing = existing
+
+
+def dev_claim_path(root: Path) -> Path:
+    return root / DEV_CLAIM_FILE
+
+
+def read_dev_claim(root: Path) -> dict | None:
+    """Return the current dev-slot claim record, or ``None`` if absent/malformed.
+
+    A malformed or schema-mismatched file is treated as absent (fail-open on
+    read, same posture as the other marker readers in this module) -- it never
+    raises, so callers like :func:`gc` can check it unconditionally.
+    """
+    path = dev_claim_path(root)
+    try:
+        data = _load_unique_json(path)
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("schema") != DEV_CLAIM_SCHEMA:
+        return None
+    owner = data.get("owner")
+    if not isinstance(owner, str) or not owner.strip():
+        return None
+    return data
+
+
+def claim_dev(root: Path, owner: str, *, host: str | None = None,
+             previous_version: str | None = None, force: bool = False) -> dict:
+    """Claim the mutable ``dev`` slot for ``owner``.
+
+    Refuses (raises :class:`DevClaimConflict`) if a *different* owner already
+    holds a live claim, unless ``force``. Re-claiming as the SAME owner is
+    idempotent (refreshes ``claimed_at``, keeps the originally recorded
+    ``previous_version`` so a later release still restores the version that
+    was active before dev mode was ever claimed -- not whatever was current at
+    the moment of a second claim call).
+    """
+    existing = read_dev_claim(root)
+    if existing is not None and existing.get("owner") != owner and not force:
+        raise DevClaimConflict(existing)
+    same_owner_reclaim = existing is not None and existing.get("owner") == owner
+    record = {
+        "schema": DEV_CLAIM_SCHEMA,
+        "version": 1,
+        "owner": owner,
+        "host": host or platform.node(),
+        "pid": os.getpid(),
+        "claimed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "previous_version": (
+            existing.get("previous_version") if same_owner_reclaim
+            else previous_version
+        ),
+    }
+    root.mkdir(parents=True, exist_ok=True)
+    path = dev_claim_path(root)
+    tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
+    tmp.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    return record
+
+
+def release_dev(root: Path, owner: str, *, force: bool = False) -> dict | None:
+    """Release ``owner``'s claim on the ``dev`` slot.
+
+    Returns the released claim record (so the caller can read
+    ``previous_version`` and restore ``current-version`` to it), or ``None``
+    if there was no claim to release. Refuses (raises :class:`DevClaimConflict`)
+    if a claim exists but is held by a DIFFERENT owner, unless ``force`` --
+    this is the one place a non-owner is allowed to release, for an operator
+    or `agent-worktrees finalize`'s obligation-settlement forcing an
+    abandoned/stale claim closed.
+    """
+    existing = read_dev_claim(root)
+    if existing is None:
+        return None
+    if existing.get("owner") != owner and not force:
+        raise DevClaimConflict(existing)
+    try:
+        dev_claim_path(root).unlink()
+    except FileNotFoundError:
+        pass
+    return existing
 
 
 # --------------------------------------------------------------------------
@@ -1172,6 +1312,22 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("toss-incomplete",
                    help="remove non-current slots lacking a completion marker")
 
+    dcp = sub.add_parser("dev-claim", help="claim the mutable dev slot")
+    dcp.add_argument("--owner", required=True,
+                     help="claimant ref (e.g. a worktree/session owner ref)")
+    dcp.add_argument("--host", default=None)
+    dcp.add_argument("--previous-version", default=None,
+                     help="version to record for later restore on release "
+                          "(typically the current-version at claim time)")
+    dcp.add_argument("--force", action="store_true",
+                     help="override a live claim held by a different owner")
+    drp = sub.add_parser("dev-release", help="release the mutable dev slot")
+    drp.add_argument("--owner", required=True)
+    drp.add_argument("--force", action="store_true",
+                     help="release even if held by a different owner "
+                          "(operator / finalize-time force-release)")
+    sub.add_parser("dev-status", help="print the current dev-slot claim (or null)")
+
     args = p.parse_args(argv)
     root: Path = args.root
     link_name: str = args.link_name
@@ -1233,8 +1389,22 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "toss-incomplete":
             tossed = toss_incomplete(root, link_name)
             _emit({"tossed": tossed} if args.json else tossed, args.json)
+        elif args.cmd == "dev-claim":
+            record = claim_dev(root, args.owner, host=args.host,
+                               previous_version=args.previous_version,
+                               force=args.force)
+            _emit(record if args.json else record, args.json)
+        elif args.cmd == "dev-release":
+            record = release_dev(root, args.owner, force=args.force)
+            _emit(record if args.json else (record or {}), args.json)
+        elif args.cmd == "dev-status":
+            record = read_dev_claim(root)
+            _emit(record, args.json)
         else:  # pragma: no cover
             p.error(f"unknown command {args.cmd}")
+    except DevClaimConflict as exc:
+        print(f"versioned_runtime: {exc}", file=sys.stderr)
+        return 2
     except Exception as exc:
         print(f"versioned_runtime: {exc}", file=sys.stderr)
         return 1

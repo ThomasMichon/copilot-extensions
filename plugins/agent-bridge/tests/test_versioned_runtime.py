@@ -756,6 +756,94 @@ def test_link_name_venv(tmp_path):
         assert (link / "marker.txt").read_text() == "1.0.0"
 
 
+# ---------------------------------------------------------------------------
+# Mutable dev slot: claim / release / GC interaction
+# ---------------------------------------------------------------------------
+
+def test_dev_status_absent_by_default(tmp_path):
+    assert vr.read_dev_claim(tmp_path) is None
+
+
+def test_dev_claim_writes_a_readable_record(tmp_path):
+    record = vr.claim_dev(tmp_path, "worktree:abc123", previous_version="1.0.0")
+    assert record["owner"] == "worktree:abc123"
+    assert record["previous_version"] == "1.0.0"
+    assert record["schema"] == vr.DEV_CLAIM_SCHEMA
+    assert vr.read_dev_claim(tmp_path) == record
+
+
+def test_dev_claim_by_same_owner_is_idempotent_and_keeps_previous_version(tmp_path):
+    first = vr.claim_dev(tmp_path, "worktree:abc123", previous_version="1.0.0")
+    second = vr.claim_dev(tmp_path, "worktree:abc123", previous_version="2.0.0")
+    # Re-claiming as the SAME owner must not clobber the originally recorded
+    # previous_version -- that's what release() restores current-version to.
+    assert second["previous_version"] == "1.0.0"
+    assert second["claimed_at"] >= first["claimed_at"]
+
+
+def test_dev_claim_refuses_a_different_owner(tmp_path):
+    vr.claim_dev(tmp_path, "worktree:abc123")
+    with pytest.raises(vr.DevClaimConflict):
+        vr.claim_dev(tmp_path, "worktree:xyz789")
+
+
+def test_dev_claim_force_overrides_a_different_owner(tmp_path):
+    vr.claim_dev(tmp_path, "worktree:abc123", previous_version="1.0.0")
+    record = vr.claim_dev(tmp_path, "worktree:xyz789", force=True,
+                          previous_version="9.9.9")
+    assert record["owner"] == "worktree:xyz789"
+    assert record["previous_version"] == "9.9.9"
+
+
+def test_dev_release_by_owner_returns_the_claim_and_clears_it(tmp_path):
+    vr.claim_dev(tmp_path, "worktree:abc123", previous_version="1.0.0")
+    released = vr.release_dev(tmp_path, "worktree:abc123")
+    assert released["previous_version"] == "1.0.0"
+    assert vr.read_dev_claim(tmp_path) is None
+
+
+def test_dev_release_with_no_claim_is_a_no_op(tmp_path):
+    assert vr.release_dev(tmp_path, "worktree:abc123") is None
+
+
+def test_dev_release_refuses_a_different_owner(tmp_path):
+    vr.claim_dev(tmp_path, "worktree:abc123")
+    with pytest.raises(vr.DevClaimConflict):
+        vr.release_dev(tmp_path, "worktree:xyz789")
+
+
+def test_dev_release_force_releases_a_different_owners_claim(tmp_path):
+    vr.claim_dev(tmp_path, "worktree:abc123", previous_version="1.0.0")
+    released = vr.release_dev(tmp_path, "worktree:xyz789", force=True)
+    assert released["owner"] == "worktree:abc123"
+    assert vr.read_dev_claim(tmp_path) is None
+
+
+def test_gc_protects_dev_slot_while_claimed(tmp_path):
+    _install(tmp_path, "1.0.0")
+    _install(tmp_path, vr.DEV_VERSION)
+    vr.activate(tmp_path, "1.0.0")
+    vr.claim_dev(tmp_path, "worktree:abc123")
+    # dev is not current, but a live claim protects it from GC.
+    assert vr.gc(tmp_path) == []
+    assert vr.version_dir(tmp_path, vr.DEV_VERSION).is_dir()
+
+
+def test_gc_reclaims_dev_slot_once_released(tmp_path):
+    _install(tmp_path, "1.0.0")
+    _install(tmp_path, vr.DEV_VERSION)
+    vr.activate(tmp_path, "1.0.0")
+    vr.claim_dev(tmp_path, "worktree:abc123")
+    vr.release_dev(tmp_path, "worktree:abc123")
+    assert vr.gc(tmp_path) == [vr.DEV_VERSION]
+
+
+def test_dev_status_malformed_file_reads_as_absent(tmp_path):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    vr.dev_claim_path(tmp_path).write_text("not json", encoding="utf-8")
+    assert vr.read_dev_claim(tmp_path) is None
+
+
 def test_activate_leaves_real_dir_without_flag(tmp_path):
     """A legacy real venv dir at the link path is not clobbered without the flag:
     the marker is written (the source of truth) and the real dir is left as-is on
