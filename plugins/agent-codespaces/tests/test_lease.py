@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import time
+
 import pytest
 
 from agent_codespaces import lease as lease_mod
@@ -13,6 +16,11 @@ def leases(monkeypatch, tmp_path):
     monkeypatch.setattr(lease_mod, "LEASE_FILE", tmp_path / "leases.json")
     monkeypatch.setattr(lease_mod, "RUNTIME_DIR", tmp_path)
     monkeypatch.setattr(lease_mod, "_LOCK_FILE", tmp_path / "leases.lock")
+    monkeypatch.setattr(
+        lease_mod,
+        "_DEPLOY_HOLDS_FILE",
+        tmp_path / "deploy-holds.json",
+    )
     # ensure_runtime_dir() targets the real RUNTIME_DIR; stub it to a no-op so
     # the broker only writes under tmp_path.
     monkeypatch.setattr(lease_mod, "ensure_runtime_dir", lambda: None)
@@ -126,6 +134,104 @@ def test_lease_survives_within_ttl(leases):
     assert active[0].effort == "effort-a"
 
 
+def test_borrow_is_blocked_by_provider_deploy_hold(leases):
+    with lease_mod.deploy_hold("cs-one", "claim-reclaim"):
+        with pytest.raises(
+            lease_mod.ProviderAdmissionError,
+            match="provider claim-reclaim is in progress",
+        ):
+            lease_mod.borrow("effort-a", "cs-one")
+
+
+def test_reborrow_is_also_blocked_by_provider_hold(leases):
+    lease_mod.borrow("effort-a", "cs-one")
+
+    with lease_mod.deploy_hold("cs-one", "claim-reclaim"):
+        with pytest.raises(
+            lease_mod.ProviderAdmissionError,
+            match="provider claim-reclaim is in progress",
+        ):
+            lease_mod.borrow("effort-a", "cs-one")
+
+
+def test_deploy_hold_rejects_when_already_held(leases):
+    with lease_mod.deploy_hold("cs-one", "claim-reclaim"):
+        with pytest.raises(
+            lease_mod.DeployHoldError,
+            match="already has a provider claim-reclaim hold",
+        ):
+            with lease_mod.deploy_hold("cs-one", "remove"):
+                pass
+
+
+def test_deploy_hold_heartbeats_and_verifies_token(leases, monkeypatch):
+    monkeypatch.setattr(lease_mod, "_RECORD_HEARTBEAT_INTERVAL", 0.01)
+    with lease_mod.deploy_hold("cs-one", "claim-reclaim") as hold:
+        initial_heartbeat = hold.heartbeat_at
+        time.sleep(0.04)
+        current = lease_mod.verify_deploy_hold("cs-one", hold.token)
+        assert current.heartbeat_at > initial_heartbeat
+        with pytest.raises(lease_mod.ProviderAdmissionError):
+            lease_mod.verify_deploy_hold("cs-one", "wrong-token")
+
+
+def test_deploy_hold_max_lifetime_expires_despite_heartbeat(leases, monkeypatch):
+    monkeypatch.setattr(lease_mod, "_RECORD_HEARTBEAT_INTERVAL", 0.005)
+    with lease_mod.deploy_hold(
+        "cs-one",
+        "claim-reclaim",
+        max_lifetime=0.02,
+    ) as hold:
+        time.sleep(0.04)
+        with pytest.raises(lease_mod.ProviderAdmissionError):
+            lease_mod.verify_deploy_hold("cs-one", hold.token)
+
+
+def test_unconfirmed_action_hold_survives_owner_exit_until_expiry(leases):
+    with lease_mod.deploy_hold(
+        "cs-one",
+        "claim-reclaim",
+        max_lifetime=60,
+    ) as hold:
+        lease_mod.mark_deploy_hold_uncertain("cs-one", hold.token)
+
+    assert lease_mod.get_deploy_hold("cs-one") is not None
+    records = json.loads(
+        lease_mod._DEPLOY_HOLDS_FILE.read_text(encoding="utf-8")
+    )
+    records["cs-one"]["expires_at"] = time.time() - 1
+    lease_mod._DEPLOY_HOLDS_FILE.write_text(
+        json.dumps(records),
+        encoding="utf-8",
+    )
+    assert lease_mod.get_deploy_hold("cs-one") is None
+
+
+def test_safe_clear_refuses_fresh_corruption_then_clears_expired_file(leases):
+    lease_mod._DEPLOY_HOLDS_FILE.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(lease_mod.ProviderAdmissionError):
+        lease_mod.clear_stale_provider_records()
+
+    old = time.time() - lease_mod.DEPLOY_HOLD_TTL - 1
+    lease_mod._DEPLOY_HOLDS_FILE.touch()
+    import os
+    os.utime(lease_mod._DEPLOY_HOLDS_FILE, (old, old))
+    cleared = lease_mod.clear_stale_provider_records()
+
+    assert cleared["deploy_holds"] == 1
+    assert not lease_mod._DEPLOY_HOLDS_FILE.exists()
+
+
+def test_deploy_hold_status_reports_unknown_for_corrupt_state(leases):
+    lease_mod._DEPLOY_HOLDS_FILE.write_text("{not-json", encoding="utf-8")
+
+    status = lease_mod.deploy_hold_status("cs-one")
+
+    assert status["state"] == "unknown"
+    with pytest.raises(lease_mod.ProviderAdmissionError):
+        lease_mod.get_deploy_hold("cs-one")
+
+
 # -- Exclusive worktree-keyed claims (#897) -----------------------------------
 
 
@@ -154,6 +260,15 @@ def test_claim_force_takes_over_live_owner(leases):
     lease_mod.claim("cs-one", "/wt/a", active={"/wt/a", "/wt/b"})
     cl = lease_mod.claim("cs-one", "/wt/b", force=True, active={"/wt/a", "/wt/b"})
     assert cl.worktree == "/wt/b"
+
+
+def test_claim_is_blocked_by_provider_deploy_hold(leases):
+    with lease_mod.deploy_hold("cs-one", "claim-reclaim"):
+        with pytest.raises(
+            lease_mod.ProviderAdmissionError,
+            match="provider claim-reclaim is in progress",
+        ):
+            lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"})
 
 
 def test_claim_auto_releases_dead_owner(leases):
@@ -229,6 +344,68 @@ def test_claim_l2_conflict_cross_machine_names_ref(leases, monkeypatch):
                         holder_ref="m/p/wt-b")
     assert ei.value.holder == "remote/p/wt-r"
     assert ei.value.host == "(cross-machine)"
+
+
+def test_claim_releases_new_l2_token_when_hold_appears_before_local_write(leases, monkeypatch):
+    from agent_codespaces import coordination
+
+    responses = iter([
+        {
+            "cs-one": lease_mod.DeployHold(
+                codespace="cs-one",
+                operation="claim-reclaim",
+                token="hold-token",
+                pid=123,
+                host=lease_mod._this_host(),
+                environment=lease_mod._this_environment(),
+                acquired_at=time.time(),
+                heartbeat_at=time.time(),
+                expires_at=time.time() + lease_mod.DEPLOY_HOLD_TTL,
+            )
+        },
+    ])
+    original_read_live_records = lease_mod._read_live_records
+
+    def _staged_records(path, record_type, ttl):
+        if path == lease_mod._DEPLOY_HOLDS_FILE and record_type is lease_mod.DeployHold:
+            return next(responses)
+        return original_read_live_records(path, record_type, ttl)
+
+    monkeypatch.setattr(lease_mod, "_read_live_records", _staged_records)
+    monkeypatch.setattr(
+        coordination,
+        "preflight",
+        lambda holder_ref: coordination.PreflightResult("ready"),
+    )
+    monkeypatch.setattr(
+        coordination,
+        "acquire",
+        lambda codespace, holder_ref: coordination.L2Result(
+            "ok",
+            token="new-token",
+        ),
+    )
+    released = {}
+    monkeypatch.setattr(
+        coordination,
+        "release",
+        lambda codespace, token: released.update(
+            {"codespace": codespace, "token": token}
+        ),
+    )
+
+    with pytest.raises(
+        lease_mod.ProviderAdmissionError,
+        match="provider claim-reclaim is in progress",
+    ):
+        lease_mod.claim(
+            "cs-one",
+            "/wt/a",
+            active={"/wt/a"},
+            holder_ref="m/p/wt-a",
+        )
+
+    assert released == {"codespace": "cs-one", "token": "new-token"}
 
 
 def test_same_holder_ref_matches_worktree_id():
