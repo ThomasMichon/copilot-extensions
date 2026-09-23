@@ -708,3 +708,52 @@ attribute — the same class of unrelated `main` drift hit twice earlier this
 session) did not block merge; `merge state: clean` confirmed it isn't a
 required check.
 
+### 2026-09-23 — `agent-pull-requests` verb parity: `create`/`merge`/`wait` implemented
+
+Resumed via context handoff (again worked around a broken `consume_handoff`
+MCP tool — `Extension disconnected before responding to tool call`, three
+consecutive attempts — by reading the file-backed handoff JSON directly
+from `~/.odsp-web-harness/worktrees/<id>/handoff/handoff-<id>.json` and
+`bind-session`ing manually; this is now the *second* distinct
+`consume_handoff` failure mode hit across two sessions and still not
+reported upstream).
+
+Picked the smaller of the two roster options (vs. `agent-bridge`'s Phase 1
+installer-engine conversion, a live production daemon deferred as
+appropriately larger/riskier for one sitting):
+
+- Implemented all three previously-stubbed verbs in
+  `plugins/agent-pull-requests/src/agent_pull_requests/__main__.py`:
+  - `create`: `gh pr create --repo <owner/repo> --head <branch> [--base ...]
+    --title ... [--body ...] [--draft]`, no local checkout required (proved
+    the exact transport works with a live `--dry-run` round-trip through
+    `agent-worktrees repos gh ... -- pr create --dry-run`, no PR created);
+    parses the created PR's number from `gh`'s printed URL.
+  - `merge`: `gh pr merge` with `--squash` (default) / `--merge` /
+    `--rebase`, `--auto`, `--delete-branch`.
+  - `wait`: polls `status` until `MERGED`/`CLOSED` or a timeout; distinct
+    exit codes (0 merged, 1 closed-unmerged/status-error, 3 timed-out).
+  - All three reuse the existing `agent-worktrees repos gh` transport and
+    the established leading-diagnostic-tolerant stdout parsing (added a
+    plain-text sibling, `_strip_leading_diagnostic`, alongside the existing
+    JSON-tail parser).
+- Added unit tests for each new verb (parser-flag tests + JSON-output smoke
+  tests via monkeypatched `_github_create`/`_github_merge`/`_github_status`),
+  bumped the plugin version (`0.1.0-dev2` -> `0.1.0-dev3`) across
+  `plugin.json`/`pyproject.toml`/`__init__.py`, and corrected the plugin
+  README/CLI-reference/marketplace description, which had gone stale
+  describing a payload-only, status-only scaffold from before the real
+  installer landed.
+- Landed as `ThomasMichon/copilot-extensions#3363` (squash-merged): 15/15
+  plugin tests passing, `check-version-consistency.py` /
+  `check-docs-consistency.py` / `check-install-contract.py` all clean, a
+  live `status` call against `gim-home/odsp-web-harness#491` still correct
+  through the module (unchanged transport), full CI green (one prior
+  unrelated `worktree-manager` drift failure not present this run).
+- **Genuinely still open**: `agent-bridge`'s Phase 1 installer-engine
+  conversion (the effort's original pilot target), Phase 2+'s remaining
+  adopters, a POSIX live-install proof lane (all proofs to date are
+  Windows-only), and the cross-repo documentation sweep pointing consumers
+  at `agent-pull-requests` instead of `agent-worktrees`' worktree-bound PR
+  verbs.
+
