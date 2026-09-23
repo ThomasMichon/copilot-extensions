@@ -109,26 +109,21 @@ ambient/legacy credentials just by making the strict path fail.
    copy the bytes.** Every existing vendor directory ships a co-located
    `_installation_context.py` beside its `_peer_launch.py` (loaded via
    `Path(__file__).with_name("_installation_context.py")`). agent-worktrees'
-   own primitive currently lives at
-   `plugins/agent-worktrees/scripts/installation-context/installation_context.py`,
-   a different location/name, and is packaged/verified by
-   `tools/sync-installation-context.py`, which does not currently list
-   agent-worktrees as a destination. Adding a bare copy under
-   `src/agent_worktrees/_installation_context.py` without also:
-   - adding that path to `tools/sync-installation-context.py`'s
-     destination list, and
-   - adding it to `libs/peer-launch/tests/test_packaging.py`'s hard-coded
-     destination list (alongside the `_peer_launch.py` destination from
-     step 1)
-
-   leaves the new copy unchecked by CI and free to silently drift the next
-   time the canonical installation-context validator changes. Do both
-   registrations in the same PR as the file itself. (Confirm at
-   implementation time whether `scripts/installation-context/
-   installation_context.py` is itself already a sync destination of some
-   other canonical source, and if so, add the new `src/agent_worktrees/`
-   copy as an additional destination of the SAME canonical source rather
-   than inventing a second one.)
+   own primitive is already packaged: `tools/sync-installation-context.py`
+   already lists `agent-worktrees` in `ADOPTERS` and vendors the canonical
+   `libs/installation-context/installation_context.py` into
+   `plugins/agent-worktrees/scripts/installation-context/`. The missing
+   registration is specifically the **new, additional, co-located**
+   destination `src/agent_worktrees/_installation_context.py` -- this is
+   a second sync destination of the SAME canonical source, not a
+   replacement for the existing `scripts/installation-context/` one (do
+   not duplicate, remove, or diverge the existing destination). Add the
+   new co-located path to `tools/sync-installation-context.py`'s
+   destination list, and add it to
+   `libs/peer-launch/tests/test_packaging.py`'s hard-coded destination
+   list (alongside the `_peer_launch.py` destination from step 1) in the
+   same PR as the file itself, so CI actually checks it stays in sync
+   going forward.
 3. **Resolve agent-worktrees' own owner context correctly.** Do NOT derive
    `own_root` from `Path(__file__).resolve().parents[N]` — the installed
    package lives in a versioned venv, not the payload tree, so a
@@ -144,19 +139,27 @@ ambient/legacy credentials just by making the strict path fail.
    path from `__file__`. Add a new
    `plugins/agent-worktrees/src/agent_worktrees/peer_launch_adapter.py`
    (name TBD at implementation time) exposing `explicit_context()`,
-   `validate_context()`, and `run(peer: str, *callback_args, timeout=15)`
+   `validate_context()`, and `run(peer: str, *callback_args, timeout)`
    that mirrors `agent_codespaces/worktrees.py`'s three functions,
    parameterized over which peer plugin to launch into (rather than one
    hardcoded target), since agent-worktrees needs this for multiple peers
-   (codespaces, containers, dispatch). `run()`'s signature takes ONLY the
-   callback arguments (e.g. `"claim-status", ref`) — never the resolved
-   binstub path. `claim_providers.py`'s existing
-   `build_provider_argv()` returns the payload-local binstub as its first
-   tuple element followed by the callback arguments; the adapter must
-   strip that leading binstub element before forwarding the remainder as
-   `*callback_args` (the adapter builds its own `python -m <peer_module>`
-   launch prefix internally and must never receive the legacy binstub
-   path as if it were a module argument).
+   (codespaces, containers, dispatch). `run()` takes an explicit,
+   caller-supplied `timeout` -- it must NOT default to a single fixed
+   value (e.g. 15s) for every call: the existing contract gives
+   claim-status callbacks a 15-second budget but claim-reclaim callbacks a
+   660-second budget (`cleanup._run_codespaces()`'s own recovery-plus-delete
+   sequence also uses 660s), so a status-sized default would truncate a
+   normal multi-minute reclaim mid-flight. Each of the three call sites
+   from step 4 must pass its own existing timeout value through to
+   `run()` unchanged, not adopt one shared default. `run()`'s signature
+   otherwise takes ONLY the callback arguments (e.g. `"claim-status",
+   ref`) — never the resolved binstub path. `claim_providers.py`'s
+   existing `build_provider_argv()` returns the payload-local binstub as
+   its first tuple element followed by the callback arguments; the
+   adapter must strip that leading binstub element before forwarding the
+   remainder as `*callback_args` (the adapter builds its own
+   `python -m <peer_module>` launch prefix internally and must never
+   receive the legacy binstub path as if it were a module argument).
 4. **Wire every launch path that currently uses `peer_env()`, not just
    `_run_callback()`.** The registry has (at least) three call sites that
    pass `peer_env()`'s stripped environment straight to `subprocess.run`
