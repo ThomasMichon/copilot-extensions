@@ -76,6 +76,23 @@ The canonical phase names are:
 - **Self-contained binstubs.** A binstub may run before anything is deployed
   (confined-host self-provision), so it embeds the canonical snippet rather than
   depending on a not-yet-deployed resolver file.
+- **A relocation must be swept everywhere, not just at the cutover site.** The
+  same divergence this pattern guards against for interpreters recurs for any
+  companion **file** (a shared launcher script, a binstub template) that moves
+  from one plugin's install tree to another's. copilot-extensions#3433/#3454
+  is the concrete case: `worktree-manager-control-plane/phase-3b-mux-
+  relocation.md` moved `launch-session.{sh,ps1,cmd}` out of agent-worktrees'
+  `~/.agent-worktrees/bin/` and into Worktree Manager's own versioned install
+  — but three separate hand-rolled references to the retired path survived
+  the cutover PR untouched: a Windows CMD wrapper's own sibling-resolution,
+  the Picker "refresh" relaunch step's self-relaunch, and a Windows-host
+  installer's WSL cross-boundary binstub generator. Each one degraded
+  silently (a wrong-exit-code launch failure, a swallowed relaunch, a broken
+  binstub) rather than failing loudly at the cutover. Before closing a
+  relocation, `grep` the **entire repo** for the retired path literal — not
+  just the call sites the cutover author already knew about — and prefer
+  resolving through the new owner's own single resolution helper (as this
+  pattern requires) over hand-copying a path anywhere a second time.
 
 ## Rationale
 
