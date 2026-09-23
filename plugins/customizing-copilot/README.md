@@ -2,7 +2,7 @@
 
 A **payload-only** Copilot CLI plugin that teaches an agent how to customize and
 extend the GitHub Copilot CLI. There is no runtime, service, venv, or binstub:
-**enable the plugin and restart the session** so the eleven skills are available
+**enable the plugin and restart the session** so the twelve skills are available
 on demand.
 
 The skills are standalone authoring guidance. They work in any repo that enables
@@ -27,6 +27,7 @@ skill name) and Copilot loads the matching skill:
 | [diagnosing-copilot-cli-startup](skills/diagnosing-copilot-cli-startup/SKILL.md) | an interactive CLI is stuck on `Loading` or `Resuming` | Mux capture, process/session correlation, persisted events and logs, startup-boundary classification, bridge differential diagnosis, and operator-authorized reproduction |
 | [hoisting-plugin-agents](skills/hoisting-plugin-agents/SKILL.md) | a delegated/background sub-agent or nested `copilot` process can't reach a marketplace-enabled plugin agent | Hoisting enabled directory-marketplace plugin agents into a repo-local `.github/agents/` fallback; generating, verifying, and retiring the hoisted copies |
 | [componentizing-modules](skills/componentizing-modules/SKILL.md) | a source or test file is oversized or growing toward its cap | Finding decomposition seams (CLI/route registration tables, policy vs. evaluator, vendored-copy canonicals), safely extracting, `--refresh-baseline`, splitting test modules by behavioral contract with `@pytest.mark.contract`, and prioritizing via `tools/rank-module-size.py` |
+| [orchestrating-componentization-campaigns](skills/orchestrating-componentization-campaigns/SKILL.md) | coordinating a multi-file componentization campaign across background agents | Per-file worktree + background-agent dispatch, incremental multi-PR slicing within one file, unblocking a stalled agent, diagnosing/detouring around shared repo-wide CI blockers, and long-running-agent monitoring (direct polling vs. scheduled check-ins) |
 | [setting-up-instruction-sync-worker](skills/setting-up-instruction-sync-worker/SKILL.md) | a repo wants its enabled plugins' static instruction projections kept current automatically | Scaffolding `projection-reflect`'s scheduled sync worker and review-gate bypass profile, gated on the adopting repo's own explicit, committed, live-rechecked opt-in |
 
 Each skill supplements the base CLI documentation with this repo's authoring
