@@ -195,9 +195,28 @@ below for the carved implementation plan.
 ## Plan
 
 ### Phase 1 - Lock the contracts with failing fixtures
-- [ ] Add focused fixtures for a retained finalized record that receives new
+- [x] Add focused fixtures for a retained finalized record that receives new
   work, a Git-settled record with held claims, and a Git-settled record with
-  multiple follow-ups.
+  multiple follow-ups. Re-audited (2026-09-23) rather than re-built: each
+  scenario already has a dedicated, focused fixture, just spread across the
+  test files each concern naturally belongs to rather than one consolidated
+  file --
+  **retained finalized record receiving new work:**
+  `test_claims_cmd.py::test_claims_add_allows_finalized_owner` (CLI level)
+  and `test_tracking.py`'s `TestFollowUpLedger::
+  test_adding_open_follow_up_reopens_finalized_owner` (ledger level);
+  **Git-settled with held claims:** `test_prune.py`'s
+  `test_held_resource_claim_blocks_cleanup_even_when_finalized`/
+  `test_at_rest_claim_also_blocks_cleanup` (disposition level) and
+  `test_closure_descriptor_wiring.py::test_closure_reports_merged_when_held_claim_present`
+  (descriptor level);
+  **Git-settled with multiple follow-ups:** `test_prune.py`'s
+  `TestClosureDescriptor::test_both_blockers_produce_both_markers`
+  (`open_follow_ups=3` renders `F3`) plus the cross-surface parity test's
+  own held-claim-and-follow-up case (`worktree-manager`'s
+  `test_closure_cross_surface_parity.py`, `C1 F1` across all three
+  surfaces). No new fixture needed; leaving these consolidated would
+  duplicate coverage already locking the same contract.
 - [x] Prune-verdict slice only: `cleanup_disposition` and
   `classify_managed_worktree` now treat a held resource claim
   (`active`/`at-rest`) as a blocker even when `status == finalized` or Git is
@@ -221,8 +240,72 @@ below for the carved implementation plan.
   worktree-manager's own suite, not agent-worktrees', since only that
   package's conftest (`ensure_engine_runtime`) puts a real `agent_worktrees`
   on `sys.path` for a test to genuinely import both sides.
-- [ ] Add compatibility fixtures for legacy boolean-only records and active
-  effort bindings.
+- [x] Add compatibility fixtures for legacy boolean-only records and active
+  effort bindings. Added `test_prune.py`'s
+  `test_legacy_boolean_follow_up_blocks_cleanup` (a pre-Phase-3 record with
+  no itemized `follow_ups` ledger, only the legacy `follow_up: true`
+  boolean, blocks `cleanup_disposition` exactly like an itemized open item)
+  and `test_active_effort_binding_blocks_cleanup_via_legacy_boolean` (the
+  record shape `effort-focus bind` actually produces -- an `active_effort`
+  pointer plus the legacy boolean via `set_disposition(follow_up=True)`, no
+  itemized entry -- proven end-to-end through `cleanup_disposition`, not
+  just `effective_open_follow_up_count` in isolation). Existing
+  `TestFollowUpLedger` tests already covered the derivation function itself
+  (`test_legacy_boolean_counts_as_one_when_ledger_empty`); these two close
+  the gap at the disposition/prune-verdict level the bullet actually names.
+- [x] Inventory every in-repo and known downstream consumer of literal `FINAL`,
+  `status == finalized`, follow-up glyphs, and cleanup buckets before changing
+  their meaning, including the agent-bridge worktree projection and cockpit
+  consumers. Findings (2026-09-23):
+  - **Inside agent-worktrees itself:** `list_views_cli.py`/`__main__.py`
+    (list JSON's `closure` field), `status_bar_cli.py` (mux segment),
+    `cleanup_gc_cli.py`/`sweep.py`/`reap_cli.py`/`finalize_cli.py`
+    (cleanup/GC/sweep/finalize's own bucket consumption), `follow_ups_cli.py`,
+    `claims_cli.py`, `disposition_history.py`, `managed_worktree_guard.py`,
+    `reciprocal_presentation.py`, `resolve_system_cli.py` -- all consume
+    `prune`'s own types/functions directly (in-process), so they can never
+    drift from the canonical descriptor by construction. `picker_support/
+    derive.py` also reads `closure.label` directly but is **dead code**: not
+    imported by any production module (confirmed via repo-wide search) --
+    it predates the bundled-Picker retirement (see below) and is orphaned,
+    not a live consumer.
+  - **`worktree-manager` (the canonical remaining Picker):**
+    `production_picker/prune.py` (the version-checked shim,
+    `interpret_descriptor_payload`), `picker_tui/derive.py` (the Picker's
+    own consumption, gated through that shim), `picker_tui/engine_helpers.py`/
+    `obscure.py`/`styles.py` (rendering only, downstream of `derive.py`'s
+    already-gated output -- not independent consumers), and
+    `mux_companion.py` (the `visions/mux-companion` Companion explainer) --
+    **the one real gap found**: `_closure_explanation` reads `closure.get
+    ("label")` directly, with no `interpret_descriptor_payload`-style
+    version/support gate, unlike every other consumer. Assessed as **low
+    real-world risk, not fixed here**: `mux_companion.py` reaches
+    agent-worktrees exclusively through `engine_client`'s **same-machine
+    subprocess** call to the currently-installed CLI (never a cross-machine
+    crawl) -- the version-skew scenario the gate exists for (an
+    agent-bridge crawl reaching an older/newer remote) cannot occur on this
+    path. Noted here rather than patched to avoid scope creep into a
+    separate, still-v1 vision's file for a defense-in-depth-only gap;
+    revisit if `mux_companion` ever gains a remote/cross-machine data
+    source.
+  - **The bundled `agent-worktrees/picker_tui/` Picker** (the historical
+    duplicate) is not a live consumer to inventory at all: transplanted to
+    `worktree-manager` in #1244 and fully **retired** by the separate,
+    already-completed `worktree-manager-control-plane` Phase 3/6 effort
+    (Step 2 deletion, 2026-09-15/16) -- confirmed via that effort's own doc,
+    not re-derived.
+  - **Downstream consumers outside agent-worktrees/worktree-manager**
+    (`agent-bridge`, `agent-dispatch`, `agent-codespaces`): grepped for
+    `"FINAL"` / `== "finalized"` across every plugin. Every hit resolved to
+    either a docstring/comment, an unrelated `status_note_at` timestamp
+    field read, or an unrelated `"finalized"` reason string on a
+    codespace-recovery status -- **none branch on worktree-finality
+    semantics at all**. Confirms the effort's own earlier assessment
+    (Phase 5's still-unbuilt "agent-bridge cockpit consumer" item) that no
+    live downstream consumer needs updating yet; `agent-bridge`'s own
+    worktree-discovery crawl (Phase 5) threads the raw `closure` field
+    through opaquely without interpreting it, which is exactly why no
+    agent-bridge-side literal check exists to find.
 - [x] Add stale-snapshot concurrency fixtures proving background stamp writes
   cannot erase, resurrect, or reorder concurrently-mutated follow-ups. This
   was a REAL production gap, not just a missing test: `save_record`'s
@@ -243,10 +326,6 @@ below for the carved implementation plan.
   unrelated `test_doctor.py`/`test_context_resolution.py` failures
   confirmed present on unmodified `origin/main`) pass; `ruff check`
   byte-identical before/after (7 pre-existing findings).
-- [ ] Inventory every in-repo and known downstream consumer of literal `FINAL`,
-  `status == finalized`, follow-up glyphs, and cleanup buckets before changing
-  their meaning, including the agent-bridge worktree projection and cockpit
-  consumers.
 
 ### Phase 2 - Make finalized records resumable
 - [x] Centralize claim add/update/remove/settle/release mutations so direct list
@@ -2530,4 +2609,48 @@ The approved design is the faceted model in [design.md](design.md):
   finalized-record / held-claims / multi-follow-up), legacy-boolean +
   active-effort-binding compatibility fixtures, and the literal-`FINAL`/
   status-consumer inventory. Not touched this session.
+
+### 2026-09-23 (continued) - Phase 1 complete: compatibility fixtures + consumer inventory
+
+- Closed out Phase 1's three remaining bullets in one pass:
+  - **Named fixtures re-audit**: the "retained finalized record / held
+    claims / multiple follow-ups" bullet's three scenarios each already had
+    a dedicated, focused test -- just spread across the files each concern
+    naturally belongs to (`test_claims_cmd.py`, `test_tracking.py`,
+    `test_prune.py`, `test_closure_descriptor_wiring.py`, and this
+    session's own cross-surface parity test). Marked complete with pointers
+    rather than consolidating into a new file that would duplicate the same
+    contract.
+  - **Compatibility fixtures**: added
+    `test_legacy_boolean_follow_up_blocks_cleanup` and
+    `test_active_effort_binding_blocks_cleanup_via_legacy_boolean` to
+    `test_prune.py` -- both prove a legacy-boolean-only record (no itemized
+    `follow_ups` ledger) blocks `cleanup_disposition` end-to-end, including
+    the exact record shape `effort-focus bind` actually produces
+    (`active_effort` pointer + `set_disposition(follow_up=True)`). Existing
+    tests only covered `effective_open_follow_up_count` in isolation, not
+    the full disposition path.
+  - **Consumer inventory**: walked every in-repo consumer of the closure
+    descriptor/literal FINAL-finalized semantics. Found one real, if
+    low-risk, gap: `worktree-manager`'s `mux_companion.py`
+    (`_closure_explanation`) reads `closure.label` with no version/support
+    gate, unlike every other consumer -- but assessed as safe-in-practice
+    (it reaches agent-worktrees only via a same-machine subprocess to the
+    currently-installed CLI, never the cross-machine crawl the gate exists
+    for) and left unpatched to avoid scope creep into a separate, still-v1
+    vision's file for a defense-in-depth-only concern. Confirmed
+    `picker_support/derive.py` (inside agent-worktrees) is dead code, not a
+    live consumer. Confirmed no downstream plugin (agent-bridge,
+    agent-dispatch, agent-codespaces) branches on worktree-finality
+    semantics at all (every grep hit was a docstring, an unrelated
+    `status_note_at` read, or an unrelated `"finalized"` reason string).
+- **Phase 1 is now fully complete** -- every Plan bullet checked. Validation:
+  125 targeted tests pass (agent-worktrees); `ruff check` clean/unchanged.
+  No code changes beyond the two new `test_prune.py` tests -- this session
+  was audit + documentation + two small compatibility tests, not a
+  production change.
+- Next open phases: Phase 4's remaining bullet (`cleanup`/`gc` -> descriptor
+  switch, deliberately deferred, higher-risk), Phase 5 (legend/filter parity
+  + agent-bridge cockpit consumer), Phase 6 (ship-it, last), and #3113
+  (the still-open half of Phase 7).
 
