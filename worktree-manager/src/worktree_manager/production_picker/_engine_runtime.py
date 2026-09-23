@@ -94,10 +94,15 @@ def ensure_engine_runtime() -> Path:
         sys.path.insert(0, source_text)
     plugin_root = source.parent
     libs_root = plugin_root / "libs"
+    # agent-procutil, dropin-registry, and plugin-activation are NOT injected
+    # here: worktree-manager vendors its own byte-identical copies of those
+    # three (declared, installed dependencies -- see libs/ and pyproject.toml)
+    # so its own call sites resolve them from its own venv, not by accident of
+    # import order against this borrowed path (copilot-extensions#3359).
+    # plugin-resolve is vendored by worktree-manager too, but agent-worktrees'
+    # own CLI-root modules (config, profiles, ...) reached via engine_module()
+    # still need it importable under this borrowed path.
     for lib in (
-        "agent-procutil",
-        "dropin-registry",
-        "plugin-activation",
         "plugin-resolve",
         "config-migrate",
         "single-instance-lease",
