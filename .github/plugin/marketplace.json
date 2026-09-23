@@ -17,8 +17,8 @@
     },
     {
       "name": "agent-pull-requests",
-      "description": "Cross-repository pull-request CLI for API-driven status/create/merge/wait flows (status implemented; others staged), initially mediated through agent-worktrees account resolution. Payload-only for now -- no install script deploys a binstub yet; invoke via 'python -m agent_pull_requests' after 'pip install -e'.",
-      "version": "0.1.0-dev2",
+      "description": "Cross-repository pull-request CLI for API-driven status/create/merge/wait flows, addressed directly by owner/repo with no local checkout required. Deployed as a self-contained versioned runtime via the shared vendored installer engine, with a real agent-pull-requests binstub; initially mediated through agent-worktrees account resolution.",
+      "version": "0.1.0-dev3",
       "source": "plugins/agent-pull-requests",
       "defaultEnabled": false
     },
