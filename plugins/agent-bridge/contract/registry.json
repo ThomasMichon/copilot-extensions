@@ -68,7 +68,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "5f1a578bb949bddc9bc8e3c80f9c67afb4b874484a4b2c4add703d481482fd1c",
+          "sha256": "ba7f41917a999e932dbbee4d1140fd3f6ab0566cd31078393ad55e2f66ea50b3",
           "semantic": false,
           "non_semantic_reason": "Installation-scoped runtime defaults do not alter the representative session-create wire shape."
         },
