@@ -165,6 +165,53 @@ def resolve_session(session_id: str, cfg: Config | None = None) -> SessionRef | 
     return _resolve_from_synced_corpus(session_id, cfg.sync_path)
 
 
+def query_reviewer_sessions(
+    repo: str,
+    pr_number: int,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    cfg: Config | None = None,
+) -> list[SessionRef]:
+    """Return every session this host can resolve for ``(repo, pr_number)``.
+
+    Backed by :class:`agent_logger.catalog.ReviewCatalogIndex` -- a
+    consumer that has exhausted its own live/history-store fallbacks (e.g.
+    Intelligence Dampener's reviewer-link chain, once agent-dispatch has
+    nothing) reaches this as the durable last tier. ``since``/``until``
+    optionally window the result by the annotation's ``recorded_at``
+    (inclusive, ISO-8601 string comparison).
+
+    A catalog entry whose session this host cannot resolve (e.g. the
+    session lives only on another machine's corpus this host doesn't sync,
+    or has aged out of every tier) is silently skipped -- this returns only
+    sessions actually resolvable *here*, exactly like :func:`resolve_session`
+    treats an unresolvable id as "not found" rather than an error. Results
+    preserve the catalog's oldest-first ``recorded_at`` order, deduplicated
+    by session id (a session can carry more than one entry for the same
+    PR, e.g. distinct roles).
+    """
+    from agent_logger.catalog import ReviewCatalogIndex
+
+    try:
+        cfg = cfg or load_config(include_repo=False)
+    except Exception:
+        return []
+    index = ReviewCatalogIndex(cfg.catalog_db_path)
+    entries = index.query(repo, pr_number, since=since, until=until)
+
+    seen: set[str] = set()
+    refs: list[SessionRef] = []
+    for entry in entries:
+        if entry.session_id in seen:
+            continue
+        seen.add(entry.session_id)
+        ref = resolve_session(entry.session_id, cfg=cfg)
+        if ref is not None:
+            refs.append(ref)
+    return refs
+
+
 def _read_events(ref: SessionRef) -> list[dict]:
     """Parse ``events.jsonl`` into a list of event objects.
 

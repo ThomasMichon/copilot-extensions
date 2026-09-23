@@ -224,6 +224,42 @@ def _cmd_session_fetch(args: argparse.Namespace) -> int:
     return code
 
 
+def _cmd_catalog_status(_args: argparse.Namespace) -> int:
+    """Report the resolved review-annotation catalog index db path."""
+    cfg = load_config()
+    print(json.dumps({"db_path": str(cfg.catalog_db_path)}, indent=2))
+    return 0
+
+
+def _cmd_catalog_rebuild(args: argparse.Namespace) -> int:
+    """Rebuild the review-annotation catalog index from every discoverable
+    session's own ``review-annotations.json`` sidecar.
+
+    Additive and idempotent -- safe to run against an index that already has
+    rows (e.g. one populated incrementally by a production annotation writer
+    passing ``index=default_index()``), and the only path that seeds the
+    catalog for annotations written *before* this index existed, or by a
+    caller that never wired ``index=`` at all. Run this periodically (a cron
+    tick / scheduled task, mirroring ``chronicle tick``) when no production
+    writer passes ``index=`` explicitly.
+    """
+    from pathlib import Path
+
+    from agent_logger.catalog import default_index, rebuild_from_sidecars
+    from agent_logger.segmenter.collate import find_copilot_dir, session_archive_stores
+    from agent_logger.sessions import SESSION_STATE_SUBDIR
+
+    cfg = load_config()
+    index = default_index(cfg)
+    state_root = Path(args.state_root) if args.state_root else (
+        find_copilot_dir() / SESSION_STATE_SUBDIR
+    )
+    archive_stores = list(session_archive_stores())
+    scanned = rebuild_from_sidecars(index, state_root, *archive_stores)
+    print(json.dumps({"scanned": scanned, "db_path": str(cfg.catalog_db_path)}))
+    return 0
+
+
 def _cmd_origin_backfill_local(args: argparse.Namespace) -> int:
     """Backfill origin.json across the LOCAL session store (this machine)."""
     from pathlib import Path
@@ -386,6 +422,26 @@ def build_parser() -> argparse.ArgumentParser:
         "config-migrate", help="migrate machine-local config.yaml schema (idempotent)"
     )
     p_migrate.set_defaults(func=_cmd_config_migrate)
+
+    p_catalog = sub.add_parser(
+        "catalog",
+        help="review-annotation catalog index -- (repo, pr_number) -> sessions",
+    )
+    cat_sub = p_catalog.add_subparsers(dest="catalog_command", required=True)
+    cat_status = cat_sub.add_parser(
+        "status", help="show the resolved catalog index db path"
+    )
+    cat_status.set_defaults(func=_cmd_catalog_status)
+    cat_rebuild = cat_sub.add_parser(
+        "rebuild",
+        help="rebuild the index from every session's review-annotations.json "
+        "sidecar (additive, idempotent)",
+    )
+    cat_rebuild.add_argument(
+        "--state-root",
+        help="live session-state root (default: this host's ~/.copilot/session-state)",
+    )
+    cat_rebuild.set_defaults(func=_cmd_catalog_rebuild)
 
     p_origin = sub.add_parser(
         "origin", help="session origin sidecars -- backfill/tag existing sessions"
