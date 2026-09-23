@@ -231,6 +231,7 @@ _NO_PROJECT_COMMANDS = {
     "-h",
     "repos",
     "accounts",
+    "copilot-identity",
     "related",
     "install",
     "register",

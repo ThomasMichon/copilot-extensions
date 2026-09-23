@@ -33,7 +33,7 @@ import platform
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import yaml
@@ -82,6 +82,18 @@ class RepoEntry:
     # explicit value overrides the derived owner (an EMU account can span orgs,
     # so owner != account isn't guaranteed). See :func:`resolve_account`.
     account: str = ""
+    # Optional preferred Copilot CLI identity (a login already cached in
+    # Copilot's own credential store, distinct from ``account`` above) for
+    # this repo. Repo-keyed rather than owner-keyed: unlike ``account``/
+    # ``account_map`` (github-owner-derived), this must also work for repos
+    # with no GitHub owner at all (e.g. a personal repo on a private Gitea
+    # instance) where Copilot's own inference identity still needs to be
+    # pinned. Absent => falls back to the machine's ``default_copilot_account``
+    # (see ``config.Config.default_copilot_account``), then to no preference
+    # (ambient Copilot login, today's behavior). See
+    # :func:`resolve_copilot_account` / :func:`copilot_account_for` and
+    # ThomasMichon/copilot-extensions#3296.
+    copilot_account: str = ""
     # Whether this repo backs a same-machine agent in agent-bridge. Defaults
     # ON for worktree/singleton repos (you adopt them to work in them); OFF for
     # reference repos (read-only). `register`/`add --no-agent` forces it off.
@@ -201,6 +213,7 @@ def read_registry() -> ReposRegistry:
                     tags=tags,
                     contributing=entry.get("contributing", ""),
                     account=str(entry.get("account", "") or ""),
+                    copilot_account=str(entry.get("copilot_account", "") or ""),
                     agent=agent,
                     paths=paths,
                 )
@@ -252,6 +265,8 @@ def write_registry(registry: ReposRegistry) -> None:
                 lines.append(f"    remote: {_quote(entry.remote)}")
             if entry.account:
                 lines.append(f"    account: {_quote(entry.account)}")
+            if entry.copilot_account:
+                lines.append(f"    copilot_account: {_quote(entry.copilot_account)}")
             if entry.default_branch:
                 lines.append(f"    default_branch: {_quote(entry.default_branch)}")
             if entry.tags:
@@ -449,6 +464,71 @@ def resolve_account(entry: RepoEntry | None) -> str | None:
     if mapped:
         return mapped
     return owner
+
+
+def resolve_copilot_account(entry: RepoEntry | None) -> str | None:
+    """Resolve this repo's explicit **Copilot CLI identity** override, or None.
+
+    Repo-keyed only -- unlike :func:`resolve_account`, there is no
+    owner-derivation fallback, because a repo with no GitHub owner at all
+    (e.g. a private Gitea remote) can still need a pinned Copilot identity.
+    Callers wanting the full precedence chain (explicit -> machine default ->
+    none) should use :func:`copilot_account_for`, which also consults
+    ``config.Config.default_copilot_account``.
+    """
+    if entry is None:
+        return None
+    return entry.copilot_account or None
+
+
+def copilot_account_for(name: str) -> str | None:
+    """Resolve the intended Copilot CLI login for a **registered repo name**.
+
+    Order: this repo's explicit ``copilot_account:`` override ->
+    the machine's ``default_copilot_account`` (``config.yaml``, machine-local
+    or global tier) -> None (no preference; leave Copilot's ambient login
+    alone). Unlike the ``account``/``account_map`` chain this never derives
+    from a GitHub owner: Copilot's own inference identity is a per-repo/
+    per-machine policy independent of where (or whether) a repo is hosted on
+    GitHub. See ThomasMichon/copilot-extensions#3296.
+    """
+    entry = find_repo(name)
+    explicit = resolve_copilot_account(entry)
+    if explicit:
+        return explicit
+    try:
+        from . import config as _config
+
+        return _config.load_config().default_copilot_account or None
+    except Exception:
+        return None
+
+
+def set_copilot_account(name: str, login: str) -> bool:
+    """Set the explicit ``copilot_account:`` override for a registered repo.
+
+    Returns False (no-op) if ``name`` isn't a registered repo.
+    """
+    registry = read_registry()
+    entry = registry.repos.get(name)
+    if entry is None:
+        return False
+    registry.repos[name] = replace(entry, copilot_account=login)
+    write_registry(registry)
+    output.ok(f"{name}: copilot_account -> {login}")
+    return True
+
+
+def unset_copilot_account(name: str) -> bool:
+    """Remove a registered repo's explicit ``copilot_account:`` override."""
+    registry = read_registry()
+    entry = registry.repos.get(name)
+    if entry is None or not entry.copilot_account:
+        return False
+    registry.repos[name] = replace(entry, copilot_account="")
+    write_registry(registry)
+    output.ok(f"{name}: copilot_account removed")
+    return True
 
 
 def account_for_github_owner(owner: str | None) -> str | None:
