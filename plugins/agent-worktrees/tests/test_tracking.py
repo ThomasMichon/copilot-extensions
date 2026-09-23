@@ -3995,3 +3995,103 @@ class TestFollowUpLedger:
         with pytest.raises(ValueError, match="creator ownership is frozen"):
             add_follow_up(rec, "x", save=False)
 
+
+class TestFollowUpLedgerConcurrencyMerge:
+    """worktree-finality-and-obligations Phase 1: stale-snapshot concurrency
+    fixtures proving a background writer's save cannot erase, resurrect, or
+    silently drop a concurrently-mutated follow-up. ``save_record``'s
+    per-item highest-revision merge (mirroring the existing `resources`
+    merge-by-ref reconciliation just above it) is what makes this true --
+    these fixtures pin that contract, not just exercise it incidentally."""
+
+    def _rec(self, tmp_path: Path) -> WorktreeRecord:
+        return create_new_record(
+            "wt-A", "worktree/wt-A", str(tmp_path / "wt-A"), "test-chamber",
+            "anomalous-potato", "wsl", tmp_path,
+        )
+
+    def test_stale_writer_save_never_erases_a_concurrently_added_item(
+        self, tmp_path: Path,
+    ):
+        # Writer A loads the record (no follow-ups yet) and holds it in
+        # memory while doing unrelated work (e.g. a background liveness
+        # stamp). Writer B, independently, loads its OWN fresh copy, adds a
+        # follow-up, and saves.
+        path = tmp_path / "wt-A.yaml"
+        writer_a = self._rec(tmp_path)
+        writer_b = load_record(path)
+        add_follow_up(writer_b, "file the bug", save=True)
+        # Writer A's later save must not erase writer B's item, even though
+        # writer A's own in-memory `follow_ups` is still empty.
+        assert writer_a.follow_ups == []
+        save_record(writer_a, path)
+        reloaded = load_record(path)
+        assert [fu.summary for fu in reloaded.follow_ups] == ["file the bug"]
+
+    def test_stale_writer_save_cannot_resurrect_a_resolved_item(
+        self, tmp_path: Path,
+    ):
+        path = tmp_path / "wt-A.yaml"
+        seed = self._rec(tmp_path)
+        item = add_follow_up(seed, "x", save=True)
+        # Writer A loads AFTER the item exists but BEFORE it is resolved.
+        writer_a = load_record(path)
+        # Writer B loads independently, resolves the item, and saves.
+        writer_b = load_record(path)
+        resolve_follow_up(writer_b, item.id, result_ref="org/repo#PR", save=True)
+        # Writer A still holds the stale open/rev-1 copy in memory.
+        assert writer_a.follow_ups[0].state == "open"
+        assert writer_a.follow_ups[0].revision == 1
+        save_record(writer_a, path)
+        reloaded = load_record(path)
+        assert len(reloaded.follow_ups) == 1
+        assert reloaded.follow_ups[0].state == "resolved"
+        assert reloaded.follow_ups[0].revision == 2
+        assert reloaded.follow_ups[0].result_ref == "org/repo#PR"
+
+    def test_stale_writer_save_cannot_resurrect_a_dismissed_item(
+        self, tmp_path: Path,
+    ):
+        path = tmp_path / "wt-A.yaml"
+        seed = self._rec(tmp_path)
+        item = add_follow_up(seed, "x", save=True)
+        writer_a = load_record(path)
+        writer_b = load_record(path)
+        dismiss_follow_up(writer_b, item.id, reason="not needed", save=True)
+        save_record(writer_a, path)
+        reloaded = load_record(path)
+        assert reloaded.follow_ups[0].state == "dismissed"
+        assert reloaded.follow_ups[0].reason == "not needed"
+
+    def test_stale_writers_own_concurrent_mutation_still_wins_over_disk(
+        self, tmp_path: Path,
+    ):
+        # Writer A's OWN in-memory mutation (a higher revision than whatever
+        # is on disk when it saves) must not be discarded by the merge --
+        # the merge favors the higher revision on EITHER side, not
+        # unconditionally the on-disk copy.
+        path = tmp_path / "wt-A.yaml"
+        seed = self._rec(tmp_path)
+        item = add_follow_up(seed, "x", save=True)
+        writer_a = load_record(path)
+        resolve_follow_up(writer_a, item.id, result_ref="org/repo#PR", save=False)
+        assert writer_a.follow_ups[0].revision == 2
+        # Disk still has the older (unresolved) revision at this point.
+        save_record(writer_a, path)
+        reloaded = load_record(path)
+        assert reloaded.follow_ups[0].state == "resolved"
+        assert reloaded.follow_ups[0].revision == 2
+
+    def test_two_independent_concurrent_additions_are_both_preserved(
+        self, tmp_path: Path,
+    ):
+        path = tmp_path / "wt-A.yaml"
+        writer_a = self._rec(tmp_path)
+        writer_b = load_record(path)
+        add_follow_up(writer_a, "from A", save=False)
+        add_follow_up(writer_b, "from B", save=True)
+        save_record(writer_a, path)
+        reloaded = load_record(path)
+        assert {fu.summary for fu in reloaded.follow_ups} == {"from A", "from B"}
+
+
