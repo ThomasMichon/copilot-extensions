@@ -100,7 +100,7 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "98baaf6f759fc64204c0048c33c36f534d36bc22789c7d8930e9fc0f45fec067",
+          "sha256": "12749db0f835eb717e4c60bcbffdcf0148636ba4e6b96760048712195e062b0b",
           "role": "current health response",
           "generation": 18
         },
@@ -130,13 +130,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "dab86c54c9fa08a2ac42b8626157d1735ccd8602a28cbb993cdb96cc50a1a98c",
+          "sha256": "43fd8a6dff4bebb5631c7e9735eff8b8a747056b9ed5cdb5717b4aa07e6ab1e9",
           "role": "current session-create response",
           "generation": 18
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "c9be955c11344f7bf660e22441aaf7c7914e27923f43371ad75643465f1bb929",
+          "sha256": "243d80a48d1c1628acf10c8e634573d8f2f352ee8201a9356418f55c4d2a4adc",
           "role": "current representative FastAPI error",
           "generation": 18
         },
@@ -160,13 +160,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "4458e4b8e043f490586b952a835085181633e56bde98478faddd3ecb99745328",
+          "sha256": "428be6202ec2b802764a941ace153c9fa87f79cddd3fe01903b7ee3fdde7bc9d",
           "role": "current HTTP range and capability constants",
           "generation": 18
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
-          "sha256": "0859ac15bfebc7430a20663b361a23138cc9ea120a2a6315d17b83788268e58b",
+          "sha256": "90c3020a6c8fe271738a08082631d38bce56f012f6795c8469c13a1fab341486",
           "role": "current carrier-backed remote command request and response",
           "generation": 18
         },
@@ -519,7 +519,7 @@
           "capture_method": "Re-attested after neutralizing an internal-organization-name comment mention for public-repo hygiene; HTTP_PROTOCOL_VERSION and BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION content is unchanged."
         },
         {
-          "commit": "a8a728d7bbbc3fa9c7b607c8fe8f7ae071049334",
+          "commit": "a1612599f20a0342c6ab15830207316f90beeb80",
           "plugin_version": "0.4.0-dev549",
           "generation": 17,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
@@ -527,7 +527,7 @@
           "capture_method": "Re-attested after adding an optional copilot_args field to RemoteSessionCreateRequest (a charter-overlay --agent <charter> pass-through for fleet-carrier session.create, mirroring the existing BridgeClient.start_session copilot_args passthrough); does not bump HTTP_PROTOCOL_VERSION."
         },
         {
-          "commit": "a8a728d7bbbc3fa9c7b607c8fe8f7ae071049334",
+          "commit": "a1612599f20a0342c6ab15830207316f90beeb80",
           "plugin_version": "0.4.0-dev549",
           "generation": 18,
           "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
@@ -535,7 +535,7 @@
           "capture_method": "Serialize the reviewed protocol version + capability table; re-attested for the generation-18 bump (HTTP_PROTOCOL_VERSION 17 -> 18, adding remote_session_copilot_args)."
         },
         {
-          "commit": "a8a728d7bbbc3fa9c7b607c8fe8f7ae071049334",
+          "commit": "a1612599f20a0342c6ab15830207316f90beeb80",
           "plugin_version": "0.4.0-dev549",
           "generation": 18,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -543,7 +543,7 @@
           "capture_method": "Serialize the reviewed /health response shape; re-attested for the generation-18 bump -- this file's own content is unchanged."
         },
         {
-          "commit": "a8a728d7bbbc3fa9c7b607c8fe8f7ae071049334",
+          "commit": "a1612599f20a0342c6ab15830207316f90beeb80",
           "plugin_version": "0.4.0-dev549",
           "generation": 18,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
@@ -551,7 +551,7 @@
           "capture_method": "Serialize the reviewed representative session-create error response; re-attested for the generation-18 bump -- this file's own content is unchanged."
         },
         {
-          "commit": "a8a728d7bbbc3fa9c7b607c8fe8f7ae071049334",
+          "commit": "a1612599f20a0342c6ab15830207316f90beeb80",
           "plugin_version": "0.4.0-dev549",
           "generation": 18,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
@@ -559,7 +559,7 @@
           "capture_method": "Re-attested for the generation-18 bump: this file's copilot_args field is the capability the bump advertises, gated by the paired REMOTE_COPILOT_ARGS_MIN_VERSION carrier-envelope check."
         },
         {
-          "commit": "4e8712397c90f0e79b5f10eb4071d65a0d062fd5",
+          "commit": "b83ac3250b00745dea9ca682c42d68b89de952bb",
           "plugin_version": "0.4.0-dev549",
           "generation": 18,
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
