@@ -184,11 +184,12 @@ Round 2 (operator's response to that evaluation):
 ## Plan
 
 ### Phase 1 — Standalone tooling (no branch split required)
-- [ ] Evaluate and select the changefile-based monorepo versioning tool
+- [x] Evaluate and select the changefile-based monorepo versioning tool
       (beachball vs. alternatives); prototype the changefile format against
-      1-2 real plugins. **See the beachball-fit finding below** (a `package.json`
-      hard requirement makes beachball itself a poor literal fit) before
-      building this.
+      1-2 real plugins. **Decided:** a native Python changefile tool
+      ("our own agent-friendly beachball"), not the real `beachball` npm
+      package — operator-confirmed; beachball's actual value here was as
+      inspiration/UX reference, not a literal dependency.
 - [ ] Build the **idempotent snapshot/materialization generator**: given a
       source tree with DRY references/generator-instructions for vendored
       code, produce the fully-materialized tree. Prove correctness by running
@@ -212,10 +213,22 @@ Round 2 (operator's response to that evaluation):
     left as its own follow-up PR.
   - See `phase1-generator.md` (create when design work starts) for the
     generator's exact input/output contract once drafted.
-- [ ] Build the version-accumulation step: consume changefiles + the
+- [x] Build the version-accumulation step: consume changefiles + the
       generator's output, compute final per-plugin versions
       (major/minor/patch/dev), write them into `plugin.json` /
       `pyproject.toml` / `marketplace.json`.
+  - **Shipped:** `tools/changefile.py` (write/list changefiles under
+    `.changefiles/`) + `tools/accumulate_bumps.py` (group pending
+    changefiles per plugin, pick the highest requested bump type, apply the
+    `MAJOR.MINOR.PATCH-devN` math, write all three files, bump
+    agent-worktrees' catalog `metadata.version` per its special rule,
+    consume the changefiles). 27 passing tests covering the bump math,
+    highest-bump-wins grouping, and the full write-three-files integration.
+    Smoke-tested `--dry-run` against a real plugin (`efforts`,
+    `0.1.0-dev21 -> 0.1.1-dev1`), not applied.
+  - Not yet wired into CI or required by any guard — that's Phase 2 (retiring
+    `check-version-bump.py`'s manual-bump requirement in favor of a
+    changefile-presence check).
 - [ ] Build the local **"preview a release"** CLI on top of the generator
       (must be the same code path CI uses, not a parallel implementation).
 - [ ] Design and prototype the **dev-slot local override**: an opt-in,
@@ -249,17 +262,15 @@ Round 2 (operator's response to that evaluation):
     on someone actually running `agent-worktrees update` after cutover — this
     is already covered by the Phase 5 cutover-announcement item below, not a
     new fix.
-- [ ] _(agent-recommended finding, not yet operator-confirmed)_ **beachball
-      itself is likely the wrong literal tool.** Beachball hard-requires a
+- [x] _(agent-recommended finding, operator-confirmed 2026-09-23)_ **beachball
+      itself is the wrong literal tool.** Beachball hard-requires a
       `package.json` per versioned package (confirmed via its own docs); this
       repo has none — it's Python/PowerShell/bash-first (`plugin.json` +
-      `pyproject.toml` + `marketplace.json`). Recommend: keep beachball's
+      `pyproject.toml` + `marketplace.json`). Decision: keep beachball's
       *changefile UX* (a changefile per PR: target plugin(s) + bump type +
-      comment) but implement a small native Python accumulator against this
-      repo's own schema, rather than depending on the real `beachball` npm
-      package (which would otherwise drag a Node/npm dependency into an
-      all-Python CI pipeline just for this). Flagging for confirmation before
-      building the version-accumulation step below on top of this choice.
+      comment) but implement a native Python accumulator tailored to this
+      repo's schema and workflow ("our own agent-friendly beachball") rather
+      than depending on the real npm package.
 
 ### Phase 2 — Cut the fork
 - [ ] Create the `dev` branch from `main`.
@@ -403,3 +414,16 @@ generator contract details here or in a linked sub-doc._
 - Next: operator confirmation on the beachball-fit call, then build the
   version-accumulation step and the local preview CLI on top of
   `sync-vendored-libs.py`'s pattern.
+
+### 2026-09-23 — Native changefile tool
+- Operator confirmed: build a native, agent-friendly, beachball-*inspired*
+  Python tool rather than depending on the real npm package (beachball was
+  only ever meant as a well-known reference point, not a hard dependency).
+- Shipped `tools/changefile.py` + `tools/accumulate_bumps.py` (see Plan).
+  This is the last Phase 1 item with no open design question; remaining
+  Phase 1 work (preview CLI, dev-slot override, CONTRIBUTING/AGENTS.md
+  draft) can now build directly on `sync-vendored-libs.py` +
+  `accumulate_bumps.py` without further operator input.
+- Next: the local "preview a release" CLI (compose `sync-vendored-libs.py
+  --materialize` + `accumulate_bumps.py --dry-run` into one preview command),
+  then the dev-slot local override design.
