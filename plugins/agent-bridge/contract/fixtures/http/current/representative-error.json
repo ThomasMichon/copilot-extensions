@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "c0afc2c593e867654a2b109956c6f48447ebffe8",
+    "commit": "fba1ef0405947dc0fa2dc22f56fb98e79beb6828",
     "plugin_version": "0.4.0-dev549",
     "protocol_generation": 18,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
