@@ -12,9 +12,15 @@ import typing
 
 import pytest
 
-from agent_dispatch.queue import ClaimOutcome, TaskQueue
+from agent_dispatch.queue import ClaimOutcome, TaskQueue, _CLAIM_REJECTION_EVENT_LIMIT, _MAX_AFFINITY
 from agent_dispatch.queue_claim_queries import QueueClaimQueriesMixin
-from agent_dispatch.queue_common import ClaimOutcome as _CommonClaimOutcome
+from agent_dispatch.queue_common import (
+    ClaimOutcome as _CommonClaimOutcome,
+)
+from agent_dispatch.queue_common import (
+    _CLAIM_REJECTION_EVENT_LIMIT as _CommonClaimRejectionLimit,
+)
+from agent_dispatch.queue_common import _MAX_AFFINITY as _CommonMaxAffinity
 from agent_dispatch.queue_storage import QueueStorageMixin
 
 
@@ -26,6 +32,8 @@ def test_task_queue_inherits_the_claim_query_mixin():
 @pytest.mark.guard
 def test_queue_re_exports_match_claim_query_dependencies():
     assert ClaimOutcome is _CommonClaimOutcome
+    assert _CLAIM_REJECTION_EVENT_LIMIT is _CommonClaimRejectionLimit
+    assert _MAX_AFFINITY is _CommonMaxAffinity
 
 
 @pytest.mark.guard
