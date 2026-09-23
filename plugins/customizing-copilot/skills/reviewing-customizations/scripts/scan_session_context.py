@@ -43,6 +43,8 @@ POWERSHELL_STDOUT_WRITE = re.compile(
     r"^\s*(Write-Host|Write-Output|\[Console\]::Out\.Write(?:Line)?)\b",
     re.IGNORECASE,
 )
+POWERSHELL_FULL_STREAM_SUPPRESSION = re.compile(r"\*>\s*\$null")
+BASH_FULL_STREAM_SUPPRESSION = re.compile(r">\s*/dev/null\s+2>&1|&>\s*/dev/null")
 STRING_LITERAL = re.compile(r"""(['"])(?P<body>(?:\\.|(?!\1).)*)\1""")
 
 
@@ -362,18 +364,101 @@ def _script_has_output_free_contract(script: Path) -> bool:
     return False
 
 
+def _split_top_level_statements(command: str) -> list[str]:
+    """Split a single-line shell/PowerShell command on ';' separators that
+    are not nested inside brackets/braces/parens or a quoted string -- so a
+    control-flow block like an ``if``/``then``/``fi`` or a PowerShell
+    ``try``/``catch`` is never mistaken for a single statement that could
+    hide a literal write past its closing brace."""
+    segments: list[str] = []
+    current: list[str] = []
+    depth = 0
+    in_single = False
+    in_double = False
+    escaped = False
+    for char in command:
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            current.append(char)
+            escaped = True
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            current.append(char)
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            current.append(char)
+            continue
+        if not in_single and not in_double:
+            if char in "{(":
+                depth += 1
+            elif char in "})":
+                depth -= 1
+            elif char == ";" and depth <= 0:
+                segments.append("".join(current))
+                current = []
+                continue
+        current.append(char)
+    if current:
+        segments.append("".join(current))
+    return [segment.strip() for segment in segments if segment.strip()]
+
+
+def _command_is_suppressed_maintenance_invocation(command: str, platform: str) -> bool:
+    """Recognize a 'run an arbitrary maintenance script with every output
+    stream redirected to null, swallow any error, then unconditionally emit
+    the canonical empty-JSON literal as the command's own last statement'
+    shape (a fire-and-forget install/ensure hook, e.g. an idempotent
+    installer re-run on every session start). This is provably output-free
+    regardless of what the invoked script itself does, because its output
+    is discarded before the hook's own guaranteed trailing literal write
+    executes -- unlike the named-script path above, it never needs to trust
+    (or even resolve) the invoked script's content. Every OTHER top-level
+    statement in the command must also be proven not to write literal text
+    itself, so a redirected invocation cannot be used to smuggle an
+    unrelated, un-redirected write earlier in the same command."""
+    stripped = command.strip()
+    if platform == "powershell":
+        suppression = POWERSHELL_FULL_STREAM_SUPPRESSION
+        canonical_tail = "[Console]::Out.Write('{}')"
+        literal_write_check = _powershell_literal_writes_text
+    elif platform == "bash":
+        suppression = BASH_FULL_STREAM_SUPPRESSION
+        canonical_tail = "printf '{}'"
+        literal_write_check = _shell_literal_writes_text
+    else:
+        return False
+    if not suppression.search(stripped):
+        return False
+    segments = _split_top_level_statements(stripped)
+    if not segments or segments[-1] != canonical_tail:
+        return False
+    for segment in segments[:-1]:
+        if suppression.search(segment):
+            continue  # the suppressed invocation clause itself
+        if literal_write_check(segment):
+            return False
+    return True
+
+
 def _session_start_is_structurally_output_free(footprint: Path) -> bool:
     """Recognize suite-standard side effects that emit no model context."""
     entries = _session_start_entries(footprint)
     if not entries:
         return False
     for entry in entries:
-        commands = [str(entry.get(platform, "")) for platform in ("bash", "powershell")]
-        if not all(commands):
-            return False
-        for command in commands:
+        for platform in ("bash", "powershell"):
+            command = str(entry.get(platform, ""))
+            if not command:
+                return False
             if _session_start_has_fast_fail_marker(command):
                 return False
+            if _command_is_suppressed_maintenance_invocation(command, platform):
+                continue
             if not any(
                 marker in command.lower() for marker in OUTPUT_FREE_SESSION_START_MARKERS
             ):
