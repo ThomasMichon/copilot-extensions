@@ -21,6 +21,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
+from agent_worktrees import picker_profiles_cli
 from agent_worktrees import reconcile
 
 
@@ -523,7 +524,7 @@ def test_skip_still_reconciles_terminal_state_on_windows(wired, monkeypatch):
                         lambda name, home=None, **kwargs: "1.5.3-dev9")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     refreshed = {"n": 0}
-    monkeypatch.setattr(m, "_refresh_terminal_profiles",
+    monkeypatch.setattr(picker_profiles_cli, "_refresh_terminal_profiles",
                         lambda: refreshed.__setitem__("n", refreshed["n"] + 1) or True)
     assert m.cmd_update(_args()) == 0
     assert not _installer_ran(wired), "heavy installer still skipped when current"
@@ -537,7 +538,7 @@ def test_skip_does_not_reconcile_terminal_on_non_windows(wired, monkeypatch):
                         lambda name, home=None, **kwargs: "1.5.3-dev9")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
     refreshed = {"n": 0}
-    monkeypatch.setattr(m, "_refresh_terminal_profiles",
+    monkeypatch.setattr(picker_profiles_cli, "_refresh_terminal_profiles",
                         lambda: refreshed.__setitem__("n", refreshed["n"] + 1) or True)
     assert m.cmd_update(_args()) == 0
     assert refreshed["n"] == 0

@@ -230,6 +230,13 @@ def _deferred_only_global_names() -> frozenset[str]:
         ("status-context", ["status-context"]),
         ("status-segment", ["status-segment", "--json"]),
         ("profiles", ["profiles", "get", "--json"]),
+        ("follow-ups", ["follow-ups", "--json"]),
+        ("session-role", ["session-role", "--json"]),
+        ("history-digest", ["history-digest"]),
+        ("pr-status", ["pr-status", "--json"]),
+        ("pre-launch", ["pre-launch"]),
+        ("reconcile-plugins", ["reconcile-plugins", "--peek"]),
+        ("worktree-status-audit", ["worktree-status-audit", "--sample", "1", "--no-log", "--seed", "1"]),
     ],
 )
 def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, monkeypatch, capsys):

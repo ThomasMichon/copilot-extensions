@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import installer as inst, output, services as svc
+from . import picker_profiles_cli, services_cli
 from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
 
 
@@ -43,11 +44,11 @@ def _exec_worktree_manager(*args, **kwargs):
 
 
 def _refresh_terminal_profiles(*args, **kwargs):
-    return _core()._refresh_terminal_profiles(*args, **kwargs)
+    return picker_profiles_cli._refresh_terminal_profiles(*args, **kwargs)
 
 
 def _resolve_environment(*args, **kwargs):
-    return _core()._resolve_environment(*args, **kwargs)
+    return services_cli._resolve_environment(*args, **kwargs)
 
 
 def _find_repo_dir(*args, **kwargs):

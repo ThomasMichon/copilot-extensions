@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import codename_tracking, config as cfg, finalize as fin, git_ops, output, pr_ops, tracking
+from . import context_cli
 
 
 def _core():
@@ -217,7 +218,7 @@ def cmd_post_exit(args: argparse.Namespace) -> int:
         output.ok(f"Worktree {worktree_id} already finalized.")
         rc = 0
     else:
-        rc = core._post_exit_gate(record, config)
+        rc = _post_exit_gate(record, config)
 
     _invoke_post_exit_sweep()
     return rc
@@ -385,7 +386,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             allow_unsquashed=getattr(args, "allow_unsquashed", False),
         )
 
-        reminder = core._pr_reminder_for(
+        reminder = context_cli._pr_reminder_for(
             config,
             "push-changes",
             ok=bool(success),
@@ -474,7 +475,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             msg = str(e)
             return core._json_error(msg) if use_json else (output.err(msg) or 1)
 
-        reminder = core._pr_reminder_for(
+        reminder = context_cli._pr_reminder_for(
             config,
             "create-pr",
             state=("created" if result.get("success") else ""),

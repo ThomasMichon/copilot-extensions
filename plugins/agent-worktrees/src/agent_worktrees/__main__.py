@@ -7395,22 +7395,32 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 
 # A module is "cluster-free" when every `_core()`-reached attribute (direct,
 # via a var, or via `_core_helper()`) is bound at module level BEFORE the
-# deferred `_load_full_command_surface()` block. Skips `_ensure_cluster_
+# deferred `_load_full_command_surface()` block, AND no __main__-native
+# function it reaches transitively touches a name bound only inside that
+# block (`find_transitively_unsafe_functions()` in
+# `tests/_core_cluster_scan.py` checks this). Skips `_ensure_cluster_
 # loaded()` in `_dispatch_lazy()` for these modules only. Regenerate/diff
-# via `tests/_core_cluster_scan.py`'s `compute_cluster_free_modules()` --
-# never hand-edit, never trust a regex-only scan (one shipped a live
-# `create-pr` regression). Can't see a transitive dependency on a deferred
-# name inside a function that itself resolves cleanly --
-# `session_inspection_cli` was excluded for exactly this. Adding a module
-# requires exercising its real commands end-to-end, not just `--help`.
+# via that file's `compute_cluster_free_modules()` -- never hand-edit,
+# never trust a regex-only scan (one shipped a live `create-pr`
+# regression). `session_inspection_cli` (and, as of Stage B,
+# `cleanup_gc_cli`/`reap_cli`/`finalize_cli`/`worktree_ops_cli`/`list_cli`)
+# stay off this list for exactly the transitive reason above -- their own
+# `_core()` accesses are cheap, but a __main__-native function they reach
+# still isn't. Adding a module requires exercising its real commands
+# end-to-end, not just `--help`.
 _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "claims_cli",
+    "follow_ups_cli",
     "maintenance_cli",
     "pane_lifecycle",
     "picker_profiles_cli",
+    "pr_state_cli",
     "reclaim_cli",
+    "session_metadata_cli",
     "status_bar_cli",
     "status_cli",
+    "update_cli",
+    "worktree_status_audit",
 })
 
 
