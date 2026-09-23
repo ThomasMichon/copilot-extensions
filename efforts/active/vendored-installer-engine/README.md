@@ -660,3 +660,51 @@ installs, no service-specific config needed for this class of plugin.
   lane (this session's end-to-end proof was Windows-only, matching the
   machine it ran on).
 
+### 2026-09-22 — Two unrelated bugs found landing #3287, fixed separately
+
+- `#3289`: a pre-existing `agent-containers` `__version__` fallback stale by
+  one dev increment, failing `check-version-consistency` for every open PR
+  on `main` at the time. Trivial fix, unrelated to the engine work.
+- `#3304`: `agent-worktrees`' own `instructions/worktree-context-guide
+  .instructions.md` template had grown to 4380 bytes, past
+  `customizing-copilot`'s `MAX_TEMPLATE_BYTES = 4096` projection budget —
+  the exact same bug class as the earlier `context-handoff` fix
+  (gim-home/odsp-web-harness#404 -> upstream #3250), this time hitting
+  `agent-worktrees` and hard-blocking `push-changes`/finalize validation in
+  *every* repo that resolves this projection (discovered when it blocked a
+  routine knowledge-repo effort-doc push, unrelated to this effort). Trimmed
+  to 3938 bytes, preserving every safety point in the trimmed sections.
+
+### 2026-09-22 — Hardened enforcement: closed two real gaps in the new guards
+
+Operator asked to make sure CI + pre-push actually enforce the vendored
+installer-engine copies staying byte-identical across every consumption
+site — not just assert that they do. Two real gaps found and closed
+(`ThomasMichon/copilot-extensions#3326`):
+
+1. `tools/sync-installer-engine.py`'s `verify()` only checked plugins
+   already listed in its `ADOPTERS` tuple — a plugin that hand-copied
+   `scripts/installer-engine.*` without being added to `ADOPTERS` would
+   drift silently forever, invisible to both CI and pre-push. Added
+   `unregistered_adopters()`, mirroring `tools/sync-installation-context
+   .py`'s existing pattern for the identical class of gap. Verified live: put
+   a copy of the canonical file in an unregistered plugin's `scripts/`,
+   confirmed `--check` failed with a clear message, reverted, confirmed
+   clean again.
+2. Neither `tools/test_check_install_contract.py` (the substring-bypass
+   regression fixtures added in #3287) nor a new
+   `tools/test_sync_installer_engine.py` (covering the new detection above)
+   were wired into any CI job — they only ran when invoked by hand. Both are
+   now explicit `guards + lint` steps in `.github/workflows/ci.yml`.
+
+Also independently re-verified the *existing* enforcement is real, not just
+present: deliberately drifted a vendored copy and confirmed both
+`check-install-contract.py` and the actual `tools/hooks/pre-push` script
+(active via `core.hooksPath=tools/hooks` in this checkout) block on it
+*before* the push leaves the machine, then reverted. One unrelated,
+pre-existing CI failure (`worktree-manager`'s `test_doctor_human_render_
+matches_exhaustive_json`, a missing `_render_dropin_registry_report`
+attribute — the same class of unrelated `main` drift hit twice earlier this
+session) did not block merge; `merge state: clean` confirmed it isn't a
+required check.
+
