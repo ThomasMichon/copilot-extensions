@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import platform
 import shlex
+import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -18,6 +20,66 @@ PLUGIN = Path(__file__).resolve().parents[1]
 def _project_binstub(lb: Path, project: str) -> str:
     name = f"{project}.cmd" if platform.system() == "Windows" else project
     return (lb / name).read_text()
+
+
+def test_binstub_lock_is_reentrant_per_thread():
+    """A duplicate acquisition of the same lock key in the same thread must
+    not re-touch the OS-level lock (Windows msvcrt.locking is not reentrant
+    and raises ``OSError(EDEADLK, "Resource deadlock avoided")`` on a
+    duplicate acquisition -- see copilot-extensions issue tracking the
+    reconcile-binstubs crash)."""
+    with inst._binstub_lock("__registries__"):
+        with inst._binstub_lock("__registries__"):
+            pass
+    # Also exercise the exact pairing used by project_binstub_registration:
+    # a project literally named "__registries__" would otherwise deadlock
+    # acquiring its own lock twice.
+    with inst._binstub_lock("__registries__"), inst._binstub_lock("__registries__"):
+        pass
+
+
+def test_binstub_lock_releases_after_reentrant_use(tmp_path: Path, monkeypatch):
+    """After the outermost ``with`` exits, the lock is fully released so a
+    fresh acquisition (e.g. a subsequent CLI invocation) still works."""
+    with inst._binstub_lock("demoproj"):
+        with inst._binstub_lock("demoproj"):
+            pass
+    # Re-acquiring after full release must succeed without blocking/raising.
+    with inst._binstub_lock("demoproj"):
+        pass
+
+
+def test_binstub_lock_serializes_peer_threads():
+    """A second thread contending for the same key must block on the
+    in-process RLock -- not race straight into the OS-level lock, which
+    would hit the process-wide EDEADLK the reentrancy fix closes."""
+    order: list[str] = []
+    started = threading.Event()
+    release = threading.Event()
+
+    def holder():
+        with inst._binstub_lock("peerkey"):
+            order.append("holder-acquired")
+            started.set()
+            release.wait(timeout=5)
+        order.append("holder-released")
+
+    def contender():
+        assert started.wait(timeout=5)
+        with inst._binstub_lock("peerkey"):
+            order.append("contender-acquired")
+
+    t1 = threading.Thread(target=holder)
+    t2 = threading.Thread(target=contender)
+    t1.start()
+    assert started.wait(timeout=5)
+    t2.start()
+    time.sleep(0.1)  # contender must still be blocked behind the holder
+    assert order == ["holder-acquired"]
+    release.set()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+    assert order == ["holder-acquired", "holder-released", "contender-acquired"]
 
 
 def test_platform_installers_honor_structured_runtime_root():
