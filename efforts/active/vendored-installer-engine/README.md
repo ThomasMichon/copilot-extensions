@@ -757,3 +757,47 @@ appropriately larger/riskier for one sitting):
   at `agent-pull-requests` instead of `agent-worktrees`' worktree-bound PR
   verbs.
 
+### 2026-09-23 — `docs/install-contract.md` updated for the engine + a real, unrelated CI-blocking bug fixed along the way
+
+- Considered `agent-bridge`'s Phase 1 conversion next (per the roster), but
+  its `install.ps1` is 2880 lines with many non-trivial call sites
+  (scheduled-task/service lifecycle, the ZDD cutover, legacy
+  project-service migration, several sibling-plugin installs) driving a
+  live production daemon other machines/sessions depend on right now. A
+  faithful "no shortcuts" conversion needs the same multi-round review
+  rigor the much smaller `agent-pull-requests` pilot needed (10 real bugs
+  across 3 rounds) plus full existing-test-suite adaptation and a
+  real-machine post-conversion health check per this effort's own
+  Validation Plan -- not something to start and leave half-finished in one
+  sitting. Deferred it rather than rush it; still the natural next slice
+  for a session with more room.
+- Picked a smaller, explicitly-required, safely-completable item instead:
+  the Validation Plan's own "`docs/install-contract.md` is updated to
+  describe the new engine + config-schema pattern once Phase 1 lands" —
+  overdue since the engine itself (and its first real adopter,
+  `agent-pull-requests`) already landed in #3287/#3363, but the doc never
+  mentioned `libs/installer-engine/` at all.
+- Added a new "Shared installer-engine helpers" section (what the engine
+  covers vs. deliberately leaves to each plugin, the vendoring-over-git-
+  fetch rationale, the phased opt-in adoption model, `agent-worktrees`'
+  permanent exception) plus a matching Enforcement bullet for
+  `tools/sync-installer-engine.py --check`. Landed as
+  `ThomasMichon/copilot-extensions#3417`.
+- **Found and fixed one real, unrelated bug along the way**: PR #3417's own
+  CI failed on the required `guards + lint` check with a
+  `check-version-consistency.py` violation -- `worktree-manager`'s
+  `pyproject.toml` (bumped to `0.1.0-dev74` by an unrelated, already-merged
+  PR #3414) had drifted from `src/worktree_manager/__init__.py`'s
+  `__version__` (still `0.1.0-dev73`). Confirmed via `git show
+  origin/main:...` that this was already broken on `main` itself, not
+  introduced by this PR, and would block every other PR's `guards + lint`
+  check the same way. Bumped `__init__.py` to match and pushed it as a
+  second commit on the same PR (matches this session's established pattern
+  of fixing a blocking, unrelated bug found along the way -- see the
+  `#3289`/`#3304` entries above). Verified `check-version-consistency.py`
+  clean before pushing; full CI green afterward.
+- **Genuinely still open**: unchanged from the prior entry --
+  `agent-bridge`'s Phase 1 conversion, Phase 2+'s remaining adopters, a
+  POSIX live-install proof lane, and the cross-repo documentation sweep are
+  all still open follow-through.
+
