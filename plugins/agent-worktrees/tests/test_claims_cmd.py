@@ -123,9 +123,13 @@ def test_inbound_refuses_unsafe_identity(monkeypatch):
     assert called["n"] == 0
 
 
-def test_inbound_refuses_in_namespaced_cell(monkeypatch):
-    """Cross-plugin claim-provider invocation is not yet supported in an
-    explicit marketplace-cell run -- never even attempt the subprocess."""
+def test_inbound_still_invokes_with_a_namespaced_cell_context(monkeypatch):
+    """agent-worktrees ships with installationContext: required, so
+    COPILOT_EXTENSIONS_CONTEXT is present on EVERY real invocation -- this
+    must still invoke the resolved binstub (with a stripped/mitigated
+    environment), never refuse outright (an earlier revision did, which
+    silently disabled this feature in every normal marketplace
+    installation)."""
     from agent_worktrees import claim_providers as cp
     provider = cp.ClaimProviderManifest(
         namespace="dispatch-task", plugin="agent-dispatch@marketplace",
@@ -133,11 +137,22 @@ def test_inbound_refuses_in_namespaced_cell(monkeypatch):
     monkeypatch.setattr(claim_providers, "discover_claim_providers",
                         lambda *a, **k: ({"dispatch-task": provider}, ()))
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
-    called = {"n": 0}
-    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: called.__setitem__("n", 1))
+
+    class _Proc:
+        returncode = 0
+        stdout = json.dumps({"assigned": [], "owned": []})
+        stderr = ""
+
+    captured = {}
+
+    def _run(cmd, **kw):
+        captured["env"] = kw.get("env")
+        return _Proc()
+    monkeypatch.setattr(m.subprocess, "run", _run)
     res = m._dispatch_assigned_tasks("anomalous-potato", "wt-a", "")
-    assert res["available"] is False
-    assert called["n"] == 0
+    assert res["available"] is True
+    assert captured["env"] is not None
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in captured["env"]
 
 
 # --- cmd_claims end-to-end --------------------------------------------------

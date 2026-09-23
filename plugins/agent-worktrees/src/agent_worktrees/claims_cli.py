@@ -150,8 +150,6 @@ def _dispatch_assigned_tasks(machine: str, worktree_id: str, cwd: str) -> dict:
     """
     from . import claim_providers
 
-    if claim_providers.in_namespaced_cell():
-        return {"available": False, "reason": "not supported in an explicit marketplace-cell"}
     full_argv = claim_providers.build_provider_argv(
         "dispatch-task",
         ("worktree-status", True), ("--machine", True), (machine, False),

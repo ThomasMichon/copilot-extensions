@@ -161,9 +161,13 @@ def test_run_codespaces_refuses_unsafe_name(monkeypatch):
     assert called["n"] == 0
 
 
-def test_run_codespaces_refuses_in_namespaced_cell(monkeypatch):
-    """Cross-plugin claim-provider invocation is not yet supported in an
-    explicit marketplace-cell run -- never even attempt the subprocess."""
+def test_run_codespaces_still_invokes_with_a_namespaced_cell_context(monkeypatch):
+    """agent-worktrees ships with installationContext: required, so
+    COPILOT_EXTENSIONS_CONTEXT is present on EVERY real invocation -- this
+    must still invoke the resolved binstub (with a stripped/mitigated
+    environment), never refuse outright (an earlier revision did, which
+    silently disabled this feature in every normal marketplace
+    installation)."""
     from agent_worktrees import claim_providers
     provider = claim_providers.ClaimProviderManifest(
         namespace="codespace", plugin="agent-codespaces@marketplace",
@@ -171,12 +175,16 @@ def test_run_codespaces_refuses_in_namespaced_cell(monkeypatch):
     monkeypatch.setattr(claim_providers, "discover_claim_providers",
                         lambda *a, **k: ({"codespace": provider}, ()))
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
-    called = {"n": 0}
-    monkeypatch.setattr(cleanup.subprocess, "run",
-                        lambda *a, **k: called.__setitem__("n", 1))
+    captured = {}
+
+    def _run(cmd, **kw):
+        captured["env"] = kw.get("env")
+        return _proc(0)
+    monkeypatch.setattr(cleanup.subprocess, "run", _run)
     proc = cleanup._run_codespaces([("delete", True), ("cs-x", False), ("--force", True)])
-    assert proc is None
-    assert called["n"] == 0
+    assert proc.returncode == 0
+    assert captured["env"] is not None
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in captured["env"]
 
 
 # ── reclaim_worktree ─────────────────────────────────────────────────────────

@@ -702,19 +702,31 @@ def test_is_safe_argument_rejects_trailing_newline():
     assert cp.is_safe_argument("cs-a") is True
 
 
-def test_peer_env_is_none_without_a_context(monkeypatch):
-    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+def test_peer_env_is_none_without_any_routing_vars(monkeypatch):
+    for name in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "GH_TOKEN", "GITHUB_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
     assert cp.peer_env() is None
 
 
-def test_in_namespaced_cell_true_when_context_set(monkeypatch):
+def test_peer_env_strips_context_and_credentials_but_still_invokes(monkeypatch):
+    """agent-worktrees ships with installationContext: required, so
+    COPILOT_EXTENSIONS_CONTEXT is present on EVERY real invocation, not
+    just some rare namespaced-cell edge case -- peer_env() must still
+    return a usable (stripped) environment here, never refuse outright
+    (an earlier revision did, which silently disabled this whole registry
+    in every normal marketplace installation)."""
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
-    assert cp.in_namespaced_cell() is True
-
-
-def test_in_namespaced_cell_false_without_context(monkeypatch):
-    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
-    assert cp.in_namespaced_cell() is False
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/some/agent-worktrees/payload/root")
+    monkeypatch.setenv("GH_TOKEN", "secret-gh-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-github-token")
+    monkeypatch.setenv("SOME_OTHER_VAR", "kept")
+    env = cp.peer_env()
+    assert env is not None
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in env
+    assert "COPILOT_PLUGIN_ROOT" not in env
+    assert "GH_TOKEN" not in env
+    assert "GITHUB_TOKEN" not in env
+    assert env.get("SOME_OTHER_VAR") == "kept"
 
 
 def test_peer_env_strips_plugin_root_even_without_a_context(monkeypatch):
@@ -723,18 +735,20 @@ def test_peer_env_strips_plugin_root_even_without_a_context(monkeypatch):
     inherit agent-worktrees' own payload root either -- independent of
     whether COPILOT_EXTENSIONS_CONTEXT itself happens to be set."""
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/some/agent-worktrees/payload/root")
     env = cp.peer_env()
     assert env is not None
     assert "COPILOT_PLUGIN_ROOT" not in env
 
 
-def test_resolve_claim_status_degrades_in_a_namespaced_cell(tmp_path, monkeypatch):
-    """Cross-plugin claim-provider invocation is not yet supported in an
-    explicit marketplace-cell run (see in_namespaced_cell's own docstring):
-    the callback must never even be attempted, degrading exactly as it
-    would for an absent provider, rather than risk operating against the
-    wrong cell's resources/credentials."""
+def test_resolve_claim_status_still_invokes_in_a_namespaced_cell(tmp_path, monkeypatch):
+    """Cross-plugin claim-provider invocation must still be attempted when
+    this process runs under an explicit marketplace-cell installation
+    context -- that's the ONLY way agent-worktrees ever runs (installation
+    Context: required) -- peer_env() carries the credential-stripping
+    mitigation instead of a feature-disabling refusal."""
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
 
     def fake_discover(_plugins_root):
@@ -742,16 +756,16 @@ def test_resolve_claim_status_degrades_in_a_namespaced_cell(tmp_path, monkeypatc
             namespace="codespace",
             plugin="agent-codespaces@copilot-extensions",
             plugin_root=str(tmp_path),
-            status_command=("python", "-c", "raise SystemExit(1)"),
+            status_command=(
+                "python", "-c",
+                "import json,sys;print(json.dumps({'exists': True, 'state': 'running'}))",
+            ),
         )
         return {"codespace": provider}, ()
 
     monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
     result = cp.resolve_claim_status("codespace:my-box-1", plugins_root=tmp_path)
-    assert result == {
-        "available": False,
-        "reason": "agent-codespaces@copilot-extensions claim-status callback failed",
-    }
+    assert result == {"available": True, "exists": True, "state": "running"}
 
 
 def test_resolve_provider_argv_degrades_when_no_provider_registered(tmp_path):

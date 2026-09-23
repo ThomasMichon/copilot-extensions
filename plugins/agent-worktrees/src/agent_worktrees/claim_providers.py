@@ -559,57 +559,47 @@ def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
     return [comspec, "/d", "/s", "/c", *command]
 
 
-def in_namespaced_cell() -> bool:
-    """Whether THIS process itself runs under an explicit marketplace-cell
-    installation context (``COPILOT_EXTENSIONS_CONTEXT`` set).
-
-    Cross-plugin claim-provider callback invocation is not yet supported in
-    this mode: naively stripping the context (what :func:`peer_env` does
-    for the common case) leaves cell-routing credentials
-    (``GH_TOKEN``/``GITHUB_TOKEN``) untouched, so the invoked sibling's own
-    payload-local shim would fall back to its LEGACY ``~/.agent-*`` runtime
-    and the CALLER's ambient credentials instead of the identity-verified
-    provider cell -- silently operating against the wrong cell/resource
-    rather than failing loudly. Every claim-provider invocation site checks
-    this FIRST and degrades exactly as it would for an absent/unregistered
-    provider (never attempting the subprocess at all) rather than risk
-    that. Properly rebinding to the target's OWN validated cell context
-    (mirroring each provider plugin's private peer-launch mechanism) is
-    real future work, not something this effort's registry can safely
-    approximate from the caller's side alone."""
-    return bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
-
-
 def peer_env() -> dict[str, str] | None:
-    """Environment for invoking a resolved SIBLING plugin's binstub, for the
-    common (non-namespaced-cell) case -- see :func:`in_namespaced_cell` for
-    why every call site refuses outright rather than reaching here at all
-    when an explicit context is present.
+    """Environment for invoking a resolved SIBLING plugin's binstub.
 
-    Strips this process's own ``COPILOT_PLUGIN_ROOT`` (an installation
-    receipt identifying THIS plugin's, agent-worktrees', own payload root)
-    before the child inherits it unchanged -- a consumer keying off
-    ``COPILOT_PLUGIN_ROOT`` specifically (e.g. agent-codespaces' ``sessions.
-    _agent_codespaces_marketplace()``) would otherwise misread it as ITS
-    OWN payload root and refuse to resolve a marketplace installation, even
-    though the provider manifest itself was discovered correctly and no
-    namespaced-cell context is even in play.
+    ``agent-worktrees`` ships with ``installationContext: required``
+    (``payload-invocation.json``), so ``COPILOT_EXTENSIONS_CONTEXT`` is
+    present on EVERY real invocation, not just some rare namespaced-cell
+    edge case -- an earlier revision of this helper refused outright
+    whenever that variable was set, which silently disabled this entire
+    registry in every normal marketplace installation (a strictly worse
+    outcome than the residual risk below).
+
+    Strips ``COPILOT_EXTENSIONS_CONTEXT``, ``COPILOT_PLUGIN_ROOT``, AND
+    ``GH_TOKEN``/``GITHUB_TOKEN`` before the child inherits any of them
+    unchanged. The sibling's own installation-context resolution (e.g.
+    ``agent_codespaces.worktrees.explicit_context()``) treats an ABSENT
+    context as "not in cell mode" and falls back to its legacy/ambient
+    resolution path -- a supported, non-erroring mode, not a refusal --
+    but leaving the CALLER's own cell-scoped ``GH_TOKEN``/``GITHUB_TOKEN``
+    in place would let that legacy fallback still authenticate as the
+    WRONG cell's identity. Properly rebinding to the target's OWN
+    validated cell context (mirroring each provider plugin's private
+    peer-launch mechanism, e.g. ``agent_codespaces._peer_launch``) would
+    be strictly better, but is real future work this registry cannot
+    safely approximate from the caller's side alone -- this bounded
+    stripping closes the concrete credential-leak risk without disabling
+    the feature entirely.
 
     Returns ``None`` (inherit the ambient environment completely
-    unmodified) when this process itself carries no such variable -- the
-    common case."""
-    if not os.environ.get("COPILOT_PLUGIN_ROOT", "").strip():
+    unmodified) only when this process carries none of these variables."""
+    stripped = ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "GH_TOKEN", "GITHUB_TOKEN")
+    if not any(os.environ.get(name, "").strip() for name in stripped):
         return None
     env = dict(os.environ)
-    env.pop("COPILOT_PLUGIN_ROOT", None)
+    for name in stripped:
+        env.pop(name, None)
     return env
 
 
 def _run_callback(
     command: tuple[str, ...], *, timeout: float, required_bool_field: str
 ) -> dict | None:
-    if in_namespaced_cell():
-        return None
     try:
         proc = subprocess.run(
             _windows_batch_argv(command), capture_output=True, text=True, timeout=timeout,

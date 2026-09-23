@@ -96,8 +96,6 @@ def _run_codespaces(args: list[tuple[str, bool]], *, timeout: float = 420.0):
     """
     from . import claim_providers
 
-    if claim_providers.in_namespaced_cell():
-        return None
     full_argv = claim_providers.build_provider_argv("codespace", *args, kind="reclaim")
     if full_argv is None:
         return None
