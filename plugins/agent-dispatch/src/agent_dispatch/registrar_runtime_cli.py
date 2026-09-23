@@ -58,6 +58,7 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
     """Manage registrar discovery pointers and read the declared profile set."""
     from . import registrar_discovery as rd
     from .registrar import RegistrarError
+    summarize = getattr(_core(), "_declaration_summary", _declaration_summary)
 
     try:
         if args.registrar_command == "doctor":
@@ -84,7 +85,7 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
                     "error": report.trusted_error,
                     "retention_possible": report.trusted_error is not None,
                     "declarations": [
-                        _declaration_summary(declaration) for declaration in combined.trusted
+                        summarize(declaration) for declaration in combined.trusted
                     ],
                 },
                 "dropins": {
@@ -93,7 +94,7 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
                     "authority": combined.plugins.snapshot.authority.value,
                     "active": [
                         {
-                            **_declaration_summary(contributed.declaration),
+                            **summarize(contributed.declaration),
                             "plugin": contributed.plugin,
                             "entry": contributed.source_path,
                             "manifest": contributed.manifest_path,
@@ -105,7 +106,7 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
                     "active_basis": "current-evidence-only",
                     "retention_possible": plugin_retention_possible,
                 },
-                "active": [_declaration_summary(declaration) for declaration in combined.declarations],
+                "active": [summarize(declaration) for declaration in combined.declarations],
                 "active_basis": "current-evidence-only",
             }
             failed = bool(report.trusted_error or combined.findings)
@@ -152,10 +153,10 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
             return _core()._emit({"removed": rd.remove_pointer(args.name)})
         if args.registrar_command == "discover":
             decls = rd.discover()
-            return _core()._emit([_declaration_summary(d) for d in decls])
+            return _core()._emit([summarize(d) for d in decls])
         if args.registrar_command == "discover-repo":
             decls = rd.discover_repo(args.repo_root, owner=args.owner)
-            return _core()._emit([_declaration_summary(d) for d in decls])
+            return _core()._emit([summarize(d) for d in decls])
     except RegistrarError as exc:
         print(f"agent-dispatch registrar: {exc}", file=sys.stderr)
         return 2

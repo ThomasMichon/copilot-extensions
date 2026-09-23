@@ -331,10 +331,12 @@ Verbatim from the operator:
               remaining shared CLI helpers into `shared_cli.py` and the
               registrar/runtime helper band into `registrar_runtime_cli.py`,
               bringing `__main__.py` down to a **919-line composition root**
-              under the module-size cap. Final landing status: **PR #3283
-              merged** after **PR #3316** cleared the shared red-main
-              blockers (`#3276` payload-invocation fallout, then `#3315`
-              version-consistency/module-size drift on `main`).
+              under the module-size cap. Final landing path: after **PR #3316**
+              cleared the shared red-main blockers (`#3276`
+              payload-invocation fallout, then `#3315`
+              version-consistency/module-size drift on `main`), **PR #3283**
+              rebased cleanly onto `main` and re-entered the final review/merge
+              gate.
             - `agent-bridge/__main__.py` slice landed: the file is now a
               **485-line composition root** with focused sibling modules for
               service start/status (`service_start_cli.py`), daemon/process
@@ -2020,11 +2022,12 @@ the Phase 0 runbook, picked up as capacity allows.
   the normal composition-root scaffolding (imports, parser assembly, client
   targeting/bootstrap helpers, and `main()`), not an uncaught command-family
   seam.
-- Final landing status: **PR #3283 merged**. The path there hit two unrelated
-  shared blockers on `main`: first **#3276** (`agent-pull-requests` missing
-  `payload-invocation.json`), then **#3315** (repo-wide
-  version-consistency/module-size drift after rebasing). Once **PR #3316**
-  landed the shared fix on `main`, the rebased `agent-dispatch` branch passed
-  its full local validation bar again, pushed cleanly, cleared review/CI, and
-  merged. The `agent-dispatch` work itself never required a behavioral
-  follow-up beyond compatibility-seam fixes inside the extracted helpers.
+- Final landing path: the under-cap slice set first hit the shared red-main
+  blocker from **#3276** (`agent-pull-requests` missing
+  `payload-invocation.json`), then a second shared red-main blocker from
+  **#3315** (repo-wide version-consistency/module-size drift after rebasing).
+  Once **PR #3316** landed the shared fix on `main`, the rebased
+  `agent-dispatch` branch again passed its full local validation bar and
+  pushed cleanly back into the review/CI gate. The `agent-dispatch` work
+  itself never required a behavioral follow-up beyond compatibility-seam fixes
+  inside the extracted helpers.
