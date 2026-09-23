@@ -187,7 +187,8 @@ class PickerScreenPivotsMixin:
             try:
                 from . import data_ssh
 
-                return data_ssh.machine_key_map()
+                with self._load_config_cache_scope():
+                    return data_ssh.machine_key_map()
             except Exception:
                 return {}
 
