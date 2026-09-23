@@ -151,8 +151,10 @@ def _dispatch_assigned_tasks(machine: str, worktree_id: str, cwd: str) -> dict:
     from . import claim_providers
 
     full_argv = claim_providers.build_provider_argv(
-        "dispatch-task", "worktree-status", "--machine", machine,
-        "--worktree", worktree_id, kind="status")
+        "dispatch-task",
+        ("worktree-status", True), ("--machine", True), (machine, False),
+        ("--worktree", True), (worktree_id, False),
+        kind="status")
     if full_argv is None:
         return {"available": False, "reason": "agent-dispatch not installed"}
     try:

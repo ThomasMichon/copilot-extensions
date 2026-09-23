@@ -741,11 +741,12 @@ def test_build_provider_argv_appends_safe_extra_tokens(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
     result = cp.build_provider_argv(
-        "codespace", "delete", "cs-a", "--force", kind="reclaim", plugins_root=tmp_path)
+        "codespace", ("delete", True), ("cs-a", False), ("--force", True),
+        kind="reclaim", plugins_root=tmp_path)
     assert result == ("agent-codespaces", "delete", "cs-a", "--force")
 
 
-def test_build_provider_argv_refuses_unsafe_extra_token(tmp_path, monkeypatch):
+def test_build_provider_argv_refuses_unsafe_untrusted_token(tmp_path, monkeypatch):
     """The whole point of this helper: a caller can never forget to
     validate an untrusted appended token, unlike calling
     resolve_provider_argv() and appending by hand."""
@@ -760,11 +761,33 @@ def test_build_provider_argv_refuses_unsafe_extra_token(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
     result = cp.build_provider_argv(
-        "codespace", "delete", "cs-x&whoami", "--force", kind="reclaim", plugins_root=tmp_path)
+        "codespace", ("delete", True), ("cs-x&whoami", False), ("--force", True),
+        kind="reclaim", plugins_root=tmp_path)
+    assert result is None
+
+
+def test_build_provider_argv_validates_untrusted_token_even_with_leading_dash(tmp_path, monkeypatch):
+    """A leading-dash heuristic would be unsafe: a crafted untrusted value
+    like ``--apply`` must still be validated (and here rejected) rather than
+    mistaken for a trusted flag literal."""
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            reclaim_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.build_provider_argv(
+        "codespace", ("delete", True), ("--apply", False), ("--force", True),
+        kind="reclaim", plugins_root=tmp_path)
     assert result is None
 
 
 def test_build_provider_argv_degrades_when_no_provider_registered(tmp_path):
-    result = cp.build_provider_argv("codespace", "delete", "cs-a", plugins_root=tmp_path / "empty")
+    result = cp.build_provider_argv(
+        "codespace", ("delete", True), ("cs-a", False), plugins_root=tmp_path / "empty")
     assert result is None
 

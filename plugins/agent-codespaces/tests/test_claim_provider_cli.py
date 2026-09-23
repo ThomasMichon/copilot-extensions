@@ -63,6 +63,22 @@ def test_claim_reclaim_apply_recovers_sessions_and_releases_lease(monkeypatch, c
     assert calls == [("sync", "cs-a"), ("delete", "cs-a"), ("release", "cs-a")]
 
 
+def test_claim_reclaim_blocks_delete_when_recovery_fails(monkeypatch, capsys):
+    """A FAILED session recovery must block the delete entirely (unattended
+    path, no operator present to notice a warn-and-continue): unlike
+    `_cmd_delete`'s human-facing default, this callback honors its own
+    docstring's 'never destroys an unrecovered session' promise."""
+    called = {"n": 0}
+    monkeypatch.setattr(cpc, "sync_codespace_sessions",
+                        lambda *a, **k: {"ok": False, "detail": "connect failed"})
+    monkeypatch.setattr(cpc, "delete_codespace", lambda *a, **k: called.__setitem__("n", 1))
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False and "recovery failed" in out["detail"]
+    assert called["n"] == 0
+
+
 def test_claim_reclaim_already_gone_releases_lease_too(monkeypatch, capsys):
     monkeypatch.setattr(cpc, "sync_codespace_sessions", lambda *a, **k: {"ok": True})
 

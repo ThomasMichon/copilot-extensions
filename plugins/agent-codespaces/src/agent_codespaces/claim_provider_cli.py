@@ -113,14 +113,31 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     lease blocking allocation). Runs the same best-effort pre-delete
     Copilot-session recovery as ``agent-codespaces delete``
     (``__main__._cmd_delete``) so a claim-reclaim invocation never destroys
-    an unrecovered session."""
+    an unrecovered session -- unlike ``_cmd_delete``'s human-facing default
+    (warn-and-continue), a FAILED recovery here blocks the delete entirely
+    (``reclaimed: false``): this is an unattended/automated path with no
+    operator present to notice the warning and intervene.
+
+    ``sync_codespace_sessions`` uses its own default timeout (300s, matching
+    ``cleanup._run_codespaces``'s own default and
+    ``claim_providers.resolve_claim_reclaim``'s reclaim-specific callback
+    timeout) -- a real reclaim (session recovery + delete, both over the
+    network) needs materially more budget than a quick status check.
+    """
     if not args.apply:
         print(json.dumps({"reclaimed": True, "detail": f"would delete CodeSpace {args.name}"}))
         return 0
     try:
-        sync_codespace_sessions(args.name)
+        recovery = sync_codespace_sessions(args.name)
     except Exception as exc:
-        print(f"pre-delete session recovery failed (continuing): {exc}", file=sys.stderr)
+        print(json.dumps({"reclaimed": False, "detail": f"pre-delete session recovery failed: {exc}"}))
+        return 0
+    if not recovery.get("ok"):
+        print(json.dumps({
+            "reclaimed": False,
+            "detail": f"pre-delete session recovery failed: {recovery.get('detail', '')}",
+        }))
+        return 0
     try:
         delete_codespace(args.name, force=True)
     except Exception as exc:

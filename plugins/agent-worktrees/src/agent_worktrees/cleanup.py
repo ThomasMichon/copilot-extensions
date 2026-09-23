@@ -69,8 +69,8 @@ def _creationflags() -> int:
     return no_window_flags()
 
 
-def _run_codespaces(args: list[str], *, timeout: float = 300.0):
-    """Run agent-codespaces ``<args>`` via the identity-verified ``codespace:``
+def _run_codespaces(args: list[tuple[str, bool]], *, timeout: float = 300.0):
+    """Run agent-codespaces via the identity-verified ``codespace:``
     claim-provider registry (claim-provider-pattern effort); return the
     process, or None if unrunnable. Resolves the provider's own
     payload-local binstub -- never an ambient ``PATH`` lookup -- closing the
@@ -78,12 +78,14 @@ def _run_codespaces(args: list[str], *, timeout: float = 300.0):
     identically to the prior ``shutil.which`` behavior when no provider is
     registered (e.g. agent-codespaces not installed): returns None.
 
-    Unlike ``resolve_claim_reclaim``'s own ``claim-reclaim <ref>`` contract,
-    ``args`` here drives a DIFFERENT subcommand shape (``delete <name>
-    --force``) -- ``claim_providers.build_provider_argv`` resolves the
-    binstub AND validates every non-flag token (a persisted CodeSpace name)
-    with ``is_safe_argument`` in one guarded step, before it ever reaches a
-    possibly-cmd.exe-wrapped argv (see that helper's own docstring for why).
+    ``args`` is an ordered ``(token, trusted)`` sequence -- ``trusted=True``
+    for a static/literal subcommand name or flag this module itself wrote
+    (e.g. ``"delete"``, ``"--force"``), ``trusted=False`` for a persisted
+    value (a CodeSpace name). Passed straight through to
+    ``claim_providers.build_provider_argv``, which validates every
+    ``trusted=False`` token before it ever reaches a possibly-cmd.exe-wrapped
+    argv (see that helper's own docstring for why a leading-dash heuristic
+    would be unsafe here).
     """
     from . import claim_providers
 
@@ -97,7 +99,7 @@ def _run_codespaces(args: list[str], *, timeout: float = 300.0):
             creationflags=_creationflags(),
         )
     except Exception as exc:  # binstub vanished / exec error
-        log.debug("agent-codespaces %s failed to run: %s", args[:2], exc)
+        log.debug("agent-codespaces %s failed to run: %s", [t for t, _ in args][:2], exc)
         return None
 
 
@@ -147,7 +149,7 @@ def reclaim_codespace(name: str, *, apply: bool) -> ReclaimResult:
         return ReclaimResult("failed", "orphan entry has no CodeSpace name")
     if not apply:
         return ReclaimResult("reclaimed", f"would delete CodeSpace {name}")
-    proc = _run_codespaces(["delete", name, "--force"])
+    proc = _run_codespaces([("delete", True), (name, False), ("--force", True)])
     if proc is None:
         return ReclaimResult("failed", "agent-codespaces binstub unavailable")
     if proc.returncode == 0:

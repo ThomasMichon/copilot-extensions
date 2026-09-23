@@ -123,7 +123,7 @@ def test_run_codespaces_no_provider_registered(monkeypatch):
     from agent_worktrees import claim_providers
     monkeypatch.setattr(claim_providers, "discover_claim_providers",
                         lambda *a, **k: ({}, ()))
-    assert cleanup._run_codespaces(["delete", "cs-x", "--force"]) is None
+    assert cleanup._run_codespaces([("delete", True), ("cs-x", False), ("--force", True)]) is None
 
 
 def test_run_codespaces_uses_providers_reclaim_command(monkeypatch):
@@ -139,7 +139,7 @@ def test_run_codespaces_uses_providers_reclaim_command(monkeypatch):
         captured["cmd"] = cmd
         return _proc(0)
     monkeypatch.setattr(cleanup.subprocess, "run", _run)
-    proc = cleanup._run_codespaces(["delete", "cs-x", "--force"])
+    proc = cleanup._run_codespaces([("delete", True), ("cs-x", False), ("--force", True)])
     assert proc.returncode == 0
     assert captured["cmd"] == ["agent-codespaces", "delete", "cs-x", "--force"]
 
@@ -156,7 +156,7 @@ def test_run_codespaces_refuses_unsafe_name(monkeypatch):
     called = {"n": 0}
     monkeypatch.setattr(cleanup.subprocess, "run",
                         lambda *a, **k: called.__setitem__("n", 1))
-    proc = cleanup._run_codespaces(["delete", "cs-x&whoami", "--force"])
+    proc = cleanup._run_codespaces([("delete", True), ("cs-x&whoami", False), ("--force", True)])
     assert proc is None
     assert called["n"] == 0
 
@@ -342,7 +342,7 @@ def test_cleanup_apply_removes_only_reclaimed(tmp_path, monkeypatch):
         source_worktree="wt", config=_config())
 
     def _fake(args, **k):
-        name = args[1]
+        name = args[1][0]
         return _proc(0) if name == "cs-good" else _proc(1, stderr="HTTP 500")
     monkeypatch.setattr(cleanup, "_run_codespaces", _fake)
 

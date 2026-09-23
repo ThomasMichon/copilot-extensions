@@ -75,6 +75,14 @@ log = logging.getLogger("agent-worktrees")
 CLAIM_PROVIDERS_SUBDIR = "claim-providers"
 REGISTRY_NAME = "claim-providers"
 _CALLBACK_TIMEOUT_SECONDS = 15.0
+#: A reclaim (delete/destroy + provider-side pre-destroy safety steps, e.g.
+#: agent-codespaces' own pre-delete Copilot-session recovery) is inherently
+#: slower than a status check and typically crosses the network -- a 15s
+#: budget is realistically too short (claim-provider-pattern effort review
+#: finding: a normal-duration reclaim could be killed mid-operation before
+#: it ever reports a result). Matches ``agent_worktrees.cleanup.
+#: _run_codespaces``'s own pre-existing 300s default for the same reason.
+_RECLAIM_CALLBACK_TIMEOUT_SECONDS = 300.0
 
 #: cmd.exe's own structurally-significant characters, scanned for in a
 #: resolved ``.cmd``/``.bat`` path before ever routing it through
@@ -469,7 +477,7 @@ def resolve_provider_argv(
 
 def build_provider_argv(
     namespace: str,
-    *extra: str,
+    *extra: tuple[str, bool],
     kind: str = "status",
     plugins_root: str | os.PathLike[str] | None = None,
 ) -> tuple[str, ...] | None:
@@ -482,18 +490,33 @@ def build_provider_argv(
     :func:`is_safe_argument` validation structural rather than something
     each caller must remember to apply itself.
 
+    Each item in ``extra`` is an explicit ``(token, trusted)`` pair --
+    ``trusted=True`` for a static/literal subcommand name or flag the call
+    site itself wrote into source (e.g. ``"delete"``, ``"--force"``,
+    ``"--machine"``), ``trusted=False`` for anything derived from
+    persisted/external data (a CodeSpace name, a machine/worktree id, ...).
+    Deliberately explicit rather than inferring trust from a leading ``-``:
+    a real call site's argv interleaves static flags AND untrusted values
+    (e.g. ``--worktree <worktree_id>``), so a leading-dash heuristic would
+    both let an untrusted value that happens to start with ``-`` (e.g. a
+    crafted ``--apply``) through unvalidated, and is simply the wrong axis
+    -- "starts with -" has nothing to do with "did this call site write it
+    as a literal". Every ``trusted=False`` token is validated with
+    :func:`is_safe_argument` regardless of its own content, INCLUDING a
+    leading dash.
+
     Returns ``None`` when no provider is registered, it declares no command
-    of the requested ``kind``, OR any non-flag ``extra`` token fails
-    :func:`is_safe_argument`. A token starting with ``-`` is treated as a
-    flag literal and passed through unvalidated -- every call site only
-    ever passes a static, trusted flag there, never a persisted value."""
+    of the requested ``kind``, OR any ``trusted=False`` token fails
+    :func:`is_safe_argument`."""
     command = resolve_provider_argv(namespace, kind=kind, plugins_root=plugins_root)
     if command is None:
         return None
-    for token in extra:
-        if not token.startswith("-") and not is_safe_argument(token):
+    tokens: list[str] = []
+    for token, trusted in extra:
+        if not trusted and not is_safe_argument(token):
             return None
-    return (*command, *extra)
+        tokens.append(token)
+    return (*command, *tokens)
 
 
 def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
@@ -627,12 +650,17 @@ def resolve_claim_reclaim(
     *,
     apply: bool,
     plugins_root: str | os.PathLike[str] | None = None,
-    timeout: float = _CALLBACK_TIMEOUT_SECONDS,
+    timeout: float = _RECLAIM_CALLBACK_TIMEOUT_SECONDS,
 ) -> dict:
     """Best-effort claim reclaim via the registered claim provider for
     ``ref``'s namespace. Never raises -- degrades to ``{"available": False,
     "reason": "..."}"`` on any absence, malformed manifest, or callback
-    failure. Without ``apply``, the provider must not act (dry-run)."""
+    failure. Without ``apply``, the provider must not act (dry-run).
+
+    Defaults to a materially larger timeout than :func:`resolve_claim_status`
+    -- a real reclaim (destroy + provider-side pre-destroy safety steps)
+    typically crosses the network and is inherently slower than a status
+    check; see :data:`_RECLAIM_CALLBACK_TIMEOUT_SECONDS`'s own comment."""
     split = split_namespaced_ref(ref)
     if split is None:
         return {"available": False, "reason": "ref has no namespace prefix, or contains unsafe characters"}

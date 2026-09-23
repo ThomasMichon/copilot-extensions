@@ -313,6 +313,65 @@ class TestGetCodespaceStatus:
         with pytest.raises(RuntimeError, match="gh CLI not found"):
             lifecycle.get_codespace_status("cs-a", account="acct-a")
 
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_ambiguous_not_found_text_is_not_confirmed_absence(self, mock_run):
+        """Only an explicit HTTP 404 confirms absence -- a non-404 error
+        that merely mentions "not found" in its own message text (e.g. a
+        malformed-request or auth error) must NOT be treated the same."""
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="422: Validation failed: repository not found",
+        )
+        with pytest.raises(RuntimeError, match="422"):
+            lifecycle.get_codespace_status("cs-a", account="acct-a")
+
+    def test_default_account_tries_every_candidate_before_absent(self, monkeypatch):
+        """Without an explicit account, a live CodeSpace under a
+        non-ambient candidate account must still be found -- never
+        misreported absent because only the FIRST/ambient account was
+        tried (the exact gap `account_for_codespace`'s own single
+        best-effort guess has)."""
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-a", "acct-b"))
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+
+        def fake_under(name, account):
+            if account == "acct-b":
+                return True, "Available"
+            raise RuntimeError(f"gh api codespace lookup for {name} failed: HTTP 404: Not Found")
+
+        monkeypatch.setattr(lifecycle, "_get_codespace_status_under", fake_under)
+        exists, state = lifecycle.get_codespace_status("cs-a")
+        assert exists is True and state == "Available"
+
+    def test_default_account_confirms_absence_only_when_every_candidate_404s(self, monkeypatch):
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-a",))
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+        monkeypatch.setattr(
+            lifecycle, "_get_codespace_status_under", lambda name, account: (False, None))
+        exists, state = lifecycle.get_codespace_status("cs-missing")
+        assert exists is False and state is None
+
+    def test_default_account_raises_when_no_candidate_confirms_and_one_errors(self, monkeypatch):
+        """A live CodeSpace in an account whose lookup failed for a REAL
+        reason (not a 404) must never be reported absent just because
+        every OTHER candidate happened to 404."""
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-a", "acct-b"))
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+
+        def fake_under(name, account):
+            if account == "acct-a":
+                raise RuntimeError("HTTP 503: service unavailable")
+            return False, None
+
+        monkeypatch.setattr(lifecycle, "_get_codespace_status_under", fake_under)
+        with pytest.raises(RuntimeError, match="503"):
+            lifecycle.get_codespace_status("cs-a")
+
 
 class TestCleanupStale:
     @patch("agent_codespaces.lifecycle.list_codespaces")

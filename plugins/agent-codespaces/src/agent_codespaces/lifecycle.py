@@ -198,6 +198,39 @@ def account_for_codespace(name: str) -> str | None:
     return None
 
 
+def _get_codespace_status_under(name: str, account: str | None) -> tuple[bool, str | None]:
+    """Single-account attempt for :func:`get_codespace_status`. Raises
+    :class:`RuntimeError` for any failure that is NOT an unambiguous 404 --
+    including an explicit ``HTTP 404`` marker only, never the looser phrase
+    "not found" (which a non-404 auth/API error could also happen to
+    mention)."""
+    from . import gh_account
+
+    args = ["gh", "api", f"/user/codespaces/{name}"]
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=30,
+            creationflags=_creation_flags(),
+            env=gh_account.env_for_account(account) if account else None,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("gh CLI not found") from None
+    if result.returncode != 0:
+        combined = f"{result.stdout}\n{result.stderr}".lower()
+        if "http 404" in combined:
+            return False, None
+        raise RuntimeError(
+            f"gh api codespace lookup for {name} failed: {result.stderr.strip()}"
+        )
+    try:
+        data = json.loads(result.stdout)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f"gh api returned invalid JSON for {name}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(f"gh api returned an unexpected shape for {name}")
+    return True, data.get("state")
+
+
 def get_codespace_status(name: str, account: str | None = None) -> tuple[bool, str | None]:
     """Strict, targeted single-CodeSpace existence check via ``gh api
     /user/codespaces/<name>``.
@@ -210,35 +243,48 @@ def get_codespace_status(name: str, account: str | None = None) -> tuple[bool, s
     unambiguous 404 (auth error, network failure, malformed response), so a
     caller never mistakes a backend outage or incomplete listing for
     confirmed absence.
+
+    When ``account`` is not given explicitly, this does NOT trust
+    :func:`account_for_codespace`'s own single best-effort guess (itself
+    backed by the same lossy ``--limit 50`` listing) as authoritative --
+    a CodeSpace beyond that listing's first page, or owned by an account
+    ``account_for_codespace`` failed to resolve, would otherwise be queried
+    under the wrong (or ambient) credentials and misreported absent. Instead
+    it tries every candidate account (the ``account_map``, each persisted
+    binding, then ambient) exactly like :func:`list_codespaces` does,
+    stopping at the first confirmed existence. Only when EVERY candidate
+    account confirms an unambiguous 404 is the CodeSpace reported absent;
+    a real backend error on any candidate raises (never a false negative).
     """
     from . import gh_account
 
     validate_context()
-    if account is None:
-        account = account_for_codespace(name)
-    args = ["gh", "api", f"/user/codespaces/{name}"]
+    if account is not None:
+        return _get_codespace_status_under(name, account)
+
     try:
-        result = subprocess.run(
-            args, capture_output=True, text=True, timeout=30,
-            creationflags=_creation_flags(),
-            env=gh_account.env_for_account(account) if account else None,
-        )
-    except FileNotFoundError:
-        raise RuntimeError("gh CLI not found") from None
-    if result.returncode != 0:
-        combined = f"{result.stdout}\n{result.stderr}".lower()
-        if "http 404" in combined or "not found" in combined:
-            return False, None
-        raise RuntimeError(
-            f"gh api codespace lookup for {name} failed: {result.stderr.strip()}"
-        )
-    try:
-        data = json.loads(result.stdout)
-    except (ValueError, TypeError) as exc:
-        raise RuntimeError(f"gh api returned invalid JSON for {name}: {exc}") from exc
-    if not isinstance(data, dict):
-        raise RuntimeError(f"gh api returned an unexpected shape for {name}")
-    return True, data.get("state")
+        from . import account_binding
+
+        bound_accounts = account_binding.bound_accounts()
+    except Exception:
+        bound_accounts = ()
+    accounts_seen: list[str] = []
+    for login in (*gh_account.mapped_accounts(), *bound_accounts):
+        if login and login not in accounts_seen:
+            accounts_seen.append(login)
+
+    errors: list[str] = []
+    for candidate in (*accounts_seen, None):
+        try:
+            exists, state = _get_codespace_status_under(name, candidate)
+        except RuntimeError as exc:
+            errors.append(str(exc))
+            continue
+        if exists:
+            return True, state
+    if errors:
+        raise RuntimeError("; ".join(dict.fromkeys(errors)))
+    return False, None
 
 
 def list_devcontainers(repo: str) -> list[str]:
