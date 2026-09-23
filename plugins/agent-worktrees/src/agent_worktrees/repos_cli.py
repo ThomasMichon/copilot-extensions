@@ -49,6 +49,10 @@ def _repos_usage() -> None:
     print("  account [list|set <owner> <login>|unset <owner>]")
     print("                                      Decoupled owner->gh-login map (account_map)")
     print("  account-for [owner|owner/name|name] Print the resolved gh login (exit 1 if none)")
+    print("  copilot-account-for <name>          Print the intended Copilot CLI login for a")
+    print("     [--json]                         registered repo (exit 1 if none resolved)")
+    print("  copilot-account set <name> <login>  Set/unset a repo's explicit Copilot CLI")
+    print("                unset <name>          identity override (see 'copilot-identity')")
     print("  gh [owner|owner/name|name] [--] <args>")
     print("                                      Run gh under that repo's account (token-inject)")
     print(
@@ -477,6 +481,44 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         if login:
             print(login)
             return 0
+        return 1
+
+    if sub == "copilot-account-for":
+        target = rest[0] if rest and not rest[0].startswith("-") else None
+        json_out = "--json" in rest
+        if not target:
+            output.err("Usage: repos copilot-account-for <registered-repo-name> [--json]")
+            return 1
+        login = repos.copilot_account_for(target)
+        if json_out:
+            _core()._json_output({"target": target, "copilot_account": login})
+            return 0 if login else 1
+        if login:
+            print(login)
+            return 0
+        return 1
+
+    if sub == "copilot-account":
+        casub = rest[0] if rest else None
+        carest = rest[1:] if rest else []
+        if casub == "set":
+            if len(carest) < 2:
+                output.err("Usage: repos copilot-account set <name> <login>")
+                return 1
+            if repos.set_copilot_account(carest[0], carest[1]):
+                return 0
+            output.err(f"'{carest[0]}' is not a registered repo")
+            return 1
+        if casub in ("unset", "remove", "rm"):
+            if not carest:
+                output.err("Usage: repos copilot-account unset <name>")
+                return 1
+            if repos.unset_copilot_account(carest[0]):
+                return 0
+            output.err(f"No explicit copilot_account override for '{carest[0]}'")
+            return 1
+        output.err(f"Unknown 'repos copilot-account' subcommand: {casub}")
+        output.info("Usage: repos copilot-account [set <name> <login>|unset <name>]")
         return 1
 
     if sub == "pin-credentials":

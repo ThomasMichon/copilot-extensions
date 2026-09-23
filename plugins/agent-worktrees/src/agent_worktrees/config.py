@@ -530,6 +530,16 @@ class Config:
     the session and setup script see an up-to-date tree.  Only ever a
     fast-forward (clean + no local commits ahead); dirty/ahead/diverged
     worktrees are left untouched.  Set false to opt out of auto-update."""
+    default_copilot_account: str = ""
+    """This machine's default **Copilot CLI** login (distinct from ``gh``'s
+    ``account_map`` -- see ``repos.RepoEntry.copilot_account``) for a repo
+    with no explicit per-repo override. Deliberately machine-local policy,
+    NOT a portable knowledge-repo operator preference (see
+    ``_KNOWLEDGE_OVERLAY_TOP_KEYS``): two machines used for different
+    purposes may legitimately want different defaults. Resolves
+    machine-local ``config.yaml`` > global ``~/.agent-worktrees/config.yaml``
+    only. Empty means no machine-wide preference (ambient Copilot login,
+    today's behavior). See ThomasMichon/copilot-extensions#3296."""
 
     @property
     def default_repo(self) -> RepoConfig:
@@ -1208,6 +1218,13 @@ def _load_config_uncached(
                     global_raw.get("auto_fast_forward", True),
                 ),
             )
+        ),
+        default_copilot_account=str(
+            machine_raw.get(
+                "default_copilot_account",
+                global_raw.get("default_copilot_account", ""),
+            )
+            or ""
         ),
     )
 

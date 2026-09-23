@@ -22,6 +22,7 @@ from pathlib import Path
 
 __all__ = [
     "copilot_relaunch_path",
+    "count_processes_named",
     "process_executable_path",
     "processes_with_cwd_under",
     "terminate_processes_under",
@@ -456,6 +457,46 @@ def terminate_pid(pid: int) -> bool:
         return killed
     except OSError:
         return False
+
+
+def count_processes_named(name: str, *, exclude_pid: int | None = None) -> int:
+    """Count live processes whose executable basename (stem) matches ``name``.
+
+    Case-insensitive; strips a Windows ``.exe`` suffix before comparing.
+    Best-effort and dependency-free like the rest of this module: any
+    enumeration failure returns 0 rather than raising, so a safety check
+    built on this degrades to "assume none" rather than crashing its caller.
+    Excludes the current process (or an explicit ``exclude_pid``) so a
+    caller checking "is any OTHER copilot process running" doesn't count
+    itself.
+    """
+    exclude = exclude_pid if exclude_pid is not None else os.getpid()
+    target = name.lower().removesuffix(".exe")
+    count = 0
+    try:
+        if platform.system() == "Windows":
+            try:
+                k32 = _win_kernel32()
+            except OSError:
+                return 0
+            for pid in _win_enum_pids():
+                if pid == exclude:
+                    continue
+                try:
+                    _cwd, exe_name = _win_read_cwd(k32, pid)
+                except OSError:
+                    continue
+                if exe_name and exe_name.removesuffix(".exe") == target:
+                    count += 1
+        else:
+            for pid, _cwd, proc_name in _iter_processes_posix():
+                if pid == exclude:
+                    continue
+                if proc_name and proc_name.lower() == target:
+                    count += 1
+    except Exception:
+        return 0
+    return count
 
 
 def processes_with_cwd_under(
