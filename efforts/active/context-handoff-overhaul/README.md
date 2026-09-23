@@ -2812,11 +2812,11 @@ mystery directly by simulating handoff data in a worktree and driving
 connection-race scenario, which targets the OTHER (already-closed) half of
 #22266.
 
-Two focused, live (non-containerized, direct-host) repros were run on
-`cloud2` against a throwaway disposable worktree
-(`tmichon-cloud2-win-20260923-002542-3907`, `--origin delegate --no-owner`,
-torn down after the round) using `tools/clean-room/lib/psmux-drive.ps1`
-directly (no Docker needed -- this is a real host, not a container):
+Two focused, live (non-containerized, direct-host) repros were run on a
+Windows dev host against a throwaway disposable worktree
+(`--origin delegate --no-owner`, torn down after the round) using
+`tools/clean-room/lib/psmux-drive.ps1` directly (no Docker needed -- this is
+a real host, not a container):
 
 1. **Fabricated file-backed handoff + bare `/consume-handoff`:** hand-wrote a
    `handoff-*.json` record directly into the resolved
@@ -2871,3 +2871,50 @@ single clean launch, to test whether the hang is a relaunch-specific
 condition. No `~/.copilot/logs/extensions/*context-handoff*` diagnostic was
 produced by either clean round-2 repro, so a positive repro's own such log
 (if any) is the first thing the next round should check.
+### 2026-09-23 (cont.) -- Root cause found: `permissionsConfigQueueRef` is an unpartitioned shared queue
+
+A live, in-the-wild capture (not synthetic) of a real `consume_handoff` call
+pinned down the mechanism precisely, filed as
+github/copilot-agent-runtime#22266 (issuecomment-5793199437):
+
+- Real event timeline (`events.jsonl`): `consume_handoff` dispatched at
+  09:24:41, then 3m36s of `session.permissions_changed` churn
+  (`allowAllPermissionMode` flipping on/off 12 times) with no other session
+  activity, then `permission.requested` (`extension-permission-access` for
+  `plugin:context-handoff:context-handoff`) at 09:28:17, approved at
+  09:29:59, `external_tool.completed` at 09:30:01 (5m20s total), followed
+  immediately by `session.error: 400 Tool reference 'consume_handoff' not
+  found in available tools` and a user-facing "Extension disconnected"
+  surface.
+- Traced to `copilot-agent-runtime`'s `src/cli/app.tsx`: extension startup
+  (and any `extension-permission-access` prompt) is gated behind a
+  permission-seeding latch (3 participants must settle per-sessionId,
+  ~line 5561) with only a one-shot, non-authorizing 5s watchdog
+  (`PERMISSIONS_SEED_WATCHDOG_MS`). Two of the three participants resolve
+  via `enqueuePermissionsConfig` (~line 7476), which chains onto
+  `permissionsConfigQueueRef` -- a single `useRef<Promise<unknown>>`
+  declared ONCE at the top of the whole app component, with **no
+  per-session partitioning**. Every session/tab in one CLI process shares
+  this one FIFO queue for `permissions.configure()` calls, unprioritized,
+  no per-entry timeout.
+- Net effect: real, unrelated activity in ANY OTHER tab of the same CLI
+  process can delay this session's own permission seeding -- and therefore
+  any tool call already dispatched to its extension -- by an amount of
+  real wall-clock time bounded only by how long the other tab stays busy.
+  Confirmed against the operator's own account: they were genuinely working
+  in a different tab of the same process during the 3.5-minute gap, and the
+  prompt resolved almost immediately once they returned attention. A fully
+  headless/unattended session (this investigation's original trigger, the
+  full-1800s-zero-response case) has no tab to return attention to,
+  so the same class of gate applies unboundedly.
+- This directly explains "ready-then-self-exit(1)": once the call resolves
+  (or the outer 1800s ceiling gives up), the tool/extension registry has
+  typically already drifted (a reload happened meanwhile), producing the
+  observed disconnected/not-found pair -- and if a clean self-exit
+  coincides, #18807's already-regression-tested cascade (#22282) tears down
+  siblings too, matching the original all-four-extensions-failed shape.
+- Filed as a detailed root-cause comment with 3 concrete upstream questions
+  (should the queue be session-keyed; should the seed latch have its own
+  session-scoped timeout; should `external_tool.requested` fail fast when
+  blocked on client-side seeding rather than genuine extension work).
+  Round 2 concludes here pending upstream response.
