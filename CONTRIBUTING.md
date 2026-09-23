@@ -187,6 +187,13 @@ Do **not** bump minor or major versions unless explicitly instructed.
 Each plugin has its own version triplet. Bump only the files for the
 plugin you changed.
 
+> **Mechanical shortcut:** `python tools/accumulate_bumps.py --from-diff origin/main --apply`
+> bumps exactly what `check-version-bump.py` requires for your branch -- every
+> touched plugin (all three files plus literal `__version__` fallbacks), every
+> plugin that vendors a changed lib, and the lib itself in all its copies --
+> each only when it is not already ahead of `origin/main`, so re-run it after a
+> rebase in which `main` consumed your `-devN`. `--dry-run` shows the plan.
+
 > **General rule (applies to every plugin, present and future).** For a plugin
 > `<p>`: bump `plugins/<p>/plugin.json` (`version`), `plugins/<p>/pyproject.toml`
 > (`[project].version`, runtime plugins only — payload-only plugins have none),
