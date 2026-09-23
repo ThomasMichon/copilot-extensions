@@ -2,12 +2,14 @@
 """PickerScreen mixin extracted from ``engine.py``."""
 from __future__ import annotations
 
+import contextlib
 import os
 import threading
 import time
 
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, target_rows
 from .selection import ListSelection
+from .. import config as cfg
 
 class PickerScreenLoadingMixin:
     def on_mount(self):
@@ -128,6 +130,19 @@ class PickerScreenLoadingMixin:
         self.grid = {}
         self.applied = {}
         self._prof_unavailable = set()
+    def _load_config_cache_scope(self):
+        """``cfg.cached_load_config_scope()`` when the resolved engine has it.
+
+        The Manager resolves ``agent_worktrees`` as a separate, independently
+        versioned runtime slot (``_engine_runtime.ensure_engine_runtime``) --
+        an older installed engine that predates
+        ``cached_load_config_scope`` must not crash the live setup pass over
+        a pure latency optimization. Degrades to a no-op context (the
+        pre-existing, always-fresh ``load_config()`` behavior) when absent.
+        """
+        scope = getattr(cfg, "cached_load_config_scope", None)
+        return scope() if callable(scope) else contextlib.nullcontext()
+
     def _setup_live_async(self):
         """Publish bootstrap rows, then fill roster and pivots independently."""
         bootstrap_fn = getattr(self.src, "bootstrap_rows", None)
@@ -155,9 +170,18 @@ class PickerScreenLoadingMixin:
         loader = None
         prepared = None
         try:
-            snapshot_fn = getattr(self.src, "source_snapshot", None)
-            snapshot = snapshot_fn() if callable(snapshot_fn) else None
-            prepared = self._prepare_live_source(snapshot)
+            # One logical pass asks the source for the roster, the
+            # profiles-matrix axes, and the REPO/BRANCH topbar fields --
+            # each independently calls agent_worktrees.config.load_config(),
+            # whose control-plane related-PR discovery is expensive and
+            # otherwise uncached (profiled at several real seconds per call
+            # on a fleet with many registered repos). Memoize every
+            # load_config() call in this pass so that cost is paid once, not
+            # once per helper (#worktree-manager-picker-startup-latency).
+            with self._load_config_cache_scope():
+                snapshot_fn = getattr(self.src, "source_snapshot", None)
+                snapshot = snapshot_fn() if callable(snapshot_fn) else None
+                prepared = self._prepare_live_source(snapshot)
             loader = (
                 self.src.make_loader(snapshot)
                 if snapshot is not None
