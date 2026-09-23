@@ -127,10 +127,25 @@ def test_cli_sweep_apply_abandons_finalized_child_claim(tmp_path, monkeypatch, c
     tdir = _seed_project(tmp_path, monkeypatch)
     _child(tdir, "wt-child", "finalized")
     _owner_with_claim(tdir, "wt-owner", "m/p/wt-child")
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
     rc = m.cmd_claims(_sweep_args(apply=True))
     assert rc == 0
     owner = tracking.load_record(tdir / "wt-owner.yaml")
     assert owner.resources[0].state == "abandoned"
+    assert logged == [(("claim_abandoned",), {
+        "worktree_id": "wt-owner", "kind": "worktree", "ref": "m/p/wt-child"})]
+
+
+def test_cli_sweep_dry_run_does_not_log(tmp_path, monkeypatch, capfd):
+    tdir = _seed_project(tmp_path, monkeypatch)
+    _child(tdir, "wt-child", "finalized")
+    _owner_with_claim(tdir, "wt-owner", "m/p/wt-child")
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    rc = m.cmd_claims(_sweep_args(apply=False))
+    assert rc == 0
+    assert logged == []
 
 
 def test_cli_sweep_spares_orphaned_and_active_children(tmp_path, monkeypatch, capfd):
