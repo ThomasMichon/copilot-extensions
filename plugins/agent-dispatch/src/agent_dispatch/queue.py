@@ -65,6 +65,7 @@ from .queue_common import (  # noqa: F401 -- re-exported for existing call sites
     _COLUMNS,
     _CLAIM_REJECTION_EVENT_LIMIT,
     _MAX_AFFINITY,
+    _PROGRESS_PR_MAX,
     _TASK_BULK_SELECT,
     _TASK_SELECT,
     _check_expected_status,
@@ -120,7 +121,6 @@ from .routing_provenance import (  # noqa: F401 -- re-exported for existing call
 from .routing_provenance import (  # noqa: F401 -- re-exported for existing call sites/tests
     token as routing_token,
 )
-
 log = logging.getLogger("agent-dispatch.queue")
 
 
