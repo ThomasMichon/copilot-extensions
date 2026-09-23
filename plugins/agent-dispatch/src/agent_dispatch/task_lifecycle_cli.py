@@ -72,11 +72,12 @@ def _cmd_claim_status(args: argparse.Namespace) -> int:
     <task_id>`` for the ``dispatch-task:`` namespace agent-worktrees'
     claim-provider registry resolves. Returns the small envelope
     ``agent_worktrees.claim_providers`` documents -- ``exists`` (required),
-    plus ``state``/``detail`` when the task is known -- never raises even
-    when the coordinator itself is unreachable (degrades to
-    ``exists: False`` with a ``detail`` explaining why, which the registry's
-    own caller treats as a callback failure only on a non-JSON/non-zero
-    exit, not on this JSON envelope).
+    plus ``state``/``detail`` when the task is known. ``exists: False`` is
+    reserved for a confirmed 404 (no such task) -- any other coordinator
+    failure (auth, 5xx, unreachable) exits non-zero with a stderr message
+    instead, so the registry's own caller degrades to
+    ``{"available": false, ...}`` rather than treating an outage as a
+    confirmed absence.
     """
     from .client import DispatchError
 
@@ -86,7 +87,12 @@ def _cmd_claim_status(args: argparse.Namespace) -> int:
     except DispatchError as exc:
         if exc.status_code == 404:
             return _core()._emit({"exists": False, "detail": "no such task"})
-        return _core()._emit({"exists": False, "detail": f"HTTP {exc.status_code}: {exc.detail}"})
+        print(f"agent-dispatch: coordinator error HTTP {exc.status_code}: {exc.detail}",
+              file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"agent-dispatch: coordinator unreachable: {exc}", file=sys.stderr)
+        return 1
     return _core()._emit({"exists": True, "state": task.get("status"), "detail": task.get("owner") or ""})
 
 

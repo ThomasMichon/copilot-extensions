@@ -139,12 +139,22 @@ def _dispatch_assigned_tasks(machine: str, worktree_id: str, cwd: str) -> dict:
     exists to fix. Degrades identically to the prior ``shutil.which``
     behavior when no provider is registered (e.g. agent-dispatch not
     installed): ``{"available": False, "reason": "..."}``.
+
+    Unlike ``resolve_claim_status``'s own ``claim-status <ref>`` contract,
+    this drives a DIFFERENT subcommand shape (``worktree-status --machine
+    ... --worktree ...``), so ``machine``/``worktree_id`` -- persisted
+    identity values, not literal constants -- are each validated with
+    ``claim_providers.is_safe_argument`` before reaching a possibly
+    cmd.exe-wrapped argv (see that helper's own docstring for why).
     """
     from . import claim_providers
 
     command = claim_providers.resolve_provider_argv("dispatch-task", kind="status")
     if command is None:
         return {"available": False, "reason": "agent-dispatch not installed"}
+    for token in (machine, worktree_id):
+        if not claim_providers.is_safe_argument(token):
+            return {"available": False, "reason": f"unsafe argument for agent-dispatch: {token!r}"}
     try:
         proc = subprocess.run(
             [*command, "worktree-status", "--machine", machine, "--worktree", worktree_id],

@@ -77,12 +77,23 @@ def _run_codespaces(args: list[str], *, timeout: float = 300.0):
     tier-3 -> tier-8 upward call this effort exists to fix. Degrades
     identically to the prior ``shutil.which`` behavior when no provider is
     registered (e.g. agent-codespaces not installed): returns None.
+
+    Unlike ``resolve_claim_reclaim``'s own ``claim-reclaim <ref>`` contract,
+    ``args`` here drives a DIFFERENT subcommand shape (``delete <name>
+    --force``), so each non-flag argument (a persisted CodeSpace name) is
+    validated with ``claim_providers.is_safe_argument`` before it ever
+    reaches a possibly-cmd.exe-wrapped argv (see that helper's own
+    docstring for why).
     """
     from . import claim_providers
 
     command = claim_providers.resolve_provider_argv("codespace", kind="reclaim")
     if command is None:
         return None
+    for token in args:
+        if not token.startswith("-") and not claim_providers.is_safe_argument(token):
+            log.debug("agent-codespaces: refusing unsafe argument %r", token)
+            return None
     try:
         return subprocess.run(
             [*command, *args],

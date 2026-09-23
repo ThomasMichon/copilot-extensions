@@ -107,6 +107,22 @@ def test_inbound_handles_dispatch_error(monkeypatch):
     assert res["available"] is False and res["reason"] == "boom"
 
 
+def test_inbound_refuses_unsafe_identity(monkeypatch):
+    """A machine/worktree_id containing a cmd.exe metacharacter must never
+    reach the resolved argv (claim-provider-pattern effort review finding)."""
+    from agent_worktrees import claim_providers as cp
+    provider = cp.ClaimProviderManifest(
+        namespace="dispatch-task", plugin="agent-dispatch@marketplace",
+        plugin_root="/x", status_command=("agent-dispatch",))
+    monkeypatch.setattr(claim_providers, "discover_claim_providers",
+                        lambda *a, **k: ({"dispatch-task": provider}, ()))
+    called = {"n": 0}
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: called.__setitem__("n", 1))
+    res = m._dispatch_assigned_tasks("anomalous-potato&whoami", "wt-a", "")
+    assert res["available"] is False
+    assert called["n"] == 0
+
+
 # --- cmd_claims end-to-end --------------------------------------------------
 
 def _seed(tmp_path, monkeypatch, *, owner_ref=None, resources=None):

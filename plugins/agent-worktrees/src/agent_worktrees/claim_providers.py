@@ -422,6 +422,23 @@ def discover_claim_providers(
     return providers, tuple(findings)
 
 
+def is_safe_argument(value: str) -> bool:
+    """Whether ``value`` is safe to append to a :func:`resolve_provider_argv`
+    result before invoking it.
+
+    :func:`resolve_claim_status`/:func:`resolve_claim_reclaim` only ever pass
+    a ref's namespace/identifier to a callback after
+    :func:`split_namespaced_ref` validates both against the same safe-token
+    pattern -- a caller of :func:`resolve_provider_argv` (which drives a
+    DIFFERENT subcommand shape, e.g. a plain positional name or a
+    ``--machine``/``--worktree`` value) must apply this same check itself to
+    every untrusted value it appends, or a persisted value containing a
+    cmd.exe metacharacter could be interpreted as shell syntax when the
+    resolved command is a Windows ``.cmd``/``.bat`` shim (see
+    :func:`_windows_batch_argv`)."""
+    return bool(_SAFE_TOKEN_RE.match(value))
+
+
 def resolve_provider_argv(
     namespace: str,
     *,

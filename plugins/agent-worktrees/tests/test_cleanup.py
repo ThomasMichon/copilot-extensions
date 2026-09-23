@@ -144,6 +144,23 @@ def test_run_codespaces_uses_providers_reclaim_command(monkeypatch):
     assert captured["cmd"] == ["agent-codespaces", "delete", "cs-x", "--force"]
 
 
+def test_run_codespaces_refuses_unsafe_name(monkeypatch):
+    """A CodeSpace name containing a cmd.exe metacharacter must never reach
+    the resolved argv (claim-provider-pattern effort review finding)."""
+    from agent_worktrees import claim_providers
+    provider = claim_providers.ClaimProviderManifest(
+        namespace="codespace", plugin="agent-codespaces@marketplace",
+        plugin_root="/x", reclaim_command=("agent-codespaces",))
+    monkeypatch.setattr(claim_providers, "discover_claim_providers",
+                        lambda *a, **k: ({"codespace": provider}, ()))
+    called = {"n": 0}
+    monkeypatch.setattr(cleanup.subprocess, "run",
+                        lambda *a, **k: called.__setitem__("n", 1))
+    proc = cleanup._run_codespaces(["delete", "cs-x&whoami", "--force"])
+    assert proc is None
+    assert called["n"] == 0
+
+
 # ── reclaim_worktree ─────────────────────────────────────────────────────────
 
 def _repo(anchor="D:/anchor"):

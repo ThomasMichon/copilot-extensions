@@ -6,13 +6,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import types
 
 from agent_containers import claim_provider_cli as cpc
 from agent_containers import lifecycle
 
 
+def _proc(returncode=0, stdout="", stderr=""):
+    return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
 def test_claim_status_exists(monkeypatch, capsys):
-    monkeypatch.setattr(lifecycle, "inspect_state", lambda name: "running")
+    monkeypatch.setattr(lifecycle, "_docker", lambda *a, **k: _proc(0, stdout="running\n"))
     rc = cpc.cmd_claim_status(argparse.Namespace(name="c-a"))
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
@@ -20,11 +25,33 @@ def test_claim_status_exists(monkeypatch, capsys):
 
 
 def test_claim_status_absent(monkeypatch, capsys):
-    monkeypatch.setattr(lifecycle, "inspect_state", lambda name: None)
+    monkeypatch.setattr(
+        lifecycle, "_docker",
+        lambda *a, **k: _proc(1, stderr="Error: No such container: c-missing"))
     rc = cpc.cmd_claim_status(argparse.Namespace(name="c-missing"))
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out == {"exists": False}
+
+
+def test_claim_status_backend_failure_is_not_false_absence(monkeypatch, capsys):
+    """A real Docker backend error (daemon unreachable, permission denied,
+    ...) must exit non-zero -- never a false ``exists: false``."""
+    monkeypatch.setattr(
+        lifecycle, "_docker",
+        lambda *a, **k: _proc(1, stderr="Cannot connect to the Docker daemon"))
+    rc = cpc.cmd_claim_status(argparse.Namespace(name="c-a"))
+    assert rc != 0
+    assert capsys.readouterr().out == ""
+
+
+def test_claim_status_docker_unavailable_is_not_false_absence(monkeypatch, capsys):
+    def _boom(*a, **k):
+        raise RuntimeError("docker CLI not found on PATH")
+    monkeypatch.setattr(lifecycle, "_docker", _boom)
+    rc = cpc.cmd_claim_status(argparse.Namespace(name="c-a"))
+    assert rc != 0
+    assert capsys.readouterr().out == ""
 
 
 def test_claim_reclaim_dry_run_never_removes(monkeypatch, capsys):

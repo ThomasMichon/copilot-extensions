@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 from . import lifecycle
 
@@ -53,16 +54,28 @@ def cmd_claim_status(args: argparse.Namespace) -> int:
     """``claim-status <name>``: does container NAME exist?
 
     Returns the small envelope ``agent_worktrees.claim_providers`` documents
-    -- ``exists`` (required) plus ``state`` when known. Never raises."""
+    -- ``exists`` (required) plus ``state`` when known. ``lifecycle.
+    inspect_state`` collapses every failure (missing container, unreachable
+    Docker daemon, permission error) to the same ``None``, which would make
+    an unrelated backend outage look like a confirmed absence -- so this
+    calls ``docker inspect`` directly and inspects ``stderr`` to distinguish
+    a genuine "no such container" from a real backend error, which exits
+    non-zero (a callback failure, degrading to ``{"available": false, ...}``
+    at the registry) instead of a false ``exists: false``."""
     try:
-        state = lifecycle.inspect_state(args.name)
+        proc = lifecycle._docker(["inspect", "-f", "{{.State.Status}}", args.name])
     except Exception as exc:
-        print(json.dumps({"exists": False, "detail": f"inspect failed: {exc}"}))
-        return 0
-    if state is None:
-        print(json.dumps({"exists": False}))
-        return 0
-    print(json.dumps({"exists": True, "state": state}))
+        print(f"docker inspect failed: {exc}", file=sys.stderr)
+        return 1
+    if proc.returncode != 0:
+        stderr_low = (proc.stderr or "").lower()
+        if "no such container" in stderr_low or "no such object" in stderr_low:
+            print(json.dumps({"exists": False}))
+            return 0
+        print(f"docker inspect {args.name} failed: "
+              f"{(proc.stderr or proc.stdout).strip()}", file=sys.stderr)
+        return 1
+    print(json.dumps({"exists": True, "state": proc.stdout.strip().lower() or None}))
     return 0
 
 
