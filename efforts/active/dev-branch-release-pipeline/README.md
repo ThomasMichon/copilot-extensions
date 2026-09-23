@@ -248,22 +248,26 @@ Round 2 (operator's response to that evaluation):
       plugin content with a locally-generated preview; auto-expires or is
       superseded by the next real release pull; the enabling agent holds a
       claim and is responsible for tidying it up when done.
-  - **Shipped:** `tools/dev_slot.py` (`install` / `status` / `clean`).
-    `install` requires an explicit `--yes`, backs up the real installed
-    payload before overwriting it, and writes a `.dev-slot-claim.json`
-    naming the claimant, source commit, and the exact cleanup command.
-    `clean` restores the backup and removes the claim. No auto-expiry
-    process exists (there's nothing to run one) — per the operator's
-    request, the installing agent/operator owns running `clean` explicitly;
-    a *real* `agent-worktrees update`/`copilot plugin update` will still
-    just overwrite the dev-slot content the normal way, so staleness can't
-    persist past the next real release either way.
-  - **Deliberately not exercised against this machine's real
-    `~/.copilot/installed-plugins`** in this session — mutating a live,
-    currently-loaded plugin tree from an automated session is exactly the
-    kind of destructive action this effort's own design principles (and the
-    harness's safety rails) call for a human in the loop on. Fully tested
-    against fake target roots instead (13 tests).
+  - **Superseded by a concurrently-merged, better-designed pattern —
+    withdrawn, not shipped.** Mid-session, while diagnosing an unrelated CI
+    failure, discovered `ThomasMichon/copilot-extensions#3376` ("mutable
+    dev slot") had just landed to `main`: a first-class `versions/dev/`
+    runtime slot per plugin, rebuilt in place, gated by a
+    `dev-claim.json` sidecar (schema `copilot-extensions.dev-slot-claim`,
+    owner = absolute worktree path, no TTL, released explicitly) —
+    integrated directly into `libs/versioned-runtime`'s existing
+    immutable-slot machinery. See `docs/patterns/mutable-dev-slot.md` and
+    `efforts/active/mutable-dev-slot/README.md`. This is exactly this
+    effort's Phase 1 item, done more correctly (a real runtime-slot
+    primitive, not a from-scratch installed-plugins-directory copy-and-claim
+    hack) — and it predates my draft by the same session's timestamp.
+    **Withdrew `tools/dev_slot.py` before merging** (removed from PR #3380
+    prior to landing); this Plan item is resolved by cross-referencing that
+    pattern rather than building a parallel one. `tools/preview_release.py`
+    is kept — it answers a different question (what would this plugin's
+    *promoted* payload + version look like) than mutable-dev-slot (iterate
+    against the currently-deployed CLI with live, uncommitted code), so the
+    two are complementary, not duplicative.
 - [ ] _(agent-recommended; not explicitly re-confirmed by the operator)_
       Confirm Copilot CLI's actual update-detection behavior empirically
       (version-string diff only, no semver range awareness) — do not assume;
@@ -473,3 +477,28 @@ generator contract details here or in a linked sub-doc._
   machine's own real `~/.copilot/installed-plugins` — too risky to mutate a
   live, currently-loaded plugin tree from within this session. Fully covered
   by tests against fake target roots instead.
+
+### 2026-09-23 — Superseded discovery: withdrew tools/dev_slot.py
+- While diagnosing a CI "guards + lint" failure on PR #3380 (traced to an
+  unrelated, pre-existing baseline break on `main` — see below — not caused
+  by this effort), found `ThomasMichon/copilot-extensions#3376` had just
+  merged the "mutable dev slot" pattern: a proper `versions/dev/`
+  runtime-slot primitive with claim-file GC protection, built into
+  `libs/versioned-runtime` itself. This resolves the same Phase 1 item my
+  `tools/dev_slot.py` was built for, more correctly. Removed
+  `tools/dev_slot.py` + its tests from PR #3380 before landing; kept
+  `tools/preview_release.py` (a distinct, complementary concern). Recovered
+  cleanly from a self-inflicted `git stash pop` mishap while investigating
+  (accidentally popped an unrelated stash entry belonging to a different
+  worktree, sharing this repo's stash ref; `git reset --hard HEAD` restored
+  a clean state with no damage to that other worktree's stash).
+- **Separately confirmed the CI failure itself is pre-existing on `main`,
+  not introduced by this effort's PRs**: `check-version-consistency.py`
+  (worktree-manager version skew) and `check-module-size.py` (several
+  `versioned_runtime.py` copies now over their grandfathered line-count
+  ceiling — plausibly from #3376's own +174-line change) both fail
+  identically against `origin/main` directly, with none of this effort's
+  files in the diff. Not fixing this here (out of scope, unrelated,
+  someone else's baseline to repair) — but it currently blocks *any* PR's
+  "guards + lint" required check from going green, including PR #3380.
+  Flagging for operator awareness rather than merging around it.
