@@ -150,13 +150,54 @@ files in this repo.**
    repo template is missing, run `efforts-setup`; that template is scaffolded
    from this skill's `assets/TEMPLATE.md`.
 4. **Fill the header + Guiding Intent + Request** — capture the operator's ask
-   **verbatim**; don't paraphrase the premise away.
+   **verbatim**; don't paraphrase the premise away. Then **validate the
+   capture** before moving on (see *Validate the capture* below) — this
+   requirement applies here and at every later rewrite.
 5. **Catalog participants.** If the work spans machines/CodeSpaces/containers,
    fill the `## Participants` section (binding + how each is reached, per the
    addendum).
 6. **Track it.** If the work warrants tracking, open an umbrella issue and
    cross-link it in the header.
 7. **Commit** the effort file on the working branch.
+
+## Validate the capture, then demarcate enhancements
+
+Every write to an effort's `README.md` that captures or updates operator
+intent — at creation, and at any later point where new operator guidance
+lands (a follow-up round, a resumed session, a direction change) — carries an
+explicit obligation: **before treating the write as done, re-read it back
+against the operator's actual words and confirm nothing was paraphrased away,
+softened, or silently added.** A captured effort that quietly drifts from
+what the operator actually said is worse than no capture at all, because it
+reads as authoritative.
+
+- **Validate against the source, within reason.** Compare the README's
+  Request/Guiding Intent/Plan against the operator's literal input for the
+  round just captured. Flag it back to the operator, in the same turn, when
+  you: omitted a stated constraint, softened a firm decision into an open
+  question, or added scope the operator didn't ask for.
+- **Demarcate agent-recommended enhancements.** Anything in the Plan,
+  Validation Plan, or Context that originated from the agent's own analysis
+  rather than the operator's stated request must be visibly marked as such —
+  an inline `_(agent-recommended)_` tag, or a dedicated subsection — so a
+  later reader (the operator, a reviewer, a resuming agent) can tell "the
+  operator asked for this" from "the agent proposed this and it was
+  accepted." Don't let recommended and requested content blend into one
+  undifferentiated list.
+- **Accumulate, then summarize.** A short back-and-forth (a clarifying
+  question, one follow-up round) can be captured verbatim inline in
+  **Request**, appended in sequence. Once operator input spans several rounds
+  or the verbatim text would dominate the README, stop accumulating inline:
+  write a **gist** in Request/Context (the settled premise, in your own
+  words, clearly labeled as a summary) and move the full back-and-forth to a
+  sidecar file.
+- **The sidecar: `<effort-folder>/inception-transcript.md`.** When the
+  verbatim record no longer belongs inline, create this file holding the full
+  operator-agent exchange that produced the effort (or a later major
+  direction change), and link it from the README's Request/Context section
+  (e.g. "Full inception exchange: `inception-transcript.md`"). This keeps the
+  README a navigable map — its own stated purpose — without losing the
+  authoritative record of what was actually said.
 
 ## Plan an effort
 
@@ -228,7 +269,10 @@ The README is the shared contract — keep it **ahead of the conversation**. But
   need pushing anyway**. Routine checkbox ticks can ride along with the next
   substantive change.
 - **Annotate as you go:** mark Plan items complete, adjust pending designs,
-  re-prioritize on feedback, and journal decisions/blockers/dispatches.
+  re-prioritize on feedback, and journal decisions/blockers/dispatches. A
+  feedback round that changes the Request/Plan is itself a rewrite —
+  re-apply *Validate the capture, then demarcate enhancements* above before
+  moving on.
 - **By code-complete**, the README reflects the coding-done state and, at most,
   names the *next* effort that carries the work forward (deploy / smoke-test /
   delegation) — it does not try to own that next stretch.
@@ -374,6 +418,15 @@ change that realizes it.
 - ❌ New planning docs outside `efforts/` for fresh planning work → start an
   effort.
 - ❌ Paraphrasing the premise instead of capturing the **Request** verbatim.
+- ❌ Writing or updating an effort README from operator input without
+  validating the capture against the operator's actual words before moving
+  on — silently dropping a constraint, softening a decision into an open
+  question, or adding unrequested scope.
+- ❌ Letting agent-recommended Plan/Validation Plan/Context items blend in,
+  undemarcated, with operator-requested ones.
+- ❌ Letting a multi-round verbatim Request balloon inline instead of
+  summarizing the gist and moving the full exchange to
+  `inception-transcript.md`.
 - ❌ Letting the conversation, not the README, hold effort state.
 - ❌ Clearing `follow_up` manually while an open effort remains bound, or
   dropping the binding without verified completion or a named transfer.

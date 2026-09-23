@@ -131,9 +131,55 @@ rewrite)._
 > Sounds like we roughly agree on the plan. I like your improvements and
 > notes. Let's make an effort, and start figuring out the sequencing.
 
-Original framing (round 1) is preserved in the umbrella issue
-(ThomasMichon/copilot-extensions#3336) and the session that opened this
-effort; not duplicated here to keep this file navigable.
+Original framing (round 1), captured verbatim below since it was previously
+only paraphrased in the umbrella issue:
+
+> I would like to figure out how to improve the release process for
+> copilot-extensions. It's now heavily used by team members in my org. I
+> can't afford to let a breaking change quickly distribute to team members,
+> who don't auto-update as frequently, and break their workflows.
+> Unfortunately, Copilot doesn't have a release-based plugin marketplace or
+> even a centralized publishing system: you point at a Git repo, and it only
+> pulls from main, checking for version bumps. Right now, PR authors to
+> copilot-extensions must pre-bump, hope the CI build is good, and then
+> merge. There's no way to do a final validation pass before a release. And
+> the last thing I want is checkins going into main, getting built, and
+> *then* bumping the build. So I am trying to figure out a better way to do
+> this.
+>
+> So, my idea: treat `main` in copilot-extensions as the "release" train, and
+> target all development to a new branch. We'll check in continuously to the
+> dev branch, but we'll use a monorepo versioning system like beachball to
+> mark PRs as providing major, minor, patch, or dev increments to target
+> packages. After a merge, and on a batched cycle, a CI pipeline will
+> validate the current state of the dev branch, accumulate the version
+> bumps, and then prepare a final commit to main, bumping all versions,
+> vendoring code, and ensuring that `main` represents the proper "release
+> snapshot" for consumption by copilot. In "dev", then, we can engage in DRY
+> by avoiding copies of vendoring code, providing ref links and pointers,
+> generator instructions, etc. and generally making it cleaner as a dev
+> environment. We'll still need a way to build, test, and locally preview
+> changes, but PRs should be easier since they won't need to deal with
+> precise version bumps themselves, or pre-copying vendored code. We still
+> can't pre-compile binaries or other heavy dependencies, but it will save us
+> a lot of energy. CONTRIBUTING.MD and copilot-extensions-harness will get
+> more complicated, as they will need to clarify the relationship and the
+> process, and explain to agents that after they merge a change to dev,
+> there's a wait time before the plugin is available locally. We'll have the
+> "preview a release" tool available locally, so we could find a way to allow
+> an impatient agent to run that, and then overwrite the local copilot's
+> installed-plugins content with a dev version, until such time as we ran the
+> normal auto-updater (or we offer a `dev` version-slot and config switch,
+> formally allowing inline replacement for at least the tool/service side of
+> our ecosystem).
+
+The agent's round-1 evaluation (strengths, risks, and the six numbered
+recommendations the operator responds to below) is *not* reproduced
+verbatim here — it is agent analysis, not operator input; its substance is
+folded into Context/Plan below and demarcated there as agent-recommended
+where it originated the idea rather than the operator.
+
+Round 2 (operator's response to that evaluation):
 
 ## Plan
 
@@ -160,7 +206,8 @@ effort; not duplicated here to keep this file navigable.
       plugin content with a locally-generated preview; auto-expires or is
       superseded by the next real release pull; the enabling agent holds a
       claim and is responsible for tidying it up when done.
-- [ ] Confirm Copilot CLI's actual update-detection behavior empirically
+- [ ] _(agent-recommended; not explicitly re-confirmed by the operator)_
+      Confirm Copilot CLI's actual update-detection behavior empirically
       (version-string diff only, no semver range awareness) — do not assume;
       verify against a controlled scratch bump.
 - [ ] Draft CONTRIBUTING.md / AGENTS.md rewrite content in-repo as a doc
@@ -188,10 +235,9 @@ effort; not duplicated here to keep this file navigable.
       commit" step (never merge `dev` into `main`).
 - [ ] Tag every generated `main` commit; stamp traceability metadata (the
       `dev` commit range / changefiles consumed).
-- [ ] Trigger: CI success on `dev` (not a schedule), per the operator's
-      stated expectation — confirm this is achievable without triggering a
-      release on every single small merge, or decide on a lightweight batching
-      rule if not.
+- [ ] Trigger: **decided** — CI success on `dev`, not a schedule (the
+      operator's stated expectation, not an open question). Implement
+      promotion as triggered directly by a green `dev` CI run.
 - [ ] Gate promotion behind admin-escalation initially (maintainers blocked
       from ordinary self-merge to `main`); document the criteria for walking
       this back over time.
@@ -199,11 +245,14 @@ effort; not duplicated here to keep this file navigable.
 ### Phase 4 — Rollback & hotfix procedures
 - [ ] Implement the CI guard against producing a non-incremental (out-of-order)
       `main` update after a manual rollback.
+- [ ] Add an explicit **pause-CI** step to the rollback procedure: the
+      promotion pipeline must be paused before a rollback commit lands, not
+      just guarded after the fact, per the operator's stated rollback flow.
 - [ ] Document and rehearse the hotfix flow: fork last-known-good `dev`, run
       the snapshot tool, hot-patch `main` directly, cherry-pick the fix back
       to `dev`.
-- [ ] Document the rollback flow: `git revert` the generated commit + re-tag,
-      never force-push.
+- [ ] Document the rollback flow: pause CI, `git revert` the generated commit
+      + re-tag, never force-push, then resume CI.
 
 ### Phase 5 — Cutover
 - [ ] Confirm the auto-updater coverage fix (Phase 1) is live before or with
@@ -217,8 +266,10 @@ effort; not duplicated here to keep this file navigable.
 ### Phase 6 — Maturity walk-back
 - [ ] Define success criteria for relaxing the admin-escalation gate on
       promotion (e.g. N clean cycles, zero rollbacks in M weeks).
-- [ ] Revisit whether promotion should stay CI-triggered-on-success or adopt
-      lightweight batching once volume is understood.
+- [ ] _(agent-recommended)_ Revisit whether CI-triggered-on-every-green-build
+      promotion remains workable once volume is understood, and consider a
+      lightweight batching rule only if it proves necessary in practice — the
+      decided default (Phase 3) is untriggered-by-schedule.
 
 ## Validation Plan
 
@@ -253,3 +304,22 @@ generator contract details here or in a linked sub-doc._
   AGENTS.md § Version Bump) to ground Phase 2's retirement step.
 - Next: begin Phase 1 — tool evaluation (beachball vs. alternatives) and the
   generator's identity-case proof against current `main`.
+
+### 2026-09-22 — Capture correction
+- Operator asked for a capture-validation pass; found and fixed real gaps:
+  round-1 Request was only paraphrased in the umbrella issue, not preserved
+  verbatim in this file — now quoted verbatim above. The rollback flow was
+  missing the operator's explicit "pause CI" step (Phase 4). The Phase 3/6
+  promotion trigger had been softened into an open question when the
+  operator stated it as a decision (CI-success-triggered, not scheduled) —
+  corrected and demarcated the remaining open follow-up as
+  agent-recommended.
+- Also demarcated the one Plan item (Copilot's update-detection semantics)
+  that originated from the agent's own round-1 analysis and was never
+  explicitly re-confirmed by the operator, per the same request.
+- Prompted a durable process fix: updated the `planning-efforts` skill
+  itself (in this repo, `plugins/efforts/skills/planning-efforts/SKILL.md`)
+  to require validating an effort capture against the operator's actual
+  words after every README write, demarcating agent-recommended content, and
+  introducing an `inception-transcript.md` sidecar for accumulated
+  multi-round verbatim input once it would otherwise dominate the README.
