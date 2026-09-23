@@ -1750,3 +1750,35 @@ independently unit-tested) -- pursuing them fully would have meant
 chasing a moving target indefinitely on a busy, shared, concurrently-
 updating machine rather than landing a validated, scoped fix.
 
+**Documentation impact:** no user-facing/authoritative documentation
+required updating -- `DEFAULT_TTL_SECONDS`/`max_refresh_per_sweep` are
+internal tuning constants with no public contract change (the wire
+protocol, cache schema, and every consumer-facing API are unchanged);
+this effort's own README (here) is the authoritative record of the
+investigation and fix, per this effort's own established convention for
+this kind of tuning change (see the 2026-09-22 `REQUEST_DEADLINE_S`
+entry above, which took the identical position).
+
+### 2026-09-23 — PR #3348 review: sweep cap could starve on a persistently-failing entry
+Copilot's review of the sweep-cap PR caught a real correctness bug the
+cap introduced: `computed_at` only advances on a *successful* refresh,
+so a chronically-broken worktree (a deleted worktree still tracked, a
+persistent git/permissions failure, etc.) would remain "the stalest"
+entry on every subsequent sweep tick and monopolize every
+`max_refresh_per_sweep` slot forever -- directly contradicting the
+cap's own claim (in its docstring) that excess demand is served on
+later ticks. In the worst case (`max_refresh_per_sweep=1` and one
+permanently-failing entry), every *other* demanded worktree would never
+be refreshed again for as long as the daemon runs.
+
+Fixed by tracking a separate `_last_attempted` timestamp, updated on
+every sweep attempt regardless of outcome (success or exception), and
+using it -- not bare `computed_at` -- for the stalest-first priority
+ordering. A failing entry now rotates to the back of the queue exactly
+like a succeeding one, so demand beyond capacity is served round-robin
+across attempts instead of jamming on one broken worktree. Added
+`test_sweep_cap_does_not_let_a_persistently_failing_entry_starve_others`
+(cap=1, a permanently-failing entry demanded first, two healthy entries
+after -- confirms all three get attempted across three sweep ticks; the
+bug would have re-selected the failing entry every single tick). Full
+targeted run: 25 `worktree_status_cache` tests pass (24 prior + 1 new).
