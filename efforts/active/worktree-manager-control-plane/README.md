@@ -374,18 +374,18 @@ each checkbox below.
       sys.path injection narrowed to the libs still needed for the CLI-root
       boundary itself (`plugin-resolve`, `config-migrate`,
       `single-instance-lease`).
-- [ ] **`profiles` moves to worktree-manager as a full relocation, not a
-      vendored copy — see Phase 3e (#3390).** The inventory found
-      `profiles`' actual call sites (`engine_profiles_view.py`,
-      `profiles_io.py`) never touch agent-worktrees' own runtime state —
-      every function takes a caller-supplied config path and returns a
-      plain dataclass (`TargetSel`) or primitive, and it's also called live
-      during interactive menu rendering (wrong shape and too frequent for a
-      subprocess round-trip regardless). Originally scoped here as a
-      #3359-style vendored-lib fix; operator direction revised this to a
-      full ownership move (terminal handling of every kind is leaving
-      agent-worktrees, matching the Mux/AHP precedent) — tracked separately
-      as its own phase since it also touches agent-worktrees' own
+- [x] **`profiles` moves to worktree-manager as a full relocation, not a
+      vendored copy — see Phase 3e (#3390).** Step 1 landed: the model
+      (`TargetSel` + load/save/default-selection) relocated verbatim to
+      `worktree_manager.terminal_profiles`;
+      `profiles_io.py`/`engine_profiles_view.py` import it directly, and
+      `production_picker/profiles.py`'s proxy shim is deleted. Originally
+      scoped here as a #3359-style vendored-lib fix; operator direction
+      revised this to a full ownership move (terminal handling of every kind
+      is leaving agent-worktrees, matching the Mux/AHP precedent) — the
+      remaining steps (registry-read boundary, fragment-generation core,
+      CLI surface, `install.ps1` repoint, clean cutover) continue under
+      Phase 3e since they also touch agent-worktrees' own
       `profiles`/`terminal-fragment`/`repair` CLI verbs, not just this
       Picker's read path.
 - [ ] **Design + convert the low-frequency, one-shot CLI-root reads.**
@@ -460,12 +460,14 @@ call site.
       `install.ps1` carries its own PowerShell terminal-integration
       functions calling into the Python CLI. `profiles.py` itself (235
       lines) has no such coupling and is a clean, mechanical move.
-- [ ] **Step 1 — relocate `profiles.py` verbatim into worktree-manager**
+- [x] **Step 1 — relocate `profiles.py` verbatim into worktree-manager**
       (an owned module, not a vendored copy); update worktree-manager's
       `profiles_io.py`/`engine_profiles_view.py` to import it directly,
       closing out Phase 3d's `profiles` checkbox. agent-worktrees keeps its
       own copy + CLI verbs working during this step (two copies briefly,
-      matching Phase 3b's own transitional shape).
+      matching Phase 3b's own transitional shape). Landed as
+      `worktree_manager.terminal_profiles`; full production_picker suite
+      green (658 passed, same 3 pre-existing unrelated failures as #3359).
 - [ ] **Step 2 — resolve the registry-read boundary** `terminal_fragment.py`'s
       `collect_local_projects` needs (new agent-worktrees `--json` verb vs.
       a confirmed-stable file contract worktree-manager reads directly) —
@@ -608,6 +610,18 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-23** — Landed Phase 3e Step 1 (`profiles.py` relocation):
+  `worktree_manager.terminal_profiles` (verbatim copy of
+  `agent_worktrees.profiles`, no behavior change — same
+  `~/.<project>/config.yaml` `terminal_profiles:` key/shape); repointed
+  `profiles_io.py`/`engine_profiles_view.py` to import it directly; deleted
+  `production_picker/profiles.py`'s `engine_module("profiles")` proxy shim,
+  closing Phase 3d's `profiles` checkbox. `test_profiles_io.py` repointed to
+  the same module. agent-worktrees' own `profiles`/`terminal-fragment`/
+  `repair` CLI verbs and `profiles.py` copy are untouched (kept working per
+  the plan's transitional shape). Full `production_picker` suite green (658
+  passed, same 3 pre-existing unrelated Windows path-validation failures as
+  #3359). worktree-manager bumped `0.1.0-dev69` -> `dev70`.
 - **2026-09-23** — Wrote Phase 3e's migration plan
   ([`phase-3e-terminal-profile-relocation.md`](phase-3e-terminal-profile-relocation.md)),
   closing that phase's first checkbox. Evidence-gathering past the Picker's
