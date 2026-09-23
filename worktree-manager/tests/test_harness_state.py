@@ -48,6 +48,20 @@ def _make_home(tmp: Path) -> Path:
     }))
     (checkout / ".agent-worktrees").mkdir()
     (checkout / ".agent-worktrees" / "config.yaml").write_text("pr:\n  enabled: true\n")
+    (checkout / ".agent-worktrees" / "machines.yaml").write_text(
+        "machines:\n"
+        "  book2:\n"
+        "    display_name: tmichon-book2\n"
+        "    hostname: book2.local\n"
+        "    ssh:\n"
+        "      ready: true\n"
+        "      environments:\n"
+        "        - {name: windows, alias: book2-win, shell: pwsh}\n"
+        "  dev6:\n"
+        "    display_name: tmichon-dev6\n"
+        "    ssh:\n"
+        "      ready: false\n"
+    )
     win = str(checkout).replace("\\", "\\\\")
     (awt / "repos.yaml").write_text(
         "schema_version: 1\n"
@@ -70,6 +84,9 @@ def _make_home(tmp: Path) -> Path:
         "  dotfiles:\n"
         "    config_dir: \"~/.dotfiles\"\n"
         "    expose_agent: true\n"
+        "    wsl:\n"
+        "      distro: Ubuntu\n"
+        "      state: Running\n"
     )
     # per-project harness config (knowledge_repo + profiles)
     proj_cfg = tmp / ".dotfiles"
@@ -120,6 +137,26 @@ def test_build_projects_joins_config_and_enablement(tmp_path: Path):
     assert p.profiles == 2
     assert p.repo is not None and p.repo.klass == "worktree"
     assert set(e.split("@")[0] for e in p.enabled_plugins) == {"mail", "teams"}
+
+
+def test_build_projects_reads_wsl_and_roster(tmp_path: Path):
+    """Phase 3e Step 2 (copilot-extensions#3390): the roster/wsl fields
+    ``terminal_fragment.collect_local_projects`` needs, joined the same way
+    every other project indicator already is."""
+    home = _make_home(tmp_path)
+    p = build_projects(home)[0]
+    assert p.wsl_distro == "Ubuntu"
+    assert p.wsl_state == "Running"
+    roster = {m.key: m for m in p.roster}
+    assert set(roster) == {"book2", "dev6"}
+    book2 = roster["book2"]
+    assert book2.display_name == "tmichon-book2"
+    assert book2.hostname == "book2.local"
+    assert book2.ssh_ready is True
+    assert [e.alias for e in book2.environments] == ["book2-win"]
+    assert book2.identities() == {"book2", "tmichon-book2", "book2.local", "book2-win"}
+    assert roster["dev6"].ssh_ready is False
+    assert roster["dev6"].environments == ()
 
 
 def test_repo_plugin_enablement_uses_last_file_wins(tmp_path: Path):
