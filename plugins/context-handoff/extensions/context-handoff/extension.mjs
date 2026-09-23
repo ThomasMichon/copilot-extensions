@@ -1389,7 +1389,12 @@ session.on("session.usage_info", async (event) => {
   state.lastUtilization = d.tokenLimit > 0 ? d.currentTokens / d.tokenLimit : 0;
   const usage = formatContextUsage(d.currentTokens, d.tokenLimit);
   await handoffConfigPromise;
-  if (!automaticHandoffEnabled(handoffConfig.mode)) {
+  // Context-pressure warnings/nudges are informational only -- they belong
+  // to "manual-only" (mode !== "off"), not "auto" (mode === "auto"). Only
+  // the force-tier's own AUTOMATIC trigger (below) stays gated on
+  // automaticHandoffEnabled -- restoring these warnings must never silently
+  // re-enable live cutover.
+  if (!manualHandoffEnabled(handoffConfig.mode)) {
     persistState();
     return;
   }
@@ -1417,8 +1422,12 @@ session.on("session.usage_info", async (event) => {
   // Force tier: crossing it auto-drafts/stores/triggers a handoff and blocks
   // further mutating tool calls, without waiting for the agent. Checked first
   // and sets handoffGenerated so the soft/hard branches below (which guard on
-  // !state.handoffGenerated) naturally stand down once forced.
-  if (pressure.force && !state.forceTriggered && !state.handoffGenerated) {
+  // !state.handoffGenerated) naturally stand down once forced. Gated
+  // separately on automaticHandoffEnabled (mode === "auto" only): under
+  // "manual-only", context pressure still WARNS (below) but never forces a
+  // handoff or blocks tools on its own.
+  if (automaticHandoffEnabled(handoffConfig.mode) &&
+      pressure.force && !state.forceTriggered && !state.handoffGenerated) {
     state.forceTriggered = true;
     state.blockMutatingTools = true;
     state.handoffGenerated = true;

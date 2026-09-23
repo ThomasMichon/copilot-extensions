@@ -60,8 +60,8 @@
     },
     {
       "name": "context-handoff",
-      "description": "Context window monitoring and session handoff - a session-start continuity kernel plus a Copilot CLI extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and always makes a manual continuation available; automatic nudging and live pending-handoff pickup signaling are opt-in (mode: auto) and never perform process management",
-      "version": "0.1.1-dev47",
+      "description": "Context window monitoring and session handoff - a session-start continuity kernel plus a Copilot CLI extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and always makes a manual continuation available; soft/hard usage warnings fire under the default manual-only mode too, but the force tier's automatic trigger and live pending-handoff pickup signaling are opt-in (mode: auto) and never perform process management",
+      "version": "0.1.1-dev48",
       "source": "plugins/context-handoff"
     },
     {

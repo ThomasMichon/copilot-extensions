@@ -262,16 +262,17 @@ Its contract is:
 
 ## Mode gate
 
-`.context-handoff/config.yaml`'s `mode` defaults to `manual-only`: the
-automatic pressure nudges, the force-tier auto-trigger, and step 3 above
-(the three live-cutover triggers -- the worktree-record note, worktree-
-visible pending-handoff state, and the agent-bridge ping) are all opt-in,
-requiring `mode: auto` in that file (repo-level) or
-`~/.context-handoff/config.yaml` (user-level). Under the default,
-`trigger_handoff` still fully composes, stores, and
-seeds the handoff -- it just never wires up automatic pickup, so the
-operator/agent must consume it manually. Do not assume live cutover
-happens unless you have confirmed `mode: auto` is set.
+`.context-handoff/config.yaml`'s `mode` defaults to `manual-only`: soft/hard
+context-pressure warnings and nudges fire under this default (any mode other
+than `off`). The force-tier auto-trigger and step 3 above (the three
+live-cutover triggers -- the worktree-record note, worktree-visible
+pending-handoff state, and the agent-bridge ping) remain opt-in, requiring
+`mode: auto` in that file (repo-level) or `~/.context-handoff/config.yaml`
+(user-level). Under the default, `trigger_handoff` still fully composes,
+stores, and seeds the handoff -- it just never auto-forces one or wires up
+automatic pickup, so the operator/agent must trigger and consume it
+manually. Do not assume live cutover happens unless you have confirmed
+`mode: auto` is set.
 
 ## Resume flow
 

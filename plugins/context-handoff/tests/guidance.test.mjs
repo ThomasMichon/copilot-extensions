@@ -25,7 +25,7 @@ test("handoff mechanism awareness carries perpetuation + fresh-session awareness
   assert.match(HANDOFF_MECHANISM_AWARENESS, /available from turn one/);
   assert.match(HANDOFF_MECHANISM_AWARENESS, /whether or not this session began from a handoff/);
   assert.match(HANDOFF_MECHANISM_AWARENESS, /never a reason to truncate diligence/);
-  assert.match(HANDOFF_MECHANISM_AWARENESS, /forces one before auto-compaction/);
+  assert.match(HANDOFF_MECHANISM_AWARENESS, /forces a handoff before auto-compaction/);
   assert.match(HANDOFF_MECHANISM_AWARENESS, /context-handoff skill/);
   assert.match(HANDOFF_MECHANISM_AWARENESS, /chain many handoffs in\s*\n?\s*succession/);
 });

@@ -14,7 +14,7 @@ This plugin ships four cooperating payload pieces:
 | Piece | Type | Role |
 |-------|------|------|
 | **continuity guidance hook** | Declarative `sessionStart` hook | Writes the full owner-marked continuity contract to the exact session folder and emits only `{}` |
-| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard/**force** thresholds (55% / 70% / 79% by default) with optional repository overrides, delivered on the next idle -- the automatic nudges, the force tier's auto-draft/store/trigger + mutating-tool-call denial, and `trigger_handoff`'s live-cutover signaling are all opt-in (`mode: auto` in `.context-handoff/config.yaml`; the default, `manual-only`, always still stores/seeds a handoff on request, see § Thresholds); provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
+| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard/**force** thresholds (55% / 70% / 79% by default) with optional repository overrides, delivered on the next idle -- soft/hard warnings fire under the default `manual-only` mode too (any mode other than `off`); only the force tier's auto-draft/store/trigger + mutating-tool-call denial, and `trigger_handoff`'s live-cutover signaling, are opt-in (`mode: auto` in `.context-handoff/config.yaml`; the default, `manual-only`, always still stores/seeds a handoff on request, see § Thresholds); provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
 | **context-handoff skill** | Skill | Owns the `/handoff` workflow: compose the continuation prompt from the extension's structured facts and the agent's live context, decide when to store it, and decide whether to ask or trigger |
 | **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, a safe `retry-cutover` remediation for a superseded session, and a lock/rebase-safe `sync-worktree` (shared with the force-tier path). Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
 
@@ -22,8 +22,8 @@ This plugin ships four cooperating payload pieces:
 
 `context-handoff` owns **continuity policy and baton storage**:
 
-1. detect context pressure (opt-in automatic nudging; always available on
-   request),
+1. detect context pressure (soft/hard warnings fire under the default
+   `manual-only` mode too; always available on request),
 2. help the agent compose the right brief,
 3. store that brief durably,
 4. expose a short recovery seed,
@@ -737,12 +737,15 @@ thresholds:
   force_percent: 78
 ```
 
-**The default mode is `manual-only`, not `auto`** -- automatic nudges, the
-force-tier auto-trigger, and `trigger_handoff`'s live-cutover wiring (the
+**The default mode is `manual-only`, not `auto`** -- the force-tier
+auto-trigger and `trigger_handoff`'s live-cutover wiring (the
 `handoff_requested` activity event agent-worktrees' resident status-monitor
-watches for, and the agent-bridge ping) are all opt-in: a repo (or a user,
+watches for, and the agent-bridge ping) are opt-in: a repo (or a user,
 via the home-directory layer) must explicitly set `mode: auto` in
-`.context-handoff/config.yaml` to enable them. `save_handoff_prompt`,
+`.context-handoff/config.yaml` to enable them. The soft/hard context-pressure
+warnings above fire under `manual-only` too -- only the force tier's own
+automatic handoff and any live pickup signaling wait for `mode: auto`.
+`save_handoff_prompt`,
 `trigger_handoff`, and `consume_handoff` all keep working under
 `manual-only` -- `trigger_handoff` still stores/seeds the handoff and prints
 the manual pickup instructions, it just never wires up automatic pickup.

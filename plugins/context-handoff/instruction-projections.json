@@ -17,6 +17,14 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "awareness",
+      "template": "instructions/awareness.instructions.md",
+      "destination": ".github/instructions/context-handoff/awareness.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }
