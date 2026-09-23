@@ -610,15 +610,22 @@ reviewed/buildable, replaces the prior proposal-only list):
   themselves are stateless pure functions called only from the manual
   `claims sweep` verb and finalize's synchronous self-heal, neither a
   tight loop, so no separate cooldown state was added here.)
-- [ ] Register a `userPromptSubmit` hook in `hooks.json` alongside the
-  existing `sessionStart`/`sessionEnd` entries (`hooks.json:20-33`): a new
-  lightweight command hook invoking a new CLI subcommand (e.g.
-  `session-reopen-nudge`, mirroring `bind-nudge`'s shape at
-  `__main__.py:24455-24458`) that, when the current session's own claim
-  exists and is not live, calls `add_resource_claim(...)` to reactivate it
-  -- composing with the existing `add_resource_claim`/
+- [x] Register a `userPromptSubmitted` hook (the real host key; `hooks.json`'s
+  own key names it that way -- the effort's shorthand `userPromptSubmit`
+  above is a paraphrase) alongside the existing `sessionStart`/`sessionEnd`
+  entries: a new lightweight command hook invoking a new CLI subcommand
+  (`session-reopen-nudge`, in its own `session_reopen_nudge_cli` module --
+  split out of `session_binding_cli` to stay under the module-size cap;
+  mirrors `bind-nudge`'s shape) that, when the current session's own claim
+  exists and is not `active`, calls `add_resource_claim(...)` to reactivate
+  it -- composing with the existing `add_resource_claim`/
   `reopen_finalized_owner` path (the second bullet above), not a new
-  reopen mechanism. The hook's own text output is not relied upon:
+  reopen mechanism. Deliberately never routed through the resident
+  monitor's hot-path IPC (`hook_client.py`'s `_request`): the resident's
+  `_resident_hook_decision` has no matching dispatch branch, so it would
+  silently return `{}` and skip the real reopen; the hook always runs the
+  CLI subcommand directly via subprocess (mirroring `_fallback_session_end`'s
+  exact shape). The hook's own text output is not relied upon:
   `userPromptSubmitted`'s `modifiedPrompt` field is documented as honored
   only for SDK programmatic hooks, never for command hooks, so this design
   only depends on the command's side effect (the CLI call), matching the
@@ -820,20 +827,22 @@ either.
   sub-line) carries the marker suffix, freed up by iconifying the
   `RELATION` column (7 truncated text cells -> 1 icon cell). Every Phase 9
   Plan bullet is now checked off.
-- [ ] **Session-claim lifecycle** (Phase 8, designed 2026-09-16, build
-  started 2026-09-17): a worktree's own live Copilot session is a held
-  `kind="session"` claim; `register_session` opens it, `settle_resource_claim`
-  settles it on finalize and on successful handoff cutover, a new
+- [x] **Session-claim lifecycle** (Phase 8, designed 2026-09-16, built
+  2026-09-17 through 2026-09-22, 3 merged slices -- PR #2824, #3317, #3334,
+  and the `userPromptSubmitted` reopen hook slice): a worktree's own live
+  Copilot session is a held `kind="session"` claim; `register_session`
+  opens it, `settle_resource_claim` settles it on finalize and on
+  successful handoff cutover (bare or token-bearing), a new
   `release_resource_claim` releases it on `sessionEnd`, and a new
-  `userPromptSubmit` hook reopens it
-  (via the existing `add_resource_claim`/`reopen_finalized_owner` path) after
-  a premature settle. `finalize`'s hard obligation gate excludes `session`
-  claims from `unsettled`; a new advisory-only `_advise_other_live_sessions`
-  names any OTHER live session claims via `output.warn` without blocking.
-  The never-wedge sweep (`sweep.py`'s `claim_gone`/`claim_safe`) gains a
-  `session` branch reusing `_maybe_reap_fsmonitor`'s liveness-transition
-  pattern. Not started -- design is reviewed/buildable; implementation is
-  the next slice.
+  `userPromptSubmitted` hook (`session-reopen-nudge`) reopens it (via the
+  existing `add_resource_claim`/`reopen_finalized_owner` path) after a
+  premature settle/release. `finalize`'s hard obligation gate excludes
+  `session` claims from `unsettled`; an advisory-only
+  `_advise_other_live_sessions` names any OTHER live session claims via
+  `output.warn` without blocking. The never-wedge sweep (`sweep.py`'s
+  `claim_gone`/`claim_safe`) gains a `session` branch, corroborated against
+  a real per-session PID check (`sessions.session_id_is_live`). All Phase 8
+  Plan bullets are checked off.
 - [x] **Reopen:** adding a new claim to a retained finalized worktree succeeds,
   changes lifecycle state away from finalized (to `active`), and immediately
   removes prune eligibility (already covered by Phase 1's held-claims fix).
@@ -2131,4 +2140,72 @@ The approved design is the faceted model in [design.md](design.md):
 - Remaining Phase 8 bullet: the `userPromptSubmit` reopen hook -- the last
   one, its own next slice/worktree. Once merged, Phase 8 (and this whole
   effort) is done pending the umbrella-issue close-out.
+
+### 2026-09-22 (continued) - Phase 8 build finished: userPromptSubmitted reopen hook -- last bullet, effort done pending close-out
+
+- Fourth and final Phase 8 sub-slice. Confirmed the real host hook key is
+  `userPromptSubmitted` (verified against the public GitHub Copilot CLI
+  hooks reference), not the `userPromptSubmit` shorthand the earlier Plan
+  bullet used -- `hooks.json`'s own key, and the `kind` string passed to
+  `hook_client.py`, both use the real name.
+- Added `hooks.json`'s `userPromptSubmitted` entry, mirroring `postToolUse`'s
+  exact non-lifecycle command-hook shape (no `WindowsApps` python filter --
+  that filter is reserved for the lifecycle-critical `sessionStart`/
+  `sessionEnd` entries).
+- Added `hook_client.py`'s `_fallback_user_prompt_submitted`, mirroring
+  `_fallback_session_end`'s exact subprocess shape (`python -m
+  agent_worktrees session-reopen-nudge --stdin`). Deliberately never routed
+  through `_request` (the resident-monitor hot path): traced
+  `_resident_hook_decision` (`__main__.py`) and confirmed it has no
+  `userPromptSubmit`/`userPromptSubmitted` dispatch branch at all -- an
+  unrecognized `kind` there just falls through to `return {}`, so routing
+  through a live resident monitor would silently swallow the real reopen
+  side effect on every single prompt. `decide()` now skips `_request`
+  entirely for this one kind rather than risk that silent no-op.
+- Added the CLI subcommand itself as its own new module,
+  `session_reopen_nudge_cli.py` (`_session_reopen_nudge_decision` +
+  `cmd_session_reopen_nudge` + `add_parsers`), rather than folding it into
+  `session_binding_cli.py` alongside `bind_nudge`'s own sibling hook as
+  first drafted: that would have pushed `session_binding_cli.py` to 1050
+  lines, a NEW breach of `check-module-size.py`'s hard 1000-line cap (not
+  a grandfathered-baseline file, so a manual ceiling widen is not the
+  guard's sanctioned escape -- splitting is). Wired into `__main__.py`'s
+  lazy-dispatch table, its `add_parsers()` call, and the full
+  `COMMAND_MAP`/global-declaration machinery, exactly matching every other
+  small CLI module's existing registration shape (confirmed end-to-end via
+  a real `python -m agent_worktrees session-reopen-nudge` invocation, not
+  just the test suite).
+- The decision function reuses the existing `add_resource_claim` path
+  unchanged (the same reopen machinery Phase 1's held-claims fix and this
+  slice's own earlier `register_session` wiring already exercise) --
+  reactivating to `ACTIVE` only when the session is present on the record
+  AND its own claim exists and is not already `ACTIVE`; silently no-ops for
+  an unknown session id (never fabricates a claim) and for an untracked
+  cwd. Best-effort throughout: any resolution failure degrades to `{}`,
+  never blocking the prompt.
+- Added 5 targeted tests for the decision function
+  (`test_session_reopen_nudge.py`): reactivates a settled claim, no-op when
+  already active, no-op for a session absent from the record, no-op for an
+  untracked cwd, no-op with no session id at all. 3 more for the CLI
+  command itself (stdin payload, env-var session-id fallback, always emits
+  `{}`). 4 more in `test_hook_ipc.py` for the `hook_client.py` fallback
+  (hooks.json shape, subprocess argv/timeout, and the "never routes through
+  the resident" guarantee via a `_request` that raises if called). Full
+  targeted run (`test_session_reopen_nudge.py` + `test_bind_session.py` +
+  `test_hook_ipc.py` + `test_cli_routing.py` + `test_register_session.py`
+  + `test_tracking.py`): 508 passed, 4 skipped (pre-existing, unrelated).
+  `ruff check` on all seven touched/new files shows the exact same
+  pre-existing per-file counts as `main` (the two new files are clean; no
+  new findings in any touched file, confirmed via `git stash` diff). No
+  module-size baseline widen needed anywhere in this slice (the new module
+  is 144 lines; `session_binding_cli.py` shrank to 946; `__main__.py`
+  stayed under its existing ceiling). Bumped `agent-worktrees`'s version to
+  `1.5.5-dev250` (`plugin.json` + `pyproject.toml` +
+  `.github/plugin/marketplace.json`'s per-plugin entry).
+- **Every Phase 8 Plan bullet and Validation Plan bullet is now checked
+  off.** This was the effort's last open item -- once this slice's PR
+  merges, close umbrella issue
+  [#1312](https://github.com/ThomasMichon/copilot-extensions/issues/1312)
+  with a summary comment (same pattern as the Phase 9 close-out on #2744),
+  which finishes the whole effort.
 
