@@ -135,13 +135,15 @@ class Body:
     def __post_init__(self) -> None:
         # Mirrors supervise_cli.py's own runtime guard: agent-worktrees embody
         # has no charter-binding flag, so a charter can never reach a
-        # CLI-embodied lane. Reject the combination here too -- at
-        # declaration/registration time -- so a persisted row can't retry a
-        # lane the daemon will always refuse to start.
-        if self.charter and (self.type == "embody" or self.cli_labels):
+        # CLI-embodied lane. cli_labels is unconditionally CLI-incompatible
+        # (per to_supervise_args, only ever emitted for a headless-default
+        # profile); `type == "embody"` is validated against the *effective*
+        # mode in load_declaration below, since a fleet declaration can pair
+        # it with `fleet.headless: true` to mean a headless fleet lane, not
+        # CLI -- Body alone (no Fleet visibility here) can't tell those apart.
+        if self.charter and self.cli_labels:
             raise RegistrarError(
-                "body.charter: not supported with a CLI-embodied body "
-                "(body.type: embody, or any body.cli_labels) -- "
+                "body.charter: not supported with any body.cli_labels -- "
                 "agent-worktrees embody has no charter-binding flag"
             )
 
@@ -696,6 +698,18 @@ def load_declaration(
 
     # A headless local profile whose headless labels are a subset that doesn't
     # intersect the watched labels supervises nothing headless -- catch the typo.
+    if decl.body.type == "embody" and not decl.fleet.headless and decl.body.charter:
+        # Mirrors to_supervise_args's effective-mode mapping: body.type ==
+        # "embody" means CLI-embodied UNLESS a fleet declaration pairs it with
+        # fleet.headless: true (a headless fleet lane). Only the genuinely
+        # CLI-embodied case is charter-incompatible (agent-worktrees embody
+        # has no charter-binding flag) -- validated here, not in
+        # Body.__post_init__, since it needs Fleet visibility.
+        raise RegistrarError(
+            "body.charter: not supported with a CLI-embodied body "
+            "(body.type: embody without fleet.headless: true) -- "
+            "agent-worktrees embody has no charter-binding flag"
+        )
     if decl.body.headless_labels and not decl.fleet.enabled:
         stray = set(decl.body.headless_labels) - set(decl.labels)
         if stray:

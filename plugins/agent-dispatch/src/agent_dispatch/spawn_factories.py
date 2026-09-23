@@ -818,10 +818,8 @@ def make_headless_spawn(
             return False, handle
         # Capture the created local agent-bridge session id and encode it as a
         # `local-body:<sid>` recovery handle so a *gone* body (ended/cancelled)
-        # is liveness-recovered by the supervisor -- freeing its spawn slot --
-        # instead of orphaning its `spawned` reservation forever. When the id
-        # can't be captured, fall back to the opaque worker id (degrade safe:
-        # unprobeable, exactly the pre-fix behavior).
+        # is liveness-recovered by the supervisor -- freeing its spawn slot.
+        # Falls back to the opaque worker id when uncapturable (degrade safe).
         sid = embody.parse_fleet_body_session(result)
         handle = f"{_LOCAL_BODY_PREFIX}{sid}" if sid else worker_id
         return True, {
@@ -832,6 +830,8 @@ def make_headless_spawn(
     spawn.requires_reusable_worktree = True
     spawn.allocation_driver = "agent-dispatch"
     spawn.allocation_interface = "acp"
+    # Caveat: --agent binds a *registered* spawn profile, not any .agent.md
+    # charter; falls back to venue on this legacy worktree-bound path only.
     spawn.allocation_agent = charter or agent
     spawn.allocation_no_pair = no_pair
     spawn.allocation_project_for = lambda _task: (

@@ -178,6 +178,23 @@ def test_charter_rejected_with_cli_labels():
         )
 
 
+def test_charter_allowed_for_embody_body_type_with_headless_fleet():
+    """body.type: embody paired with fleet.headless: true maps to a headless
+    fleet lane (per to_supervise_args), not CLI -- charter must be accepted."""
+    decl = load_declaration(
+        {
+            "name": "x",
+            "labels": ["a"],
+            "body": {"type": "embody", "charter": "cab-charter"},
+            "fleet": {"pool": ["host-a"], "origin": "here", "headless": True},
+        }
+    )
+    assert decl.body.charter == "cab-charter"
+    args = decl.to_supervise_args()
+    assert "--headless" in args
+    assert "--charter" in args and "cab-charter" in args
+
+
 def test_disposable_cli_label_must_be_watched_and_local():
     with pytest.raises(RegistrarError, match="not in labels"):
         load_declaration(

@@ -130,6 +130,24 @@ def _read_supervisor_runtime_status(scope: str) -> tuple[dict | None, str | None
     return payload, None
 
 
+def _validate_spec_charter_mode(spec: dict) -> None:
+    """Reject a raw ``--spec`` dict combining ``charter`` with any CLI/script
+    embody mode -- the same check the flag-based path applies, since a raw
+    ``--spec`` bypasses that path entirely and would otherwise persist a
+    registration the daemon can never actually start (agent-worktrees embody
+    has no charter-binding flag)."""
+    if not spec.get("charter"):
+        return
+    backend = spec.get("embody_backend")
+    if backend in ("cli", "script") or spec.get("cli_labels") or spec.get("script_labels"):
+        raise SystemExit(
+            "supervise register: --spec charter is only supported for a fully "
+            "headless lane today (agent-worktrees embody has no "
+            "charter-binding flag) -- drop embody_backend cli/script and any "
+            "cli_labels/script_labels, or drop charter."
+        )
+
+
 def _build_registration_spec(args: argparse.Namespace) -> dict:
     """Assemble the ``spec`` dict a registration stores from the register args.
 
@@ -154,6 +172,7 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
             raise SystemExit(f"supervise register: bad --spec JSON: {exc}") from exc
         if not isinstance(spec, dict):
             raise SystemExit("supervise register: --spec must be a JSON object")
+        _validate_spec_charter_mode(spec)
         return spec
 
     kind = getattr(args, "kind", None) or "supervised-lane"
@@ -201,10 +220,11 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
     if getattr(args, "headless_agent", None):
         spec["headless_agent"] = args.headless_agent
     if getattr(args, "charter", None):
-        # Mirrors _cmd_supervise's own runtime guard (and Body.__post_init__ for
-        # the YAML-declaration path): agent-worktrees embody has no
-        # charter-binding flag, so reject the combination here too rather than
-        # persisting a registration the daemon can never actually start.
+        # Mirrors _cmd_supervise's own runtime guard (and registrar.py's
+        # load_declaration for the YAML-declaration path): agent-worktrees
+        # embody has no charter-binding flag, so reject the combination here
+        # too rather than persisting a registration the daemon can never
+        # actually start.
         if backend in ("cli", "script") or cli or script:
             raise SystemExit(
                 "supervise register: --charter is only supported for a fully "

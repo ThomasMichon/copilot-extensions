@@ -890,6 +890,21 @@ def test_cli_build_spec_inline_json():
     assert spec == {"id": "nightly", "interval_seconds": 3600}
 
 
+def test_cli_build_spec_inline_json_rejects_charter_with_cli_embody_backend():
+    """A raw --spec bypasses the flag-based charter/mode check entirely --
+    it needs the same guard so a persisted registration can't retry a lane
+    the daemon will always refuse to start."""
+    from agent_dispatch.__main__ import _build_registration_spec
+
+    args = _parse(
+        ["supervise", "register", "--spec",
+         '{"charter": "cab-charter", "embody_backend": "cli"}']
+    )
+    with pytest.raises(SystemExit) as exc:
+        _build_registration_spec(args)
+    assert "--spec charter is only supported for a fully headless lane" in str(exc.value)
+
+
 def test_cli_build_spec_missing_file_errors():
     from agent_dispatch.__main__ import _build_registration_spec
 
