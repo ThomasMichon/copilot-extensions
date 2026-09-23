@@ -189,10 +189,10 @@ accelerator, which is already done); otherwise independent and
 parallelizable across worktrees.
 
 ### Phase 1 — Golden-screenshot baseline for visual regression
-- [ ] Fix the screenshot-command crash blocking `picker-shot.py` /
+- [x] Fix the screenshot-command crash blocking `picker-shot.py` /
       `preview-picker.ps1`/`.sh` / `worktree-manager picker screenshot`.
       **Filed as [copilot-extensions#3319](https://github.com/ThomasMichon/copilot-extensions/issues/3319)**
-      (2026-09-22): the originally-reported crash
+      (2026-09-22, closed 2026-09-23): the originally-reported crash
       (gim-home/odsp-web-harness#265 / dotfiles#2120) traced to
       `picker_tui/engine.py`, which no longer exists (retired with the
       bundled Picker per `worktree-manager-control-plane` Phase 6). Live
@@ -202,11 +202,37 @@ parallelizable across worktrees.
       `_load_full_command_surface()`, and its regression scans covered
       only in-repo `agent_worktrees` call shapes — not
       `worktree-manager/production_picker/runner.py::_prepare()`'s direct
-      `engine_module("__main__")` import, which crashes with
+      `engine_module("__main__")` import, which crashed with
       `AttributeError: module 'agent_worktrees.__main__' has no attribute
-      '_in_ssh_session'` on every invocation. Both stale issues
-      cross-linked to #3319 and left for the agent that introduced #3309
-      to fix, per its own regression-scan follow-up.
+      '_in_ssh_session'` on every invocation. Fixed upstream; verified
+      `worktree-manager picker screenshot --demo` now captures cleanly.
+      Both stale issues cross-linked to #3319.
+- [ ] **Blocked on two more findings from verifying the #3319 fix
+      (2026-09-23):**
+      - [copilot-extensions#3413](https://github.com/ThomasMichon/copilot-extensions/issues/3413)
+        — `runner.capture()` (the real, non-demo production-Picker headless
+        capture path) has **no mock-data option**; only `live` (SSH) or
+        local-real (`data_local`) data. `--demo` *does* produce a working
+        mock-data-backed capture, but it renders a different, stale, legacy
+        app (`picker_app.WorktreeManagerApp`, last touched 2026-09-10 vs.
+        `production_picker`'s daily churn) — **not** the actual current
+        Worktrees pivot. There is currently no way to headlessly capture
+        the real pivot against deterministic mock data.
+      - [copilot-extensions#3418](https://github.com/ThomasMichon/copilot-extensions/issues/3418)
+        — chasing why non-demo capture also *hangs* (not just lacks mock
+        data) led to the real, generic root cause: `agent-worktrees list
+        --classify` itself (which any real capture ultimately shells out
+        to) does an unbounded, serial, per-related-repo-anchor `git`
+        subprocess walk (`_control_plane_related_pr_map`) that can take
+        minutes on a machine with a large/partially-unreachable related-repo
+        topology — confirmed via an all-threads `faulthandler` dump, not
+        guessed. Unrelated to the Picker/worktree-manager at all; narrows
+        and supersedes the initial (incorrect) theory in #3412, which is
+        cross-linked and left open for the responsible agent to triage.
+      Phase 1's actual baseline capture is on hold until #3413 and/or #3418
+      land — whichever unblocks a real, representative capture first (a
+      mock-data path for `production_picker`, or a fast/bounded
+      `list --classify`).
 - [ ] Capture a current, mock-data-backed set of Worktrees-pivot renders
       (the existing `capture.py` injected-source path) across representative
       states (empty, ACTIVE-only, mixed ACTIVE+Recent+unused, claims present,
@@ -338,3 +364,30 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
   harness#265 and dotfiles#2120.
 - Phase 1 remains blocked on #3319 landing before the actual golden
   captures can be taken. No code changes made in this slice.
+
+### 2026-09-23 — Verified #3319's fix; found two more real gaps blocking capture
+- Confirmed #3319 closed/fixed: `worktree-manager picker screenshot --demo`
+  now captures cleanly (previously crashed with the `_in_ssh_session`
+  `AttributeError`).
+- Tried the *real* (non-demo) capture path next, per the wishlist's actual
+  ask (a representative capture of the real Worktrees pivot, not a
+  stand-in). Found it hangs. Used `faulthandler.dump_traceback(all_threads=
+  True)` (not guesswork) to trace the hang to its true root: an unbounded,
+  serial per-related-repo-anchor `git rev-parse` walk inside
+  `agent-worktrees list --classify` itself
+  (`_control_plane_related_pr_map`), unrelated to the Picker/worktree-manager
+  at all. Filed precisely as
+  [#3418](https://github.com/ThomasMichon/copilot-extensions/issues/3418).
+- Separately, confirmed `--demo` mode's mock-data capture renders a
+  different, stale legacy app (`picker_app.py`) rather than the actual
+  shipped `production_picker`, and that `production_picker`'s own capture
+  path has no mock-data option at all. Filed as
+  [#3413](https://github.com/ThomasMichon/copilot-extensions/issues/3413).
+- Corrected an earlier over-eager theory: initially filed
+  [#3412](https://github.com/ThomasMichon/copilot-extensions/issues/3412)
+  guessing the hang was Picker-specific (a `data_local`/mount-time blocking
+  call); the deeper trace in #3418 disproved that and #3412 was narrowed/
+  cross-linked accordingly rather than left stale.
+- Phase 1 remains blocked — now on #3413 and/or #3418 — before a real,
+  representative golden baseline can be captured. No functional code
+  changes made in this slice; investigation and filing only.
