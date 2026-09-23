@@ -15,7 +15,14 @@
   [#1478](https://github.com/ThomasMichon/copilot-extensions/issues/1478)
   (manual mux restoration for unreachable active sessions),
   [#2062](https://github.com/ThomasMichon/copilot-extensions/issues/2062)
-  (relocate Mux + AHP execution mechanics out of agent-worktrees)
+  (relocate Mux + AHP execution mechanics out of agent-worktrees),
+  [#3359](https://github.com/ThomasMichon/copilot-extensions/issues/3359)
+  (vendor worktree-manager's own agent-procutil/dropin-registry/plugin-activation
+  copies instead of borrowing agent-worktrees' live — fixed, PR
+  [#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368)),
+  [#3360](https://github.com/ThomasMichon/copilot-extensions/issues/3360)
+  (retire `_engine_runtime.py`'s in-process import of agent-worktrees' own CLI-
+  root modules)
 - **Vision:** **vision-closing** against three already-stated visions (no
   revision needed to close their delta vs. reality; the recent
   `session-hosting` split narrowed which of these visions govern the
@@ -333,6 +340,85 @@ realized in `main`; unchecked items are the remaining delta.
       for built-in-verb progress percentages):
       [`phase-3c-picker-nonblocking-io.md`](phase-3c-picker-nonblocking-io.md).
 
+### Phase 3d — Retire the Picker's in-process engine-module boundary (Planned — #3359, #3360)
+
+_(agent-recommended scoping below the two linked issues; the issues
+themselves are operator-filed.)_
+
+`production_picker/_engine_runtime.py` — its own docstring calls it a
+"temporary compatibility boundary" — is the last major violation of the
+picker vision's process-boundary-only Non-Goal: 9 `agent_worktrees.*`
+submodules (`config`, `profiles`, `pr_ops`, `reclaim`, `sessions`,
+`tracking`, `__main__`, `update_stage`, `state_root`) are imported
+**in-process** via whole-module `__getattr__` proxies or inline
+`engine_module(name)` calls, sharing agent-worktrees' own venv/sys.path
+instead of going through the `--json` engine boundary every other Picker
+read path uses. This directly caused two live production bugs already fixed
+this session (#3319, #3327). #3359 is the mechanical, low-risk half
+(vendor the 3 borrowed shared libs, `agent-procutil`/`dropin-registry`/
+`plugin-activation`) — **done**, PR
+[#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368).
+#3360 is the harder half (the CLI-root modules themselves) and needs real
+design, not a blind mechanical conversion — see
+[`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)
+for the full call-site inventory and the performance-tradeoff analysis behind
+each checkbox below.
+
+- [x] **#3359 — vendor the 3 borrowed shared libs.** Landed via
+      [#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368):
+      `worktree-manager/libs/{agent-procutil,dropin-registry,plugin-activation}`
+      + declared `pyproject.toml` dependencies + `_engine_runtime.py`'s
+      sys.path injection narrowed to the libs still needed for the CLI-root
+      boundary itself (`plugin-resolve`, `config-migrate`,
+      `single-instance-lease`).
+- [ ] **Vendor `profiles` as a 4th shared lib (not a subprocess conversion).**
+      The inventory found `profiles`' actual call sites
+      (`engine_profiles_view.py`, `profiles_io.py`) never touch
+      agent-worktrees' own runtime state — every function takes a
+      caller-supplied config path and returns a plain dataclass
+      (`TargetSel`) or primitive. It is pure, dependency-free logic exactly
+      like `agent_procutil`/`dropin_registry`, called live during interactive
+      menu rendering (wrong shape and too frequent for a subprocess
+      round-trip regardless). Same treatment as #3359: vendor
+      `worktree-manager/libs/profiles` byte-identical, register with
+      `check-vendored-libs-sync.py`.
+- [ ] **Design + convert the low-frequency, one-shot CLI-root reads.**
+      `pivot_manifest.py`'s `config.install_dir()` / `config._home()` /
+      `state_root_module.resolve_state_root(...)` run once per pivot-registry
+      scan pass, not per render frame — the safest subprocess-conversion
+      candidates. Needs: confirm/add a stable `--json` verb for each
+      (install dir, state root), matching the existing
+      `docs/engine-picker-contract.md` pinning discipline Phase 3 already
+      established for `engine_client`.
+- [ ] **Design the `runner.py` process-lifecycle call sites — likely NOT a
+      subprocess conversion at all.** `_start_anchor_heal_check`,
+      `reap_orphan_mux_sessions`, `_sweep_managed_on_exit`,
+      `_sweep_launcher_shells_on_exit`, `_sweep_finished_sessions_on_cadence`,
+      and `_start_picker_monitor_root` are private (`_`-prefixed),
+      never-designed-for-external-callers `agent_worktrees.__main__`
+      internals that manage the **Picker's own process lifetime**
+      (background threads, exit-time sweeps) — not agent-worktrees state
+      reads. A subprocess can't run "in this process's exit handler"; the
+      real fix is likely reclassifying this logic as worktree-manager's own
+      owned concern (or a new shared lib), not a CLI verb.
+- [ ] **Design the `data_local.py` hot path — needs a new batched verb, not
+      per-attribute conversion.** `tracking.list_records` /
+      `tracking._pr_is_terminal` / `pr_ops._reconcile_active_pr` /
+      `reclaim.resolve_bound_copilots` / `sessions.mux_status_many` /
+      `sessions.worktree_session_lock_state` / `tracking.stamp_*` run as one
+      read-reconcile-**write** loop over every managed worktree record, once
+      per Picker refresh (Phase 3c's synchronous hot path) — `stamp_*`
+      mutates `tracking.yaml` in-process using agent-worktrees' own file
+      lock. Naive per-attribute subprocess conversion would multiply
+      per-refresh subprocess spawns by up to 6× the worktree count and can't
+      hold a cross-process lock across separate calls. Needs one new atomic,
+      batched `--json` verb (read + reconcile + stamp in a single
+      agent-worktrees-owned call) before any of this path can move off the
+      in-process boundary — sequence this **after** Phase 3c's non-blocking
+      I/O work lands, since both touch the same call site.
+- [ ] Retire `_engine_runtime.py` (and its 9 proxy-module shims) once every
+      call site above has converted or been reclassified.
+
 ### Phase 4 — Bare-invocation seam & handoff (Plugin side landed; end-state pending)
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
       `PATH` (health-probed), else the still-bundled Picker, else the install
@@ -454,6 +540,27 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-22** — Added Phase 3d (Planned — #3359, #3360): retire
+  `_engine_runtime.py`'s in-process import of agent-worktrees' own CLI-root
+  modules. Landed #3359 (vendor the 3 borrowed shared libs) via
+  [#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368),
+  full test suite green (656 passed, 3 pre-existing unrelated Windows
+  path-validation failures confirmed out of scope). For #3360, did the
+  requested drill-down before any conversion work: a grep-verified call-site
+  inventory across all 9 proxied modules revealed the issue's own "9 read
+  paths, each needs a JSON verb" framing doesn't fit the evidence — one
+  cluster (`runner.py`'s `cli._sweep_*_on_exit`/`reap_orphan_mux_sessions`/
+  `_start_picker_monitor_root`) is private process-lifecycle internals
+  managing the Picker's *own* process, not a read path; another
+  (`data_local.py`'s `tracking`/`pr_ops`/`reclaim`/`sessions` cluster) is one
+  atomic read-reconcile-**write** loop over `tracking.yaml` per Picker
+  refresh, needing a new batched verb rather than per-attribute conversion,
+  and sequenced after Phase 3c since both touch the same hot call site; and
+  `profiles` turns out to be pure dependency-free logic — a vendoring fix
+  like #3359, not a CLI-conversion one. Full inventory + revised remediation
+  shape + open design questions:
+  [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+  Conversion implementation not started pending design-question answers.
 - **2026-09-19** — Added Phase 3c (Planned): design/architecture/plan for
   consistently non-blocking Picker I/O across pivot loads, menu opens, and
   action execution/progress, written up after #2967's picker UX fixes
