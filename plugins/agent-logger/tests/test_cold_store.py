@@ -314,3 +314,96 @@ def test_fetch_session_json_rejects_traversal(tmp_path: Path, monkeypatch) -> No
     code, payload = cold_store.fetch_session_json("../s-real")
     assert code == cold_store.NOT_FOUND_EXIT_CODE
     assert payload == ""
+
+
+# --- query_reviewer_sessions -----------------------------------------------
+
+def _cfg_stub_with_catalog(
+    monkeypatch: pytest.MonkeyPatch, sync_path: Path, catalog_db_path: Path,
+) -> None:
+    class _StubConfig:
+        pass
+
+    stub = _StubConfig()
+    stub.sync_path = sync_path
+    stub.catalog_db_path = catalog_db_path
+    monkeypatch.setattr(cold_store, "load_config", lambda **_kw: stub)
+
+
+def test_query_reviewer_sessions_resolves_catalog_hits(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from agent_logger.catalog import ReviewCatalogIndex
+
+    state_root = tmp_path / "copilot" / "session-state"
+    _make_session(state_root, "s1")
+    monkeypatch.setattr(cold_store, "_local_state_root", lambda: state_root)
+    monkeypatch.setattr(cold_store, "session_archive_stores", lambda: [])
+    _cfg_stub_with_catalog(monkeypatch, tmp_path / "sessions", tmp_path / "catalog.db")
+
+    index = ReviewCatalogIndex(tmp_path / "catalog.db")
+    index.record(
+        session_id="s1", repo="example/repo", pr_number=6100,
+        role="reviewer", recorded_at="2026-09-22T19:00:00Z",
+    )
+
+    refs = cold_store.query_reviewer_sessions("example/repo", 6100)
+
+    assert len(refs) == 1
+    assert refs[0].id == "s1"
+
+
+def test_query_reviewer_sessions_skips_unresolvable_sessions(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from agent_logger.catalog import ReviewCatalogIndex
+
+    monkeypatch.setattr(cold_store, "_local_state_root", lambda: None)
+    _cfg_stub_with_catalog(monkeypatch, tmp_path / "sessions", tmp_path / "catalog.db")
+
+    index = ReviewCatalogIndex(tmp_path / "catalog.db")
+    index.record(
+        session_id="ghost", repo="example/repo", pr_number=6100,
+        role="reviewer", recorded_at="2026-09-22T19:00:00Z",
+    )
+
+    refs = cold_store.query_reviewer_sessions("example/repo", 6100)
+
+    assert refs == []
+
+
+def test_query_reviewer_sessions_empty_catalog_returns_empty(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(cold_store, "_local_state_root", lambda: None)
+    _cfg_stub_with_catalog(monkeypatch, tmp_path / "sessions", tmp_path / "catalog.db")
+
+    refs = cold_store.query_reviewer_sessions("example/repo", 6100)
+
+    assert refs == []
+
+
+def test_query_reviewer_sessions_dedupes_by_session_id(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from agent_logger.catalog import ReviewCatalogIndex
+
+    state_root = tmp_path / "copilot" / "session-state"
+    _make_session(state_root, "s1")
+    monkeypatch.setattr(cold_store, "_local_state_root", lambda: state_root)
+    monkeypatch.setattr(cold_store, "session_archive_stores", lambda: [])
+    _cfg_stub_with_catalog(monkeypatch, tmp_path / "sessions", tmp_path / "catalog.db")
+
+    index = ReviewCatalogIndex(tmp_path / "catalog.db")
+    index.record(
+        session_id="s1", repo="example/repo", pr_number=6100,
+        role="reviewer", recorded_at="2026-09-22T19:00:00Z",
+    )
+    index.record(
+        session_id="s1", repo="example/repo", pr_number=6100,
+        role="author", recorded_at="2026-09-22T19:05:00Z",
+    )
+
+    refs = cold_store.query_reviewer_sessions("example/repo", 6100)
+
+    assert len(refs) == 1

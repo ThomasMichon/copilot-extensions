@@ -263,6 +263,39 @@ This is a write/read primitive only — a queryable index (e.g. "every session
 that reviewed PR N" without iterating every session directory) is a natural
 follow-up once a consumer needs one; none exists yet.
 
+### review-annotation catalog index (`agent_logger.catalog`)
+
+A small SQLite index over the sidecar above, keyed on `(repo, pr_number)`,
+analogous to the chronicle reservation store
+(`agent_logger.chronicle.source.SqliteReservationStore`): derived,
+rebuildable-from-sidecars, never a second source of truth.
+
+- `ReviewCatalogIndex(db_path)` — `record(session_id, repo, pr_number, role,
+  recorded_at)` (idempotent) and `query(repo, pr_number, since=None,
+  until=None) -> list[CatalogEntry]`.
+- `default_index(cfg=None) -> ReviewCatalogIndex` — resolves
+  `Config.catalog_db_path` (`<home>/review-catalog.db` by default,
+  configurable via `catalog.db_path`); the entry point production callers
+  use.
+- `write_review_annotation(..., index=None)` gains an optional `index`
+  parameter: when a caller passes `index=default_index()`, the same call
+  that appends the sidecar entry also records it into the index — no
+  separate wiring needed for a writer that opts in. Passing no `index` (the
+  default) writes the sidecar only, exactly as before this index existed.
+- `rebuild_from_sidecars(index, state_root, *archive_stores) -> int` —
+  additive, idempotent rebuild from every discoverable session's own
+  sidecar; the only path that backfills annotations written before the
+  index existed, or by a writer that never passed `index=`. Exposed as
+  `agent-logger catalog rebuild` (and `catalog status` to print the
+  resolved db path) — run it periodically (a cron tick, mirroring
+  `chronicle tick`) for any deployment where the production annotation
+  writer doesn't pass `index=` directly.
+- `agent_logger.cold_store.query_reviewer_sessions(repo, pr_number,
+  since=None, until=None) -> list[SessionRef]` — the caller-facing query:
+  resolves every catalog hit through the existing three-tier
+  `resolve_session()`, silently skipping anything this host can't resolve
+  (unreachable session treated as "not found", never an error).
+
 ## Configuration
 
 Layered: built-in defaults → `$AGENT_LOGGER_HOME/config.yaml`

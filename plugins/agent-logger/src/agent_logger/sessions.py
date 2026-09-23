@@ -43,6 +43,13 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Deferred: agent_logger.catalog imports this module (for
+    # iter_session_refs/read_review_annotations), so importing it at module
+    # load time here would be circular. Only needed for the type hint below.
+    from agent_logger.catalog import ReviewCatalogIndex
 
 #: Subdirectory of ``~/.copilot`` holding live session directories.
 SESSION_STATE_SUBDIR = "session-state"
@@ -404,6 +411,11 @@ def read_origin(ref: SessionRef) -> dict[str, object]:
     return data if isinstance(data, dict) else {}
 
 
+def _utcnow_iso() -> str:
+    """The sortable UTC timestamp format review annotations are recorded in."""
+    return datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def read_review_annotations(ref: SessionRef) -> list[dict[str, object]]:
     """Return this session's review-annotation entries (``[]`` if none).
 
@@ -429,6 +441,7 @@ def write_review_annotation(
     pr_number: int,
     role: str = "reviewer",
     recorded_at: str | None = None,
+    index: "ReviewCatalogIndex | None" = None,
 ) -> None:
     """Append a review annotation to a **live** session's sidecar, idempotently.
 
@@ -439,6 +452,14 @@ def write_review_annotation(
     is not re-appended (safe to call repeatedly from a backfill/sweep without
     growing the file unboundedly), but ``recorded_at`` on a genuinely new
     entry always reflects this call.
+
+    When ``index`` (an :class:`agent_logger.catalog.ReviewCatalogIndex`) is
+    given, the same fact is recorded into it -- the sidecar remains the
+    durable source of truth; the index is a queryable derived cache kept in
+    sync at the same call site. Recorded unconditionally (even for an
+    already-present sidecar entry), so a caller that later adds ``index`` to
+    an existing write path can pass it in to backfill the index as a side
+    effect of ordinary re-annotation, without needing a separate rebuild.
 
     The read-modify-write is serialized with an advisory lock (colocated
     ``.lock`` file, the same cross-platform primitive
@@ -479,15 +500,26 @@ def write_review_annotation(
                 and entry.get("pr_number") == pr_number
                 and entry.get("role") == role
             ):
+                if index is not None:
+                    existing_recorded_at = entry.get("recorded_at")
+                    index.record(
+                        session_id=session_dir.name,
+                        repo=repo,
+                        pr_number=pr_number,
+                        role=role,
+                        recorded_at=existing_recorded_at
+                        if isinstance(existing_recorded_at, str)
+                        else (recorded_at or _utcnow_iso()),
+                    )
                 return
 
+        new_recorded_at = recorded_at or _utcnow_iso()
         entries.append(
             {
                 "repo": repo,
                 "pr_number": pr_number,
                 "role": role,
-                "recorded_at": recorded_at
-                or datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+                "recorded_at": new_recorded_at,
             }
         )
 
@@ -502,6 +534,15 @@ def write_review_annotation(
             with suppress(OSError):
                 os.unlink(tmp_name)
             raise
+
+        if index is not None:
+            index.record(
+                session_id=session_dir.name,
+                repo=repo,
+                pr_number=pr_number,
+                role=role,
+                recorded_at=new_recorded_at,
+            )
 
 
 @contextmanager
