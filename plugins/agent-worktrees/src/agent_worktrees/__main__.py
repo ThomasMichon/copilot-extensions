@@ -7383,6 +7383,39 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 })
 
 
+# A module is "cluster-free" when every attribute any of its own CLI
+# submodule handlers reach via `_core()` (this __main__ module) is available
+# WITHOUT running `_load_full_command_surface()` -- either because the
+# module never calls `_core()` at all, or because every name it reaches is
+# bound at __main__ module level BEFORE the deferred ~35-submodule import
+# block (i.e. it's a plain top-level function/class/import in __main__.py,
+# not one of the `name = owning_module.attr` reexports that function builds).
+# This is Phase 1b of the agent-cli-lazy-dispatch effort: `_dispatch_lazy()`
+# skips `_ensure_cluster_loaded()` entirely for these modules, so their
+# commands no longer pay the cluster's import cost (previously EVERY
+# fast-tracked command paid it, via the blanket call that used to run before
+# any dispatch -- see that call's own comment). Regenerate and diff this set
+# with the `plugins/agent-worktrees/scan_core_cluster2.py` AST-based scanner
+# (walks every `_core().attr` and `core = _core(); ... core.attr` call shape,
+# then classifies each accessed name against __main__.py's own module-level
+# bindings) before trusting it to still be accurate -- do NOT hand-edit this
+# set without re-running that scan, and do NOT reuse a regex-only scan (an
+# earlier one shipped a live `create-pr` regression; see the effort's
+# Journal). A module NOT in this set is unaffected by Phase 1b: it still
+# calls `_ensure_cluster_loaded()` exactly as Phase 1 landed it, so it takes
+# on zero incremental risk from this change.
+_CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
+    "claims_cli",
+    "maintenance_cli",
+    "pane_lifecycle",
+    "picker_profiles_cli",
+    "reclaim_cli",
+    "session_inspection_cli",
+    "status_bar_cli",
+    "status_cli",
+})
+
+
 def _dispatch_lazy(command: str, args_list: list[str]) -> int:
     """Fast-path dispatch for a module-delegated subcommand.
 
@@ -7392,7 +7425,8 @@ def _dispatch_lazy(command: str, args_list: list[str]) -> int:
     identical to what build_parser() would have produced for it.
     """
     module_name, handler_attr = _LAZY_DISPATCH_TABLE[command]
-    _ensure_cluster_loaded()
+    if module_name not in _CLUSTER_FREE_MODULES:
+        _ensure_cluster_loaded()
     module = importlib.import_module(f"{__package__}.{module_name}")
     parser = argparse.ArgumentParser(
         prog="agent-worktrees",
@@ -8288,11 +8322,32 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    # Every remaining dispatch path below (fast-tracked _LAZY_DISPATCH_TABLE
-    # commands, the manual-dispatch verbs, and the full COMMAND_MAP fallback)
-    # may reach into the cross-referencing CLI-submodule cluster described at
-    # _ensure_cluster_loaded()'s own definition -- resolve it once, here,
-    # rather than chasing individual call sites.
+    # Fast path: a module-delegated subcommand (see _LAZY_DISPATCH_TABLE) --
+    # import only its owning module instead of the full eager surface that
+    # build_parser()/COMMAND_MAP below would otherwise force. Checked BEFORE
+    # the manual-dispatch verbs and the blanket _ensure_cluster_loaded() call
+    # below (Phase 1b of the agent-cli-lazy-dispatch effort) so that a
+    # _CLUSTER_FREE_MODULES-listed command (see _dispatch_lazy()) never pays
+    # the cluster's import cost at all -- previously this check ran after the
+    # blanket call, so every fast-tracked command paid that cost regardless.
+    if args_list[0] in _LAZY_DISPATCH_TABLE:
+        try:
+            return _dispatch_lazy(args_list[0], args_list)
+        except (
+            FileNotFoundError, ValueError, inst.BinstubOwnershipError,
+            codename_tracking.CodenameAttributionPolicyError,
+        ) as e:
+            output.err(str(e))
+            return 1
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # Every remaining dispatch path below (the manual-dispatch verbs and the
+    # full COMMAND_MAP fallback) may reach into the cross-referencing
+    # CLI-submodule cluster described at _ensure_cluster_loaded()'s own
+    # definition -- resolve it once, here, rather than chasing individual
+    # call sites. Fast-tracked commands (above) never reach this line.
     _ensure_cluster_loaded()
 
     # Services uses manual dispatch for passthrough support --
@@ -8482,21 +8537,9 @@ def main(argv: list[str] | None = None) -> int:
         name = args_list[1] if len(args_list) > 1 else ""
         return _hooks.run_hook(name, args_list[2:])
 
-    # Fast path: a module-delegated subcommand (see _LAZY_DISPATCH_TABLE) --
-    # import only its owning module instead of the full eager surface that
-    # build_parser()/COMMAND_MAP below would otherwise force.
-    if args_list[0] in _LAZY_DISPATCH_TABLE:
-        try:
-            return _dispatch_lazy(args_list[0], args_list)
-        except (
-            FileNotFoundError, ValueError, inst.BinstubOwnershipError,
-            codename_tracking.CodenameAttributionPolicyError,
-        ) as e:
-            output.err(str(e))
-            return 1
-        except KeyboardInterrupt:
-            print("\nCancelled.")
-            return 130
+    # (The _LAZY_DISPATCH_TABLE fast path is checked earlier, before the
+    # blanket _ensure_cluster_loaded() call above -- see that check's own
+    # comment for why.)
 
     # First arg is a known subcommand → parse normally
     _load_full_command_surface()

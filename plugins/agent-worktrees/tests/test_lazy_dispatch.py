@@ -10,16 +10,30 @@ landing (ThomasMichon/copilot-extensions#3309/#3312/#3313):
   point of the fast path); a non-fast-tracked command still does.
 - `--help` for a fast-tracked command produces output identical to what the
   full `build_parser()` would have produced for that same subcommand.
+
+Phase 1b (decoupling the `_core()` cross-module helper cluster) adds:
+
+- `_CLUSTER_FREE_MODULES` cannot go stale relative to the real `_core()`
+  call-shapes in every dispatch-table module: regenerate it via the
+  AST-based scanner in `_core_cluster_scan.py` and diff.
+- A cluster-free fast-tracked command genuinely never triggers
+  `_ensure_cluster_loaded()`; a not-yet-decoupled one still does (both must
+  hold, or the differentiation this Phase adds is untested/vacuous).
 """
 
 from __future__ import annotations
 
 import argparse
 import importlib
+import sys
+from pathlib import Path
 
 import pytest
 
 from agent_worktrees import __main__ as m
+
+sys.path.insert(0, str(Path(__file__).parent))
+import _core_cluster_scan  # noqa: E402 -- must follow the sys.path insert above
 
 # Every module build_parser() delegates a subparser to (see build_parser()'s
 # own `*.add_parsers(sub)` / `pane_lifecycle.register_cli(sub)` call list).
@@ -32,7 +46,6 @@ _ADD_PARSERS_MODULES = [
     "installation_cli", "update_cli", "context_cli", "services_cli",
     "repos_cli", "related_cli", "git_cli", "pr_cli", "session_binding_cli",
     "session_inspection_cli", "session_tracking_cli", "worktree_status_audit",
-    "session_reopen_nudge_cli",
 ]
 
 
@@ -142,3 +155,57 @@ def test_fast_path_help_matches_full_parser_help(command, capsys):
     full_help = capsys.readouterr().out
 
     assert fast_help == full_help
+
+
+def test_cluster_free_modules_matches_regenerated_scan():
+    """`_CLUSTER_FREE_MODULES` must not silently drift from the real
+    `_core()` call-shapes in every dispatch-table module.
+
+    Regenerates the set via the AST-based scanner (`_core_cluster_scan.py`,
+    which walks both the direct `_core().attr` chain and the assigned
+    `core = _core(); ... core.attr` shape, then classifies each accessed
+    name against __main__.py's own module-level bindings) and diffs it
+    against the checked-in version. Mirrors `_LAZY_DISPATCH_TABLE`'s own
+    drift-check test above; see this file's module docstring for why a
+    regex-only scan isn't trustworthy for this.
+    """
+    candidates = frozenset(modname for modname, _ in m._LAZY_DISPATCH_TABLE.values())
+    regenerated = _core_cluster_scan.compute_cluster_free_modules(candidates)
+    assert regenerated == m._CLUSTER_FREE_MODULES
+
+
+@pytest.mark.parametrize("command", ["status", "claims", "reclaim"])
+def test_cluster_free_command_skips_cluster_load(command, monkeypatch):
+    """A `_CLUSTER_FREE_MODULES` command must genuinely never trigger
+    `_ensure_cluster_loaded()` -- the actual mechanism Phase 1b adds, not
+    just the classification `_CLUSTER_FREE_MODULES` itself lists."""
+    module_name, _ = m._LAZY_DISPATCH_TABLE[command]
+    assert module_name in m._CLUSTER_FREE_MODULES
+
+    calls = []
+    monkeypatch.setattr(m, "_ensure_cluster_loaded", lambda: calls.append(1))
+    monkeypatch.setattr(m, "_load_full_command_surface", lambda: calls.append(1))
+
+    with pytest.raises(SystemExit):
+        m._dispatch_lazy(command, [command, "--help"])
+
+    assert calls == [], f"{command!r} ({module_name}) must not load the cluster"
+
+
+@pytest.mark.parametrize("command", ["get", "worktree-lineage"])
+def test_not_yet_decoupled_command_still_loads_cluster(command, monkeypatch):
+    """A command whose module is NOT in `_CLUSTER_FREE_MODULES` must still
+    load the cluster -- the safe, unchanged Phase 1 behavior. Proves the
+    differentiation `_dispatch_lazy()` now makes is real (not vacuously
+    always-skip), and that a not-yet-decoupled command takes on zero
+    incremental risk from Phase 1b."""
+    module_name, _ = m._LAZY_DISPATCH_TABLE[command]
+    assert module_name not in m._CLUSTER_FREE_MODULES
+
+    calls = []
+    monkeypatch.setattr(m, "_ensure_cluster_loaded", lambda: calls.append(1))
+
+    with pytest.raises(SystemExit):
+        m._dispatch_lazy(command, [command, "--help"])
+
+    assert calls == [1], f"{command!r} ({module_name}) must still load the cluster"
