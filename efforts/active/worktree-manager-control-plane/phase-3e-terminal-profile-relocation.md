@@ -227,21 +227,42 @@ rewrite is a separate, already-existing migration concern that moves with
    `test_terminal_fragment_cli.py`); full non-picker suite green (1134
    passed, the same 3 pre-existing unrelated Windows path-validation
    failures as every prior step).
-   - [ ] **5b. Repoint `install.ps1`'s** `Deploy-TerminalScripts`/
+   - [x] **5b. Repoint `install.ps1`'s** `Deploy-TerminalScripts`/
      `Sync-TerminalState`/`Get-SettingsProfileGuids`/`Clean-TerminalSettingsJson`
-     at the new owner, following Phase 3b Slice 2a's launcher-script repoint
-     pattern (copy verbatim, hash-verify, repoint, keep a direct fallback for
-     the absent-Manager case).
-   - [ ] **5c. Live-machine validation trial.** `--live` has NOT yet been
-     exercised against a real installed Windows Terminal — only against
-     synthetic fixture `LOCALAPPDATA` trees in the test suite. Per the
-     operator's chosen validation approach (dry-run flag first, defer real
-     writes until proven safe), do not flip any default or remove the
-     `--live` gate, retire agent-worktrees' own deploy path, or treat this
-     mechanism as "done" until an operator-supervised live trial on one real
-     machine has confirmed `terminal-fragment <project> --deploy --live`
-     (and `profiles apply --mirror --live`) behave correctly against this
-     machine's actual Windows Terminal install.
+     at the new owner. **Landed** — PR
+     [#3457](https://github.com/ThomasMichon/copilot-extensions/pull/3457):
+     `Deploy-Shortcuts` now calls `Deploy-TerminalFragmentViaWorktreeManager`
+     first (resolves a health-checked, version-gated `worktree-manager`
+     binstub via the new `Get-UsableWorktreeManagerBin`/
+     `Test-WorktreeManagerVersionAtLeast` — >= `0.1.0-dev75`, the version
+     that added `--deploy`/`--mirror` — and runs `terminal-fragment
+     <project> --machine <k> --deploy --live`), falling back to the
+     pre-existing implementation (extracted verbatim into
+     `Deploy-TerminalFragmentLocally`, unchanged) when Worktree Manager is
+     absent, unhealthy, or too old. Followed Phase 3b Sub-slice 2a's
+     present-or-fallback shape exactly.
+   - [x] **5c. Live-machine validation trial.** **Done, operator-supervised,
+     on tmichon-book2 (per operator direction: "repoint and trial now").**
+     Sequence: (1) dry-run preview (`terminal-fragment dotfiles --explain`
+     / `--deploy`, no `--live`) proved worktree-manager's plain fragment
+     output and deploy plan were byte-identical (same 14 profile GUIDs) to
+     the fragment the pre-Step-5b PowerShell path had already deployed, and
+     the plan converged to zero changes against live `state.json`/
+     `settings.json`; (2) landed PR #3457, then `worktree-manager update`
+     (`0.1.0-dev65` -> `dev75`) and `agent-worktrees update`
+     (`1.5.5-dev260` -> `dev261`) refreshed both installed runtimes on this
+     machine; (3) ran the installed `install.ps1`'s `refresh-profiles`
+     action directly and confirmed its own output line — `"Windows
+     Terminal profiles deployed via Worktree Manager"` plus the deploy
+     plan's `-> LIVE: writes applied.` — proving the NEW code path, not the
+     fallback, actually ran; (4) diffed the real fragment/`state.json`/
+     `settings.json` before vs. after: identical fragment GUIDs, identical
+     `generatedProfiles`, identical settings profile count (22), and no new
+     `settings.json.wt-backup-*` file was created (correctly skipped since
+     nothing needed pruning) — a clean, idempotent, non-destructive real
+     deploy. `--live` is now proven safe on this machine; `--live` still
+     defaults to off everywhere else (CLI flags, other machines) until each
+     is independently exercised the same way.
 6. [ ] **Delete agent-worktrees' `profiles`/`terminal-fragment` CLI verbs,
    `picker_profiles_cli.py`'s terminal-mirroring code, and
    `picker_support/data_local.py`'s/`profiles_io.py`'s Profiles-grid path**
