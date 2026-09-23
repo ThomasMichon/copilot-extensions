@@ -161,7 +161,7 @@ def test_no_uv_fallback_rescrubs_between_the_two_pip_calls(tmp_path: Path) -> No
     _seed_build_residue(plugin_dir)
     marker = tmp_path / "second-call.json"
     stub = f"""
-function Get-Command {{ param($Name, [switch]$ErrorAction2) return $null }}
+function Get-Command {{ [CmdletBinding()] param($Name) return $null }}
 function python3 {{
     param()
     $args2 = $args
