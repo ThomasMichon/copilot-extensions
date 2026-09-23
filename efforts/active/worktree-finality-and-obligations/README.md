@@ -265,13 +265,18 @@ below for the carved implementation plan.
   `WorktreeRecord.last_finalized_at` (copied from `completed_at` before it's
   cleared by the reopen) and clear `status_note_at` on reopen so a stale
   "nothing left to do" note doesn't linger.
-- [ ] Reopen output and guidance must list prior resources that were released or
+- [x] Reopen output and guidance must list prior resources that were released or
   re-homed by the earlier finalize cascade; reopening the worktree does not
-  restore those resources. `claims add`'s CLI output now reports `reopened:
-  true` and prints a one-line notice, but it does not yet enumerate the prior
-  finalize's released/re-homed resources -- that needs `finalize`'s
-  `release_all_resources` cascade to leave a durable trail on the record for
-  a later reopen to read back.
+  restore those resources. `claims add`'s CLI output reports `reopened: true`
+  and now also enumerates exactly what the earlier finalize's
+  `release_all_resources` cascade let go: `WorktreeRecord.last_finalize_released`
+  is a durable snapshot (kind/ref/note), overwritten -- including to empty --
+  on every finalize, distinct from the general `resources` ledger a manual
+  `claims release <ref>` can also touch. Surfaced in both `--json`
+  (`released_by_earlier_finalize`) and the human-readable notice. Re-homed
+  (rehomed-on-abandon) resources are NOT covered here -- that path ends in
+  `orphaned`, which `add_resource_claim` already hard-rejects, so an orphaned
+  record is never reopened through this path in the first place.
 
 ### Phase 3 - Replace the boolean-only follow-up model
 - [x] Add a migration-free `FollowUpRecord` list with stable IDs, summary,
@@ -2343,4 +2348,34 @@ The approved design is the faceted model in [design.md](design.md):
 - No PR opened -- documentation-only change to the effort's own tracking
   doc; will commit and push directly per this repo's effort-doc convention
   (not a reviewable code change).
+
+### 2026-09-23 (continued) - Phase 2 complete: reopen notice lists the earlier finalize's release trail
+
+- Picked the small, cheap next slice named in the prior triage entry: Phase
+  2's sole remaining bullet (reopen output must enumerate prior finalize-
+  released resources).
+- Added `WorktreeRecord.last_finalize_released`: a durable snapshot (copies,
+  not aliases) of exactly what `release_all_resources` released on the most
+  recent finalize cascade, overwritten -- including to empty -- on every
+  cascade run. Kept separate from the general `resources` ledger because
+  that ledger is also mutated by the unrelated `claims release <ref>` path,
+  which would otherwise make "released by finalize" ambiguous with
+  "released by hand."
+- `claims add`'s reopen notice now reads it back: `--json` gains
+  `released_by_earlier_finalize` (kind/ref/note per entry); the
+  human-readable path prints a bulleted list under the existing "reopened"
+  line. Re-homed (rehome-on-abandon) resources are explicitly out of scope
+  -- that path only runs for `--abandon`, which ends in `orphaned`, and
+  `add_resource_claim` already hard-rejects claims on an `orphaned` record,
+  so it's never reopened through this code path at all.
+- Added tracking-level tests (snapshot populated, persisted across reload,
+  overwritten to empty on a no-op cascade, copies not aliases) and CLI-level
+  tests (both the populated and the empty-trail reopen notice). Confirmed
+  the 12 `test_doctor.py`/`test_context_resolution.py` failures in the full
+  suite pre-exist on `origin/main` unmodified (verified via `git stash` +
+  re-run) -- unrelated to this change, not investigated further here.
+  Targeted suite (31 tests) passes; `ruff check` on every touched file is
+  byte-identical before/after (15 pre-existing findings, confirmed via the
+  same stash comparison).
+- Phase 2 is now fully complete -- every Plan bullet checked.
 
