@@ -748,6 +748,14 @@ class ContentStore:
                 self._fts_next_retry_at = time.monotonic() + _FTS_LOCK_RECHECK_S
                 return self._fts_available
 
+            # Track *why* a full rebuild is chosen -- the three distinct
+            # triggers (never-built, recovered-unavailable, escalated from a
+            # non-retryable incremental failure) previously collapsed into an
+            # identical "created/rebuilt" log line, making a full rebuild's
+            # cause undiagnosable after the fact (#1818 follow-up). Recorded
+            # here and surfaced by ``_mark_rebuilt`` below.
+            full_reason = "never-built" if not self._fts_available else None
+
             if not self._fts_available:
                 # A different process may have created the first durable index
                 # while this one was waiting for the cross-process lock. Reopen
@@ -757,10 +765,13 @@ class ContentStore:
                 table = self._get_or_create_table()
                 if self._durable_fts_index_exists(table):
                     self._fts_available = True
+                    full_reason = None
+                else:
+                    full_reason = "recovered-unavailable"
 
             full = not self._fts_available
 
-            def _mark_rebuilt(*, via_full: bool) -> None:
+            def _mark_rebuilt(*, via_full: bool, reason: str | None) -> None:
                 # The subprocess built the index on its OWN connection; drop
                 # the cached table handle so the next query sees the fresh
                 # index (a handle from before the first build won't).
@@ -769,18 +780,21 @@ class ContentStore:
                 self._fts_dirty = False
                 self._fts_consecutive_failures = 0
                 self._fts_next_retry_at = 0.0
-                logger.info(
-                    "FTS index %s on %d chunks",
-                    "created/rebuilt" if via_full else "incrementally updated",
-                    count,
-                )
+                if via_full:
+                    logger.info(
+                        "FTS index created/rebuilt on %d chunks (full rebuild, "
+                        "reason=%s)",
+                        count, reason or "unknown",
+                    )
+                else:
+                    logger.info("FTS index incrementally updated on %d chunks", count)
 
             last_err: Exception | None = None
             last_retryable = False
             for attempt in range(1, max_retries + 1):
                 try:
                     self._run_fts_build(full=full)
-                    _mark_rebuilt(via_full=full)
+                    _mark_rebuilt(via_full=full, reason=full_reason)
                     return True
                 except Exception as e:
                     last_err = e
@@ -802,9 +816,17 @@ class ContentStore:
                 # A non-retryable incremental failure (#2951) would repeat
                 # forever -- escalate once to a full rebuild. A merely
                 # retries-exhausted conflict keeps the existing backoff.
+                logger.warning(
+                    "FTS incremental update hit a non-retryable failure, "
+                    "escalating to a full rebuild: %s",
+                    last_err,
+                )
                 try:
                     self._run_fts_build(full=True)
-                    _mark_rebuilt(via_full=True)
+                    _mark_rebuilt(
+                        via_full=True,
+                        reason=f"escalated-non-retryable-failure: {last_err}",
+                    )
                     return True
                 except Exception as full_err:
                     last_err = full_err
