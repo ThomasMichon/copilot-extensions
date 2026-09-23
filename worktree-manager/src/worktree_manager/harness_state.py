@@ -164,6 +164,14 @@ class ProjectInfo:
     wsl_distro: str | None = None
     wsl_state: str | None = None
     roster: tuple[RosterMachine, ...] = field(default=())
+    display_name: str | None = None
+    anchor: str | None = None
+    """This project's resolved checkout path: ``repo.path`` (repos.yaml) when
+    a matching repos.yaml entry exists, else this project's own
+    ``projects.yaml``-level ``anchor:`` override -- a real, actively-used
+    field for a project registered without (or overriding) a repos.yaml
+    entry (ported from ``agent_worktrees.terminal_fragment.anchor_for``,
+    copilot-extensions#3390 Phase 3e Step 3b)."""
 
 
 def repos_registry(home_dir: Path | None = None) -> dict:
@@ -320,6 +328,11 @@ def build_projects(home_dir: Path | None = None) -> list[ProjectInfo]:
         cfg = project_config(name, home_dir)
         repo = repos.get(name)
         wsl = entry.get("wsl") if isinstance(entry.get("wsl"), dict) else {}
+        # Prefer the repos.yaml-resolved path; fall back to this project's
+        # own projects.yaml `anchor:` override for a project registered
+        # without (or overriding) a repos.yaml entry.
+        anchor_override = entry.get("anchor") if isinstance(entry.get("anchor"), str) else None
+        anchor = (repo.path if repo else None) or anchor_override
         out.append(ProjectInfo(
             name=name,
             config_dir=entry.get("config_dir"),
@@ -330,7 +343,9 @@ def build_projects(home_dir: Path | None = None) -> list[ProjectInfo]:
             enabled_plugins=tuple(repo_enabled_plugins(repo.path) if repo else ()),
             wsl_distro=wsl.get("distro"),
             wsl_state=wsl.get("state"),
-            roster=project_roster(repo.path if repo else None),
+            roster=project_roster(anchor),
+            display_name=entry.get("display_name"),
+            anchor=anchor,
         ))
     return sorted(out, key=lambda p: p.name)
 
