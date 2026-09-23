@@ -194,10 +194,20 @@ rewrite is a separate, already-existing migration concern that moves with
    (`test_collect_local_projects_honors_projects_yaml_anchor_override`)
    proves a repos.yaml-absent, anchor-only project still resolves its
    roster.
-4. [ ] **Give worktree-manager an equivalent CLI/config surface** for
+4. [x] **Give worktree-manager an equivalent CLI/config surface** for
    `profiles get/apply` and `terminal-fragment [--explain|--doctor|
-   --migrate-selections]`, proven against the same scenarios agent-worktrees'
-   existing tests cover.
+   --migrate-selections]`. **Landed:** `worktree-manager terminal-fragment
+   <project> [--machine K] [--explain|--doctor|--migrate-selections]` and
+   `worktree-manager profiles <project> get|apply [--machine K] [--set
+   '<json>'] [--json]` — an explicit `<project>` positional (matching this
+   CLI's own `projects`/`repos` convention) instead of agent-worktrees'
+   cwd-based `--machine` default, with `--machine` resolved from that
+   project's own `config.yaml` `machine:` field directly (no
+   `config.load_config()` CLI-root dependency, sidestepping Phase 3d's still-
+   open Group A/B question). `apply` persists the selection but always
+   reports `mirrored: false` — deploying to disk is Step 5's scope. 6 new
+   CLI-dispatch tests plus the manual end-to-end check recorded in the
+   effort journal.
 5. [ ] **Repoint `install.ps1`'s** `Deploy-TerminalScripts`/
    `Sync-TerminalState`/`Get-SettingsProfileGuids`/`Clean-TerminalSettingsJson`
    at the new owner, following Phase 3b Slice 2a's launcher-script repoint

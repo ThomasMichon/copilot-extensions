@@ -70,6 +70,8 @@ __all__ = [
     "collect_local_projects",
     "color_scheme",
     "default_selection_keys",
+    "detect_env_label",
+    "detect_platform",
     "diagnose_wt_state",
     "is_rfc_v4_or_v5_guid",
     "migrate_local_selections",
@@ -103,6 +105,32 @@ def sel_env_label(name: str) -> str:
 def ssh_env_label(name: str) -> str:
     """Profile-name env label (``wsl`` -> ``WSL``)."""
     return _SSH_ENV_LABEL.get(name, name)
+
+
+def detect_platform() -> str:
+    """Detect the current platform: ``windows``, ``wsl``, or ``linux``.
+
+    Ported verbatim from ``agent_worktrees.config.detect_platform`` (pure,
+    dependency-free) -- Phase 3e Step 4's CLI surface needs this to resolve
+    the local env label without the cwd-based ``config.load_config()``
+    CLI-root boundary Phase 3d has not yet converted.
+    """
+    import platform as _platform
+
+    if _platform.system() == "Windows":
+        return "windows"
+    try:
+        with open("/proc/version") as f:
+            if "microsoft" in f.read().lower():
+                return "wsl"
+    except OSError:
+        pass
+    return "linux"
+
+
+def detect_env_label() -> str:
+    """This host's short selection env label (``Win``/``WSL``/``Linux``)."""
+    return sel_env_label(detect_platform())
 
 
 # ---------------------------------------------------------------------------
