@@ -2803,3 +2803,71 @@ since prior rounds' verification):
     this round (out of scope for this scenario as written; it targets the
     clash specifically) and remains an open question for a future round
     or a fresh scenario.
+
+### 2026-09-23 -- Round 2: `/consume-handoff` and `consume_handoff` narrow-scope repro attempts (both clean, no repro)
+
+Operator direction for round 2: target the still-open ready-then-self-exit(1)
+mystery directly by simulating handoff data in a worktree and driving
+`/consume-handoff` from a fresh session's starting prompt -- as opposed to the
+connection-race scenario, which targets the OTHER (already-closed) half of
+#22266.
+
+Two focused, live (non-containerized, direct-host) repros were run on
+`cloud2` against a throwaway disposable worktree
+(`tmichon-cloud2-win-20260923-002542-3907`, `--origin delegate --no-owner`,
+torn down after the round) using `tools/clean-room/lib/psmux-drive.ps1`
+directly (no Docker needed -- this is a real host, not a container):
+
+1. **Fabricated file-backed handoff + bare `/consume-handoff`:** hand-wrote a
+   `handoff-*.json` record directly into the resolved
+   `worktree-state-dir\handoff\` (schema reverse-engineered from
+   `handoff-core.mjs`'s `makeHandoffMetadata`/`saveFileHandoff`/
+   `findHandoffFile` -- any filename works; `findHandoffFile` scores by
+   mtime + a `cwd` match bonus, not by exact id), then started a fresh headed
+   session with the literal prompt `/consume-handoff`. Result: **clean** --
+   `Resuming handoff handoff-simulated-round2` was injected correctly, no
+   hang, no new `~/.copilot/logs/extensions/*context-handoff*` diagnostic log
+   appeared (consistent with those logs being crash/anomaly-triggered, not
+   written on a healthy path).
+2. **`consume_handoff` tool called directly with a fabricated, definitely-
+   nonexistent `task_id`** (`deadbeef00000000000000000000000dead`), prompted
+   explicitly rather than via the slash command, polled every 15s for up to
+   240s. Result: **clean and fast** -- resolved in `12s` per the tool's own
+   reported wall-clock (Claude's response) with a normal `HTTP 404: no such
+   task` error result; no hang.
+
+**This is real negative evidence that narrows the mystery**, not a dead end:
+neither "plant a valid file-backed handoff and consume it" nor "reference a
+task id that flatly does not exist" reproduces the original session's
+symptom (an `external_tool.requested` for `consume_handoff` that received
+**zero** response -- not even an error -- for 1800s). A clean 404 in well
+under a second rules out "the runtime/tool wrapper itself has no timeout
+path" as the mechanism for a nonexistent task. The original hang is more
+consistent with one of:
+ - a **live agent-dispatch coordinator health problem** (the coordinator
+   process itself wedged/unresponsive, so the underlying `agent-dispatch
+   task show <id>` CLI call blocks on a dead socket/connection with no
+   timeout of its own -- as opposed to the coordinator being reachable and
+   promptly reporting 404), reproducible only against a genuinely
+   stuck/overloaded coordinator, not a clean sandbox;
+ - a **valid-but-anomalous task state** (e.g. a task already claimed/
+   consumed/in a transitional state) that some other code path along
+   `consumeDispatchHandoffTask`/`dispatchTaskConsumed` blocks on, distinct
+   from the fast not-found path exercised here;
+ - or something specific to the **repeated-relaunch cascade** shape itself
+   (the original observation was 3 relaunches in ~19s) rather than to
+   `consume_handoff`'s own logic in a single clean launch -- i.e. the hang
+   might only appear on the 2nd/3rd relaunch of the SAME session, which this
+   round's single-launch reproductions did not attempt.
+
+**Next round should target one of these three, not another blind single-
+launch repro:** (a) reproduce a wedged/unreachable agent-dispatch coordinator
+underneath a live `consume_handoff` call and confirm a genuine unbounded
+hang (vs. the current instant-404 baseline); (b) find or construct a task in
+an anomalous status (e.g. already-consumed, `abandoned`, or mid-claim) and
+call `consume_handoff` against it; or (c) drive a REPEATED relaunch of the
+same headed session (matching the original 3-in-19s shape) rather than a
+single clean launch, to test whether the hang is a relaunch-specific
+condition. No `~/.copilot/logs/extensions/*context-handoff*` diagnostic was
+produced by either clean round-2 repro, so a positive repro's own such log
+(if any) is the first thing the next round should check.
