@@ -394,6 +394,33 @@ def pr_merged(ref: str) -> bool | None:
     return None
 
 
+def session_claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None:
+    """Is a ``kind="session"`` claim's own Copilot session **provably gone**?
+
+    A session claim's ref is self-referential (``format_claim_ref(machine,
+    project, worktree_id, session=session_id)`` names the SAME worktree that
+    holds the claim, not a child) so :func:`load_claim_child_record` resolves
+    it correctly with no special-casing. Corroborated against a real PID
+    check for that SPECIFIC session id (:func:`sessions.session_id_is_live`,
+    factored out of ``worktree_session_lock_state``'s "any session" check) --
+    never inferred from staleness/timestamps alone -- so a crashed/killed
+    session cannot wedge finalize forever, matching the invariant every other
+    claim kind already gets from this sweep. Cross-machine (or otherwise
+    unresolvable) is ``None`` (spare); the record itself being gone entirely
+    is a stronger, positive "gone" signal than any per-session PID check.
+    """
+    parsed = tracking.parse_claim_ref(claim.ref)
+    if parsed is None or not parsed.session:
+        return None
+    record, judgeable = load_claim_child_record(claim.ref, config)
+    if not judgeable:
+        return None
+    if record is None:
+        return True
+    from . import sessions
+    return not sessions.session_id_is_live(record, parsed.session)
+
+
 def claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None:
     """Tri-state **gone** verdict, dispatched by claim kind.
 
@@ -401,7 +428,9 @@ def claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None
     (:func:`gone_of`). A leaseable kind (codespace/container) is *gone* when its
     lease mirror shows the obligation settled (:func:`leaseable_settled`). A
     ``pr`` claim is *gone* when its PR (GitHub **or** ADO) is provably merged
-    (:func:`pr_merged`). Every other kind is ``None`` (spare).
+    (:func:`pr_merged`). A ``session`` claim is *gone* when its own Copilot
+    process is confirmed dead (:func:`session_claim_gone`). Every other kind
+    is ``None`` (spare).
     """
     if claim.kind == "worktree":
         return gone_of(claim.ref)
@@ -409,6 +438,8 @@ def claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None
         return leaseable_settled(claim, config)
     if claim.kind == "pr":
         return pr_merged(claim.ref)
+    if claim.kind == "session":
+        return session_claim_gone(claim, config)
     return None
 
 
@@ -418,7 +449,12 @@ def claim_safe(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None
     A ``worktree`` claim proves safety from the child's record/branch
     (:func:`safe_of`). A leaseable kind proves it from the lease's settled
     disposition mirror (:func:`leaseable_settled`). A ``pr`` claim proves it from
-    a provably-merged PR (:func:`pr_merged`). Every other kind is ``None``.
+    a provably-merged PR (:func:`pr_merged`). A ``session`` claim carries no
+    separate at-risk payload of its own -- any uncommitted work the session
+    left behind is exactly what the descriptor's own dirtiness/open-claims
+    facts already surface independently -- so its ``safe`` verdict mirrors
+    :func:`session_claim_gone`'s own verdict (gone implies safe) rather than
+    running a second, separate probe. Every other kind is ``None``.
     """
     if claim.kind == "worktree":
         return safe_of(claim, config)
@@ -426,6 +462,8 @@ def claim_safe(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None
         return leaseable_settled(claim, config)
     if claim.kind == "pr":
         return pr_merged(claim.ref)
+    if claim.kind == "session":
+        return session_claim_gone(claim, config)
     return None
 
 
