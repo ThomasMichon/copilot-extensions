@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from agent_worktrees.worktree_status_cache import WorktreeStatusCache
 
 
@@ -376,6 +378,29 @@ def test_sweep_does_not_cap_when_due_entries_are_within_the_limit(tmp_path):
 
     refreshed_count = cache.sweep_due(refresh=lambda p, w: {"v": "swept"})
     assert refreshed_count == 4
+
+
+def test_negative_max_refresh_per_sweep_is_rejected(tmp_path):
+    """Regression (Copilot review, PR #3348): an unvalidated negative
+    max_refresh_per_sweep silently defeats the cap's own purpose --
+    `stalest[:-1]` (a negative slice bound) refreshes every due entry
+    except one, making the CPU-saturation guard effectively unbounded as
+    demand grows."""
+    with pytest.raises(ValueError):
+        WorktreeStatusCache(tmp_path / "cache.sqlite3", max_refresh_per_sweep=-1)
+
+
+def test_non_int_max_refresh_per_sweep_is_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        WorktreeStatusCache(tmp_path / "cache.sqlite3", max_refresh_per_sweep=2.5)
+
+
+def test_zero_max_refresh_per_sweep_is_accepted_as_a_valid_boundary(tmp_path):
+    """0 is a legitimate (if extreme) configuration -- pause all sweeping --
+    and must not be rejected by the same guard that rejects negative
+    values."""
+    cache = WorktreeStatusCache(tmp_path / "cache.sqlite3", max_refresh_per_sweep=0)
+    assert cache is not None
 
 
 def test_sweep_cap_does_not_let_a_persistently_failing_entry_starve_others(tmp_path):

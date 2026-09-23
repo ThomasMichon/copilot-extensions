@@ -65,6 +65,19 @@ DEFAULT_SAMPLE_SIZE = 10
 #: probe on the worktree ahead of it in line) without false-flagging.
 FRESHNESS_SLACK_SECONDS = 60.0
 
+#: Conservative worst-case cost of ONE per-entry refresh inside
+#: `WorktreeStatusCache.sweep_due` -- the unavoidable `git fetch` in
+#: `worktree_status_compute.compute()`, live-measured at ~5-6s (see the
+#: effort README's own accelerator-perf-fix Journal entries). Used only to
+#: widen `_check_freshness`'s cap-aware bound by a full batch's own compute
+#: time per extra sweep tick (Copilot review, PR #3348): the daemon's
+#: `SWEEP_INTERVAL_SECONDS` gap between ticks starts only AFTER a tick's
+#: own batch of up to `max_refresh_per_sweep` entries finishes computing,
+#: so counting only the inter-tick gap and ignoring each batch's own
+#: multi-entry compute time would still under-estimate how long a
+#: low-priority entry can legitimately wait.
+WORST_CASE_REFRESH_SECONDS = 6.0
+
 
 @dataclass
 class FieldMismatch:
@@ -353,9 +366,16 @@ def _check_freshness(
     # cap, the same "confuse a real caller's own tolerated resting state
     # for an outage" mistake this check exists to avoid.
     extra_ticks = max(0, -(-demanded_count // DEFAULT_MAX_REFRESH_PER_SWEEP) - 1)
+    # Each extra tick contributes its own inter-tick gap PLUS that tick's
+    # own batch of up to `max_refresh_per_sweep` entries actually
+    # computing (Copilot review, PR #3348) -- the daemon's sweep-interval
+    # sleep only starts once a tick's whole batch has finished, so
+    # counting just SWEEP_INTERVAL_SECONDS per extra tick understates the
+    # real worst-case wait by however long that batch's own compute takes.
     bound = (
         DEFAULT_TTL_SECONDS
         + SWEEP_INTERVAL_SECONDS * (1 + extra_ticks)
+        + WORST_CASE_REFRESH_SECONDS * DEFAULT_MAX_REFRESH_PER_SWEEP * extra_ticks
         + FRESHNESS_SLACK_SECONDS
     )
     if age > bound:
@@ -369,6 +389,33 @@ def _check_freshness(
             ),
         )]
     return []
+
+
+def _count_actively_demanded(cache_rows: list[dict], *, now: float) -> int:
+    """Count only rows the sweep would actually consider refreshing --
+    i.e. whose demand has not yet aged past ``DEMAND_TTL_SECONDS``.
+
+    ``_check_freshness``'s cap-aware bound needs the same population
+    ``WorktreeStatusCache.sweep_due`` competes for a refresh slot among
+    (Copilot review, PR #3348): a bare ``len(cache_rows)`` also counts
+    dormant rows whose demand has already aged out -- ``sweep_due`` never
+    refreshes those (it evicts them instead), so including them would
+    inflate the bound for every genuinely active entry, and enough
+    abandoned rows could let a real stuck sweep slip past this check
+    entirely. Tolerates a malformed/missing ``demanded_at`` by counting
+    that row as active (the conservative direction -- it never WIDENS the
+    bound incorrectly, only risks under-widening, which degrades to the
+    prior, already-reviewed behavior rather than masking a real stall).
+    """
+    from .worktree_status_cache import DEMAND_TTL_SECONDS
+
+    count = 0
+    for row in cache_rows:
+        demanded_at = row.get("demanded_at")
+        if isinstance(demanded_at, (int, float)) and now - demanded_at > DEMAND_TTL_SECONDS:
+            continue
+        count += 1
+    return count
 
 
 def _safe_age(cache_entry: dict | None, key: str, *, now: float) -> float | None:
@@ -619,8 +666,9 @@ def run_audit(
     now = time.time()
     cache_rows = read_cache_snapshot(cache_db_path(runtime_home))
     sample = select_sample(cache_rows, sample_size=sample_size, rng=rng)
+    demanded_count = _count_actively_demanded(cache_rows, now=now)
     audits = [
-        audit_one(project, wt_id, entry, now=now, demanded_count=len(cache_rows))
+        audit_one(project, wt_id, entry, now=now, demanded_count=demanded_count)
         for project, wt_id, entry in sample
     ]
     probe = (audits[0].project, audits[0].worktree_id) if audits else None

@@ -272,6 +272,27 @@ def test_check_freshness_bound_widens_with_demanded_count_past_the_sweep_cap():
     assert wsa._check_freshness(entry, now=now, demanded_count=demanded_count) == []
 
 
+def test_count_actively_demanded_excludes_rows_whose_demand_has_aged_out():
+    """Regression (Copilot review, PR #3348): `len(cache_rows)` counts every
+    durable row, including ones `WorktreeStatusCache.sweep_due` will never
+    refresh again -- rows whose `demanded_at` has already passed
+    `DEMAND_TTL_SECONDS` are evicted, not refreshed. Counting those dormant
+    rows would inflate the cap-based freshness bound for every genuinely
+    active entry, and enough abandoned rows could let a real stuck sweep
+    slip past the audit entirely."""
+    from agent_worktrees.worktree_status_cache import DEMAND_TTL_SECONDS
+
+    now = time.time()
+    rows = [
+        {"demanded_at": now},  # active
+        {"demanded_at": now - (DEMAND_TTL_SECONDS - 1)},  # still active (barely)
+        {"demanded_at": now - (DEMAND_TTL_SECONDS + 1)},  # dormant -- excluded
+        {"demanded_at": now - 10_000},  # long dormant -- excluded
+        {},  # malformed/missing -- conservatively counted as active
+    ]
+    assert wsa._count_actively_demanded(rows, now=now) == 3
+
+
 # -- audit_one -------------------------------------------------------------
 
 def test_audit_one_clean_when_cache_matches_live(monkeypatch):

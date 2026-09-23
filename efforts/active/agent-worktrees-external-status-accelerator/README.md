@@ -1706,7 +1706,10 @@ Fixed two ways:
    demanded worktrees than one core can refresh within a TTL window
    would reproduce the same symptom at a higher N. The cap bounds
    worst-case per-tick cost to a fixed number of entries, prioritizing
-   the STALEST (oldest `computed_at`) first -- demand beyond capacity
+   the STALEST-ATTEMPTED entries first (see the 2026-09-23 Journal
+   entry below -- refined to `_last_attempted`, not bare `computed_at`,
+   after a follow-up review round caught that a persistently-failing
+   entry's `computed_at` never advances) -- demand beyond capacity
    degrades as wider staleness for the excess entries, served on
    subsequent ticks, rather than unbounded CPU growth with N.
 
@@ -1798,4 +1801,61 @@ past_the_sweep_cap` proving the same stale age is flagged at
 explain the delay.
 
 Full targeted run: 71 tests pass (25 `worktree_status_cache` + 46
+`worktree_status_audit`).
+
+### 2026-09-23 — PR #3348 review round 3: negative-cap validation, dormant-row inflation, refresh-duration accounting, and unrelated-baseline revert
+Another review pass on the same PR caught four more real issues:
+
+1. **Unvalidated negative `max_refresh_per_sweep`.** A negative value
+   makes `stalest[:-1]` (a negative Python slice bound) refresh every
+   due entry except one -- the CPU-saturation guard this parameter
+   exists to provide becomes effectively unbounded as demand grows,
+   exactly the failure mode the whole mechanism was added to prevent.
+   `WorktreeStatusCache.__init__` now rejects a non-int or negative
+   value with `ValueError`; 0 remains a valid (if extreme) "pause all
+   sweeping" configuration. Added three tests covering the negative,
+   non-int, and zero-boundary cases.
+2. **`demanded_count` inflated by dormant rows.** The cap-aware
+   freshness bound (added in the prior round) used `len(cache_rows)`
+   directly, but that count includes rows whose demand has already
+   aged past `DEMAND_TTL_SECONDS` -- `sweep_due` evicts those instead
+   of refreshing them, so counting them inflates the bound for every
+   genuinely active entry, and enough abandoned rows could let a real
+   stuck sweep slip past the audit entirely. Added `_count_actively_
+   demanded()`, applied in `run_audit`, and a regression test.
+3. **The cap-aware bound ignored each batch's own compute time.** The
+   prior round's bound counted only `SWEEP_INTERVAL_SECONDS` per extra
+   tick, but the daemon's inter-tick sleep only starts once a tick's
+   whole batch of up to `max_refresh_per_sweep` entries has finished
+   computing (each costing ~5-6s of real git-fetch work) -- with enough
+   active entries, a genuinely healthy sweep could still exceed the
+   bound before an entry's turn arrives. Added a
+   `WORST_CASE_REFRESH_SECONDS` constant and folded
+   `WORST_CASE_REFRESH_SECONDS * cap * extra_ticks` into the bound.
+4. **Unrelated module-size-baseline widening.** The prior round's
+   commit had widened `tracking.py`'s and `worktree-manager/__main__
+   .py`'s ceilings to fix red-main growth this PR's own diff never
+   touched -- against this repo's own shrink-only baseline policy
+   (`CONTRIBUTING.md`), an untouched file's ceiling must never move in
+   an unrelated PR. Reverted by taking `tools/module-size-baseline
+   .json` verbatim from `origin/main` (which had, by this point in a
+   very fast-moving day, already absorbed the same fix upstream) rather
+   than hand-editing -- confirms zero unrelated diff remains.
+
+Also bumped the marketplace catalog's own top-level `metadata.version`
+(a separate, required surface distinct from the `agent-worktrees`
+plugin entry -- flagged as missing) and corrected the Journal's own
+description of the cap's priority ordering (it prioritizes
+`_last_attempted`, not bare `computed_at`, per the starvation fix two
+entries above -- the summary above had drifted out of sync with that
+fix).
+
+**Documentation impact:** none of `agent-worktrees`' user-facing
+documentation, the wire contract, or the durable cache schema changed
+in this round -- purely internal validation, an audit-side bound
+correction, and a housekeeping baseline/version fix. This effort README
+remains the authoritative record, consistent with every prior entry's
+own position on this question.
+
+Full targeted run: 75 tests pass (28 `worktree_status_cache` + 47
 `worktree_status_audit`).

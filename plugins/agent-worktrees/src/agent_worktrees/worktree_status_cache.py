@@ -129,6 +129,17 @@ class WorktreeStatusCache:
         max_refresh_per_sweep: int = DEFAULT_MAX_REFRESH_PER_SWEEP,
         now: Callable[[], float] = time.time,
     ) -> None:
+        # Copilot review, PR #3348: an unvalidated negative
+        # max_refresh_per_sweep silently defeats the cap's own purpose.
+        # `stalest[:-1]` (a negative slice bound) refreshes every due entry
+        # except one -- the CPU-saturation guard this parameter exists to
+        # provide becomes effectively unbounded as demand grows, exactly
+        # the failure mode this whole mechanism was added to prevent.
+        if not isinstance(max_refresh_per_sweep, int) or max_refresh_per_sweep < 0:
+            raise ValueError(
+                "max_refresh_per_sweep must be a non-negative int, got "
+                f"{max_refresh_per_sweep!r}"
+            )
         self._db_path = db_path
         self._ttl = ttl_seconds
         self._demand_ttl = demand_ttl_seconds
