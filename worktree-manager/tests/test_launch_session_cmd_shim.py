@@ -32,9 +32,7 @@ def test_launch_session_cmd_preserves_windows_powershell_fallback() -> None:
 def test_launch_session_cmd_survives_overlong_path(tmp_path: Path) -> None:
     cmd = tmp_path / "launch-session.cmd"
     shutil.copyfile(PLUGIN / "bin" / "launch-session.cmd", cmd)
-    runtime_bin = tmp_path / ".agent-worktrees" / "bin"
-    runtime_bin.mkdir(parents=True)
-    (runtime_bin / "launch-session.ps1").write_text(
+    (tmp_path / "launch-session.ps1").write_text(
         "Write-Output ($args -join '|')\n",
         encoding="utf-8",
     )
