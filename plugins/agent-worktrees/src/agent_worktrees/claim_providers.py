@@ -106,8 +106,12 @@ _CMD_METACHAR_RE = re.compile(r'[&|<>^%!"]')
 #: ``"--apply"`` identifier would let a dry-run call
 #: (``apply=False``) still append a literal ``--apply`` token the
 #: callback's own parser could interpret as ITS ``--apply`` flag,
-#: silently turning a preview into a real reclaim.
-_SAFE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*$")
+#: silently turning a preview into a real reclaim. Anchored with ``\Z``
+#: (an absolute end-of-string boundary), never bare ``$`` -- Python's ``$``
+#: also matches immediately before a single trailing newline, so
+#: ``"name\n"`` would otherwise pass despite a control character outside
+#: the documented safe-token alphabet.
+_SAFE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*\Z")
 
 
 class ManifestError(ValueError):
@@ -548,13 +552,37 @@ def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
     return [comspec, "/d", "/s", "/c", *command]
 
 
+def peer_env() -> dict[str, str] | None:
+    """Environment for invoking a resolved SIBLING plugin's binstub.
+
+    Strips this process's own ``COPILOT_EXTENSIONS_CONTEXT`` (an explicit
+    marketplace-cell installation receipt identifying THIS plugin,
+    agent-worktrees) before the child inherits it unchanged -- otherwise the
+    sibling's own installation-context runtime gate validates the inherited
+    receipt against ITS OWN plugin id, sees a mismatch, and exits non-zero
+    (fails closed as unavailable) even though the provider manifest itself
+    was discovered correctly. Mirrors the same absence-means-resolve-fresh
+    contract this suite's own pivot registry already relies on
+    (``picker_support.pivot_manifest._resolve_activation``: explicit
+    context set -> validate against it; absent -> resolve fresh).
+
+    Returns ``None`` (inherit the ambient environment completely
+    unmodified) when this process itself carries no such context -- the
+    common, non-namespaced-cell case."""
+    if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
+        return None
+    env = dict(os.environ)
+    env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    return env
+
+
 def _run_callback(
     command: tuple[str, ...], *, timeout: float, required_bool_field: str
 ) -> dict | None:
     try:
         proc = subprocess.run(
             _windows_batch_argv(command), capture_output=True, text=True, timeout=timeout,
-            encoding="utf-8", errors="replace", **no_window_kwargs(),
+            encoding="utf-8", errors="replace", env=peer_env(), **no_window_kwargs(),
         )
     except (subprocess.SubprocessError, OSError, ValueError):
         return None

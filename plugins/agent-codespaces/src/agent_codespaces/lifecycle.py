@@ -198,6 +198,17 @@ def account_for_codespace(name: str) -> str | None:
     return None
 
 
+#: The claim-provider registry's own default STATUS callback budget is 15s
+#: (``agent_worktrees.claim_providers._CALLBACK_TIMEOUT_SECONDS``), and
+#: ``get_codespace_status`` may try this per-account call SERIALLY across
+#: several candidate accounts -- a single sub-call therefore needs a much
+#: tighter budget than a one-shot operation would, or a hung backend lets
+#: the registry kill the whole callback (and possibly outlive it as an
+#: orphaned ``gh`` process) before this code ever returns its own
+#: controlled 404-vs-error verdict.
+_STATUS_LOOKUP_TIMEOUT_SECONDS = 6.0
+
+
 def _get_codespace_status_under(name: str, account: str | None) -> tuple[bool, str | None]:
     """Single-account attempt for :func:`get_codespace_status`. Raises
     :class:`RuntimeError` for any failure that is NOT an unambiguous 404 --
@@ -209,12 +220,17 @@ def _get_codespace_status_under(name: str, account: str | None) -> tuple[bool, s
     args = ["gh", "api", f"/user/codespaces/{name}"]
     try:
         result = subprocess.run(
-            args, capture_output=True, text=True, timeout=30,
+            args, capture_output=True, text=True, timeout=_STATUS_LOOKUP_TIMEOUT_SECONDS,
             creationflags=_creation_flags(),
             env=gh_account.env_for_account(account) if account else None,
         )
     except FileNotFoundError:
         raise RuntimeError("gh CLI not found") from None
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"gh api codespace lookup for {name} timed out after "
+            f"{_STATUS_LOOKUP_TIMEOUT_SECONDS:.0f}s"
+        ) from exc
     if result.returncode != 0:
         combined = f"{result.stdout}\n{result.stderr}".lower()
         if "http 404" in combined:

@@ -164,6 +164,7 @@ def _dispatch_assigned_tasks(machine: str, worktree_id: str, cwd: str) -> dict:
             capture_output=True,
             text=True,
             timeout=15,
+            env=claim_providers.peer_env(),
         )
     except (subprocess.SubprocessError, OSError) as e:
         return {"available": False, "reason": f"agent-dispatch call failed: {e}"}

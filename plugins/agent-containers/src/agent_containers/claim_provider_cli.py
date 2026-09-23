@@ -14,6 +14,7 @@ import logging
 import sys
 
 from . import lifecycle
+from .lease import get_lease
 from .lease import release as release_lease
 
 log = logging.getLogger("agent-containers")
@@ -103,9 +104,19 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     container is already gone ("no such container") still reports
     ``reclaimed: true`` -- and, like the successful-remove path, releases
     any local lease on it (an already-gone resource must not leave a stale
-    lease blocking allocation for the lease TTL)."""
+    lease blocking allocation for the lease TTL). Refuses (``reclaimed:
+    false``) an actively leased container -- the same guard
+    ``lifecycle.cmd_remove`` applies -- so a stale worktree claim can never
+    destroy a container another effort currently holds."""
     if not args.apply:
         print(json.dumps({"reclaimed": True, "detail": f"would remove container {args.name}"}))
+        return 0
+    lease = get_lease(args.name)
+    if lease:
+        print(json.dumps({
+            "reclaimed": False,
+            "detail": f"container is leased to {lease.effort}; release it first",
+        }))
         return 0
     try:
         lifecycle.remove_container(args.name, force=True)

@@ -63,19 +63,58 @@ def test_claim_reclaim_apply_recovers_sessions_and_releases_lease(monkeypatch, c
     assert calls == [("sync", "cs-a"), ("delete", "cs-a"), ("release", "cs-a")]
 
 
-def test_claim_reclaim_blocks_delete_when_recovery_fails(monkeypatch, capsys):
-    """A FAILED session recovery must block the delete entirely (unattended
-    path, no operator present to notice a warn-and-continue): unlike
-    `_cmd_delete`'s human-facing default, this callback honors its own
-    docstring's 'never destroys an unrecovered session' promise."""
+def test_claim_reclaim_blocks_delete_when_recovery_fails_and_still_exists(monkeypatch, capsys):
+    """A FAILED session recovery must block the delete when the CodeSpace
+    genuinely still exists (unattended path, no operator present to notice
+    a warn-and-continue): unlike `_cmd_delete`'s human-facing default, this
+    callback honors its own docstring's 'never destroys an unrecovered
+    session' promise."""
     called = {"n": 0}
     monkeypatch.setattr(cpc, "sync_codespace_sessions",
                         lambda *a, **k: {"ok": False, "detail": "connect failed"})
+    monkeypatch.setattr(cpc, "get_codespace_status", lambda name: (True, "Available"))
     monkeypatch.setattr(cpc, "delete_codespace", lambda *a, **k: called.__setitem__("n", 1))
     rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out["reclaimed"] is False and "recovery failed" in out["detail"]
+    assert called["n"] == 0
+
+
+def test_claim_reclaim_recovery_failure_confirmed_gone_is_still_idempotent(monkeypatch, capsys):
+    """Recovery failing because the CodeSpace is ALREADY gone (nothing to
+    connect to) must still resolve as an idempotent reclaim, not a refusal."""
+    called = {"n": 0}
+    monkeypatch.setattr(cpc, "sync_codespace_sessions",
+                        lambda *a, **k: {"ok": False, "detail": "connect failed"})
+    monkeypatch.setattr(cpc, "get_codespace_status", lambda name: (False, None))
+    monkeypatch.setattr(cpc, "delete_codespace", lambda *a, **k: called.__setitem__("n", 1))
+    released = {}
+    monkeypatch.setattr(cpc, "release_lease",
+                        lambda name: released.setdefault("name", name) or True)
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is True and "already gone" in out["detail"]
+    assert called["n"] == 0  # delete_codespace never invoked; confirmed via status lookup
+    assert released["name"] == "cs-a"
+
+
+def test_claim_reclaim_recovery_failure_ambiguous_status_refuses(monkeypatch, capsys):
+    """If the existence check itself fails (ambiguous), refuse rather than
+    guess -- never treat an indeterminate state as confirmed absence."""
+    called = {"n": 0}
+    monkeypatch.setattr(cpc, "sync_codespace_sessions",
+                        lambda *a, **k: {"ok": False, "detail": "connect failed"})
+
+    def _boom(name):
+        raise RuntimeError("gh CLI not found")
+    monkeypatch.setattr(cpc, "get_codespace_status", _boom)
+    monkeypatch.setattr(cpc, "delete_codespace", lambda *a, **k: called.__setitem__("n", 1))
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False
     assert called["n"] == 0
 
 

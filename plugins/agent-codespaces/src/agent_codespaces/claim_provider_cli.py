@@ -116,7 +116,10 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     an unrecovered session -- unlike ``_cmd_delete``'s human-facing default
     (warn-and-continue), a FAILED recovery here blocks the delete entirely
     (``reclaimed: false``): this is an unattended/automated path with no
-    operator present to notice the warning and intervene.
+    operator present to notice the warning and intervene -- UNLESS recovery
+    failed only because the CodeSpace is already gone (nothing to connect
+    to, so nothing to recover), confirmed via a real existence check, which
+    still resolves as an idempotent reclaim.
 
     ``sync_codespace_sessions`` uses its own default timeout (300s, matching
     ``cleanup._run_codespaces``'s own default and
@@ -130,9 +133,20 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     try:
         recovery = sync_codespace_sessions(args.name)
     except Exception as exc:
-        print(json.dumps({"reclaimed": False, "detail": f"pre-delete session recovery failed: {exc}"}))
-        return 0
+        recovery = {"ok": False, "detail": str(exc)}
     if not recovery.get("ok"):
+        # Recovery failing because the CodeSpace is ALREADY gone (nothing to
+        # connect to -> nothing to recover) must still resolve as an
+        # idempotent reclaim, not a refusal -- confirm via a real existence
+        # check rather than guessing from the recovery failure text alone.
+        try:
+            exists, _state = get_codespace_status(args.name)
+        except Exception:
+            exists = True  # ambiguous -- treat as present, refuse below
+        if not exists:
+            _release_lease_silently(args.name)
+            print(json.dumps({"reclaimed": True, "detail": f"CodeSpace {args.name} already gone"}))
+            return 0
         print(json.dumps({
             "reclaimed": False,
             "detail": f"pre-delete session recovery failed: {recovery.get('detail', '')}",

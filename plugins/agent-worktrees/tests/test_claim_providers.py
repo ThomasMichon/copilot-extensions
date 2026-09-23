@@ -692,6 +692,34 @@ def test_is_safe_argument_rejects_metacharacters_and_leading_dash(value):
     assert cp.is_safe_argument(value) is False
 
 
+def test_is_safe_argument_rejects_trailing_newline():
+    """Python's bare `$` matches immediately before a single trailing
+    newline at the end of the string, unlike a strict `\\Z` end-of-string
+    anchor -- a value with a trailing control character must never pass
+    validation just because it looks safe up to that point."""
+    assert cp.is_safe_argument("cs-a\n") is False
+    assert cp.is_safe_argument("cs-a\r\n") is False
+    assert cp.is_safe_argument("cs-a") is True
+
+
+def test_peer_env_is_none_without_a_context(monkeypatch):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    assert cp.peer_env() is None
+
+
+def test_peer_env_strips_own_context_for_the_child(monkeypatch):
+    """A resolved SIBLING binstub must never inherit THIS process's own
+    marketplace-cell installation receipt -- the sibling's own
+    installation-context runtime gate would validate it against the
+    wrong plugin id and fail closed."""
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
+    monkeypatch.setenv("SOME_OTHER_VAR", "kept")
+    env = cp.peer_env()
+    assert env is not None
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in env
+    assert env.get("SOME_OTHER_VAR") == "kept"
+
+
 def test_resolve_provider_argv_degrades_when_no_provider_registered(tmp_path):
     assert cp.resolve_provider_argv("codespace", plugins_root=tmp_path / "empty") is None
 

@@ -96,7 +96,7 @@ def _run_codespaces(args: list[tuple[str, bool]], *, timeout: float = 300.0):
         return subprocess.run(
             list(full_argv),
             capture_output=True, text=True, timeout=timeout,
-            creationflags=_creationflags(),
+            creationflags=_creationflags(), env=claim_providers.peer_env(),
         )
     except Exception as exc:  # binstub vanished / exec error
         log.debug("agent-codespaces %s failed to run: %s", [t for t, _ in args][:2], exc)
