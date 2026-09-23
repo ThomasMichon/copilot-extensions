@@ -583,20 +583,29 @@ def test_cli_offer_show_decline_cancel(handoff_state, monkeypatch, capfd):
     monkeypatch.setattr(m.cfg, "load_config", lambda: config)
     monkeypatch.setattr(m, "_infer_worktree_id", lambda explicit, config: "wt-source")
     ref = handoff_state[0].ref
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
     assert m.cmd_claims(_args(
         ["handoff", "offer", ref], handoff_to=[CONSUMER]
     )) == 0
     offered = json.loads(capfd.readouterr().out)
     bundle_id = offered["id"]
     assert offered["state"] == "offered" and offered["created"] is True
+    assert logged[-1] == (("claim_handoff_offered",), {
+        "worktree_id": SOURCE, "bundle_id": bundle_id, "consumer": CONSUMER,
+        "refs": [ref], "created": True})
     assert m.cmd_claims(_args(["handoff", "show", bundle_id])) == 0
     assert json.loads(capfd.readouterr().out)["id"] == bundle_id
+    assert len(logged) == 1  # show is read-only -- never logs a mutation
     monkeypatch.setattr(m, "_infer_worktree_id", lambda explicit, config: "wt-consumer")
     config.repo_name = "consumer-project"
     assert m.cmd_claims(_args(
         ["handoff", "decline", bundle_id], reason="busy"
     )) == 0
     assert json.loads(capfd.readouterr().out)["state"] == "declined"
+    assert logged[-1] == (("claim_handoff_declined",), {
+        "worktree_id": SOURCE, "bundle_id": bundle_id, "consumer": CONSUMER,
+        "reason": "busy"})
     source = tracking.load_record(
         claim_handoffs.cfg.project_dir("source-project")
         / "worktrees"
@@ -615,6 +624,9 @@ def test_cli_offer_show_decline_cancel(handoff_state, monkeypatch, capfd):
         ["handoff", "cancel", second_id], reason="superseded"
     )) == 0
     assert json.loads(capfd.readouterr().out)["state"] == "cancelled"
+    assert logged[-1] == (("claim_handoff_cancelled",), {
+        "worktree_id": SOURCE, "bundle_id": second_id, "consumer": CONSUMER,
+        "reason": "superseded"})
 
 
 def test_cli_reports_invalid_action_as_json(handoff_state, capfd):
