@@ -57,6 +57,27 @@ thing, and it never spawns one just to be sure.
   config fragments without importing across runtimes or editing one shared file.
   Presence is only a discovery candidate: the consumer validates provenance,
   current eligibility, and the referenced target before activating it.
+- **Plugin-stack tier** — every plugin in the suite has one position in an
+  ordered, one-way dependency stack (lowest first): agent-machines, agent-ssh,
+  agent-worktrees, agent-mcp, agent-logger (optional), agent-vault (optional),
+  agent-bridge, agent-codespaces/agent-containers, agent-dispatch, agent-index
+  (highest). A plugin may call **downward** to a lower tier, with graceful
+  degradation if that tier is absent — never **upward**, directly, to a higher
+  tier. Functionality a higher tier owns is exposed to a lower tier only
+  through a drop-in contribution registry the *lower* tier itself owns (the
+  higher tier contributes into it), never by the lower tier importing or
+  shelling out to the higher tier's own CLI.
+- **Claim provider** — a plugin-stack instance of the drop-in contribution
+  registry, scoped to "things a worktree can claim" (a dispatch task, a
+  CodeSpace, a container). agent-worktrees owns the claims ledger and the
+  claim-provider registry itself; a higher-tier plugin that introduces a new
+  kind of claimable resource registers its claim **namespace** and a
+  **status-check callback** into that registry, mirroring agent-bridge's own
+  bridge-provider pattern for namespace resolution. agent-worktrees resolves
+  the provider for a namespaced claim's prefix and asks it for status — it
+  never hardcodes a call to a specific higher-tier sibling's CLI. A missing
+  provider degrades only that claim's status resolution, never agent-
+  worktrees' own claims commands.
 - **Service-bearing plugin** — a plugin whose runtime includes a **long-lived
   local service** (an always-on daemon), as distinct from an on-demand CLI or a
   payload-only (skills/extension) plugin.
