@@ -35,6 +35,7 @@
           "0.4.0-dev447",
           "0.4.0-dev535",
           "0.4.0-dev502",
+          "0.4.0-dev547",
           "0.4.0-dev537"
         ]
       },
@@ -65,7 +66,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "a26c11618b75062cb0ccd89f54ea2f70a46cef53ca67147b2516bc1ed16c59be",
+          "sha256": "5f1a578bb949bddc9bc8e3c80f9c67afb4b874484a4b2c4add703d481482fd1c",
           "semantic": false,
           "non_semantic_reason": "Installation-scoped runtime defaults do not alter the representative session-create wire shape."
         },
@@ -127,7 +128,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "780bafd06d84cf7680ddb57f350d7fc85490b331c4d32ef72d9d23dc43b509db",
+          "sha256": "b0b8ffe588e72e9e4b5baa713b9cb2478afd88602275b376eb56d655b1fa4691",
           "role": "current session-create response",
           "generation": 17
         },
@@ -478,11 +479,11 @@
           "capture_method": "Re-attested for the generation-17 bump: adds GET /api/v1/sessions/{id}/transcript (the new bare session transcript route, review-requested read_only/at_rest preservation included); the pre-resolution initialization refusal this fixture attests is unchanged."
         },
         {
-          "commit": "b25684c9ad7dfaa9b2a013db481acd7f76f615ab",
-          "plugin_version": "0.4.0-dev537",
+          "commit": "316a6495d3a22623fa31def355bd28c5e94aa062",
+          "plugin_version": "0.4.0-dev547",
           "generation": 17,
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "source_git_blob": "d77b3fb8a1bfb3f06b5f26df1fbb9301b4c545ee",
+          "source_git_blob": "510e2934cf8567a396c6cd4af95fc02c4328eae0",
           "capture_method": "Re-attested for the generation-17 bump; installation-scoped runtime defaults do not alter the representative session-create wire shape."
         },
         {

@@ -283,6 +283,7 @@ STUB="$LOCAL_BIN/agent-index"
 SYSTEMD_UNIT="agent-index.service"
 UNIT_DIR="$HOME/.config/systemd/user"
 ENV_FILE="$INSTALL_DIR/service.env"
+SERVICE_LAUNCHER="$INSTALL_DIR/service.sh"
 
 # === engine-daemon: durable, persistent embedding-engine runtime =============
 # The heavy embedding stack (torch + transformers + sentence-transformers) lives
@@ -297,6 +298,7 @@ ENGINE_VENV="$ENGINE_HOME/.venv"
 ENGINE_VENV_PYTHON="$ENGINE_VENV/bin/python"
 ENGINE_ENV_FILE="$ENGINE_HOME/engine.env"
 ENGINE_SYSTEMD_UNIT="agent-index-engine.service"
+ENGINE_LAUNCHER="$ENGINE_HOME/engine.sh"
 # === end engine-daemon ======================================================
 
 # === install-contract:v3 versioned-venv (agent-index: .venv-as-symlink) ===
@@ -1407,18 +1409,7 @@ _restart_engine_daemon() {
     fi
 }
 
-_register_engine_daemon() {
-    # Register the persistent systemd --user unit that runs the warm engine from
-    # the durable venv. A warm engine is left untouched (never restarted) when it
-    # is already active.
-    if [[ "$NO_SERVICE" -eq 1 ]]; then
-        _skip "Engine daemon skipped (--no-service)"
-        return 0
-    fi
-    if [[ ! -x "$ENGINE_VENV_PYTHON" ]]; then
-        _skip "Engine runtime not provisioned -- daemon not registered"
-        return 0
-    fi
+_write_engine_files() {
     if [[ ! -f "$ENGINE_ENV_FILE" ]]; then
         cat > "$ENGINE_ENV_FILE" << 'ENVEOF'
 # agent-index engine daemon environment
@@ -1429,6 +1420,36 @@ ENVEOF
     else
         _skip "Engine env already exists: $ENGINE_ENV_FILE"
     fi
+    cat > "$ENGINE_LAUNCHER" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PYTHONUTF8=1
+export AGENT_INDEX_ENGINE_HOME="$ENGINE_HOME"
+if [[ -f "$ENGINE_ENV_FILE" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENGINE_ENV_FILE"
+    set +a
+fi
+cd "$ENGINE_HOME"
+exec "$ENGINE_VENV_PYTHON" -I -X utf8 -m agent_index engine run
+EOF
+    chmod +x "$ENGINE_LAUNCHER"
+}
+
+_register_engine_daemon() {
+    # Register the persistent systemd --user unit that runs the warm engine from
+    # the durable venv through a stable launcher. A warm engine is left untouched
+    # (never restarted) when it is already active.
+    if [[ "$NO_SERVICE" -eq 1 ]]; then
+        _skip "Engine daemon skipped (--no-service)"
+        return 0
+    fi
+    if [[ ! -x "$ENGINE_VENV_PYTHON" ]]; then
+        _skip "Engine runtime not provisioned -- daemon not registered"
+        return 0
+    fi
+    _write_engine_files
     if ! command -v systemctl >/dev/null 2>&1; then
         _skip "systemd not available -- run 'agent-index engine run' via your own supervisor on this host"
         return 0
@@ -1444,7 +1465,7 @@ Type=simple
 Environment=PYTHONUTF8=1
 Environment=AGENT_INDEX_ENGINE_HOME=$ENGINE_HOME
 EnvironmentFile=-$ENGINE_ENV_FILE
-ExecStart=$ENGINE_VENV_PYTHON -I -X utf8 -m agent_index engine run
+ExecStart=$ENGINE_LAUNCHER
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$ENGINE_HOME
@@ -1467,16 +1488,7 @@ EOF
     fi
 }
 
-_install_service() {
-    if [[ "$NO_SERVICE" -eq 1 ]]; then
-        _skip "Service skipped (--no-service)"
-        return 0
-    fi
-    if ! command -v systemctl >/dev/null 2>&1; then
-        _skip "systemd not available -- run 'agent-index start' manually if this host runs the service"
-        return 0
-    fi
-    mkdir -p "$UNIT_DIR"
+_write_service_files() {
     if [[ ! -f "$ENV_FILE" ]]; then
         cat > "$ENV_FILE" << 'ENVEOF'
 # agent-index service environment
@@ -1487,6 +1499,45 @@ ENVEOF
     else
         _skip "Service env already exists: $ENV_FILE"
     fi
+    cat > "$SERVICE_LAUNCHER" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PYTHONUTF8=1
+if [[ -f "$ENV_FILE" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENV_FILE"
+    set +a
+fi
+_root="$INSTALL_DIR"
+_resolver="\$_root/bin/resolve-runtime.sh"
+AGENT_RT_PY=""
+if [[ -f "\$_resolver" ]]; then
+    AGENT_RT_ROOT="\$_root"
+    # shellcheck disable=SC1090
+    . "\$_resolver"
+fi
+if [[ -z "\${AGENT_RT_PY:-}" ]]; then
+    printf '%s\n' '[agent-index] no complete, importable runtime slot is available.' >&2
+    exit 1
+fi
+cd "$INSTALL_DIR"
+exec "\$AGENT_RT_PY" -I -X utf8 -m agent_index start
+EOF
+    chmod +x "$SERVICE_LAUNCHER"
+}
+
+_install_service() {
+    if [[ "$NO_SERVICE" -eq 1 ]]; then
+        _skip "Service skipped (--no-service)"
+        return 0
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        _skip "systemd not available -- run 'agent-index start' manually if this host runs the service"
+        return 0
+    fi
+    mkdir -p "$UNIT_DIR"
+    _write_service_files
     cat > "$UNIT_DIR/$SYSTEMD_UNIT" << EOF
 [Unit]
 Description=agent-index -- portable indexing/search service shell
@@ -1496,7 +1547,7 @@ After=network.target
 Type=simple
 EnvironmentFile=-$ENV_FILE
 Environment=PYTHONUTF8=1
-ExecStart=$VENV_PYTHON -I -X utf8 -m agent_index start
+ExecStart=$SERVICE_LAUNCHER
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$INSTALL_DIR
@@ -1518,6 +1569,36 @@ EOF
         _ok "Service installed + started ($SYSTEMD_UNIT)"
     else
         _warn "Service installed but not active -- check: systemctl --user status agent-index"
+    fi
+}
+
+_install_logon_autostart() {
+    # Default durable tier on POSIX: user-scoped systemd units around the same
+    # stable launchers. If systemd-user is unavailable we keep the tier-1
+    # ensure path only and report the degraded persistence contract.
+    if [[ "$NO_SERVICE" -eq 1 ]]; then
+        _skip "Durable auto-start skipped (--no-service)"
+        return 0
+    fi
+    local role
+    role="$(_activation_role)"
+    if [[ "$role" != "host" ]]; then
+        _skip "Durable auto-start skipped (role: $role)"
+        return 0
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        _skip "systemd not available -- keeping tier-1 ensure only"
+        return 0
+    fi
+    if [[ -x "$ENGINE_VENV_PYTHON" ]]; then
+        _register_engine_daemon
+    else
+        _skip "Engine durable auto-start skipped -- engine runtime not provisioned"
+    fi
+    if _service_healthy; then
+        _install_service --no-restart
+    else
+        _install_service
     fi
 }
 
@@ -1708,15 +1789,17 @@ case "$ACTION" in
     install)
         _ensure_runtime
         _service_cutover || _ensure_running
+        _install_logon_autostart
         _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
         ;;
     update)                                                         # Thread B: installer-driven graceful zdd cutover (a version update must never kill in-flight work)
         _downgrade_guard
         _ensure_runtime
         _service_cutover || _ensure_running
+        _install_logon_autostart
         _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
         ;;
-    ensure) _ensure_running ;;  # user-mode auto-run safety net (sessionStart hook) -- start if not already healthy
+    ensure) _ensure_running; _install_logon_autostart ;;  # user-mode safety net + default durable auto-start registration
     stamp) do_stamp ;;
     provision)
         _ensure_runtime
