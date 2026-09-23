@@ -587,9 +587,14 @@ def peer_env() -> dict[str, str] | None:
     the feature entirely.
 
     Returns ``None`` (inherit the ambient environment completely
-    unmodified) only when this process carries none of these variables."""
+    unmodified) only when this process carries none of these variables set
+    at all -- checked by simple presence, NOT by :meth:`str.strip`, matching
+    ``agent_codespaces.worktrees.explicit_context()``'s own fail-closed
+    presence check: a whitespace-only value is still an explicit (if
+    invalid) context there, not an absent one, so it must still be
+    stripped here rather than silently passed through unmodified."""
     stripped = ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "GH_TOKEN", "GITHUB_TOKEN")
-    if not any(os.environ.get(name, "").strip() for name in stripped):
+    if not any(os.environ.get(name, "") for name in stripped):
         return None
     env = dict(os.environ)
     for name in stripped:

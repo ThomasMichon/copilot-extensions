@@ -145,10 +145,22 @@ def find_session_sync() -> tuple[str | None, str]:
     return str(command), ""
 
 
-async def _connect_with_retry(manager, name: str, *, timeout: float) -> None:
-    """ensure_connected with boot-patience retry (a Shutdown CS boots here)."""
+async def _connect_with_retry(
+    manager, name: str, *, timeout: float, account: str | None = None,
+) -> None:
+    """ensure_connected with boot-patience retry (a Shutdown CS boots here).
+
+    ``account`` -- when given, pins the connection to a caller-resolved
+    account (e.g. the one :func:`lifecycle.get_codespace_status` already
+    confirmed owns this CodeSpace) rather than re-resolving via
+    ``account_for_codespace``'s own limited listing/ambient fallback, which
+    can silently disagree for a CodeSpace outside that listing's first page
+    or owned by a non-ambient/beyond-first-page account (claim-provider-
+    pattern effort review finding: "Preserve the resolved account through
+    CodeSpace reclamation")."""
     from .lifecycle import account_for_codespace
-    account = account_for_codespace(name)
+    if account is None:
+        account = account_for_codespace(name)
     source = CodespaceSource(name, account=account)
     deadline = time.monotonic() + timeout
     backoff = 3.0
@@ -255,9 +267,14 @@ def sync_codespace_sessions(
     timeout: float = 300.0,
     verbose: bool = False,
     skip_if_shutdown: bool = False,
+    account: str | None = None,
 ) -> dict:
     """Pull a CodeSpace's Copilot session-state and land it in the agent-logger
     hub under ``.codespaces/<name>``.
+
+    ``account`` -- when given, pins the connection to a caller-resolved
+    account (see :func:`_connect_with_retry`'s own docstring) instead of
+    re-resolving it independently.
 
     Returns a result dict: ``{ok, session_count, detail, skipped?}``. Never
     raises for routine connect/pull failures -- callers (delete hook, finalize)
@@ -302,7 +319,7 @@ def sync_codespace_sessions(
 
     async def _run() -> dict:
         try:
-            await _connect_with_retry(manager, name, timeout=_BOOT_TIMEOUT)
+            await _connect_with_retry(manager, name, timeout=_BOOT_TIMEOUT, account=account)
         except (ConnectionError, TimeoutError, RuntimeError) as exc:
             # RuntimeError covers the SSH-config-fetch timeout / gh failures
             # (codespace_config) that an unbootable CodeSpace raises -- treat

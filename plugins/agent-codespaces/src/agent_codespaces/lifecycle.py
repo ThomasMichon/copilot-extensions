@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import time
 from dataclasses import dataclass
 from enum import Enum
 
@@ -208,8 +209,20 @@ def account_for_codespace(name: str) -> str | None:
 #: controlled 404-vs-error verdict.
 _STATUS_LOOKUP_TIMEOUT_SECONDS = 6.0
 
+#: Overall wall-clock budget for the WHOLE serial account loop in
+#: :func:`get_codespace_status`, strictly under the registry's own 15s
+#: callback timeout (leaving margin for JSON parsing/return overhead).
+#: Without this, two mapped accounts plus the ambient fallback could each
+#: consume up to ``_STATUS_LOOKUP_TIMEOUT_SECONDS`` (6s x 3 = 18s), already
+#: exceeding the registry's budget on its own -- the registry would then
+#: kill this callback mid-loop, reporting a live CodeSpace unavailable
+#: instead of this function's own controlled verdict.
+_STATUS_OVERALL_BUDGET_SECONDS = 12.0
 
-def _get_codespace_status_under(name: str, account: str | None) -> tuple[bool, str | None]:
+
+def _get_codespace_status_under(
+    name: str, account: str | None, *, timeout: float = _STATUS_LOOKUP_TIMEOUT_SECONDS,
+) -> tuple[bool, str | None]:
     """Single-account attempt for :func:`get_codespace_status`. Raises
     :class:`RuntimeError` for any failure that is NOT an unambiguous 404 --
     including an explicit ``HTTP 404`` marker only, never the looser phrase
@@ -220,7 +233,7 @@ def _get_codespace_status_under(name: str, account: str | None) -> tuple[bool, s
     args = ["gh", "api", f"/user/codespaces/{name}"]
     try:
         result = subprocess.run(
-            args, capture_output=True, text=True, timeout=_STATUS_LOOKUP_TIMEOUT_SECONDS,
+            args, capture_output=True, text=True, timeout=timeout,
             creationflags=_creation_flags(),
             env=gh_account.env_for_account(account) if account else None,
         )
@@ -228,8 +241,7 @@ def _get_codespace_status_under(name: str, account: str | None) -> tuple[bool, s
         raise RuntimeError("gh CLI not found") from None
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(
-            f"gh api codespace lookup for {name} timed out after "
-            f"{_STATUS_LOOKUP_TIMEOUT_SECONDS:.0f}s"
+            f"gh api codespace lookup for {name} timed out after {timeout:.0f}s"
         ) from exc
     if result.returncode != 0:
         combined = f"{result.stdout}\n{result.stderr}".lower()
@@ -271,12 +283,38 @@ def get_codespace_status(name: str, account: str | None = None) -> tuple[bool, s
     stopping at the first confirmed existence. Only when EVERY candidate
     account confirms an unambiguous 404 is the CodeSpace reported absent;
     a real backend error on any candidate raises (never a false negative).
+
+    See :func:`get_codespace_status_with_account` for a variant that also
+    reports WHICH account confirmed existence, for a caller that must then
+    reuse that same account for a follow-up operation (rather than letting
+    it re-resolve independently and possibly disagree).
     """
+    exists, state, _account = get_codespace_status_with_account(name, account)
+    return exists, state
+
+
+def get_codespace_status_with_account(
+    name: str, account: str | None = None,
+) -> tuple[bool, str | None, str | None]:
+    """Like :func:`get_codespace_status`, but also returns the account that
+    confirmed existence (or ``None`` when ``account`` was explicit, or no
+    candidate exists).
+
+    A caller that must perform a FOLLOW-UP operation on the same CodeSpace
+    (e.g. ``sync_codespace_sessions``/``delete_codespace`` during a
+    claim-provider reclaim) should thread this resolved account through
+    rather than letting the follow-up re-resolve independently via
+    ``account_for_codespace``'s own limited listing/ambient fallback, which
+    can disagree for a CodeSpace found only under a non-ambient or
+    beyond-first-page account (claim-provider-pattern effort review
+    finding: "Preserve the resolved account through CodeSpace
+    reclamation")."""
     from . import gh_account
 
     validate_context()
     if account is not None:
-        return _get_codespace_status_under(name, account)
+        exists, state = _get_codespace_status_under(name, account)
+        return exists, state, account
 
     try:
         from . import account_binding
@@ -290,17 +328,27 @@ def get_codespace_status(name: str, account: str | None = None) -> tuple[bool, s
             accounts_seen.append(login)
 
     errors: list[str] = []
+    deadline = time.monotonic() + _STATUS_OVERALL_BUDGET_SECONDS
     for candidate in (*accounts_seen, None):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            errors.append(
+                f"overall status budget ({_STATUS_OVERALL_BUDGET_SECONDS:.0f}s) "
+                f"exhausted before checking account {candidate or '(ambient)'}"
+            )
+            break
         try:
-            exists, state = _get_codespace_status_under(name, candidate)
+            exists, state = _get_codespace_status_under(
+                name, candidate, timeout=min(_STATUS_LOOKUP_TIMEOUT_SECONDS, remaining),
+            )
         except RuntimeError as exc:
             errors.append(str(exc))
             continue
         if exists:
-            return True, state
+            return True, state, candidate
     if errors:
         raise RuntimeError("; ".join(dict.fromkeys(errors)))
-    return False, None
+    return False, None, None
 
 
 def list_devcontainers(repo: str) -> list[str]:

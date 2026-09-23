@@ -743,6 +743,25 @@ def test_peer_env_strips_plugin_root_even_without_a_context(monkeypatch):
     assert "COPILOT_PLUGIN_ROOT" not in env
 
 
+def test_peer_env_strips_whitespace_only_context(monkeypatch):
+    """A whitespace-only COPILOT_EXTENSIONS_CONTEXT is still an explicit
+    (if invalid) context to agent_codespaces.worktrees.explicit_context()
+    (``bool(os.environ.get(...))`` -- no stripping there), NOT an absent
+    one -- so peer_env() must still strip it (and the credential vars)
+    rather than treating a whitespace value as "nothing set" and returning
+    None (inherit unmodified), which would leave the caller's own
+    cell-scoped GH_TOKEN/GITHUB_TOKEN reaching a sibling that then reads
+    itself as being in (invalid) cell mode."""
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "   ")
+    monkeypatch.setenv("GH_TOKEN", "secret-gh-token")
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    env = cp.peer_env()
+    assert env is not None
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in env
+    assert "GH_TOKEN" not in env
+
+
 def test_resolve_claim_status_still_invokes_in_a_namespaced_cell(tmp_path, monkeypatch):
     """Cross-plugin claim-provider invocation must still be attempted when
     this process runs under an explicit marketplace-cell installation

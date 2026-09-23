@@ -15,7 +15,7 @@ import sys
 
 from .lease import get_lease
 from .lease import release as release_lease
-from .lifecycle import delete_codespace, get_codespace_status
+from .lifecycle import delete_codespace, get_codespace_status, get_codespace_status_with_account
 from .sessions import sync_codespace_sessions
 
 log = logging.getLogger("agent-codespaces")
@@ -127,6 +127,11 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     ``claim_providers.resolve_claim_reclaim``'s reclaim-specific callback
     timeout) -- a real reclaim (session recovery + delete, both over the
     network) needs materially more budget than a quick status check.
+
+    Resolves the owning account ONCE up front (via
+    ``lifecycle.get_codespace_status_with_account``) and threads it through
+    session recovery, the existence recheck, and the delete itself, rather
+    than letting each independently re-derive it.
     """
     if not args.apply:
         print(json.dumps({"reclaimed": True, "detail": f"would delete CodeSpace {args.name}"}))
@@ -138,8 +143,21 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
             "detail": f"CodeSpace is leased to {lease.effort}; release it first",
         }))
         return 0
+    # Resolve the owning account ONCE, up front, and thread it through every
+    # subsequent operation (session recovery, the existence recheck, the
+    # delete itself) -- rather than letting each one independently re-derive
+    # it via account_for_codespace's own limited listing/ambient fallback,
+    # which can disagree for a CodeSpace found only under a non-ambient or
+    # beyond-first-page account (claim-provider-pattern effort review
+    # finding: "Preserve the resolved account through CodeSpace
+    # reclamation"). Best-effort: an ambiguous/failed resolution here falls
+    # back to each operation resolving independently, same as before.
     try:
-        recovery = sync_codespace_sessions(args.name)
+        _exists, _state, resolved_account = get_codespace_status_with_account(args.name)
+    except Exception:
+        resolved_account = None
+    try:
+        recovery = sync_codespace_sessions(args.name, account=resolved_account)
     except Exception as exc:
         recovery = {"ok": False, "detail": str(exc)}
     if not recovery.get("ok"):
@@ -148,7 +166,7 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
         # idempotent reclaim, not a refusal -- confirm via a real existence
         # check rather than guessing from the recovery failure text alone.
         try:
-            exists, _state = get_codespace_status(args.name)
+            exists, _state = get_codespace_status(args.name, account=resolved_account)
         except Exception:
             exists = True  # ambiguous -- treat as present, refuse below
         if not exists:
@@ -175,7 +193,7 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
         }))
         return 0
     try:
-        delete_codespace(args.name, force=True)
+        delete_codespace(args.name, force=True, account=resolved_account)
     except Exception as exc:
         detail = str(exc)
         if _codespace_looks_gone(detail):

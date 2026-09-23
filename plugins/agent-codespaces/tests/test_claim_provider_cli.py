@@ -20,6 +20,19 @@ def _no_lease_by_default(monkeypatch):
     monkeypatch.setattr(cpc, "get_lease", lambda name: None)
 
 
+@pytest.fixture(autouse=True)
+def _no_account_resolution_by_default(monkeypatch):
+    """Most reclaim tests aren't exercising the account-resolution/threading
+    behavior itself -- default to "exists, no specific account resolved" so
+    they don't all need to mock the up-front
+    ``get_codespace_status_with_account`` call this callback now makes
+    (claim-provider-pattern effort review finding: "Preserve the resolved
+    account through CodeSpace reclamation"), and downstream calls still
+    receive ``account=None`` exactly as before that change."""
+    monkeypatch.setattr(cpc, "get_codespace_status_with_account",
+                        lambda name: (True, None, None))
+
+
 def test_claim_status_exists(monkeypatch, capsys):
     monkeypatch.setattr(cpc, "get_codespace_status", lambda name: (True, "Shutdown"))
     rc = cpc.cmd_claim_status(argparse.Namespace(name="cs-b"))
@@ -87,6 +100,26 @@ def test_claim_reclaim_apply_recovers_sessions_and_releases_lease(monkeypatch, c
     assert calls == [("sync", "cs-a"), ("delete", "cs-a"), ("release", "cs-a")]
 
 
+def test_claim_reclaim_threads_resolved_account_through(monkeypatch, capsys):
+    """The account get_codespace_status_with_account() confirms existence
+    under must be threaded through sync_codespace_sessions/delete_codespace,
+    not independently re-derived by each (claim-provider-pattern effort
+    review finding: "Preserve the resolved account through CodeSpace
+    reclamation") -- a CodeSpace found only under a non-ambient account
+    would otherwise be recovered/deleted with the WRONG credentials."""
+    monkeypatch.setattr(cpc, "get_codespace_status_with_account",
+                        lambda name: (True, "Available", "acct-nonambient"))
+    calls = []
+    monkeypatch.setattr(cpc, "sync_codespace_sessions",
+                        lambda name, account=None: calls.append(("sync", account)) or {"ok": True})
+    monkeypatch.setattr(cpc, "delete_codespace",
+                        lambda name, force=True, account=None: calls.append(("delete", account)))
+    monkeypatch.setattr(cpc, "release_lease", lambda name: True)
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+    assert rc == 0
+    assert calls == [("sync", "acct-nonambient"), ("delete", "acct-nonambient")]
+
+
 def test_claim_reclaim_refuses_when_leased_during_recovery(monkeypatch, capsys):
     """Narrows (does not eliminate -- there is no atomic fence primitive)
     the window between the initial lease check and the destructive delete:
@@ -122,7 +155,7 @@ def test_claim_reclaim_blocks_delete_when_recovery_fails_and_still_exists(monkey
     called = {"n": 0}
     monkeypatch.setattr(cpc, "sync_codespace_sessions",
                         lambda *a, **k: {"ok": False, "detail": "connect failed"})
-    monkeypatch.setattr(cpc, "get_codespace_status", lambda name: (True, "Available"))
+    monkeypatch.setattr(cpc, "get_codespace_status", lambda name, **k: (True, "Available"))
     monkeypatch.setattr(cpc, "delete_codespace", lambda *a, **k: called.__setitem__("n", 1))
     rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
     assert rc == 0
@@ -137,7 +170,7 @@ def test_claim_reclaim_recovery_failure_confirmed_gone_is_still_idempotent(monke
     called = {"n": 0}
     monkeypatch.setattr(cpc, "sync_codespace_sessions",
                         lambda *a, **k: {"ok": False, "detail": "connect failed"})
-    monkeypatch.setattr(cpc, "get_codespace_status", lambda name: (False, None))
+    monkeypatch.setattr(cpc, "get_codespace_status", lambda name, **k: (False, None))
     monkeypatch.setattr(cpc, "delete_codespace", lambda *a, **k: called.__setitem__("n", 1))
     released = {}
     monkeypatch.setattr(cpc, "release_lease",
@@ -157,7 +190,7 @@ def test_claim_reclaim_recovery_failure_ambiguous_status_refuses(monkeypatch, ca
     monkeypatch.setattr(cpc, "sync_codespace_sessions",
                         lambda *a, **k: {"ok": False, "detail": "connect failed"})
 
-    def _boom(name):
+    def _boom(name, **k):
         raise RuntimeError("gh CLI not found")
     monkeypatch.setattr(cpc, "get_codespace_status", _boom)
     monkeypatch.setattr(cpc, "delete_codespace", lambda *a, **k: called.__setitem__("n", 1))
