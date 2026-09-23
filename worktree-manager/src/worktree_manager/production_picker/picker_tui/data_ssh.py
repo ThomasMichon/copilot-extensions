@@ -1552,27 +1552,33 @@ class LiveLoader:
         source, and does two DIFFERENT things depending on what kind of
         in-flight work it finds:
 
-        - A bare `ensure_loaded` **promotion that has never committed a
-          result** (``_lazy_promoted``, no real records behind it yet): fully
-          reset it -- kill any spawned child, bump the generation (so a
-          result the killed attempt eventually produces can never land), and
-          put it back in ``_pinged_only`` with a ``ready``/no-records
-          placeholder, exactly like a successful ping -- so navigating back
-          onto the tab (`ensure_loaded`) starts a genuinely fresh load.
-          Acts even when no child has spawned yet (a race between
-          `ensure_loaded` releasing its lock and the new thread reaching
-          `_spawn`): the generation bump alone discards whatever that
-          orphaned attempt eventually produces, and the actual SSH
+        - **No first result committed yet** -- either a bare `ensure_loaded`
+          promotion (``_lazy_promoted``, always resettable) or ANY source
+          still on its *initial* load (``state == "loading"`` with no
+          records at all -- covers the local tab and any other source
+          `start()`'s ``focus_keys`` loaded eagerly, which never touch
+          ``_lazy_promoted``): fully reset it -- kill any spawned child,
+          bump the generation (so a result the killed attempt eventually
+          produces can never land), and put it back in ``_pinged_only`` with
+          a ``ready``/no-records placeholder, exactly like a successful ping
+          -- so navigating back onto the tab (`ensure_loaded`) starts a
+          genuinely fresh load instead of finding nothing to promote and
+          leaving the tab stuck on its cancelled, pre-first-result state.
+          Acts even when no child has spawned yet (a race between the
+          promoting/starting call releasing its lock and the new thread
+          reaching `_spawn`): the generation bump alone discards whatever
+          that orphaned attempt eventually produces, and the actual SSH
           connection -- already unavoidable once dispatched -- simply
           becomes wasted, unobserved work rather than a correctness risk.
-        - A routine `repoll_silent`/`reconcile_remote_prs`/`reload_source`
-          refresh of an **already-resolved** source: only bump the
-          generation and kill its child (stopping the wasted remote work);
-          state/records are left exactly as they are, so the tab keeps
-          showing its last-good rows, not a reset connect spinner.
+        - **Already has a committed result** (a remote's two-phase fast rows,
+          or any prior successful load) and a `repoll_silent`/
+          `reconcile_remote_prs`/`reload_source` refresh is in flight: only
+          bump the generation and kill its child (stopping the wasted remote
+          work); state/records are left exactly as they are, so the tab
+          keeps showing its last-good rows, not a reset connect spinner.
 
-        Returns ``False`` (a harmless no-op) when there is neither a
-        promoted-but-uncommitted load nor a tracked child process for this
+        Returns ``False`` (a harmless no-op) when there is neither
+        resettable in-flight work nor a tracked child process for this
         source -- nothing to stop.
         """
         with self._lock:
@@ -1584,11 +1590,17 @@ class LiveLoader:
                 return False
             with self._procs_lock:
                 procs = list(self._procs_by_source.get(src.cache_key, ()))
-            promoted = src.cache_key in self._lazy_promoted
-            if not procs and not promoted:
+            resettable = (
+                src.cache_key in self._lazy_promoted
+                or (
+                    self._state.get(src.cache_key) == "loading"
+                    and not self._records.get(src.cache_key)
+                )
+            )
+            if not procs and not resettable:
                 return False
             self._gen[src.cache_key] = self._gen.get(src.cache_key, 0) + 1
-            if promoted:
+            if resettable:
                 self._lazy_promoted.discard(src.cache_key)
                 self._pinged_only.add(src.cache_key)
                 self._state[src.cache_key] = "ready"

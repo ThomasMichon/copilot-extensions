@@ -2281,9 +2281,46 @@ def test_cancel_source_kills_only_that_sources_procs(monkeypatch):
 
 
 def test_cancel_source_noop_when_nothing_in_flight():
+    """A source already resolved (success or permanent failure), with
+    nothing currently loading and no tracked child, is a genuine no-op --
+    unlike a freshly-constructed loader's still-"loading"-no-records seed
+    state, which IS resettable (see the fix above): that seed state is
+    indistinguishable from "never started" only in a test, never in real
+    picker usage, where cancel_source is only ever called on a loader whose
+    start() has already run."""
     src = _remote_src()
     loader = data_ssh.LiveLoader([src])
+    loader._state[src.cache_key] = "failed"
     assert loader.cancel_source(("dev6", "Win")) is False
+
+
+def test_cancel_source_resets_an_eagerly_loaded_source_stuck_pre_first_result(monkeypatch):
+    """The gap the second review round found: a source `start()` loaded
+    eagerly via focus_keys (e.g. the local tab) never touches
+    _lazy_promoted, so navigating away from it before its first result
+    commits must still be resettable -- not just a bare ensure_loaded()
+    promotion."""
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    monkeypatch.setattr(data_ssh, "_kill_proc_tree", lambda proc: None)
+    monkeypatch.setattr(loader, "_load_one", lambda s, gen=None: None)
+    monkeypatch.setattr(
+        data_ssh.threading, "Thread",
+        lambda target, args=(), name=None, daemon=None: types.SimpleNamespace(
+            start=lambda: target(*args)),
+    )
+    proc = types.SimpleNamespace(name="p")
+    loader._procs_by_source[src.cache_key] = [proc]
+    # Seeded "loading", no records -- exactly start()'s initial state for an
+    # eagerly (focus_keys) loaded source before its first phase commits.
+    assert loader._state[src.cache_key] == "loading"
+    assert src.cache_key not in loader._lazy_promoted
+
+    assert loader.cancel_source(("dev6", "Win")) is True
+
+    assert src.cache_key in loader._pinged_only
+    assert loader.state("dev6", "Win") == "ready"
+    assert loader.ensure_loaded(("dev6", "Win")) is True   # retries cleanly
 
 
 def test_cancel_source_re_arms_for_a_retry_on_nav_back(monkeypatch):
