@@ -186,13 +186,30 @@ Round 2 (operator's response to that evaluation):
 ### Phase 1 — Standalone tooling (no branch split required)
 - [ ] Evaluate and select the changefile-based monorepo versioning tool
       (beachball vs. alternatives); prototype the changefile format against
-      1-2 real plugins.
+      1-2 real plugins. **See the beachball-fit finding below** (a `package.json`
+      hard requirement makes beachball itself a poor literal fit) before
+      building this.
 - [ ] Build the **idempotent snapshot/materialization generator**: given a
       source tree with DRY references/generator-instructions for vendored
       code, produce the fully-materialized tree. Prove correctness by running
       it against the **current** single-branch `main` and diffing to zero
       (today's `main` already has no DRY pointers, so this is the generator's
       identity-case test before any pointers exist).
+  - **Progress:** the repo already has a proven generator *pattern* for this
+    (`tools/sync-installer-engine.py`: canonical -> copy, plus `--check`
+    verify mode) for a couple of narrow surfaces. The biggest vendoring
+    surface — shared Python libs (`libs/<lib>` canonical -> 2-11
+    `plugins/<plugin>/libs/<lib>` copies each) — had no syncer at all, only
+    a copies-vs-copies verifier (`check-vendored-libs-sync.py`). Shipped
+    `tools/sync-vendored-libs.py` (`--check` / `--restore-canonical` /
+    `--materialize`, version-ordering-gated so it can't silently regress a
+    consumer) to close that gap; see Journal.
+  - **Discovered and filed separately** (not fixed here, to keep this PR's
+    diff reviewable): `libs/ssh-manager` and `libs/credential-relay`
+    canonical sources had already drifted 8-9 dev-versions behind their real,
+    mutually-in-sync vendored copies —
+    ThomasMichon/copilot-extensions#3361. `--restore-canonical` fixes it;
+    left as its own follow-up PR.
   - See `phase1-generator.md` (create when design work starts) for the
     generator's exact input/output contract once drafted.
 - [ ] Build the version-accumulation step: consume changefiles + the
@@ -213,10 +230,36 @@ Round 2 (operator's response to that evaluation):
 - [ ] Draft CONTRIBUTING.md / AGENTS.md rewrite content in-repo as a doc
       (not yet the live contract) describing the new contributor flow:
       changefile-only PRs, no manual version edits, no vendoring copies.
-- [ ] Investigate and close the auto-updater coverage gap: enumerate which
+- [x] Investigate and close the auto-updater coverage gap: enumerate which
       copilot-extensions plugins a harness worktree actually keeps current
       via `agent-worktrees update` (or equivalent), confirm whether
       `copilot-extensions-harness` is covered, and fix if not.
+  - **Finding (no code fix needed):** read `_registered_plugin_targets` /
+    `_update_registered_plugins` in
+    `plugins/agent-worktrees/src/agent_worktrees/update_runtime.py`. The
+    payload-refresh sweep is **not** filtered to `agent-*`-prefixed plugins —
+    it iterates every enabled plugin from every registered `agent-worktrees`
+    anchor's own `.github/copilot/settings.json` (plus user-global enabled
+    plugins and installed inventory) and calls `copilot plugin update` for
+    each. Since copilot-extensions itself is a registered anchor on this
+    machine and its own settings.json enables
+    `copilot-extensions-harness@copilot-extensions`, it is already swept.
+    The suspected gap does not exist in the mechanism itself.
+  - **Residual, real risk (operational, not code):** freshness still depends
+    on someone actually running `agent-worktrees update` after cutover — this
+    is already covered by the Phase 5 cutover-announcement item below, not a
+    new fix.
+- [ ] _(agent-recommended finding, not yet operator-confirmed)_ **beachball
+      itself is likely the wrong literal tool.** Beachball hard-requires a
+      `package.json` per versioned package (confirmed via its own docs); this
+      repo has none — it's Python/PowerShell/bash-first (`plugin.json` +
+      `pyproject.toml` + `marketplace.json`). Recommend: keep beachball's
+      *changefile UX* (a changefile per PR: target plugin(s) + bump type +
+      comment) but implement a small native Python accumulator against this
+      repo's own schema, rather than depending on the real `beachball` npm
+      package (which would otherwise drag a Node/npm dependency into an
+      all-Python CI pipeline just for this). Flagging for confirmation before
+      building the version-accumulation step below on top of this choice.
 
 ### Phase 2 — Cut the fork
 - [ ] Create the `dev` branch from `main`.
@@ -323,3 +366,40 @@ generator contract details here or in a linked sub-doc._
   words after every README write, demarcating agent-recommended content, and
   introducing an `inception-transcript.md` sidecar for accumulated
   multi-round verbatim input once it would otherwise dominate the README.
+
+### 2026-09-22 — Phase 1 driving session
+- **Auto-updater coverage gap: investigated, no code fix needed.** Read
+  `agent-worktrees`' `_registered_plugin_targets` /
+  `_update_registered_plugins`; the payload-refresh sweep already covers
+  every enabled plugin from every registered anchor (not filtered to
+  `agent-*`), so `copilot-extensions-harness` is already swept on this
+  machine. Closed the Plan item; residual risk is operational (someone must
+  run `update`), already covered by Phase 5.
+- **Materialization generator: real progress, plus a live bug found.**
+  Confirmed the repo's existing `sync-installer-engine.py`-style
+  canonical -> copy pattern, then found the largest vendoring surface
+  (`libs/<lib>` shared Python libs) had no syncer at all — only a
+  copies-vs-copies verifier. Shipped `tools/sync-vendored-libs.py` with
+  `--check` / `--restore-canonical` / `--materialize` modes, gated by
+  version ordering so `--materialize` can never silently push a stale
+  canonical down over newer copies (8 passing tests,
+  `tools/test_sync_vendored_libs.py`). Running `--check` against the real
+  repo surfaced genuine drift: `libs/ssh-manager` was missing an entire
+  module and 9 dev-versions stale relative to its real vendored copies;
+  `libs/credential-relay` similarly drifted. Filed
+  ThomasMichon/copilot-extensions#3361 rather than fixing it inline, to keep
+  this PR's diff reviewable; `--restore-canonical` is the fix, left as a
+  follow-up.
+- **beachball-fit finding:** confirmed (via beachball's own docs) it hard-requires
+  a `package.json` per versioned package. This repo has none — recommend
+  keeping beachball's changefile UX but implementing a native Python
+  accumulator instead of depending on the real npm package. Flagged as
+  agent-recommended, not yet operator-confirmed.
+- Deferred (not risked without a scratch environment): empirically confirming
+  Copilot CLI's update-detection semantics. No safe way to test this against
+  the live global marketplace without a disposable scratch plugin/fork;
+  folding it into the Phase 3 dry-run validation instead, which already needs
+  a scratch environment.
+- Next: operator confirmation on the beachball-fit call, then build the
+  version-accumulation step and the local preview CLI on top of
+  `sync-vendored-libs.py`'s pattern.
