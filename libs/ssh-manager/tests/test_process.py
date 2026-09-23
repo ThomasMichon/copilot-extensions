@@ -75,3 +75,53 @@ def test_terminate_tree_ignores_already_exited_kill_race():
             raise ProcessLookupError
 
     asyncio.run(process.terminate_ssh_process_tree(FakeProc()))
+
+
+def test_run_process_cleanup_timeout_does_not_block_caller():
+    """A bounded caller must not be stuck behind a slow shielded cleanup.
+
+    Regression for the observed Windows symptom: a per-command SSH proxy's
+    cleanup (`taskkill /T /F` against a `gh cs ssh --stdio` child) can take
+    100+ seconds under endpoint-protection scanning. An ambient watcher with
+    no one waiting on it for correctness must be able to give up on its own
+    schedule while the real cleanup keeps running in the background.
+    """
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_close():
+        started.set()
+        await release.wait()
+
+    fake_process = object()
+    process.register_process_cleanup(fake_process, slow_close)
+
+    async def scenario():
+        async with asyncio.timeout(5):
+            await process.run_process_cleanup(fake_process, timeout=0.05)
+            # The bounded wait gave up quickly...
+            await started.wait()
+            # ...but the shielded cleanup task is still alive in the
+            # background rather than abandoned/cancelled outright.
+            entry = process._CLEANUPS[id(fake_process)]
+            assert not entry.task.done()
+            release.set()
+            await entry.task
+
+    asyncio.run(scenario())
+
+
+def test_run_process_cleanup_default_is_unbounded():
+    """Existing unbounded callers keep waiting for the real result."""
+    calls = []
+
+    async def close():
+        calls.append("done")
+
+    fake_process = object()
+    process.register_process_cleanup(fake_process, close)
+
+    asyncio.run(process.run_process_cleanup(fake_process))
+
+    assert calls == ["done"]
+    assert id(fake_process) not in process._CLEANUPS

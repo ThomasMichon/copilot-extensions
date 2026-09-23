@@ -125,7 +125,25 @@ def _broker_args(args: Sequence[str], client_command: str) -> list[str]:
 
 
 async def _pump(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    while data := await reader.read(65536):
+    """Relay bytes from ``reader`` to ``writer`` until the source is spent.
+
+    On Windows, ProactorEventLoop pipe/socket transports commonly raise
+    ``ConnectionResetError`` (``WinError 64``, "the specified network name is
+    no longer available") from a read once the peer has gone away, instead of
+    the POSIX-style empty-bytes EOF. Observed live bridging a loopback
+    ``ProxyCommand`` socket to a spawned ``gh cs ssh --stdio`` child: the
+    other pump direction closing first triggers exactly this on a read that
+    would otherwise have returned ``b""``. Treat it as a normal end-of-stream
+    rather than letting it surface as an unhandled "SSH proxy connection
+    failed" warning/traceback -- the peer going away IS the close signal here.
+    """
+    while True:
+        try:
+            data = await reader.read(65536)
+        except ConnectionResetError:
+            return
+        if not data:
+            return
         writer.write(data)
         await writer.drain()
 
@@ -261,11 +279,22 @@ class _ProxyBroker:
         await asyncio.shield(self._close_task)
 
 
+# How long the ambient background watcher (below) waits for its own
+# cleanup before moving on. This watcher has no caller waiting on it for
+# correctness -- it exists purely to reap the broker's spawned process once
+# the local SSH root exits -- so it must never be allowed to block the
+# hosting CLI process's exit for as long as a slow remote `taskkill /T /F`
+# takes (observed 100+ seconds on Windows under endpoint-protection
+# scanning). The shielded cleanup keeps running in the background past this
+# bound; only THIS watcher's wait is capped.
+_WATCHER_CLEANUP_TIMEOUT = 10.0
+
+
 async def _watch_process(process: asyncio.subprocess.Process) -> None:
     try:
         await process.wait()
     finally:
-        await run_process_cleanup(process)
+        await run_process_cleanup(process, timeout=_WATCHER_CLEANUP_TIMEOUT)
 
 
 _WATCHERS: set[asyncio.Task] = set()
