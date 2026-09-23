@@ -190,7 +190,7 @@ Round 2 (operator's response to that evaluation):
       ("our own agent-friendly beachball"), not the real `beachball` npm
       package — operator-confirmed; beachball's actual value here was as
       inspiration/UX reference, not a literal dependency.
-- [ ] Build the **idempotent snapshot/materialization generator**: given a
+- [x] Build the **idempotent snapshot/materialization generator**: given a
       source tree with DRY references/generator-instructions for vendored
       code, produce the fully-materialized tree. Prove correctness by running
       it against the **current** single-branch `main` and diffing to zero
@@ -211,6 +211,16 @@ Round 2 (operator's response to that evaluation):
     mutually-in-sync vendored copies —
     ThomasMichon/copilot-extensions#3361. `--restore-canonical` fixes it;
     left as its own follow-up PR.
+  - **DRY vendor-pointer format designed and validated end-to-end in a
+    standalone trial clone** (not this repo — see Journal), then ported back
+    as real, tested tooling: `sync-vendored-libs.py` now understands a
+    `VENDOR_POINTER.json` stub as a valid vendored-copy form (excluded from
+    copies-agreement/restore-canonical truth selection; fully expanded by
+    `--materialize`), and a new whole-repo `tools/materialize_main.py`
+    expands every pointer in a snapshot from canonical — the validated
+    prototype of Phase 3's actual promotion step. 26 tests across the two
+    files (was 8, +18). **No real plugin in this repo carries a pointer
+    yet** — that conversion is a Phase 2 action, not shipped here.
   - See `phase1-generator.md` (create when design work starts) for the
     generator's exact input/output contract once drafted.
 - [x] Build the version-accumulation step: consume changefiles + the
@@ -533,3 +543,41 @@ generator contract details here or in a linked sub-doc._
   commit) — resolved with `git reset --hard origin/main` after confirming
   the squash captured identical content (verified `contributing-draft.md`
   present, `tools/dev_slot.py` absent).
+
+### 2026-09-23 — Standalone DRY-pointer trial + port-back
+- **Trial run, entirely outside this repo/worktree**, per the operator's
+  request: fresh standalone clone at `D:\Scratch\copilot-extensions-dryrun`
+  (not agent-worktrees-managed), `dev` branch cut from `main`. Converted all
+  56 vendored copies across this repo's 10 shared libs (every lib with a
+  top-level canonical source; `venue-copilot` has none and was left as-is)
+  into `VENDOR_POINTER.json` stubs — the "purest DRY dev form." Wrote a
+  trial `tools/materialize_main.py` that snapshots the tree and expands
+  every pointer from canonical.
+- **Caught a real bug mid-trial**: running `--restore-canonical` after
+  converting a lib's copies to pointers silently wiped canonical, because
+  the tool treated an empty pointer stub as valid "truth" to copy up. Fixed
+  `sync-vendored-libs.py` to exclude pointer copies from copies-agreement
+  and restore-canonical truth selection; `--materialize` still fully
+  expands them (and now also deletes the pointer file once expanded).
+  Recovered the one corrupted canonical (`libs/zdd`) in the trial clone from
+  an already-verified-correct materialized snapshot before re-running.
+- **Verified losslessness rigorously**: after the fix, ran the full
+  conversion again (canonical-only content, `tests/` deliberately
+  untouched — matches `check-vendored-libs-sync.py`'s own existing
+  `src/`-only invariant, not the broader scope my first draft's
+  materializer mistakenly also touched), then diffed the fully materialized
+  "main" snapshot's entire `plugins/` tree against the pristine
+  pre-conversion commit with `git diff --no-index`: **zero differences,
+  exit code 0**, across all 56 copies. `check-vendored-libs-sync.py` also
+  reports clean on the materialized output. dev-branch vendored-libs
+  footprint: ~817 KB (pointers) vs. ~3.0 MB fully materialized — roughly a
+  73% reduction for that one surface.
+- **Ported back into this repo's real tooling** (this repo's own trees were
+  never touched by the trial itself): `sync-vendored-libs.py` gained the
+  same pointer-awareness fix (with a regression test reproducing the exact
+  wipe-canonical bug), and a new `tools/materialize_main.py` brings the
+  validated whole-repo materializer into the real, tested tool set (26
+  tests total across the two files). Confirmed it's a safe no-op against
+  the real checkout (0 pointers found, `git status` unchanged) since no
+  real plugin carries a pointer yet — that conversion is deliberately left
+  for Phase 2, not bundled into this tooling PR.
