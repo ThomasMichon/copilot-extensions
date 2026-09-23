@@ -194,7 +194,13 @@ whether or not it is interactive. Execution is provider-neutral: the app
 currently drives both the **TMux/PSMux presentation layer** and the **AHP
 session backend** — composable, not exclusive, choices — for launch, resume,
 and reattach, and may add ACP, SDK, App, or third-party hosts alongside them.
-No lightweight plugin carries or assumes any of these dependencies.
+The app is also the phased destination for **terminal-app profile handling**
+(which launch targets a machine's terminal app — Windows Terminal, Tabby,
+... — carries a profile for, and mirroring that selection into real
+terminal-app fragments): a machine-local concern currently still split across
+agent-worktrees' `profiles`/`terminal-fragment`/`repair` CLI verbs, relocating
+here the same way Mux/AHP already did. No lightweight plugin carries or
+assumes any of these dependencies.
 
 ### plugin-updating-and-alignment
 Keeps the installed plugin set **current and mutually consistent** — updates
@@ -331,6 +337,16 @@ the app to keep *itself* current.
 
 ## Provenance
 
+- **2026-09-23** — Generalized the control-plane's ownership of terminal
+  handling one step further: beyond Mux presentation and the AHP backend
+  (#2062), **terminal-app profile selection and fragment mirroring**
+  (currently `agent-worktrees profiles`/`terminal-fragment`/`repair`) is also
+  relocating here, in phases — the same eventual direction as
+  `agent-worktrees update` becoming `worktree-manager update`. Operator
+  direction while scoping copilot-extensions#3360. See the mirrored
+  provenance entry in
+  [`visions/plugins/agent-worktrees`](../plugins/agent-worktrees/README.md)
+  and the `worktree-manager-control-plane` effort's Phase 3e.
 - **2026-08-10** — Conceived from the operator's diagnosis that plugin delivery
   leaves code **inert until a session launches**, so users who adopt the suite
   without running the setup flows never get the core (binstubs, runtime, config)
