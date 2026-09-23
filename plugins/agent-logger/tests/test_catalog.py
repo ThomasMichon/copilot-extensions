@@ -203,3 +203,68 @@ def test_rebuild_from_sidecars_skips_malformed_entries(tmp_path: Path) -> None:
 
     assert scanned == 1
     assert index.query("example/repo", 6100) == []
+
+
+# --- default_index() + production-path wiring ------------------------------
+
+def test_default_index_resolves_configured_db_path(tmp_path: Path) -> None:
+    from agent_logger.catalog import default_index
+
+    class _StubConfig:
+        catalog_db_path = tmp_path / "custom-catalog.db"
+
+    index = default_index(cfg=_StubConfig())
+
+    assert index.db_path == tmp_path / "custom-catalog.db"
+    # Usable immediately (migration already ran).
+    assert index.query("example/repo", 6100) == []
+
+
+def test_ordinary_write_then_rebuild_then_query_end_to_end(tmp_path: Path) -> None:
+    """The exact gap flagged in review: an ordinary write_review_annotation()
+    call with no `index=` must still become queryable once `catalog rebuild`
+    (rebuild_from_sidecars) runs -- proving the production annotation path
+    doesn't require every writer to pass `index=` to eventually be indexed."""
+    from agent_logger.catalog import ReviewCatalogIndex, rebuild_from_sidecars
+
+    state_root = tmp_path / "session-state"
+    session_dir = state_root / "s1"
+    session_dir.mkdir(parents=True)
+    (session_dir / "events.jsonl").write_text("", encoding="utf-8")
+
+    # No `index=` passed -- exactly today's real writer shape.
+    write_review_annotation(session_dir, repo="example/repo", pr_number=6100)
+
+    index = ReviewCatalogIndex(tmp_path / "catalog.db")
+    rebuild_from_sidecars(index, state_root)
+
+    entries = index.query("example/repo", 6100)
+    assert len(entries) == 1
+    assert entries[0].session_id == "s1"
+
+
+def test_write_review_annotation_with_default_index_populates_immediately(
+    tmp_path: Path,
+) -> None:
+    """The other supported shape: a caller passes `index=default_index()`
+    directly, so the catalog is populated at write time with no rebuild."""
+    from agent_logger.catalog import ReviewCatalogIndex, default_index
+
+    session_dir = tmp_path / "session-state" / "s1"
+    session_dir.mkdir(parents=True)
+    (session_dir / "events.jsonl").write_text("", encoding="utf-8")
+
+    class _StubConfig:
+        catalog_db_path = tmp_path / "catalog.db"
+
+    index = default_index(cfg=_StubConfig())
+    write_review_annotation(
+        session_dir, repo="example/repo", pr_number=6100, index=index,
+    )
+
+    # A fresh handle onto the same db file sees the write (proves it's a
+    # real durable index, not an in-process-only artifact).
+    fresh = ReviewCatalogIndex(tmp_path / "catalog.db")
+    entries = fresh.query("example/repo", 6100)
+    assert len(entries) == 1
+    assert entries[0].session_id == "s1"

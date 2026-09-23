@@ -145,6 +145,27 @@ class ReviewCatalogIndex:
         ]
 
 
+def default_index(cfg: object | None = None) -> ReviewCatalogIndex:
+    """Resolve the config-configured catalog index for this host.
+
+    The convenience entry point every production caller should use rather
+    than constructing a :class:`ReviewCatalogIndex` from a hand-rolled path:
+    a session-writing caller (e.g. a reviewer-session backfill tool) passes
+    ``index=default_index()`` to :func:`agent_logger.sessions
+    .write_review_annotation` so ordinary annotation writes populate the
+    catalog as a side effect, with no separate wiring. Also used by the
+    ``agent-logger catalog rebuild``/``status`` CLI (see ``__main__.py``).
+
+    ``cfg`` is injectable for tests; production callers omit it and get
+    :func:`agent_logger.config.load_config`'s resolution.
+    """
+    if cfg is None:
+        from agent_logger.config import load_config
+
+        cfg = load_config()
+    return ReviewCatalogIndex(cfg.catalog_db_path)
+
+
 def rebuild_from_sidecars(
     index: ReviewCatalogIndex, state_root: Path, *archive_stores: Path
 ) -> int:
