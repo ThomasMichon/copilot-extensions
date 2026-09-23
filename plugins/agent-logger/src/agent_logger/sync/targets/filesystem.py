@@ -48,8 +48,8 @@ from agent_logger.sync.targets.base import (
     Target,
 )
 
-#: Files never copied to a destination (session lock sidecars, temp files).
-_EXCLUDE_NAMES = frozenset({".lock", "lock"})
+#: Excluded from sync: legacy lock names, plus any ``.lock``/``.tmp`` suffix.
+_EXCLUDE_NAMES, _EXCLUDE_SUFFIXES = frozenset({".lock", "lock"}), (".lock", ".tmp")
 
 #: Top-level session-index files kept alongside the ``session-state`` tree when
 #: no repo allowlist narrows the scope. Everything else under the source (the
@@ -66,7 +66,7 @@ _MAX_FLEET_ENTRIES = 10_000
 
 
 def _is_excluded_name(name: str) -> bool:
-    return name.casefold() in _EXCLUDE_NAMES
+    return name.casefold() in _EXCLUDE_NAMES or name.casefold().endswith(_EXCLUDE_SUFFIXES)
 
 
 def _is_windows_sharing_violation(exc: OSError) -> bool:
