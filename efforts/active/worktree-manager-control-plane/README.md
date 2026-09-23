@@ -485,9 +485,12 @@ call site.
       split out) covers rewiring `collect_local_projects` itself onto
       `harness_state.build_projects()` — deferred pending a small
       `anchor`-override/`display_name` decision.
-- [ ] **Step 3b — rewire `collect_local_projects`** onto
-      `harness_state.build_projects()`, closing the 2 disk-collection tests
-      Step 3 deferred.
+- [x] **Step 3b — rewire `collect_local_projects`** onto
+      `harness_state.build_projects()`. Found the projects.yaml `anchor`
+      override is real (not dead code) — many agent-worktrees tests exercise
+      a repos.yaml-absent, anchor-only project — so extended
+      `ProjectInfo` with `anchor`/`display_name` fields (`repo.path or
+      entry.get("anchor")`) rather than dropping the fallback.
 - [ ] **Step 4 — give worktree-manager an equivalent CLI/config surface**
       for `profiles get/apply` and
       `terminal-fragment [--explain|--doctor|--migrate-selections]`.
@@ -623,6 +626,28 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-23** — Landed Phase 3e Step 3b (`collect_local_projects`
+  rewiring): rewired `collect_local_projects`/`preview_local`/
+  `migrate_local_selections` onto `harness_state.build_projects()`,
+  completing the `terminal_fragment.py` relocation. Investigated Step 3's
+  deferred `anchor`-override question directly rather than re-asking:
+  grepped the whole agent-worktrees tree and found `entry.get("anchor")` is
+  read by `config.py`/`doctor.py`/`front_door_cli.py` and exercised by
+  several existing test fixtures (`test_doctor.py`,
+  `test_projects_registry.py`, `test_registry_paths.py`) registering a
+  project via `anchor:` with **no** matching `repos.yaml` entry at all —
+  real, actively-used, not dead code as the Step 3 hedge suspected. Extended
+  `harness_state.ProjectInfo` with `anchor`/`display_name` fields, resolved
+  as `repo.path or entry.get("anchor")`, and used that for `project_roster()`
+  instead of `repo.path` alone — closing a real gap the naive rewrite would
+  have introduced. Ported the 2 original disk-collection tests (rewritten
+  against a synthetic HOME + `home_dir` kwarg rather than monkeypatching
+  agent-worktrees internals) plus a new
+  `test_collect_local_projects_honors_projects_yaml_anchor_override` proving
+  the fix. Full non-picker suite green (460 passed). worktree-manager
+  bumped `0.1.0-dev72` -> `dev73`. Phase 3e's disk-collection/build side is
+  now fully relocated; Steps 4-6 (CLI surface, `install.ps1` repoint, clean
+  cutover) remain.
 - **2026-09-23** — Landed Phase 3e Step 3 (`terminal_fragment.py`'s pure
   core): `worktree_manager.terminal_fragment` — `build_fragment`,
   `stable_guid`/GUID helpers, `reconcile_generated_profiles`,

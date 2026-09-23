@@ -179,13 +179,21 @@ rewrite is a separate, already-existing migration concern that moves with
    **not** ported — split into **Step 3b** below, since the registry-walk
    rewrite still needs the `anchor`-override decision noted in the current-
    state inventory.
-3b. [ ] **Rewire `collect_local_projects`/`preview_local`/
-   `migrate_local_selections`** onto `harness_state.build_projects()`,
-   resolving the projects.yaml-level `anchor` override
-   `anchor_for()` falls back to today (evidence suggests it has no writer —
-   `register_project()` never sets it — so it may be dead code; confirm
-   before dropping it silently) and the `display_name` field (already a
-   real, written field — needs adding to `harness_state.ProjectInfo`).
+3b. [x] **Rewire `collect_local_projects`/`preview_local`/
+   `migrate_local_selections`** onto `harness_state.build_projects()`.
+   **Landed.** The `anchor` override turned out to be **real, actively-used
+   code, not dead** — a repo-wide grep found `entry.get("anchor")` read by
+   `config.py`, `doctor.py`, `front_door_cli.py`, and exercised by many
+   agent-worktrees tests (`test_doctor.py`, `test_projects_registry.py`,
+   `test_registry_paths.py`, ...) constructing projects.yaml fixtures with
+   `anchor:` and no matching `repos.yaml` entry at all — a project
+   registered without (or overriding) a repos.yaml entry. Fixed by adding
+   `ProjectInfo.anchor`/`display_name` fields to `harness_state.py`,
+   resolved as `repo.path or entry.get("anchor")`, and using that for
+   `project_roster()` instead of `repo.path` alone. New test
+   (`test_collect_local_projects_honors_projects_yaml_anchor_override`)
+   proves a repos.yaml-absent, anchor-only project still resolves its
+   roster.
 4. [ ] **Give worktree-manager an equivalent CLI/config surface** for
    `profiles get/apply` and `terminal-fragment [--explain|--doctor|
    --migrate-selections]`, proven against the same scenarios agent-worktrees'

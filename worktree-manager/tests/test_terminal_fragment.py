@@ -10,12 +10,14 @@ agent-exposed project keeps its launcher even with an empty selection), SSH
 shell/agent gating, self-skip, cross-project de-duplication, WSL gating, and the
 stable-GUID parity with PowerShell.
 
-The 2 disk-collection tests (``collect_local_projects`` reading
-``repos.yaml``/``projects.yaml``) are NOT ported here -- that rewiring onto
-``worktree_manager.harness_state.build_projects()`` is Phase 3e Step 3b, a
-separate follow-up (see the effort's Phase 3e doc).
+The disk-collection tests (``collect_local_projects``) are rewritten against
+``harness_state.build_projects()`` (Phase 3e Step 3b) rather than
+monkeypatching ``agent_worktrees`` internals -- a real synthetic HOME,
+matching ``test_harness_state.py``'s own fixture style.
 """
 from __future__ import annotations
+
+import yaml
 
 from worktree_manager import terminal_fragment as tf
 from worktree_manager.terminal_fragment import (
@@ -356,6 +358,88 @@ def test_env_label_helpers():
     assert tf.sel_env_label("linux") == "Linux"
     assert tf.ssh_env_label("windows") == "Windows"
     assert tf.ssh_env_label("wsl") == "WSL"
+
+
+# ---------------------------------------------------------------------------
+# Disk collection wiring (harness_state.build_projects() -- Phase 3e Step 3b).
+# ---------------------------------------------------------------------------
+
+def _write_home(tmp_path, projects: dict):
+    awt = tmp_path / ".agent-worktrees"
+    awt.mkdir(parents=True, exist_ok=True)
+    (awt / "projects.yaml").write_text(
+        yaml.safe_dump({"schema_version": 2, "projects": projects}, sort_keys=False),
+        encoding="utf-8",
+    )
+    (awt / "repos.yaml").write_text(
+        yaml.safe_dump({"schema_version": 1, "repos": {}}, sort_keys=False),
+        encoding="utf-8",
+    )
+
+
+def test_collect_local_projects_reads_managed_empty(tmp_path):
+    """A ``terminal_profiles: []`` config.yaml yields a managed (empty) selection,
+    while an absent key yields ``None`` (unmanaged)."""
+    managed_dir = tmp_path / ".test-chamber"
+    managed_dir.mkdir()
+    (managed_dir / "config.yaml").write_text("terminal_profiles: []\n", encoding="utf-8")
+    unmanaged_dir = tmp_path / ".other-proj"
+    unmanaged_dir.mkdir()
+    (unmanaged_dir / "config.yaml").write_text("machine: anomalous-potato\n", encoding="utf-8")
+
+    _write_home(tmp_path, {
+        "test-chamber": {"display_name": "Test Chamber"},
+        "other-proj": {},
+    })
+
+    projects = tf.collect_local_projects(current_project="test-chamber", home_dir=tmp_path)
+    by_name = {p.name: p for p in projects}
+
+    # Current project is placed first.
+    assert projects[0].name == "test-chamber"
+    # Managed empty -> empty frozenset (NOT None).
+    assert by_name["test-chamber"].selection == frozenset()
+    assert by_name["test-chamber"].display == "Test Chamber"
+    # Absent key -> None (unmanaged, default column at build time).
+    assert by_name["other-proj"].selection is None
+    # Title-cased slug fallback for the display name.
+    assert by_name["other-proj"].display == "Other Proj"
+
+
+def test_collect_skips_reserved_runtime_name(tmp_path):
+    """The runtime's own name never becomes a launchable project, from ANY
+    source: a stale projects.yaml entry, or ``current_project`` (running the
+    ``agent-worktrees`` binstub resolves the active project to
+    ``agent-worktrees``). Otherwise the generator emits a bogus "Agent
+    Worktrees" launcher backed by no repo."""
+    _write_home(tmp_path, {"agent-worktrees": {}, "dotfiles": {}})
+
+    # Even with current_project explicitly the reserved name, it is filtered.
+    names = [p.name for p in tf.collect_local_projects(
+        current_project="agent-worktrees", home_dir=tmp_path)]
+    assert "agent-worktrees" not in names
+    assert "dotfiles" in names
+
+
+def test_collect_local_projects_honors_projects_yaml_anchor_override(tmp_path):
+    """A project registered only in ``projects.yaml`` (no ``repos.yaml``
+    entry) still resolves its checkout via the projects.yaml-level
+    ``anchor:`` override -- the fallback ``harness_state.build_projects()``
+    (Phase 3e Step 3b) added, since evidence showed it is a real, actively-
+    used field, not dead code."""
+    anchor = tmp_path / "checkout"
+    (anchor / ".agent-worktrees").mkdir(parents=True)
+    (anchor / ".agent-worktrees" / "machines.yaml").write_text(
+        "machines:\n"
+        "  anomalous-potato:\n"
+        "    display_name: Anomalous-Potato\n",
+        encoding="utf-8",
+    )
+    _write_home(tmp_path, {"anchored-proj": {"anchor": str(anchor)}})
+
+    projects = tf.collect_local_projects(home_dir=tmp_path)
+    proj = next(p for p in projects if p.name == "anchored-proj")
+    assert [m.key for m in proj.roster] == ["anomalous-potato"]
 
 
 # ---------------------------------------------------------------------------
