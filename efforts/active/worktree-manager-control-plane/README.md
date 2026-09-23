@@ -504,12 +504,19 @@ call site.
       `terminal-fragment --deploy [--live]` / `profiles apply --mirror
       [--live]`, both defaulting to dry-run per operator direction (no safe
       CI test path for live Windows Terminal state).
-  - [ ] **Step 5b — repoint `install.ps1`'s** `Deploy-TerminalScripts`/
+  - [x] **Step 5b — repointed `install.ps1`'s** `Deploy-TerminalScripts`/
         `Sync-TerminalState`/`Get-SettingsProfileGuids`/
-        `Clean-TerminalSettingsJson` at the new owner, following Phase 3b
-        Slice 2a's launcher-script repoint pattern.
-  - [ ] **Step 5c — live-machine validation trial** of `--live` against a
-        real installed Windows Terminal, before it's treated as proven safe.
+        `Clean-TerminalSettingsJson` at the new owner (PR #3457), following
+        Phase 3b Slice 2a's launcher-script repoint pattern: health-checked,
+        version-gated (`>= 0.1.0-dev75`) present-or-fallback to the
+        unchanged local implementation.
+  - [x] **Step 5c — live-machine validation trial**, operator-supervised on
+        tmichon-book2: confirmed the installed `install.ps1` actually ran
+        the new Worktree Manager path (`--live: writes applied`) and left
+        the real fragment/`state.json`/`settings.json` byte-identical to
+        before (idempotent, non-destructive). `--live` is proven safe on
+        this machine; still off by default everywhere else until
+        independently exercised.
 - [ ] **Step 6 — clean, decisive cutover** (Mux/AHP precedent): delete
       agent-worktrees' `profiles`/`terminal-fragment` CLI verbs, the
       terminal-mirroring parts of `repair`, and (pending the bundled-Picker
@@ -638,6 +645,37 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-23** — Landed Phase 3e Step 5b/5c (install.ps1 repoint + live
+  trial), PR [#3457](https://github.com/ThomasMichon/copilot-extensions/pull/3457).
+  Asked the operator how to proceed before touching `install.ps1` (this
+  step, unlike 5a, cannot be a pure dry-run: repointing the installer means
+  the next real update/install exercises the new write path for real).
+  Operator direction: "repoint and trial now" -- treat this machine's own
+  `agent-worktrees update` as the supervised live trial. Repointed
+  `Deploy-Shortcuts` to call a new `Deploy-TerminalFragmentViaWorktreeManager`
+  first: resolves the `worktree-manager` binstub via `Get-
+  UsableWorktreeManagerBin` (PATH lookup + `--version` health check +
+  `Test-WorktreeManagerVersionAtLeast` >= `0.1.0-dev75`, the version that
+  added `--deploy`/`--mirror`), and calls `terminal-fragment <project>
+  --machine <k> --deploy --live`; falls back to the pre-existing PowerShell
+  implementation (extracted verbatim into `Deploy-TerminalFragmentLocally`,
+  behaviourally unchanged) when Worktree Manager is absent, unhealthy, or
+  too old -- the same present-or-fallback shape Phase 3b Sub-slice 2a's mux
+  relocation used. Validated in stages before landing: a dry-run preview
+  proved worktree-manager's fragment output was byte-identical to the
+  already-installed fragment and converged to zero plan changes. After
+  landing, ran `worktree-manager update` (`0.1.0-dev65` -> `dev75`) and
+  `agent-worktrees update` (`1.5.5-dev260` -> `dev261`) on tmichon-book2,
+  then invoked the installed `install.ps1`'s `refresh-profiles` action
+  directly: its own output confirmed the NEW path ran ("Windows Terminal
+  profiles deployed via Worktree Manager" + the deploy plan's `-> LIVE:
+  writes applied.`), and a before/after diff of the real fragment/
+  `state.json`/`settings.json` showed everything byte-identical with no
+  spurious `settings.json.wt-backup-*` file created -- a clean, idempotent,
+  non-destructive real deploy. `--live` is proven safe on this machine
+  (Step 5c done here); it remains off by default everywhere else until
+  independently exercised. Bumped `agent-worktrees` `1.5.5-dev260` ->
+  `dev261`.
 - **2026-09-23** — Landed Phase 3e Step 5a (deploy/mirror mechanism), PR
   [#3445](https://github.com/ThomasMichon/copilot-extensions/pull/3445).
   Added `terminal_fragment.deploy_fragment(machine, current_project=None,
