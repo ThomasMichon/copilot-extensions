@@ -196,6 +196,32 @@ def test_cluster_free_command_skips_cluster_load(command, monkeypatch):
     assert calls == [], f"{command!r} ({module_name}) must not load the cluster"
 
 
+def _deferred_only_global_names() -> frozenset[str]:
+    """Every name bound ONLY inside `_load_full_command_surface()` -- i.e.
+    absent from `__main__`'s module namespace until that function runs at
+    least once. Used to force a genuinely fresh "surface never loaded"
+    state for a single test, since flipping `_FULL_SURFACE_LOADED`/
+    `_CLUSTER_LOADED` back to `False` alone doesn't undo the fact that an
+    EARLIER test in this same process already called
+    `_load_full_command_surface()` for real and left these names bound in
+    `vars(m)` -- Copilot review correctly flagged that this made the
+    original version of the test below unable to actually prove anything
+    (a handler that incorrectly depends on the cluster could still pass
+    because the deferred globals were already sitting there from an earlier
+    test's real load, not because this change's own gating logic worked).
+    """
+    import ast
+
+    main_text = _core_cluster_scan.MAIN_PATH.read_text(encoding="utf-8")
+    main_tree = ast.parse(main_text, filename=str(_core_cluster_scan.MAIN_PATH))
+    func_start = func_end = -1
+    for node in ast.walk(main_tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_load_full_command_surface":
+            func_start, func_end = node.lineno, node.end_lineno
+    _cheap, heavy_owned, heavy_native = _core_cluster_scan.classify_main_names(main_tree, func_start, func_end)
+    return frozenset(heavy_owned.keys()) | frozenset(heavy_native)
+
+
 @pytest.mark.parametrize(
     "command, argv",
     [
@@ -206,11 +232,18 @@ def test_cluster_free_command_skips_cluster_load(command, monkeypatch):
         ("profiles", ["profiles", "get", "--json"]),
     ],
 )
-def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, monkeypatch):
+def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, monkeypatch, capsys):
     """Actually RUN each cluster-free command's real handler (not just
     `--help`, which only builds/prints the parser and never executes the
     handler body at all -- Copilot review correctly flagged that the
-    original version of this test suite never caught this).
+    original version of this test suite never caught this), in a state
+    that genuinely simulates the cluster never having loaded in this
+    process -- not just a state where the loader functions are stubbed out
+    while the deferred globals they'd populate are already sitting in
+    `vars(m)` from an earlier test's real load (Copilot review's second,
+    equally valid finding: `test_lazy_dispatch_table_matches_regenerated_
+    scan` above calls `_load_full_command_surface()` for real, so a naive
+    version of this test could pass for the wrong reason).
 
     A prior version of this change also marked `session_inspection_cli`
     cluster-free; its `session-lifecycle` handler transitively referenced
@@ -228,6 +261,15 @@ def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, m
     module_name, _ = m._LAZY_DISPATCH_TABLE[command]
     assert module_name in m._CLUSTER_FREE_MODULES
 
+    # Force a genuinely fresh "never loaded" state: strip every deferred-only
+    # global an earlier test's real _load_full_command_surface() call may
+    # have already bound, and reset both loaded-flags. monkeypatch restores
+    # all of this automatically at teardown.
+    for name in _deferred_only_global_names():
+        monkeypatch.delitem(m.__dict__, name, raising=False)
+    monkeypatch.setattr(m, "_FULL_SURFACE_LOADED", False, raising=False)
+    monkeypatch.setattr(m, "_CLUSTER_LOADED", False, raising=False)
+
     calls = []
     monkeypatch.setattr(m, "_ensure_cluster_loaded", lambda: calls.append(1))
     monkeypatch.setattr(m, "_load_full_command_surface", lambda: calls.append(1))
@@ -235,6 +277,15 @@ def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, m
     try:
         rc = m._dispatch_lazy(command, argv)
         assert isinstance(rc, int)
+        # Some handlers (notably session lifecycle-style ones) swallow an
+        # internal exception into a diagnostic string rather than letting it
+        # propagate -- catch that class of miss too, not just a raised
+        # NameError/AttributeError.
+        out = capsys.readouterr().out
+        assert "NameError" not in out and "is not defined" not in out, (
+            f"{command!r} ({module_name}) swallowed a NameError into its own "
+            "output instead of raising it"
+        )
     except RuntimeError as exc:
         assert "No active project could be resolved" in str(exc)
     except (NameError, AttributeError):

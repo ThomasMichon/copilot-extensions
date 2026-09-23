@@ -109,10 +109,22 @@ def classify_main_names(main_tree: ast.Module, func_start: int, func_end: int) -
     cheap: dict[str, int] = {}
     heavy_owned: dict[str, str] = {}
     heavy_native: set[str] = set()
+    deferred_func_node: ast.FunctionDef | None = None
 
+    # Pass 1: every name genuinely bound at module level OUTSIDE the
+    # deferred function -- these are cheap regardless of whether the
+    # deferred function's body also *reassigns* them internally (e.g.
+    # `_FULL_SURFACE_LOADED`/`_CLUSTER_LOADED`, initialized cheaply at
+    # module level, then flipped to `True` inside the function they gate --
+    # an internal reassignment of an already-cheap name must never demote it
+    # to "heavy", or a consumer that only reads it would be wrongly treated
+    # as needing the cluster).
     for node in main_tree.body:
         lineno = node.lineno
-        in_func = func_start <= lineno <= func_end
+        if func_start <= lineno <= func_end:
+            if isinstance(node, ast.FunctionDef) and node.name == "_load_full_command_surface":
+                deferred_func_node = node
+            continue
         names: list[str] = []
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names = [node.name]
@@ -125,26 +137,26 @@ def classify_main_names(main_tree: ast.Module, func_start: int, func_end: int) -
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             for alias in node.names:
                 names.append(alias.asname or alias.name)
+        for n in names:
+            cheap[n] = lineno
 
-        if lineno == func_start and isinstance(node, ast.FunctionDef) and node.name == "_load_full_command_surface":
-            # Walk its body for `name = module.attr` assignments (global reexports).
-            for stmt in ast.walk(node):
-                if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
-                    tgt = stmt.targets[0]
-                    val = stmt.value
+    # Pass 2: names bound inside the deferred function -- only those NOT
+    # already cheap (see the note above) count as heavy.
+    if deferred_func_node is not None:
+        for stmt in ast.walk(deferred_func_node):
+            if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+                tgt = stmt.targets[0]
+                val = stmt.value
+                if not (isinstance(tgt, ast.Name) and tgt.id in cheap):
                     if isinstance(tgt, ast.Name) and isinstance(val, ast.Attribute) and isinstance(val.value, ast.Name):
                         heavy_owned[tgt.id] = val.value.id
                     elif isinstance(tgt, ast.Name) and tgt.id not in heavy_owned:
                         heavy_native.add(tgt.id)
-                elif isinstance(stmt, (ast.ImportFrom, ast.Import)):
-                    for alias in stmt.names:
-                        heavy_native.add(alias.asname or alias.name)
-            continue
-
-        for n in names:
-            if in_func:
-                continue  # handled above for the specific function; ignore other in-range nodes
-            cheap[n] = lineno
+            elif isinstance(stmt, (ast.ImportFrom, ast.Import)):
+                for alias in stmt.names:
+                    name = alias.asname or alias.name
+                    if name not in cheap:
+                        heavy_native.add(name)
 
     return cheap, heavy_owned, heavy_native
 
