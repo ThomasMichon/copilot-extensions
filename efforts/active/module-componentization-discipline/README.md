@@ -334,9 +334,9 @@ Verbatim from the operator:
               under the module-size cap. Final landing path: after **PR #3316**
               cleared the shared red-main blockers (`#3276`
               payload-invocation fallout, then `#3315`
-              version-consistency/module-size drift on `main`), **PR #3283**
-              rebased cleanly onto `main` and re-entered the final review/merge
-              gate.
+              version-consistency/module-size drift on `main`), **PR #3283
+              merged** and finalized the `agent-dispatch/__main__.py`
+              campaign.
             - `agent-bridge/__main__.py` slice landed: the file is now a
               **485-line composition root** with focused sibling modules for
               service start/status (`service_start_cli.py`), daemon/process
@@ -2027,7 +2027,8 @@ the Phase 0 runbook, picked up as capacity allows.
   `payload-invocation.json`), then a second shared red-main blocker from
   **#3315** (repo-wide version-consistency/module-size drift after rebasing).
   Once **PR #3316** landed the shared fix on `main`, the rebased
-  `agent-dispatch` branch again passed its full local validation bar and
-  pushed cleanly back into the review/CI gate. The `agent-dispatch` work
-  itself never required a behavioral follow-up beyond compatibility-seam fixes
-  inside the extracted helpers.
+  `agent-dispatch` branch again passed its full local validation bar, pushed
+  cleanly, cleared the required review/CI gates, and merged as **#3283**.
+  The worktree was then reconciled onto `origin/main` and finalized. The
+  `agent-dispatch` work itself never required a behavioral follow-up beyond
+  compatibility-seam fixes inside the extracted helpers.
