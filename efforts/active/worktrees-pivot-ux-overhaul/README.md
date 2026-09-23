@@ -476,3 +476,25 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
 - Full suite: 1155 passed, 1 skipped.
 - Phase 1 status: **Done**. Moving to Phase 2 (evaluate native Textual
   components for the Worktrees table) next.
+
+### 2026-09-23 — Enriched the durable mock fixture with the scraped memo titles
+- Scraped the 18 "management memo" titles from the original v1.0.0
+  screenshot (`docs/assets/worktree-picker.png`) found while writing the
+  Phase 1 comparison — the terse, absurd, treats-employees-as-test-subjects
+  Cave Johnson register, distinct from `demo.py`'s original 7 "Portal quote"
+  rows. Folded them into `demo.py` as a durable, reusable `_MEMO_TITLES`
+  bank plus 18 new fixture rows (9 Active/9 Recent+Completed), reconstructed
+  with the same ids, relative ages, live/session indicators, follow-up
+  markers, and PR states the original screenshot showed. Kept the existing
+  7 rows byte-identical (nothing removed) so `test_picker_app.py`'s
+  "lemons"/"GLaDOS" assertions and row-count checks stay valid untouched.
+- `_MEMO_TITLES` is intentionally separated from the row-construction code
+  so a future combinatorial title generator (more volume than this fixed
+  25-row roster) has a clearly-labeled, reusable bank of on-theme phrasing
+  to start from, per the operator's "at least inspiration for the
+  generator" ask — not built this pass; the curated bank alone was judged
+  sufficient for now.
+- Verified live: `--demo` now shows "9 active · 10 recent · 6 done",
+  matching the original's section shape closely, with the same titles,
+  follow-up markers (✚), and PR numbers/states. Full suite: 1155 passed,
+  1 skipped.
