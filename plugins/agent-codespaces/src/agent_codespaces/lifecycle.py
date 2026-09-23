@@ -741,11 +741,22 @@ def wait_for_available(name: str, timeout: float = 300.0, interval: float = 10.0
     return outcome == WaitOutcome.AVAILABLE
 
 
-def delete_codespace(name: str, force: bool = False, account: str | None = None) -> None:
+def delete_codespace(
+    name: str, force: bool = False, account: str | None = None,
+    *, token: str | None = None,
+) -> None:
     """Delete a CodeSpace by name.
 
     ``account`` pins ``gh`` to the account that owns the CodeSpace; when None it
     is resolved from the cross-account listing (falls back to ambient auth).
+
+    ``token`` -- when given, uses this EXACT pre-minted token directly
+    instead of re-deriving one via ``gh_account.env_for_account`` (which
+    silently falls back to AMBIENT credentials when it cannot mint one for
+    ``account``). A caller that already validated the account (e.g. a
+    claim-provider reclaim) should pass its own already-minted token here
+    to close that gap entirely (claim-provider-pattern effort review
+    finding: "Preserve validated credentials during status and reclaim").
     """
     from . import gh_account
 
@@ -755,12 +766,18 @@ def delete_codespace(name: str, force: bool = False, account: str | None = None)
 
     log.info("Deleting codespace: %s", name)
 
-    if account is None:
-        account = account_for_codespace(name)
+    if token is not None:
+        env = dict(os.environ)
+        env["GH_TOKEN"] = token
+        env.pop("GITHUB_TOKEN", None)
+    else:
+        if account is None:
+            account = account_for_codespace(name)
+        env = gh_account.env_for_account(account) if account else None
     result = subprocess.run(
         args, capture_output=True, text=True, timeout=60,
         creationflags=_creation_flags(),
-        env=gh_account.env_for_account(account) if account else None,
+        env=env,
     )
 
     if result.returncode != 0:

@@ -122,13 +122,36 @@ def test_claim_reclaim_threads_resolved_account_through(monkeypatch, capsys):
                         lambda name: (True, "Available", "acct-nonambient"))
     calls = []
     monkeypatch.setattr(cpc, "sync_codespace_sessions",
-                        lambda name, account=None: calls.append(("sync", account)) or {"ok": True})
+                        lambda name, account=None, **k: calls.append(("sync", account)) or {"ok": True})
     monkeypatch.setattr(cpc, "delete_codespace",
-                        lambda name, force=True, account=None: calls.append(("delete", account)))
+                        lambda name, force=True, account=None, **k: calls.append(("delete", account)))
     monkeypatch.setattr(cpc, "release_lease", lambda name: True)
     rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
     assert rc == 0
     assert calls == [("sync", "acct-nonambient"), ("delete", "acct-nonambient")]
+
+
+def test_claim_reclaim_threads_the_exact_minted_token_through(monkeypatch, capsys):
+    """The EXACT token minted for the resolved account must be threaded
+    through both sync_codespace_sessions and delete_codespace -- never
+    letting either independently re-derive (and possibly silently
+    ambient-fallback for) credentials moments later (claim-provider-
+    pattern effort review finding: "Preserve validated credentials during
+    status and reclaim")."""
+    monkeypatch.setattr(cpc, "get_codespace_status_with_account",
+                        lambda name: (True, "Available", "acct-nonambient"))
+    monkeypatch.setattr(
+        "agent_codespaces.gh_account.token_for_account",
+        lambda login: "exact-minted-token" if login == "acct-nonambient" else None)
+    calls = []
+    monkeypatch.setattr(cpc, "sync_codespace_sessions",
+                        lambda name, account=None, token=None: calls.append(("sync", token)) or {"ok": True})
+    monkeypatch.setattr(cpc, "delete_codespace",
+                        lambda name, force=True, account=None, token=None: calls.append(("delete", token)))
+    monkeypatch.setattr(cpc, "release_lease", lambda name: True)
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+    assert rc == 0
+    assert calls == [("sync", "exact-minted-token"), ("delete", "exact-minted-token")]
 
 
 def test_claim_reclaim_fails_closed_when_remint_fails_for_resolved_account(monkeypatch, capsys):

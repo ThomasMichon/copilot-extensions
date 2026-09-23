@@ -157,6 +157,7 @@ def find_session_sync() -> tuple[str | None, str]:
 
 async def _connect_with_retry(
     manager, name: str, *, timeout: float, account: str | None = None,
+    token: str | None = None,
 ) -> None:
     """ensure_connected with boot-patience retry (a Shutdown CS boots here).
 
@@ -167,11 +168,17 @@ async def _connect_with_retry(
     can silently disagree for a CodeSpace outside that listing's first page
     or owned by a non-ambient/beyond-first-page account (claim-provider-
     pattern effort review finding: "Preserve the resolved account through
-    CodeSpace reclamation")."""
+    CodeSpace reclamation").
+
+    ``token`` -- when given, passed straight through to
+    :class:`codespace_config.CodespaceSource` to use this EXACT pre-minted
+    token directly, bypassing its own internal ``env_for_account`` re-
+    derivation entirely (which can silently fall back to ambient
+    credentials) -- see that class's own docstring."""
     from .lifecycle import account_for_codespace
-    if account is None:
+    if account is None and token is None:
         account = account_for_codespace(name)
-    source = CodespaceSource(name, account=account)
+    source = CodespaceSource(name, account=account, token=token)
     deadline = time.monotonic() + timeout
     backoff = 3.0
     while True:
@@ -286,6 +293,7 @@ def sync_codespace_sessions(
     verbose: bool = False,
     skip_if_shutdown: bool = False,
     account: str | None = None,
+    token: str | None = None,
 ) -> dict:
     """Pull a CodeSpace's Copilot session-state and land it in the agent-logger
     hub under ``.codespaces/<name>``.
@@ -293,6 +301,13 @@ def sync_codespace_sessions(
     ``account`` -- when given, pins the connection to a caller-resolved
     account (see :func:`_connect_with_retry`'s own docstring) instead of
     re-resolving it independently.
+
+    ``token`` -- when given, passed straight through to
+    :func:`_connect_with_retry` to use this EXACT pre-minted token
+    directly rather than let the connection re-derive (and possibly
+    silently ambient-fallback) credentials for ``account`` moments later
+    (claim-provider-pattern effort review finding: "Preserve validated
+    credentials during status and reclaim").
 
     Returns a result dict: ``{ok, session_count, detail, skipped?}``. Never
     raises for routine connect/pull failures -- callers (delete hook, finalize)
@@ -337,7 +352,9 @@ def sync_codespace_sessions(
 
     async def _run() -> dict:
         try:
-            await _connect_with_retry(manager, name, timeout=_BOOT_TIMEOUT, account=account)
+            await _connect_with_retry(
+                manager, name, timeout=_BOOT_TIMEOUT, account=account, token=token,
+            )
         except (ConnectionError, TimeoutError, RuntimeError) as exc:
             # RuntimeError covers the SSH-config-fetch timeout / gh failures
             # (codespace_config) that an unbootable CodeSpace raises -- treat

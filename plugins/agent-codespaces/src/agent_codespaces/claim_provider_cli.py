@@ -134,13 +134,12 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     timeout) -- a real reclaim (session recovery + delete, both over the
     network) needs materially more budget than a quick status check.
 
-    Resolves the owning account ONCE up front and threads it through
-    session recovery and the delete itself, rather than letting each
-    independently re-derive it -- and re-verifies immediately before use
-    that a token can still be minted for that account, failing closed
-    rather than let either helper's own permissive ambient-fallback
-    silently reclaim under the WRONG identity (review finding: "Preserve
-    validated credentials during status and reclaim").
+    Resolves the owning account ONCE up front, mints its token ONCE, and
+    threads BOTH through session recovery and the delete itself -- never
+    letting either helper independently re-derive (and possibly
+    ambient-fallback for) credentials moments later. Fails closed if
+    minting fails (review finding: "Preserve validated credentials during
+    status and reclaim").
     """
     if not args.apply:
         print(json.dumps({"reclaimed": True, "detail": f"would delete CodeSpace {args.name}"}))
@@ -176,20 +175,21 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
         _release_lease_silently(args.name)
         print(json.dumps({"reclaimed": True, "detail": f"CodeSpace {args.name} already gone"}))
         return 0
-    # sync_codespace_sessions/delete_codespace pin to resolved_account via
-    # gh_account.env_for_account -- a PERMISSIVE helper that silently falls
-    # back to ambient credentials when it cannot mint a token (its own
-    # documented contract for its other, non-strict callers). Re-verify
-    # RIGHT HERE, immediately before using them, that minting still
-    # succeeds for the account the status check just validated -- and fail
-    # closed rather than let a transient mint failure silently reclaim
-    # under a DIFFERENT (ambient) identity than the one just confirmed
-    # (claim-provider-pattern effort review finding: "Preserve validated
-    # credentials during status and reclaim"). token_for_account() is
-    # cached, so this doesn't mint twice in the success case.
+    # sync_codespace_sessions/delete_codespace previously pinned to
+    # resolved_account via gh_account.env_for_account -- a PERMISSIVE
+    # helper that silently falls back to ambient credentials when it
+    # cannot mint a token (its own documented contract for its other,
+    # non-strict callers). Mint the token ONCE, right here, and thread the
+    # EXACT token through both calls -- never letting either re-derive
+    # (and possibly silently ambient-fallback for) credentials moments
+    # later. Fail closed if minting itself fails (claim-provider-pattern
+    # effort review finding: "Preserve validated credentials during
+    # status and reclaim").
+    resolved_token: str | None = None
     if resolved_account is not None:
         from . import gh_account
-        if not gh_account.token_for_account(resolved_account):
+        resolved_token = gh_account.token_for_account(resolved_account)
+        if not resolved_token:
             print(json.dumps({
                 "reclaimed": False,
                 "detail": (
@@ -199,7 +199,9 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
             }))
             return 0
     try:
-        recovery = sync_codespace_sessions(args.name, account=resolved_account)
+        recovery = sync_codespace_sessions(
+            args.name, account=resolved_account, token=resolved_token,
+        )
     except Exception as exc:
         recovery = {"ok": False, "detail": str(exc)}
     if not recovery.get("ok"):
@@ -223,7 +225,9 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
         }))
         return 0
     try:
-        delete_codespace(args.name, force=True, account=resolved_account)
+        delete_codespace(
+            args.name, force=True, account=resolved_account, token=resolved_token,
+        )
     except Exception as exc:
         detail = str(exc)
         if _codespace_looks_gone(detail):
