@@ -14,6 +14,7 @@ import pytest
 
 from agent_machines import resources as R
 from agent_machines import self_update as SU
+from agent_machines import self_update_tasks
 from agent_machines.manifest import ManifestError, load_package
 from agent_machines.resources import (
     ResourceContext,
@@ -2279,3 +2280,101 @@ def test_self_update_resource_absent_on_unsupported_platform(tmp_path):
         dry_run=False,
     )
     assert results == []
+
+
+def test_self_update_resource_dry_run_queries_systemd_timer_on_linux(tmp_path, monkeypatch):
+    # Regression: apply()'s dry-run path called query_scheduled_task() (always
+    # the Windows PowerShell/Scheduled Task probe) directly, unconditionally,
+    # instead of dispatching by platform the way reconcile_scheduled_task()
+    # does -- so a Linux/WSL dry-run tried to run pwsh/Get-ScheduledTask (or
+    # errored) instead of reporting the systemd --user timer's real state.
+    # Mirrors the identical fix/test for fleet-update
+    # (test_fleet_update_resource_dry_run_queries_systemd_timer_on_linux).
+    #
+    # Distinguishing the two paths (review finding): query_task_state() now
+    # probes availability first (a single "systemctl --user is-system-running"
+    # call, reported "running" by this fake), then -- with no unit files on
+    # disk -- query_systemd_timer() returns present=False without any further
+    # runner call (self_update_tasks.py's early-return branch). The buggy
+    # code instead unconditionally called query_scheduled_task() ->
+    # _run_powershell(), which -- via the blanket shutil_which patch below --
+    # resolves "pwsh" to "/usr/bin/systemctl" and calls
+    # runner(["/usr/bin/systemctl", "-NoProfile", "-NonInteractive",
+    # "-Command", script]). A runner that tolerantly returned success for
+    # *any* argv (the original fake) could not tell that apart from a real
+    # systemd call, so the test passed even against the pre-fix code. This
+    # runner instead only recognizes the exact systemd --user argv shapes
+    # and raises on anything else, including that Windows-shaped call, so a
+    # regression back to the unconditional Windows probe fails loudly here.
+    from agent_machines.resources import RunOutcome
+
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "linux")
+    monkeypatch.setattr(SU, "shutil_which", lambda _b: "/usr/bin/systemctl")
+
+    class LinuxRunner:
+        def __call__(self, argv):
+            if argv == ["systemctl", "--user", "is-system-running"]:
+                return RunOutcome(0, "running\n", "")
+            if len(argv) == 3 and argv[:2] == ["systemctl", "--user"]:
+                return RunOutcome(0, "", "")
+            raise AssertionError(
+                f"unexpected non-systemd command dispatched on Linux: {argv!r} "
+                "-- the Windows Scheduled Task path must never run here"
+            )
+
+    pkg = _pkg(tmp_path, "acme/watchdog", [{"type": "self-update", "tier": "watchdog"}])
+    results = apply_resources(
+        [pkg],
+        "box-1",
+        "linux",
+        _ctx(tmp_path, LinuxRunner(), plat="linux"),
+        dry_run=True,
+    )
+    res = results[0]
+    assert res.type == "self-update"
+    assert res.action == "install"
+    assert res.changed is True
+    # Backend-label fix (review finding): the dry-run detail must name the
+    # backend actually queried (systemd --user timer on Linux), not the
+    # Windows-only "Scheduled Task" wording unconditionally used before.
+    assert "systemd --user timer" in res.detail
+    assert "Scheduled Task" not in res.detail
+
+
+def test_self_update_resource_dry_run_reports_unavailable_without_systemd_manager(
+    tmp_path, monkeypatch
+):
+    """Review finding: query_task_state()'s Linux branch called
+    query_systemd_timer() unconditionally, without the
+    linux_systemd_user_available() guard reconcile_scheduled_task()/
+    scheduled_task_status() already use -- so a dry-run on a host with no
+    reachable systemd --user manager could crash (missing systemctl) or
+    misreport state, instead of the "skipped, unavailable" outcome the
+    non-dry-run reconcile path already reports correctly for this exact
+    case (self_update_tasks._reconcile_linux_timer)."""
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "linux")
+    monkeypatch.setattr(SU, "shutil_which", lambda _b: None)  # no systemctl on PATH
+
+    pkg = _pkg(tmp_path, "acme/watchdog", [{"type": "self-update", "tier": "watchdog"}])
+
+    class NoCallRunner:
+        def __call__(self, argv):
+            raise AssertionError(
+                f"the systemd-availability guard should short-circuit before any "
+                f"command runs, but got: {argv!r}"
+            )
+
+    results = apply_resources(
+        [pkg],
+        "box-1",
+        "linux",
+        _ctx(tmp_path, NoCallRunner(), plat="linux"),
+        dry_run=True,
+    )
+    res = results[0]
+    assert res.type == "self-update"
+    assert res.action == "none"
+    assert res.changed is False
+    assert res.skipped_reason is not None
+    assert "systemd" in res.detail
+
