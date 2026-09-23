@@ -223,8 +223,26 @@ below for the carved implementation plan.
   on `sys.path` for a test to genuinely import both sides.
 - [ ] Add compatibility fixtures for legacy boolean-only records and active
   effort bindings.
-- [ ] Add stale-snapshot concurrency fixtures proving background stamp writes
-  cannot erase, resurrect, or reorder concurrently-mutated follow-ups.
+- [x] Add stale-snapshot concurrency fixtures proving background stamp writes
+  cannot erase, resurrect, or reorder concurrently-mutated follow-ups. This
+  was a REAL production gap, not just a missing test: `save_record`'s
+  `resources` ledger already had a per-ref merge-by-reservation
+  reconciliation against a concurrent writer's on-disk state, but
+  `follow_ups` had none -- Phase 3's own note already flagged "the
+  cross-writer merge-by-highest-revision path itself is not implemented
+  yet." Added a per-id, per-`FollowUpRecord.revision` merge clause right
+  alongside the `resources` merge in `_save_record_unlocked`: whichever
+  side (in-memory or on-disk) holds the higher revision for a given id
+  wins; an id present only on disk is never dropped. `TestFollowUpLedgerConcurrencyMerge`
+  in `test_tracking.py` (5 new tests) pins: a stale writer's save can't
+  erase a concurrently-added item, can't resurrect a resolved/dismissed
+  item back to open, a writer's OWN concurrent mutation still wins when its
+  revision is higher, and two independent concurrent additions are both
+  preserved. Full targeted suite (664 tests: tracking/claims/handoff) and
+  the full agent-worktrees suite (681 passed, same 12 pre-existing/
+  unrelated `test_doctor.py`/`test_context_resolution.py` failures
+  confirmed present on unmodified `origin/main`) pass; `ruff check`
+  byte-identical before/after (7 pre-existing findings).
 - [ ] Inventory every in-repo and known downstream consumer of literal `FINAL`,
   `status == finalized`, follow-up glyphs, and cleanup buckets before changing
   their meaning, including the agent-bridge worktree projection and cockpit
@@ -298,9 +316,12 @@ below for the carved implementation plan.
   (YAML-round-tripped, emitted only when non-empty). Revision bumps on every
   mutation; deletion is a tombstone (state flips to
   resolved/dismissed/transferred, never a list removal) so history and
-  revision continuity survive -- but the **cross-writer merge-by-highest-
-  revision path itself is not implemented yet** (see the unchecked
-  concurrency item below and Validation Plan's **Concurrency** row).
+  revision continuity survive. **The cross-writer merge-by-highest-revision
+  path was NOT implemented when this bullet first landed -- it now is** (see
+  Phase 1's stale-snapshot concurrency fixture bullet and Validation Plan's
+  **Concurrency** row, both closed 2026-09-23): `save_record` reconciles
+  `follow_ups` per-id by highest `revision`, the same shape as the existing
+  `resources` merge.
 - [x] Add explicit list/add/resolve/dismiss ... CLI operations (`follow-ups
   [id]`, `follow-ups add <summary> [--ref kind:value]...`, `follow-ups
   resolve <id> [--result-ref <ref>]`, `follow-ups dismiss <id> --reason
@@ -942,7 +963,7 @@ either.
   shipped path yet since that machinery isn't built (Phase 3 note).
 - [ ] **Regression:** existing ACTIVE, DIRTY, WIP, UNUSED, CONVO, GONE, ORPHAN,
   and UNKNOWN behavior remains stable when no closure blockers exist.
-- [ ] **Concurrency:** stale background record writers preserve every concurrent
+- [x] **Concurrency:** stale background record writers preserve every concurrent
   follow-up mutation through the ledger revision merge.
 - [ ] **Mixed versions:** a remote without the descriptor, or with an
   unsupported descriptor version, is provisional and never prune-safe.
@@ -2473,4 +2494,40 @@ The approved design is the faceted model in [design.md](design.md):
   failures in `test_data_ssh_sources.py` (confirmed present on `origin/main`
   before this change too -- a Windows path-format assertion, untouched
   file). `ruff check` clean on the new file.
+
+### 2026-09-23 (continued) - Phase 1: follow-up ledger concurrency merge (a real gap, not just a missing test)
+
+- Picked Phase 1's remaining stale-snapshot concurrency bullet. Investigating
+  it surfaced this was NOT purely a test gap: Phase 3's own note already
+  said "the cross-writer merge-by-highest-revision path itself is not
+  implemented yet" for `follow_ups`, unlike `resources`, which already had a
+  per-ref merge-by-reservation reconciliation in `save_record`
+  (`_save_record_unlocked`). Concretely: a stale background writer (e.g. a
+  liveness/title-stamp save that loaded the record before a concurrent
+  `follow-ups add`/`resolve`/`dismiss` landed) could silently erase that
+  mutation, or resurrect a resolved/dismissed item back to `open`, on its
+  own later save.
+- Fixed it: added a per-id, per-`FollowUpRecord.revision` merge clause
+  alongside the existing `resources` merge -- whichever side (in-memory or
+  on-disk) holds the higher revision for a given id wins; an id present
+  only on disk (added by a concurrent writer after this record was loaded)
+  is never dropped.
+- Added `TestFollowUpLedgerConcurrencyMerge` (5 tests) pinning: erase
+  prevention, resurrection prevention (resolved and dismissed cases), the
+  writer's OWN higher-revision mutation still winning (never
+  unconditionally trusting disk), and two independent concurrent additions
+  both surviving.
+- Updated Phase 3's own bullet and the Validation Plan's Concurrency row to
+  reflect this is now built, rather than leaving the stale "not implemented
+  yet" note standing after the fact was no longer true.
+- Validation: 664 targeted tests (tracking/claims/handoff) pass; full
+  agent-worktrees suite: 681 passed, the same 12 pre-existing/unrelated
+  `test_doctor.py`/`test_context_resolution.py` failures (confirmed present
+  on unmodified `origin/main` via `git stash` comparison, same as prior
+  sessions this effort). `ruff check` byte-identical before/after (7
+  pre-existing findings).
+- Phase 1's remaining open bullets: the three named fixtures (retained-
+  finalized-record / held-claims / multi-follow-up), legacy-boolean +
+  active-effort-binding compatibility fixtures, and the literal-`FINAL`/
+  status-consumer inventory. Not touched this session.
 

@@ -2455,6 +2455,37 @@ def _save_record_unlocked(
                 merged.append(claim)
         merged.extend(reserved.values())
         record.resources = merged
+        # worktree-finality-and-obligations Phase 1/3: per-item highest-
+        # revision merge for the follow-up ledger. Each `FollowUpRecord`
+        # bumps its OWN `revision` on every mutation (add/resolve/dismiss/
+        # transfer), but nothing previously reconciled that against a
+        # concurrent writer's stale in-memory snapshot the way `resources`
+        # is reconciled above -- an ordinary background stamp writer (e.g.
+        # a liveness/title refresh) that loaded the record before a
+        # concurrent `follow-ups add`/`resolve`/`dismiss` landed could
+        # silently ERASE that mutation on its own later save (dropping an
+        # item entirely, or writing back its own older revision of one that
+        # was already resolved/dismissed elsewhere). Per-id, per-revision
+        # comparison: whichever side (in-memory or on-disk) holds the
+        # HIGHER revision for a given id wins; an id present only on disk
+        # (created by a concurrent writer after this record was loaded) is
+        # never dropped; a tombstoned (resolved/dismissed/transferred) item
+        # with a higher revision can never be resurrected back to `open` by
+        # a stale writer's lower-revision copy.
+        current_follow_ups_by_id = {fu.id: fu for fu in current.follow_ups}
+        merged_follow_ups: list[FollowUpRecord] = []
+        seen_follow_up_ids: set[str] = set()
+        for fu in record.follow_ups:
+            seen_follow_up_ids.add(fu.id)
+            on_disk = current_follow_ups_by_id.get(fu.id)
+            if on_disk is not None and on_disk.revision > fu.revision:
+                merged_follow_ups.append(on_disk)
+            else:
+                merged_follow_ups.append(fu)
+        for fu_id, on_disk in current_follow_ups_by_id.items():
+            if fu_id not in seen_follow_up_ids:
+                merged_follow_ups.append(on_disk)
+        record.follow_ups = merged_follow_ups
         # codename-attribution-by-default (round-11 finding): a codename is
         # assigned AT MOST ONCE and never reassigned afterward, unlike the
         # revision-tracked fields above -- so the merge rule is simply
