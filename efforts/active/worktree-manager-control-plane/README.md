@@ -447,28 +447,45 @@ terminal-mirroring parts of `repair`, all in `picker_profiles_cli.py`) and
 agent-worktrees' own bundled legacy Picker's `picker_support/data_local.py`
 call site.
 
-- [ ] Write the reviewed, ordered migration plan (matching
+- [x] Write the reviewed, ordered migration plan (matching
       `phase-3b-ahp-relocation.md`'s shape): full current-state inventory
       with exact file/line evidence, target ownership shape, back-compat for
       existing on-disk `terminal_profiles:` records, and independently-
       landable steps.
-- [ ] Relocate `profiles.py` + `terminal_fragment.py` into worktree-manager;
-      decide whether worktree-manager's copy is a new owned module or
-      (if agent-worktrees keeps a call site during the transition) a
-      vendored shared lib in the interim.
-- [ ] Give worktree-manager an equivalent CLI/config surface for reading and
-      writing a machine's terminal-profile column, callable both by its own
-      Picker and by agent-worktrees' `install`/`repair` flow during the
-      transition (accepting a temporary reverse dependency, same as any
-      other Mux/AHP-style cutover) until agent-worktrees' own verbs retire.
-- [ ] **Clean, decisive cutover — not an indefinitely-maintained pair**, per
-      the Mux/AHP relocation's precedent: retire agent-worktrees'
-      `profiles`/`terminal-fragment` CLI verbs and the terminal-mirroring
-      parts of `repair` once the Manager's surface is proven, rather than
-      keeping both paths alive indefinitely.
-- [ ] Update worktree-manager's own `production_picker` call sites
-      (`engine_profiles_view.py`, `profiles_io.py`) to the relocated module,
-      closing out Phase 3d's `profiles` checkbox above.
+      [`phase-3e-terminal-profile-relocation.md`](phase-3e-terminal-profile-relocation.md).
+      **Finding: the boundary is bigger than `profiles.py` alone** —
+      `terminal_fragment.py` (1016 lines) structurally couples to
+      agent-worktrees' own project/repo registry
+      (`collect_local_projects` imports `config`/`installer`/`repos`), and
+      `install.ps1` carries its own PowerShell terminal-integration
+      functions calling into the Python CLI. `profiles.py` itself (235
+      lines) has no such coupling and is a clean, mechanical move.
+- [ ] **Step 1 — relocate `profiles.py` verbatim into worktree-manager**
+      (an owned module, not a vendored copy); update worktree-manager's
+      `profiles_io.py`/`engine_profiles_view.py` to import it directly,
+      closing out Phase 3d's `profiles` checkbox. agent-worktrees keeps its
+      own copy + CLI verbs working during this step (two copies briefly,
+      matching Phase 3b's own transitional shape).
+- [ ] **Step 2 — resolve the registry-read boundary** `terminal_fragment.py`'s
+      `collect_local_projects` needs (new agent-worktrees `--json` verb vs.
+      a confirmed-stable file contract worktree-manager reads directly) —
+      an open design question, see the plan doc.
+- [ ] **Step 3 — relocate the GUID/state-diagnosis/reconciliation core** of
+      `terminal_fragment.py` into worktree-manager, wired to Step 2's
+      boundary.
+- [ ] **Step 4 — give worktree-manager an equivalent CLI/config surface**
+      for `profiles get/apply` and
+      `terminal-fragment [--explain|--doctor|--migrate-selections]`.
+- [ ] **Step 5 — repoint `install.ps1`'s** `Deploy-TerminalScripts`/
+      `Sync-TerminalState`/`Get-SettingsProfileGuids`/
+      `Clean-TerminalSettingsJson` at the new owner, following Phase 3b
+      Slice 2a's launcher-script repoint pattern.
+- [ ] **Step 6 — clean, decisive cutover** (Mux/AHP precedent): delete
+      agent-worktrees' `profiles`/`terminal-fragment` CLI verbs, the
+      terminal-mirroring parts of `repair`, and (pending the bundled-Picker
+      disposition question) `picker_support/data_local.py`'s/
+      `profiles_io.py`'s Profiles-grid path — the actual deletion commit,
+      kept last and separate for revertability.
 
 ### Phase 4 — Bare-invocation seam & handoff (Plugin side landed; end-state pending)
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
@@ -591,6 +608,23 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-23** — Wrote Phase 3e's migration plan
+  ([`phase-3e-terminal-profile-relocation.md`](phase-3e-terminal-profile-relocation.md)),
+  closing that phase's first checkbox. Evidence-gathering past the Picker's
+  own call sites found the boundary is bigger than `profiles.py` alone:
+  `terminal_fragment.py` (1016 lines) structurally couples to
+  agent-worktrees' own project/repo registry via `collect_local_projects`
+  (imports `config`/`installer`/`repos` to enumerate every registered
+  project), and `install.ps1` carries its own PowerShell terminal-
+  integration functions calling into the Python CLI — a second-language
+  surface. `profiles.py` itself (235 lines) has zero such coupling and is a
+  clean, mechanical relocation. Split the phase's checklist into 6 ordered
+  steps (relocate `profiles.py` first, closing Phase 3d's dependent
+  checkbox; resolve the registry-read boundary; relocate the GUID/
+  reconciliation core; give worktree-manager an equivalent CLI/config
+  surface; repoint `install.ps1`; clean cutover last). Left 3 open design
+  questions in the doc (registry-read shape, the bundled legacy Picker's
+  disposition, sequencing against Phase 3d) — no implementation started.
 - **2026-09-23** — Operator direction on Phase 3d's `profiles` disposition:
   not a vendored-lib fix (as originally scoped below) — terminal handling of
   every kind is leaving agent-worktrees for the Worktree Manager, matching
