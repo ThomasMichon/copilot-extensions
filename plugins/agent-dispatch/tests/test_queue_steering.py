@@ -19,6 +19,7 @@ import pytest
 
 from agent_dispatch.queue import (
     DEFAULT_WAKE_DELIVERY_LEASE_SECONDS,
+    PROGRESS_PHASE_MAX,
     Task,
     TaskQueue,
     WakeOperation,
@@ -26,6 +27,7 @@ from agent_dispatch.queue import (
 from agent_dispatch.queue_common import (
     DEFAULT_WAKE_DELIVERY_LEASE_SECONDS as _CommonWakeLease,
 )
+from agent_dispatch.queue_common import PROGRESS_PHASE_MAX as _CommonProgressPhaseMax
 from agent_dispatch.queue_common import Task as _CommonTask
 from agent_dispatch.queue_common import WakeOperation as _CommonWakeOperation
 from agent_dispatch.queue_steering import QueueSteeringMixin
@@ -39,6 +41,7 @@ def test_task_queue_inherits_the_steering_mixin():
 @pytest.mark.guard
 def test_queue_re_exports_match_queue_common():
     assert DEFAULT_WAKE_DELIVERY_LEASE_SECONDS is _CommonWakeLease
+    assert PROGRESS_PHASE_MAX is _CommonProgressPhaseMax
     assert Task is _CommonTask
     assert WakeOperation is _CommonWakeOperation
 

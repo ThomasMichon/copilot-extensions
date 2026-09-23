@@ -5,7 +5,6 @@ a set of *tasks*. This module is deliberately transport-free: it is a pure
 library that the coordinator process wraps behind HTTP. Everything that must be
 *correct under concurrency* lives here, patterned on a proven single-writer
 leased-queue design.
-
 Design notes
 ------------
 * **Eight-state model** (see :class:`Status`):
@@ -50,6 +49,7 @@ from .queue_common import (  # noqa: F401 -- re-exported for existing call sites
     DEFAULT_RESULT_MAX_BYTES,
     DEFAULT_WAKE_DELIVERY_LEASE_SECONDS,
     LEGACY_REPO,
+    PROGRESS_PHASE_MAX,
     PROGRESS_SUMMARY_MAX,
     AttachmentRecord,
     ClaimOutcome,
