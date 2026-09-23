@@ -2291,20 +2291,21 @@ def test_self_update_resource_dry_run_queries_systemd_timer_on_linux(tmp_path, m
     # Mirrors the identical fix/test for fleet-update
     # (test_fleet_update_resource_dry_run_queries_systemd_timer_on_linux).
     #
-    # Distinguishing the two paths (review finding): with no unit files on
-    # disk, query_systemd_timer() returns present=False *without ever
-    # calling the runner* (self_update_tasks.py's early-return branch), so
-    # the fixed code makes zero runner calls here. The buggy code instead
-    # unconditionally called query_scheduled_task() -> _run_powershell(),
-    # which -- via the blanket shutil_which patch below -- resolves "pwsh"
-    # to "/usr/bin/systemctl" and calls runner(["/usr/bin/systemctl",
-    # "-NoProfile", "-NonInteractive", "-Command", script]). A runner that
-    # tolerantly returned success for *any* argv (the original fake) could
-    # not tell that apart from a real systemd call, so the test passed even
-    # against the pre-fix code. This runner instead only recognizes the
-    # exact systemd --user argv shapes and raises on anything else,
-    # including that Windows-shaped call, so a regression back to the
-    # unconditional Windows probe fails loudly here.
+    # Distinguishing the two paths (review finding): query_task_state() now
+    # probes availability first (a single "systemctl --user is-system-running"
+    # call, reported "running" by this fake), then -- with no unit files on
+    # disk -- query_systemd_timer() returns present=False without any further
+    # runner call (self_update_tasks.py's early-return branch). The buggy
+    # code instead unconditionally called query_scheduled_task() ->
+    # _run_powershell(), which -- via the blanket shutil_which patch below --
+    # resolves "pwsh" to "/usr/bin/systemctl" and calls
+    # runner(["/usr/bin/systemctl", "-NoProfile", "-NonInteractive",
+    # "-Command", script]). A runner that tolerantly returned success for
+    # *any* argv (the original fake) could not tell that apart from a real
+    # systemd call, so the test passed even against the pre-fix code. This
+    # runner instead only recognizes the exact systemd --user argv shapes
+    # and raises on anything else, including that Windows-shaped call, so a
+    # regression back to the unconditional Windows probe fails loudly here.
     from agent_machines.resources import RunOutcome
 
     monkeypatch.setattr(self_update_tasks.sys, "platform", "linux")
