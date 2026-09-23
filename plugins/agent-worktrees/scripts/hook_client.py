@@ -30,7 +30,6 @@ _CONNECT_TIMEOUT_S = 0.5
 _SESSION_START_TIMEOUT_S = 12.0
 _SESSION_START_DECISION_S = 10.0
 _SESSION_END_TIMEOUT_S = 8.0
-_USER_PROMPT_SUBMITTED_TIMEOUT_S = 8.0
 _FALLBACK_PRE_BUDGET_S = 25.0
 _MAX_RESPONSE = 64 * 1024
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
@@ -730,45 +729,6 @@ def _fallback_session_end(payload: dict, home: Path) -> dict:
     return {}
 
 
-def _fallback_user_prompt_submitted(payload: dict, home: Path) -> dict:
-    """Reactivate this session's own Phase 8 ``session`` claim if needed.
-
-    Deliberately never routed through the resident monitor (:func:`_request`)
-    -- the resident's ``_resident_hook_decision`` has no ``userPromptSubmit``
-    branch and would just return ``{}`` on every prompt, silently skipping
-    the real reopen side effect. Always runs the CLI subcommand directly
-    (mirroring :func:`_fallback_session_end`'s exact subprocess shape) so the
-    reopen fires regardless of resident-monitor availability. The host
-    discards a command-type ``userPromptSubmitted`` hook's text output, so
-    this always returns ``{}`` -- only the subprocess's own side effect
-    (reactivating the claim) matters.
-    """
-    python = _runtime_python(home)
-    if python is None:
-        return {}
-    try:
-        environment = os.environ.copy()
-        environment["PYTHONPATH"] = ""
-        subprocess.run(
-            [
-                str(python),
-                "-m",
-                "agent_worktrees",
-                "session-reopen-nudge",
-                "--stdin",
-            ],
-            input=json.dumps(payload, separators=(",", ":")),
-            capture_output=True,
-            text=True,
-            timeout=_USER_PROMPT_SUBMITTED_TIMEOUT_S,
-            check=False,
-            env=environment,
-        )
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return {}
-
-
 @cache
 def _load_sibling(name: str):
     path = Path(__file__).resolve().with_name(name)
@@ -898,13 +858,9 @@ def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
         and not isinstance(payload.get("_agentWorktrees"), dict)
     ):
         payload = _enrich_session_payload(payload)
-    # userPromptSubmitted is deliberately never routed through the resident
-    # monitor: it has no matching dispatch branch there, so a live resident
-    # would just return {} and silently skip the reopen's real side effect.
-    if kind != "userPromptSubmitted":
-        remote = _request(kind, payload, home)
-        if remote is not None:
-            return remote
+    remote = _request(kind, payload, home)
+    if remote is not None:
+        return remote
     if kind == "sessionStart" and not contextual and _resident_started(payload, home):
         return {}
     if kind == "preToolUse":
@@ -915,18 +871,13 @@ def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
         return _fallback_session_start(payload, home)
     if kind == "sessionEnd":
         return _fallback_session_end(payload, home)
-    if kind == "userPromptSubmitted":
-        return _fallback_user_prompt_submitted(payload, home)
     return {}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     kind = argv[0] if argv else ""
-    if kind not in {
-        "preToolUse", "postToolUse", "sessionStart", "sessionEnd",
-        "userPromptSubmitted",
-    }:
+    if kind not in {"preToolUse", "postToolUse", "sessionStart", "sessionEnd"}:
         return 0
     try:
         raw = sys.stdin.read()

@@ -610,27 +610,18 @@ reviewed/buildable, replaces the prior proposal-only list):
   themselves are stateless pure functions called only from the manual
   `claims sweep` verb and finalize's synchronous self-heal, neither a
   tight loop, so no separate cooldown state was added here.)
-- [x] Register a `userPromptSubmitted` hook (the real host key; `hooks.json`'s
-  own key names it that way -- the effort's shorthand `userPromptSubmit`
-  above is a paraphrase) alongside the existing `sessionStart`/`sessionEnd`
-  entries: a new lightweight command hook invoking a new CLI subcommand
-  (`session-reopen-nudge`, in its own `session_reopen_nudge_cli` module --
-  split out of `session_binding_cli` to stay under the module-size cap;
-  mirrors `bind-nudge`'s shape) that, when the current session's own claim
-  exists and is not `active`, calls `add_resource_claim(...)` to reactivate
-  it -- composing with the existing `add_resource_claim`/
-  `reopen_finalized_owner` path (the second bullet above), not a new
-  reopen mechanism. Deliberately never routed through the resident
-  monitor's hot-path IPC (`hook_client.py`'s `_request`): the resident's
-  `_resident_hook_decision` has no matching dispatch branch, so it would
-  silently return `{}` and skip the real reopen; the hook always runs the
-  CLI subcommand directly via subprocess (mirroring `_fallback_session_end`'s
-  exact shape). The hook's own text output is not relied upon:
-  `userPromptSubmitted`'s `modifiedPrompt` field is documented as honored
-  only for SDK programmatic hooks, never for command hooks, so this design
-  only depends on the command's side effect (the CLI call), matching the
-  effort's "runs with real side effects even though text output is
-  discarded" framing.
+- [x] **Superseded 2026-09-23 (see the correction journal entry below):**
+  built the `userPromptSubmitted` hook + `session-reopen-nudge` CLI
+  subcommand as originally planned, then reverted it after tracing that it
+  guarded nothing -- `prune.py`'s `held_claims` check already treats
+  `at-rest` as live, and a session claim only ever becomes `released` via a
+  genuine `sessionEnd`, so a still-running session's claim was always
+  protected from premature pruning with or without a reopen. Left checked
+  off since the design/build/validate work genuinely happened and the
+  underlying investigation (confirming `userPromptSubmitted` is the real
+  host key, that `/clear`/`/new` don't fire `sessionStart`/`sessionEnd`)
+  remains correct and useful -- only the specific hook mechanism itself was
+  removed as unnecessary overhead.
 - [x] Confirmed (2026-09-16, this design session, replacing "operator-
   asserted, not yet independently confirmed"): the public GitHub Copilot
   CLI hooks reference documents `userPromptSubmitted` as firing on every
@@ -828,21 +819,26 @@ either.
   `RELATION` column (7 truncated text cells -> 1 icon cell). Every Phase 9
   Plan bullet is now checked off.
 - [x] **Session-claim lifecycle** (Phase 8, designed 2026-09-16, built
-  2026-09-17 through 2026-09-22, 3 merged slices -- PR #2824, #3317, #3334,
-  and the `userPromptSubmitted` reopen hook slice): a worktree's own live
+  2026-09-17 through 2026-09-22, 2 merged slices -- PR #2824, #3317, #3334;
+  a fourth slice adding a `userPromptSubmitted` reopen hook was built,
+  merged as #3349, then reverted 2026-09-23 after tracing it guarded
+  nothing -- see the correction journal entry): a worktree's own live
   Copilot session is a held `kind="session"` claim; `register_session`
   opens it, `settle_resource_claim` settles it on finalize and on
-  successful handoff cutover (bare or token-bearing), a new
-  `release_resource_claim` releases it on `sessionEnd`, and a new
-  `userPromptSubmitted` hook (`session-reopen-nudge`) reopens it (via the
-  existing `add_resource_claim`/`reopen_finalized_owner` path) after a
-  premature settle/release. `finalize`'s hard obligation gate excludes
-  `session` claims from `unsettled`; an advisory-only
-  `_advise_other_live_sessions` names any OTHER live session claims via
-  `output.warn` without blocking. The never-wedge sweep (`sweep.py`'s
-  `claim_gone`/`claim_safe`) gains a `session` branch, corroborated against
-  a real per-session PID check (`sessions.session_id_is_live`). All Phase 8
-  Plan bullets are checked off.
+  successful handoff cutover (bare or token-bearing), and a new
+  `release_resource_claim` releases it on `sessionEnd`. `finalize`'s hard
+  obligation gate excludes `session` claims from `unsettled`; an
+  advisory-only `_advise_other_live_sessions` names any OTHER live session
+  claims via `output.warn` without blocking. The never-wedge sweep
+  (`sweep.py`'s `claim_gone`/`claim_safe`) gains a `session` branch,
+  corroborated against a real per-session PID check
+  (`sessions.session_id_is_live`). A live session's claim is `active` or
+  `at-rest` for as long as the process runs -- never `released` until a
+  genuine `sessionEnd` -- so `prune.py`'s pre-existing `held_claims` check
+  (`is_live` covers both states) already protects a still-running session
+  from premature pruning with no reopen mechanism needed; a reopen hook
+  would only ever have flipped a claim's own cosmetic display state. All
+  Phase 8 Plan bullets are checked off.
 - [x] **Reopen:** adding a new claim to a retained finalized worktree succeeds,
   changes lifecycle state away from finalized (to `active`), and immediately
   removes prune eligibility (already covered by Phase 1's held-claims fix).
@@ -2208,4 +2204,54 @@ The approved design is the faceted model in [design.md](design.md):
   [#1312](https://github.com/ThomasMichon/copilot-extensions/issues/1312)
   with a summary comment (same pattern as the Phase 9 close-out on #2744),
   which finishes the whole effort.
+
+### 2026-09-23 - Correction: reverted the userPromptSubmitted reopen hook -- it guarded nothing
+
+- Operator flagged a real concern after #1312 closed: a hook firing on
+  every submitted prompt is a genuine per-message cost concern (a
+  subprocess spawning a full `python -m agent_worktrees ...` invocation,
+  bypassing the resident-monitor fast path entirely by design). Asked to
+  make it cheap (a session-state note) rather than accept that cost.
+- Tracing the actual value of the reopen before redesigning it found it
+  had **no functional safety effect at all**: `prune.py`'s cleanup-
+  eligibility check already treats `is_live` (`active` **or** `at-rest`) as
+  "held" regardless of which -- and a session claim only ever becomes
+  `released` via a genuine `sessionEnd` (real process exit), never while
+  the process is still running. So a still-live session settled to
+  `at-rest` by a mid-conversation `finalize` call was ALREADY protected
+  from premature pruning, with or without any reopen. Separately, tracing
+  `add_resource_claim`'s own reopen path (`_claim_reopens_owner`) showed an
+  at-rest→active claim update never even triggers `reopen_finalized_owner`
+  (an already-live claim is never treated as "reopening" anything) -- so
+  the hook, even when it fired successfully, only ever flipped one claim's
+  own display string from `at-rest` to `active`, never anything the
+  cleanup/prune decision actually reads. Purely cosmetic, not worth a
+  subprocess spawn on every prompt.
+- Reverted cleanly: removed `hooks.json`'s `userPromptSubmitted` entry,
+  `hook_client.py`'s fallback + timeout constant + the special
+  never-route-through-resident branch in `decide()`, the entire
+  `session_reopen_nudge_cli.py` module and its dedicated test file, and
+  all `__main__.py` wiring (lazy-dispatch entry, `add_parsers` call,
+  global declarations, import, `COMMAND_MAP` entry). Added a code comment
+  at `prune.py`'s `held_claims` check explaining explicitly why no reopen
+  mechanism is needed, so a future reader doesn't re-derive (or
+  re-introduce) the same dead-end design. Kept the load-bearing settle
+  (#3317) and sweep-liveness-probe (#3334) slices -- both genuinely used
+  elsewhere (`sessions.session_id_is_live` also grounds the sweep's
+  `session_claim_gone`).
+- 327 passed, 4 skipped (pre-existing) across the affected test files after
+  the revert; `ruff check` unchanged vs. `main` on every touched file
+  (confirmed via `git stash` diff). Bumped `agent-worktrees` to
+  `1.5.5-dev254`.
+- **Separately**, the operator's own scenario walkthrough surfaced a real,
+  distinct gap this effort never covered: nothing today warns when a
+  worktree is finalized while it still carries **ungracefully-abandoned**
+  sessions (crashed, never concluded, never linked via handoff) whose
+  conversation content was never captured anywhere -- risking silent data
+  loss the operator/agent should be asked about before finalizing. Filed
+  as [ThomasMichon/copilot-extensions#3369](https://github.com/ThomasMichon/copilot-extensions/issues/3369)
+  with a concrete design (reusing `sessions.session_id_is_live` +
+  `sessions.session_message_tail`'s already-built `cut_off_mid_turn`
+  signal) rather than building it here -- it's a new capability, not a
+  Phase 8 completion item.
 
