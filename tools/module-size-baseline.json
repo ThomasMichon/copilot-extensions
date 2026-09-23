@@ -30,7 +30,7 @@
   "plugins/agent-dispatch/scripts/versioned_runtime.py": 1415,
   "plugins/agent-dispatch/src/agent_dispatch/client.py": 1175,
   "plugins/agent-dispatch/src/agent_dispatch/companion.py": 1421,
-  "plugins/agent-dispatch/src/agent_dispatch/embody.py": 1106,
+  "plugins/agent-dispatch/src/agent_dispatch/embody.py": 1113,
   "plugins/agent-dispatch/src/agent_dispatch/managed_retention.py": 1018,
   "plugins/agent-dispatch/src/agent_dispatch/managed_runtime.py": 1605,
   "plugins/agent-dispatch/src/agent_dispatch/queue_spawn_reservations.py": 1057,

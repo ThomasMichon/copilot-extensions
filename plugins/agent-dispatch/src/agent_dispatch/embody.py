@@ -679,12 +679,19 @@ def spawn_fleet_headless_worker(
     except bridge_remote.RemoteBridgeUnavailable:
         pass
     except bridge_remote.RemoteBridgeOperationError as exc:
-        return subprocess.CompletedProcess(
-            args=[],
-            returncode=1,
-            stdout="",
-            stderr=str(exc),
-        )
+        # A far-side carrier still on the old REMOTE_OPERATION_VERSION (2)
+        # rejects a chartered request with 426 unsupported_version even when
+        # the LOCAL daemon already passed its own capability gate above --
+        # treat that specific carrier-skew case as unavailable too, so it
+        # falls through to the SSH `create --charter` fallback below instead
+        # of failing the spawn outright.
+        if not (charter and exc.status == 426 and exc.code == "unsupported_version"):
+            return subprocess.CompletedProcess(
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr=str(exc),
+            )
 
     exe = shutil.which("ssh")
     if exe is None:
