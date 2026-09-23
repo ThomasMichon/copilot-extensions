@@ -37,12 +37,32 @@ def _args(*, selectors=(), apply=False, json_=True):
         target=["reconcile-at-rest", *selectors], apply=apply, json=json_)
 
 
+def test_apply_releases_at_rest_never_active(tmp_path, monkeypatch, capfd):
+    tdir = _seed_project(tmp_path, monkeypatch)
+    _owner(tdir, "wt-owner", [
+        tracking.ResourceClaim(kind="codespace", ref="cs-1", state="at-rest"),
+        tracking.ResourceClaim(kind="worktree", ref="m/p/wt-c", state="active"),
+    ])
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    rc = m.cmd_claims(_args(apply=True))
+    assert rc == 0
+    reloaded = tracking.load_record(tdir / "wt-owner.yaml")
+    by_ref = {c.ref: c.state for c in reloaded.resources}
+    assert by_ref["cs-1"] == "released"
+    assert by_ref["m/p/wt-c"] == "active"   # never touched
+    assert logged == [(("claim_at_rest_reconciled",), {
+        "worktree_id": "wt-owner", "kind": "codespace", "ref": "cs-1"})]
+
+
 def test_dry_run_reports_but_does_not_write(tmp_path, monkeypatch, capfd):
     tdir = _seed_project(tmp_path, monkeypatch)
     _owner(tdir, "wt-owner", [
         tracking.ResourceClaim(kind="codespace", ref="cs-1", state="at-rest"),
         tracking.ResourceClaim(kind="worktree", ref="m/p/wt-c", state="active"),
     ])
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
     rc = m.cmd_claims(_args(apply=False))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
@@ -52,20 +72,7 @@ def test_dry_run_reports_but_does_not_write(tmp_path, monkeypatch, capfd):
     by_ref = {c.ref: c.state for c in reloaded.resources}
     assert by_ref["cs-1"] == "at-rest"      # dry-run: unchanged on disk
     assert by_ref["m/p/wt-c"] == "active"
-
-
-def test_apply_releases_at_rest_never_active(tmp_path, monkeypatch, capfd):
-    tdir = _seed_project(tmp_path, monkeypatch)
-    _owner(tdir, "wt-owner", [
-        tracking.ResourceClaim(kind="codespace", ref="cs-1", state="at-rest"),
-        tracking.ResourceClaim(kind="worktree", ref="m/p/wt-c", state="active"),
-    ])
-    rc = m.cmd_claims(_args(apply=True))
-    assert rc == 0
-    reloaded = tracking.load_record(tdir / "wt-owner.yaml")
-    by_ref = {c.ref: c.state for c in reloaded.resources}
-    assert by_ref["cs-1"] == "released"
-    assert by_ref["m/p/wt-c"] == "active"   # never touched
+    assert logged == []
 
 
 def test_selector_narrows_to_named_worktrees(tmp_path, monkeypatch, capfd):
