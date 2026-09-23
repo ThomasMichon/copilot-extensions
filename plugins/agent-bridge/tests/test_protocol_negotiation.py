@@ -71,6 +71,13 @@ def test_bare_session_transcript_capability_is_advertised() -> None:
     assert BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
+def test_remote_session_copilot_args_capability_is_advertised() -> None:
+    from agent_bridge.protocol import REMOTE_SESSION_COPILOT_ARGS_PROTOCOL_VERSION
+
+    assert REMOTE_SESSION_COPILOT_ARGS_PROTOCOL_VERSION == 18
+    assert REMOTE_SESSION_COPILOT_ARGS_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
+
+
 def _app(tmp_path):
     cfg = ServiceConfig(
         port=0,

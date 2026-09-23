@@ -55,6 +55,9 @@ class RemoteSessionCreateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=1_048_576)
     caller_id: str = Field(min_length=1, max_length=128)
     timeout: float = Field(default=120.0, ge=1.0, le=600.0)
+    # Extra copilot CLI args for THIS session (e.g. a --agent <charter> overlay)
+    # -- mirrors StartSessionRequest.copilot_args (see there for full semantics).
+    copilot_args: list[str] | None = None
 
 
 class RemoteSessionStopRequest(BaseModel):
@@ -200,6 +203,7 @@ async def remote_create_session(
             prompt=body.prompt,
             caller_id=body.caller_id,
             timeout=body.timeout,
+            copilot_args=body.copilot_args,
         )
     except RemoteBridgeError as exc:
         _raise(exc)

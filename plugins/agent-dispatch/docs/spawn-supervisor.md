@@ -599,11 +599,17 @@ session **by default** (`--embody-backend headless`) — the right body for a
 dispatched/supervised task, which is a self-contained, autonomous unit that needs
 no human attach. Headless also sidesteps the **CLI-start-prompt** path entirely (a
 seeded CLI/mux session can *race the input-prompt caret and never deliver its
-seed*, deadlocking at 0%). `--headless-agent AGENT` names the **spawn profile**
-used (default `task-worker`): a direct venue target still spawns directly, but a
-worktree-bound charter is first bound onto the worker worktree and then resumed
-by worktree handle so agent-bridge applies the charter's launch shape from the
-worktree rather than treating the charter name as a first-class target.
+seed*, deadlocking at 0%). `--headless-agent AGENT` names the **venue** the
+spawn targets (default `task-worker`): a real, addressable agent-bridge
+machine/repo identity that controls access and resources. `--charter CHARTER`
+names an *optional* `.github/agents/<charter>.agent.md` **behavior overlay** —
+rendered as Copilot's own `--agent <charter>` flag — layered on top of the venue
+without changing what venue is spawned. Venue and charter are independent axes:
+the venue is what gets addressed/spawned, the charter (when set) is only what
+shapes the spawned agent's behavior. `--charter` is supported for a fully
+headless lane only today — `agent-worktrees embody` has no charter-binding flag
+yet, so pairing `--charter` with `--embody-backend cli`/`script` (or any
+`--cli-label`/`--script-label`) is refused up front.
 
 > **Preflight (fail-loud, best-effort).** At loop startup a headless lane checks
 > that its `--headless-agent` is actually registered with agent-bridge on the host
@@ -957,7 +963,11 @@ agent-dispatch supervise --pool host-a,host-b [--origin <alias>] \
 `--origin` is the supervisor machine's own SSH alias that bodies report back to
 (defaults to the resolved local machine). Omit `--pool` for local spawn. Add
 `--headless` for a headless agent-bridge ACP body on the pool host instead of a
-CLI/mux one.
+CLI/mux one. `--charter CHARTER` layers a `.github/agents/<charter>.agent.md`
+behavior overlay on the headless fleet venue (`--headless-agent`) — supported
+for a headless fleet lane only; combining it with a CLI-embodied fleet lane
+(`--embody-backend cli`) is refused up front, since `agent-worktrees embody`
+has no charter-binding flag yet.
 
 **Recovery-on-kill (headless fleet):** because the recovery handle is the pool
 host's bridge session, a killed headless-fleet body is auto-recovered

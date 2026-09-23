@@ -154,6 +154,7 @@ def _spawn_worker_via_worktree(
     exe: list[str],
     task_id: str,
     agent: str,
+    charter: str | None = None,
     worker_id: str,
     prompt: str,
     route: str,
@@ -169,9 +170,10 @@ def _spawn_worker_via_worktree(
 
     Phase 4 of agent-bridge-worktree-native-agents: a charter is a spawn
     *profile*, not a direct target. The worktree is created/resolved first
-    (binding ``--agent <charter>`` at the ground layer), then agent-bridge is
-    addressed by the **worktree handle** so the bound charter's spawn shape is
-    auto-applied by Phase 3's ``_apply_bound_charter()`` path.
+    (binding ``--agent <charter or agent>`` at the ground layer), then
+    agent-bridge is addressed by the **worktree handle** so the bound
+    charter's spawn shape is auto-applied by Phase 3's
+    ``_apply_bound_charter()`` path.
     """
     from . import embody
 
@@ -192,7 +194,7 @@ def _spawn_worker_via_worktree(
             driver="agent-dispatch",
             supervisor="bridge",
             timeout=timeout,
-            agent=agent,
+            agent=charter or agent,
         )
         ensured_worktree_id = str(created["worktree"])
 
@@ -286,6 +288,7 @@ def spawn_worker(
     task_id: str,
     *,
     agent: str = DEFAULT_WORKER_AGENT,
+    charter: str | None = None,
     worker_id: str,
     prompt: str | None = None,
     route: str = "",
@@ -366,6 +369,7 @@ def spawn_worker(
             exe=exe,
             task_id=task_id,
             agent=agent,
+            charter=charter,
             worker_id=worker_id,
             prompt=prompt,
             route=route,
@@ -396,6 +400,8 @@ def spawn_worker(
     if worktree_id:
         cmd += ["--worktree-id", worktree_id]
     cmd += [agent, prompt]
+    if charter:
+        cmd += ["--charter", charter]
     cmd += ["--caller", f"agent-dispatch:{worker_id}"]
     if not wait:
         cmd.append("--no-wait")
@@ -409,6 +415,7 @@ def spawn_or_resume_worker(
     task_id: str,
     *,
     agent: str = DEFAULT_WORKER_AGENT,
+    charter: str | None = None,
     worker_id: str,
     prompt: str,
     prior_session_id: str | None = None,
@@ -455,6 +462,7 @@ def spawn_or_resume_worker(
     return spawn_worker(
         task_id,
         agent=agent,
+        charter=charter,
         worker_id=worker_id,
         prompt=prompt,
         project=project,

@@ -877,6 +877,69 @@ def test_fleet_headless_ssh_fallback_passes_caller(monkeypatch):
     assert "--caller fleet-t1-abc" in remote_cmd
 
 
+def test_fleet_headless_falls_back_to_ssh_on_far_side_426(monkeypatch):
+    """A far-side carrier still on the old REMOTE_OPERATION_VERSION rejects a
+    chartered request with 426 unsupported_version, even though the LOCAL
+    daemon's own capability gate already passed -- this must fall through to
+    the SSH create --charter fallback (which independently supports charter
+    once deployed) rather than failing the spawn outright."""
+    from agent_dispatch import bridge_remote
+
+    class _RejectingClient:
+        def create_session(self, *args, **kwargs):
+            raise bridge_remote.RemoteBridgeOperationError(
+                "remote operation version is not supported",
+                status=426,
+                code="unsupported_version",
+            )
+
+    monkeypatch.setattr(
+        embody.bridge_remote, "LocalBridgeRemoteClient", _RejectingClient
+    )
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
+    captured = {}
+    monkeypatch.setattr(
+        embody, "run_ssh_command",
+        lambda cmd, **kw: (captured.__setitem__("cmd", cmd)
+                           or subprocess.CompletedProcess(cmd, 0, "", "")),
+    )
+
+    result = embody.spawn_fleet_headless_worker(
+        "pool-a", "t1", origin="coord", owner="fleet-t1-abc",
+        worker_id="fleet-t1-abc", charter="cab-charter",
+    )
+
+    assert result.returncode == 0
+    remote_cmd = captured["cmd"][-1]
+    assert "--charter cab-charter" in remote_cmd
+
+
+def test_fleet_headless_426_without_charter_fails_outright(monkeypatch):
+    """A 426 unrelated to a charter request (no charter was even sent) is a
+    real capability mismatch, not the specific carrier-skew case the SSH
+    fallback exists for -- it must still fail rather than silently retry."""
+    from agent_dispatch import bridge_remote
+
+    class _RejectingClient:
+        def create_session(self, *args, **kwargs):
+            raise bridge_remote.RemoteBridgeOperationError(
+                "remote operation version is not supported",
+                status=426,
+                code="unsupported_version",
+            )
+
+    monkeypatch.setattr(
+        embody.bridge_remote, "LocalBridgeRemoteClient", _RejectingClient
+    )
+
+    result = embody.spawn_fleet_headless_worker(
+        "pool-a", "t1", origin="coord", owner="fleet-t1-abc",
+        worker_id="fleet-t1-abc",
+    )
+
+    assert result.returncode == 1
+
+
 def test_spawn_worker_for_uses_embody_backend(monkeypatch):
     """`create --spawn --spawn-backend embody` routes to the embody backend."""
     from agent_dispatch import __main__ as m

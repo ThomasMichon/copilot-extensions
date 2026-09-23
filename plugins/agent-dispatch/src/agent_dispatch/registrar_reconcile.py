@@ -86,6 +86,8 @@ def declaration_to_spec(decl: ProfileDeclaration) -> dict:
         spec["no_pair"] = True
     if decl.body.type == "headless" or decl.body.headless_labels or decl.fleet.headless:
         spec["headless_agent"] = decl.body.agent
+    if decl.body.charter:
+        spec["charter"] = decl.body.charter
     if decl.verify_timeout:
         spec["verify_timeout"] = decl.verify_timeout
     if decl.evaluator:
