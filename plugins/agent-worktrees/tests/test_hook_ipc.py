@@ -1059,6 +1059,66 @@ def test_explicit_context_session_end_uses_payload_client():
     assert 'python3 "$s" sessionEnd' in entry["bash"]
 
 
+def test_hooks_json_registers_user_prompt_submitted():
+    hooks = json.loads(
+        (Path(__file__).resolve().parents[1] / "hooks.json").read_text("utf-8")
+    )
+    entry = hooks["hooks"]["userPromptSubmitted"][0]
+    assert "COPILOT_PLUGIN_ROOT" in entry["powershell"]
+    assert "hook_client.py" in entry["powershell"]
+    assert '$py $s userPromptSubmitted' in entry["powershell"]
+    assert "COPILOT_PLUGIN_ROOT" in entry["bash"]
+    assert 'python3 "$s" userPromptSubmitted' in entry["bash"]
+
+
+def test_user_prompt_submitted_uses_cell_runtime(monkeypatch, tmp_path):
+    python = tmp_path / "cell" / "versions" / "1.0.0" / "bin" / "python"
+    seen = {}
+    monkeypatch.setattr(hook_client, "_runtime_python", lambda _home: python)
+
+    def run(argv, **kwargs):
+        seen.update(argv=argv, kwargs=kwargs)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(hook_client.subprocess, "run", run)
+    payload = {"cwd": str(tmp_path)}
+
+    assert hook_client._fallback_user_prompt_submitted(payload, tmp_path) == {}
+    assert seen["argv"] == [
+        str(python),
+        "-m",
+        "agent_worktrees",
+        "session-reopen-nudge",
+        "--stdin",
+    ]
+    assert json.loads(seen["kwargs"]["input"]) == payload
+    assert seen["kwargs"]["timeout"] == hook_client._USER_PROMPT_SUBMITTED_TIMEOUT_S
+
+
+def test_user_prompt_submitted_never_routes_through_resident(monkeypatch, tmp_path):
+    """The resident monitor has no ``userPromptSubmit`` dispatch branch, so
+    routing through it would silently swallow the real reopen side effect --
+    ``decide`` must skip ``_request`` entirely for this kind."""
+    monkeypatch.setattr(
+        hook_client, "_request",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not call _request")),
+    )
+    called = {}
+
+    def _fallback(payload, home):
+        called["ran"] = True
+        return {}
+
+    monkeypatch.setattr(hook_client, "_fallback_user_prompt_submitted", _fallback)
+    result = hook_client.decide("userPromptSubmitted", {"cwd": str(tmp_path)}, home=tmp_path)
+    assert result == {}
+    assert called.get("ran") is True
+
+
+def test_user_prompt_submitted_no_runtime_is_noop(tmp_path):
+    assert hook_client._fallback_user_prompt_submitted({}, tmp_path) == {}
+
+
 def test_explicit_context_session_end_uses_cell_runtime(
     monkeypatch, tmp_path
 ):
