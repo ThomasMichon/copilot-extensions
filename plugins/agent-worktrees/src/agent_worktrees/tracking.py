@@ -573,6 +573,7 @@ from .tracking_claims import (  # noqa: F401
     orphanage_path,
     parse_claim_ref,
     release_all_resources,
+    release_at_rest_resources,
     release_resource_claim,
     remove_orphaned_obligations,
     rehome_abandoned_obligations,

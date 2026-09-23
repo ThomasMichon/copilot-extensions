@@ -341,13 +341,17 @@ below for the carved implementation plan.
   non-held. (Already true since Phase 1/2's `ResourceClaim.is_live`; the
   descriptor just reads that count -- abandoned-claim audit visibility is
   unchanged, pre-existing behavior.)
-- [ ] Make finalize reject active claims, then release at-rest claims under the
+- [x] Make finalize reject active claims, then release at-rest claims under the
   finalizing freeze before committing finalized status. Give legacy/GC close-out
   an explicit preview/apply reconciliation command rather than silently
-  releasing current-version claims. **Not done this phase** -- `finalize.py`'s
-  existing obligation gate (pre-dates this effort) already rejects active
-  claims and releases at-rest ones under the freeze; the explicit
-  preview/apply reconciliation command for legacy/GC close-out is unbuilt.
+  releasing current-version claims. `finalize.py`'s existing obligation gate
+  (pre-dates this effort) already rejects active claims and releases at-rest
+  ones under the freeze. The legacy/GC reconciliation command is now built:
+  `claims reconcile-at-rest [<worktree-id> ...] [--apply]` releases only
+  AT-REST claims (never active) on existing records -- a record finalized
+  under an older version, or one whose at-rest claims accumulated some other
+  way, was never swept by cleanup/GC on its own. Dry-run by default, matching
+  `claims sweep`/`claims cleanup`'s existing convention.
 - [x] Separate completed-worktree closure from other cleanup categories:
   `FINAL` is the strict completed-and-safe proof, while UNUSED, CONVO, GONE, and
   system-record reap retain their own opt-in/action dispositions (unchanged --
@@ -2378,4 +2382,40 @@ The approved design is the faceted model in [design.md](design.md):
   byte-identical before/after (15 pre-existing findings, confirmed via the
   same stash comparison).
 - Phase 2 is now fully complete -- every Plan bullet checked.
+
+### 2026-09-23 (continued) - Phase 4: the legacy/GC at-rest-claim reconciliation command
+
+- Picked Phase 4's remaining, lower-risk bullet (the legacy/GC preview/apply
+  reconciliation command) over its sibling (switching `cleanup`/`gc`'s own
+  decision logic to consume the descriptor) -- the latter changes an
+  existing safety-critical decision path and was explicitly deferred to
+  Phase 5 in the original Phase 4 PR to keep behavior changes to one per
+  PR; this command is purely additive.
+- Added `tracking.release_at_rest_resources`: releases only claims in the
+  `at-rest` state (never `active`, never `session`-kind, matching
+  `release_all_resources`'s existing exclusion). Exposed as
+  `agent-worktrees claims reconcile-at-rest [<worktree-id> ...] [--apply]`,
+  following the exact preview/apply convention `claims sweep`/`claims
+  cleanup` already established: dry-run by default, `--apply` to write,
+  optional worktree-id selectors to narrow scope, `--json` for structured
+  output.
+- This is deliberately narrower than `release_all_resources`: it never
+  touches an `active` claim, and it is never invoked automatically by
+  finalize or by `cleanup`/`gc` -- design.md is explicit that "cleanup/GC
+  does not auto-release an at-rest claim from a current-version record."
+  It exists for records whose at-rest claims were never released
+  automatically (an older-version finalize, or claims settled by some other
+  path after the fact) -- exactly the gap Phase 6's own planned "fleet
+  inventory/backfill preview for ... at-rest claims" will need a command
+  like this to act on.
+- Tests: tracking-level (releases at-rest only, excludes session claims,
+  idempotent no-op) and CLI-level (dry-run vs `--apply`, selector
+  narrowing, empty case, human-readable output) -- 39 targeted tests pass.
+  `ruff check` on every touched file is byte-identical before/after (14
+  pre-existing findings, confirmed via `git stash` comparison against
+  `origin/main`).
+- Phase 4's remaining unchecked bullet (`cleanup`/`gc` consuming the
+  descriptor's own graded action disposition instead of `CleanupDisposition`
+  directly) is untouched -- confirmed still open this session, deliberately
+  left for Phase 5 as noted above.
 
