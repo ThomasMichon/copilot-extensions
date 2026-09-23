@@ -2199,11 +2199,11 @@ The approved design is the faceted model in [design.md](design.md):
   `1.5.5-dev250` (`plugin.json` + `pyproject.toml` +
   `.github/plugin/marketplace.json`'s per-plugin entry).
 - **Every Phase 8 Plan bullet and Validation Plan bullet is now checked
-  off.** This was the effort's last open item -- once this slice's PR
-  merges, close umbrella issue
-  [#1312](https://github.com/ThomasMichon/copilot-extensions/issues/1312)
-  with a summary comment (same pattern as the Phase 9 close-out on #2744),
-  which finishes the whole effort.
+  off.** (Corrected 2026-09-23: this was mistakenly written as "the
+  effort's last open item" here and acted on that way -- see the
+  correction entry immediately below. Phases 1, 2, 4, 5, 6, and 7 still
+  carry substantial unchecked Plan/Validation-Plan items; only Phases 8
+  and 9 were actually complete.)
 
 ### 2026-09-23 - Correction: reverted the userPromptSubmitted reopen hook -- it guarded nothing
 
@@ -2254,4 +2254,30 @@ The approved design is the faceted model in [design.md](design.md):
   `sessions.session_message_tail`'s already-built `cut_off_mid_turn`
   signal) rather than building it here -- it's a new capability, not a
   Phase 8 completion item.
+
+### 2026-09-23 (continued) - Correction: umbrella issue #1312 was closed prematurely; reopened
+
+- Auditing the doc's own Plan section (prompted by "back to our effort")
+  found the prior close-out claim false: Phases 1, 2, 4, 5, 6, and 7 all
+  still carry substantial unchecked Plan and/or Validation Plan bullets --
+  Phase 1's cross-surface compact-token parity fixtures, Phase 2's
+  reopen-history-listing bullet, Phase 4's finalize-reject/release-under-
+  freeze and cleanup/GC-descriptor-consumption bullets, Phase 5's Picker/
+  mux/legend parity bullets, all of Phase 6 (including its own explicit
+  "mark the effort Done only when every Plan and Validation Plan item is
+  complete" gate), and all of Phase 7 (the deferred-backlog reconciliation
+  phase, itself tracking #3113/#3114). Only Phases 8 and 9 were actually
+  complete. The handoff this session started from asserted "Phase 8 is the
+  effort's last open item" -- that premise was wrong, and closing #1312 on
+  2026-09-22 extended the error into a public, closed GitHub issue.
+- Reverted the doc's own `Status: Done` (back to `Active`) and the
+  `efforts/README.md` index row (`Done; pending archive` back to
+  `Active`), corrected the false "finishes the whole effort" journal claim
+  above in place (kept, annotated, rather than deleted -- the Phase 8/9
+  completion claim itself is still accurate), and reopened
+  [#1312](https://github.com/ThomasMichon/copilot-extensions/issues/1312)
+  with a comment naming the mistake and pointing back to the phases that
+  still need triage/completion or an explicit transfer-out decision (Phase
+  7 already exists for exactly that transfer path).
+- No code changes in this entry -- documentation/tracking correction only.
 
