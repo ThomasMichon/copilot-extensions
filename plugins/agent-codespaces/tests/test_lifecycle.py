@@ -376,6 +376,35 @@ class TestGetCodespaceStatus:
         exists, state = lifecycle.get_codespace_status("cs-missing")
         assert exists is False and state is None
 
+    def test_exact_binding_tried_before_the_generic_candidate_scan(self, monkeypatch):
+        """Two DIFFERENT GitHub accounts can each have a CodeSpace with the
+        SAME name -- the exact per-name binding (authoritative, mirroring
+        account_for_codespace's own precedence) must be tried FIRST, not
+        merely as one candidate among the generic mapped/bound-accounts
+        scan, or a reclaim could confirm/delete the WRONG account's
+        same-named CodeSpace (claim-provider-pattern effort review
+        finding: "Resolve exact CodeSpace binding before scanning
+        candidate accounts")."""
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-wrong",))
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_account",
+            lambda name: "acct-exact" if name == "cs-dup" else None)
+        seen_accounts = []
+
+        def fake_under(name, account, **_kwargs):
+            seen_accounts.append(account)
+            if account == "acct-exact":
+                return True, "Available"
+            return True, "Available"  # the WRONG account also "has" cs-dup
+
+        monkeypatch.setattr(lifecycle, "_get_codespace_status_under", fake_under)
+        exists, state, resolved = lifecycle.get_codespace_status_with_account("cs-dup")
+        assert exists is True and resolved == "acct-exact"
+        assert seen_accounts == ["acct-exact"]  # never even reached the generic scan
+
     def test_default_account_raises_when_no_candidate_confirms_and_one_errors(self, monkeypatch):
         """A live CodeSpace in an account whose lookup failed for a REAL
         reason (not a 404) must never be reported absent just because

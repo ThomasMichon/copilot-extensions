@@ -339,13 +339,47 @@ def get_codespace_status_with_account(
     can disagree for a CodeSpace found only under a non-ambient or
     beyond-first-page account (claim-provider-pattern effort review
     finding: "Preserve the resolved account through CodeSpace
-    reclamation")."""
+    reclamation").
+
+    When no explicit ``account`` is given, the EXACT per-name binding
+    (``account_binding.bound_account(name)``) is tried FIRST, ahead of the
+    generic multi-candidate scan -- :func:`account_for_codespace` already
+    treats that binding as authoritative for the same reason: two DIFFERENT
+    GitHub accounts can each have a CodeSpace with the identical name, and
+    the generic scan would otherwise confirm (and a reclaim would then
+    delete!) whichever account's same-named CodeSpace it happened to reach
+    first, not necessarily the one this name is actually bound to
+    (claim-provider-pattern effort review finding: "Resolve exact
+    CodeSpace binding before scanning candidate accounts"). The scan is
+    still the fallback -- a stale/missing binding must not make an
+    otherwise-discoverable CodeSpace misreport absent."""
     from . import gh_account
 
     validate_context()
     if account is not None:
         exists, state = _get_codespace_status_under(name, account)
         return exists, state, account
+
+    deadline = time.monotonic() + _STATUS_OVERALL_BUDGET_SECONDS
+    errors: list[str] = []
+
+    try:
+        from . import account_binding
+
+        bound = account_binding.bound_account(name)
+    except Exception:
+        bound = None
+    if bound:
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            try:
+                exists, state = _get_codespace_status_under(
+                    name, bound, timeout=min(_STATUS_LOOKUP_TIMEOUT_SECONDS, remaining),
+                )
+                if exists:
+                    return True, state, bound
+            except RuntimeError as exc:
+                errors.append(str(exc))
 
     try:
         from . import account_binding
@@ -355,11 +389,9 @@ def get_codespace_status_with_account(
         bound_accounts = ()
     accounts_seen: list[str] = []
     for login in (*gh_account.mapped_accounts(), *bound_accounts):
-        if login and login not in accounts_seen:
+        if login and login != bound and login not in accounts_seen:
             accounts_seen.append(login)
 
-    errors: list[str] = []
-    deadline = time.monotonic() + _STATUS_OVERALL_BUDGET_SECONDS
     for candidate in (*accounts_seen, None):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
