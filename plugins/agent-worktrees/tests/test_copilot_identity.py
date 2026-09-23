@@ -139,6 +139,7 @@ def test_ensure_login_no_target_is_a_noop(home: Path):
 def test_ensure_login_switches_via_gh_token(home: Path, monkeypatch):
     _write_copilot_config(home, "ThomasMichon")
     monkeypatch.setattr(copilot_identity.shutil, "which", lambda _name: "/usr/bin/x")
+    monkeypatch.setattr(copilot_identity, "other_copilot_sessions_running", lambda: 0)
 
     calls = []
 
@@ -170,6 +171,7 @@ def test_ensure_login_switches_via_gh_token(home: Path, monkeypatch):
 def test_ensure_login_no_cached_token(home: Path, monkeypatch):
     _write_copilot_config(home, "ThomasMichon")
     monkeypatch.setattr(copilot_identity.shutil, "which", lambda _name: "/usr/bin/x")
+    monkeypatch.setattr(copilot_identity, "other_copilot_sessions_running", lambda: 0)
 
     class _Proc:
         returncode = 1
@@ -192,3 +194,76 @@ def test_ensure_login_dry_run_never_shells_out(home: Path, monkeypatch):
     result = copilot_identity.ensure_login("tmichon_microsoft", dry_run=True)
     assert result.status == "switched"
     assert "dry-run" in result.detail
+
+
+def test_ensure_login_dry_run_bypasses_other_sessions_gate(home: Path, monkeypatch):
+    """dry-run must not even query for other running sessions -- it never
+    shells out, and the gate itself is irrelevant to a pure preview."""
+    _write_copilot_config(home, "ThomasMichon")
+
+    def _boom():
+        raise AssertionError("dry-run must not check for other sessions")
+
+    monkeypatch.setattr(copilot_identity, "other_copilot_sessions_running", _boom)
+    result = copilot_identity.ensure_login("tmichon_microsoft", dry_run=True)
+    assert result.status == "switched"
+
+
+# ---------------------------------------------------------------------------
+# The other-running-sessions safety gate
+# ---------------------------------------------------------------------------
+
+def test_ensure_login_refuses_switch_when_other_sessions_running(home: Path, monkeypatch):
+    """Switching the shared ~/.copilot/config.json identity while another
+    Copilot CLI process is running risks splicing that session's billing
+    across accounts, invalidating its prompt cache, and auth errors -- this
+    must refuse rather than silently switching underneath it."""
+    _write_copilot_config(home, "ThomasMichon")
+    monkeypatch.setattr(copilot_identity.shutil, "which", lambda _name: "/usr/bin/x")
+    monkeypatch.setattr(copilot_identity, "other_copilot_sessions_running", lambda: 3)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("must not shell out when the safety gate refuses")
+
+    monkeypatch.setattr(copilot_identity.subprocess, "run", _boom)
+    result = copilot_identity.ensure_login("tmichon_microsoft")
+    assert result.status == "other-sessions-active"
+    assert not result.ok
+    assert "3 other" in result.detail
+
+
+def test_ensure_login_force_overrides_other_sessions_gate(home: Path, monkeypatch):
+    _write_copilot_config(home, "ThomasMichon")
+    monkeypatch.setattr(copilot_identity.shutil, "which", lambda _name: "/usr/bin/x")
+    monkeypatch.setattr(copilot_identity, "other_copilot_sessions_running", lambda: 3)
+
+    class _Proc:
+        def __init__(self, returncode, stdout=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = ""
+
+    def _run(cmd, **kwargs):
+        if cmd[:3] == ["gh", "auth", "token"]:
+            return _Proc(0, stdout="fake-token-value\n")
+        if cmd[:2] == ["copilot", "login"]:
+            return _Proc(0, stdout="Signed in successfully.\n")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(copilot_identity.subprocess, "run", _run)
+    result = copilot_identity.ensure_login("tmichon_microsoft", force=True)
+    assert result.status == "switched"
+    assert result.ok
+
+
+def test_ensure_login_no_gate_when_already_correct(home: Path, monkeypatch):
+    """The gate only matters when an actual switch would happen -- it must
+    not even be consulted on the already-correct fast path."""
+    _write_copilot_config(home, "tmichon_microsoft")
+
+    def _boom():
+        raise AssertionError("must not check for other sessions when already correct")
+
+    monkeypatch.setattr(copilot_identity, "other_copilot_sessions_running", _boom)
+    result = copilot_identity.ensure_login("tmichon_microsoft")
+    assert result.status == "already-correct"

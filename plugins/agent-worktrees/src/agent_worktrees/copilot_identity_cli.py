@@ -39,12 +39,17 @@ def _usage() -> None:
     print("Commands:")
     print("  status [--repo NAME] [--json]        Show current vs. intended login")
     print("  ensure [<account>] [--repo NAME]      Ensure Copilot is logged in as")
-    print("         [--dry-run] [--json]           <account> (or the resolved one)")
+    print("         [--dry-run] [--force] [--json]  <account> (or the resolved one)")
+    print()
+    print("--force overrides the safety gate that otherwise refuses to switch")
+    print("while any other Copilot CLI process is running on this machine --")
+    print("switching underneath a running session risks splicing its billing")
+    print("across accounts, invalidating its prompt cache, and auth errors.")
     print()
     print("Examples:")
-    print(f"  {project} copilot-identity status --repo aperture-labs")
-    print(f"  {project} copilot-identity ensure --repo odsp-web-harness")
-    print(f"  {project} copilot-identity ensure tmichon_microsoft")
+    print(f"  {project} copilot-identity status --repo my-personal-repo")
+    print(f"  {project} copilot-identity ensure --repo my-work-repo")
+    print(f"  {project} copilot-identity ensure some-account-login")
 
 
 def _resolve_target(rest: list[str]) -> tuple[str | None, str | None]:
@@ -58,7 +63,7 @@ def _resolve_target(rest: list[str]) -> tuple[str | None, str | None]:
             repo = rest[i + 1]
             i += 2
             continue
-        if tok in ("--json", "--dry-run"):
+        if tok in ("--json", "--dry-run", "--force"):
             i += 1
             continue
         if account is None and not tok.startswith("-"):
@@ -111,7 +116,8 @@ def cmd_copilot_identity_dispatch(argv: list[str]) -> int:
         if not account:
             account = copilot_identity.intended_account(repo)
         dry_run = "--dry-run" in rest
-        result = copilot_identity.ensure_login(account, dry_run=dry_run)
+        force = "--force" in rest
+        result = copilot_identity.ensure_login(account, dry_run=dry_run, force=force)
         if json_out:
             _core()._json_output(
                 {
@@ -131,6 +137,8 @@ def cmd_copilot_identity_dispatch(argv: list[str]) -> int:
             )
         elif result.status == "no-target":
             output.info("No intended Copilot account resolved; nothing to do.")
+        elif result.status == "other-sessions-active":
+            output.warn(f"{result.detail}")
         else:
             output.err(f"{result.status}: {result.detail}")
         return 0 if result.ok else 1
