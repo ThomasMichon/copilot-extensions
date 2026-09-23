@@ -27,6 +27,7 @@ import logging
 import os
 import shlex
 import shutil
+import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -846,10 +847,38 @@ def main(argv: list[str] | None = None) -> int:
         help="Migrate machine-local config schema (adopted-repos.yaml); idempotent",
     )
 
+    # --- dev-release / dev-status (mutable-dev-slot, #3376 Phase 2) ---
+    # `dev-claim`/`slot`/`activate` stay installer-time only (they need this
+    # worktree's own checkout to build the editable slot); a *release* must
+    # work even when the operator is no longer standing in a source checkout
+    # (e.g. reacting to an `agent-worktrees finalize` warning) -- see
+    # docs/patterns/mutable-dev-slot.md "Runtime accessibility". Both verbs
+    # shell out to the versioned_runtime.py copy staged at RUNTIME_DIR by the
+    # installer (option 1 in that doc), never import it directly.
+    dev_release_p = sub.add_parser(
+        "dev-release",
+        help="Release the mutable `dev` version slot and restore the machine's "
+        "real deployment (current-version -> whatever was active before "
+        "dev mode was claimed).",
+    )
+    dev_release_p.add_argument(
+        "--owner", default=None,
+        help="Claimant ref to release as (defaults to `agent-worktrees get "
+        "worktree-dir`, else this repo checkout's root).",
+    )
+    dev_release_p.add_argument(
+        "--force", action="store_true",
+        help="Release even if the claim is held by a different owner.",
+    )
+    sub.add_parser(
+        "dev-status",
+        help="Print the current `dev` slot claim (or null) as JSON.",
+    )
+
     args = parser.parse_args(argv)
 
     try:
-        if args.command and args.command not in {"doctor", "status", "version", "installer-readiness"}:
+        if args.command and args.command not in {"doctor", "status", "version", "installer-readiness", "dev-release", "dev-status"}:
             validate_context()
     except ContextRefused as error:
         print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
@@ -974,6 +1003,10 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_config_migrate()
         if args.command == "owner":
             return _cmd_owner(args)
+        if args.command == "dev-release":
+            return _cmd_dev_release(args)
+        if args.command == "dev-status":
+            return _cmd_dev_status()
     except ContextRefused as error:
         print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
         return _COORDINATION_EXIT
@@ -4653,6 +4686,109 @@ def _cmd_config_migrate() -> int:
         return 0
     results = config_migrations.run_migrations()
     print(config_migrations.summarize(results))
+    return 0
+
+
+def _resolve_dev_slot_owner() -> str:
+    """Same resolution the installer's `dev` verb uses (mutable-dev-slot.md):
+    the calling worktree's checkout path via `agent-worktrees get
+    worktree-dir`, falling back to this package's own installed source
+    directory when that CLI is unavailable.
+    """
+    agent_worktrees = shutil.which("agent-worktrees")
+    if agent_worktrees:
+        try:
+            proc = subprocess.run(
+                [agent_worktrees, "get", "worktree-dir"],
+                capture_output=True, text=True, timeout=15, check=False,
+            )
+            out = proc.stdout.strip()
+            if proc.returncode == 0 and out:
+                return out
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return str(Path(__file__).resolve().parent.parent.parent)
+
+
+def _versioned_runtime_helper_path() -> Path | None:
+    """The versioned_runtime.py copy the installer stages at RUNTIME_DIR
+    (mutable-dev-slot.md "Runtime accessibility", option 1) -- present once
+    any install/update/dev has run. ``None`` if it has never been staged.
+    """
+    candidate = RUNTIME_DIR / "versioned_runtime.py"
+    return candidate if candidate.is_file() else None
+
+
+def _run_versioned_runtime(*args: str, json_output: bool = False) -> subprocess.CompletedProcess[str]:
+    """Shell out to the staged versioned_runtime.py. ``--root``/``--link-name``
+    and (if requested) ``--json`` are GLOBAL flags on that tool's own parser
+    and must precede the subcommand token, so they are assembled here rather
+    than left to each caller to order correctly.
+    """
+    helper = _versioned_runtime_helper_path()
+    if helper is None:
+        raise RuntimeError(
+            "versioned_runtime.py has not been staged yet -- run "
+            "`agent-codespaces` install/update at least once first"
+        )
+    cmd = [sys.executable, str(helper), "--root", str(RUNTIME_DIR), "--link-name", ".venv"]
+    if json_output:
+        cmd.append("--json")
+    cmd.extend(args)
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def _cmd_dev_release(args: argparse.Namespace) -> int:
+    """Release the mutable `dev` version slot (mutable-dev-slot.md).
+
+    Restores `current-version` to whatever was active before dev mode was
+    claimed. Reachable from the DEPLOYED CLI (no source checkout required) --
+    the whole point of staging versioned_runtime.py at RUNTIME_DIR.
+    """
+    owner = args.owner or _resolve_dev_slot_owner()
+    release_args = ["dev-release", "--owner", owner]
+    if args.force:
+        release_args.append("--force")
+    try:
+        result = _run_versioned_runtime(*release_args, json_output=True)
+    except RuntimeError as exc:
+        print(f"dev-release: {exc}", file=sys.stderr)
+        return 1
+    if result.returncode == 2:
+        print(result.stderr.strip() or result.stdout.strip(), file=sys.stderr)
+        print("Pass --force to release a claim held by a different owner.", file=sys.stderr)
+        return 2
+    if result.returncode != 0:
+        print(result.stderr.strip() or result.stdout.strip(), file=sys.stderr)
+        return 1
+    record = json.loads(result.stdout) if result.stdout.strip() else None
+    if not record:
+        print("dev-release: no dev-slot claim was held (nothing to release)")
+        return 0
+    previous_version = record.get("previous_version")
+    if not previous_version:
+        print("dev-release: released the claim, but no previous_version was "
+              "recorded to restore -- current-version left untouched")
+        return 0
+    activate = _run_versioned_runtime("activate", previous_version, "--no-link")
+    if activate.returncode != 0:
+        print(activate.stderr.strip() or activate.stdout.strip(), file=sys.stderr)
+        return 1
+    print(f"dev-release: released; current-version -> {previous_version}")
+    return 0
+
+
+def _cmd_dev_status() -> int:
+    """Print the current `dev` slot claim (or ``null``) as JSON."""
+    try:
+        result = _run_versioned_runtime("dev-status", json_output=True)
+    except RuntimeError as exc:
+        print(f"dev-status: {exc}", file=sys.stderr)
+        return 1
+    if result.returncode != 0:
+        print(result.stderr.strip() or result.stdout.strip(), file=sys.stderr)
+        return 1
+    print(result.stdout.strip() or "null")
     return 0
 
 

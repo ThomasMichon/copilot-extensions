@@ -421,12 +421,19 @@ PY
 }
 
 # uv pip install the vendored libs (ssh-manager, credential-relay) then
-# agent-codespaces into the given venv python. Non-editable; deps resolved from
-# pyproject.toml. The vendored libs are force-reinstalled so a local code change
-# propagates even without a version bump (uv otherwise skips a same-version path
-# dep, leaving the venv stale).
+# agent-codespaces into the given venv python. Non-editable by default; deps
+# resolved from pyproject.toml. The vendored libs are force-reinstalled so a
+# local code change propagates even without a version bump (uv otherwise skips
+# a same-version path dep, leaving the venv stale).
+#
+# Pass "--editable" as $2 (mutable-dev-slot, #3376) to install every one of
+# these path-dependencies with `uv pip install -e` instead, so the venv's
+# site-packages resolve straight back to this worktree's own checkout -- an
+# ordinary source edit takes effect without re-running the installer. Used
+# only for the mutable `versions/dev` slot; never for a real (numbered)
+# version.
 _install_package_into() {
-    local py="$1"
+    local py="$1" mode="${2:-}"
     if [[ ! -f "$SSH_MGR_DIR/pyproject.toml" ]]; then
         _fail "ssh-manager source not found at $SSH_MGR_DIR"
         return 1
@@ -438,6 +445,17 @@ _install_package_into() {
     if [[ ! -f "$CFG_MIGRATE_DIR/pyproject.toml" ]]; then
         _fail "config-migrate source not found at $CFG_MIGRATE_DIR"
         return 1
+    fi
+    if [[ "$mode" == "--editable" ]]; then
+        uv pip install --python "$py" --editable "$SSH_MGR_DIR" --quiet || {
+            _fail "ssh-manager install failed"; return 1; }
+        uv pip install --python "$py" --editable "$CRED_RELAY_DIR" --quiet || {
+            _fail "credential-relay install failed"; return 1; }
+        uv pip install --python "$py" --editable "$CFG_MIGRATE_DIR" --quiet || {
+            _fail "config-migrate install failed"; return 1; }
+        uv pip install --python "$py" --editable "$PLUGIN_DIR" --quiet || {
+            _fail "agent-codespaces install failed"; return 1; }
+        return 0
     fi
     uv pip install --python "$py" --reinstall-package agent-ssh-manager "$SSH_MGR_DIR" --quiet || {
         _fail "ssh-manager install failed"; return 1; }
@@ -529,6 +547,120 @@ deploy_package() {
     # issue-#14 sync). agent-bridge's own installer prunes any stale copy and
     # guards against one lingering.
 }
+
+# === mutable-dev-slot (#3376/Phase 2) ===
+# Copy versioned_runtime.py into the plugin's own root (sibling of versions/),
+# so the DEPLOYED agent-codespaces CLI's `dev-release`/`dev-status` verbs can
+# shell out to it even when the operator is not standing in a source checkout
+# (docs/patterns/mutable-dev-slot.md Runtime accessibility, option 1).
+# Best-effort -- never fatal.
+_deploy_versioned_runtime_helper() {
+    cp -f "$SCRIPT_DIR/versioned_runtime.py" "$INSTALL_DIR/versioned_runtime.py" 2>/dev/null \
+        || _warn "Could not stage versioned_runtime.py into $INSTALL_DIR"
+}
+
+# The absolute worktree checkout path claiming/releasing the mutable dev slot
+# -- the same value + resolution agent-codespaces' own cross-machine CodeSpace
+# claims already use as their `owner` (docs/patterns/mutable-dev-slot.md).
+# Falls back to this repo checkout's own root when agent-worktrees is
+# unavailable (e.g. a bare clone).
+_resolve_dev_slot_owner() {
+    local out
+    if command -v agent-worktrees &>/dev/null; then
+        out="$(agent-worktrees get worktree-dir 2>/dev/null || true)"
+        [[ -n "$out" ]] && { printf '%s\n' "$out"; return 0; }
+    fi
+    printf '%s\n' "$REPO_ROOT"
+}
+
+# Claim + (re)build the mutable `versions/dev` slot IN PLACE (an editable
+# install against THIS checkout), then activate it. Safe to call repeatedly
+# across an iteration loop: the dev venv is reused, only the editable package
+# links are refreshed -- not a fresh venv every call. Release with the
+# deployed CLI's own `dev-release` verb (not this installer -- see
+# docs/patterns/mutable-dev-slot.md). Accepts an optional "--force" arg.
+do_dev() {
+    local force_flag="${1:-}"
+    _header "$SERVICE_NAME (dev slot)"
+    if [[ -z "$SRC_VERSION" ]]; then
+        _fail "dev mode requires the versioned-runtime layout (no version in pyproject.toml?)"
+        return 1
+    fi
+    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    _deploy_versioned_runtime_helper
+
+    local owner dev_dir dev_python
+    owner="$(_resolve_dev_slot_owner)"
+    dev_dir="$INSTALL_DIR/versions/dev"
+    dev_python="$dev_dir/bin/python"
+
+    _assert_uv
+    _ensure_uv_index
+    if [[ ! -f "$dev_python" ]]; then
+        mkdir -p "$dev_dir"
+        if ! uv venv "$dev_dir" --python 3.11 --allow-existing 2>/dev/null; then
+            uv venv "$dev_dir" --allow-existing 2>/dev/null || true
+        fi
+        if [[ ! -f "$dev_python" ]]; then
+            _fail "dev venv creation failed at $dev_dir"
+            return 1
+        fi
+        _ok "dev venv created at $dev_dir"
+    else
+        _ok "Reusing existing dev venv at $dev_dir (mutable in place)"
+    fi
+
+    local prev_version claim_args=(--root "$INSTALL_DIR" dev-claim --owner "$owner")
+    prev_version="$(_run_versioned_runtime --root "$INSTALL_DIR" --link-name .venv current 2>/dev/null || true)"
+    [[ -n "$prev_version" ]] && claim_args+=(--previous-version "$prev_version")
+    [[ "$force_flag" == "--force" ]] && claim_args+=(--force)
+    local claim_out claim_rc
+    claim_out="$(_run_versioned_runtime "${claim_args[@]}" 2>&1)"; claim_rc=$?
+    if [[ $claim_rc -eq 2 ]]; then
+        _fail "dev slot is already claimed by a different owner: $claim_out"
+        _fail "Pass --force to override, or release it from its current owner first."
+        return 1
+    elif [[ $claim_rc -ne 0 ]]; then
+        _fail "dev-claim failed: $claim_out"
+        return 1
+    fi
+    if [[ -n "$prev_version" ]]; then
+        _ok "dev slot claimed by $owner (restores to '$prev_version' on release)"
+    else
+        _ok "dev slot claimed by $owner"
+    fi
+
+    _install_package_into "$dev_python" --editable || return 1
+    # NOTE: deliberately do NOT call _stamp_build_info here -- an editable
+    # install's "package dir" resolves straight back to src/agent_codespaces/
+    # in THIS checkout, so stamping would write _build_info.py into tracked
+    # source rather than an installed copy. `agent-codespaces version` in dev
+    # mode falls back to the plain importlib-derived __version__, which is
+    # enough for dev-mode diagnostics.
+
+    local check
+    check="$("$dev_python" -c 'import agent_codespaces; print("OK")' 2>/dev/null || true)"
+    if [[ "$check" != "OK" ]]; then
+        _fail "dev slot failed its health gate (import agent_codespaces) -- not activating"
+        return 1
+    fi
+
+    if ! _run_versioned_runtime --root "$INSTALL_DIR" --link-name .venv mark-complete dev; then
+        _fail "Failed to mark dev slot complete"
+        return 1
+    fi
+    if ! _run_versioned_runtime --root "$INSTALL_DIR" --link-name .venv activate dev --no-link; then
+        _fail "Failed to activate dev slot"
+        return 1
+    fi
+    _ok "dev slot active (current-version -> dev, editable install from $PLUGIN_DIR)"
+
+    deploy_binstub
+    echo ""
+    _ok "$SERVICE_NAME dev slot ready. Edit $PLUGIN_DIR and re-run 'dev' to refresh."
+    _ok "Release when done: agent-codespaces dev-release"
+}
+# === end mutable-dev-slot ===
 
 deploy_binstub() {
     mkdir -p "$LOCAL_BIN"
@@ -778,6 +910,10 @@ do_install() {
     # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
     _versioned_activate || return 1
 
+    # Stage versioned_runtime.py at the root so the deployed CLI's
+    # dev-release/dev-status verbs work without a source checkout (#3376).
+    _deploy_versioned_runtime_helper
+
     # Deploy binstub
     deploy_binstub
 
@@ -974,6 +1110,10 @@ do_update() {
     # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
     _versioned_activate || return 1
 
+    # Stage versioned_runtime.py at the root so the deployed CLI's
+    # dev-release/dev-status verbs work without a source checkout (#3376).
+    _deploy_versioned_runtime_helper
+
     # Re-deploy binstub
     deploy_binstub
 
@@ -1041,8 +1181,9 @@ case "$ACTION" in
     uninstall) do_uninstall ;;
     status)    do_status ;;
     update)    do_update ;;
+    dev)       do_dev "${2:-}" ;;
     *)
-        echo "Usage: $0 {install|stamp|provision|uninstall|status|update}" >&2
+        echo "Usage: $0 {install|stamp|provision|uninstall|status|update|dev}" >&2
         exit 1
         ;;
 esac
