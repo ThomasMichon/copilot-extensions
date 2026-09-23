@@ -247,7 +247,11 @@ def test_claim_reclaim_holds_deploy_fence_through_recovery_and_delete(monkeypatc
         "delete_codespace",
         lambda name, **k: events.append(("delete", name)),
     )
-    monkeypatch.setattr(cpc, "release_lease", lambda name: True)
+    monkeypatch.setattr(
+        cpc,
+        "release_lease",
+        lambda name: events.append(("release", name)) or True,
+    )
 
     rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
 
@@ -259,6 +263,7 @@ def test_claim_reclaim_holds_deploy_fence_through_recovery_and_delete(monkeypatc
         ("sync", "cs-a"),
         ("verify", "cs-a", "hold-token"),
         ("delete", "cs-a"),
+        ("release", "cs-a"),
         ("exit", "cs-a", "claim-reclaim"),
     ]
 

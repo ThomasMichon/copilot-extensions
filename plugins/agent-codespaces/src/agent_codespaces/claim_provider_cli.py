@@ -257,6 +257,7 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
                 mark_deploy_hold_uncertain(args.name, hold.token)
                 print(json.dumps({"reclaimed": False, "detail": detail}))
                 return 0
+            _release_lease_silently(args.name)
     except DeployHoldError as exc:
         print(json.dumps({"reclaimed": False, "detail": str(exc)}))
         return 0
@@ -266,6 +267,5 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
             "detail": f"admission/hold check failed: {exc}",
         }))
         return 0
-    _release_lease_silently(args.name)
     print(json.dumps({"reclaimed": True, "detail": f"deleted CodeSpace {args.name}"}))
     return 0
