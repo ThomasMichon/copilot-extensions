@@ -58,7 +58,7 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-21, post-`agent-bridge/session_manager.py` split)
+### Current pecking order (snapshot, 2026-09-22, post-`agent-dispatch/queue.py` steering/common slice)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
 — re-run before starting a phase, this list moves; it already has multiple
@@ -66,14 +66,12 @@ passes during this effort — treat it as a live command, not a frozen table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 8,162 | +7,162 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
+| 8,534 | +7,534 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
 | 5,145 | +4,145 | `plugins/agent-index/scripts/cell-runtime.py` | |
-| 5,032 | +4,032 | `plugins/agent-dispatch/src/agent_dispatch/__main__.py` | Already partially split (`producers_cli.py` et al. extracted) — still a strong model for how far a CLI-registration split can continue |
-| 4,753 | +3,753 | `plugins/agent-codespaces/src/agent_codespaces/__main__.py` | CLI registration surface |
-| 4,508 | +3,508 | `plugins/agent-dispatch/src/agent_dispatch/queue.py` | The original motivating case for the cap itself |
+| 4,767 | +3,767 | `plugins/agent-codespaces/src/agent_codespaces/__main__.py` | CLI registration surface |
 | 3,946 | +2,946 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | Partial split landed: the claim/follow-up/orphanage ledger now lives in `tracking_claims.py`, asserted head/handoff/create primitives in `tracking_lifecycle.py`, and the hook/session-registry + repo-freshness helpers in `tracking_session_registry.py`. What's left is the persistence-heavy core: `WorktreeRecord`, YAML load/save/merge, locking/stamp-queue machinery, and the remaining parse/serialize compatibility helpers. |
-| 3,521 | +2,521 | `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` | |
-| 2,963 | +1,963 | `plugins/agent-bridge/src/agent_bridge/agent_registry.py` | Now `agent-bridge`'s dominant remaining offender after the `session_manager.py` mixin split. |
+| 3,651 | +2,651 | `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` | |
+| 3,362 | +2,362 | `plugins/agent-dispatch/src/agent_dispatch/queue.py` | First dedicated slice landed: task/wake records, shared constants/helpers, and SQL select fragments moved to `queue_common.py`, and the card/steer/wake/detach band moved to `queue_steering.py`. `queue.py` stays the compatibility/composition root and import surface; remaining strong seams are the task lifecycle/transition band, then the create/claim/query/storage core. |
 | 2,662 | +1,662 | `plugins/agent-worktrees/src/agent_worktrees/sessions.py` | |
 | 2,583 | +1,583 | `plugins/agent-codespaces/src/agent_codespaces/config.py` | |
 | 2,429 | +1,429 | `tools/clean-room/scenarios/agent-index-installation-cells/scenario.py` | Clean-room fixture, not production code — lower urgency |
@@ -83,25 +81,22 @@ passes during this effort — treat it as a live command, not a frozen table):
 | 2,195 | +1,195 | `plugins/agent-worktrees/src/agent_worktrees/reconcile.py` | |
 | 2,124 | +1,124 | `plugins/agent-worktrees/src/agent_worktrees/session_projection.py` | |
 | 2,107 | +1,107 | `plugins/agent-worktrees/src/agent_worktrees/config.py` | |
+| 2,087 | +1,087 | `plugins/agent-worktrees/src/agent_worktrees/finalize.py` | |
 | 2,078 | +1,078 | `worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py` | Now the largest remaining `worktree-manager` / production-picker module after the `engine.py` split; coherent same-package follow-up if the campaign stays in this area |
-| 2,011 | +1,011 | `plugins/agent-worktrees/src/agent_worktrees/finalize.py` | |
 | 2,006 | +1,006 | `plugins/agent-machines/src/agent_machines/resources.py` | |
+| 1,989 | +989 | `plugins/agent-logger/src/agent_logger/sync/targets/filesystem.py` | |
+| 1,865 | +865 | `plugins/agent-vault/src/agent_vault/cli.py` | |
 
-**Suggested next pick (Phase 2, next slice):** if the priority is still the
-largest remaining production offender overall, take
-`plugins/agent-worktrees/src/agent_worktrees/__main__.py`. If the operator
-wants to stay in `worktree-manager` / the production-picker package that
-opened this effort, `picker_tui/data_ssh.py` is still the clearest local
-follow-up. If the operator wants to stay in `agent-worktrees`,
-`tracking.py` remains the clearest partially-resolved target: split the
-persistence/serialization core (`load_record`, `_save_record_unlocked`,
-locking, stamp queue, and the record/PR parse-merge helpers) away from the
-still-large composition root. If the operator prefers a fresh
-`agent-worktrees` file instead of another pass on the same one, `pr_ops.py`
-remains the next best candidate. **Within `agent-bridge`, the next slice is now
-`agent_registry.py`**: with `__main__.py` down to 485 lines and
-`session_manager.py` down to 771, the registry is the plugin's new dominant
-remaining offender.
+**Suggested next pick (Phase 2, next slice):** continue
+`plugins/agent-dispatch/src/agent_dispatch/queue.py` until it is near cap.
+The first slice proved the existing queue mixin pattern scales beyond the
+already-extracted schedule/routing/spawn/producer-fence bands: the remaining
+strong seams are the task lifecycle/transition band, then the create/claim/
+query/storage core. If the campaign pivots away from `queue.py`, the largest
+production offender overall remains
+`plugins/agent-worktrees/src/agent_worktrees/__main__.py`; within
+`agent-dispatch`, `supervisor.py` is now the plugin's largest remaining
+offender after `queue.py`.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
 margin of their own ceiling (most likely to tip over next from unrelated
@@ -249,6 +244,22 @@ Verbatim from the operator:
             sub-suites, targeted `-k` coverage green, ruff green, baseline
             refreshed to remove `coordinator.py`, and `agent-dispatch` bumped
             to `0.1.2-dev151`.
+      - [x] `agent-dispatch/queue.py` slice 1 (4,508 live lines at slice
+            start, the original motivating case for the cap itself) —
+            extracted `queue_common.py` (425 lines) for queue-wide constants,
+            task/wake record types, result encoding, selector/progress helpers,
+            and SQL select fragments, and extracted `queue_steering.py`
+            (615 lines) for the card/steer/wake/detach responsibility band.
+            `queue.py` stays the compatibility/composition root and public
+            import surface, now at **3,362 lines** with the next clear seams
+            exposed (task lifecycle/transition, then create/claim/query/
+            storage). Added `test_queue_steering.py` as the direct-import /
+            MRO / `get_type_hints()` guard mirroring the earlier
+            `queue_schedule_registry.py` / `queue_spawn_reservations.py`
+            lessons. Full `run-plugin-tests.py agent-dispatch` green across
+            all 6 sub-suites, `ruff check --select F,E9 plugins/agent-dispatch`
+            green, `check-module-size.py` green with baseline refreshed, and
+            `agent-dispatch` bumped to `0.1.2-dev184`.
       - [ ] The `tools/clean-room/scenarios/*` fixtures (2,429 / 2,369) —
             lower urgency (not production code), but validating a split
             means actually running the Docker-based clean-room scenario
@@ -444,6 +455,42 @@ onward has no open design question yet — each is a mechanical application of
 the Phase 0 runbook, picked up as capacity allows.
 
 ## Journal
+
+### 2026-09-22 — `agent-dispatch/queue.py` slice 1: queue common + steering/wake mixin
+- Started the dedicated `queue.py` campaign the effort's Guiding Intent calls
+  out explicitly. The file is a single large `TaskQueue` class already using
+  extracted mixins (`queue_schedule_registry.py`,
+  `queue_routing_assignments.py`, `queue_spawn_reservations.py`,
+  `queue_producer_fences.py`, `queue_liveness.py`,
+  `queue_handoff_fallback.py`), so the safest continuation was the same
+  proven shape rather than a free-function split.
+- First extracted a new shared support layer, `queue_common.py`, because the
+  next mixin needed queue-owned task/wake record types and helpers without
+  importing back through `queue.py` and recreating the exact circular-import /
+  `typing.get_type_hints()` failure mode earlier queue slices already tripped
+  over. That module now owns the queue-wide constants, `Task` /
+  `WakeOperation` / outcome dataclasses, bounded selector/progress helpers,
+  result encoding, and the SQL select fragments derived from `Task`.
+- With that dependency seam in place, extracted the operator-interaction band
+  into `queue_steering.py`: `_has_headless_reservation`,
+  `_has_cold_headless_reservation`, `set_card`, `submit_steer`,
+  `save_card_draft`, `clear_card_draft`, `take_steer`, `steer_log`,
+  `list_wakes`, `_wake_is_current`, `recover_inflight_wakes`,
+  `claim_due_wake`, `finish_wake`, `wake_metrics`, and `detach`. This is a
+  cohesive band: card/steer state, durable wake delivery, and the small
+  pin-portability helper all revolve around operator interaction rather than
+  task creation or lifecycle transitions.
+- Preserved `queue.py` as the compatibility/composition root and public import
+  surface: all existing `from agent_dispatch.queue import ...` imports still
+  work unchanged, and `TaskQueue` still exposes the moved behavior through its
+  historical class. Added `tests/test_queue_steering.py` to guard the new MRO
+  composition, direct import surface, queue re-exports, and runtime-resolvable
+  annotations. Running line count: `queue.py` **4508 -> 3362**.
+- Validation: `python tools/run-plugin-tests.py agent-dispatch` passed across
+  all 6 sub-suites, `ruff check --select F,E9 plugins/agent-dispatch` passed,
+  `python tools/check-module-size.py` passed, and
+  `python tools/check-module-size.py --refresh-baseline` updated the shrink-only
+  baseline. Version bump: `agent-dispatch` `0.1.2-dev183 -> 0.1.2-dev184`.
 
 ### 2026-09-16 — Kickoff + Phase 0
 - Effort created from an operator request following review of
