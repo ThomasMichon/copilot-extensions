@@ -1312,10 +1312,13 @@ def pr_reminder(
             cautions=cautions,
         )
 
-    # Generic (pr-status / pr-complete / unknown verb).
+    # Generic (pr-status / pr-complete / unknown verb). ``reason`` -- when the
+    # caller supplies one -- overrides the flow-summary headline; used by
+    # pr-status to surface a live self-merge-bypass opportunity explicitly
+    # rather than leaving an agent to infer it from a raw eligible/reason pair.
     return PRReminder(
         flow.profile, verb, state, ok,
-        headline=flow.summary,
+        headline=reason or flow.summary,
         next_step=merge,
         waiting_on=(review,) if review else (),
         use_instead=(),

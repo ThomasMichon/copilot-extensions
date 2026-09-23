@@ -280,6 +280,7 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         "pr-status",
         state=state,
         ok=not result.get("error"),
+        reason=(live.get("self_merge_note") or "") if isinstance(live_block, dict) else "",
     )
     if reminder is not None:
         result["reminder"] = reminder.as_dict()
@@ -328,6 +329,8 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
             else ("eligible" if live.get("eligible") else "not yet")
         )
         print(f"    consent:     {consent}")
+        if live.get("self_merge_note"):
+            output.ok(f"    {live['self_merge_note']}")
     if getattr(args, "all", False) and result.get("prs"):
         print(f"  all PRs ({count}):")
         for pr in result["prs"]:

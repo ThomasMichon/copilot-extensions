@@ -46,12 +46,14 @@ def _self_merge_flow():
 class _FakeProvider:
     name = "github"
 
-    def __init__(self, err="", auto_err="unsupported"):
+    def __init__(self, err="", auto_err="unsupported", review_gate=None):
         self._err = err
         self._auto_err = auto_err
+        self._review_gate = review_gate
         self.calls = []
         self.auto_calls = []
         self.complete_calls = []
+        self.review_gate_calls = []
 
     def merge_pull(self, repo, number, *, squash=True, admin=False,
                    api_base="", token=None):
@@ -81,6 +83,10 @@ class _FakeProvider:
             bypass_reason=bypass_reason,
         ))
         return self._auto_err
+
+    def pull_review_gate(self, repo, number, *, api_base="", token=None):
+        self.review_gate_calls.append(dict(repo=repo, number=number))
+        return self._review_gate if self._review_gate is not None else (False, None)
 
 
 def _patch_provider(monkeypatch, provider):
@@ -262,6 +268,83 @@ def test_prefer_auto_merge_dry_run_previews_auto(monkeypatch, capsys):
     out = _json.loads(capsys.readouterr().out.strip())
     assert out["prefer_auto_merge"] is True
     assert "auto-merge" in out["would"]
+
+
+# --- bypassable review-gate short-circuit (#3296 follow-up) ----------------
+
+def test_bypassable_review_gate_skips_auto_merge_and_admin_bypasses(
+    monkeypatch, capsys,
+):
+    # A live, required review that the acting identity CAN bypass must skip
+    # straight to an admin merge -- auto-merge would otherwise arm
+    # successfully and then sit blocked on that same review forever.
+    import json as _json
+    fake = _FakeProvider(auto_err="", review_gate=(True, True))
+    _patch_provider(monkeypatch, fake)
+    rc = m._pr_merge_now(_args(json=True), _prcfg(prefer_auto_merge=True),
+                         _self_merge_flow(), apply=True)
+    assert rc == 0
+    assert fake.auto_calls == []  # never attempted -- would have queued forever
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True)]
+    out = _json.loads(capsys.readouterr().out.strip())
+    assert out["action"] == "merge"
+    assert out["applied"] is True
+    assert out["bypassed_review_gate"] is True
+
+
+def test_non_bypassable_review_gate_still_arms_auto_merge(monkeypatch, capsys):
+    # A required review the acting identity CANNOT bypass must still go
+    # through ordinary auto-merge -- never an unauthorized admin bypass.
+    import json as _json
+    fake = _FakeProvider(auto_err="", review_gate=(True, False))
+    _patch_provider(monkeypatch, fake)
+    rc = m._pr_merge_now(_args(json=True), _prcfg(prefer_auto_merge=True),
+                         _self_merge_flow(), apply=True)
+    assert rc == 0
+    assert fake.auto_calls == [dict(repo="o/r", number=7, squash=True)]
+    assert fake.calls == []
+    out = _json.loads(capsys.readouterr().out.strip())
+    assert out["action"] == "auto-merge"
+
+
+def test_no_review_required_arms_auto_merge_as_before(monkeypatch, capsys):
+    # No review required at all (the ordinary case) -- unchanged behavior.
+    import json as _json
+    fake = _FakeProvider(auto_err="", review_gate=(False, None))
+    _patch_provider(monkeypatch, fake)
+    rc = m._pr_merge_now(_args(json=True), _prcfg(prefer_auto_merge=True),
+                         _self_merge_flow(), apply=True)
+    assert rc == 0
+    assert fake.auto_calls == [dict(repo="o/r", number=7, squash=True)]
+    assert fake.calls == []
+    out = _json.loads(capsys.readouterr().out.strip())
+    assert out["action"] == "auto-merge"
+
+
+def test_unknown_bypassability_still_arms_auto_merge(monkeypatch):
+    # A required review whose bypassability couldn't be determined (rulesets
+    # unreadable, classic protection with no per-actor bypass signal, etc.)
+    # must never be treated as an affirmative "yes" -- ordinary auto-merge.
+    fake = _FakeProvider(auto_err="", review_gate=(True, None))
+    _patch_provider(monkeypatch, fake)
+    rc = m._pr_merge_now(_args(), _prcfg(prefer_auto_merge=True),
+                         _self_merge_flow(), apply=True)
+    assert rc == 0
+    assert fake.auto_calls == [dict(repo="o/r", number=7, squash=True)]
+    assert fake.calls == []
+
+
+def test_bypassable_review_gate_not_consulted_when_prefer_auto_off(monkeypatch):
+    # The whole short-circuit only matters when auto-merge would otherwise be
+    # tried -- with prefer_auto_merge off, the existing direct-merge path is
+    # unaffected and pull_review_gate is never even called.
+    fake = _FakeProvider(auto_err="", review_gate=(True, True))
+    _patch_provider(monkeypatch, fake)
+    rc = m._pr_merge_now(_args(), _prcfg(prefer_auto_merge=False),
+                         _self_merge_flow(), apply=True)
+    assert rc == 0
+    assert fake.review_gate_calls == []
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True)]
 
 
 def test_ado_self_merge_uses_native_completion(monkeypatch, capsys):

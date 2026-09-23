@@ -2903,6 +2903,79 @@ class TestMultiPR:
 
 
 # ---------------------------------------------------------------------------
+# self_merge_bypass_note (#3296 follow-up)
+# ---------------------------------------------------------------------------
+
+class TestSelfMergeBypassNote:
+    def _flow(self, *, merge_actor="submitter-direct"):
+        from agent_worktrees import pr_contract as pc
+        return pc.classify_pr_flow(
+            enabled=True, required=True, provider="github",
+            automerge_label="", merge_actor=merge_actor,
+        )
+
+    class _GhLikeProvider:
+        def __init__(self, gate_result):
+            self._gate_result = gate_result
+            self.calls = []
+
+        def pull_review_gate(self, repo, number, *, api_base="", token=None):
+            self.calls.append((repo, number))
+            return self._gate_result
+
+    def test_none_when_not_self_merge_profile(self):
+        provider = self._GhLikeProvider((True, True))
+        flow = self._flow(merge_actor="")  # not pr-self-merge
+        note = pr_ops.self_merge_bypass_note(flow, provider, "o/r", 7)
+        assert note is None
+        assert provider.calls == []  # never even consulted
+
+    def test_none_when_no_pr_number_yet(self):
+        provider = self._GhLikeProvider((True, True))
+        note = pr_ops.self_merge_bypass_note(self._flow(), provider, "o/r", None)
+        assert note is None
+        assert provider.calls == []
+
+    def test_none_when_provider_lacks_pull_review_gate(self):
+        class _NoGate:
+            pass
+
+        note = pr_ops.self_merge_bypass_note(self._flow(), _NoGate(), "o/r", 7)
+        assert note is None
+
+    def test_note_when_review_required_and_bypassable(self):
+        provider = self._GhLikeProvider((True, True))
+        note = pr_ops.self_merge_bypass_note(self._flow(), provider, "o/r", 7)
+        assert note is not None
+        assert "Maintainer bypass" in note
+        assert "pr-merge" in note
+        assert provider.calls == [("o/r", 7)]
+
+    def test_none_when_review_required_but_not_bypassable(self):
+        provider = self._GhLikeProvider((True, False))
+        note = pr_ops.self_merge_bypass_note(self._flow(), provider, "o/r", 7)
+        assert note is None
+
+    def test_none_when_no_review_required(self):
+        provider = self._GhLikeProvider((False, None))
+        note = pr_ops.self_merge_bypass_note(self._flow(), provider, "o/r", 7)
+        assert note is None
+
+    def test_none_when_bypassability_unknown(self):
+        provider = self._GhLikeProvider((True, None))
+        note = pr_ops.self_merge_bypass_note(self._flow(), provider, "o/r", 7)
+        assert note is None
+
+    def test_none_when_gate_read_raises(self):
+        class _Boom:
+            def pull_review_gate(self, repo, number, **kw):
+                raise RuntimeError("gh api failed")
+
+        note = pr_ops.self_merge_bypass_note(self._flow(), _Boom(), "o/r", 7)
+        assert note is None
+
+
+# ---------------------------------------------------------------------------
 # pr_status live block (verdict/conflict/merge from the provider snapshot)
 # ---------------------------------------------------------------------------
 
@@ -2910,7 +2983,7 @@ class TestPRStatusLive:
     def _config_with_binding(self, base_config, **pr_kwargs):
         """Clone the fixture config with a merge-consent binding on its repo."""
         repo = base_config.default_repo
-        pr = cfg.PRConfig(
+        defaults = dict(
             enabled=True, provider="gitea", branch_prefix="feature",
             head_scheme="snapshot", auto_open=False,
             api_base="https://h/gitea",
@@ -2918,8 +2991,9 @@ class TestPRStatusLive:
             allow_stale_approval=True,
             hold_labels=("do-not-merge", "needs-rebase", "wip"),
             wip_title_prefixes=("wip:",),
-            **pr_kwargs,
         )
+        defaults.update(pr_kwargs)
+        pr = cfg.PRConfig(**defaults)
         new_repo = cfg.RepoConfig(
             anchor=repo.anchor, worktree_root=repo.worktree_root,
             default_branch=repo.default_branch, remote=repo.remote, pr=pr,
@@ -3090,6 +3164,109 @@ class TestPRStatusLive:
         )
         res = pr_ops.pr_status(wid, config=config)
         assert "live" not in res
+
+    def test_live_self_merge_note_surfaced_when_bypassable(self, pr_repo, monkeypatch):
+        # #3296 follow-up: a pr-self-merge repo with a live, actor-bypassable
+        # required review must surface that explicitly in the live block --
+        # not just a bare eligible=False an agent has to puzzle out.
+        from agent_worktrees import pr_contract as pc
+
+        config, wid, _wt, _ = pr_repo
+        config = self._config_with_binding(
+            config, merge_actor="submitter-direct", automerge_label="",
+        )
+        pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
+        snap = pc.PRSnapshot(
+            pr_state="open", merged=False, head_sha="h", base_ref="master",
+            author="alice", mergeable=True, title="Feature", reviews=(),
+        )
+
+        class _GhLikeProv:
+            name = "gitea"
+
+            def authority_endpoint(self, api_base=""):
+                return api_base.rstrip("/")
+
+            def get_snapshot(self, repo, number, *, api_base="", token=None):
+                return snap
+
+            def pull_review_gate(self, repo, number, *, api_base="", token=None):
+                return (True, True)
+
+        from agent_worktrees import providers
+        monkeypatch.setattr(providers, "get_provider", lambda name: _GhLikeProv())
+        monkeypatch.setattr(providers, "resolve_token", lambda prcfg: "tok")
+
+        res = pr_ops.pr_status(wid, config=config)
+        assert "Maintainer bypass" in res["live"]["self_merge_note"]
+
+    def test_live_self_merge_note_absent_when_not_bypassable(
+        self, pr_repo, monkeypatch,
+    ):
+        from agent_worktrees import pr_contract as pc
+
+        config, wid, _wt, _ = pr_repo
+        config = self._config_with_binding(
+            config, merge_actor="submitter-direct", automerge_label="",
+        )
+        pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
+        snap = pc.PRSnapshot(
+            pr_state="open", merged=False, head_sha="h", base_ref="master",
+            author="alice", mergeable=True, title="Feature", reviews=(),
+        )
+
+        class _GhLikeProv:
+            name = "gitea"
+
+            def authority_endpoint(self, api_base=""):
+                return api_base.rstrip("/")
+
+            def get_snapshot(self, repo, number, *, api_base="", token=None):
+                return snap
+
+            def pull_review_gate(self, repo, number, *, api_base="", token=None):
+                return (True, False)
+
+        from agent_worktrees import providers
+        monkeypatch.setattr(providers, "get_provider", lambda name: _GhLikeProv())
+        monkeypatch.setattr(providers, "resolve_token", lambda prcfg: "tok")
+
+        res = pr_ops.pr_status(wid, config=config)
+        assert "self_merge_note" not in res["live"]
+
+    def test_live_self_merge_note_absent_on_non_self_merge_repo(
+        self, pr_repo, monkeypatch,
+    ):
+        # A gitea repo without submitter-direct merge_actor never surfaces the
+        # note even if the (hypothetical) provider had pull_review_gate.
+        from agent_worktrees import pr_contract as pc
+
+        config, wid, _wt, _ = pr_repo
+        config = self._config_with_binding(config)  # no merge_actor override
+        pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
+        snap = pc.PRSnapshot(
+            pr_state="open", merged=False, head_sha="h", base_ref="master",
+            author="alice", mergeable=True, title="Feature", reviews=(),
+        )
+
+        class _GhLikeProv:
+            name = "gitea"
+
+            def authority_endpoint(self, api_base=""):
+                return api_base.rstrip("/")
+
+            def get_snapshot(self, repo, number, *, api_base="", token=None):
+                return snap
+
+            def pull_review_gate(self, repo, number, *, api_base="", token=None):
+                return (True, True)
+
+        from agent_worktrees import providers
+        monkeypatch.setattr(providers, "get_provider", lambda name: _GhLikeProv())
+        monkeypatch.setattr(providers, "resolve_token", lambda prcfg: "tok")
+
+        res = pr_ops.pr_status(wid, config=config)
+        assert "self_merge_note" not in res["live"]
 
 
 # ---------------------------------------------------------------------------

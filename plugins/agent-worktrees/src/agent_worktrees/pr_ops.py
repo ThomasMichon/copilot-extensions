@@ -1088,6 +1088,52 @@ def create_pr(
     return result
 
 
+def self_merge_bypass_note(
+    flow, provider, repo: str, number: int | None, *,
+    api_base: str = "", token: str | None = None,
+) -> str | None:
+    """Explain a pr-self-merge repo's live self-merge availability, or None.
+
+    Answers the question an agent otherwise has to infer by hand from a raw
+    ``eligible: false`` / ``reason: "not yet approved"`` verdict: on a
+    ``pr-self-merge`` repo, "no verdict yet" does NOT necessarily mean merge
+    is blocked -- the acting identity may hold **Maintainer bypass rights**
+    on the repo's own required-review rule (discovered landing
+    gim-home/odsp-web-harness#502/#504; see :meth:`GitHubProvider.
+    pull_review_gate`). Surfacing this explicitly at both ``pr-status`` and
+    ``create-pr`` matters because agents have been observed hesitating or
+    declaring "I can't self-merge" on exactly this state, even as a
+    Maintainer, when nothing was actually blocking them (#3296 follow-up).
+
+    Only ever returns a note for the ``pr-self-merge`` profile, only when a
+    provider exposes ``pull_review_gate`` (currently GitHub only, via
+    ``hasattr`` -- other providers/flows are silently unaffected), and only
+    when that live read confirms BOTH a required review AND actor
+    bypassability -- never a guess. ``number is None`` (no PR yet) or any
+    read failure returns ``None``, matching :func:`_live_pr_state`'s existing
+    "omit rather than guess" contract.
+    """
+    from . import pr_contract as pc
+
+    if flow.profile != pc.PROFILE_PR_SELF_MERGE:
+        return None
+    if number is None or not hasattr(provider, "pull_review_gate"):
+        return None
+    try:
+        review_required, bypassable = provider.pull_review_gate(
+            repo, number, api_base=api_base, token=token,
+        )
+    except Exception:
+        return None
+    if not (review_required and bypassable):
+        return None
+    return (
+        "No verdict yet, but this identity holds Maintainer bypass rights on "
+        "this repo's required-review rule -- `pr-merge <#> --now` self-merges "
+        "directly rather than waiting for a review that may never come."
+    )
+
+
 def _open_via_provider(
     result: dict,
     config: Config,
@@ -1248,6 +1294,19 @@ def _open_via_provider(
     # and source attribution depend on these labels.
     if getattr(pull, "label_error", ""):
         result["pr_label_error"] = pull.label_error
+
+    # Draft PRs never carry a live review verdict worth checking -- skip the
+    # read rather than reporting a note for a state the PR isn't even in yet.
+    if not draft:
+        from . import pr_config
+
+        flow = pr_config._pr_flow_profile(config.default_repo)
+        note = self_merge_bypass_note(
+            flow, provider, scope.repo, pull.number,
+            api_base=getattr(prcfg, "api_base", "") or "", token=token,
+        )
+        if note:
+            result["self_merge_note"] = note
 
 
 def refresh_source_attribution(
@@ -1686,23 +1745,33 @@ def _live_pr_state(
         ),
         review_blocking=bool(getattr(prcfg, "review_blocking", False)),
     )
-    return {
-        "live": {
-            "verdict": st.verdict,
-            "approval_stale": st.approval_stale,
-            "approval_stale_authorized": st.approval_stale_authorized,
-            "merge_state": st.merge_state,
-            "conflict": st.conflict,
-            "mergeable": snap.mergeable,
-            "consent_present": st.consent_present,
-            "consent_action": st.consent_action,
-            "eligible": st.eligible,
-            "held": list(st.held),
-            "wip": st.wip,
-            "reviews": len(snap.reviews),
-            "reason": st.reason,
-        }
+    self_merge_note = None
+    if st.merge_state not in ("merged", "closed") and not st.wip and not st.held:
+        from . import pr_config
+
+        flow = pr_config._pr_flow_profile(config.default_repo)
+        self_merge_note = self_merge_bypass_note(
+            flow, provider, target_repo, active.number,
+            api_base=getattr(prcfg, "api_base", "") or "", token=token,
+        )
+    live: dict = {
+        "verdict": st.verdict,
+        "approval_stale": st.approval_stale,
+        "approval_stale_authorized": st.approval_stale_authorized,
+        "merge_state": st.merge_state,
+        "conflict": st.conflict,
+        "mergeable": snap.mergeable,
+        "consent_present": st.consent_present,
+        "consent_action": st.consent_action,
+        "eligible": st.eligible,
+        "held": list(st.held),
+        "wip": st.wip,
+        "reviews": len(snap.reviews),
+        "reason": st.reason,
     }
+    if self_merge_note:
+        live["self_merge_note"] = self_merge_note
+    return {"live": live}
 
 
 def _load_record_or_none(worktree_id: str) -> tracking.WorktreeRecord | None:

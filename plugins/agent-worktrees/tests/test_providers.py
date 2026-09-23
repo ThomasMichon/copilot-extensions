@@ -1273,6 +1273,108 @@ class TestGitHubProvider:
         assert "does not support native auto-merge" in \
             azure_devops.AzureDevOpsProvider().enable_auto_merge("o/r", 7)
 
+    def test_pull_review_gate_no_review_required(self, monkeypatch):
+        # reviewDecision anything other than REVIEW_REQUIRED -> ordinary
+        # auto-merge is fine; never even looks at rulesets.
+        from agent_worktrees.providers import github
+        calls = []
+
+        def fake(args, **kw):
+            calls.append(args)
+            return _proc(stdout=json.dumps(
+                {"reviewDecision": "", "baseRefName": "main"}
+            ))
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        result = github.GitHubProvider().pull_review_gate("o/r", 7)
+        assert result == (False, None)
+        assert len(calls) == 1  # only the `pr view` read, no rulesets lookup
+
+    def test_pull_review_gate_bypassable_ruleset(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        def fake(args, **kw):
+            if args[:3] == ["gh", "pr", "view"]:
+                return _proc(stdout=json.dumps(
+                    {"reviewDecision": "REVIEW_REQUIRED", "baseRefName": "main"}
+                ))
+            if "rules/branches/main" in args[-1]:
+                return _proc(stdout=json.dumps([
+                    {"type": "pull_request", "ruleset_id": 42},
+                    {"type": "deletion"},
+                ]))
+            if args[-1] == "repos/o/r/rulesets/42":
+                return _proc(stdout=json.dumps(
+                    {"current_user_can_bypass": "pull_requests_only"}
+                ))
+            raise AssertionError(f"unexpected gh call: {args}")
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        result = github.GitHubProvider().pull_review_gate("o/r", 7)
+        assert result == (True, True)
+
+    def test_pull_review_gate_non_bypassable_ruleset(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        def fake(args, **kw):
+            if args[:3] == ["gh", "pr", "view"]:
+                return _proc(stdout=json.dumps(
+                    {"reviewDecision": "REVIEW_REQUIRED", "baseRefName": "main"}
+                ))
+            if "rules/branches/main" in args[-1]:
+                return _proc(stdout=json.dumps(
+                    [{"type": "pull_request", "ruleset_id": 42}]
+                ))
+            if args[-1] == "repos/o/r/rulesets/42":
+                return _proc(stdout=json.dumps({"current_user_can_bypass": "never"}))
+            raise AssertionError(f"unexpected gh call: {args}")
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        result = github.GitHubProvider().pull_review_gate("o/r", 7)
+        assert result == (True, False)
+
+    def test_pull_review_gate_unknown_when_no_rulesets_apply(self, monkeypatch):
+        # Required review, but no `pull_request`-typed ruleset covers it (e.g.
+        # classic branch protection instead) -- unknown, never an affirmative
+        # bypass.
+        from agent_worktrees.providers import github
+
+        def fake(args, **kw):
+            if args[:3] == ["gh", "pr", "view"]:
+                return _proc(stdout=json.dumps(
+                    {"reviewDecision": "REVIEW_REQUIRED", "baseRefName": "main"}
+                ))
+            if "rules/branches/main" in args[-1]:
+                return _proc(stdout=json.dumps([{"type": "deletion"}]))
+            raise AssertionError(f"unexpected gh call: {args}")
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        result = github.GitHubProvider().pull_review_gate("o/r", 7)
+        assert result == (True, None)
+
+    def test_pull_review_gate_unknown_when_rules_read_fails(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        def fake(args, **kw):
+            if args[:3] == ["gh", "pr", "view"]:
+                return _proc(stdout=json.dumps(
+                    {"reviewDecision": "REVIEW_REQUIRED", "baseRefName": "main"}
+                ))
+            return _proc(returncode=1, stderr="not found")
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        result = github.GitHubProvider().pull_review_gate("o/r", 7)
+        assert result == (True, None)
+
+    def test_pull_review_gate_false_when_pr_view_fails(self, monkeypatch):
+        from agent_worktrees.providers import github
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: _proc(returncode=1, stderr="not found"),
+        )
+        result = github.GitHubProvider().pull_review_gate("o/r", 7)
+        assert result == (False, None)
+
     def test_get_repo_policy_reads_settings_and_protection(self, monkeypatch):
         # #225: adopt-time research reads repo merge settings + branch protection.
         from agent_worktrees.providers import github
