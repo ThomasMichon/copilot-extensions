@@ -57,6 +57,7 @@ that pattern to this repository.
 | [PR Attribution Codenames](active/pr-attribution-codenames/README.md) | Done; pending archive | #2838 |
 | [Codename Attribution By Default](active/codename-attribution-by-default/README.md) | Done; pending archive | #2977 |
 | [AGENTS.md vs .github/instructions Split](active/agents-md-vs-instructions-split/README.md) | Done; pending archive | #2825 |
+| [agent-mcp Bridge Idle Self-Reap](active/agent-mcp-bridge-idle-reap/README.md) | Draft | aperture-labs#3876 |
 
 ## Local conventions
 

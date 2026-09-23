@@ -56,6 +56,17 @@ class BridgeSession:
     def decorator_count(self) -> int:
         return len(self._pipeline.decorators) if self._pipeline is not None else 0
 
+    @property
+    def has_pending(self) -> bool:
+        """True while at least one client message is mid-dispatch.
+
+        The authoritative liveness signal for an idle self-reap (#3876): a
+        bridge must never be reaped while a request is still awaiting its
+        upstream response, however long that takes, even past an otherwise
+        elapsed idle window.
+        """
+        return bool(self._tasks)
+
     async def start(self) -> None:
         """Build the injector + transport + upstream client + pipeline, connect."""
         injector = build_injector(self.cfg)

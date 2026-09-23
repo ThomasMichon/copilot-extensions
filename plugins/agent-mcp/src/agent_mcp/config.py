@@ -321,6 +321,7 @@ class BridgeConfig:
     tools: ToolFilter = field(default_factory=ToolFilter)
     timeout: float = 30.0
     retries: int = 1
+    idle_timeout: float = 300.0  # idle self-reap seconds (#3876); <=0 disables
     name: str | None = None
     source_path: Path | None = None
     # Decorator stack (client->upstream order). See ``agent_mcp.decorators``.
@@ -792,6 +793,8 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
         tools=tools,
         timeout=float(data.get("timeout", 30.0)),
         retries=int(data.get("retries", 1)),
+        idle_timeout=float(
+            data.get("idle_timeout", os.environ.get("AGENT_MCP_BRIDGE_IDLE_TIMEOUT", 300.0))),
         name=name,
         source_path=source_path,
         decorators=decorators,
