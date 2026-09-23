@@ -365,14 +365,18 @@ def get_codespace_status_with_account(
     discoverable CodeSpace misreport absent. Reading the binding STORE
     itself (as opposed to a confirmed absence of a binding for this name)
     can also fail (lock contention) -- that failure propagates too, via
-    ``account_binding.bound_account_or_raise``, rather than degrading to
-    "no binding" (review finding: "Fail closed when account binding
-    cannot be read"). Likewise, once ANY candidate in the fallback scan
-    has produced an ambiguous error, a LATER candidate's success is no
-    longer trusted blindly -- it also raises, rather than risk selecting
-    (and reclaiming!) a same-named CodeSpace under an unverified account
-    while the true owner's lookup remains unresolved (review finding:
-    "Reject later candidates after earlier lookup errors")."""
+    ``account_binding.bound_account_or_raise`` for the exact-name lookup
+    AND ``account_binding.bound_accounts_or_raise`` for the fallback
+    scan's own candidate-list setup, rather than either one degrading to
+    "no binding"/an empty candidate set (review findings: "Fail closed
+    when account binding cannot be read" and "Propagate binding read
+    failures instead of scanning accounts"). Likewise, once ANY candidate
+    in the fallback scan has produced an ambiguous error, a LATER
+    candidate's success is no longer trusted blindly -- it also raises,
+    rather than risk selecting (and reclaiming!) a same-named CodeSpace
+    under an unverified account while the true owner's lookup remains
+    unresolved (review finding: "Reject later candidates after earlier
+    lookup errors")."""
     from . import gh_account
 
     validate_context()
@@ -397,10 +401,7 @@ def get_codespace_status_with_account(
         )
         return exists, state, (bound if exists else None)
 
-    try:
-        bound_accounts = account_binding.bound_accounts()
-    except Exception:
-        bound_accounts = ()
+    bound_accounts = account_binding.bound_accounts_or_raise()
     accounts_seen: list[str] = []
     for login in (*gh_account.mapped_accounts(), *bound_accounts):
         if login and login != bound and login not in accounts_seen:

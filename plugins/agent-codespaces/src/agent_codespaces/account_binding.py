@@ -170,12 +170,25 @@ def list_bindings() -> list[AccountBinding]:
 def bound_accounts() -> tuple[str, ...]:
     """Return distinct non-empty bound gh logins."""
     try:
-        seen: list[str] = []
-        with _binding_lock():
-            records = _read()
-        for rec in records.values():
-            if rec.account and rec.account not in seen:
-                seen.append(rec.account)
-        return tuple(seen)
+        return bound_accounts_or_raise()
     except Exception:
         return ()
+
+
+def bound_accounts_or_raise() -> tuple[str, ...]:
+    """Like :func:`bound_accounts`, but propagates a lock-acquisition
+    failure instead of silently degrading to an empty tuple -- for a
+    caller (e.g. building the fallback candidate list for a destructive
+    CodeSpace reclaim) that must not treat an UNAVAILABLE binding store
+    the same as a confirmed empty one (claim-provider-pattern effort
+    review finding: "Propagate binding read failures instead of scanning
+    accounts"). Losing visibility into which accounts hold bindings and
+    then still scanning mapped/ambient accounts anyway risks selecting
+    (and reclaiming!) a same-named CodeSpace under the wrong account."""
+    seen: list[str] = []
+    with _binding_lock():
+        records = _read()
+    for rec in records.values():
+        if rec.account and rec.account not in seen:
+            seen.append(rec.account)
+    return tuple(seen)

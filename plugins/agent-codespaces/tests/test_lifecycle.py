@@ -354,7 +354,7 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-a", "acct-b"))
         monkeypatch.setattr(
-            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+            "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
 
         def fake_under(name, account, **_kwargs):
             if account == "acct-b":
@@ -369,7 +369,7 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-a",))
         monkeypatch.setattr(
-            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+            "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
         monkeypatch.setattr(
             lifecycle, "_get_codespace_status_under",
             lambda name, account, **_kwargs: (False, None))
@@ -388,7 +388,7 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-wrong",))
         monkeypatch.setattr(
-            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+            "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_account_or_raise",
             lambda name: "acct-exact" if name == "cs-dup" else None)
@@ -415,7 +415,7 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-other",))
         monkeypatch.setattr(
-            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+            "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_account_or_raise",
             lambda name: "acct-exact" if name == "cs-dup" else None)
@@ -443,7 +443,7 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-other",))
         monkeypatch.setattr(
-            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+            "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_account_or_raise",
             lambda name: "acct-exact" if name == "cs-dup" else None)
@@ -471,12 +471,39 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-other",))
         monkeypatch.setattr(
-            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+            "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
 
         def _boom(name):
             raise RuntimeError("Could not acquire account binding lock")
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_account_or_raise", _boom)
+        called = {"n": 0}
+        monkeypatch.setattr(
+            lifecycle, "_get_codespace_status_under",
+            lambda *a, **k: called.__setitem__("n", 1))
+
+        with pytest.raises(RuntimeError, match="lock"):
+            lifecycle.get_codespace_status_with_account("cs-dup")
+        assert called["n"] == 0  # never even reached a status lookup
+
+    def test_bound_accounts_read_failure_fails_closed_in_fallback_scan(self, monkeypatch):
+        """When there is NO exact per-name binding, the fallback scan's
+        own candidate-list setup (bound_accounts) can ALSO fail to read --
+        that failure must propagate too, not silently degrade to an empty
+        candidate set and proceed scanning mapped/ambient accounts anyway,
+        which risks selecting (and reclaiming!) a same-named CodeSpace
+        under the wrong account (claim-provider-pattern effort review
+        finding: "Propagate binding read failures instead of scanning
+        accounts")."""
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-other",))
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_account_or_raise", lambda name: None)
+
+        def _boom():
+            raise RuntimeError("Could not acquire account binding lock")
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_accounts_or_raise", _boom)
         called = {"n": 0}
         monkeypatch.setattr(
             lifecycle, "_get_codespace_status_under",
@@ -493,7 +520,7 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-a", "acct-b"))
         monkeypatch.setattr(
-            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+            "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
 
         def fake_under(name, account, **_kwargs):
             if account == "acct-a":
@@ -514,7 +541,7 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-a", "acct-b"))
         monkeypatch.setattr(
-            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+            "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
 
         def fake_under(name, account, **_kwargs):
             if account == "acct-a":
