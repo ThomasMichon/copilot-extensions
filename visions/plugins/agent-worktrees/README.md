@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-20
+- **Last revised:** 2026-09-23
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -53,6 +53,35 @@ record of that posture for every repo a project relates to. A project never
 needs a second, parallel catalog of the repos it works with, their
 contribution rules, or an operator's standing in each — whatever such a
 project previously tracked on its own converges into this one record instead.
+
+### Per-repo account identity resolution
+
+Two related but independent identity systems must each resolve to the account
+an operator actually intends for the repo in play: the `gh`/git identity
+(which account pushes, opens PRs, and calls the `gh` API) and Copilot CLI's
+own inference identity (the account Copilot itself authenticates its own
+requests as, tracked independently of `gh`). agent-worktrees is the durable
+owner of both resolutions. The `gh` identity resolves through an explicit
+per-repo `account` override, or the decoupled owner-keyed `account_map`, so
+git/PR operations for a repo never depend on whichever account happens to be
+globally active. The Copilot identity resolves separately and is
+**repo-keyed, not owner-keyed** — a repo has no GitHub owner to derive an
+identity from at all when hosted somewhere other than GitHub, yet an operator
+can still need a specific Copilot identity pinned for it — falling back to a
+machine-level default when a repo declares no explicit preference. This is
+an **opt-in personal-accountability capability**: an operator who never
+declares a Copilot-identity preference sees no change in behavior.
+
+Correcting a resolved Copilot-identity mismatch is inherently constrained by
+one hazard: the identity file it corrects is shared machine-wide, not scoped
+to the process about to launch, and an already-running Copilot CLI session
+observably picks up a change to it live rather than only at its own next
+startup. Switching it while another session is mid-flight risks splicing
+that session's usage across two accounts, invalidating its prompt cache, and
+provoking authentication errors. Correction therefore only proceeds
+automatically when the machine looks otherwise idle for Copilot, and simply
+surfaces the mismatch (never blocking the launch) the rest of the time,
+unless an operator explicitly accepts the risk.
 
 ### Related-repo relationship and contribution posture
 
