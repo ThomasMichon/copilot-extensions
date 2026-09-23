@@ -203,7 +203,18 @@ if (-not (Test-Path $Manifest)) {
         if (-not (Test-LegacyMutationAllowed)) { Exit-SessionStart }
         $pw = Get-Command pwsh -ErrorAction SilentlyContinue
         $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
-        & $exe -NoProfile -ExecutionPolicy Bypass -File $payloadInit stamp *> $null
+        # Async, matching the $contextSelected branch above (and agent-bridge's
+        # reference bootstrap-check.ps1): a synchronous `&` call here blocks the
+        # WHOLE sessionStart hook on the first-install stamp step -- measured at
+        # ~22s standalone in a fresh container, well past this hook's 15s
+        # timeout (confirmed root cause of the HookTimeoutError observed in
+        # full-harness clean-room runs). `stamp` only needs to land before the
+        # binstub is next invoked, not before this session's first turn.
+        $command = "& `"$payloadInit`" stamp *> `$null"
+        $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+        Start-Process -FilePath 'conhost.exe' `
+            -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) `
+            -WindowStyle Hidden | Out-Null
     }
     Exit-SessionStart
 }
