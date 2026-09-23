@@ -76,6 +76,7 @@ class FakeClient:
         self,
         *,
         agent=None,
+        charter=None,
         target_dir=None,
         caller_id=None,
         sender_repo=None,
@@ -87,7 +88,7 @@ class FakeClient:
         request_timeout=None,
     ):
         self.started.append(
-            {"agent": agent, "target_dir": target_dir,
+            {"agent": agent, "charter": charter, "target_dir": target_dir,
              "caller_id": caller_id,
              "sender_repo": sender_repo, "force_new": force_new,
              "caller_owner_ref": caller_owner_ref,

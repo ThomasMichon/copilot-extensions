@@ -280,6 +280,7 @@ def _resolve_target(
     force: bool = False,
     model: str | None = None,
     effort: str | None = None,
+    charter: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
 ) -> str:
@@ -344,6 +345,7 @@ def _resolve_target(
             force=force,
             model=model,
             effort=effort,
+            charter=charter,
             target_dir=target_dir,
             worktree_id=worktree_id,
         )
@@ -357,6 +359,7 @@ def _resolve_target(
             force=force,
             model=model,
             effort=effort,
+            charter=charter,
             target_dir=target_dir,
             worktree_id=worktree_id,
         )
@@ -454,6 +457,14 @@ def _cmd_create_cli(target: str, prompt: str | None, driver: str | None) -> None
 
 def _cmd_create(args: argparse.Namespace) -> None:
     if getattr(args, "cli", False):
+        if getattr(args, "charter", None):
+            print(
+                "[FAIL] --charter is not supported with --cli: the CLI-mode "
+                "venue verbs (agent-codespaces/agent-containers copilot) have "
+                "no charter-binding flag -- drop --cli, or drop --charter.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         _cmd_create_cli(
             args.target, _resolve_prompt(args, required=False),
             getattr(args, "driver", None),
@@ -492,6 +503,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
             refuse_on_conflict=True,
             model=getattr(args, "model", None),
             effort=getattr(args, "effort", None),
+            charter=getattr(args, "charter", None),
             target_dir=getattr(args, "target_dir", None),
             worktree_id=getattr(args, "worktree_id", None),
         )
@@ -606,6 +618,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     create_p.add_argument("--model", dest="model", default=None, metavar="MODEL", help="Run THIS session on MODEL (e.g. gpt-5.6-sol). Copilot ignores --model in ACP mode, so the bridge applies it per-session via session/set_config_option, at highest precedence over the daemon default model. Omit to keep the daemon's default model.")
     create_p.add_argument("--session-id-file", dest="session_id_file", default=None, metavar="PATH", help="Atomically write this process's exact created session id before streaming the first turn.")
     create_p.add_argument("--effort", dest="effort", default=None, metavar="EFFORT", help="Reasoning-effort override for THIS session (e.g. low|medium|high), applied the same per-session way as --model.")
+    create_p.add_argument("--charter", dest="charter", default=None, metavar="AGENT", help="Optional .github/agents/<charter>.agent.md behavior overlay -- passed as Copilot's own --agent flag on the launched session, independent of TARGET (the venue this session spawns onto).")
     create_p.add_argument("--target-dir", dest="target_dir", default=None, metavar="PATH", help="Run this agent session in an existing checkout directory.")
     create_p.add_argument("--worktree-id", dest="worktree_id", default=None, metavar="ID", help="Bind the created session to an existing agent-worktrees worktree id.")
     create_p.add_argument("--cli", action="store_true", help="Deliver a live, human-attachable CLI-mode Copilot session on the venue TARGET names (codespace:<name> or container:<name>) instead of an ordinary headless ACP session -- hands off entirely to that provider's own `copilot` verb, optionally seeded with the positional prompt as its first turn (agent-bridge-cli-mode-sessions Phase 4). Defaults to anchor mode on the venue (no worktree required). Refused for a bare/unprefixed TARGET -- use `agent-worktrees copilot` directly for a local session.")

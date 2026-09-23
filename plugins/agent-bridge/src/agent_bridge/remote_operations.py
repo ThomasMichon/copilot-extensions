@@ -29,7 +29,11 @@ from .client import (
 )
 from .protocol import REMOTE_OPERATIONS_PROTOCOL_VERSION
 
-REMOTE_OPERATION_VERSION = 2
+REMOTE_OPERATION_VERSION = 3
+#: Versions below this reject a request naming ``copilot_args`` (a charter
+#: overlay) rather than silently dropping it on an older carrier.
+REMOTE_COPILOT_ARGS_MIN_VERSION = 3
+_REMOTE_OPERATION_VERSIONS = {1, 2, REMOTE_OPERATION_VERSION}
 MAX_CALLER_ID_LENGTH = 128
 MAX_HOST_LENGTH = 128
 MAX_SESSION_ID_LENGTH = 256
@@ -196,6 +200,15 @@ def validate_message(value: Any, *, field: str) -> str:
     return value
 
 
+def validate_copilot_args(value: Any) -> list[str] | None:
+    """Validate an optional charter-overlay ``--agent <charter>``-style args list."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise RemoteBridgeError(400, "invalid_request", "copilot_args must be a list of strings")
+    return list(value)
+
+
 def validate_continuity_id(value: Any) -> str | None:
     """Validate an optional event-log continuity identifier."""
     if value is None:
@@ -326,12 +339,14 @@ class CarrierRequestRouter:
         agent = validate_agent_name(payload.get("agent"))
         prompt = validate_message(payload.get("prompt"), field="prompt")
         caller_id = validate_caller_id(payload.get("caller_id"))
+        copilot_args = validate_copilot_args(payload.get("copilot_args"))
         start = asyncio.create_task(
             asyncio.to_thread(
                 client.start_session,
                 agent=agent,
                 caller_id=caller_id,
                 force_new=True,
+                copilot_args=copilot_args,
             )
         )
         try:
@@ -387,7 +402,7 @@ class CarrierRequestRouter:
         if (
             isinstance(version, bool)
             or not isinstance(version, int)
-            or version not in {1, REMOTE_OPERATION_VERSION}
+            or version not in _REMOTE_OPERATION_VERSIONS
         ):
             raise RemoteBridgeError(
                 426,
@@ -408,6 +423,21 @@ class CarrierRequestRouter:
                 426,
                 "unsupported_version",
                 "remote operation requires protocol version 2",
+                details={
+                    "supported_version": REMOTE_OPERATION_VERSION,
+                    "requested_version": version,
+                },
+            )
+        if (
+            version < REMOTE_COPILOT_ARGS_MIN_VERSION
+            and operation == "session.create"
+            and payload.get("copilot_args") is not None
+        ):
+            raise RemoteBridgeError(
+                426,
+                "unsupported_version",
+                "remote operation requires protocol version "
+                f"{REMOTE_COPILOT_ARGS_MIN_VERSION} for copilot_args",
                 details={
                     "supported_version": REMOTE_OPERATION_VERSION,
                     "requested_version": version,
@@ -947,17 +977,21 @@ class RemoteOperationService:
             while True:
                 try:
                     operation = payload.get("operation")
-                    version = (
-                        REMOTE_OPERATION_VERSION
-                        if operation
-                        in {
-                            "live_session.send",
-                            "session.create",
-                            "session.end",
-                            "session.stop",
-                        }
-                        else 1
-                    )
+                    # Version 3 is only required when this request actually carries
+                    # copilot_args (a charter overlay) -- send the lowest version
+                    # that still satisfies the request so a not-yet-upgraded remote
+                    # carrier keeps working for every call that doesn't need it.
+                    if payload.get("copilot_args") is not None:
+                        version = REMOTE_COPILOT_ARGS_MIN_VERSION
+                    elif operation in {
+                        "live_session.send",
+                        "session.create",
+                        "session.end",
+                        "session.stop",
+                    }:
+                        version = 2
+                    else:
+                        version = 1
                     response = await lease.carrier.request(
                         {
                             "version": version,
@@ -1046,17 +1080,17 @@ class RemoteOperationService:
         prompt: str,
         caller_id: str,
         timeout: float = 120.0,
+        copilot_args: list[str] | None = None,
     ) -> dict[str, Any]:
-        response = await self._request(
-            host,
-            {
-                "operation": "session.create",
-                "agent": validate_agent_name(agent),
-                "prompt": validate_message(prompt, field="prompt"),
-                "caller_id": validate_caller_id(caller_id),
-            },
-            timeout=timeout,
-        )
+        payload: dict[str, Any] = {
+            "operation": "session.create",
+            "agent": validate_agent_name(agent),
+            "prompt": validate_message(prompt, field="prompt"),
+            "caller_id": validate_caller_id(caller_id),
+        }
+        if copilot_args is not None:
+            payload["copilot_args"] = validate_copilot_args(copilot_args)
+        response = await self._request(host, payload, timeout=timeout)
         result = response.get("result")
         return dict(result) if isinstance(result, dict) else {}
 

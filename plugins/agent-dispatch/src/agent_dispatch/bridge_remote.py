@@ -15,6 +15,10 @@ from typing import Any
 import yaml
 
 REMOTE_COMMAND_PROTOCOL_VERSION = 14
+#: Minimum local agent-bridge HTTP protocol that honors an optional
+#: copilot_args field on a remote session.create request (a charter overlay);
+#: mirrors agent_bridge.protocol.REMOTE_SESSION_COPILOT_ARGS_PROTOCOL_VERSION.
+REMOTE_SESSION_COPILOT_ARGS_PROTOCOL_VERSION = 18
 
 
 class RemoteBridgeUnavailable(RuntimeError):
@@ -284,17 +288,28 @@ class LocalBridgeRemoteClient:
         prompt: str,
         caller_id: str,
         timeout: float,
+        charter: str | None = None,
     ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "agent": agent,
+            "prompt": prompt,
+            "caller_id": caller_id,
+            "timeout": timeout,
+        }
+        # Mirrors BridgeClient.start_session's charter -> copilot_args translation:
+        # the remote carrier has no dedicated charter field, only copilot_args.
+        if charter:
+            body["copilot_args"] = ["--agent", charter]
         return self._request(
             "POST",
             self._host_path(host, "/sessions"),
-            body={
-                "agent": agent,
-                "prompt": prompt,
-                "caller_id": caller_id,
-                "timeout": timeout,
-            },
+            body=body,
             timeout=timeout + 15.0,
+            required_protocol=(
+                REMOTE_SESSION_COPILOT_ARGS_PROTOCOL_VERSION
+                if charter
+                else REMOTE_COMMAND_PROTOCOL_VERSION
+            ),
         )
 
     def stop_session(

@@ -902,6 +902,32 @@ def test_cli_build_spec_missing_file_errors():
     assert "could not read --spec file" in str(exc.value)
 
 
+def test_cli_build_spec_rejects_charter_with_cli_embody_backend():
+    """agent-worktrees embody has no charter-binding flag -- refuse persisting
+    a registration the daemon can never actually start."""
+    from agent_dispatch.__main__ import _build_registration_spec
+
+    args = _parse(
+        ["supervise", "register", "--all-repos", "--label", "code-review",
+         "--embody-backend", "cli", "--charter", "cab-charter"]
+    )
+    with pytest.raises(SystemExit) as exc:
+        _build_registration_spec(args)
+    assert "--charter is only supported for a fully headless lane" in str(exc.value)
+
+
+def test_cli_build_spec_rejects_charter_with_cli_label():
+    from agent_dispatch.__main__ import _build_registration_spec
+
+    args = _parse(
+        ["supervise", "register", "--all-repos", "--label", "code-review",
+         "--cli-label", "code-review", "--charter", "cab-charter"]
+    )
+    with pytest.raises(SystemExit) as exc:
+        _build_registration_spec(args)
+    assert "--charter is only supported for a fully headless lane" in str(exc.value)
+
+
 def test_cli_status_and_remove_take_id():
     assert _parse(["supervise", "status", "lane-1"]).id == "lane-1"
     assert _parse(["supervise", "remove", "lane-1"]).id == "lane-1"

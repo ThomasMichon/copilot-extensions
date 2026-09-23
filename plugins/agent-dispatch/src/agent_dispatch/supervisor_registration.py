@@ -394,6 +394,8 @@ def _lane_flags(spec: dict) -> list[str]:
             argv.append("--headless")
     if spec.get("headless_agent"):
         argv += ["--headless-agent", str(spec["headless_agent"])]
+    if spec.get("charter"):
+        argv += ["--charter", str(spec["charter"])]
     argv += ["--interval", str(spec.get("interval", 30.0))]
     # Full supervise surface (a declaration is a lossless superset of the legacy env
     # profile): these keys are absent in older store-backed specs -- emitted only

@@ -60,6 +60,7 @@ _KNOWN_BODY_KEYS = frozenset(
     {
         "type",
         "agent",
+        "charter",
         "headless_labels",
         "cli_labels",
         "disposable_cli_labels",
@@ -98,10 +99,25 @@ class Body:
     Per-label overrides refine either default: ``cli_labels`` forces specific
     labels to a CLI body when the profile is headless-by-default; ``headless_labels``
     forces specific labels headless when the profile is ``embody`` (a mixed profile).
+
+    ``agent`` and ``charter`` are deliberately distinct: ``agent`` is the
+    **venue** this pool embodies onto -- a real, already-addressable
+    agent-bridge target (a machine/repo loopback identity), never a
+    stand-in invented just to carry a persona. ``charter`` is the optional
+    **behavior overlay** -- a ``.github/agents/<charter>.agent.md`` name
+    passed as Copilot's own ``--agent <charter>`` flag on the launched
+    session, scoping its tools/guidance without changing where it runs or
+    what it can access. A pool with no ``charter`` launches a plain,
+    unscoped session at its venue -- this is the case (worker pools with no
+    fixed persona) the field's optionality exists for. Whether the body is
+    headless or CLI-embodied is a separate, purely operational "mode" axis
+    (``type`` above / per-label overrides) -- it is not part of either
+    ``agent`` or ``charter`` and must never be inferred from either.
     """
 
     type: str = "headless"
     agent: str = "task-worker"
+    charter: str | None = None
     headless_labels: tuple[str, ...] = ()
     cli_labels: tuple[str, ...] = ()
     disposable_cli_labels: tuple[str, ...] = ()
@@ -115,6 +131,19 @@ class Body:
     together with a fleet (`--pool`) declaration by `load_declaration`
     (fleet mode never creates a paired worktree locally, so there is
     nothing for this flag to skip)."""
+
+    def __post_init__(self) -> None:
+        # Mirrors supervise_cli.py's own runtime guard: agent-worktrees embody
+        # has no charter-binding flag, so a charter can never reach a
+        # CLI-embodied lane. Reject the combination here too -- at
+        # declaration/registration time -- so a persisted row can't retry a
+        # lane the daemon will always refuse to start.
+        if self.charter and (self.type == "embody" or self.cli_labels):
+            raise RegistrarError(
+                "body.charter: not supported with a CLI-embodied body "
+                "(body.type: embody, or any body.cli_labels) -- "
+                "agent-worktrees embody has no charter-binding flag"
+            )
 
 
 @dataclass(frozen=True)
@@ -273,6 +302,8 @@ class ProfileDeclaration:
             args.append("--no-pair")
         if self.body.type == "headless" or self.body.headless_labels or self.fleet.headless:
             args += ["--headless-agent", self.body.agent]
+        if self.body.charter:
+            args += ["--charter", self.body.charter]
         if self.evaluator:
             args += ["--evaluator", self.evaluator]
         return args
@@ -407,9 +438,13 @@ def _load_body(data: object) -> Body:
     agent = data.get("agent", "task-worker")
     if not isinstance(agent, str) or not agent:
         raise RegistrarError(f"body.agent: expected a non-empty string, got {agent!r}")
+    charter = data.get("charter")
+    if charter is not None and (not isinstance(charter, str) or not charter):
+        raise RegistrarError(f"body.charter: expected a non-empty string, got {charter!r}")
     return Body(
         type=btype,
         agent=agent,
+        charter=charter,
         headless_labels=_as_str_tuple(data.get("headless_labels"), key="body.headless_labels"),
         cli_labels=_as_str_tuple(data.get("cli_labels"), key="body.cli_labels"),
         disposable_cli_labels=_as_str_tuple(

@@ -160,6 +160,24 @@ def test_bad_body_type_rejected():
         load_declaration({"name": "x", "body": {"type": "sidecar"}})
 
 
+def test_charter_rejected_for_embody_body_type():
+    with pytest.raises(RegistrarError, match="body.charter"):
+        load_declaration(
+            {"name": "x", "body": {"type": "embody", "charter": "cab-charter"}}
+        )
+
+
+def test_charter_rejected_with_cli_labels():
+    with pytest.raises(RegistrarError, match="body.charter"):
+        load_declaration(
+            {
+                "name": "x",
+                "labels": ["a"],
+                "body": {"charter": "cab-charter", "cli_labels": ["a"]},
+            }
+        )
+
+
 def test_disposable_cli_label_must_be_watched_and_local():
     with pytest.raises(RegistrarError, match="not in labels"):
         load_declaration(

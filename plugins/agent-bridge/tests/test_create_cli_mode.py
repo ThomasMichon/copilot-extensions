@@ -120,6 +120,15 @@ class TestCmdCreateCliDispatch:
         assert exc.value.code == 2
         assert "namespaced venue target" in capsys.readouterr().err
 
+    def test_charter_is_refused_with_cli(self, monkeypatch, capsys) -> None:
+        """--cli's CLI-mode venue verbs have no charter-binding flag -- reject
+        the combination explicitly rather than silently dropping --charter."""
+        with pytest.raises(SystemExit) as exc:
+            m._cmd_create(_ns(target="codespace:friendly-eureka", charter="cab-charter"))
+
+        assert exc.value.code == 2
+        assert "--charter is not supported with --cli" in capsys.readouterr().err
+
     def test_missing_binstub_fails_clearly(self, monkeypatch, capsys) -> None:
         monkeypatch.setattr(targeting.shutil, "which", lambda name: None)
 

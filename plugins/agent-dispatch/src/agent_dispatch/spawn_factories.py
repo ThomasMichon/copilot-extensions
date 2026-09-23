@@ -677,6 +677,7 @@ def make_embody_spawn(
     route: str = "",
     all_repos: bool = False,
     no_pair: bool = False,
+    charter: str | None = None,
 ) -> SpawnFn:
     """Build a :data:`SpawnFn` that embodies a worker via ``agent-worktrees``.
 
@@ -693,6 +694,7 @@ def make_embody_spawn(
     ``route`` is the coordinator routing intent handed to the worker's
     ``agent-dispatch`` commands (``""`` for local discovery, ``" --shared"`` for
     the shared moniker); never a raw ``--url`` (the caller rejects that).
+    ``charter`` is accepted for parity but ``spawn_embodied_worker`` raises.
     """
     from . import embody
 
@@ -709,6 +711,7 @@ def make_embody_spawn(
                 repo=None if all_repos else task.get("repo"),
                 all_repos=all_repos,
                 verify_timeout=verify_timeout,
+                charter=charter,
             )
         except embody.EmbodyUnavailable as exc:
             return False, {"error": str(exc)}
@@ -739,6 +742,7 @@ def make_embody_spawn(
 def make_headless_spawn(
     *,
     agent: str = "task-worker",
+    charter: str | None = None,
     route: str = "",
     all_repos: bool = False,
     no_pair: bool = False,
@@ -751,7 +755,7 @@ def make_headless_spawn(
     deliberate completion, and is torn down. It sidesteps the CLI-start-prompt
     delivery path entirely (a seeded CLI session can race the input caret and
     never deliver its seed), so a headless-marked task never deadlocks on that
-    path.
+    path. ``charter`` optionally overlays a ``.agent.md`` persona.
 
     It reuses the **same autopilot seed** as the CLI backend
     (:func:`agent_dispatch.embody.autopilot_worker_prompt` -- claim-under-identity,
@@ -791,6 +795,7 @@ def make_headless_spawn(
             result = bridge.spawn_or_resume_worker(
                 task["id"],
                 agent=agent,
+                charter=charter,
                 worker_id=worker_id,
                 prompt=seed,
                 prior_session_id=prior_session,
@@ -827,7 +832,7 @@ def make_headless_spawn(
     spawn.requires_reusable_worktree = True
     spawn.allocation_driver = "agent-dispatch"
     spawn.allocation_interface = "acp"
-    spawn.allocation_agent = agent
+    spawn.allocation_agent = charter or agent
     spawn.allocation_no_pair = no_pair
     spawn.allocation_project_for = lambda _task: (
         bridge.registered_agent_project(agent, strict=True) or ""

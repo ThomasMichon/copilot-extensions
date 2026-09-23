@@ -1010,6 +1010,7 @@ class BridgeClient(WorktreeRestartMixin):
         self,
         *,
         agent: str | None = None,
+        charter: str | None = None,
         target_dir: str | None = None,
         caller_id: str | None = None,
         sender_repo: str | None = None,
@@ -1020,6 +1021,7 @@ class BridgeClient(WorktreeRestartMixin):
         env: dict[str, str] | None = None,
         model: str | None = None,
         effort: str | None = None,
+        copilot_args: list[str] | None = None,
         request_timeout: float | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions
@@ -1031,6 +1033,8 @@ class BridgeClient(WorktreeRestartMixin):
         ``worktree_head_pending``) with no break-glass of its own (Phase 3)
         -- ``resume_worktree(reclaim=True)`` resumes-or-creates it instead.
 
+        ``charter`` binds a ``.github/agents/<charter>.agent.md`` overlay via
+        ``copilot_args`` (``--agent <charter>``), independent of ``agent``.
         ``env`` sets per-session environment overrides merged onto the resolved
         agent's declared env and applied to the spawned Copilot CLI -- e.g. BYOK
         provider selection (``COPILOT_PROVIDER_BASE_URL`` / ``COPILOT_MODEL``).
@@ -1038,6 +1042,8 @@ class BridgeClient(WorktreeRestartMixin):
         body: dict[str, Any] = {}
         if agent:
             body["agent"] = agent
+        if args := (["--agent", charter, *(copilot_args or [])] if charter else copilot_args):
+            body["copilot_args"] = args
         if target_dir:
             body["target_dir"] = target_dir
         if caller_id:
