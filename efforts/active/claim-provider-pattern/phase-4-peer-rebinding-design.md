@@ -104,22 +104,31 @@ ambient/legacy credentials just by making the strict path fail.
    `DESTINATIONS`. Run `python tools/sync-peer-launch.py` (or `--check` to
    verify) so the new vendor copy is created and stays byte-identical to
    canonical going forward — never hand-edit the vendored file.
-2. **Add the missing installation-context primitive for agent-worktrees.**
-   Every existing vendor directory ships a co-located
+2. **Add the missing installation-context primitive for agent-worktrees --
+   and register it with the existing sync/packaging guards, not just
+   copy the bytes.** Every existing vendor directory ships a co-located
    `_installation_context.py` beside its `_peer_launch.py` (loaded via
    `Path(__file__).with_name("_installation_context.py")`). agent-worktrees'
    own primitive currently lives at
    `plugins/agent-worktrees/scripts/installation-context/installation_context.py`,
-   a different location/name. Resolve this before wiring anything: either
-   (a) vendor/rename a copy of that primitive to
-   `plugins/agent-worktrees/src/agent_worktrees/_installation_context.py`
-   matching the co-located-file convention every peer expects, checking
-   first whether `scripts/installation-context/installation_context.py` is
-   itself a synced copy of some other canonical source (grep for another
-   sync/packaging guard before assuming it's safe to duplicate), or
-   (b) confirm the two files are already identical/interchangeable and
-   symlink/generate one from the other. Do not invent a third divergent
-   copy of this primitive.
+   a different location/name, and is packaged/verified by
+   `tools/sync-installation-context.py`, which does not currently list
+   agent-worktrees as a destination. Adding a bare copy under
+   `src/agent_worktrees/_installation_context.py` without also:
+   - adding that path to `tools/sync-installation-context.py`'s
+     destination list, and
+   - adding it to `libs/peer-launch/tests/test_packaging.py`'s hard-coded
+     destination list (alongside the `_peer_launch.py` destination from
+     step 1)
+
+   leaves the new copy unchecked by CI and free to silently drift the next
+   time the canonical installation-context validator changes. Do both
+   registrations in the same PR as the file itself. (Confirm at
+   implementation time whether `scripts/installation-context/
+   installation_context.py` is itself already a sync destination of some
+   other canonical source, and if so, add the new `src/agent_worktrees/`
+   copy as an additional destination of the SAME canonical source rather
+   than inventing a second one.)
 3. **Resolve agent-worktrees' own owner context correctly.** Do NOT derive
    `own_root` from `Path(__file__).resolve().parents[N]` — the installed
    package lives in a versioned venv, not the payload tree, so a
@@ -135,15 +144,33 @@ ambient/legacy credentials just by making the strict path fail.
    path from `__file__`. Add a new
    `plugins/agent-worktrees/src/agent_worktrees/peer_launch_adapter.py`
    (name TBD at implementation time) exposing `explicit_context()`,
-   `validate_context()`, and `run(peer: str, *args, timeout=15)` that
-   mirrors `agent_codespaces/worktrees.py`'s three functions, parameterized
-   over which peer plugin to launch into (rather than one hardcoded
-   target), since agent-worktrees needs this for multiple peers
-   (codespaces, containers, dispatch).
-4. **Wire `claim_providers.py`.** In `_run_callback()` (or a new sibling
-   function), when the resolved provider's plugin id is one of the
-   registered peers: call the new adapter's `run(peer_id, *argv)`. On
-   success, use its stdout exactly as today. On `ContextRefused` (or any
+   `validate_context()`, and `run(peer: str, *callback_args, timeout=15)`
+   that mirrors `agent_codespaces/worktrees.py`'s three functions,
+   parameterized over which peer plugin to launch into (rather than one
+   hardcoded target), since agent-worktrees needs this for multiple peers
+   (codespaces, containers, dispatch). `run()`'s signature takes ONLY the
+   callback arguments (e.g. `"claim-status", ref`) — never the resolved
+   binstub path. `claim_providers.py`'s existing
+   `build_provider_argv()` returns the payload-local binstub as its first
+   tuple element followed by the callback arguments; the adapter must
+   strip that leading binstub element before forwarding the remainder as
+   `*callback_args` (the adapter builds its own `python -m <peer_module>`
+   launch prefix internally and must never receive the legacy binstub
+   path as if it were a module argument).
+4. **Wire every launch path that currently uses `peer_env()`, not just
+   `_run_callback()`.** The registry has (at least) three call sites that
+   pass `peer_env()`'s stripped environment straight to `subprocess.run`
+   today: `claim_providers._run_callback()`, and two callers outside this
+   module entirely -- `claims_cli._dispatch_assigned_tasks()` and
+   `cleanup._run_codespaces()`. Route all three through the new adapter (or
+   centralize them behind one shared runner in `claim_providers.py` that
+   all three call, so there is exactly one place that decides
+   peer-launch-vs-legacy-strip). Leaving any of the three on the direct
+   `peer_env()` path means that call path keeps stripping context and
+   never gets the rebinding this design exists to add. In the adapter (or
+   centralized runner): when the resolved provider's plugin id is one of
+   the registered peers, call `run(peer_id, *callback_args)`. On success,
+   use its stdout exactly as today. On `ContextRefused` (or any
    validation-boundary failure) when an explicit context WAS present,
    **do not fall back** — treat it as the callback's own execution failure
    (degrade to `{"available": false, "reason": ...}` exactly as a genuine
