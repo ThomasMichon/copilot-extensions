@@ -278,6 +278,17 @@ class TestGetCodespaceStatus:
     effort) -- unlike ``list_codespaces()``, unambiguous about existence and
     never silently drops a live CodeSpace to an incomplete listing."""
 
+    @pytest.fixture(autouse=True)
+    def _mint_token_by_default(self, monkeypatch):
+        """An explicit-account lookup now requires a genuine minted token
+        (claim-provider-pattern effort review finding: "Require
+        account-specific authentication for strict lookups") -- default to
+        a successful mint so tests not exercising THAT behavior specifically
+        don't all need to mock it."""
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.token_for_account", lambda login: "fake-token"
+        )
+
     @patch("agent_codespaces.lifecycle.subprocess.run")
     def test_exists(self, mock_run):
         mock_run.return_value = MagicMock(
@@ -311,6 +322,16 @@ class TestGetCodespaceStatus:
     @patch("agent_codespaces.lifecycle.subprocess.run", side_effect=FileNotFoundError)
     def test_gh_missing_raises(self, mock_run):
         with pytest.raises(RuntimeError, match="gh CLI not found"):
+            lifecycle.get_codespace_status("cs-a", account="acct-a")
+
+    def test_failed_token_mint_raises_never_falls_back_to_ambient(self, monkeypatch):
+        """A named account that CANNOT mint a token must fail closed --
+        never silently query (and later reclaim!) under whatever account
+        happens to be ambient, misreporting that as a confirmed result for
+        the named candidate."""
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.token_for_account", lambda login: None)
+        with pytest.raises(RuntimeError, match="could not mint"):
             lifecycle.get_codespace_status("cs-a", account="acct-a")
 
     @patch("agent_codespaces.lifecycle.subprocess.run")

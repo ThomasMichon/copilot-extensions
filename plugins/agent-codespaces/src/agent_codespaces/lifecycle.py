@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import time
 from dataclasses import dataclass
@@ -227,15 +228,45 @@ def _get_codespace_status_under(
     :class:`RuntimeError` for any failure that is NOT an unambiguous 404 --
     including an explicit ``HTTP 404`` marker only, never the looser phrase
     "not found" (which a non-404 auth/API error could also happen to
-    mention)."""
+    mention).
+
+    When ``account`` is given, this is a STRICT provider path whose verdict
+    feeds a destructive reclaim decision -- it requires a genuine
+    account-specific token, never a silent ambient-auth fallback.
+    ``gh_account.env_for_account`` returns the environment UNCHANGED
+    (ambient) when it cannot mint a token for the named account (its own
+    documented, deliberately permissive contract for its other, non-strict
+    callers) -- reusing it here would let a failed-to-authenticate named
+    candidate silently query (and later reclaim!) under whatever account
+    happens to be ambient, misreporting that as a confirmed result for the
+    NAMED candidate (claim-provider-pattern effort review finding: "Require
+    account-specific authentication for strict lookups"). Minting also
+    consumes its own time (up to its internal 10s timeout) that must count
+    against THIS candidate's own ``timeout`` budget, not run on top of it,
+    or a single candidate could blow well past its allotted share (review
+    finding: "...include credential resolution in the end-to-end
+    deadline")."""
     from . import gh_account
+
+    env = None
+    if account is not None:
+        mint_start = time.monotonic()
+        token = gh_account.token_for_account(account)
+        timeout = max(timeout - (time.monotonic() - mint_start), 0.5)
+        if not token:
+            raise RuntimeError(
+                f"could not mint an authenticated gh token for account {account} "
+                "-- refusing to fall back to ambient auth for this strict lookup"
+            )
+        env = dict(os.environ)
+        env["GH_TOKEN"] = token
+        env.pop("GITHUB_TOKEN", None)
 
     args = ["gh", "api", f"/user/codespaces/{name}"]
     try:
         result = subprocess.run(
             args, capture_output=True, text=True, timeout=timeout,
-            creationflags=_creation_flags(),
-            env=gh_account.env_for_account(account) if account else None,
+            creationflags=_creation_flags(), env=env,
         )
     except FileNotFoundError:
         raise RuntimeError("gh CLI not found") from None

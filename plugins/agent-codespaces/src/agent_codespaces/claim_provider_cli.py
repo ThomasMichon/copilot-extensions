@@ -107,20 +107,26 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     """``claim-reclaim <name> [--apply]``: reclaim (delete) CodeSpace NAME.
 
     Without ``--apply`` this is a dry-run preview only (never deletes), per
-    the callback contract. Idempotent: a delete failing because the
-    CodeSpace is already gone (404/not-found) still reports
-    ``reclaimed: true`` -- and, like the successful-delete path, releases
-    any local lease on it (an already-gone resource must not leave a stale
-    lease blocking allocation). Runs the same best-effort pre-delete
-    Copilot-session recovery as ``agent-codespaces delete``
-    (``__main__._cmd_delete``) so a claim-reclaim invocation never destroys
-    an unrecovered session -- unlike ``_cmd_delete``'s human-facing default
-    (warn-and-continue), a FAILED recovery here blocks the delete entirely
-    (``reclaimed: false``): this is an unattended/automated path with no
-    operator present to notice the warning and intervene -- UNLESS recovery
-    failed only because the CodeSpace is already gone (nothing to connect
-    to, so nothing to recover), confirmed via a real existence check, which
-    still resolves as an idempotent reclaim.
+    the callback contract. Confirms existence UP FRONT via
+    ``lifecycle.get_codespace_status_with_account`` and fails closed on
+    ANY lookup error (never falls back to ambient/re-derived credentials
+    for what follows) or resolves immediately when the CodeSpace is
+    confirmed already gone (``reclaimed: true``) -- rather than spending
+    minutes attempting SSH session recovery on a resource that no longer
+    exists (claim-provider-pattern effort review finding: "Fail closed on
+    lookup errors and return immediately when absent"). Runs the same
+    best-effort pre-delete Copilot-session recovery as ``agent-codespaces
+    delete`` (``__main__._cmd_delete``) so a claim-reclaim invocation never
+    destroys an unrecovered session -- unlike ``_cmd_delete``'s
+    human-facing default (warn-and-continue), a FAILED recovery here
+    blocks the delete entirely (``reclaimed: false``): this is an
+    unattended/automated path with no operator present to notice the
+    warning and intervene. A delete that itself fails because the
+    CodeSpace turns out to already be gone (a race after the up-front
+    check) still resolves as an idempotent reclaim, and, like the
+    successful-delete path, releases any local lease on it (an
+    already-gone resource must not leave a stale lease blocking
+    allocation).
 
     ``sync_codespace_sessions`` uses its own default timeout (300s, matching
     ``cleanup._run_codespaces``'s own default and
@@ -128,10 +134,9 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     timeout) -- a real reclaim (session recovery + delete, both over the
     network) needs materially more budget than a quick status check.
 
-    Resolves the owning account ONCE up front (via
-    ``lifecycle.get_codespace_status_with_account``) and threads it through
-    session recovery, the existence recheck, and the delete itself, rather
-    than letting each independently re-derive it.
+    Resolves the owning account ONCE up front and threads it through
+    session recovery and the delete itself, rather than letting each
+    independently re-derive it.
     """
     if not args.apply:
         print(json.dumps({"reclaimed": True, "detail": f"would delete CodeSpace {args.name}"}))
@@ -144,35 +149,34 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
         }))
         return 0
     # Resolve the owning account ONCE, up front, and thread it through every
-    # subsequent operation (session recovery, the existence recheck, the
-    # delete itself) -- rather than letting each one independently re-derive
-    # it via account_for_codespace's own limited listing/ambient fallback,
-    # which can disagree for a CodeSpace found only under a non-ambient or
+    # subsequent operation (session recovery, the delete itself) -- rather
+    # than letting each one independently re-derive it via
+    # account_for_codespace's own limited listing/ambient fallback, which
+    # can disagree for a CodeSpace found only under a non-ambient or
     # beyond-first-page account (claim-provider-pattern effort review
     # finding: "Preserve the resolved account through CodeSpace
-    # reclamation"). Best-effort: an ambiguous/failed resolution here falls
-    # back to each operation resolving independently, same as before.
+    # reclamation"). Unlike an earlier revision, a lookup FAILURE here is
+    # NOT silently swallowed into "resolve independently later" -- an
+    # authoritative status-lookup error must fail closed (never fall back
+    # to ambient/re-derived credentials for a destructive operation), and a
+    # CONFIRMED absence returns the idempotent result immediately rather
+    # than spending minutes attempting SSH recovery on a resource that is
+    # already gone (claim-provider-pattern effort review finding: "Fail
+    # closed on lookup errors and return immediately when absent").
     try:
-        _exists, _state, resolved_account = get_codespace_status_with_account(args.name)
-    except Exception:
-        resolved_account = None
+        exists, _state, resolved_account = get_codespace_status_with_account(args.name)
+    except Exception as exc:
+        print(json.dumps({"reclaimed": False, "detail": f"status lookup failed: {exc}"}))
+        return 0
+    if not exists:
+        _release_lease_silently(args.name)
+        print(json.dumps({"reclaimed": True, "detail": f"CodeSpace {args.name} already gone"}))
+        return 0
     try:
         recovery = sync_codespace_sessions(args.name, account=resolved_account)
     except Exception as exc:
         recovery = {"ok": False, "detail": str(exc)}
     if not recovery.get("ok"):
-        # Recovery failing because the CodeSpace is ALREADY gone (nothing to
-        # connect to -> nothing to recover) must still resolve as an
-        # idempotent reclaim, not a refusal -- confirm via a real existence
-        # check rather than guessing from the recovery failure text alone.
-        try:
-            exists, _state = get_codespace_status(args.name, account=resolved_account)
-        except Exception:
-            exists = True  # ambiguous -- treat as present, refuse below
-        if not exists:
-            _release_lease_silently(args.name)
-            print(json.dumps({"reclaimed": True, "detail": f"CodeSpace {args.name} already gone"}))
-            return 0
         print(json.dumps({
             "reclaimed": False,
             "detail": f"pre-delete session recovery failed: {recovery.get('detail', '')}",
