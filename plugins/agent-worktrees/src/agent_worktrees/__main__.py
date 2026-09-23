@@ -52,6 +52,7 @@ import argparse
 import contextlib
 import dataclasses
 import hashlib
+import importlib
 import json
 import os
 import platform
@@ -95,6 +96,7 @@ from . import (
     codename_tracking,
     disposition_history,
     effort_focus,
+    front_door_cli,
     git_ops,
     handoff_trace,
     list_cache,  # noqa: F401 -- compatibility re-export for extracted status-monitor CLI
@@ -123,6 +125,57 @@ from . import services as _svc
 from . import session_context as session_context_mod  # noqa: F401 -- compatibility re-export
 from . import state_root as state_root_mod
 from .update_stage import cmd_stage_update, discover_plugin_dir as _discover_plugin_dir
+
+# front_door_cli's own names are re-exported eagerly (not deferred to
+# _load_full_command_surface() below) because main() calls several of them
+# -- _extract_project_flag, _guard_project_scope, _resolve_active_project,
+# etc. -- unconditionally for EVERY invocation, regardless of which
+# subcommand (or none) was requested, before any lazy dispatch decision can
+# be made. This is the "small always-on core" the lazy-dispatch design
+# deliberately keeps eager.
+_extract_project_flag = front_door_cli._extract_project_flag
+_installed_sibling_slugs = front_door_cli._installed_sibling_slugs
+_CORE_SLUGS = front_door_cli._CORE_SLUGS
+_PROJECT_ARG_SLUGS = front_door_cli._PROJECT_ARG_SLUGS
+_worktrees_verbs = front_door_cli._worktrees_verbs
+_canonical_slug = front_door_cli._canonical_slug
+_sibling_binstub = front_door_cli._sibling_binstub
+_route_to_sibling_plugin = front_door_cli._route_to_sibling_plugin
+_safe_cwd = front_door_cli._safe_cwd
+_git_toplevel = front_door_cli._git_toplevel
+_NO_PROJECT_COMMANDS = front_door_cli._NO_PROJECT_COMMANDS
+_is_no_project_invocation = front_door_cli._is_no_project_invocation
+_is_registered_project = front_door_cli._is_registered_project
+_guard_project_scope = front_door_cli._guard_project_scope
+_anchor_for_project = front_door_cli._anchor_for_project
+_reverse_lookup_project = front_door_cli._reverse_lookup_project
+_cwd_is_inside_project = front_door_cli._cwd_is_inside_project
+_resolve_active_project = front_door_cli._resolve_active_project
+cmd_help_unrouted = front_door_cli.cmd_help_unrouted
+_worktree_manager_path = front_door_cli._worktree_manager_path
+_launch_probe_env = front_door_cli._launch_probe_env
+_probe_worktree_manager_version = front_door_cli._probe_worktree_manager_version
+_usable_worktree_manager = front_door_cli._usable_worktree_manager
+_WORKTREE_MANAGER_ENGINE_ARGV_ENV = front_door_cli._WORKTREE_MANAGER_ENGINE_ARGV_ENV
+_WORKTREE_MANAGER_REPO_URL = front_door_cli._WORKTREE_MANAGER_REPO_URL
+_WORKTREE_MANAGER_INSTALL_SH = front_door_cli._WORKTREE_MANAGER_INSTALL_SH
+_WORKTREE_MANAGER_INSTALL_PS1 = front_door_cli._WORKTREE_MANAGER_INSTALL_PS1
+_worktree_manager_root = front_door_cli._worktree_manager_root
+_current_version_slot = front_door_cli._current_version_slot
+_usable_worktree_manager_launcher_dir = front_door_cli._usable_worktree_manager_launcher_dir
+_agent_worktrees_launch_command = front_door_cli._agent_worktrees_launch_command
+_resolve_direct_launch_plan = front_door_cli._resolve_direct_launch_plan
+_wait_for_launch_child = front_door_cli._wait_for_launch_child
+_run_post_exit_for_direct_launch = front_door_cli._run_post_exit_for_direct_launch
+_run_direct_launch_fallback = front_door_cli._run_direct_launch_fallback
+_exec_worktree_manager = front_door_cli._exec_worktree_manager
+_bundled_picker_available = front_door_cli._bundled_picker_available
+cmd_manager_install_trigger = front_door_cli.cmd_manager_install_trigger
+_is_headless_project = front_door_cli._is_headless_project
+_is_noninteractive_invocation = front_door_cli._is_noninteractive_invocation
+cmd_noninteractive_bare = front_door_cli.cmd_noninteractive_bare
+cmd_headless_bare = front_door_cli.cmd_headless_bare
+dispatch_bare_invocation = front_door_cli.dispatch_bare_invocation
 
 # ── Env var helpers ─────────────────────────────────────────────────────
 # Operational flags are read from their WORKTREE_* names. The legacy APERTURE_*
@@ -6854,6 +6907,7 @@ repos:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    _load_full_command_surface()
     parser = argparse.ArgumentParser(
         prog="agent-worktrees",
         description=(
@@ -7154,530 +7208,848 @@ def _current_session_ids() -> set[str]:
 
 
 
-from . import (
-    claims_cli,
-    cleanup_gc_cli,
-    context_cli,
-    finalize_cli,
-    follow_ups_cli,
-    front_door_cli,
-    git_cli,
-    handoff_cli,
-    handoff_diagnostics,
-    installation_cli,
-    list_cli,
-    maintenance_cli,
-    picker_profiles_cli,
-    pr_cli,
-    pr_state_cli,
-    reap_cli,
-    reclaim_cli,
-    related_cli,
-    resolve_cli,
-    resolve_launch_cli,
-    resolve_machine_cli,
-    resolve_picker_cli,
-    resolve_system_cli,
-    repos_cli,
-    session_binding_cli,
-    session_inspection_cli,
-    services_cli,
-    session_metadata_cli,
-    session_tracking_cli,
-    status_bar_cli,
-    status_cli,
-    status_monitor_cli,
-    status_monitor_runtime,
-    status_updater_cli,
-    update_cli,
-    worktree_ops_cli,
-)
-
-_infer_active_repo_slug = pr_cli._infer_active_repo_slug
-_infer_active_github_slug = pr_cli._infer_active_github_slug
-_pr_watch_usage = pr_cli._pr_watch_usage
-_pr_parse_repo = pr_cli._pr_parse_repo
-_tracked_pr_head_evidence = pr_cli._tracked_pr_head_evidence
-_classify_pr_operands = pr_cli._classify_pr_operands
-_pr_watch_review_blocking = pr_cli._pr_watch_review_blocking
-cmd_pr_watch_dispatch = pr_cli.cmd_pr_watch_dispatch
-_PR_NAMESPACE = pr_cli._PR_NAMESPACE
-_pr_merge_usage = pr_cli._pr_merge_usage
-_pr_merge_print_human = pr_cli._pr_merge_print_human
-_pr_merge_now = pr_cli._pr_merge_now
-cmd_pr_merge_dispatch = pr_cli.cmd_pr_merge_dispatch
-_pr_usage = pr_cli._pr_usage
-cmd_pr_research_dispatch = pr_cli.cmd_pr_research_dispatch
-cmd_pr_dispatch = pr_cli.cmd_pr_dispatch
-_GET_KEYS = context_cli._GET_KEYS
-_resolve_lease_origin = context_cli._resolve_lease_origin
-_pr_reminder_for = context_cli._pr_reminder_for
-_emit_pr_reminder = context_cli._emit_pr_reminder
-cmd_deploy_instructions = context_cli.cmd_deploy_instructions
-cmd_machine_context = context_cli.cmd_machine_context
-cmd_get = context_cli.cmd_get
-cmd_install_status = context_cli.cmd_install_status
-cmd_installer_readiness = context_cli.cmd_installer_readiness
-cmd_reconcile_marketplaces = context_cli.cmd_reconcile_marketplaces
-cmd_state_root_dispatch = context_cli.cmd_state_root_dispatch
-cmd_coordination_readiness_dispatch = context_cli.cmd_coordination_readiness_dispatch
-cmd_config_root_dispatch = context_cli.cmd_config_root_dispatch
-cmd_knowledge_dispatch = context_cli.cmd_knowledge_dispatch
-_resolve_environment = services_cli._resolve_environment
-_WORKTREE_VERBS = services_cli._WORKTREE_VERBS
-_is_copilot_plugin_name = services_cli._is_copilot_plugin_name
-_plugin_managed_notice = services_cli._plugin_managed_notice
-cmd_worktree_dispatch = services_cli.cmd_worktree_dispatch
-cmd_services_dispatch = services_cli.cmd_services_dispatch
-_repo_for_record = tracking._repo_for_record
-_clarify_registration_account = repos_cli._clarify_registration_account
-cmd_repos_dispatch = repos_cli.cmd_repos_dispatch
-cmd_accounts_dispatch = repos_cli.cmd_accounts_dispatch
-_related_usage = related_cli._related_usage
-_related_opt = related_cli._related_opt
-_related_anchor = related_cli._related_anchor
-_related_current_machine = related_cli._related_current_machine
-_related_config_source_anchors = related_cli._related_config_source_anchors
-_related_lookup_anchors = related_cli._related_lookup_anchors
-_related_doctor = related_cli._related_doctor
-_render_related_findings = related_cli._render_related_findings
-_related_conduct = related_cli._related_conduct
-cmd_related_dispatch = related_cli.cmd_related_dispatch
-_all_tracking_dirs = session_tracking_cli._all_tracking_dirs
-_find_tracking_file = session_tracking_cli._find_tracking_file
-_find_tracking_file_exact = session_tracking_cli._find_tracking_file_exact
-_find_tracking_file_by_session = session_tracking_cli._find_tracking_file_by_session
-_project_for_tracking_file = session_tracking_cli._project_for_tracking_file
-_relocate_active_project_for_worktree = session_tracking_cli._relocate_active_project_for_worktree
-cmd_list_sessions = session_tracking_cli.cmd_list_sessions
-cmd_head_session = session_tracking_cli.cmd_head_session
-cmd_worktree_lineage = session_tracking_cli.cmd_worktree_lineage
-cmd_worktree_status_bundle = session_tracking_cli.cmd_worktree_status_bundle
-cmd_conclude_session = session_tracking_cli.cmd_conclude_session
-cmd_conclude_disposable = session_tracking_cli.cmd_conclude_disposable
-cmd_link_succession = session_tracking_cli.cmd_link_succession
-cmd_session_transcript = session_tracking_cli.cmd_session_transcript
-cmd_session_tail = session_tracking_cli.cmd_session_tail
-cmd_recent_messages = session_tracking_cli.cmd_recent_messages
-terminal_conclusion = session_tracking_cli.terminal_conclusion
-_resolve_worktree_for_read = session_metadata_cli._resolve_worktree_for_read
-_session_role = session_metadata_cli._session_role
-_CONCLUDED_STATES = session_metadata_cli._CONCLUDED_STATES
-_pending_handoff_predecessor_safe = session_metadata_cli._pending_handoff_predecessor_safe
-_succession_header = session_metadata_cli._succession_header
-_effort_orientation = session_metadata_cli._effort_orientation
-cmd_session_role = session_metadata_cli.cmd_session_role
-cmd_history_digest = session_metadata_cli.cmd_history_digest
-_effort_focus_output = session_metadata_cli._effort_focus_output
-_effort_storage_root = session_metadata_cli._effort_storage_root
-cmd_effort_focus = session_metadata_cli.cmd_effort_focus
-cmd_claimant_liveness = session_metadata_cli.cmd_claimant_liveness
-cmd_codename_lookup = session_metadata_cli.cmd_codename_lookup
-cmd_session_lock = session_metadata_cli.cmd_session_lock
-_activate_session_binding = session_binding_cli._activate_session_binding
-_bind_nudge_should_fire = session_binding_cli._bind_nudge_should_fire
-_bind_nudge_decision = session_binding_cli._bind_nudge_decision
-_capture_session_title = session_binding_cli._capture_session_title
-cmd_register_session = session_binding_cli.cmd_register_session
-cmd_deregister_session = session_binding_cli.cmd_deregister_session
-cmd_bind_session = session_binding_cli.cmd_bind_session
-cmd_bind_nudge = session_binding_cli.cmd_bind_nudge
-cmd_note_handoff = session_binding_cli.cmd_note_handoff
-cmd_session_lifecycle = session_inspection_cli.cmd_session_lifecycle
-cmd_session_binding = session_inspection_cli.cmd_session_binding
-cmd_session_recovery = session_inspection_cli.cmd_session_recovery
-cmd_session_lineage = session_inspection_cli.cmd_session_lineage
-_resolve_repo_remote = pr_config._resolve_repo_remote
-_pr_flow_profile = pr_config._pr_flow_profile
-_sweep_orphans_on_exit = finalize_cli._sweep_orphans_on_exit
-_post_exit_gate = finalize_cli._post_exit_gate
-cmd_post_exit = finalize_cli.cmd_post_exit
-cmd_finalize = finalize_cli.cmd_finalize
-cmd_push_changes = finalize_cli.cmd_push_changes
-cmd_create_pr = finalize_cli.cmd_create_pr
-cmd_attribution_audit = finalize_cli.cmd_attribution_audit
-cmd_mark_complete = finalize_cli.cmd_mark_complete
-cmd_set_pr = pr_state_cli.cmd_set_pr
-cmd_pr_ready = pr_state_cli.cmd_pr_ready
-cmd_pr_status = pr_state_cli.cmd_pr_status
-cmd_pr_complete = pr_state_cli.cmd_pr_complete
-cmd_status = status_cli.cmd_status
-cmd_status_monitor = status_monitor_cli.cmd_status_monitor
-_SEGMENT_STYLE = status_bar_cli._SEGMENT_STYLE
-_DESCRIPTOR_STYLE_BG = status_bar_cli._DESCRIPTOR_STYLE_BG
-_find_record_for_path = status_bar_cli._find_record_for_path
-_resolve_remote_default_branch = status_bar_cli._resolve_remote_default_branch
-_detect_upstream_branch = status_bar_cli._detect_upstream_branch
-_render_status_segment = status_bar_cli._render_status_segment
-_status_segment_json = status_bar_cli._status_segment_json
-cmd_status_segment = status_bar_cli.cmd_status_segment
-_platform_short = status_bar_cli._platform_short
-_ENV_BG = status_bar_cli._ENV_BG
-_resolve_machine_alias = status_bar_cli._resolve_machine_alias
-_render_status_context = status_bar_cli._render_status_context
-cmd_status_context = status_bar_cli.cmd_status_context
-_activate_project_for_path = status_updater_cli._activate_project_for_path
-_resolve_mux_worktree_id = status_updater_cli._resolve_mux_worktree_id
-_activate_project_for_worktree_id = status_updater_cli._activate_project_for_worktree_id
-_slot_superseded = status_updater_cli._slot_superseded
-_runtime_superseded = status_updater_cli._runtime_superseded
-_background_environment = status_updater_cli._background_environment
-_spawn_status_updater = status_updater_cli._spawn_status_updater
-cmd_status_updater = status_updater_cli.cmd_status_updater
-_status_monitor_enabled = status_monitor_runtime._status_monitor_enabled
-_aw_runtime_home = status_monitor_runtime._aw_runtime_home
-_monitor_lock_path = status_monitor_runtime._monitor_lock_path
-_monitor_registry_dir = status_monitor_runtime._monitor_registry_dir
-_monitor_handoff_claim_root = status_monitor_runtime._monitor_handoff_claim_root
-_monitor_handoff_claim_stale_seconds = (
-    status_monitor_runtime._monitor_handoff_claim_stale_seconds
-)
-_monitor_handoff_claim_segment = status_monitor_runtime._monitor_handoff_claim_segment
-_monitor_handoff_claim_path = status_monitor_runtime._monitor_handoff_claim_path
-_monitor_handoff_claim_created_at = status_monitor_runtime._monitor_handoff_claim_created_at
-_monitor_handoff_claim_staleness = status_monitor_runtime._monitor_handoff_claim_staleness
-_monitor_publish_handoff_cutover_claim = (
-    status_monitor_runtime._monitor_publish_handoff_cutover_claim
-)
-_monitor_reclaim_stale_handoff_cutover_claim = (
-    status_monitor_runtime._monitor_reclaim_stale_handoff_cutover_claim
-)
-_monitor_claim_handoff_cutover = status_monitor_runtime._monitor_claim_handoff_cutover
-_valid_monitor_session = status_monitor_runtime._valid_monitor_session
-_register_session_for_monitor = status_monitor_runtime._register_session_for_monitor
-_read_monitor_registry = status_monitor_runtime._read_monitor_registry
-_remove_monitor_entry = status_monitor_runtime._remove_monitor_entry
-_windowless_python = status_monitor_runtime._windowless_python
-_spawn_detached = status_monitor_runtime._spawn_detached
-_ensure_status_monitor = status_monitor_runtime._ensure_status_monitor
-_restart_status_monitor = status_monitor_runtime._restart_status_monitor
-cmd_status_monitor_restart = status_monitor_runtime.cmd_status_monitor_restart
-cmd_reconcile_sessions = status_monitor_runtime.cmd_reconcile_sessions
-_monitor_mux_set = status_monitor_runtime._monitor_mux_set
-_monitor_list_sessions = status_monitor_runtime._monitor_list_sessions
-_monitor_session_state_handoff_path = status_monitor_runtime._monitor_session_state_handoff_path
-_monitor_read_session_state_handoff = status_monitor_runtime._monitor_read_session_state_handoff
-_monitor_pending_handoff_request = status_monitor_runtime._monitor_pending_handoff_request
-_load_remote_machines = resolve_machine_cli._load_remote_machines
-_try_machine_handoff = resolve_machine_cli._try_machine_handoff
-_load_all_machine_keys = resolve_machine_cli._load_all_machine_keys
-_new_picker_blocked_by_ssh = resolve_machine_cli._new_picker_blocked_by_ssh
-_in_ssh_session = resolve_machine_cli._in_ssh_session
-_emit_remote_plan_for_env = resolve_machine_cli._emit_remote_plan_for_env
-_resolve_ssh_alias = resolve_machine_cli._resolve_ssh_alias
-_machine_key_for_display = resolve_machine_cli._machine_key_for_display
-_resolve_profile = resolve_launch_cli._resolve_profile
-_picker_profile_choice = resolve_launch_cli._picker_profile_choice
-_validate_profile_assignment_config = resolve_launch_cli._validate_profile_assignment_config
-_launch_profile_selection = resolve_launch_cli._launch_profile_selection
-_apply_assignment_env = resolve_launch_cli._apply_assignment_env
-_reflect_assignment = resolve_launch_cli._reflect_assignment
-_resolve_base_repo = resolve_launch_cli._resolve_base_repo
-_resolve_resume = resolve_launch_cli._resolve_resume
-_resolve_new = resolve_launch_cli._resolve_new
-_run_picker_housekeeping = resolve_picker_cli._run_picker_housekeeping
-_run_new_picker = resolve_picker_cli._run_new_picker
-_start_picker_monitor_root = resolve_picker_cli._start_picker_monitor_root
-_run_machine_menu = resolve_picker_cli._run_machine_menu
-_run_system_menu = resolve_system_cli._run_system_menu
-_system_cleanup = resolve_system_cli._system_cleanup
-_system_update = resolve_system_cli._system_update
-_system_status = resolve_system_cli._system_status
-_system_pause = resolve_system_cli._system_pause
-_system_worktrees_browse = resolve_system_cli._system_worktrees_browse
-_cmd_list_stream = list_cli._cmd_list_stream
-_list_records_for_args = list_cli._list_records_for_args
-_filter_list_worktree = list_cli._filter_list_worktree
-_refresh_list_record = list_cli._refresh_list_record
-_list_error = list_cli._list_error
-_build_list_json_payload = list_cli._build_list_json_payload
-_warm_list_cache_for_active_project = list_cli._warm_list_cache_for_active_project
-cmd_list = list_cli.cmd_list
-_inbound_claims = claims_cli._inbound_claims
-_claim_handoff_actor = claims_cli._claim_handoff_actor
-_require_coordination_readiness = claims_cli._require_coordination_readiness
-_emit_coordination_rejection = claims_cli._emit_coordination_rejection
-CoordinationReadinessFailure = claims_cli.CoordinationReadinessFailure
-_coordination_readiness_for_owner_ref = claims_cli._coordination_readiness_for_owner_ref
-_claims_handoff = claims_cli._claims_handoff
-_resolve_owner_ref_record_path = claims_cli._resolve_owner_ref_record_path
-_claims_add = claims_cli._claims_add
-_claims_mirror_status = claims_cli._claims_mirror_status
-_claims_release = claims_cli._claims_release
-_claims_settle = claims_cli._claims_settle
-_claims_sweep = claims_cli._claims_sweep
-_claims_cleanup = claims_cli._claims_cleanup
-_claims_orphans = claims_cli._claims_orphans
-_claims_show = claims_cli._claims_show
-cmd_claims = claims_cli.cmd_claims
-_parse_follow_up_refs = follow_ups_cli._parse_follow_up_refs
-_follow_up_to_json = follow_ups_cli._follow_up_to_json
-_follow_ups_record_path = follow_ups_cli._follow_ups_record_path
-_follow_ups_show = follow_ups_cli._follow_ups_show
-_follow_ups_add = follow_ups_cli._follow_ups_add
-_follow_ups_resolve = follow_ups_cli._follow_ups_resolve
-_follow_ups_dismiss = follow_ups_cli._follow_ups_dismiss
-cmd_follow_ups = follow_ups_cli.cmd_follow_ups
-discover_plugin_dir = _discover_plugin_dir
-cmd_handoff_cutover = handoff_cli.cmd_handoff_cutover
-_restore_before_resume = handoff_cli._restore_before_resume
-_resolve_codename_anywhere = handoff_cli._resolve_codename_anywhere
-cmd_embody = handoff_cli.cmd_embody
-cmd_handoffs_check = handoff_cli.cmd_handoffs_check
-_enumerate_launcher_shells_posix = reap_cli._enumerate_launcher_shells_posix
-_proc_boot_time = reap_cli._proc_boot_time
-reap_orphan_launcher_shells = reap_cli.reap_orphan_launcher_shells
-cmd_reap_shells = reap_cli.cmd_reap_shells
-_remove_managed_worktree = reap_cli._remove_managed_worktree
-sweep_managed_worktrees = reap_cli.sweep_managed_worktrees
-auto_clean_enabled = reap_cli.auto_clean_enabled
-_auto_clean_grace_secs = reap_cli._auto_clean_grace_secs
-sweep_finished_session_worktrees = reap_cli.sweep_finished_session_worktrees
-cmd_reap_sessions = reap_cli.cmd_reap_sessions
-_slugify = worktree_ops_cli._slugify
-cmd_remove_system = worktree_ops_cli.cmd_remove_system
-cmd_create = worktree_ops_cli.cmd_create
-_resolve_owner_ref = worktree_ops_cli._resolve_owner_ref
-_resolve_anchor_owner_ref = worktree_ops_cli._resolve_anchor_owner_ref
-_claim_from_run_output = worktree_ops_cli._claim_from_run_output
-_ensure_anchor_ledger = worktree_ops_cli._ensure_anchor_ledger
-_journal_run_claim = worktree_ops_cli._journal_run_claim
-cmd_run = worktree_ops_cli.cmd_run
-_sync_one_record = worktree_ops_cli._sync_one_record
-sync_one = worktree_ops_cli.sync_one
-finalize_one = worktree_ops_cli.finalize_one
-cmd_sync = worktree_ops_cli.cmd_sync
-cmd_reclaim = reclaim_cli.cmd_reclaim
-_perform_remux = reclaim_cli._perform_remux
-cmd_remux = reclaim_cli.cmd_remux
-reclaim_one = reclaim_cli.reclaim_one
-cmd_restart = reclaim_cli.cmd_restart
-_cleanup_one = cleanup_gc_cli._cleanup_one
-_cleanup_per_item_skip_reason = cleanup_gc_cli._cleanup_per_item_skip_reason
-RevalidationResult = cleanup_gc_cli.RevalidationResult
-_revalidate_cleanup_safety = cleanup_gc_cli._revalidate_cleanup_safety
-cmd_cleanup = cleanup_gc_cli.cmd_cleanup
-_print_gc_orphans = cleanup_gc_cli._print_gc_orphans
-_print_gc_managed = cleanup_gc_cli._print_gc_managed
-_print_gc_shells = cleanup_gc_cli._print_gc_shells
-cmd_gc = cleanup_gc_cli.cmd_gc
-_profiles_host = picker_profiles_cli._profiles_host
-cmd_profiles = picker_profiles_cli.cmd_profiles
-_mirror_terminal_profiles = picker_profiles_cli._mirror_terminal_profiles
-cmd_terminal_fragment = picker_profiles_cli.cmd_terminal_fragment
-_terminal_fragment_doctor = picker_profiles_cli._terminal_fragment_doctor
-cmd_picker = picker_profiles_cli.cmd_picker
-cmd_validate = picker_profiles_cli.cmd_validate
-_resolve_terminal_install_script = picker_profiles_cli._resolve_terminal_install_script
-_refresh_terminal_profiles = picker_profiles_cli._refresh_terminal_profiles
-cmd_repair = picker_profiles_cli.cmd_repair
-cmd_hygiene = maintenance_cli.cmd_hygiene
-cmd_dev = maintenance_cli.cmd_dev
-_run_reciprocal_backfill = maintenance_cli._run_reciprocal_backfill
-_run_backfill = maintenance_cli._run_backfill
-cmd_backfill_sessions = maintenance_cli.cmd_backfill_sessions
-cmd_doctor = maintenance_cli.cmd_doctor
-_render_doctor_report = maintenance_cli._render_doctor_report
-_render_dropin_registry_report = maintenance_cli._render_dropin_registry_report
-cmd_reconcile_binstubs = maintenance_cli.cmd_reconcile_binstubs
-cmd_register_project_entry = maintenance_cli.cmd_register_project_entry
-cmd_anchor_check = maintenance_cli.cmd_anchor_check
-cmd_config_migrate = maintenance_cli.cmd_config_migrate
-_validate_machine_registry = installation_cli._validate_machine_registry
-_INSTRUCTION_MARKER = installation_cli._INSTRUCTION_MARKER
-_remove_managed_file = installation_cli._remove_managed_file
-_remove_managed_instruction = installation_cli._remove_managed_instruction
-_gh_env_for_repo = installation_cli._gh_env_for_repo
-_deploy_copilot_instructions = installation_cli._deploy_copilot_instructions
-_cleanup_stale_instructions = installation_cli._cleanup_stale_instructions
-_prepare_namespaced_project_state = installation_cli._prepare_namespaced_project_state
-_ensure_ado_pr_cli = installation_cli._ensure_ado_pr_cli
-cmd_install = installation_cli.cmd_install
-cmd_register = installation_cli.cmd_register
-cmd_uninstall = installation_cli.cmd_uninstall
-cmd_update = update_cli.cmd_update
-_update_flags = update_cli._update_flags
-_cmd_update_in_plugin = update_cli._cmd_update_in_plugin
-_project_update_context = update_cli._project_update_context
-_invocation_update_context = update_cli._invocation_update_context
-_refresh_marketplace = update_cli._refresh_marketplace
-_browse_marketplace_plugins = update_cli._browse_marketplace_plugins
-_uninstall_one_plugin_payload = update_cli._uninstall_one_plugin_payload
-_update_one_plugin_payload = update_cli._update_one_plugin_payload
-_PluginActivation = update_cli._PluginActivation
-_RegisteredPluginTarget = update_cli._RegisteredPluginTarget
-_update_registered_plugins = update_cli._update_registered_plugins
-_registered_plugin_targets = update_cli._registered_plugin_targets
-_module_names = update_cli._module_names
-_reconcile_registered_runtimes = update_cli._reconcile_registered_runtimes
-_reconcile_one_runtime = update_cli._reconcile_one_runtime
-_fast_forward_project_anchors = update_cli._fast_forward_project_anchors
-_self_entry_present = update_cli._self_entry_present
-_heal_stale_anchor_if_self_missing = update_cli._heal_stale_anchor_if_self_missing
-_update_modules = update_cli._update_modules
-_find_installed_plugin_dir = update_cli._find_installed_plugin_dir
-plan_pre_launch = update_cli.plan_pre_launch
-cmd_pre_launch = update_cli.cmd_pre_launch
-_build_installer_argv = update_cli._build_installer_argv
-_append_update_if_stale = update_cli._append_update_if_stale
-cmd_reconcile_plugins = update_cli.cmd_reconcile_plugins
-cmd_uninstall_plugins = update_cli.cmd_uninstall_plugins
-_git_usage = git_cli._git_usage
-_git_resolve_target = git_cli._git_resolve_target
-_git_positional = git_cli._git_positional
-cmd_git_sync = git_cli.cmd_git_sync
-cmd_git_feature_branch = git_cli.cmd_git_feature_branch
-cmd_git_merge_to_feature = git_cli.cmd_git_merge_to_feature
-cmd_git_dispatch = git_cli.cmd_git_dispatch
-_extract_project_flag = front_door_cli._extract_project_flag
-_installed_sibling_slugs = front_door_cli._installed_sibling_slugs
-_CORE_SLUGS = front_door_cli._CORE_SLUGS
-_PROJECT_ARG_SLUGS = front_door_cli._PROJECT_ARG_SLUGS
-_worktrees_verbs = front_door_cli._worktrees_verbs
-_canonical_slug = front_door_cli._canonical_slug
-_sibling_binstub = front_door_cli._sibling_binstub
-_route_to_sibling_plugin = front_door_cli._route_to_sibling_plugin
-_safe_cwd = front_door_cli._safe_cwd
-_git_toplevel = front_door_cli._git_toplevel
-_NO_PROJECT_COMMANDS = front_door_cli._NO_PROJECT_COMMANDS
-_is_no_project_invocation = front_door_cli._is_no_project_invocation
-_is_registered_project = front_door_cli._is_registered_project
-_guard_project_scope = front_door_cli._guard_project_scope
-_anchor_for_project = front_door_cli._anchor_for_project
-_reverse_lookup_project = front_door_cli._reverse_lookup_project
-_cwd_is_inside_project = front_door_cli._cwd_is_inside_project
-_resolve_active_project = front_door_cli._resolve_active_project
-cmd_help_unrouted = front_door_cli.cmd_help_unrouted
-_worktree_manager_path = front_door_cli._worktree_manager_path
-_launch_probe_env = front_door_cli._launch_probe_env
-_probe_worktree_manager_version = front_door_cli._probe_worktree_manager_version
-_usable_worktree_manager = front_door_cli._usable_worktree_manager
-_WORKTREE_MANAGER_ENGINE_ARGV_ENV = front_door_cli._WORKTREE_MANAGER_ENGINE_ARGV_ENV
-_WORKTREE_MANAGER_REPO_URL = front_door_cli._WORKTREE_MANAGER_REPO_URL
-_WORKTREE_MANAGER_INSTALL_SH = front_door_cli._WORKTREE_MANAGER_INSTALL_SH
-_WORKTREE_MANAGER_INSTALL_PS1 = front_door_cli._WORKTREE_MANAGER_INSTALL_PS1
-_worktree_manager_root = front_door_cli._worktree_manager_root
-_current_version_slot = front_door_cli._current_version_slot
-_usable_worktree_manager_launcher_dir = front_door_cli._usable_worktree_manager_launcher_dir
-_agent_worktrees_launch_command = front_door_cli._agent_worktrees_launch_command
-_resolve_direct_launch_plan = front_door_cli._resolve_direct_launch_plan
-_wait_for_launch_child = front_door_cli._wait_for_launch_child
-_run_post_exit_for_direct_launch = front_door_cli._run_post_exit_for_direct_launch
-_run_direct_launch_fallback = front_door_cli._run_direct_launch_fallback
-_exec_worktree_manager = front_door_cli._exec_worktree_manager
-_bundled_picker_available = front_door_cli._bundled_picker_available
-cmd_manager_install_trigger = front_door_cli.cmd_manager_install_trigger
-_is_headless_project = front_door_cli._is_headless_project
-_is_noninteractive_invocation = front_door_cli._is_noninteractive_invocation
-cmd_noninteractive_bare = front_door_cli.cmd_noninteractive_bare
-cmd_headless_bare = front_door_cli.cmd_headless_bare
-dispatch_bare_invocation = front_door_cli.dispatch_bare_invocation
-socket = _socket
-svc = _svc
-
-def cmd_handoff_trace(args):
-    return handoff_diagnostics.cmd_handoff_trace(
-        args, json_output=_json_output, json_error=_json_error
-    )
-COMMAND_MAP = {
-    "resolve": cmd_resolve,
-    "execution-leg": cmd_execution_leg,
-    "post-exit": cmd_post_exit,
-    "session-lock": cmd_session_lock,
-    "finalize": cmd_finalize,
-    "push-changes": cmd_push_changes,
-    "create-pr": cmd_create_pr,
-    "pr-create": cmd_create_pr,  # pr-* family alias (also rewritten pre-argparse)
-    "attribution-audit": cmd_attribution_audit,
-    "set-pr": cmd_set_pr,
-    "pr-ready": cmd_pr_ready,
-    "pr-status": cmd_pr_status,
-    "pr-complete": cmd_pr_complete,
-    "mark-complete": cmd_mark_complete,
-    "status": cmd_status,
-    "effort-focus": cmd_effort_focus,
-    "status-segment": cmd_status_segment,
-    "status-context": cmd_status_context,
-    "status-updater": cmd_status_updater,
-    "status-monitor": cmd_status_monitor,
-    "reconcile-sessions": cmd_reconcile_sessions,
-    "status-monitor-restart": cmd_status_monitor_restart,
-    "pane-create": pane_lifecycle.cmd_pane_create,
-    "pane-terminate": pane_lifecycle.cmd_pane_terminate,
-    "handoff-cutover": cmd_handoff_cutover,
-    "handoff-trace": cmd_handoff_trace,
-    "handoffs-check": cmd_handoffs_check,
-    "embody": cmd_embody,
-    "copilot": cmd_copilot,
-    "list": cmd_list,
-    "claims": cmd_claims,
-    "follow-ups": cmd_follow_ups,
-    "claimant-liveness": cmd_claimant_liveness,
-    "codename-lookup": cmd_codename_lookup,
-    "create": cmd_create,
-    "run": cmd_run,
-    "remove-system": cmd_remove_system,
-    "cleanup": cmd_cleanup,
-    "gc": cmd_gc,
-    "reap-sessions": cmd_reap_sessions,
-    "reap-shells": cmd_reap_shells,
-    "reclaim": cmd_reclaim,
-    "remux": cmd_remux,
-    "restart": cmd_restart,
-    "sync": cmd_sync,
-    "profiles": cmd_profiles,
-    "terminal-fragment": cmd_terminal_fragment,
-    "repair": cmd_repair,
-    "picker": cmd_picker,
-    "validate": cmd_validate,
-    "config-migrate": cmd_config_migrate,
-    "install": cmd_install,
-    "register": cmd_register,
-    "unregister": cmd_uninstall,
-    "uninstall": cmd_uninstall,
-    "update": cmd_update,
-    "install-status": cmd_install_status,
-    "installer-readiness": cmd_installer_readiness,
-    "deploy-instructions": cmd_deploy_instructions,
-    "machine-context": cmd_machine_context,
-    "get": cmd_get,
-    "pre-launch": cmd_pre_launch,
-    "stage-update": cmd_stage_update,
-    "reconcile-marketplaces": cmd_reconcile_marketplaces,
-    "reconcile-plugins": cmd_reconcile_plugins,
-    "uninstall-plugins": cmd_uninstall_plugins,
-    "reconcile-binstubs": cmd_reconcile_binstubs,
-    "register-project-entry": cmd_register_project_entry,
-    "dev": cmd_dev,
-    "register-session": cmd_register_session,
-    "session-lifecycle": cmd_session_lifecycle,
-    "deregister-session": cmd_deregister_session,
-    "session-binding": cmd_session_binding,
-    "session-recovery": cmd_session_recovery,
-    "session-lineage": cmd_session_lineage,
-    "bind-session": cmd_bind_session,
-    "bind-nudge": cmd_bind_nudge,
-    "history-digest": cmd_history_digest,
-    "note-handoff": cmd_note_handoff,
-    "session-role": cmd_session_role,
-    "backfill-sessions": cmd_backfill_sessions,
-    "doctor": cmd_doctor,
-    "hygiene": cmd_hygiene,
-    "list-sessions": cmd_list_sessions,
-    "head-session": cmd_head_session,
-    "worktree-lineage": cmd_worktree_lineage,
-    "worktree-status-bundle": cmd_worktree_status_bundle,
-    "worktree-status-audit": cmd_worktree_status_audit,
-    "conclude-session": cmd_conclude_session,
-    "conclude-disposable": cmd_conclude_disposable,
-    "link-succession": cmd_link_succession,
-    "session-transcript": cmd_session_transcript,
-    "session-tail": cmd_session_tail,
-    "recent-messages": cmd_recent_messages,
-    "anchor-check": cmd_anchor_check,
-    "activity": activity.cmd_activity,
-    "activity-log": activity.cmd_activity_log,
+# ── Lazy dispatch (agent-cli-lazy-dispatch effort, Phase 1) ────────────────
+# {command: (module_name, handler_attr_name)} for every subcommand whose own
+# module owns BOTH its argparse subparser (via that module's `add_parsers`,
+# or `register_cli` for pane_lifecycle) AND its COMMAND_MAP handler, with no
+# naming conflict against any other module. Regenerate by importing
+# agent_worktrees.__main__ once (pays the full cost, offline), then for each
+# add_parsers-owning module, building a throwaway
+# `argparse.ArgumentParser().add_subparsers()` and calling that module's own
+# `add_parsers(sub)` to see which command names land in `sub.choices`;
+# cross-check module/attr via `COMMAND_MAP[name].__module__`/`__name__`.
+# Deliberately excludes: commands with no module-owned parser (parser built
+# inline in build_parser() -- activity, activity-log, stage-update,
+# reconcile-marketplaces, execution-leg, copilot), commands whose handler is
+# native to __main__ itself (resolve, handoff-trace), and commands that never
+# reach COMMAND_MAP at all (their own hand-rolled manual-dispatch branches in
+# main() -- services, repos, accounts, related, state-root,
+# coordination-readiness, config-root, knowledge, git, pr*, worktree, lease,
+# fleet, reconcile, delegates, hook -- each of those is fixed to do its own
+# lazy `from . import <module>` at its own call site instead).
+_LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
+    'anchor-check': ('maintenance_cli', 'cmd_anchor_check'),
+    'attribution-audit': ('finalize_cli', 'cmd_attribution_audit'),
+    'backfill-sessions': ('maintenance_cli', 'cmd_backfill_sessions'),
+    'bind-nudge': ('session_binding_cli', 'cmd_bind_nudge'),
+    'bind-session': ('session_binding_cli', 'cmd_bind_session'),
+    'claimant-liveness': ('session_metadata_cli', 'cmd_claimant_liveness'),
+    'claims': ('claims_cli', 'cmd_claims'),
+    'cleanup': ('cleanup_gc_cli', 'cmd_cleanup'),
+    'codename-lookup': ('session_metadata_cli', 'cmd_codename_lookup'),
+    'conclude-disposable': ('session_tracking_cli', 'cmd_conclude_disposable'),
+    'conclude-session': ('session_tracking_cli', 'cmd_conclude_session'),
+    'config-migrate': ('maintenance_cli', 'cmd_config_migrate'),
+    'create': ('worktree_ops_cli', 'cmd_create'),
+    'create-pr': ('finalize_cli', 'cmd_create_pr'),
+    'deploy-instructions': ('context_cli', 'cmd_deploy_instructions'),
+    'deregister-session': ('session_binding_cli', 'cmd_deregister_session'),
+    'dev': ('maintenance_cli', 'cmd_dev'),
+    'doctor': ('maintenance_cli', 'cmd_doctor'),
+    'effort-focus': ('session_metadata_cli', 'cmd_effort_focus'),
+    'embody': ('handoff_cli', 'cmd_embody'),
+    'finalize': ('finalize_cli', 'cmd_finalize'),
+    'follow-ups': ('follow_ups_cli', 'cmd_follow_ups'),
+    'gc': ('cleanup_gc_cli', 'cmd_gc'),
+    'get': ('context_cli', 'cmd_get'),
+    'handoff-cutover': ('handoff_cli', 'cmd_handoff_cutover'),
+    'handoffs-check': ('handoff_cli', 'cmd_handoffs_check'),
+    'head-session': ('session_tracking_cli', 'cmd_head_session'),
+    'history-digest': ('session_metadata_cli', 'cmd_history_digest'),
+    'hygiene': ('maintenance_cli', 'cmd_hygiene'),
+    'install': ('installation_cli', 'cmd_install'),
+    'install-status': ('context_cli', 'cmd_install_status'),
+    'installer-readiness': ('context_cli', 'cmd_installer_readiness'),
+    'link-succession': ('session_tracking_cli', 'cmd_link_succession'),
+    'list': ('list_cli', 'cmd_list'),
+    'list-sessions': ('session_tracking_cli', 'cmd_list_sessions'),
+    'machine-context': ('context_cli', 'cmd_machine_context'),
+    'mark-complete': ('finalize_cli', 'cmd_mark_complete'),
+    'note-handoff': ('session_binding_cli', 'cmd_note_handoff'),
+    'pane-create': ('pane_lifecycle', 'cmd_pane_create'),
+    'pane-terminate': ('pane_lifecycle', 'cmd_pane_terminate'),
+    'picker': ('picker_profiles_cli', 'cmd_picker'),
+    'post-exit': ('finalize_cli', 'cmd_post_exit'),
+    'pr-complete': ('pr_state_cli', 'cmd_pr_complete'),
+    'pr-create': ('finalize_cli', 'cmd_create_pr'),
+    'pr-ready': ('pr_state_cli', 'cmd_pr_ready'),
+    'pr-status': ('pr_state_cli', 'cmd_pr_status'),
+    'pre-launch': ('update_cli', 'cmd_pre_launch'),
+    'profiles': ('picker_profiles_cli', 'cmd_profiles'),
+    'push-changes': ('finalize_cli', 'cmd_push_changes'),
+    'reap-sessions': ('reap_cli', 'cmd_reap_sessions'),
+    'reap-shells': ('reap_cli', 'cmd_reap_shells'),
+    'recent-messages': ('session_tracking_cli', 'cmd_recent_messages'),
+    'reclaim': ('reclaim_cli', 'cmd_reclaim'),
+    'reconcile-binstubs': ('maintenance_cli', 'cmd_reconcile_binstubs'),
+    'reconcile-plugins': ('update_cli', 'cmd_reconcile_plugins'),
+    'reconcile-sessions': ('status_monitor_runtime', 'cmd_reconcile_sessions'),
+    'register': ('installation_cli', 'cmd_register'),
+    'register-project-entry': ('maintenance_cli', 'cmd_register_project_entry'),
+    'register-session': ('session_binding_cli', 'cmd_register_session'),
+    'remove-system': ('worktree_ops_cli', 'cmd_remove_system'),
+    'remux': ('reclaim_cli', 'cmd_remux'),
+    'repair': ('picker_profiles_cli', 'cmd_repair'),
+    'restart': ('reclaim_cli', 'cmd_restart'),
+    'run': ('worktree_ops_cli', 'cmd_run'),
+    'session-binding': ('session_inspection_cli', 'cmd_session_binding'),
+    'session-lifecycle': ('session_inspection_cli', 'cmd_session_lifecycle'),
+    'session-lineage': ('session_inspection_cli', 'cmd_session_lineage'),
+    'session-lock': ('session_metadata_cli', 'cmd_session_lock'),
+    'session-recovery': ('session_inspection_cli', 'cmd_session_recovery'),
+    'session-role': ('session_metadata_cli', 'cmd_session_role'),
+    'session-tail': ('session_tracking_cli', 'cmd_session_tail'),
+    'session-transcript': ('session_tracking_cli', 'cmd_session_transcript'),
+    'set-pr': ('pr_state_cli', 'cmd_set_pr'),
+    'status': ('status_cli', 'cmd_status'),
+    'status-context': ('status_bar_cli', 'cmd_status_context'),
+    'status-monitor': ('status_monitor_cli', 'cmd_status_monitor'),
+    'status-monitor-restart': ('status_monitor_runtime', 'cmd_status_monitor_restart'),
+    'status-segment': ('status_bar_cli', 'cmd_status_segment'),
+    'status-updater': ('status_updater_cli', 'cmd_status_updater'),
+    'sync': ('worktree_ops_cli', 'cmd_sync'),
+    'terminal-fragment': ('picker_profiles_cli', 'cmd_terminal_fragment'),
+    'uninstall': ('installation_cli', 'cmd_uninstall'),
+    'uninstall-plugins': ('update_cli', 'cmd_uninstall_plugins'),
+    'update': ('update_cli', 'cmd_update'),
+    'validate': ('picker_profiles_cli', 'cmd_validate'),
+    'worktree-lineage': ('session_tracking_cli', 'cmd_worktree_lineage'),
+    'worktree-status-audit': ('worktree_status_audit', 'cmd_worktree_status_audit'),
+    'worktree-status-bundle': ('session_tracking_cli', 'cmd_worktree_status_bundle'),
 }
+
+# The complete set of top-level agent-worktrees verb literals -- exactly
+# every real argparse subparser choice (build_parser()'s subs[0].choices),
+# verified by regenerating _LAZY_DISPATCH_TABLE (see its own comment) and
+# diffing against the real parser. This set's only job is
+# `front_door_cli._worktrees_verbs()`'s "never treat a real worktrees verb as
+# a routable sibling-plugin slug" exclusion check, done BEFORE any
+# subcommand-specific dispatch -- it must stay cheap (no imports) or it would
+# defeat lazy dispatch for every invocation, not just fast-tracked ones.
+# Deliberately excludes manual-dispatch-only verbs that never register an
+# argparse subparser choice at all (delegates, fleet, hook, lease, reconcile,
+# unregister, worktree) -- several of those (worktree, in particular) rely on
+# being ABSENT here so `_canonical_slug()` can still fold the singular
+# "worktree" back to this binstub's own "worktrees" alias; adding them here
+# would silently break that fold-back (found the hard way, via
+# test_router_worktree_singular_folds_back).
+_ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | frozenset({
+    "services", "repos", "accounts", "related", "state-root",
+    "coordination-readiness", "config-root", "knowledge", "git",
+    "pr-watch", "pr-merge", "pr-research", "pr",
+    "activity", "activity-log", "stage-update", "reconcile-marketplaces",
+    "execution-leg", "copilot", "resolve", "handoff-trace",
+})
+
+
+def _dispatch_lazy(command: str, args_list: list[str]) -> int:
+    """Fast-path dispatch for a module-delegated subcommand.
+
+    Imports and registers only the ONE module that owns `command`'s parser
+    and handler (per _LAZY_DISPATCH_TABLE), instead of build_parser()'s full
+    eager surface. The resulting parser/help text for this one subcommand is
+    identical to what build_parser() would have produced for it.
+    """
+    module_name, handler_attr = _LAZY_DISPATCH_TABLE[command]
+    _ensure_cluster_loaded()
+    module = importlib.import_module(f"{__package__}.{module_name}")
+    parser = argparse.ArgumentParser(
+        prog="agent-worktrees",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+    if module_name == "pane_lifecycle":
+        module.register_cli(sub)
+    else:
+        module.add_parsers(sub)
+    args = parser.parse_args(args_list)
+    # Prefer an already-populated COMMAND_MAP's entry when one exists (real
+    # runtime never builds COMMAND_MAP for a fast-tracked command, so this is
+    # normally a no-op fallthrough to the module attribute below -- but a
+    # caller that already loaded the full surface, or a test that
+    # monkeypatches COMMAND_MAP[command] to intercept dispatch, gets the
+    # override it expects instead of silently bypassing it).
+    command_map = globals().get("COMMAND_MAP")
+    handler = command_map.get(command) if command_map else None
+    if handler is None:
+        handler = getattr(module, handler_attr)
+    return handler(args)
+
+
+# A cluster of ~18 CLI submodules cross-reference each other's helpers through
+# `_core()` (this __main__ module) rather than importing one another
+# directly -- a pre-existing pattern discovered while implementing lazy
+# dispatch (see the agent-cli-lazy-dispatch effort's Journal). Any of the
+# _LAZY_DISPATCH_TABLE-fast-tracked handlers below might reach for one of
+# these names, so the cluster is resolved together, once, before dispatching
+# into it -- still far short of the full ~35-module eager surface (the
+# _load_full_command_surface() fallback below), and this is itself Phase 1's
+# known, documented limitation: decoupling this cluster (Phase 1b/2 work) is
+# needed to get the full lazy-dispatch win for its own commands.
+_CLUSTER_LOADED = False
+
+
+def _ensure_cluster_loaded() -> None:
+    global _CLUSTER_LOADED
+    if _CLUSTER_LOADED:
+        return
+    from . import (
+        claims_cli,
+        cleanup_gc_cli,
+        context_cli,
+        finalize_cli,
+        handoff_cli,
+        installation_cli,
+        list_cli,
+        picker_profiles_cli,
+        pr_cli,
+        reap_cli,
+        reclaim_cli,
+        related_cli,
+        repos_cli,
+        resolve_launch_cli,
+        resolve_picker_cli,
+        services_cli,
+        session_binding_cli,
+        session_metadata_cli,
+        session_tracking_cli,
+        status_bar_cli,
+        status_cli,
+        status_monitor_runtime,
+        status_updater_cli,
+        worktree_ops_cli,
+    )
+    global CoordinationReadinessFailure, _activate_project_for_path, _activate_project_for_worktree_id, _activate_session_binding, _apply_assignment_env, _aw_runtime_home, _background_environment, _bind_nudge_decision
+    global _clarify_registration_account, _cleanup_stale_instructions, _cmd_list_stream, _coordination_readiness_for_owner_ref, _deploy_copilot_instructions, _emit_coordination_rejection, _ensure_status_monitor, _enumerate_launcher_shells_posix
+    global _find_record_for_path, _find_tracking_file_by_session, _gh_env_for_repo, _infer_active_github_slug, _launch_profile_selection, _list_records_for_args, _monitor_handoff_claim_root, _monitor_handoff_claim_segment
+    global _monitor_list_sessions, _monitor_lock_path, _monitor_mux_set, _monitor_pending_handoff_request, _monitor_read_session_state_handoff, _monitor_registry_dir, _monitor_session_state_handoff_path, _perform_remux
+    global _pr_flow_profile, _read_monitor_registry, _reflect_assignment, _refresh_terminal_profiles, _register_session_for_monitor, _related_anchor, _related_config_source_anchors, _remove_managed_worktree
+    global _remove_monitor_entry, _render_status_context, _render_status_segment, _repo_for_record, _require_coordination_readiness, _resolve_environment, _resolve_lease_origin, _resolve_mux_worktree_id
+    global _resolve_owner_ref, _resolve_owner_ref_record_path, _resolve_remote_default_branch, _resolve_repo_remote, _resolve_worktree_for_read, _revalidate_cleanup_safety, _run_new_picker, _runtime_superseded
+    global _slugify, _spawn_status_updater, _status_monitor_enabled, _sweep_orphans_on_exit, _validate_profile_assignment_config, _warm_list_cache_for_active_project, _windowless_python, auto_clean_enabled
+    global cmd_cleanup, cmd_embody, cmd_list, cmd_register, cmd_register_session, cmd_state_root_dispatch, cmd_status, reap_orphan_launcher_shells
+    global sweep_finished_session_worktrees, sweep_managed_worktrees, terminal_conclusion
+    CoordinationReadinessFailure = claims_cli.CoordinationReadinessFailure
+    _activate_project_for_path = status_updater_cli._activate_project_for_path
+    _activate_project_for_worktree_id = status_updater_cli._activate_project_for_worktree_id
+    _activate_session_binding = session_binding_cli._activate_session_binding
+    _apply_assignment_env = resolve_launch_cli._apply_assignment_env
+    _aw_runtime_home = status_monitor_runtime._aw_runtime_home
+    _background_environment = status_updater_cli._background_environment
+    _bind_nudge_decision = session_binding_cli._bind_nudge_decision
+    _clarify_registration_account = repos_cli._clarify_registration_account
+    _cleanup_stale_instructions = installation_cli._cleanup_stale_instructions
+    _cmd_list_stream = list_cli._cmd_list_stream
+    _coordination_readiness_for_owner_ref = claims_cli._coordination_readiness_for_owner_ref
+    _deploy_copilot_instructions = installation_cli._deploy_copilot_instructions
+    _emit_coordination_rejection = claims_cli._emit_coordination_rejection
+    _ensure_status_monitor = status_monitor_runtime._ensure_status_monitor
+    _enumerate_launcher_shells_posix = reap_cli._enumerate_launcher_shells_posix
+    _find_record_for_path = status_bar_cli._find_record_for_path
+    _find_tracking_file_by_session = session_tracking_cli._find_tracking_file_by_session
+    _gh_env_for_repo = installation_cli._gh_env_for_repo
+    _infer_active_github_slug = pr_cli._infer_active_github_slug
+    _launch_profile_selection = resolve_launch_cli._launch_profile_selection
+    _list_records_for_args = list_cli._list_records_for_args
+    _monitor_handoff_claim_root = status_monitor_runtime._monitor_handoff_claim_root
+    _monitor_handoff_claim_segment = status_monitor_runtime._monitor_handoff_claim_segment
+    _monitor_list_sessions = status_monitor_runtime._monitor_list_sessions
+    _monitor_lock_path = status_monitor_runtime._monitor_lock_path
+    _monitor_mux_set = status_monitor_runtime._monitor_mux_set
+    _monitor_pending_handoff_request = status_monitor_runtime._monitor_pending_handoff_request
+    _monitor_read_session_state_handoff = status_monitor_runtime._monitor_read_session_state_handoff
+    _monitor_registry_dir = status_monitor_runtime._monitor_registry_dir
+    _monitor_session_state_handoff_path = status_monitor_runtime._monitor_session_state_handoff_path
+    _perform_remux = reclaim_cli._perform_remux
+    _pr_flow_profile = pr_config._pr_flow_profile
+    _read_monitor_registry = status_monitor_runtime._read_monitor_registry
+    _reflect_assignment = resolve_launch_cli._reflect_assignment
+    _refresh_terminal_profiles = picker_profiles_cli._refresh_terminal_profiles
+    _register_session_for_monitor = status_monitor_runtime._register_session_for_monitor
+    _related_anchor = related_cli._related_anchor
+    _related_config_source_anchors = related_cli._related_config_source_anchors
+    _remove_managed_worktree = reap_cli._remove_managed_worktree
+    _remove_monitor_entry = status_monitor_runtime._remove_monitor_entry
+    _render_status_context = status_bar_cli._render_status_context
+    _render_status_segment = status_bar_cli._render_status_segment
+    _repo_for_record = tracking._repo_for_record
+    _require_coordination_readiness = claims_cli._require_coordination_readiness
+    _resolve_environment = services_cli._resolve_environment
+    _resolve_lease_origin = context_cli._resolve_lease_origin
+    _resolve_mux_worktree_id = status_updater_cli._resolve_mux_worktree_id
+    _resolve_owner_ref = worktree_ops_cli._resolve_owner_ref
+    _resolve_owner_ref_record_path = claims_cli._resolve_owner_ref_record_path
+    _resolve_remote_default_branch = status_bar_cli._resolve_remote_default_branch
+    _resolve_repo_remote = pr_config._resolve_repo_remote
+    _resolve_worktree_for_read = session_metadata_cli._resolve_worktree_for_read
+    _revalidate_cleanup_safety = cleanup_gc_cli._revalidate_cleanup_safety
+    _run_new_picker = resolve_picker_cli._run_new_picker
+    _runtime_superseded = status_updater_cli._runtime_superseded
+    _slugify = worktree_ops_cli._slugify
+    _spawn_status_updater = status_updater_cli._spawn_status_updater
+    _status_monitor_enabled = status_monitor_runtime._status_monitor_enabled
+    _sweep_orphans_on_exit = finalize_cli._sweep_orphans_on_exit
+    _validate_profile_assignment_config = resolve_launch_cli._validate_profile_assignment_config
+    _warm_list_cache_for_active_project = list_cli._warm_list_cache_for_active_project
+    _windowless_python = status_monitor_runtime._windowless_python
+    auto_clean_enabled = reap_cli.auto_clean_enabled
+    cmd_cleanup = cleanup_gc_cli.cmd_cleanup
+    cmd_embody = handoff_cli.cmd_embody
+    cmd_list = list_cli.cmd_list
+    cmd_register = installation_cli.cmd_register
+    cmd_register_session = session_binding_cli.cmd_register_session
+    cmd_state_root_dispatch = context_cli.cmd_state_root_dispatch
+    cmd_status = status_cli.cmd_status
+    reap_orphan_launcher_shells = reap_cli.reap_orphan_launcher_shells
+    sweep_finished_session_worktrees = reap_cli.sweep_finished_session_worktrees
+    sweep_managed_worktrees = reap_cli.sweep_managed_worktrees
+    terminal_conclusion = session_tracking_cli.terminal_conclusion
+    _CLUSTER_LOADED = True
+
+
+_FULL_SURFACE_LOADED = False
+
+
+def _load_full_command_surface() -> None:
+    """Import every remaining CLI submodule and build COMMAND_MAP.
+
+    Deferred (previously unconditional module-level code executed on
+    every invocation regardless of which single subcommand was
+    requested). Called lazily from the COMMAND_MAP-based dispatch site
+    and from build_parser() -- a fast-pathed subcommand (see
+    _LAZY_DISPATCH_TABLE) never pays this cost. Idempotent.
+    """
+    global _FULL_SURFACE_LOADED
+    if _FULL_SURFACE_LOADED:
+        return
+    global COMMAND_MAP, CoordinationReadinessFailure, RevalidationResult, _CONCLUDED_STATES, _DESCRIPTOR_STYLE_BG, _ENV_BG, _GET_KEYS, _INSTRUCTION_MARKER
+    global _PR_NAMESPACE, _PluginActivation, _RegisteredPluginTarget, _SEGMENT_STYLE, _WORKTREE_VERBS, _activate_project_for_path, _activate_project_for_worktree_id, _activate_session_binding
+    global _all_tracking_dirs, _append_update_if_stale, _apply_assignment_env, _auto_clean_grace_secs, _aw_runtime_home, _background_environment, _bind_nudge_decision, _bind_nudge_should_fire
+    global _browse_marketplace_plugins, _build_installer_argv, _build_list_json_payload, _capture_session_title, _claim_from_run_output, _claim_handoff_actor, _claims_add, _claims_cleanup
+    global _claims_handoff, _claims_mirror_status, _claims_orphans, _claims_release, _claims_settle, _claims_show, _claims_sweep, _clarify_registration_account
+    global _classify_pr_operands, _cleanup_one, _cleanup_per_item_skip_reason, _cleanup_stale_instructions, _cmd_list_stream, _cmd_update_in_plugin, _coordination_readiness_for_owner_ref, _deploy_copilot_instructions
+    global _detect_upstream_branch, _effort_focus_output, _effort_orientation, _effort_storage_root, _emit_coordination_rejection, _emit_pr_reminder, _emit_remote_plan_for_env, _ensure_ado_pr_cli
+    global _ensure_anchor_ledger, _ensure_status_monitor, _enumerate_launcher_shells_posix, _fast_forward_project_anchors, _filter_list_worktree, _find_installed_plugin_dir, _find_record_for_path, _find_tracking_file
+    global _find_tracking_file_by_session, _find_tracking_file_exact, _follow_up_to_json, _follow_ups_add, _follow_ups_dismiss, _follow_ups_record_path, _follow_ups_resolve, _follow_ups_show
+    global _gh_env_for_repo, _git_positional, _git_resolve_target, _git_usage, _heal_stale_anchor_if_self_missing, _in_ssh_session, _inbound_claims, _infer_active_github_slug
+    global _infer_active_repo_slug, _invocation_update_context, _is_copilot_plugin_name, _journal_run_claim, _launch_profile_selection, _list_error, _list_records_for_args, _load_all_machine_keys
+    global _load_remote_machines, _machine_key_for_display, _mirror_terminal_profiles, _module_names, _monitor_claim_handoff_cutover, _monitor_handoff_claim_created_at, _monitor_handoff_claim_path, _monitor_handoff_claim_root
+    global _monitor_handoff_claim_segment, _monitor_handoff_claim_staleness, _monitor_list_sessions, _monitor_lock_path, _monitor_mux_set, _monitor_pending_handoff_request, _monitor_read_session_state_handoff, _monitor_registry_dir
+    global _monitor_session_state_handoff_path, _new_picker_blocked_by_ssh, _parse_follow_up_refs, _pending_handoff_predecessor_safe, _perform_remux, _picker_profile_choice, _platform_short, _plugin_managed_notice
+    global _post_exit_gate, _pr_flow_profile, _pr_merge_now, _pr_merge_print_human, _pr_merge_usage, _pr_parse_repo, _pr_reminder_for, _pr_usage
+    global _pr_watch_review_blocking, _pr_watch_usage, _prepare_namespaced_project_state, _print_gc_managed, _print_gc_orphans, _print_gc_shells, _proc_boot_time, _profiles_host
+    global _project_for_tracking_file, _project_update_context, _read_monitor_registry, _reconcile_one_runtime, _reconcile_registered_runtimes, _reflect_assignment, _refresh_list_record, _refresh_marketplace
+    global _refresh_terminal_profiles, _register_session_for_monitor, _registered_plugin_targets, _related_anchor, _related_conduct, _related_config_source_anchors, _related_current_machine, _related_doctor
+    global _related_lookup_anchors, _related_opt, _related_usage, _relocate_active_project_for_worktree, _remove_managed_file, _remove_managed_instruction, _remove_managed_worktree, _remove_monitor_entry
+    global _render_doctor_report, _render_dropin_registry_report, _render_related_findings, _render_status_context, _render_status_segment, _repo_for_record, _require_coordination_readiness, _resolve_anchor_owner_ref
+    global _resolve_base_repo, _resolve_codename_anywhere, _resolve_environment, _resolve_lease_origin, _resolve_machine_alias, _resolve_mux_worktree_id, _resolve_new, _resolve_owner_ref
+    global _resolve_owner_ref_record_path, _resolve_profile, _resolve_remote_default_branch, _resolve_repo_remote, _resolve_resume, _resolve_ssh_alias, _resolve_terminal_install_script, _resolve_worktree_for_read
+    global _restart_status_monitor, _restore_before_resume, _revalidate_cleanup_safety, _run_backfill, _run_machine_menu, _run_new_picker, _run_picker_housekeeping, _run_reciprocal_backfill
+    global _run_system_menu, _runtime_superseded, _self_entry_present, _session_role, _slot_superseded, _slugify, _spawn_detached, _spawn_status_updater
+    global _start_picker_monitor_root, _status_monitor_enabled, _status_segment_json, _succession_header, _sweep_orphans_on_exit, _sync_one_record, _system_cleanup, _system_pause
+    global _system_status, _system_update, _system_worktrees_browse, _terminal_fragment_doctor, _tracked_pr_head_evidence, _try_machine_handoff, _uninstall_one_plugin_payload, _update_flags
+    global _update_modules, _update_one_plugin_payload, _update_registered_plugins, _valid_monitor_session, _validate_machine_registry, _validate_profile_assignment_config, _warm_list_cache_for_active_project, _windowless_python
+    global auto_clean_enabled, claims_cli, cleanup_gc_cli, cmd_accounts_dispatch, cmd_anchor_check, cmd_attribution_audit, cmd_backfill_sessions, cmd_bind_nudge
+    global cmd_bind_session, cmd_claimant_liveness, cmd_claims, cmd_cleanup, cmd_codename_lookup, cmd_conclude_disposable, cmd_conclude_session, cmd_config_migrate
+    global cmd_config_root_dispatch, cmd_coordination_readiness_dispatch, cmd_create, cmd_create_pr, cmd_deploy_instructions, cmd_deregister_session, cmd_dev, cmd_doctor
+    global cmd_effort_focus, cmd_embody, cmd_finalize, cmd_follow_ups, cmd_gc, cmd_get, cmd_git_dispatch, cmd_git_feature_branch
+    global cmd_git_merge_to_feature, cmd_git_sync, cmd_handoff_cutover, cmd_handoff_trace, cmd_handoffs_check, cmd_head_session, cmd_history_digest, cmd_hygiene
+    global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context
+    global cmd_mark_complete, cmd_note_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_ready
+    global cmd_pr_research_dispatch, cmd_pr_status, cmd_pr_watch_dispatch, cmd_pre_launch, cmd_profiles, cmd_push_changes, cmd_reap_sessions, cmd_reap_shells
+    global cmd_recent_messages, cmd_reclaim, cmd_reconcile_binstubs, cmd_reconcile_marketplaces, cmd_reconcile_plugins, cmd_reconcile_sessions, cmd_register, cmd_register_project_entry
+    global cmd_register_session, cmd_related_dispatch, cmd_remove_system, cmd_remux, cmd_repair, cmd_repos_dispatch, cmd_restart, cmd_run
+    global cmd_services_dispatch, cmd_session_binding, cmd_session_lifecycle, cmd_session_lineage, cmd_session_lock, cmd_session_recovery, cmd_session_role, cmd_session_tail
+    global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment
+    global cmd_status_updater, cmd_sync, cmd_terminal_fragment, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
+    global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
+    global handoff_cli, handoff_diagnostics, installation_cli, list_cli, maintenance_cli, picker_profiles_cli, plan_pre_launch, pr_cli
+    global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
+    global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
+    global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees, sweep_managed_worktrees
+    global sync_one, terminal_conclusion, update_cli, worktree_ops_cli
+    from . import (
+        claims_cli,
+        cleanup_gc_cli,
+        context_cli,
+        finalize_cli,
+        follow_ups_cli,
+        front_door_cli,
+        git_cli,
+        handoff_cli,
+        handoff_diagnostics,
+        installation_cli,
+        list_cli,
+        maintenance_cli,
+        picker_profiles_cli,
+        pr_cli,
+        pr_state_cli,
+        reap_cli,
+        reclaim_cli,
+        related_cli,
+        resolve_cli,
+        resolve_launch_cli,
+        resolve_machine_cli,
+        resolve_picker_cli,
+        resolve_system_cli,
+        repos_cli,
+        session_binding_cli,
+        session_inspection_cli,
+        services_cli,
+        session_metadata_cli,
+        session_tracking_cli,
+        status_bar_cli,
+        status_cli,
+        status_monitor_cli,
+        status_monitor_runtime,
+        status_updater_cli,
+        update_cli,
+        worktree_ops_cli,
+    )
+
+    _infer_active_repo_slug = pr_cli._infer_active_repo_slug
+    _infer_active_github_slug = pr_cli._infer_active_github_slug
+    _pr_watch_usage = pr_cli._pr_watch_usage
+    _pr_parse_repo = pr_cli._pr_parse_repo
+    _tracked_pr_head_evidence = pr_cli._tracked_pr_head_evidence
+    _classify_pr_operands = pr_cli._classify_pr_operands
+    _pr_watch_review_blocking = pr_cli._pr_watch_review_blocking
+    cmd_pr_watch_dispatch = pr_cli.cmd_pr_watch_dispatch
+    _PR_NAMESPACE = pr_cli._PR_NAMESPACE
+    _pr_merge_usage = pr_cli._pr_merge_usage
+    _pr_merge_print_human = pr_cli._pr_merge_print_human
+    _pr_merge_now = pr_cli._pr_merge_now
+    cmd_pr_merge_dispatch = pr_cli.cmd_pr_merge_dispatch
+    _pr_usage = pr_cli._pr_usage
+    cmd_pr_research_dispatch = pr_cli.cmd_pr_research_dispatch
+    cmd_pr_dispatch = pr_cli.cmd_pr_dispatch
+    _GET_KEYS = context_cli._GET_KEYS
+    _resolve_lease_origin = context_cli._resolve_lease_origin
+    _pr_reminder_for = context_cli._pr_reminder_for
+    _emit_pr_reminder = context_cli._emit_pr_reminder
+    cmd_deploy_instructions = context_cli.cmd_deploy_instructions
+    cmd_machine_context = context_cli.cmd_machine_context
+    cmd_get = context_cli.cmd_get
+    cmd_install_status = context_cli.cmd_install_status
+    cmd_installer_readiness = context_cli.cmd_installer_readiness
+    cmd_reconcile_marketplaces = context_cli.cmd_reconcile_marketplaces
+    cmd_state_root_dispatch = context_cli.cmd_state_root_dispatch
+    cmd_coordination_readiness_dispatch = context_cli.cmd_coordination_readiness_dispatch
+    cmd_config_root_dispatch = context_cli.cmd_config_root_dispatch
+    cmd_knowledge_dispatch = context_cli.cmd_knowledge_dispatch
+    _resolve_environment = services_cli._resolve_environment
+    _WORKTREE_VERBS = services_cli._WORKTREE_VERBS
+    _is_copilot_plugin_name = services_cli._is_copilot_plugin_name
+    _plugin_managed_notice = services_cli._plugin_managed_notice
+    cmd_worktree_dispatch = services_cli.cmd_worktree_dispatch
+    cmd_services_dispatch = services_cli.cmd_services_dispatch
+    _repo_for_record = tracking._repo_for_record
+    _clarify_registration_account = repos_cli._clarify_registration_account
+    cmd_repos_dispatch = repos_cli.cmd_repos_dispatch
+    cmd_accounts_dispatch = repos_cli.cmd_accounts_dispatch
+    _related_usage = related_cli._related_usage
+    _related_opt = related_cli._related_opt
+    _related_anchor = related_cli._related_anchor
+    _related_current_machine = related_cli._related_current_machine
+    _related_config_source_anchors = related_cli._related_config_source_anchors
+    _related_lookup_anchors = related_cli._related_lookup_anchors
+    _related_doctor = related_cli._related_doctor
+    _render_related_findings = related_cli._render_related_findings
+    _related_conduct = related_cli._related_conduct
+    cmd_related_dispatch = related_cli.cmd_related_dispatch
+    _all_tracking_dirs = session_tracking_cli._all_tracking_dirs
+    _find_tracking_file = session_tracking_cli._find_tracking_file
+    _find_tracking_file_exact = session_tracking_cli._find_tracking_file_exact
+    _find_tracking_file_by_session = session_tracking_cli._find_tracking_file_by_session
+    _project_for_tracking_file = session_tracking_cli._project_for_tracking_file
+    _relocate_active_project_for_worktree = session_tracking_cli._relocate_active_project_for_worktree
+    cmd_list_sessions = session_tracking_cli.cmd_list_sessions
+    cmd_head_session = session_tracking_cli.cmd_head_session
+    cmd_worktree_lineage = session_tracking_cli.cmd_worktree_lineage
+    cmd_worktree_status_bundle = session_tracking_cli.cmd_worktree_status_bundle
+    cmd_conclude_session = session_tracking_cli.cmd_conclude_session
+    cmd_conclude_disposable = session_tracking_cli.cmd_conclude_disposable
+    cmd_link_succession = session_tracking_cli.cmd_link_succession
+    cmd_session_transcript = session_tracking_cli.cmd_session_transcript
+    cmd_session_tail = session_tracking_cli.cmd_session_tail
+    cmd_recent_messages = session_tracking_cli.cmd_recent_messages
+    terminal_conclusion = session_tracking_cli.terminal_conclusion
+    _resolve_worktree_for_read = session_metadata_cli._resolve_worktree_for_read
+    _session_role = session_metadata_cli._session_role
+    _CONCLUDED_STATES = session_metadata_cli._CONCLUDED_STATES
+    _pending_handoff_predecessor_safe = session_metadata_cli._pending_handoff_predecessor_safe
+    _succession_header = session_metadata_cli._succession_header
+    _effort_orientation = session_metadata_cli._effort_orientation
+    cmd_session_role = session_metadata_cli.cmd_session_role
+    cmd_history_digest = session_metadata_cli.cmd_history_digest
+    _effort_focus_output = session_metadata_cli._effort_focus_output
+    _effort_storage_root = session_metadata_cli._effort_storage_root
+    cmd_effort_focus = session_metadata_cli.cmd_effort_focus
+    cmd_claimant_liveness = session_metadata_cli.cmd_claimant_liveness
+    cmd_codename_lookup = session_metadata_cli.cmd_codename_lookup
+    cmd_session_lock = session_metadata_cli.cmd_session_lock
+    _activate_session_binding = session_binding_cli._activate_session_binding
+    _bind_nudge_should_fire = session_binding_cli._bind_nudge_should_fire
+    _bind_nudge_decision = session_binding_cli._bind_nudge_decision
+    _capture_session_title = session_binding_cli._capture_session_title
+    cmd_register_session = session_binding_cli.cmd_register_session
+    cmd_deregister_session = session_binding_cli.cmd_deregister_session
+    cmd_bind_session = session_binding_cli.cmd_bind_session
+    cmd_bind_nudge = session_binding_cli.cmd_bind_nudge
+    cmd_note_handoff = session_binding_cli.cmd_note_handoff
+    cmd_session_lifecycle = session_inspection_cli.cmd_session_lifecycle
+    cmd_session_binding = session_inspection_cli.cmd_session_binding
+    cmd_session_recovery = session_inspection_cli.cmd_session_recovery
+    cmd_session_lineage = session_inspection_cli.cmd_session_lineage
+    _resolve_repo_remote = pr_config._resolve_repo_remote
+    _pr_flow_profile = pr_config._pr_flow_profile
+    _sweep_orphans_on_exit = finalize_cli._sweep_orphans_on_exit
+    _post_exit_gate = finalize_cli._post_exit_gate
+    cmd_post_exit = finalize_cli.cmd_post_exit
+    cmd_finalize = finalize_cli.cmd_finalize
+    cmd_push_changes = finalize_cli.cmd_push_changes
+    cmd_create_pr = finalize_cli.cmd_create_pr
+    cmd_attribution_audit = finalize_cli.cmd_attribution_audit
+    cmd_mark_complete = finalize_cli.cmd_mark_complete
+    cmd_set_pr = pr_state_cli.cmd_set_pr
+    cmd_pr_ready = pr_state_cli.cmd_pr_ready
+    cmd_pr_status = pr_state_cli.cmd_pr_status
+    cmd_pr_complete = pr_state_cli.cmd_pr_complete
+    cmd_status = status_cli.cmd_status
+    cmd_status_monitor = status_monitor_cli.cmd_status_monitor
+    _SEGMENT_STYLE = status_bar_cli._SEGMENT_STYLE
+    _DESCRIPTOR_STYLE_BG = status_bar_cli._DESCRIPTOR_STYLE_BG
+    _find_record_for_path = status_bar_cli._find_record_for_path
+    _resolve_remote_default_branch = status_bar_cli._resolve_remote_default_branch
+    _detect_upstream_branch = status_bar_cli._detect_upstream_branch
+    _render_status_segment = status_bar_cli._render_status_segment
+    _status_segment_json = status_bar_cli._status_segment_json
+    cmd_status_segment = status_bar_cli.cmd_status_segment
+    _platform_short = status_bar_cli._platform_short
+    _ENV_BG = status_bar_cli._ENV_BG
+    _resolve_machine_alias = status_bar_cli._resolve_machine_alias
+    _render_status_context = status_bar_cli._render_status_context
+    cmd_status_context = status_bar_cli.cmd_status_context
+    _activate_project_for_path = status_updater_cli._activate_project_for_path
+    _resolve_mux_worktree_id = status_updater_cli._resolve_mux_worktree_id
+    _activate_project_for_worktree_id = status_updater_cli._activate_project_for_worktree_id
+    _slot_superseded = status_updater_cli._slot_superseded
+    _runtime_superseded = status_updater_cli._runtime_superseded
+    _background_environment = status_updater_cli._background_environment
+    _spawn_status_updater = status_updater_cli._spawn_status_updater
+    cmd_status_updater = status_updater_cli.cmd_status_updater
+    _status_monitor_enabled = status_monitor_runtime._status_monitor_enabled
+    _aw_runtime_home = status_monitor_runtime._aw_runtime_home
+    _monitor_lock_path = status_monitor_runtime._monitor_lock_path
+    _monitor_registry_dir = status_monitor_runtime._monitor_registry_dir
+    _monitor_handoff_claim_root = status_monitor_runtime._monitor_handoff_claim_root
+    _monitor_handoff_claim_stale_seconds = (
+        status_monitor_runtime._monitor_handoff_claim_stale_seconds
+    )
+    _monitor_handoff_claim_segment = status_monitor_runtime._monitor_handoff_claim_segment
+    _monitor_handoff_claim_path = status_monitor_runtime._monitor_handoff_claim_path
+    _monitor_handoff_claim_created_at = status_monitor_runtime._monitor_handoff_claim_created_at
+    _monitor_handoff_claim_staleness = status_monitor_runtime._monitor_handoff_claim_staleness
+    _monitor_publish_handoff_cutover_claim = (
+        status_monitor_runtime._monitor_publish_handoff_cutover_claim
+    )
+    _monitor_reclaim_stale_handoff_cutover_claim = (
+        status_monitor_runtime._monitor_reclaim_stale_handoff_cutover_claim
+    )
+    _monitor_claim_handoff_cutover = status_monitor_runtime._monitor_claim_handoff_cutover
+    _valid_monitor_session = status_monitor_runtime._valid_monitor_session
+    _register_session_for_monitor = status_monitor_runtime._register_session_for_monitor
+    _read_monitor_registry = status_monitor_runtime._read_monitor_registry
+    _remove_monitor_entry = status_monitor_runtime._remove_monitor_entry
+    _windowless_python = status_monitor_runtime._windowless_python
+    _spawn_detached = status_monitor_runtime._spawn_detached
+    _ensure_status_monitor = status_monitor_runtime._ensure_status_monitor
+    _restart_status_monitor = status_monitor_runtime._restart_status_monitor
+    cmd_status_monitor_restart = status_monitor_runtime.cmd_status_monitor_restart
+    cmd_reconcile_sessions = status_monitor_runtime.cmd_reconcile_sessions
+    _monitor_mux_set = status_monitor_runtime._monitor_mux_set
+    _monitor_list_sessions = status_monitor_runtime._monitor_list_sessions
+    _monitor_session_state_handoff_path = status_monitor_runtime._monitor_session_state_handoff_path
+    _monitor_read_session_state_handoff = status_monitor_runtime._monitor_read_session_state_handoff
+    _monitor_pending_handoff_request = status_monitor_runtime._monitor_pending_handoff_request
+    _load_remote_machines = resolve_machine_cli._load_remote_machines
+    _try_machine_handoff = resolve_machine_cli._try_machine_handoff
+    _load_all_machine_keys = resolve_machine_cli._load_all_machine_keys
+    _new_picker_blocked_by_ssh = resolve_machine_cli._new_picker_blocked_by_ssh
+    _in_ssh_session = resolve_machine_cli._in_ssh_session
+    _emit_remote_plan_for_env = resolve_machine_cli._emit_remote_plan_for_env
+    _resolve_ssh_alias = resolve_machine_cli._resolve_ssh_alias
+    _machine_key_for_display = resolve_machine_cli._machine_key_for_display
+    _resolve_profile = resolve_launch_cli._resolve_profile
+    _picker_profile_choice = resolve_launch_cli._picker_profile_choice
+    _validate_profile_assignment_config = resolve_launch_cli._validate_profile_assignment_config
+    _launch_profile_selection = resolve_launch_cli._launch_profile_selection
+    _apply_assignment_env = resolve_launch_cli._apply_assignment_env
+    _reflect_assignment = resolve_launch_cli._reflect_assignment
+    _resolve_base_repo = resolve_launch_cli._resolve_base_repo
+    _resolve_resume = resolve_launch_cli._resolve_resume
+    _resolve_new = resolve_launch_cli._resolve_new
+    _run_picker_housekeeping = resolve_picker_cli._run_picker_housekeeping
+    _run_new_picker = resolve_picker_cli._run_new_picker
+    _start_picker_monitor_root = resolve_picker_cli._start_picker_monitor_root
+    _run_machine_menu = resolve_picker_cli._run_machine_menu
+    _run_system_menu = resolve_system_cli._run_system_menu
+    _system_cleanup = resolve_system_cli._system_cleanup
+    _system_update = resolve_system_cli._system_update
+    _system_status = resolve_system_cli._system_status
+    _system_pause = resolve_system_cli._system_pause
+    _system_worktrees_browse = resolve_system_cli._system_worktrees_browse
+    _cmd_list_stream = list_cli._cmd_list_stream
+    _list_records_for_args = list_cli._list_records_for_args
+    _filter_list_worktree = list_cli._filter_list_worktree
+    _refresh_list_record = list_cli._refresh_list_record
+    _list_error = list_cli._list_error
+    _build_list_json_payload = list_cli._build_list_json_payload
+    _warm_list_cache_for_active_project = list_cli._warm_list_cache_for_active_project
+    cmd_list = list_cli.cmd_list
+    _inbound_claims = claims_cli._inbound_claims
+    _claim_handoff_actor = claims_cli._claim_handoff_actor
+    _require_coordination_readiness = claims_cli._require_coordination_readiness
+    _emit_coordination_rejection = claims_cli._emit_coordination_rejection
+    CoordinationReadinessFailure = claims_cli.CoordinationReadinessFailure
+    _coordination_readiness_for_owner_ref = claims_cli._coordination_readiness_for_owner_ref
+    _claims_handoff = claims_cli._claims_handoff
+    _resolve_owner_ref_record_path = claims_cli._resolve_owner_ref_record_path
+    _claims_add = claims_cli._claims_add
+    _claims_mirror_status = claims_cli._claims_mirror_status
+    _claims_release = claims_cli._claims_release
+    _claims_settle = claims_cli._claims_settle
+    _claims_sweep = claims_cli._claims_sweep
+    _claims_cleanup = claims_cli._claims_cleanup
+    _claims_orphans = claims_cli._claims_orphans
+    _claims_show = claims_cli._claims_show
+    cmd_claims = claims_cli.cmd_claims
+    _parse_follow_up_refs = follow_ups_cli._parse_follow_up_refs
+    _follow_up_to_json = follow_ups_cli._follow_up_to_json
+    _follow_ups_record_path = follow_ups_cli._follow_ups_record_path
+    _follow_ups_show = follow_ups_cli._follow_ups_show
+    _follow_ups_add = follow_ups_cli._follow_ups_add
+    _follow_ups_resolve = follow_ups_cli._follow_ups_resolve
+    _follow_ups_dismiss = follow_ups_cli._follow_ups_dismiss
+    cmd_follow_ups = follow_ups_cli.cmd_follow_ups
+    discover_plugin_dir = _discover_plugin_dir  # noqa: F841 -- compatibility re-export
+    cmd_handoff_cutover = handoff_cli.cmd_handoff_cutover
+    _restore_before_resume = handoff_cli._restore_before_resume
+    _resolve_codename_anywhere = handoff_cli._resolve_codename_anywhere
+    cmd_embody = handoff_cli.cmd_embody
+    cmd_handoffs_check = handoff_cli.cmd_handoffs_check
+    _enumerate_launcher_shells_posix = reap_cli._enumerate_launcher_shells_posix
+    _proc_boot_time = reap_cli._proc_boot_time
+    reap_orphan_launcher_shells = reap_cli.reap_orphan_launcher_shells
+    cmd_reap_shells = reap_cli.cmd_reap_shells
+    _remove_managed_worktree = reap_cli._remove_managed_worktree
+    sweep_managed_worktrees = reap_cli.sweep_managed_worktrees
+    auto_clean_enabled = reap_cli.auto_clean_enabled
+    _auto_clean_grace_secs = reap_cli._auto_clean_grace_secs
+    sweep_finished_session_worktrees = reap_cli.sweep_finished_session_worktrees
+    cmd_reap_sessions = reap_cli.cmd_reap_sessions
+    _slugify = worktree_ops_cli._slugify
+    cmd_remove_system = worktree_ops_cli.cmd_remove_system
+    cmd_create = worktree_ops_cli.cmd_create
+    _resolve_owner_ref = worktree_ops_cli._resolve_owner_ref
+    _resolve_anchor_owner_ref = worktree_ops_cli._resolve_anchor_owner_ref
+    _claim_from_run_output = worktree_ops_cli._claim_from_run_output
+    _ensure_anchor_ledger = worktree_ops_cli._ensure_anchor_ledger
+    _journal_run_claim = worktree_ops_cli._journal_run_claim
+    cmd_run = worktree_ops_cli.cmd_run
+    _sync_one_record = worktree_ops_cli._sync_one_record
+    sync_one = worktree_ops_cli.sync_one
+    finalize_one = worktree_ops_cli.finalize_one
+    cmd_sync = worktree_ops_cli.cmd_sync
+    cmd_reclaim = reclaim_cli.cmd_reclaim
+    _perform_remux = reclaim_cli._perform_remux
+    cmd_remux = reclaim_cli.cmd_remux
+    reclaim_one = reclaim_cli.reclaim_one
+    cmd_restart = reclaim_cli.cmd_restart
+    _cleanup_one = cleanup_gc_cli._cleanup_one
+    _cleanup_per_item_skip_reason = cleanup_gc_cli._cleanup_per_item_skip_reason
+    RevalidationResult = cleanup_gc_cli.RevalidationResult
+    _revalidate_cleanup_safety = cleanup_gc_cli._revalidate_cleanup_safety
+    cmd_cleanup = cleanup_gc_cli.cmd_cleanup
+    _print_gc_orphans = cleanup_gc_cli._print_gc_orphans
+    _print_gc_managed = cleanup_gc_cli._print_gc_managed
+    _print_gc_shells = cleanup_gc_cli._print_gc_shells
+    cmd_gc = cleanup_gc_cli.cmd_gc
+    _profiles_host = picker_profiles_cli._profiles_host
+    cmd_profiles = picker_profiles_cli.cmd_profiles
+    _mirror_terminal_profiles = picker_profiles_cli._mirror_terminal_profiles
+    cmd_terminal_fragment = picker_profiles_cli.cmd_terminal_fragment
+    _terminal_fragment_doctor = picker_profiles_cli._terminal_fragment_doctor
+    cmd_picker = picker_profiles_cli.cmd_picker
+    cmd_validate = picker_profiles_cli.cmd_validate
+    _resolve_terminal_install_script = picker_profiles_cli._resolve_terminal_install_script
+    _refresh_terminal_profiles = picker_profiles_cli._refresh_terminal_profiles
+    cmd_repair = picker_profiles_cli.cmd_repair
+    cmd_hygiene = maintenance_cli.cmd_hygiene
+    cmd_dev = maintenance_cli.cmd_dev
+    _run_reciprocal_backfill = maintenance_cli._run_reciprocal_backfill
+    _run_backfill = maintenance_cli._run_backfill
+    cmd_backfill_sessions = maintenance_cli.cmd_backfill_sessions
+    cmd_doctor = maintenance_cli.cmd_doctor
+    _render_doctor_report = maintenance_cli._render_doctor_report
+    _render_dropin_registry_report = maintenance_cli._render_dropin_registry_report
+    cmd_reconcile_binstubs = maintenance_cli.cmd_reconcile_binstubs
+    cmd_register_project_entry = maintenance_cli.cmd_register_project_entry
+    cmd_anchor_check = maintenance_cli.cmd_anchor_check
+    cmd_config_migrate = maintenance_cli.cmd_config_migrate
+    _validate_machine_registry = installation_cli._validate_machine_registry
+    _INSTRUCTION_MARKER = installation_cli._INSTRUCTION_MARKER
+    _remove_managed_file = installation_cli._remove_managed_file
+    _remove_managed_instruction = installation_cli._remove_managed_instruction
+    _gh_env_for_repo = installation_cli._gh_env_for_repo
+    _deploy_copilot_instructions = installation_cli._deploy_copilot_instructions
+    _cleanup_stale_instructions = installation_cli._cleanup_stale_instructions
+    _prepare_namespaced_project_state = installation_cli._prepare_namespaced_project_state
+    _ensure_ado_pr_cli = installation_cli._ensure_ado_pr_cli
+    cmd_install = installation_cli.cmd_install
+    cmd_register = installation_cli.cmd_register
+    cmd_uninstall = installation_cli.cmd_uninstall
+    cmd_update = update_cli.cmd_update
+    _update_flags = update_cli._update_flags
+    _cmd_update_in_plugin = update_cli._cmd_update_in_plugin
+    _project_update_context = update_cli._project_update_context
+    _invocation_update_context = update_cli._invocation_update_context
+    _refresh_marketplace = update_cli._refresh_marketplace
+    _browse_marketplace_plugins = update_cli._browse_marketplace_plugins
+    _uninstall_one_plugin_payload = update_cli._uninstall_one_plugin_payload
+    _update_one_plugin_payload = update_cli._update_one_plugin_payload
+    _PluginActivation = update_cli._PluginActivation
+    _RegisteredPluginTarget = update_cli._RegisteredPluginTarget
+    _update_registered_plugins = update_cli._update_registered_plugins
+    _registered_plugin_targets = update_cli._registered_plugin_targets
+    _module_names = update_cli._module_names
+    _reconcile_registered_runtimes = update_cli._reconcile_registered_runtimes
+    _reconcile_one_runtime = update_cli._reconcile_one_runtime
+    _fast_forward_project_anchors = update_cli._fast_forward_project_anchors
+    _self_entry_present = update_cli._self_entry_present
+    _heal_stale_anchor_if_self_missing = update_cli._heal_stale_anchor_if_self_missing
+    _update_modules = update_cli._update_modules
+    _find_installed_plugin_dir = update_cli._find_installed_plugin_dir
+    plan_pre_launch = update_cli.plan_pre_launch
+    cmd_pre_launch = update_cli.cmd_pre_launch
+    _build_installer_argv = update_cli._build_installer_argv
+    _append_update_if_stale = update_cli._append_update_if_stale
+    cmd_reconcile_plugins = update_cli.cmd_reconcile_plugins
+    cmd_uninstall_plugins = update_cli.cmd_uninstall_plugins
+    _git_usage = git_cli._git_usage
+    _git_resolve_target = git_cli._git_resolve_target
+    _git_positional = git_cli._git_positional
+    cmd_git_sync = git_cli.cmd_git_sync
+    cmd_git_feature_branch = git_cli.cmd_git_feature_branch
+    cmd_git_merge_to_feature = git_cli.cmd_git_merge_to_feature
+    cmd_git_dispatch = git_cli.cmd_git_dispatch
+    socket = _socket  # noqa: F841 -- compatibility re-export
+    svc = _svc  # noqa: F841 -- compatibility re-export
+
+    def cmd_handoff_trace(args):
+        return handoff_diagnostics.cmd_handoff_trace(
+            args, json_output=_json_output, json_error=_json_error
+        )
+    COMMAND_MAP = {
+        "resolve": cmd_resolve,
+        "execution-leg": cmd_execution_leg,
+        "post-exit": cmd_post_exit,
+        "session-lock": cmd_session_lock,
+        "finalize": cmd_finalize,
+        "push-changes": cmd_push_changes,
+        "create-pr": cmd_create_pr,
+        "pr-create": cmd_create_pr,  # pr-* family alias (also rewritten pre-argparse)
+        "attribution-audit": cmd_attribution_audit,
+        "set-pr": cmd_set_pr,
+        "pr-ready": cmd_pr_ready,
+        "pr-status": cmd_pr_status,
+        "pr-complete": cmd_pr_complete,
+        "mark-complete": cmd_mark_complete,
+        "status": cmd_status,
+        "effort-focus": cmd_effort_focus,
+        "status-segment": cmd_status_segment,
+        "status-context": cmd_status_context,
+        "status-updater": cmd_status_updater,
+        "status-monitor": cmd_status_monitor,
+        "reconcile-sessions": cmd_reconcile_sessions,
+        "status-monitor-restart": cmd_status_monitor_restart,
+        "pane-create": pane_lifecycle.cmd_pane_create,
+        "pane-terminate": pane_lifecycle.cmd_pane_terminate,
+        "handoff-cutover": cmd_handoff_cutover,
+        "handoff-trace": cmd_handoff_trace,
+        "handoffs-check": cmd_handoffs_check,
+        "embody": cmd_embody,
+        "copilot": cmd_copilot,
+        "list": cmd_list,
+        "claims": cmd_claims,
+        "follow-ups": cmd_follow_ups,
+        "claimant-liveness": cmd_claimant_liveness,
+        "codename-lookup": cmd_codename_lookup,
+        "create": cmd_create,
+        "run": cmd_run,
+        "remove-system": cmd_remove_system,
+        "cleanup": cmd_cleanup,
+        "gc": cmd_gc,
+        "reap-sessions": cmd_reap_sessions,
+        "reap-shells": cmd_reap_shells,
+        "reclaim": cmd_reclaim,
+        "remux": cmd_remux,
+        "restart": cmd_restart,
+        "sync": cmd_sync,
+        "profiles": cmd_profiles,
+        "terminal-fragment": cmd_terminal_fragment,
+        "repair": cmd_repair,
+        "picker": cmd_picker,
+        "validate": cmd_validate,
+        "config-migrate": cmd_config_migrate,
+        "install": cmd_install,
+        "register": cmd_register,
+        "unregister": cmd_uninstall,
+        "uninstall": cmd_uninstall,
+        "update": cmd_update,
+        "install-status": cmd_install_status,
+        "installer-readiness": cmd_installer_readiness,
+        "deploy-instructions": cmd_deploy_instructions,
+        "machine-context": cmd_machine_context,
+        "get": cmd_get,
+        "pre-launch": cmd_pre_launch,
+        "stage-update": cmd_stage_update,
+        "reconcile-marketplaces": cmd_reconcile_marketplaces,
+        "reconcile-plugins": cmd_reconcile_plugins,
+        "uninstall-plugins": cmd_uninstall_plugins,
+        "reconcile-binstubs": cmd_reconcile_binstubs,
+        "register-project-entry": cmd_register_project_entry,
+        "dev": cmd_dev,
+        "register-session": cmd_register_session,
+        "session-lifecycle": cmd_session_lifecycle,
+        "deregister-session": cmd_deregister_session,
+        "session-binding": cmd_session_binding,
+        "session-recovery": cmd_session_recovery,
+        "session-lineage": cmd_session_lineage,
+        "bind-session": cmd_bind_session,
+        "bind-nudge": cmd_bind_nudge,
+        "history-digest": cmd_history_digest,
+        "note-handoff": cmd_note_handoff,
+        "session-role": cmd_session_role,
+        "backfill-sessions": cmd_backfill_sessions,
+        "doctor": cmd_doctor,
+        "hygiene": cmd_hygiene,
+        "list-sessions": cmd_list_sessions,
+        "head-session": cmd_head_session,
+        "worktree-lineage": cmd_worktree_lineage,
+        "worktree-status-bundle": cmd_worktree_status_bundle,
+        "worktree-status-audit": cmd_worktree_status_audit,
+        "conclude-session": cmd_conclude_session,
+        "conclude-disposable": cmd_conclude_disposable,
+        "link-succession": cmd_link_succession,
+        "session-transcript": cmd_session_transcript,
+        "session-tail": cmd_session_tail,
+        "recent-messages": cmd_recent_messages,
+        "anchor-check": cmd_anchor_check,
+        "activity": activity.cmd_activity,
+        "activity-log": activity.cmd_activity_log,
+    }
+    _FULL_SURFACE_LOADED = True
 
 
 def _print_boot_provenance() -> None:
@@ -7965,35 +8337,50 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
 
+    # Every remaining dispatch path below (fast-tracked _LAZY_DISPATCH_TABLE
+    # commands, the manual-dispatch verbs, and the full COMMAND_MAP fallback)
+    # may reach into the cross-referencing CLI-submodule cluster described at
+    # _ensure_cluster_loaded()'s own definition -- resolve it once, here,
+    # rather than chasing individual call sites.
+    _ensure_cluster_loaded()
+
     # Services uses manual dispatch for passthrough support --
     # argparse can't handle "unknown subcommand = service name".
     if args_list[0] == "services":
+        from . import services_cli
+
         try:
-            return cmd_services_dispatch(args_list[1:])
+            return services_cli.cmd_services_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
 
     # Repos uses manual dispatch for subcommand flexibility.
     if args_list[0] == "repos":
+        from . import repos_cli
+
         try:
-            return cmd_repos_dispatch(args_list[1:])
+            return repos_cli.cmd_repos_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
 
     # Accounts (gh identity catalog) -- manual dispatch.
     if args_list[0] == "accounts":
+        from . import repos_cli
+
         try:
-            return cmd_accounts_dispatch(args_list[1:])
+            return repos_cli.cmd_accounts_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
 
     # Related (per-project related repos) -- manual dispatch.
     if args_list[0] == "related":
+        from . import related_cli
+
         try:
-            return cmd_related_dispatch(args_list[1:])
+            return related_cli.cmd_related_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
@@ -8001,40 +8388,54 @@ def main(argv: list[str] | None = None) -> int:
     # state-root (resolve where efforts/visions/logs are written) -- manual
     # dispatch (needs project context; see cmd_state_root_dispatch).
     if args_list[0] == "state-root":
+        _ensure_cluster_loaded()
+        from . import context_cli
+
         try:
-            return cmd_state_root_dispatch(args_list[1:])
+            return context_cli.cmd_state_root_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
 
     # coordination-readiness -- JSON preflight for claim-producing peers.
     if args_list[0] == "coordination-readiness":
+        _ensure_cluster_loaded()
+        from . import context_cli
+
         try:
-            return cmd_coordination_readiness_dispatch(args_list[1:])
+            return context_cli.cmd_coordination_readiness_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
 
     # config-root (guarded machine-local setup destination) -- manual dispatch.
     if args_list[0] == "config-root":
+        _ensure_cluster_loaded()
+        from . import context_cli
+
         try:
-            return cmd_config_root_dispatch(args_list[1:])
+            return context_cli.cmd_config_root_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
 
     # knowledge (paired private-repo management) -- manual dispatch.
     if args_list[0] == "knowledge":
+        _ensure_cluster_loaded()
+        from . import context_cli
+
         try:
-            return cmd_knowledge_dispatch(args_list[1:])
+            return context_cli.cmd_knowledge_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
 
     # git -- collaboration primitives (manual dispatch).
     if args_list[0] == "git":
+        from . import git_cli
+
         try:
-            return cmd_git_dispatch(args_list[1:])
+            return git_cli.cmd_git_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
@@ -8085,8 +8486,10 @@ def main(argv: list[str] | None = None) -> int:
     # Worktree namespace -- groups the non-launching lifecycle verbs as a
     # discoverable alias over the existing top-level commands.
     if args_list[0] == "worktree":
+        from . import services_cli
+
         try:
-            return cmd_worktree_dispatch(args_list[1:])
+            return services_cli.cmd_worktree_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
@@ -8117,7 +8520,24 @@ def main(argv: list[str] | None = None) -> int:
         name = args_list[1] if len(args_list) > 1 else ""
         return _hooks.run_hook(name, args_list[2:])
 
+    # Fast path: a module-delegated subcommand (see _LAZY_DISPATCH_TABLE) --
+    # import only its owning module instead of the full eager surface that
+    # build_parser()/COMMAND_MAP below would otherwise force.
+    if args_list[0] in _LAZY_DISPATCH_TABLE:
+        try:
+            return _dispatch_lazy(args_list[0], args_list)
+        except (
+            FileNotFoundError, ValueError, inst.BinstubOwnershipError,
+            codename_tracking.CodenameAttributionPolicyError,
+        ) as e:
+            output.err(str(e))
+            return 1
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
     # First arg is a known subcommand → parse normally
+    _load_full_command_surface()
     if args_list[0] in COMMAND_MAP:
         parser = build_parser()
         args = parser.parse_args(args_list)

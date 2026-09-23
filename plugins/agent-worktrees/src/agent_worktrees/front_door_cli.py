@@ -116,12 +116,8 @@ def _worktrees_verbs() -> set[str]:
         return override()
     global _WORKTREES_VERBS
     if _WORKTREES_VERBS is None:
-        import argparse
-
         try:
-            parser = _core().build_parser()
-            subs = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
-            _WORKTREES_VERBS = set(subs[0].choices) if subs else set()
+            _WORKTREES_VERBS = set(_core()._ALL_KNOWN_VERBS)
         except Exception:
             _WORKTREES_VERBS = set()
     return _WORKTREES_VERBS
