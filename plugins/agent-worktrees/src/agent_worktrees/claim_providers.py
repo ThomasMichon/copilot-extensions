@@ -108,7 +108,7 @@ def parse_manifest(data: object, *, source_path: str = "") -> ClaimProviderManif
         raise ManifestError("manifest root must be a JSON object")
 
     schema_version = data.get("schema_version")
-    if isinstance(schema_version, bool) or schema_version != 1:
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version != 1:
         raise ManifestError("`schema_version` must be the integer 1")
 
     ns = data.get("namespace")
@@ -378,17 +378,23 @@ def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
     ``_payload_command``) would otherwise fail to launch at all and degrade
     to ``available: False`` before its logic ever ran. ``/d`` skips
     ``AutoRun`` registry commands (never let an ambient AutoRun script
-    inject itself into this call); ``/s`` plus wrapping the already
-    correctly-quoted command line (`subprocess.list2cmdline`) in one more
-    pair of quotes is the standard technique for handing a pre-quoted
-    argument list to ``cmd.exe /c`` without a second, conflicting layer of
-    its own parsing.
+    inject itself into this call).
+
+    The batch path and each callback argument are passed as **separate**
+    argv elements -- `[comspec, "/d", "/s", "/c", batch_path, *args]` --
+    never pre-joined into one already-quoted string. `subprocess.run`
+    itself quotes each argv element when it builds the actual
+    `CreateProcess` command line; pre-quoting the whole thing first (an
+    earlier revision of this function did, via `list2cmdline`) means that
+    quoting happens a SECOND time on top of the first, breaking cmd.exe's
+    own parsing (especially once any path or argument contains a space).
+    Mirrors `agent_bridge.transport._wrap_batch_for_windows`, an existing,
+    separately-tested precedent for this exact problem.
     """
     if os.name != "nt" or Path(command[0]).suffix.casefold() not in (".cmd", ".bat"):
         return list(command)
-    quoted = subprocess.list2cmdline(list(command))
     comspec = os.environ.get("ComSpec", "cmd.exe")
-    return [comspec, "/d", "/s", "/c", f'"{quoted}"']
+    return [comspec, "/d", "/s", "/c", *command]
 
 
 def _run_callback(

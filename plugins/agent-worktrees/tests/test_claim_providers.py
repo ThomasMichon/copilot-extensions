@@ -67,6 +67,14 @@ def test_parse_manifest_rejects_boolean_schema_version():
         cp.parse_manifest({"schema_version": True, "namespace": "codespace", "status_command": ["x"]})
 
 
+def test_parse_manifest_rejects_a_float_schema_version():
+    """Regression: JSON 1.0 decodes to a Python float, which compares
+    equal to the integer 1 but is not one -- the manifest contract
+    requires the integer 1 specifically."""
+    with pytest.raises(cp.ManifestError, match="schema_version"):
+        cp.parse_manifest({"schema_version": 1.0, "namespace": "codespace", "status_command": ["x"]})
+
+
 def test_parse_manifest_rejects_a_nul_byte_in_a_command_component():
     """Regression: an embedded NUL previously reached _payload_command's
     Path.is_file(), which can raise ValueError -- a class scan_directory's
@@ -528,15 +536,24 @@ def test_windows_batch_argv_routes_cmd_shims_through_comspec(monkeypatch):
     """Regression: CreateProcess (what subprocess.run(shell=False) uses)
     cannot execute a .cmd file directly -- every real Windows claim-provider
     callback would otherwise fail to launch. Exercised on any platform by
-    forcing os.name to "nt", since the routing logic itself is pure."""
+    forcing os.name to "nt", since the routing logic itself is pure.
+
+    The batch path and each argument must be SEPARATE argv elements (never
+    pre-joined into one already-quoted string) -- subprocess.run() quotes
+    each element itself when building the real CreateProcess command line,
+    so pre-quoting the whole thing first would double-quote it and break
+    cmd.exe's parsing (regression for an earlier revision of this helper
+    that used list2cmdline() to build one combined string)."""
     monkeypatch.setattr(cp.os, "name", "nt")
     monkeypatch.setenv("ComSpec", r"C:\Windows\System32\cmd.exe")
     argv = cp._windows_batch_argv(("C:\\plugins\\agent-codespaces\\bin\\agent-codespaces.cmd", "claim-status", "my box"))
-    assert argv[0] == r"C:\Windows\System32\cmd.exe"
-    assert argv[1:4] == ["/d", "/s", "/c"]
-    assert argv[4].startswith('"') and argv[4].endswith('"')
-    assert "agent-codespaces.cmd" in argv[4]
-    assert '"my box"' in argv[4]
+    assert argv == [
+        r"C:\Windows\System32\cmd.exe",
+        "/d", "/s", "/c",
+        "C:\\plugins\\agent-codespaces\\bin\\agent-codespaces.cmd",
+        "claim-status",
+        "my box",
+    ]
 
 
 def test_windows_batch_argv_leaves_non_batch_commands_untouched(monkeypatch):

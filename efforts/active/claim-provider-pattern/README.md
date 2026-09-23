@@ -143,7 +143,7 @@ always declare a namespace.
   `plugin_activation.resolve_active_plugins()`, plus findings for
   malformed/inactive/duplicate manifests (module:
   `plugins/agent-worktrees/src/agent_worktrees/claim_providers.py`; tests:
-  `plugins/agent-worktrees/tests/test_claim_providers.py`, 40 collected
+  `plugins/agent-worktrees/tests/test_claim_providers.py`, 44 collected
   cases as of the current round of review fixes).
 
 ### Phase 2 — Provider registration in claim-owning plugins
