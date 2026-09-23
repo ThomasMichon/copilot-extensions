@@ -977,7 +977,7 @@ function Install-Runtime {
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
                 (Join-Path $PluginDir 'build'), `
                 (Join-Path $PluginDir '*.egg-info'), `
-                (Join-Path $PluginDir 'src\*.egg-info')
+                (Join-Path (Join-Path $PluginDir 'src') '*.egg-info')
         }
         # Scrub BEFORE installing too, not just after: residue already
         # sitting in $PluginDir the moment this call starts (an earlier
