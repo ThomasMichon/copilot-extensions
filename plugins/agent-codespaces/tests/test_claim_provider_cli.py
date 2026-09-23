@@ -7,10 +7,26 @@ from __future__ import annotations
 import argparse
 import json
 import types
+from contextlib import contextmanager
+import time
 
 from agent_codespaces import claim_provider_cli as cpc
+from agent_codespaces import lease as lease_mod
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _lease_state_tmp(monkeypatch, tmp_path):
+    monkeypatch.setattr(lease_mod, "LEASE_FILE", tmp_path / "leases.json")
+    monkeypatch.setattr(lease_mod, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(lease_mod, "_LOCK_FILE", tmp_path / "leases.lock")
+    monkeypatch.setattr(
+        lease_mod,
+        "_DEPLOY_HOLDS_FILE",
+        tmp_path / "deploy-holds.json",
+    )
+    monkeypatch.setattr(lease_mod, "ensure_runtime_dir", lambda: None)
 
 
 @pytest.fixture(autouse=True)
@@ -177,21 +193,22 @@ def test_claim_reclaim_fails_closed_when_remint_fails_for_resolved_account(monke
     assert called["n"] == 0  # never even reached session recovery/delete
 
 
-def test_claim_reclaim_refuses_when_leased_during_recovery(monkeypatch, capsys):
-    """Narrows (does not eliminate -- there is no atomic fence primitive)
-    the window between the initial lease check and the destructive delete:
-    another effort can legitimately acquire the CodeSpace during the
-    (potentially minutes-long) session-recovery step -- re-verify
-    immediately before the point of no return."""
+def test_claim_reclaim_refuses_when_leased_after_hold_acquired(monkeypatch, capsys):
+    """The initial lease check runs before the deploy hold exists at all, so
+    a second check still matters after the hold is acquired."""
     lease_calls = {"n": 0}
 
     def _get_lease(name):
         lease_calls["n"] += 1
         if lease_calls["n"] == 1:
-            return None  # free at the initial check
-        return types.SimpleNamespace(effort="late-borrower")  # acquired during recovery
+            return None
+        return types.SimpleNamespace(effort="late-borrower")
 
     monkeypatch.setattr(cpc, "get_lease", _get_lease)
+    @contextmanager
+    def _hold(*_args, **_kwargs):
+        yield object()
+    monkeypatch.setattr(cpc, "deploy_hold", _hold)
     monkeypatch.setattr(cpc, "sync_codespace_sessions", lambda *a, **k: {"ok": True})
     called = {"n": 0}
     monkeypatch.setattr(cpc, "delete_codespace", lambda *a, **k: called.__setitem__("n", 1))
@@ -201,6 +218,185 @@ def test_claim_reclaim_refuses_when_leased_during_recovery(monkeypatch, capsys):
     assert out["reclaimed"] is False and "late-borrower" in out["detail"]
     assert called["n"] == 0
     assert lease_calls["n"] == 2
+
+
+def test_claim_reclaim_holds_deploy_fence_through_recovery_and_delete(monkeypatch, capsys):
+    events = []
+
+    @contextmanager
+    def _hold(name, operation):
+        hold = types.SimpleNamespace(token="hold-token")
+        events.append(("enter", name, operation))
+        yield hold
+        events.append(("exit", name, operation))
+
+    monkeypatch.setattr(cpc, "deploy_hold", _hold)
+    monkeypatch.setattr(
+        cpc,
+        "verify_deploy_hold",
+        lambda name, token: events.append(("verify", name, token))
+        or types.SimpleNamespace(expires_at=time.time() + 600),
+    )
+    monkeypatch.setattr(
+        cpc,
+        "sync_codespace_sessions",
+        lambda name, **k: events.append(("sync", name)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        cpc,
+        "delete_codespace",
+        lambda name, **k: events.append(("delete", name)),
+    )
+    monkeypatch.setattr(
+        cpc,
+        "release_lease",
+        lambda name: events.append(("release", name)) or True,
+    )
+
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is True
+    assert events == [
+        ("enter", "cs-a", "claim-reclaim"),
+        ("sync", "cs-a"),
+        ("verify", "cs-a", "hold-token"),
+        ("delete", "cs-a"),
+        ("release", "cs-a"),
+        ("exit", "cs-a", "claim-reclaim"),
+    ]
+
+
+def test_claim_reclaim_reports_busy_deploy_hold(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cpc,
+        "deploy_hold",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            cpc.DeployHoldError("CodeSpace 'cs-a' already has a provider claim-reclaim hold")
+        ),
+    )
+    called = {"n": 0}
+    monkeypatch.setattr(
+        cpc,
+        "sync_codespace_sessions",
+        lambda *a, **k: called.__setitem__("n", 1),
+    )
+    monkeypatch.setattr(
+        cpc,
+        "delete_codespace",
+        lambda *a, **k: called.__setitem__("n", 1),
+    )
+
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False
+    assert "already has a provider claim-reclaim hold" in out["detail"]
+    assert called["n"] == 0
+
+
+def test_claim_reclaim_fails_closed_when_hold_expires_before_delete(monkeypatch, capsys):
+    @contextmanager
+    def _hold(*_args, **_kwargs):
+        yield types.SimpleNamespace(token="hold-token")
+
+    monkeypatch.setattr(cpc, "deploy_hold", _hold)
+    monkeypatch.setattr(cpc, "sync_codespace_sessions", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(
+        cpc,
+        "verify_deploy_hold",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            RuntimeError("Provider lifecycle hold for 'cs-a' is no longer owned by this operation")
+        ),
+    )
+    called = {"n": 0}
+    monkeypatch.setattr(
+        cpc,
+        "delete_codespace",
+        lambda *a, **k: called.__setitem__("n", 1),
+    )
+
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False
+    assert "admission/hold check failed" in out["detail"]
+    assert called["n"] == 0
+
+
+def test_claim_reclaim_refuses_to_start_delete_when_hold_budget_is_nearly_exhausted(
+    monkeypatch,
+    capsys,
+):
+    @contextmanager
+    def _hold(*_args, **_kwargs):
+        yield types.SimpleNamespace(token="hold-token")
+
+    monkeypatch.setattr(cpc, "deploy_hold", _hold)
+    monkeypatch.setattr(cpc, "sync_codespace_sessions", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(
+        cpc,
+        "verify_deploy_hold",
+        lambda *a, **k: types.SimpleNamespace(
+            expires_at=time.time() + cpc._DELETE_TIMEOUT_SECONDS
+        ),
+    )
+    marked = {}
+    monkeypatch.setattr(
+        cpc,
+        "mark_deploy_hold_uncertain",
+        lambda name, token: marked.update({"name": name, "token": token}),
+    )
+    called = {"n": 0}
+    monkeypatch.setattr(
+        cpc,
+        "delete_codespace",
+        lambda *a, **k: called.__setitem__("n", 1),
+    )
+
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False
+    assert "hold budget is nearly exhausted" in out["detail"]
+    assert marked == {"name": "cs-a", "token": "hold-token"}
+    assert called["n"] == 0
+
+
+def test_claim_reclaim_marks_hold_uncertain_on_ambiguous_delete_failure(monkeypatch, capsys):
+    @contextmanager
+    def _hold(*_args, **_kwargs):
+        yield types.SimpleNamespace(token="hold-token")
+
+    monkeypatch.setattr(cpc, "deploy_hold", _hold)
+    monkeypatch.setattr(cpc, "sync_codespace_sessions", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(
+        cpc,
+        "verify_deploy_hold",
+        lambda *a, **k: types.SimpleNamespace(expires_at=time.time() + 600),
+    )
+
+    def _boom(*a, **k):
+        raise RuntimeError("HTTP 500: server exploded")
+
+    monkeypatch.setattr(cpc, "delete_codespace", _boom)
+    marked = {}
+    monkeypatch.setattr(
+        cpc,
+        "mark_deploy_hold_uncertain",
+        lambda name, token: marked.update({"name": name, "token": token}),
+    )
+
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False
+    assert marked == {"name": "cs-a", "token": "hold-token"}
 
 
 def test_claim_reclaim_blocks_delete_when_recovery_fails_and_still_exists(monkeypatch, capsys):
