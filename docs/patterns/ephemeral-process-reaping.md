@@ -5,7 +5,8 @@ lifecycle tier; an unreaped background process is the same availability/
 host-health failure whether or not it is a registered "service".
 **Exemplars:** agent-worktrees (per-worktree `git fsmonitor--daemon`, the
 `status-monitor`'s `pane_reaper.py` dead-mux-pane reconciliation, `gc.py`'s
-orphan-directory sweep).
+orphan-directory sweep); agent-mcp's stdio `Bridge.run()` idle self-reap
+(tmichon/aperture-labs#3876 — a *different* shape, see the Variant below).
 
 ## Problem
 
@@ -98,6 +99,61 @@ afterward. Treating reaping as "someone else's problem" (a hook, a later
 poller costs nothing when nothing has died, and is the only mechanism that
 reliably fires on every death path — clean exit, abrupt kill, and crash
 alike.
+
+## Variant: an attached child whose logical caller outlives it, nested inside a physical parent that outlives *that*
+
+The problem above assumes the leaking process was deliberately **detached**
+to survive its parent. A second, distinct shape produces the identical
+symptom (unbounded process accumulation, invisible day-to-day, discovered
+only once dozens-to-hundreds have piled up) from the opposite setup: a
+process that was **never detached** — it has a real, live OS parent the
+whole time — but still outlives its actual reason for existing, because
+that reason is a **logical** scope nested *inside* the physical parent, and
+the physical parent is much longer-lived than that inner scope.
+
+`agent-mcp`'s stdio `Bridge.run()` is the exemplar
+(tmichon/aperture-labs#3876): a `task()` sub-agent delegation spawns a
+per-delegation `agent-mcp bridge` process (and, for a `stdio` upstream, its
+own heavier child, e.g. `bunx gitea-mcp`). The bridge's OS parent is the
+**top-level Copilot session**, which stays alive long after that one
+delegation's sub-agent has finished — so the two standard termination
+signals (stdin EOF, parent-death) never fire: the parent process that would
+send either signal is still very much running. Confirmed directly by reading
+`bridge.py`: both signals were implemented correctly and fire reliably for
+the *general* case; neither is wrong, they simply answer a different
+question ("has my physical parent gone away?") than the one that actually
+matters ("has the logical operation I exist to serve concluded?"). Three
+prior WSL reproductions (2026-07-31/08-18/08-22) had already established
+every leaked bridge was parented to a **live**, non-dead process — the
+signature of exactly this variant, not a classic orphan.
+
+**A polling liveness-reconciler (the standard approach above) does not fit
+here either.** There is no independent, external observer that can see "is
+the sub-agent that spawned this bridge still doing anything with it" — that
+information exists *only* inside the bridge's own request/response traffic.
+The fix is not a poller; it's an **idle self-check the process runs on
+itself**, dual-gated the same way a liveness reconciler cross-checks two
+signals before acting (Standard approach, step 3):
+
+1. **Elapsed time since the last unit of real work** (here: the last client
+   message read off stdin) is necessary but not sufficient — a slow
+   in-flight call can legitimately run longer than the idle window.
+2. **An authoritative in-flight-work signal** (here: `BridgeSession
+   .has_pending`, backed by the session's own dispatch-task set) gates step 1:
+   self-reap fires only when *both* the idle window has elapsed *and* zero
+   work is in flight. This mirrors `serve.py`'s own resident-daemon
+   `_maybe_idle_evict` (attached-session refcount + warm-pool size, gating an
+   idle clock) — the *same* dual-gate discipline, reused for a per-invocation
+   child instead of a shared daemon.
+
+**Recognize this variant when:** the process's *physical* OS parent is
+correctly identified and genuinely alive (ruling out the classic-orphan
+case above), the process nonetheless leaks, and the thing it actually exists
+to serve is a bounded, inner operation — a single delegation, a single
+request batch, a single task — that a still-live *outer* host process
+(a persistent session, a resident daemon, a long-running supervisor) merely
+happens to contain. Detached-child pollers can't see that inner boundary;
+only an idle/inactivity self-check running inside the process itself can.
 
 ## See Also
 

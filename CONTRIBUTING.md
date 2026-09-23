@@ -767,6 +767,30 @@ an incomplete change, not a follow-up: #2265 and #2269/#2270 are what an
 process/window leak discovered only once it made a laptop's fans and keyboard
 noticeably hot).
 
+**A second shape gets missed by the four questions above because it isn't
+detached at all.** A process spawned per-invocation (per `task()` delegation,
+per request, per session) whose real OS parent is a **longer-lived host
+process** (a persistent top-level session, a resident daemon) can leak for
+the opposite reason: stdin-EOF and parent-death correctly answer "is my
+*physical* parent still alive?" — but never "has the *logical* operation I
+exist to serve concluded?", when that operation is a bounded scope nested
+*inside* the still-live parent. `agent-mcp`'s stdio `Bridge.run()` idle
+self-reap (tmichon/aperture-labs#3876) is the exemplar: a sub-agent
+delegation finishing does not close the bridge's stdin or kill the top-level
+session that holds it open, so neither existing signal ever fires. Any
+change spawning a per-invocation child under a longer-lived host process
+must additionally answer:
+
+5. Is the process's true termination boundary a **logical** scope (one
+   delegation, one request, one task) nested inside a physical parent that
+   outlives it? If so, a poll-based reaper (question 2) has nothing external
+   to observe — add an **idle-timeout self-check the process runs on
+   itself**, dual-gated on elapsed inactivity *and* an authoritative
+   in-flight-work signal (never idle-timeout alone; a slow in-flight call
+   must never be reaped mid-flight) — see the pattern doc's *Variant*
+   section and `agent_mcp.session.BridgeSession.has_pending` /
+   `agent_mcp.bridge.Bridge.run`'s idle branch for a worked example.
+
 They are **not active until wired** per clone (git does not auto-enable a
 committed hooks dir). Run the helper once per checkout:
 
