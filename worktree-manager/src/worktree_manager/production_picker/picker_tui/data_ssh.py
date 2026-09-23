@@ -40,6 +40,7 @@ from agent_procutil import no_window_flags
 
 from .. import config as cfg
 from . import data_local, derive, provider_sources, roster, source_identity
+from .loader_lazy import LazyLoadMixin, _lazy_loading_enabled, _ping_argv, _PING_TIMEOUT_SECS  # noqa: F401
 
 # Shared display surface so the engine treats this exactly like ``data_local``.
 # ``LOCAL`` is resolved from the actual local source below (so it carries the
@@ -301,26 +302,6 @@ def _ssh_argv(alias: str, remote: str) -> list[str]:
     return ["ssh", *_SSH_HARDENING, alias, remote]
 
 
-# A bare reachability probe -- deliberately NOT the full list/classify hardening
-# above: the picker fans a probe out to every not-yet-viewed machine tab on
-# every launch (picker-lazy-per-machine-loading), so it needs to fail fast on
-# an offline/hibernating box rather than waiting out the full ConnectTimeout.
-# ``exit 0`` never touches the remote agent-worktrees at all -- this is pure
-# SSH-layer connectivity, cheaper than even the fastest real list call.
-_PING_TIMEOUT_SECS = 5
-_PING_HARDENING = (
-    "-o", "BatchMode=yes",
-    "-o", "ConnectTimeout=4",
-    "-o", "ServerAliveInterval=4",
-    "-o", "ServerAliveCountMax=1",
-)
-
-
-def _ping_argv(alias: str) -> list[str]:
-    """``ssh`` argv for a fast connectivity-only probe (no listing)."""
-    return ["ssh", *_PING_HARDENING, alias, "exit", "0"]
-
-
 def _argv_for(shell: str, alias: str, project: str, *, classify: bool,
               reconcile: bool = False):
     """Remote list argv for a machine/env: pwsh on Windows, bash elsewhere."""
@@ -580,22 +561,6 @@ def _stream_enabled() -> bool:
     return os.environ.get(
         "AGENT_WORKTREES_PICKER_STREAM", "").strip().lower() in (
         "1", "true", "yes", "on")
-
-
-def _lazy_loading_enabled() -> bool:
-    """Whether `start()` defers a non-focused machine's full listing behind a
-    cheap connectivity ping instead of loading it immediately (picker-lazy-
-    per-machine-loading).
-
-    On by default -- unlike `_stream_enabled`'s fleet-rollout gate, this is
-    pure picker-local behavior with no remote-version dependency (the ping is
-    a bare ``ssh ... exit 0``, and `ensure_loaded` reuses the exact existing
-    load path). Kept behind an escape hatch anyway, matching this module's own
-    rollback-switch convention: set ``AGENT_WORKTREES_PICKER_LAZY_LOAD=0``
-    (any of 0/false/no/off) to load every ready machine up front again."""
-    return os.environ.get(
-        "AGENT_WORKTREES_PICKER_LAZY_LOAD", "").strip().lower() not in (
-        "0", "false", "no", "off")
 
 
 def _find_source(machine=None, env=None, *, source_id=None):
@@ -1316,7 +1281,7 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None,
             for w in data.get("worktrees", [])]
 
 
-class LiveLoader:
+class LiveLoader(LazyLoadMixin):
     """Background, per-machine loader feeding the picker's spinner -> resolve.
 
     On :meth:`start`, spawns one daemon thread per *ready* source. Each thread
@@ -1431,168 +1396,8 @@ class LiveLoader:
                 name=f"load-{s.machine}-{s.env}", daemon=True,
             ).start()
 
-    @staticmethod
-    def _matches_focus(source, focus_keys) -> bool:
-        return (
-            source.key in focus_keys
-            or source.cache_key in focus_keys
-            or (source.source_id and source.source_id in focus_keys)
-            or (source.machine, source.env) in focus_keys
-        )
-
-    def _ping_one(self, source: Source):
-        """Cheap connectivity-only probe standing in for a deferred full load.
-
-        Sets the SAME ``ready``/``failed`` state the operator already reads as
-        the tab's spinner -> checkmark/X (``ready`` with empty records renders
-        identically to a machine that genuinely has no worktrees) -- but never
-        runs the remote's ``list``/git-classification. ``ensure_loaded``
-        replaces this with the real listing once the tab is actually viewed.
-        """
-        try:
-            if self._cancelled.is_set():
-                return
-            self._active_source.key = source.cache_key
-            try:
-                proc = self._spawn(_ping_argv(source.alias), _PING_TIMEOUT_SECS)
-            finally:
-                self._active_source.key = None
-        except Exception as exc:
-            with self._lock:
-                if source.cache_key in self._pinged_only:
-                    # A failed probe must NOT stay eligible for automatic
-                    # promotion: ensure_loaded()/ensure_all_loaded() only
-                    # check set membership, so leaving the key here would
-                    # have the operator's very next nav onto (or "All" past)
-                    # this X-marked tab silently kick off the full,
-                    # expensive listing against a host we just confirmed is
-                    # unreachable -- contradicting the connect-spinner ✗'s
-                    # whole point. `reload_source`/an explicit 'r' remains
-                    # the escape hatch if the operator believes it's back.
-                    self._pinged_only.discard(source.cache_key)
-                    self._state[source.cache_key] = "failed"
-                    self._error[source.cache_key] = (
-                        str(exc).strip() or type(exc).__name__
-                    )
-            return
-        with self._lock:
-            # A nav-driven ensure_loaded() may have already promoted this
-            # source (and possibly completed a real load) while the ping was
-            # in flight -- never clobber that with a stale ping result.
-            if source.cache_key not in self._pinged_only:
-                return
-            if proc.returncode == 0:
-                self._records[source.cache_key] = []
-                self._state[source.cache_key] = "ready"
-                self._error[source.cache_key] = ""
-            else:
-                # Same reasoning as the exception branch above: an
-                # unreachable ping must not stay promotable.
-                self._pinged_only.discard(source.cache_key)
-                self._state[source.cache_key] = "failed"
-                self._error[source.cache_key] = (
-                    (proc.stderr or proc.stdout or "").strip().splitlines()[-1:]
-                    or ["unreachable"]
-                )[0]
-
-    def ensure_loaded(self, key) -> bool:
-        """Promote one ping-only source to a real listing (picker-lazy-
-        per-machine-loading): the operator just navigated onto its tab.
-
-        No-op (returns ``False``) if ``key`` doesn't match a ping-only
-        source -- already loaded, still loading, unreachable (a failed ping
-        already removed itself from consideration -- see `_ping_one`), or
-        unknown are all left exactly as they are. Flips the tab back to its
-        connect spinner while the real fetch runs, exactly like a fresh
-        `start()`.
-        """
-        with self._lock:
-            src = next(
-                (s for s in self._sources if self._matches_focus(s, {key})),
-                None,
-            )
-            if src is None or src.cache_key not in self._pinged_only:
-                return False
-            self._pinged_only.discard(src.cache_key)
-            self._state[src.cache_key] = "loading"
-            self._records[src.cache_key] = []
-            gen = self._gen.get(src.cache_key, 0)
-        threading.Thread(
-            target=self._load_one, args=(src, gen),
-            name=f"lazyload-{src.machine}-{src.env}", daemon=True,
-        ).start()
-        return True
-
-    def ensure_all_loaded(self) -> int:
-        """``ensure_loaded`` every currently ping-only source (the "All" tab
-        needs every machine's real rows, not just the one(s) in single-machine
-        focus). Returns the number of loads actually started."""
-        with self._lock:
-            keys = list(self._pinged_only)
-        return sum(1 for k in keys if self.ensure_loaded(k))
-
-    def cancel_source(self, key) -> bool:
-        """Stop this source's in-flight fetch (nav-away) without disturbing
-        an already-resolved source's last-good rows.
-
-        Unlike :meth:`cancel` (whole-picker teardown), this targets one
-        source, and does two DIFFERENT things depending on whether it has
-        committed a real result yet -- **not** on how it got started (a bare
-        `ensure_loaded` promotion vs. one of `start()`'s eagerly (focus_keys)
-        loaded sources vs. a background repoll/reconcile of an
-        already-resolved source all funnel through the same one check,
-        ``self._records`` itself, so a remote's own two-phase load can never
-        be caught mid-flight with its already-committed phase-1 fast rows
-        wrongly discarded just because its phase-2 classify pass is still
-        running):
-
-        - **No records committed yet** (initial connect, a bare promotion
-          that hasn't resolved, or a fully-failed load that never got any
-          rows): fully reset it -- kill any spawned child, bump the
-          generation (so a result the killed attempt eventually produces can
-          never land), and put it back in ``_pinged_only`` with a
-          ``ready``/no-records placeholder, exactly like a successful ping
-          -- so navigating back onto the tab (`ensure_loaded`) starts a
-          genuinely fresh load instead of finding nothing to promote and
-          leaving the tab stuck on its cancelled, pre-first-result state.
-          Acts even when no child has spawned yet (a race between the
-          promoting/starting call releasing its lock and the new thread
-          reaching `_spawn`): the generation bump alone discards whatever
-          that orphaned attempt eventually produces, and the actual SSH
-          connection -- already unavoidable once dispatched -- simply
-          becomes wasted, unobserved work rather than a correctness risk.
-        - **Already has committed rows** (a remote's two-phase fast rows
-          already landed, or any prior successful/last-good load) and a
-          further refresh (phase 2, `repoll_silent`, `reconcile_remote_prs`,
-          `reload_source`) is in flight: only bump the generation and kill
-          its child (stopping the wasted remote work); state/records are
-          left exactly as they are, so the tab keeps showing its last-good
-          rows, not a reset connect spinner.
-
-        Returns ``False`` (a harmless no-op) when there is neither
-        resettable in-flight work nor a tracked child process for this
-        source -- nothing to stop.
-        """
-        with self._lock:
-            src = next(
-                (s for s in self._sources if self._matches_focus(s, {key})),
-                None,
-            )
-            if src is None:
-                return False
-            with self._procs_lock:
-                procs = list(self._procs_by_source.get(src.cache_key, ()))
-            resettable = not self._records.get(src.cache_key)
-            if not procs and not resettable:
-                return False
-            self._gen[src.cache_key] = self._gen.get(src.cache_key, 0) + 1
-            if resettable:
-                self._pinged_only.add(src.cache_key)
-                self._state[src.cache_key] = "ready"
-                self._records[src.cache_key] = []
-        for p in procs:
-            _kill_proc_tree(p)
-        return True
+    # _matches_focus, _ping_one, ensure_loaded, ensure_all_loaded, and
+    # cancel_source live in loader_lazy.LazyLoadMixin (module-size guard).
 
     def reload(self, machine, env):
         """Re-fetch one source now (e.g. after a Maintenance op changed it).
@@ -1934,7 +1739,7 @@ class LiveLoader:
     def _load_one_serial(self, source: Source, gen: int):
         if source.local:
             # Local tab: fast-then-fill so rows paint immediately (see below).
-            self._load_local_two_phase(source)
+            self._load_local_two_phase(source, gen)
             return
         try:
             changed = _resolve_provider_source(source, self._spawn)
@@ -2193,7 +1998,7 @@ class LiveLoader:
                     and self._gen.get(source.cache_key, 0) == gen):
                 self._records[source.cache_key] = full
 
-    def _load_local_two_phase(self, source: Source):
+    def _load_local_two_phase(self, source: Source, gen: int | None = None):
         """Fast-then-fill for the local tab.
 
         Phase 1 (``classify=False``) is cheap -- tracking + sessions + mux, no
@@ -2207,8 +2012,16 @@ class LiveLoader:
         own failure write too: a superseded Phase 1 attempt (a newer
         ``reload()``/``reload_source()`` already bumped the generation and
         committed a fresher, genuinely successful ready state) must never
-        clobber that with a stale failure marker."""
-        gen = self._gen.get(source.cache_key, 0)
+        clobber that with a stale failure marker.
+
+        ``gen`` is the generation captured by the caller (``_load_one``) when
+        THIS load started -- mirrors ``_load_remote_two_phase``'s guard so a
+        ``cancel_source()``/``reload_source()`` bump raced against an
+        in-flight local load can't have its bump ignored. Defaults to the
+        source's current generation when omitted (unchanged direct/test call
+        behavior)."""
+        if gen is None:
+            gen = self._gen.get(source.cache_key, 0)
         t0 = _dt.datetime.now()
         try:
             fast = _fetch(source, classify=False)
