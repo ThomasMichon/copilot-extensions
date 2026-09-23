@@ -70,6 +70,14 @@ class SelfUpdateResourceHandler(ResourceHandler):
         self, resolved: ResolvedResource, ctx: ResourceContext, dry_run: bool
     ) -> ResourceResult:
         desired_present = str(resolved.desired.get("state", "present")) != "absent"
+        # Dry-run detail text must name the backend actually in play: Windows
+        # uses Scheduled Tasks, Linux/WSL uses a systemd --user timer (review
+        # finding -- these details previously hard-coded "Scheduled Task"
+        # even when query_task_state() had already switched to the systemd
+        # backend for this platform).
+        backend_label = (
+            "systemd --user timer" if ctx.platform in ("linux", "wsl") else "Scheduled Task"
+        )
 
         def runner(argv: list[str], *, cwd=None, timeout=1800):
             _ = cwd, timeout
@@ -83,6 +91,26 @@ class SelfUpdateResourceHandler(ResourceHandler):
 
         if dry_run:
             task = _self_update.query_task_state(resolved.id, runner=runner, home=ctx.home)
+            if task.unavailable:
+                # Mirrors reconcile_scheduled_task()'s own "skipped" outcome
+                # for this exact case (self_update_tasks._reconcile_linux_timer)
+                # -- no reachable systemd --user manager, so this dry-run must
+                # report unavailable rather than crash or claim a spurious
+                # install/enable action (review finding).
+                return ResourceResult(
+                    self.TYPE,
+                    resolved.id,
+                    False,
+                    True,
+                    "none",
+                    detail=(
+                        "no reachable systemd --user manager on this host; "
+                        "self-update scheduling is unavailable here (Windows "
+                        "uses Scheduled Tasks; Linux/WSL needs a running "
+                        "`systemctl --user` session)"
+                    ),
+                    skipped_reason="no reachable systemd --user manager on this host",
+                )
             if desired_present and not task.present:
                 return ResourceResult(
                     self.TYPE,
@@ -90,7 +118,7 @@ class SelfUpdateResourceHandler(ResourceHandler):
                     True,
                     True,
                     "install",
-                    detail="would register the Scheduled Task",
+                    detail=f"would register the {backend_label}",
                 )
             if desired_present and task.enabled is False:
                 return ResourceResult(
@@ -99,7 +127,7 @@ class SelfUpdateResourceHandler(ResourceHandler):
                     True,
                     True,
                     "install",
-                    detail="would enable the existing Scheduled Task",
+                    detail=f"would enable the existing {backend_label}",
                 )
             if desired_present and not task.matching:
                 return ResourceResult(
@@ -108,7 +136,7 @@ class SelfUpdateResourceHandler(ResourceHandler):
                     True,
                     True,
                     "install",
-                    detail="would refresh the Scheduled Task definition",
+                    detail=f"would refresh the {backend_label} definition",
                 )
             if (not desired_present) and task.present:
                 return ResourceResult(
@@ -117,7 +145,7 @@ class SelfUpdateResourceHandler(ResourceHandler):
                     True,
                     True,
                     "uninstall",
-                    detail="would remove the Scheduled Task",
+                    detail=f"would remove the {backend_label}",
                 )
             return ResourceResult(
                 self.TYPE,
@@ -126,9 +154,9 @@ class SelfUpdateResourceHandler(ResourceHandler):
                 True,
                 "none",
                 detail=(
-                    "Scheduled Task is already registered"
+                    f"{backend_label} is already registered"
                     if desired_present
-                    else "Scheduled Task is already absent"
+                    else f"{backend_label} is already absent"
                 ),
             )
 

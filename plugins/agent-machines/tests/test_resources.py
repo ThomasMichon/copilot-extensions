@@ -2333,5 +2333,47 @@ def test_self_update_resource_dry_run_queries_systemd_timer_on_linux(tmp_path, m
     assert res.type == "self-update"
     assert res.action == "install"
     assert res.changed is True
-    assert "Scheduled Task" in res.detail
+    # Backend-label fix (review finding): the dry-run detail must name the
+    # backend actually queried (systemd --user timer on Linux), not the
+    # Windows-only "Scheduled Task" wording unconditionally used before.
+    assert "systemd --user timer" in res.detail
+    assert "Scheduled Task" not in res.detail
+
+
+def test_self_update_resource_dry_run_reports_unavailable_without_systemd_manager(
+    tmp_path, monkeypatch
+):
+    """Review finding: query_task_state()'s Linux branch called
+    query_systemd_timer() unconditionally, without the
+    linux_systemd_user_available() guard reconcile_scheduled_task()/
+    scheduled_task_status() already use -- so a dry-run on a host with no
+    reachable systemd --user manager could crash (missing systemctl) or
+    misreport state, instead of the "skipped, unavailable" outcome the
+    non-dry-run reconcile path already reports correctly for this exact
+    case (self_update_tasks._reconcile_linux_timer)."""
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "linux")
+    monkeypatch.setattr(SU, "shutil_which", lambda _b: None)  # no systemctl on PATH
+
+    pkg = _pkg(tmp_path, "acme/watchdog", [{"type": "self-update", "tier": "watchdog"}])
+
+    class NoCallRunner:
+        def __call__(self, argv):
+            raise AssertionError(
+                f"the systemd-availability guard should short-circuit before any "
+                f"command runs, but got: {argv!r}"
+            )
+
+    results = apply_resources(
+        [pkg],
+        "box-1",
+        "linux",
+        _ctx(tmp_path, NoCallRunner(), plat="linux"),
+        dry_run=True,
+    )
+    res = results[0]
+    assert res.type == "self-update"
+    assert res.action == "none"
+    assert res.changed is False
+    assert res.skipped_reason is not None
+    assert "systemd" in res.detail
 

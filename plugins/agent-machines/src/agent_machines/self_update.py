@@ -54,6 +54,7 @@ from .self_update_tasks import (
 from .self_update_tasks import (
     scheduled_task_status as _scheduled_task_status,
 )
+from .self_update_tasks import linux_systemd_user_available as _linux_systemd_user_available
 
 WATCHDOG_START_TIMEOUT_SECONDS = 40
 LIVE_SESSION_DEFER_STATUSES = {"awaiting-operator", "busy", "idle", "running"}
@@ -165,16 +166,20 @@ def query_task_state(
 ) -> ScheduledTaskSnapshot:
     """Platform-dispatching query for the declarative resource's dry-run path.
 
-    Unlike ``query_scheduled_task()`` above (always the Windows Scheduled
-    Task query -- correct for the Windows-only register/reconcile call sites
-    that use it directly), this mirrors ``reconcile_scheduled_task()``'s own
-    internal ``sys.platform`` dispatch so a platform-agnostic caller (the
-    resource handler's ``apply(dry_run=True)``) gets the systemd --user timer
-    state on Linux/WSL instead of unconditionally probing for `pwsh`/
-    `Get-ScheduledTask`. Mirrors the identical fix in fleet_update.py.
+    Unlike ``query_scheduled_task()`` above (always Windows Scheduled Tasks
+    -- correct for its Windows-only callers), this mirrors
+    ``reconcile_scheduled_task()``'s own ``sys.platform`` dispatch so a
+    platform-agnostic caller gets the systemd --user timer state on
+    Linux/WSL instead of probing for `pwsh`/`Get-ScheduledTask`. Mirrors the
+    identical fleet_update.py fix.
     """
     resolved_runner = runner or default_command_runner
     if sys.platform == "linux":
+        # Guard mirrors _reconcile_linux_timer/_linux_timer_status's own check.
+        if not _linux_systemd_user_available(resolve_binary=shutil_which, runner=resolved_runner):
+            return _tasks.ScheduledTaskSnapshot(
+                task_name=_tasks._linux_timer_name(tier), present=False, unavailable=True
+            )
         return _tasks.query_systemd_timer(
             tier,
             machine=machine,
