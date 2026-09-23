@@ -62,6 +62,14 @@ if [ -n "$_rt_root" ]; then
     printf '1970-01-01T00:00:00+00:00\n'
   }
 
+  # See the payload shim templates' own copy of this helper for the full
+  # rationale (Copilot review, PR #3310): an inherited/environment-sourced
+  # value (HOSTNAME, an operator-set COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
+  # override) must never be interpolated into JSON raw.
+  _rt_boot_trace_escape_json() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+  }
+
   _rt_boot_trace_log() {
     [ -n "${_rt_bt_log_path:-}" ] || return 0
     _rt_phase="$1"
@@ -73,19 +81,19 @@ if [ -n "$_rt_root" ]; then
     if [ ! -d "$_rt_bt_log_dir" ]; then
       mkdir -p "$_rt_bt_log_dir" 2>/dev/null || return 0
     fi
-    _rt_bt_line="{\"ts\":\"$(_rt_boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"$_rt_bt_plugin\",\"phase\":\"$_rt_phase\",\"t_ms\":$_rt_now_ms,\"pid\":$$"
+    _rt_bt_line="{\"ts\":\"$(_rt_boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"$(_rt_boot_trace_escape_json "$_rt_bt_plugin")\",\"phase\":\"$(_rt_boot_trace_escape_json "$_rt_phase")\",\"t_ms\":$_rt_now_ms,\"pid\":$$"
     if [ -n "${HOSTNAME:-}" ]; then
-      _rt_bt_line="$_rt_bt_line,\"host\":\"$HOSTNAME\""
+      _rt_bt_line="$_rt_bt_line,\"host\":\"$(_rt_boot_trace_escape_json "$HOSTNAME")\""
     fi
     _rt_bt_line="$_rt_bt_line,\"source\":\"resolver\""
     if [ -n "$_rt_resolution_source" ]; then
-      _rt_bt_line="$_rt_bt_line,\"resolution_source\":\"$_rt_resolution_source\""
+      _rt_bt_line="$_rt_bt_line,\"resolution_source\":\"$(_rt_boot_trace_escape_json "$_rt_resolution_source")\""
     fi
     if [ -n "$_rt_result" ]; then
-      _rt_bt_line="$_rt_bt_line,\"result\":\"$_rt_result\""
+      _rt_bt_line="$_rt_bt_line,\"result\":\"$(_rt_boot_trace_escape_json "$_rt_result")\""
     fi
     if [ -n "$_rt_version" ]; then
-      _rt_bt_line="$_rt_bt_line,\"version\":\"$_rt_version\""
+      _rt_bt_line="$_rt_bt_line,\"version\":\"$(_rt_boot_trace_escape_json "$_rt_version")\""
     fi
     _rt_bt_line="$_rt_bt_line}"
     { printf '%s\n' "$_rt_bt_line" >> "$_rt_bt_log_path"; } 2>/dev/null || true

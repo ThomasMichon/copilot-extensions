@@ -47,6 +47,18 @@ _boot_trace_iso() {
     printf '1970-01-01T00:00:00+00:00\n'
 }
 
+# Escapes backslash and double-quote so an inherited/environment-sourced
+# value (HOSTNAME, an operator-set COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
+# override, etc.) can never produce a malformed JSONL line -- a raw
+# interpolation would otherwise let a value containing `"` or `\` corrupt
+# the record and silently drop it from every downstream reader (Copilot
+# review, PR #3310). True POSIX sh has no builtin global substitution, so
+# this uses sed (universally available); only called for a handful of
+# fields per boot-trace call, not a hot per-byte path.
+_boot_trace_escape_json() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
 _boot_trace_log() {
     [ -n "${_boot_trace_log_path:-}" ] || return 0
     _bt_phase="$1"
@@ -60,22 +72,22 @@ _boot_trace_log() {
     if [ ! -d "$_bt_log_dir" ]; then
         mkdir -p "$_bt_log_dir" 2>/dev/null || return 0
     fi
-    _bt_line="{\"ts\":\"$(_boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"$_plugin\",\"phase\":\"$_bt_phase\",\"t_ms\":$_bt_now_ms,\"pid\":$$"
+    _bt_line="{\"ts\":\"$(_boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"$(_boot_trace_escape_json "$_plugin")\",\"phase\":\"$(_boot_trace_escape_json "$_bt_phase")\",\"t_ms\":$_bt_now_ms,\"pid\":$$"
     if [ -n "${HOSTNAME:-}" ]; then
-        _bt_line="$_bt_line,\"host\":\"$HOSTNAME\""
+        _bt_line="$_bt_line,\"host\":\"$(_boot_trace_escape_json "$HOSTNAME")\""
     fi
-    _bt_line="$_bt_line,\"source\":\"$_bt_emitter\""
+    _bt_line="$_bt_line,\"source\":\"$(_boot_trace_escape_json "$_bt_emitter")\""
     if [ -n "$_bt_resolution_source" ]; then
-        _bt_line="$_bt_line,\"resolution_source\":\"$_bt_resolution_source\""
+        _bt_line="$_bt_line,\"resolution_source\":\"$(_boot_trace_escape_json "$_bt_resolution_source")\""
     fi
     if [ -n "$_bt_result" ]; then
-        _bt_line="$_bt_line,\"result\":\"$_bt_result\""
+        _bt_line="$_bt_line,\"result\":\"$(_boot_trace_escape_json "$_bt_result")\""
     fi
     if [ -n "$_bt_version" ]; then
-        _bt_line="$_bt_line,\"version\":\"$_bt_version\""
+        _bt_line="$_bt_line,\"version\":\"$(_boot_trace_escape_json "$_bt_version")\""
     fi
     if [ -n "$_bt_dispatch_path" ]; then
-        _bt_line="$_bt_line,\"path\":\"$_bt_dispatch_path\""
+        _bt_line="$_bt_line,\"path\":\"$(_boot_trace_escape_json "$_bt_dispatch_path")\""
     fi
     _bt_line="$_bt_line}"
     { printf '%s\n' "$_bt_line" >> "$_boot_trace_log_path"; } 2>/dev/null || true

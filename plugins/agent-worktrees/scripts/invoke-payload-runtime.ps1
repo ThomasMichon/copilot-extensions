@@ -74,9 +74,16 @@ function Invoke-BootTraceMaybePrune([string]$LogPath) {
         $tmp = "$LogPath.prune.$PID"
         $kept = [System.Collections.Generic.List[string]]::new()
         foreach ($line in [IO.File]::ReadLines($LogPath)) {
-            $idx = $line.IndexOf('"ts":"')
-            if ($idx -lt 0) { $kept.Add($line); continue }
-            $rest = $line.Substring($idx + 6)
+            # Tolerate both the compact form this launcher writes
+            # ("ts":"...") and the space-after-colon form Python's
+            # json.dumps (default separators) writes for every other
+            # activity.jsonl event ("ts": "...") -- matching only the
+            # compact form previously treated every real Python-emitted
+            # record as unparseable, retaining them forever (Copilot
+            # review, PR #3310).
+            $match = [regex]::Match($line, '"ts"\s*:\s*"')
+            if (-not $match.Success) { $kept.Add($line); continue }
+            $rest = $line.Substring($match.Index + $match.Length)
             $endIdx = $rest.IndexOf('"')
             if ($endIdx -lt 0) { $kept.Add($line); continue }
             $ts = $rest.Substring(0, $endIdx)

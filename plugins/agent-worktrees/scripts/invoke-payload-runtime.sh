@@ -59,13 +59,24 @@ boot_trace_log() {
     local log_dir="${log_path%/*}"
     [[ -d "$log_dir" ]] || mkdir -p "$log_dir" 2>/dev/null || return 0
     local line
-    line="{\"ts\":\"$(boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"agent-worktrees\",\"phase\":\"$phase\",\"t_ms\":$now_ms,\"pid\":$$"
-    [[ -n "${HOSTNAME:-}" ]] && line="$line,\"host\":\"$HOSTNAME\""
+    line="{\"ts\":\"$(boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"agent-worktrees\",\"phase\":\"$(boot_trace_escape_json "$phase")\",\"t_ms\":$now_ms,\"pid\":$$"
+    [[ -n "${HOSTNAME:-}" ]] && line="$line,\"host\":\"$(boot_trace_escape_json "$HOSTNAME")\""
     line="$line,\"source\":\"launcher\""
-    [[ -n "$dispatch_path" ]] && line="$line,\"path\":\"$dispatch_path\""
+    [[ -n "$dispatch_path" ]] && line="$line,\"path\":\"$(boot_trace_escape_json "$dispatch_path")\""
     line="$line}"
     { printf '%s\n' "$line" >> "$log_path"; } 2>/dev/null || true
     boot_trace_maybe_prune "$log_path"
+}
+
+# Escapes backslash and double-quote so an inherited/environment-sourced
+# value (HOSTNAME) can never produce a malformed JSONL line (Copilot
+# review, PR #3310). Bash builtin substitution -- no subprocess spawn,
+# unlike the plain-POSIX-sh templates' sed-based equivalent.
+boot_trace_escape_json() {
+    local v="$1"
+    v="${v//\\/\\\\}"
+    v="${v//\"/\\\"}"
+    printf '%s' "$v"
 }
 
 # Mirrors agent_worktrees.activity._maybe_prune/_prune's own retention window
@@ -86,9 +97,16 @@ boot_trace_maybe_prune() {
     local tmp="${log_path}.prune.$$"
     if LC_ALL=C awk -v cutoff="$cutoff" '
         {
-            i = index($0, "\"ts\":\"")
-            if (i == 0) { print; next }
-            rest = substr($0, i + 6)
+            # Tolerate both the compact form this shell writer produces
+            # ("ts":"...") and the space-after-colon form Python'"'"'s
+            # json.dumps (default separators) writes for every OTHER
+            # activity.jsonl event ("ts": "...") -- matching only the
+            # compact form previously treated every real Python-emitted
+            # record as unparseable, retaining them forever and defeating
+            # the whole point of this prune (Copilot review, PR #3310).
+            match($0, /"ts"[[:space:]]*:[[:space:]]*"/)
+            if (RSTART == 0) { print; next }
+            rest = substr($0, RSTART + RLENGTH)
             j = index(rest, "\"")
             if (j == 0) { print; next }
             ts = substr(rest, 1, j - 1)

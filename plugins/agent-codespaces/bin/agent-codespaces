@@ -46,6 +46,11 @@ _boot_trace_iso() {
     printf '1970-01-01T00:00:00+00:00\n'
 }
 
+# See posix-shim.tmpl's own copy of this helper for the full rationale.
+_boot_trace_escape_json() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
 _boot_trace_log() {
     [ -n "${_boot_trace_log_path:-}" ] || return 0
     _bt_phase="$1"
@@ -55,13 +60,13 @@ _boot_trace_log() {
     if [ ! -d "$_bt_log_dir" ]; then
         mkdir -p "$_bt_log_dir" 2>/dev/null || return 0
     fi
-    _bt_line="{\"ts\":\"$(_boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"$_plugin\",\"phase\":\"$_bt_phase\",\"t_ms\":$_bt_now_ms,\"pid\":$$"
+    _bt_line="{\"ts\":\"$(_boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"$(_boot_trace_escape_json "$_plugin")\",\"phase\":\"$(_boot_trace_escape_json "$_bt_phase")\",\"t_ms\":$_bt_now_ms,\"pid\":$$"
     if [ -n "${HOSTNAME:-}" ]; then
-        _bt_line="$_bt_line,\"host\":\"$HOSTNAME\""
+        _bt_line="$_bt_line,\"host\":\"$(_boot_trace_escape_json "$HOSTNAME")\""
     fi
     _bt_line="$_bt_line,\"source\":\"launcher\""
     if [ -n "$_bt_dispatch_path" ]; then
-        _bt_line="$_bt_line,\"path\":\"$_bt_dispatch_path\""
+        _bt_line="$_bt_line,\"path\":\"$(_boot_trace_escape_json "$_bt_dispatch_path")\""
     fi
     _bt_line="$_bt_line}"
     { printf '%s\n' "$_bt_line" >> "$_boot_trace_log_path"; } 2>/dev/null || true
