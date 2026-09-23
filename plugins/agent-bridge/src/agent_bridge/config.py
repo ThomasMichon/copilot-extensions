@@ -123,6 +123,20 @@ def _repo_config_layers(repo_root: Path) -> list[Path]:
     return layers
 
 
+#: agent-dispatch's own loopback coordinator directory (mirrors
+#: ``_read_agent_dispatch_token`` below, and ``agent_dispatch.config
+#: .routing_dir()`` on that plugin's own side -- agent-bridge doesn't import
+#: that package, so this constant is kept independently in sync by
+#: convention, same as the token-file path already was).
+_AGENT_DISPATCH_DIR = Path.home() / ".agent-dispatch"
+
+#: The historical fixed port agent-dispatch's coordinator used before its own
+#: move to OS-assigned ports -- kept only as the absolute last-resort tier in
+#: :func:`resolve_dispatch_url` (no explicit override *and* no live routing
+#: -table record), never assumed correct on its own.
+LEGACY_AGENT_DISPATCH_FALLBACK = "http://127.0.0.1:9847"
+
+
 def _read_agent_dispatch_token() -> str:
     """Best-effort read of ``AGENT_DISPATCH_TOKEN`` from the agent-dispatch
     coordinator's service env file (``~/.agent-dispatch/service.env``).
@@ -133,7 +147,7 @@ def _read_agent_dispatch_token() -> str:
     Returns "" when the file is absent or the token is unset (the loopback
     coordinator commonly runs unauthenticated).
     """
-    path = Path.home() / ".agent-dispatch" / "service.env"
+    path = _AGENT_DISPATCH_DIR / "service.env"
     try:
         for raw in path.read_text(encoding="utf-8").splitlines():
             line = raw.strip()
@@ -142,6 +156,38 @@ def _read_agent_dispatch_token() -> str:
     except OSError:
         pass
     return ""
+
+
+def resolve_dispatch_url(configured_url: str | None) -> str:
+    """Resolve the effective agent-dispatch coordinator base URL.
+
+    ``configured_url`` is the raw ``ServiceConfig.agent_dispatch_url`` value:
+
+    - ``None`` -- nothing configured (no YAML key, no ``AGENT_DISPATCH_URL``
+      env var) -- resolve from agent-dispatch's own zdd routing table
+      (``~/.agent-dispatch/active.json`` -- the exact discovery contract
+      agent-bridge itself already publishes for its own clients, see
+      ``self_retire``/``app.py``), healing to its ``previous`` generation and
+      verifying the endpoint is actually listening. Falls back to
+      :data:`LEGACY_AGENT_DISPATCH_FALLBACK` only when discovery also comes
+      up empty -- never assumed correct on its own (aperture-labs incident,
+      2026-09-22/23: a bare hardcoded default here silently broke a
+      downstream consumer the moment agent-dispatch's live port drifted
+      from it).
+    - ``""`` (explicit empty string) -- the documented way to disable the
+      coordinator lookup entirely; returned as-is, never reinterpreted as
+      "go discover".
+    - any other non-empty string -- an explicit override; returned as-is,
+      winning unconditionally over discovery.
+    """
+    if configured_url is not None:
+        return configured_url
+    from zdd.routing import read_active_endpoint
+
+    endpoint = read_active_endpoint(_AGENT_DISPATCH_DIR)
+    if endpoint is not None:
+        return endpoint.base_url
+    return LEGACY_AGENT_DISPATCH_FALLBACK
 
 
 def _apply_agent_dispatch_env_defaults(data: dict[str, object]) -> dict[str, object]:
@@ -162,6 +208,7 @@ def _apply_agent_dispatch_env_defaults(data: dict[str, object]) -> dict[str, obj
         if token:
             data["agent_dispatch_token"] = token
     return data
+
 
 
 def load_config() -> ServiceConfig:

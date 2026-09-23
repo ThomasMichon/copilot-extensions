@@ -46,6 +46,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from ..agent_dispatch_client import fetch_attachments, fetch_task
 from ..cold_store_views import cold_store_session_info, live_registration_to_session_info
+from ..config import resolve_dispatch_url
 from ..dispatch_task_resolution import candidate_session_ids, task_worktree_id
 from ..models import SessionInfo
 from ..session_manager import SessionManager
@@ -60,7 +61,7 @@ router = APIRouter(prefix="/api/v1/dispatch-tasks", tags=["dispatch-tasks"])
 @router.get("/{task_id}/session", response_model=SessionInfo)
 async def get_dispatch_task_session(task_id: str, request: Request) -> SessionInfo:
     cfg = request.app.state.config
-    base_url = getattr(cfg, "agent_dispatch_url", "") or ""
+    base_url = resolve_dispatch_url(getattr(cfg, "agent_dispatch_url", None))
     token = getattr(cfg, "agent_dispatch_token", "") or ""
     if not base_url:
         raise HTTPException(
