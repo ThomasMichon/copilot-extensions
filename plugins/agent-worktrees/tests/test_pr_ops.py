@@ -241,6 +241,39 @@ class TestPRHeadName:
         name = pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", topic="Hot Fix")
         assert name == "submit/add-auth-hot-fix-aaaa"
 
+    def test_snapshot_default_inserts_topic_when_supplied(self):
+        prcfg = cfg.PRConfig(enabled=True, branch_prefix="feature", head_scheme="snapshot")
+        name = pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", topic="Hot Fix!!")
+        assert name == "feature/add-auth-hot-fix-aaaa"
+
+    def test_refspec_default_inserts_topic_when_supplied(self):
+        prcfg = cfg.PRConfig(enabled=True, provider="github", head_scheme="refspec")
+        name = pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", topic="Mini Task")
+        assert name == "pr/add-auth-mini-task-aaaa"
+
+    def test_azure_devops_default_inserts_topic_when_supplied(self, tmp_path):
+        repo = tmp_path / "r"
+        repo.mkdir()
+        _git("init", cwd=repo)
+        _git("config", "user.email", "tmichon@example.com", cwd=repo)
+        prcfg = cfg.PRConfig(enabled=True, provider="azure-devops", head_scheme="refspec")
+        name = pr_ops.pr_head_name(
+            prcfg, "Some title", "wt-x-a1b2", cwd=str(repo), topic="Topic!! Name"
+        )
+        assert name == "user/tmichon/some-title-topic-name-a1b2"
+
+    def test_blank_topic_preserves_existing_default_output(self):
+        prcfg = cfg.PRConfig(enabled=True, provider="github", head_scheme="refspec")
+        assert pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", topic="") == \
+            "pr/add-auth-aaaa"
+        assert pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", topic="   ") == \
+            "pr/add-auth-aaaa"
+
+    def test_explicit_pattern_can_reference_topic(self):
+        prcfg = cfg.PRConfig(enabled=True, head_pattern="submit/{slug}-{topic}-{suffix}")
+        name = pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", topic="Hot Fix")
+        assert name == "submit/add-auth-hot-fix-aaaa"
+
     def test_sanitizes_unresolved_segments(self):
         # No cwd -> username falls back to "user"; no empty // segments.
         prcfg = cfg.PRConfig(enabled=True, head_pattern="user/{username}/{slug}-{suffix}")
