@@ -66,18 +66,18 @@ passes during this effort — treat it as a live command, not a frozen table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 8,534 | +7,534 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
+| 8,561 | +7,561 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Tenth dedicated slice landed: `status-monitor` now lives in `status_monitor_cli.py`, the resident runtime stays in `status_monitor_runtime.py`, and the entire no-project / bare-launch / Worktree Manager front door now lives in `front_door_cli.py`. Live `cmd_*` inventory is down to `cmd_launch`, `cmd_execution_leg`, excluded `cmd_copilot`, thin-wrapper `cmd_resolve`, and thin-wrapper `cmd_handoff_trace` — i.e. the remaining command-handler seams are effectively exhausted. |
 | 5,145 | +4,145 | `plugins/agent-index/scripts/cell-runtime.py` | |
 | 4,767 | +3,767 | `plugins/agent-codespaces/src/agent_codespaces/__main__.py` | CLI registration surface |
 | 3,946 | +2,946 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | Partial split landed: the claim/follow-up/orphanage ledger now lives in `tracking_claims.py`, asserted head/handoff/create primitives in `tracking_lifecycle.py`, and the hook/session-registry + repo-freshness helpers in `tracking_session_registry.py`. What's left is the persistence-heavy core: `WorktreeRecord`, YAML load/save/merge, locking/stamp-queue machinery, and the remaining parse/serialize compatibility helpers. |
 | 3,651 | +2,651 | `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` | |
-| 3,362 | +2,362 | `plugins/agent-dispatch/src/agent_dispatch/queue.py` | First dedicated slice landed: task/wake records, shared constants/helpers, and SQL select fragments moved to `queue_common.py`, and the card/steer/wake/detach band moved to `queue_steering.py`. `queue.py` stays the compatibility/composition root and import surface; remaining strong seams are the task lifecycle/transition band, then the create/claim/query/storage core. |
-| 2,662 | +1,662 | `plugins/agent-worktrees/src/agent_worktrees/sessions.py` | |
+| 2,704 | +1,704 | `plugins/agent-worktrees/src/agent_worktrees/sessions.py` | |
 | 2,583 | +1,583 | `plugins/agent-codespaces/src/agent_codespaces/config.py` | |
 | 2,429 | +1,429 | `tools/clean-room/scenarios/agent-index-installation-cells/scenario.py` | Clean-room fixture, not production code — lower urgency |
 | 2,369 | +1,369 | `tools/clean-room/scenarios/progressive-context-disclosure-baseline/fixture.py` | Clean-room fixture, not production code — lower urgency |
 | 2,307 | +1,307 | `plugins/agent-worktrees/src/agent_worktrees/pr_ops.py` | |
 | 2,207 | +1,207 | `plugins/agent-dispatch/src/agent_dispatch/supervisor_daemon.py` | |
+| 2,203 | +1,203 | `plugins/agent-dispatch/src/agent_dispatch/queue.py` | Second dedicated slice landed: the transition-heavy task lifecycle/ownership/progress band now lives in `queue_lifecycle.py` after the earlier `queue_common.py` + `queue_steering.py` extraction. `queue.py` stays the compatibility/composition root and import surface; the remaining strong seam is the create/claim/query/storage core. |
 | 2,195 | +1,195 | `plugins/agent-worktrees/src/agent_worktrees/reconcile.py` | |
 | 2,124 | +1,124 | `plugins/agent-worktrees/src/agent_worktrees/session_projection.py` | |
 | 2,107 | +1,107 | `plugins/agent-worktrees/src/agent_worktrees/config.py` | |
@@ -89,11 +89,10 @@ passes during this effort — treat it as a live command, not a frozen table):
 
 **Suggested next pick (Phase 2, next slice):** continue
 `plugins/agent-dispatch/src/agent_dispatch/queue.py` until it is near cap.
-The first slice proved the existing queue mixin pattern scales beyond the
-already-extracted schedule/routing/spawn/producer-fence bands: the remaining
-strong seams are the task lifecycle/transition band, then the create/claim/
-query/storage core. If the campaign pivots away from `queue.py`, the largest
-production offender overall remains
+Two slices have now proven the existing queue mixin pattern scales cleanly:
+the remaining strong seam is the create/claim/query/storage core (plus any
+small support helpers it wants extracted beside it). If the campaign pivots
+away from `queue.py`, the largest production offender overall remains
 `plugins/agent-worktrees/src/agent_worktrees/__main__.py`; within
 `agent-dispatch`, `supervisor.py` is now the plugin's largest remaining
 offender after `queue.py`.
@@ -260,6 +259,21 @@ Verbatim from the operator:
             all 6 sub-suites, `ruff check --select F,E9 plugins/agent-dispatch`
             green, `check-module-size.py` green with baseline refreshed, and
             `agent-dispatch` bumped to `0.1.2-dev184`.
+      - [x] `agent-dispatch/queue.py` slice 2 (3,362 live lines at slice
+            start) — extracted `queue_lifecycle.py` (963 lines) for the
+            transition-heavy task lifecycle/ownership/progress band:
+            `approve`, `start`, `complete(_with_outcome)`, suspend/resume/
+            release/hold/reset/yield/abandon, owner-session binding, activity,
+            progress, and the shared `_transition` primitive. Kept `queue.py`
+            as the compatibility/composition root and re-export surface, with
+            the historical helper constants still forwarded for existing
+            imports. Added `test_queue_lifecycle.py` as the direct-import /
+            MRO / `get_type_hints()` guard. Running line count:
+            `queue.py` **3362 -> 2203**. Full `run-plugin-tests.py
+            agent-dispatch` green across all 6 sub-suites, `ruff check --select
+            F,E9 plugins/agent-dispatch` green, `check-module-size.py` green
+            with baseline refreshed, and `agent-dispatch` bumped to
+            `0.1.2-dev185`.
       - [ ] The `tools/clean-room/scenarios/*` fixtures (2,429 / 2,369) —
             lower urgency (not production code), but validating a split
             means actually running the Docker-based clean-room scenario
@@ -491,6 +505,32 @@ the Phase 0 runbook, picked up as capacity allows.
   `python tools/check-module-size.py` passed, and
   `python tools/check-module-size.py --refresh-baseline` updated the shrink-only
   baseline. Version bump: `agent-dispatch` `0.1.2-dev183 -> 0.1.2-dev184`.
+
+### 2026-09-22 — `agent-dispatch/queue.py` slice 2: lifecycle / transition mixin
+- Continued the same large-class mixin split pattern rather than inventing a
+  second decomposition shape mid-campaign: with the support layer and
+  steering/wake band already extracted, the next cohesive responsibility band
+  left in `queue.py` was the transition-heavy task lifecycle itself.
+- Extracted `queue_lifecycle.py` (963 lines) for the methods centered on task
+  state transitions and ownership fences: `approve`, `start`,
+  `complete_with_outcome`, `suspend`, `resume`, `release_suspended`,
+  `set_hold`, `clear_hold`, `yield_task`, `abandon`, `reset`, `heartbeat`,
+  `bind_owner_session`, `set_activity`, `record_progress`, the
+  completion-owner helper, and the shared `_transition` primitive. Moved
+  `_task_transition_spec` into `queue_common.py` so the mixin could import it
+  as an ordinary top-level name instead of reaching back through `queue.py`.
+- Preserved the historical `agent_dispatch.queue` import surface by re-exporting
+  the moved compatibility helpers (`PROGRESS_PHASE_MAX`, `_PROGRESS_PR_MAX`,
+  `_TASK_DB_COLUMNS`) from the composition root after Copilot review surfaced
+  those exact regressions. Added `tests/test_queue_lifecycle.py` to guard the
+  new MRO composition, queue re-exports, and runtime-resolvable annotations.
+  Running line count: `queue.py` **3362 -> 2203**.
+- Validation: `python tools/run-plugin-tests.py agent-dispatch` passed across
+  all 6 sub-suites, `ruff check --select F,E9 plugins/agent-dispatch` passed,
+  `python tools/check-module-size.py` passed, and
+  `python tools/check-module-size.py --refresh-baseline` lowered the
+  shrink-only baseline again. Version bump: `agent-dispatch`
+  `0.1.2-dev184 -> 0.1.2-dev185`.
 
 ### 2026-09-16 — Kickoff + Phase 0
 - Effort created from an operator request following review of
