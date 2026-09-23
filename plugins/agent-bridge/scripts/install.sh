@@ -394,6 +394,12 @@ _uv_pip_install_resilient() {
         fi
         _warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
         sleep "$delay"
+        # Re-scrub before every retry, not just the first attempt: the failed
+        # attempt above (or a concurrent installer racing this one during the
+        # sleep) can recreate build/egg-info residue, which would otherwise
+        # shadow THIS retry's build the same way the pre-first-attempt scrub
+        # exists to prevent.
+        _scrub_payload_build_artifacts
         if out="$(uv pip install "$@" 2>&1)"; then
             printf '%s\n' "$out"
             _scrub_payload_build_artifacts

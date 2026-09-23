@@ -12,9 +12,14 @@ loop (aperture-labs#7281/#7279): a since-added function existed only in
 and importing it crashed the daemon on every startup attempt.
 
 ``_uv_pip_install_resilient`` must scrub ``$PLUGIN_DIR/build`` and
-``$PLUGIN_DIR/*.egg-info`` after every successful install (first-try or after
-a retry), and must NOT scrub (or need to) on a hard failure, since nothing
-was installed to leave residue from that attempt.
+``$PLUGIN_DIR/*.egg-info`` (including the src-layout location,
+``$PLUGIN_DIR/src/*.egg-info``) **before every attempt** (the first call and
+every retry) so pre-existing residue can never shadow that attempt's own
+build, and again **after every successful install** (first-try or after a
+retry) so the payload directory stays pristine for the next install. A hard
+failure (every attempt exhausted) still leaves the pre-attempt scrubs' effect
+in place -- there is no residue left over from a call that never installed
+anything -- but the wrapper does not scrub again itself on that path.
 """
 
 from __future__ import annotations
@@ -137,6 +142,47 @@ fi
     assert "EXIT:0" in result.stdout
     assert not (plugin_dir / "build").exists()
     assert not (plugin_dir / "some_pkg.egg-info").exists()
+
+
+def test_retry_rescrubs_residue_recreated_during_the_failed_attempt(tmp_path: Path) -> None:
+    """Regression: the first attempt failing (or a concurrent installer
+    racing the retry delay) can recreate build/egg-info residue -- the
+    retry must see a clean directory too, not just the very first call."""
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    counter_file = tmp_path / "attempt-count.txt"
+    counter_file.write_text("0", encoding="utf-8")
+    uv_stub = f"""
+uv() {{
+    n=$(cat '{counter_file}')
+    n=$((n + 1))
+    echo "$n" > '{counter_file}'
+    if [ "$n" -lt 2 ]; then
+        # Simulate residue appearing during the failed first attempt.
+        mkdir -p "{plugin_dir}/build/lib/some_pkg"
+        mkdir -p "{plugin_dir}/some_pkg.egg-info"
+        echo 'AssertionError: SRE module mismatch'
+        return 1
+    fi
+    if [ -e "{plugin_dir}/build" ] || [ -e "{plugin_dir}/some_pkg.egg-info" ]; then
+        echo 'residue still present at retry time' >&2
+        return 1
+    fi
+    echo 'Installed 1 package'
+    return 0
+}}
+sleep() {{ :; }}
+"""
+    extra = """
+if _uv_pip_install_resilient --python fake-python some-package --quiet; then
+    echo "EXIT:0"
+else
+    echo "EXIT:1"
+fi
+"""
+    result = _run_harness(plugin_dir, uv_stub, extra)
+    assert "EXIT:0" in result.stdout
+    assert "residue still present" not in result.stderr
 
 
 def test_hard_failure_leaves_no_crash_even_without_residue(tmp_path: Path) -> None:

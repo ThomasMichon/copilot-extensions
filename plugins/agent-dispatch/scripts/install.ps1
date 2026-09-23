@@ -973,6 +973,21 @@ function Install-Runtime {
         # (success or not) so the payload directory stays the pristine
         # clone it's supposed to be -- mirrors the POSIX installer's
         # cleanup in install.sh.
+        $scrubArtifacts = {
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+                (Join-Path $PluginDir 'build'), `
+                (Join-Path $PluginDir '*.egg-info'), `
+                (Join-Path $PluginDir 'src\*.egg-info')
+        }
+        # Scrub BEFORE installing too, not just after: residue already
+        # sitting in $PluginDir the moment this call starts (an earlier
+        # failed attempt, a marketplace resync, a concurrent process) is
+        # what shadows THIS build -- an after-only scrub only protects the
+        # NEXT install, not this one. Confirmed live (2026-09-23,
+        # copilot-extensions#3444): a truncated recipes_cli.py shipped this
+        # way on POSIX and crash-looped a production daemon for ~8h; the
+        # Windows path had the identical gap.
+        & $scrubArtifacts
         try {
             if (Get-Command uv -ErrorAction SilentlyContinue) {
                 $refreshFlags = @()
@@ -989,14 +1004,16 @@ function Install-Runtime {
                 if ($LASTEXITCODE -ne 0) {
                     return [pscustomobject]@{ Code = $LASTEXITCODE; Output = $preOut }
                 }
+                # The pre-pass above can itself recreate build/egg-info
+                # residue before the real install's own build starts below --
+                # re-scrub between the two calls so that build isn't shadowed
+                # by residue the pre-pass just left behind.
+                & $scrubArtifacts
                 $out = & $VenvPython -m pip install $Spec 2>&1 | Out-String
             }
             [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
         } finally {
-            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
-                (Join-Path $PluginDir 'build'), `
-                (Join-Path $PluginDir '*.egg-info'), `
-                (Join-Path $PluginDir 'src\*.egg-info')
+            & $scrubArtifacts
         }
     }
 
