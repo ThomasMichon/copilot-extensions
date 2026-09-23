@@ -15,9 +15,11 @@ from agent_bridge.config import (
     load_config,
     load_repo_bridge_config,
     remove_topology,
+    resolve_dispatch_url,
     save_config,
     validate_config,
     _apply_agent_dispatch_env_defaults,
+    LEGACY_AGENT_DISPATCH_FALLBACK,
 )
 from agent_bridge.models import ServiceConfig, TopologyProfile
 
@@ -495,3 +497,50 @@ class TestAgentDispatchEnvDefaults:
             {"agent_dispatch_url": "http://from-yaml:2"}
         )
         assert data["agent_dispatch_url"] == "http://from-yaml:2"
+
+
+class TestResolveDispatchUrl:
+    """resolve_dispatch_url() -- discovery for the previously hardcoded
+    agent-dispatch default (aperture-labs incident, 2026-09-22/23)."""
+
+    def test_explicit_override_wins_unconditionally(self, monkeypatch, tmp_path):
+        # Even with a live routing table present, an explicit non-empty
+        # override always wins -- never consulted.
+        monkeypatch.setattr(
+            "agent_bridge.config._AGENT_DISPATCH_DIR", tmp_path,
+        )
+        assert (
+            resolve_dispatch_url("http://127.0.0.1:12345")
+            == "http://127.0.0.1:12345"
+        )
+
+    def test_explicit_empty_string_disables_lookup(self, tmp_path, monkeypatch):
+        from zdd import routing
+
+        monkeypatch.setattr(
+            "agent_bridge.config._AGENT_DISPATCH_DIR", tmp_path,
+        )
+        monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+        routing.publish_active(tmp_path, bind="127.0.0.1", port=9290, version="v")
+
+        # An explicit "" is the documented disable -- never reinterpreted as
+        # "go discover", even though a live table exists.
+        assert resolve_dispatch_url("") == ""
+
+    def test_none_discovers_from_live_routing_table(self, tmp_path, monkeypatch):
+        from zdd import routing
+
+        monkeypatch.setattr(
+            "agent_bridge.config._AGENT_DISPATCH_DIR", tmp_path,
+        )
+        monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+        routing.publish_active(tmp_path, bind="127.0.0.1", port=9290, version="v")
+
+        assert resolve_dispatch_url(None) == "http://127.0.0.1:9290"
+
+    def test_none_falls_back_to_legacy_port_when_no_table(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "agent_bridge.config._AGENT_DISPATCH_DIR", tmp_path,
+        )
+
+        assert resolve_dispatch_url(None) == LEGACY_AGENT_DISPATCH_FALLBACK
