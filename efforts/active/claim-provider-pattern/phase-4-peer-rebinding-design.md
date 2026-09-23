@@ -160,6 +160,25 @@ ambient/legacy credentials just by making the strict path fail.
    remainder as `*callback_args` (the adapter builds its own
    `python -m <peer_module>` launch prefix internally and must never
    receive the legacy binstub path as if it were a module argument).
+   Do NOT derive the callback arguments by stripping a fixed number of
+   leading elements off `build_provider_argv()`'s tuple: on Windows,
+   `_windows_batch_argv()` prepends `ComSpec`, `/d`, `/s`, `/c`, and the
+   batch path ahead of the binstub, so a naive "drop element 0" strips
+   the wrong thing and forwards `/d /s /c ...` as if it were callback
+   arguments. Have the adapter accept the raw callback arguments directly
+   from each call site's own original inputs (the ref, `--apply`, etc. --
+   whatever each caller already knows before it ever builds a binstub
+   argv), not derived from `build_provider_argv()`'s already-wrapped
+   output; or introduce a structured resolver that returns
+   `(callback_args, legacy_command)` as two separate values rather than
+   one combined/wrapped tuple, so the adapter and the legacy path each
+   get exactly the shape they need. `run()` also needs a keyword-only
+   `cwd` parameter, preserved end to end: `claims_cli._dispatch_assigned_tasks()`
+   currently passes an explicit `cwd` to `subprocess.run` (agent-dispatch's
+   `worktree-status` defaults to the calling repository), so a peer-launch
+   call that drops `cwd` could silently query the wrong repo. Add a
+   regression test that launches from a non-default `cwd` and asserts the
+   peer process observed it.
 4. **Wire every launch path that currently uses `peer_env()`, not just
    `_run_callback()`.** The registry has (at least) three call sites that
    pass `peer_env()`'s stripped environment straight to `subprocess.run`
@@ -172,8 +191,9 @@ ambient/legacy credentials just by making the strict path fail.
    `peer_env()` path means that call path keeps stripping context and
    never gets the rebinding this design exists to add. In the adapter (or
    centralized runner): when the resolved provider's plugin id is one of
-   the registered peers, call `run(peer_id, *callback_args)`. On success,
-   use its stdout exactly as today. On `ContextRefused` (or any
+   the registered peers, call `run(peer_id, *callback_args, timeout=...,
+   cwd=...)` with each call site's own existing timeout/cwd values. On
+   success, use its stdout exactly as today. On `ContextRefused` (or any
    validation-boundary failure) when an explicit context WAS present,
    **do not fall back** — treat it as the callback's own execution failure
    (degrade to `{"available": false, "reason": ...}` exactly as a genuine
