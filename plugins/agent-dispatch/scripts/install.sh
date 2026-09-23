@@ -748,6 +748,19 @@ _ensure_runtime() {
     )
     _pip_install() {  # $1 = package spec
         local rc
+        # Scrub BEFORE installing too, not just after: residue left behind by
+        # an earlier attempt (a marketplace resync, a failed prior install, a
+        # concurrent process) is already sitting in "$PLUGIN_DIR" the moment
+        # THIS install starts, so an after-only scrub cleans up for next time
+        # but does nothing to stop setuptools' incremental-build mtime check
+        # from shadowing THIS build with that stale build/lib -- confirmed
+        # live (2026-09-23): a truncated recipes_cli.py (missing
+        # register_recipes_commands, present in the fresh src/ copy the whole
+        # time) got installed this way, crash-looping the supervisor daemon
+        # for ~8h before anyone noticed. See the after-install scrub below
+        # for the full #2863 background.
+        rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info \
+               "$PLUGIN_DIR"/src/*.egg-info 2>/dev/null || true
         if [[ "$have_uv" -eq 1 ]]; then
             local refresh_flags=()
             local pkg

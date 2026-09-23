@@ -1,4 +1,5 @@
-"""POSIX regression coverage for install.sh's post-install payload scrub.
+"""POSIX regression coverage for install.sh's build-artifact scrub (before AND
+after an install attempt, not just after).
 
 Installing FROM the pristine payload directory (``$PLUGIN_DIR``, under
 ``~/.copilot/installed-plugins/``) leaves setuptools' own ``build/lib`` +
@@ -173,3 +174,70 @@ fi
 """
     result = _run_harness(plugin_dir, uv_stub, extra)
     assert "EXIT:0" in result.stdout
+
+
+def _seed_src_layout_egg_info(plugin_dir: Path) -> None:
+    """A src-layout package's egg-info (``src/<pkg>.egg-info``) sits one
+    level deeper than the root-level glob reaches -- the same shadow that
+    survived every cleanup pass and broke a live agent-dispatch deployment
+    (copilot-extensions#3444) before being caught; agent-bridge is an
+    equally src-layout package and equally vulnerable."""
+    (plugin_dir / "src" / "some_pkg.egg-info").mkdir(parents=True)
+    (plugin_dir / "src" / "some_pkg.egg-info" / "PKG-INFO").write_text("stub\n", encoding="utf-8")
+
+
+def test_src_layout_egg_info_is_also_scrubbed(tmp_path: Path) -> None:
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    _seed_build_residue(plugin_dir)
+    _seed_src_layout_egg_info(plugin_dir)
+    uv_stub = """
+uv() { echo 'Installed 1 package'; return 0; }
+"""
+    extra = """
+if _uv_pip_install_resilient --python fake-python some-package --quiet; then
+    echo "EXIT:0"
+else
+    echo "EXIT:1"
+fi
+"""
+    result = _run_harness(plugin_dir, uv_stub, extra)
+    assert "EXIT:0" in result.stdout
+    assert not (plugin_dir / "build").exists()
+    assert not (plugin_dir / "some_pkg.egg-info").exists()
+    assert not (plugin_dir / "src" / "some_pkg.egg-info").exists()
+
+
+def test_preexisting_residue_is_gone_before_the_install_call_runs(tmp_path: Path) -> None:
+    """Regression (2026-09-23, copilot-extensions#3444): an after-only scrub
+    cleans up for the NEXT install but does nothing to stop stale
+    build/lib/*.egg-info -- already sitting in $PLUGIN_DIR from an earlier
+    attempt, a marketplace resync, or a concurrent process -- from shadowing
+    THIS install's own build via setuptools' incremental-build mtime check.
+    The stub `uv` below asserts the residue is already gone by the time
+    it's invoked, not merely gone by the time the wrapper returns."""
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    _seed_build_residue(plugin_dir)
+    _seed_src_layout_egg_info(plugin_dir)
+    uv_stub = f"""
+uv() {{
+    if [ -e "{plugin_dir}/build" ] || [ -e "{plugin_dir}/some_pkg.egg-info" ] \\
+        || [ -e "{plugin_dir}/src/some_pkg.egg-info" ]; then
+        echo 'residue still present at install time' >&2
+        return 1
+    fi
+    echo 'Installed 1 package'
+    return 0
+}}
+"""
+    extra = """
+if _uv_pip_install_resilient --python fake-python some-package --quiet; then
+    echo "EXIT:0"
+else
+    echo "EXIT:1"
+fi
+"""
+    result = _run_harness(plugin_dir, uv_stub, extra)
+    assert "EXIT:0" in result.stdout
+    assert "residue still present" not in result.stderr
