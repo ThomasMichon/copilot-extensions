@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "316a6495d3a22623fa31def355bd28c5e94aa062",
-    "plugin_version": "0.4.0-dev547",
-    "protocol_generation": 17,
+    "commit": "PLACEHOLDER",
+    "plugin_version": "PLACEHOLDER",
+    "protocol_generation": 18,
     "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
-    "source_git_blob": "510e2934cf8567a396c6cd4af95fc02c4328eae0",
-    "source_sha256": "5f1a578bb949bddc9bc8e3c80f9c67afb4b874484a4b2c4add703d481482fd1c"
+    "source_git_blob": "PLACEHOLDER",
+    "source_sha256": "PLACEHOLDER"
   },
   "response": {
     "status_code": 201,
@@ -13,7 +13,7 @@
       "session_id": "session-123",
       "name": "example-session",
       "status": "idle",
-      "protocol_version": 17,
+      "protocol_version": 18,
       "min_protocol_version": 1,
       "parity_fault_result": null
     }
