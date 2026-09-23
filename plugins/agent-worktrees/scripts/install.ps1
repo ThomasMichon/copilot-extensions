@@ -2639,22 +2639,21 @@ function Deploy-WslBinstub {
         return $false
     }
 
-    # Generate thin launcher with helpful error when not yet installed
+    # Generate thin launcher with helpful error when not yet installed. Routes
+    # through the WSL-side `agent-worktrees` tool binstub (deployed by its own
+    # install.sh's deploy_tool_binstub at $HOME/.local/bin/agent-worktrees) via
+    # `--project`, exactly like every other modern project binstub -- NOT the
+    # shared launch-session.sh script, which was retired from agent-worktrees
+    # in the phase-3b relocation (worktree-manager-control-plane/phase-3b-mux-
+    # relocation.md) and hasn't been deployed at its old install path since.
     $binstubScript = @"
 #!/usr/bin/env bash
 # agent-worktrees project binstub
 # Thin binstub for $ProjectName - deployed by agent-worktrees (Windows)
 # Requires agent-worktrees to be installed in WSL via the copilot-extensions plugin.
-# This thin launcher only starts a session (no CLI dispatch), so it passes the
-# project directly to the shared launcher.
-_launcher="`$HOME/.agent-worktrees/bin/launch-session.sh"
+_launcher="`$HOME/.local/bin/agent-worktrees"
 if [[ -x "`$_launcher" ]]; then
-    if grep -q -- 'elif \[\[ "`$arg" == "--project" \]\]' "`$_launcher"; then
-        exec "`$_launcher" --project "$ProjectName" "`$@"
-    fi
-    echo "agent-worktrees in WSL is too old for explicit project routing." >&2
-    echo "Update the copilot-extensions plugins in WSL, then retry." >&2
-    exit 1
+    exec "`$_launcher" --project "$ProjectName" "`$@"
 else
     echo "agent-worktrees is not installed in WSL." >&2
     echo "To set up:" >&2

@@ -315,10 +315,16 @@ def test_posix_binstub_has_no_pre_context_trace(monkeypatch, tmp_path: Path):
     assert "%N" not in content
 
 
-def test_wsl_binstub_refuses_legacy_launcher():
+def test_wsl_binstub_routes_through_tool_binstub_not_retired_launcher():
+    """The Windows->WSL project binstub must route through the modern,
+    self-provisioning `agent-worktrees` tool binstub (~/.local/bin/agent-worktrees),
+    never the phase-3b-retired shared `~/.agent-worktrees/bin/launch-session.sh`
+    (deleted in worktree-manager-control-plane/phase-3b-mux-relocation.md and
+    never deployed there since -- copilot-extensions#3433's sibling defect)."""
     install_ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
-    assert "grep -q -- 'elif \\[\\[ \"`$arg\" == \"--project\" \\]\\]'" in install_ps1
-    assert "agent-worktrees in WSL is too old for explicit project routing." in install_ps1
+    assert ".agent-worktrees/bin/launch-session.sh" not in install_ps1
+    assert '$HOME/.local/bin/agent-worktrees"' in install_ps1
+    assert "agent-worktrees is not installed in WSL." in install_ps1
 
 
 def _reg(monkeypatch, names: list[str]) -> None:
