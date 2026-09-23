@@ -2,6 +2,7 @@
 """PickerScreen mixin extracted from ``engine.py``."""
 from __future__ import annotations
 
+import contextlib
 import os
 import threading
 import time
@@ -129,6 +130,19 @@ class PickerScreenLoadingMixin:
         self.grid = {}
         self.applied = {}
         self._prof_unavailable = set()
+    def _load_config_cache_scope(self):
+        """``cfg.cached_load_config_scope()`` when the resolved engine has it.
+
+        The Manager resolves ``agent_worktrees`` as a separate, independently
+        versioned runtime slot (``_engine_runtime.ensure_engine_runtime``) --
+        an older installed engine that predates
+        ``cached_load_config_scope`` must not crash the live setup pass over
+        a pure latency optimization. Degrades to a no-op context (the
+        pre-existing, always-fresh ``load_config()`` behavior) when absent.
+        """
+        scope = getattr(cfg, "cached_load_config_scope", None)
+        return scope() if callable(scope) else contextlib.nullcontext()
+
     def _setup_live_async(self):
         """Publish bootstrap rows, then fill roster and pivots independently."""
         bootstrap_fn = getattr(self.src, "bootstrap_rows", None)
@@ -164,7 +178,7 @@ class PickerScreenLoadingMixin:
             # on a fleet with many registered repos). Memoize every
             # load_config() call in this pass so that cost is paid once, not
             # once per helper (#worktree-manager-picker-startup-latency).
-            with cfg.cached_load_config_scope():
+            with self._load_config_cache_scope():
                 snapshot_fn = getattr(self.src, "source_snapshot", None)
                 snapshot = snapshot_fn() if callable(snapshot_fn) else None
                 prepared = self._prepare_live_source(snapshot)
