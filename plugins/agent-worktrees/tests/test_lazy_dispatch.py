@@ -162,12 +162,16 @@ def test_cluster_free_modules_matches_regenerated_scan():
     `_core()` call-shapes in every dispatch-table module.
 
     Regenerates the set via the AST-based scanner (`_core_cluster_scan.py`,
-    which walks both the direct `_core().attr` chain and the assigned
-    `core = _core(); ... core.attr` shape, then classifies each accessed
-    name against __main__.py's own module-level bindings) and diffs it
-    against the checked-in version. Mirrors `_LAZY_DISPATCH_TABLE`'s own
-    drift-check test above; see this file's module docstring for why a
-    regex-only scan isn't trustworthy for this.
+    which walks the direct `_core().attr` chain, the assigned `core =
+    _core(); ... core.attr` shape, and each module's own `_core_helper()`
+    idiom, then classifies each accessed name against __main__.py's own
+    module-level bindings -- and separately checks whether any resolved
+    __main__-native function transitively touches a name bound only inside
+    `_load_full_command_surface()`) and diffs it against the checked-in
+    version. Mirrors `_LAZY_DISPATCH_TABLE`'s own drift-check test above; see
+    this file's module docstring for why a regex-only scan isn't
+    trustworthy for this, and `session_inspection_cli`'s exclusion (Journal,
+    2026-09-23) for why single-level static analysis alone isn't either.
     """
     candidates = frozenset(modname for modname, _ in m._LAZY_DISPATCH_TABLE.values())
     regenerated = _core_cluster_scan.compute_cluster_free_modules(candidates)
@@ -192,13 +196,65 @@ def test_cluster_free_command_skips_cluster_load(command, monkeypatch):
     assert calls == [], f"{command!r} ({module_name}) must not load the cluster"
 
 
-@pytest.mark.parametrize("command", ["get", "worktree-lineage"])
+@pytest.mark.parametrize(
+    "command, argv",
+    [
+        ("status", ["status", "--json"]),
+        ("claims", ["claims", "--json"]),
+        ("status-context", ["status-context"]),
+        ("status-segment", ["status-segment", "--json"]),
+        ("profiles", ["profiles", "get", "--json"]),
+    ],
+)
+def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, monkeypatch):
+    """Actually RUN each cluster-free command's real handler (not just
+    `--help`, which only builds/prints the parser and never executes the
+    handler body at all -- Copilot review correctly flagged that the
+    original version of this test suite never caught this).
+
+    A prior version of this change also marked `session_inspection_cli`
+    cluster-free; its `session-lifecycle` handler transitively referenced
+    `cmd_register_session`/`_aw_runtime_home` -- names bound only inside
+    `_load_full_command_surface()` -- and raised a bare `NameError` at
+    runtime once the blanket cluster load was skipped. That class of bug is
+    invisible to a scanner that only inspects the CLI submodule's own
+    `_core()` accesses (see `_core_cluster_scan.find_transitively_unsafe_
+    functions`); the only fully reliable check is running the real handler.
+    A `RuntimeError` about no active project being resolved is expected and
+    fine here (`_dispatch_lazy` bypasses `main()`'s own project-resolution
+    step) -- what this asserts is the ABSENCE of `NameError`/`AttributeError`
+    and that the cluster never loads.
+    """
+    module_name, _ = m._LAZY_DISPATCH_TABLE[command]
+    assert module_name in m._CLUSTER_FREE_MODULES
+
+    calls = []
+    monkeypatch.setattr(m, "_ensure_cluster_loaded", lambda: calls.append(1))
+    monkeypatch.setattr(m, "_load_full_command_surface", lambda: calls.append(1))
+
+    try:
+        rc = m._dispatch_lazy(command, argv)
+        assert isinstance(rc, int)
+    except RuntimeError as exc:
+        assert "No active project could be resolved" in str(exc)
+    except (NameError, AttributeError):
+        raise AssertionError(
+            f"{command!r} ({module_name}) hit a transitive dependency on a "
+            "deferred global that _CLUSTER_FREE_MODULES incorrectly assumed safe"
+        )
+
+    assert calls == [], f"{command!r} ({module_name}) must not load the cluster"
+
+
+@pytest.mark.parametrize("command", ["get", "worktree-lineage", "session-lifecycle"])
 def test_not_yet_decoupled_command_still_loads_cluster(command, monkeypatch):
     """A command whose module is NOT in `_CLUSTER_FREE_MODULES` must still
     load the cluster -- the safe, unchanged Phase 1 behavior. Proves the
     differentiation `_dispatch_lazy()` now makes is real (not vacuously
     always-skip), and that a not-yet-decoupled command takes on zero
-    incremental risk from Phase 1b."""
+    incremental risk from Phase 1b. `session-lifecycle` is a deliberate
+    regression guard: it was briefly (incorrectly) cluster-free earlier in
+    this change -- see the previous test's own docstring."""
     module_name, _ = m._LAZY_DISPATCH_TABLE[command]
     assert module_name not in m._CLUSTER_FREE_MODULES
 

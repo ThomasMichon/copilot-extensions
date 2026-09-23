@@ -5690,7 +5690,27 @@ def _run_session_lifecycle(
             plugin_related_anchors=plugin_related_anchors,
         )
         try:
-            cmd_register_session(registration_args)
+            # Prefer an already-bound `cmd_register_session` global (either
+            # a real one from `_load_full_command_surface()`, or a test's
+            # own `monkeypatch.setattr(main, "cmd_register_session", ...)`
+            # override -- `test_hook_ipc.py`'s
+            # `test_combined_lifecycle_preserves_side_effect_snapshots`
+            # relies on exactly this). `globals().get()` is a plain dict
+            # lookup, so it can never trigger `__getattr__`'s eager
+            # `_load_full_command_surface()` the way `getattr(module, name)`
+            # would. Falling back to a direct import covers the case this
+            # global genuinely isn't bound yet: a fast-tracked, cluster-free
+            # caller (session_inspection_cli's `session-lifecycle`
+            # dispatch is NOT in `_CLUSTER_FREE_MODULES` today specifically
+            # because of this dependency chain, but this fallback also
+            # protects any future caller that reaches here before the
+            # cluster loads).
+            _register_session_fn = globals().get("cmd_register_session")
+            if _register_session_fn is None:
+                from . import session_binding_cli as _session_binding_cli
+
+                _register_session_fn = _session_binding_cli.cmd_register_session
+            _register_session_fn(registration_args)
         except Exception as exc:
             diagnostics += f"[agent-worktrees] Session registration failed: {exc}\n"
         registration_output = (
@@ -7386,31 +7406,42 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 # A module is "cluster-free" when every attribute any of its own CLI
 # submodule handlers reach via `_core()` (this __main__ module) is available
 # WITHOUT running `_load_full_command_surface()` -- either because the
-# module never calls `_core()` at all, or because every name it reaches is
-# bound at __main__ module level BEFORE the deferred ~35-submodule import
-# block (i.e. it's a plain top-level function/class/import in __main__.py,
-# not one of the `name = owning_module.attr` reexports that function builds).
+# module never calls `_core()` at all, or because every name it reaches
+# (directly, via an assigned `core = _core()` var, or via its own
+# `_core_helper()` idiom -- see `tests/_core_cluster_scan.py`'s own
+# docstring for why `_core_helper` is always safe post-fix) is bound at
+# __main__ module level BEFORE the deferred ~35-submodule import block
+# (i.e. it's a plain top-level function/class/import in __main__.py, not one
+# of the `name = owning_module.attr` reexports that function builds).
 # This is Phase 1b of the agent-cli-lazy-dispatch effort: `_dispatch_lazy()`
 # skips `_ensure_cluster_loaded()` entirely for these modules, so their
 # commands no longer pay the cluster's import cost (previously EVERY
 # fast-tracked command paid it, via the blanket call that used to run before
 # any dispatch -- see that call's own comment). Regenerate and diff this set
-# with the `plugins/agent-worktrees/scan_core_cluster2.py` AST-based scanner
-# (walks every `_core().attr` and `core = _core(); ... core.attr` call shape,
-# then classifies each accessed name against __main__.py's own module-level
-# bindings) before trusting it to still be accurate -- do NOT hand-edit this
-# set without re-running that scan, and do NOT reuse a regex-only scan (an
+# with `tests/_core_cluster_scan.py`'s `compute_cluster_free_modules()`
+# before trusting it to still be accurate -- do NOT hand-edit this set
+# without re-running that scan, and do NOT reuse a regex-only scan (an
 # earlier one shipped a live `create-pr` regression; see the effort's
-# Journal). A module NOT in this set is unaffected by Phase 1b: it still
-# calls `_ensure_cluster_loaded()` exactly as Phase 1 landed it, so it takes
-# on zero incremental risk from this change.
+# Journal). IMPORTANT: the scanner only proves a module's OWN `_core()`
+# accesses are safe -- it cannot see whether a name that resolves cleanly
+# (e.g. `_core()._run_session_lifecycle`) itself has a transitive body
+# dependency on a name only bound inside `_load_full_command_surface()`.
+# `session_inspection_cli` was excluded for exactly this reason: its
+# `session-lifecycle` handler reaches `_run_session_lifecycle`, whose body
+# referenced deferred globals (`cmd_register_session`, `_aw_runtime_home`)
+# -- found only by actually *running* the command, not by static analysis.
+# Adding a module to this set requires exercising every one of its real
+# commands end-to-end (not just `--help`, which never runs the handler
+# body), not just a clean scanner result. A module NOT in this set is
+# unaffected by Phase 1b: it still calls `_ensure_cluster_loaded()` exactly
+# as Phase 1 landed it, so it takes on zero incremental risk from this
+# change.
 _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "claims_cli",
     "maintenance_cli",
     "pane_lifecycle",
     "picker_profiles_cli",
     "reclaim_cli",
-    "session_inspection_cli",
     "status_bar_cli",
     "status_cli",
 })
