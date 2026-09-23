@@ -76,6 +76,29 @@ CLAIM_PROVIDERS_SUBDIR = "claim-providers"
 REGISTRY_NAME = "claim-providers"
 _CALLBACK_TIMEOUT_SECONDS = 15.0
 
+#: cmd.exe's own structurally-significant characters, scanned for in a
+#: resolved ``.cmd``/``.bat`` path before ever routing it through
+#: ``cmd.exe /c`` (see ``_resolve_command``'s own doc comment for why
+#: ordinary ``subprocess`` argv quoting cannot make this safe on its own).
+_CMD_METACHAR_RE = re.compile(r'[&|<>^%"]')
+
+
+#: Namespace and identifier characters this module ever passes through to a
+#: callback command line. Deliberately conservative (matches typical
+#: CodeSpace/container/task-id shapes: alnum plus a small, unambiguous
+#: punctuation set) -- rejecting anything else, rather than trying to escape
+#: it, is what actually closes cmd.exe metacharacter injection at the
+#: source rather than merely narrowing it. The FIRST character may not be
+#: `-`: a leading-dash identifier (e.g. a ref like "codespace:--apply")
+#: could otherwise be parsed as an option/flag by a callback's own CLI
+#: argument parser instead of a positional ref -- for
+#: ``resolve_claim_reclaim`` specifically, a caller-controlled
+#: ``"--apply"`` identifier would let a dry-run call
+#: (``apply=False``) still append a literal ``--apply`` token the
+#: callback's own parser could interpret as ITS ``--apply`` flag,
+#: silently turning a preview into a real reclaim.
+_SAFE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*$")
+
 
 class ManifestError(ValueError):
     """A claim-provider manifest was structurally invalid."""
@@ -117,6 +140,12 @@ def parse_manifest(data: object, *, source_path: str = "") -> ClaimProviderManif
     ns = ns.strip().rstrip(":")
     if not ns:
         raise ManifestError("`namespace` must not be empty after stripping ':'")
+    if not _SAFE_TOKEN_RE.match(ns):
+        raise ManifestError(
+            "`namespace` must match the safe-token pattern (matches "
+            "split_namespaced_ref's own validation, so a valid manifest "
+            "namespace can always actually be selected by a ref)"
+        )
 
     def _argv(field: str) -> tuple[str, ...] | None:
         value = data.get(field)
@@ -216,6 +245,25 @@ def _resolve_command(command: tuple[str, ...], *, root: Path) -> tuple[str, ...]
         raise TargetUnusableError(
             "command resolves outside the identity-verified plugin root"
         ) from exc
+    # A `.cmd`/`.bat` command is routed through cmd.exe on Windows (see
+    # `_windows_batch_argv`), whose own lexer treats `& | < > ^ %` and `"`
+    # as structurally significant REGARDLESS of any quoting `subprocess`
+    # itself applies when building the actual CreateProcess command line
+    # (`subprocess`'s quoting assumes the target parses via
+    # CommandLineToArgvW-style conventions, which cmd.exe's own `/C`
+    # parsing does not use). A path containing one of these characters
+    # could therefore split or reinterpret the command line even though
+    # the claim ref's own namespace/identifier are already validated
+    # elsewhere -- refuse outright (fail closed) rather than let it reach
+    # cmd.exe at all.
+    if (
+        os.name == "nt"
+        and canonical.suffix.casefold() in (".cmd", ".bat")
+        and _CMD_METACHAR_RE.search(str(canonical))
+    ):
+        raise TargetUnusableError(
+            "command path contains a cmd.exe metacharacter and cannot be safely invoked"
+        )
     return (str(canonical), *command[1:])
 
 
@@ -426,15 +474,6 @@ def _run_callback(
         if value is not None and not isinstance(value, str):
             return None
     return data
-
-
-#: Namespace and identifier characters this module ever passes through to a
-#: callback command line. Deliberately conservative (matches typical
-#: CodeSpace/container/task-id shapes: alnum plus a small, unambiguous
-#: punctuation set) -- rejecting anything else, rather than trying to escape
-#: it, is what actually closes the injection risk described below rather
-#: than merely narrowing it.
-_SAFE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 
 
 def split_namespaced_ref(ref: str) -> tuple[str, str] | None:

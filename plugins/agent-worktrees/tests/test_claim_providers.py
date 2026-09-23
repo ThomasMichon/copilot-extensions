@@ -107,6 +107,21 @@ def test_parse_manifest_rejects_a_namespace_that_is_only_a_colon():
         cp.parse_manifest({"schema_version": 1, "namespace": ":", "status_command": ["x"]})
 
 
+def test_parse_manifest_rejects_a_namespace_with_unsafe_characters():
+    """Regression: a manifest namespace was previously only checked for
+    non-emptiness, so e.g. "foo&bar" or "foo:bar" would be accepted as
+    active yet could never actually be selected by split_namespaced_ref's
+    own (stricter) validation -- silently degrading every claim in that
+    namespace as if no provider were registered at all, rather than
+    reporting the manifest itself as invalid."""
+    with pytest.raises(cp.ManifestError, match="namespace"):
+        cp.parse_manifest({"schema_version": 1, "namespace": "foo&bar", "status_command": ["x"]})
+    with pytest.raises(cp.ManifestError, match="namespace"):
+        cp.parse_manifest({"schema_version": 1, "namespace": "foo:bar", "status_command": ["x"]})
+    with pytest.raises(cp.ManifestError, match="namespace"):
+        cp.parse_manifest({"schema_version": 1, "namespace": "-leadingdash", "status_command": ["x"]})
+
+
 # --- discover_claim_providers --------------------------------------------
 
 
@@ -258,6 +273,33 @@ def test_symlinked_bin_directory_degrades_to_target_unusable(tmp_path):
     assert findings[0].reason == "target-unusable"
 
 
+def test_resolve_command_rejects_cmd_metacharacter_in_a_batch_path(tmp_path, monkeypatch):
+    """Regression: cmd.exe's own lexer treats & | < > ^ % " as
+    structurally significant regardless of any quoting subprocess itself
+    applies when building the actual CreateProcess command line -- a
+    resolved .cmd path containing one of these characters must be refused
+    outright rather than ever routed through cmd.exe /c."""
+    monkeypatch.setattr(cp.os, "name", "nt")
+    plugin_root = tmp_path / "agent-codespaces & evil"
+    bin_dir = plugin_root / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "agent-codespaces.cmd").write_text("@exit /b 0\r\n")
+
+    with pytest.raises(cp.TargetUnusableError, match="metacharacter"):
+        cp._resolve_command(("agent-codespaces",), root=plugin_root)
+
+
+def test_resolve_command_accepts_a_batch_path_with_no_metacharacters(tmp_path, monkeypatch):
+    monkeypatch.setattr(cp.os, "name", "nt")
+    plugin_root = tmp_path / "agent-codespaces"
+    bin_dir = plugin_root / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "agent-codespaces.cmd").write_text("@exit /b 0\r\n")
+
+    resolved = cp._resolve_command(("agent-codespaces",), root=plugin_root)
+    assert resolved[0].endswith("agent-codespaces.cmd")
+
+
 def test_duplicate_namespace_keeps_first_and_records_a_finding(tmp_path):
     root_a, plugins_root = _installed_plugins_tree(tmp_path, "agent-codespaces")
     root_b, _ = _installed_plugins_tree(tmp_path, "agent-containers")
@@ -319,6 +361,14 @@ def test_duplicate_namespace_keeps_first_and_records_a_finding(tmp_path):
         ("codespace:foo%PATH%", None),
         ('codespace:foo"bar', None),
         ("codespace:foo bar", None),
+        # Regression: a leading dash could be parsed as an option/flag by
+        # a callback's own CLI argument parser instead of a positional
+        # ref -- most notably "--apply" itself, which resolve_claim_reclaim
+        # would otherwise append literally before its own optional
+        # "--apply" flag.
+        ("codespace:--apply", None),
+        ("codespace:-x", None),
+        ("-codespace:my-box-1", None),
     ],
 )
 def test_split_namespaced_ref(ref, expected):
@@ -466,6 +516,35 @@ def test_resolve_claim_reclaim_passes_apply_flag(tmp_path, monkeypatch):
     result = cp.resolve_claim_reclaim("codespace:my-box-1", apply=True, plugins_root=tmp_path)
     assert result == {"available": True, "reclaimed": True}
     assert captured["command"] == ("agent-codespaces", "claim-reclaim", "my-box-1", "--apply")
+
+
+def test_resolve_claim_reclaim_rejects_a_leading_dash_identifier_in_dry_run(tmp_path, monkeypatch):
+    """Regression: a ref like "codespace:--apply" must never reach the
+    callback command line at all -- previously it would append a literal
+    "--apply" identifier BEFORE the real conditional --apply flag,
+    letting caller-controlled input make a dry-run call
+    (apply=False) still emit "claim-reclaim --apply", indistinguishable
+    from the genuine flag to the callback's own CLI parser."""
+    captured = {}
+
+    def fake_run_callback(command, *, timeout, required_bool_field):
+        captured["command"] = command
+        return {"reclaimed": True}
+
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            reclaim_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    monkeypatch.setattr(cp, "_run_callback", fake_run_callback)
+    result = cp.resolve_claim_reclaim("codespace:--apply", apply=False, plugins_root=tmp_path)
+    assert result["available"] is False
+    assert "command" not in captured  # the callback must never have been invoked at all
 
 
 def test_resolve_claim_reclaim_omits_apply_flag_in_dry_run(tmp_path, monkeypatch):
