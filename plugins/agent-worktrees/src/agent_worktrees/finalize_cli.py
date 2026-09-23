@@ -78,6 +78,11 @@ def add_parsers(sub) -> None:
     p.add_argument("--title", default=None, help="Title for the squashed commit / PR slug")
     p.add_argument("--branch", default=None, help="Override the generated feature branch name")
     p.add_argument(
+        "--topic",
+        default=None,
+        help="Optional mini-task token folded into the generated default branch name",
+    )
+    p.add_argument(
         "--repo",
         default=None,
         help="Target repo 'owner/name' for the PR (default: the worktree repo)",
@@ -454,6 +459,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 config,
                 title=args.title,
                 branch=args.branch,
+                topic=getattr(args, "topic", None),
                 target_repo=getattr(args, "repo", None),
                 new=getattr(args, "new", False),
                 body=body,
@@ -491,6 +497,8 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             remote = result.get("remote", "")
             provider = result.get("provider", "")
             output.ok(f"Feature branch '{branch}' pushed to {remote}.")
+            if result.get("topic_note"):
+                output.warn(result["topic_note"])
             print(
                 f"  base: {result.get('base_sha', '')[:10]}  "
                 f"head: {result.get('head_sha', '')[:10]}"
