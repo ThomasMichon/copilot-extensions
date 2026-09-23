@@ -30,6 +30,7 @@ from .sockio import (
     _TCP_HOST,
     _endpoint_path,
     _read_endpoint,
+    default_home_dir,
     default_socket_path,
     serve_socket_if_available,
 )
@@ -50,6 +51,7 @@ __all__ = [
     "_read_endpoint",
     "aclose_writer",
     "call_via_socket",
+    "default_home_dir",
     "default_socket_path",
     "list_tools_via_socket",
     "open_attached_session",
