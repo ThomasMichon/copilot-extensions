@@ -1062,11 +1062,13 @@ class TestCachedLoadConfigScope:
         assert len(calls) == 2  # a fresh scope never inherits a prior one's cache
 
     def test_scope_exception_still_resets_the_cache(self, tmp_path):
+        from agent_worktrees import config_cache
+
         with pytest.raises(RuntimeError):
             with cfg.cached_load_config_scope():
-                assert cfg._load_config_cache.get() is not None
+                assert config_cache._scope_cache.get() is not None
                 raise RuntimeError("boom")
-        assert cfg._load_config_cache.get() is None
+        assert config_cache._scope_cache.get() is None
 
 
 class TestLayeredConfig:
