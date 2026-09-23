@@ -23,6 +23,7 @@ import yaml
 
 from . import config_migrations, project_state, registry_paths
 from .codename_config import CodenameConfig, parse_codename
+from .config_cache import cached_load_config_scope, memoize_in_scope  # noqa: F401 (re-exported)
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
@@ -948,7 +949,7 @@ def legacy_inrepo_config_path(anchor: str | Path) -> Path:
     return Path(anchor) / LEGACY_INREPO_CONFIG_DIRNAME / GLOBAL_CONFIG_FILENAME
 
 
-def load_config(
+def _load_config_uncached(
     path: Path | None = None,
     *,
     include_control_plane_related_pr: bool = True,
@@ -1211,11 +1212,26 @@ def load_config(
     )
 
 
+def load_config(
+    path: Path | None = None,
+    *,
+    include_control_plane_related_pr: bool = True,
+    project: str | None = None,
+) -> Config:
+    """Load config; memoized inside ``cached_load_config_scope()`` (see
+    :mod:`agent_worktrees.config_cache`), else identical to the unwrapped loader."""
+    return memoize_in_scope(
+        _load_config_uncached,
+        path,
+        include_control_plane_related_pr=include_control_plane_related_pr,
+        project=project,
+    )
+
+
 def load_project_config(
     name: str, *, include_control_plane_related_pr: bool = True
 ) -> Config:
     """Load one project's layered config without inheriting caller identity.
-
     Args:
         name: Project identity to load.
         include_control_plane_related_pr: Forwarded to :func:`load_config`.

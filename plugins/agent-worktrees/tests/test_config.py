@@ -975,6 +975,102 @@ class TestControlPlaneRelatedPRTier:
         assert got["ext"]["merge_actor"] == "submitter-direct"
 
 
+class TestCachedLoadConfigScope:
+    """``cached_load_config_scope()`` memoizes ``load_config()`` -- opt-in only,
+    so every other caller keeps the ordinary always-fresh (cache-miss) behavior."""
+
+    def _write_machine(self, path: Path, anchor: Path) -> None:
+        path.write_text(
+            "repo_name: ext\n"
+            "srcroot: /tmp/src\n"
+            "machine: anomalous-potato\n"
+            "platform: wsl\n"
+            "repos:\n"
+            "  ext:\n"
+            f"    anchor: {anchor}\n"
+            "    worktree_root: /tmp/src/.worktrees/ext\n"
+            "    default_branch: main\n"
+            "    remote: origin\n"
+        )
+
+    def test_outside_scope_every_call_is_a_miss(self, tmp_path, monkeypatch):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(cfgfile, anchor)
+        calls = []
+        orig = cfg._load_config_uncached
+        monkeypatch.setattr(
+            cfg, "_load_config_uncached",
+            lambda *a, **k: (calls.append(1), orig(*a, **k))[1],
+        )
+        cfg.load_config(cfgfile)
+        cfg.load_config(cfgfile)
+        assert len(calls) == 2  # no scope active -> always a fresh call
+
+    def test_inside_scope_repeat_calls_are_memoized(self, tmp_path, monkeypatch):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(cfgfile, anchor)
+        calls = []
+        orig = cfg._load_config_uncached
+        monkeypatch.setattr(
+            cfg, "_load_config_uncached",
+            lambda *a, **k: (calls.append(1), orig(*a, **k))[1],
+        )
+        with cfg.cached_load_config_scope():
+            first = cfg.load_config(cfgfile)
+            second = cfg.load_config(cfgfile)
+        assert len(calls) == 1  # second call hit the cache
+        assert first is second  # same Config instance, not just equal
+
+    def test_scope_keys_by_full_call_signature(self, tmp_path, monkeypatch):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(cfgfile, anchor)
+        calls = []
+        orig = cfg._load_config_uncached
+        monkeypatch.setattr(
+            cfg, "_load_config_uncached",
+            lambda *a, **k: (calls.append((a, k)), orig(*a, **k))[1],
+        )
+        with cfg.cached_load_config_scope():
+            cfg.load_config(cfgfile)
+            cfg.load_config(cfgfile, include_control_plane_related_pr=False)
+            cfg.load_config(cfgfile, project="other")
+        # Three distinct signatures -> three real loads, none reused across
+        # differently-parameterized calls.
+        assert len(calls) == 3
+
+    def test_scope_does_not_leak_across_scopes(self, tmp_path, monkeypatch):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(cfgfile, anchor)
+        calls = []
+        orig = cfg._load_config_uncached
+        monkeypatch.setattr(
+            cfg, "_load_config_uncached",
+            lambda *a, **k: (calls.append(1), orig(*a, **k))[1],
+        )
+        with cfg.cached_load_config_scope():
+            cfg.load_config(cfgfile)
+        with cfg.cached_load_config_scope():
+            cfg.load_config(cfgfile)
+        assert len(calls) == 2  # a fresh scope never inherits a prior one's cache
+
+    def test_scope_exception_still_resets_the_cache(self, tmp_path):
+        from agent_worktrees import config_cache
+
+        with pytest.raises(RuntimeError):
+            with cfg.cached_load_config_scope():
+                assert config_cache._scope_cache.get() is not None
+                raise RuntimeError("boom")
+        assert config_cache._scope_cache.get() is None
+
+
 class TestLayeredConfig:
     """Three-tier merge: global < in-repo < machine-local; optional machine file."""
 
