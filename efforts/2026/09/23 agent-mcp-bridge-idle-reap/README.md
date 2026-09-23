@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** `worktree/lambda-core-win-20260923-030014-3867` (this worktree); may split to a fresh worktree per phase
 - **Created:** 2026-09-23
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
 - **Vision:** `visions/plugin-services` §`work-coalescing-singleton`, §`process-count-scales-with-services-not-sessions` — reality has one `agent-mcp bridge` process (+ its stdio-heavy upstream child, e.g. `bunx gitea-mcp`) per **sub-agent delegation**, unbounded and never reclaimed for the life of the top-level session, directly violating "process count scales with services, not sessions/invocations." **Vision-closing.**
 - **Umbrella issue:** [tmichon/aperture-labs#3876](https://gitea.michon.ski/tmichon/aperture-labs/issues/3876) (bug — the reap gap itself; 3 field-evidence comments, WSL 2026-07-31/08-18/08-22 + Windows 2026-09-23)
 - **Related:**
@@ -184,14 +184,20 @@ issue)."*
   Python; only the launch-chain shape differs).
 
 ### Phase 4 — Land + close the loop
-- [ ] PR through copilot-extensions' normal review/version-bump flow.
-- [ ] Comment on tmichon/aperture-labs#3876 with the fix version, close it.
-- [ ] Cross-reference from #3877 (still open — the idle self-reap bounds
+- [x] PR through copilot-extensions' normal review/version-bump flow: PR
+  #3406, squash-merged as `c7e8fd7a5` (agent-mcp `0.2.0-dev137`). Blocked
+  twice on unrelated pre-existing main-red guard failures along the way
+  (tmichon/aperture-labs#7491, then #7495); both diagnosed as out-of-scope
+  drift on `main` rather than this effort's own content, and picked up as
+  trivial one-line fixes only where genuinely blocking (see Journal).
+- [x] Comment on tmichon/aperture-labs#3876 with the fix version, close it:
+  commented (id 125682) and closed.
+- [x] Cross-reference from #3877 (still open — the idle self-reap bounds
   instance *count*; #3877's warmth daemon is the separate, still-valid fix
-  for per-instance upstream duplication) and from
-  `efforts/active/mcp-to-cli-migration` (aperture-labs) noting this is a
-  stopgap, not a substitute for eventually migrating `gitea`/`home-assistant`
-  off MCP frontmatter entirely.
+  for per-instance upstream duplication): commented (id 125684), left open
+  as intended. `efforts/active/mcp-to-cli-migration` (aperture-labs) is the
+  longer-horizon alternative; not touched by this effort, noted for context
+  only.
 
 ## Validation Plan
 
@@ -263,3 +269,43 @@ tasks), landed as PR ThomasMichon/copilot-extensions#3406.
   still red, Phase 2 implementation work can still proceed locally
   (uncommitted/on this branch) while the PR waits, but do not force-merge
   around a genuinely broken CI gate.
+
+### 2026-09-23 — Phase 1 design resolved, Phase 2/3 implemented, PR merged, closed the loop
+- Resumed via context-handoff. #7491 was already fixed upstream (PR #3407
+  widened the agent_codespaces module-size baseline) by the time of resume;
+  rebased and confirmed CI unblocked on that front.
+- Resolved Phase 1's remaining design questions by reading `serve.py`
+  directly (not guessed): mirrored its `_maybe_idle_evict` dual-gate exactly
+  -- elapsed idle time AND zero live work (there, attached sessions/warm
+  pool size; here, `BridgeSession.has_pending`, a new property exposing the
+  session's existing `_tasks` in-flight-dispatch set). Default 300s, matching
+  `serve.py`'s own `_DEFAULT_IDLE_TIMEOUT`.
+- Implemented Phase 2: `BridgeConfig.idle_timeout` (config field +
+  `AGENT_MCP_BRIDGE_IDLE_TIMEOUT` env fallback), `BridgeSession.has_pending`,
+  and the idle-reap branch in `Bridge.run()`'s main loop (breaks into the
+  same `session.aclose()` teardown the existing EOF/parent-death paths use).
+  Added 4 new tests (unit `has_pending` + 3 e2e subprocess tests); full
+  `agent-mcp` suite (565 passed, 34 skipped) unaffected.
+- Executed Phase 3 with **real, live** validation (not just the test suite):
+  spawned an actual `agent-mcp bridge` subprocess with a stdio upstream that
+  itself spawns a live descendant child, on both Windows
+  (`Get-CimInstance Win32_Process`) and WSL (`ps -o pid,ppid,cmd`, via
+  `wsl -d Ubuntu`) -- confirmed the bridge + its descendant both fully
+  self-reap within the idle window, matching #3876's own evidence commands.
+  Scratch probe files were removed after use, never committed.
+- Pushed to PR #3406's actual head branch
+  (`pr/efforts-agent-mcp-bridge-idle-self-reap-3867` -- discovered the
+  branch name didn't match the worktree branch name, corrected after one
+  misdirected push+cleanup). Hit a **second**, fresh unrelated main-red state
+  (worktree-manager version-consistency drift dev73/dev74 + two new
+  module-size overruns from other merged PRs) -- filed
+  tmichon/aperture-labs#7495, fixed only the trivial one-line version bump
+  inline (blocking, mechanical, zero risk), deliberately left the two
+  module-size overruns (especially a +274 line jump on
+  `worktree-manager/__main__.py`) for their own owner's judgment rather than
+  rubber-stamping a widen from an unrelated PR.
+- CI went green; merged PR #3406 (squash, `c7e8fd7a5`, this repo's
+  `pr-self-merge` profile). Commented + closed tmichon/aperture-labs#3876
+  with the fix version; commented (cross-reference only, left open)
+  tmichon/aperture-labs#3877.
+- Status: Done. Archiving this effort folder now.
