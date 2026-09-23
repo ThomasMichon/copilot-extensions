@@ -12,13 +12,22 @@ implements):
    rollback. ``.github/workflows/promote.yml`` refuses to run (via
    ``tools/promote_release.py``'s own pause check) while this is set.
 2. **Revert.** ``python tools/rollback_release.py revert --reason "..."
-   --push`` -- ``git revert``s the most recent promotion commit (refusing
-   to touch anything else -- see the guard below), tags it, and records the
+   --push`` -- restores main's pre-promotion tree wholesale (refusing to
+   touch anything else -- see the guard below), tags it, and records the
    rollback in the pipeline state so a subsequent promotion of that exact
    `dev` state is refused (the non-incremental-update guard) until `dev`
    actually moves forward with a fix.
 3. **Fix forward on `dev`**, then **resume**:
    ``python tools/rollback_release.py resume --push``.
+
+**Every ``--push`` here lands via a real ``gh pr create`` + ``gh pr merge
+--squash`` by default**, never a raw push -- `main` carries a zero-bypass
+"pull request required" ruleset (a personal GitHub account cannot grant the
+GitHub Actions app, or any other actor, a bypass the way an organization
+can), so a raw push to `main` is always rejected. Requires an authenticated
+`gh` CLI (this is meant to be run by a human operator with their own
+credentials, not from within `promote.yml`'s CI identity). Pass `--no-pr`
+only against an unprotected/trusted repo (tests use this).
 
 Guards:
 
@@ -59,8 +68,44 @@ from promote_release import (  # noqa: E402
 REPO = Path(__file__).resolve().parent.parent
 
 
+def _land_via_pr(
+    *, repo: Path, branch: str, base_ref: str, title: str, body: str
+) -> str:
+    """Push ``branch`` (already created by the caller), open a PR against
+    ``base_ref``, merge it (squash -- this repo's ruleset allows no other
+    method), and return the real, post-merge commit sha on ``base_ref``.
+
+    This is the only way to land a change on a branch protected by a
+    zero-bypass "pull request required" ruleset (personal GitHub accounts
+    cannot grant the GitHub Actions app -- or any other actor -- a bypass
+    the way an organization can) -- it is the same sanctioned path every
+    other change to this repo already uses."""
+    import json as _json
+    import subprocess as _subprocess
+
+    create = _subprocess.run(
+        ["gh", "pr", "create", "--base", base_ref, "--head", branch,
+         "--title", title, "--body", body, "--json", "number"],
+        cwd=str(repo), capture_output=True, text=True,
+    )
+    if create.returncode != 0:
+        raise PromotionError(f"gh pr create failed: {create.stderr.strip()}")
+    number = _json.loads(create.stdout)["number"]
+
+    merge = _subprocess.run(
+        ["gh", "pr", "merge", str(number), "--squash", "--auto"],
+        cwd=str(repo), capture_output=True, text=True,
+    )
+    if merge.returncode != 0:
+        raise PromotionError(f"gh pr merge failed: {merge.stderr.strip()}")
+
+    _git(["fetch", "origin", base_ref], cwd=repo)
+    return _rev_parse(f"origin/{base_ref}", cwd=repo)
+
+
 def _write_state_commit(
-    *, repo: Path, main_ref: str, state: dict, message: str, push: bool
+    *, repo: Path, main_ref: str, state: dict, message: str, push: bool,
+    land_via_pr: bool = True,
 ) -> dict:
     """Land ``state`` as a small, real commit on ``main`` (never touching
     any other file) via an isolated scratch worktree."""
@@ -80,9 +125,18 @@ def _write_state_commit(
               "-c", "user.email=release-bot@users.noreply.github.com",
               "commit", "-m", message], cwd=scratch)
         commit = _git(["rev-parse", "HEAD"], cwd=scratch)
-        if push:
-            _git(["push", "origin", f"{commit}:refs/heads/main"], cwd=scratch)
-        return {"commit": commit, "main_before": main_head, "pushed": push}
+        if not push:
+            return {"commit": commit, "main_before": main_head, "pushed": False}
+        if land_via_pr:
+            branch = f"release-pipeline/state-{int(time.time() * 1000)}"
+            _git(["push", "origin", f"{commit}:refs/heads/{branch}"], cwd=scratch)
+            merged = _land_via_pr(
+                repo=repo, branch=branch, base_ref=main_ref.rsplit("/", 1)[-1],
+                title=message.splitlines()[0], body=message,
+            )
+            return {"commit": merged, "main_before": main_head, "pushed": True}
+        _git(["push", "origin", f"{commit}:refs/heads/main"], cwd=scratch)
+        return {"commit": commit, "main_before": main_head, "pushed": True}
     finally:
         remove_scratch_worktree(scratch, repo=repo)
 
@@ -104,7 +158,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def pause(*, repo: Path = REPO, main_ref: str = "origin/main", reason: str, push: bool) -> dict:
+def pause(
+    *, repo: Path = REPO, main_ref: str = "origin/main", reason: str, push: bool,
+    land_via_pr: bool = True,
+) -> dict:
     main_head = _rev_parse(main_ref, cwd=repo)
     if main_head is None:
         raise PromotionError(f"cannot resolve main ref: {main_ref!r}")
@@ -114,11 +171,14 @@ def pause(*, repo: Path = REPO, main_ref: str = "origin/main", reason: str, push
     return _write_state_commit(
         repo=repo, main_ref=main_ref, state=state,
         message=f"release-pipeline: pause promotion -- {reason}",
-        push=push,
+        push=push, land_via_pr=land_via_pr,
     )
 
 
-def resume(*, repo: Path = REPO, main_ref: str = "origin/main", push: bool) -> dict:
+def resume(
+    *, repo: Path = REPO, main_ref: str = "origin/main", push: bool,
+    land_via_pr: bool = True,
+) -> dict:
     main_head = _rev_parse(main_ref, cwd=repo)
     if main_head is None:
         raise PromotionError(f"cannot resolve main ref: {main_ref!r}")
@@ -128,13 +188,16 @@ def resume(*, repo: Path = REPO, main_ref: str = "origin/main", push: bool) -> d
     return _write_state_commit(
         repo=repo, main_ref=main_ref, state=state,
         message="release-pipeline: resume promotion",
-        push=push,
+        push=push, land_via_pr=land_via_pr,
     )
 
 
 def cmd_pause(args: argparse.Namespace) -> int:
     try:
-        result = pause(repo=args.repo, main_ref=args.main_ref, reason=args.reason, push=args.push)
+        result = pause(
+            repo=args.repo, main_ref=args.main_ref, reason=args.reason,
+            push=args.push, land_via_pr=not args.no_pr,
+        )
     except PromotionError as exc:
         print(f"rollback-release: {exc}", file=sys.stderr)
         return 1
@@ -146,7 +209,10 @@ def cmd_pause(args: argparse.Namespace) -> int:
 
 def cmd_resume(args: argparse.Namespace) -> int:
     try:
-        result = resume(repo=args.repo, main_ref=args.main_ref, push=args.push)
+        result = resume(
+            repo=args.repo, main_ref=args.main_ref, push=args.push,
+            land_via_pr=not args.no_pr,
+        )
     except PromotionError as exc:
         print(f"rollback-release: {exc}", file=sys.stderr)
         return 1
@@ -205,7 +271,10 @@ def _tree_with_state_overlay(base_tree: str, state: dict, *, repo: Path) -> str:
         return result.stdout.strip()
 
 
-def revert(*, repo: Path = REPO, main_ref: str = "origin/main", reason: str, push: bool) -> dict:
+def revert(
+    *, repo: Path = REPO, main_ref: str = "origin/main", reason: str, push: bool,
+    land_via_pr: bool = True,
+) -> dict:
     main_head = _rev_parse(main_ref, cwd=repo)
     if main_head is None:
         raise PromotionError(f"cannot resolve main ref: {main_ref!r}")
@@ -258,24 +327,53 @@ def revert(*, repo: Path = REPO, main_ref: str = "origin/main", reason: str, pus
     revert_commit = _git(
         ["commit-tree", new_tree, "-p", main_head, "-m", message], cwd=repo
     )
+
+    if not push:
+        tag_name = f"rollback-{time.strftime('%Y%m%d%H%M%S')}-{revert_commit[:8]}"
+        _git(["tag", "-a", tag_name, "-m", message, revert_commit], cwd=repo)
+        return {
+            "reverted_commit": promotion_commit,
+            "revert_commit": revert_commit,
+            "tag": tag_name,
+            "pushed": False,
+        }
+
+    if land_via_pr:
+        branch = f"release-pipeline/rollback-{int(time.time() * 1000)}"
+        _git(["push", "origin", f"{revert_commit}:refs/heads/{branch}"], cwd=repo)
+        merged = _land_via_pr(
+            repo=repo, branch=branch, base_ref=main_ref.rsplit("/", 1)[-1],
+            title=message.splitlines()[0], body=message,
+        )
+        tag_name = f"rollback-{time.strftime('%Y%m%d%H%M%S')}-{merged[:8]}"
+        _git(["tag", "-a", tag_name, "-m", message, merged], cwd=repo)
+        _git(["push", "origin", tag_name], cwd=repo)
+        return {
+            "reverted_commit": promotion_commit,
+            "revert_commit": merged,
+            "tag": tag_name,
+            "pushed": True,
+        }
+
     tag_name = f"rollback-{time.strftime('%Y%m%d%H%M%S')}-{revert_commit[:8]}"
     _git(["tag", "-a", tag_name, "-m", message, revert_commit], cwd=repo)
-
-    if push:
-        _git(["push", "origin", f"{revert_commit}:refs/heads/main"], cwd=repo)
-        _git(["push", "origin", tag_name], cwd=repo)
+    _git(["push", "origin", f"{revert_commit}:refs/heads/main"], cwd=repo)
+    _git(["push", "origin", tag_name], cwd=repo)
 
     return {
         "reverted_commit": promotion_commit,
         "revert_commit": revert_commit,
         "tag": tag_name,
-        "pushed": push,
+        "pushed": True,
     }
 
 
 def cmd_revert(args: argparse.Namespace) -> int:
     try:
-        result = revert(repo=args.repo, main_ref=args.main_ref, reason=args.reason, push=args.push)
+        result = revert(
+            repo=args.repo, main_ref=args.main_ref, reason=args.reason,
+            push=args.push, land_via_pr=not args.no_pr,
+        )
     except PromotionError as exc:
         print(f"rollback-release: {exc}", file=sys.stderr)
         return 1
@@ -300,15 +398,22 @@ def main(argv: list[str] | None = None) -> int:
     pause = sub.add_parser("pause", help="pause promotion before landing a rollback")
     pause.add_argument("--reason", required=True)
     pause.add_argument("--push", action="store_true")
+    pause.add_argument(
+        "--no-pr", action="store_true",
+        help="push directly instead of landing via gh pr create/merge "
+             "(only valid against an unprotected/trusted repo)",
+    )
     pause.set_defaults(func=cmd_pause)
 
     resume = sub.add_parser("resume", help="resume promotion after a fix is in place")
     resume.add_argument("--push", action="store_true")
+    resume.add_argument("--no-pr", action="store_true")
     resume.set_defaults(func=cmd_resume)
 
     revert_p = sub.add_parser("revert", help="revert the most recent promotion commit")
     revert_p.add_argument("--reason", required=True)
     revert_p.add_argument("--push", action="store_true")
+    revert_p.add_argument("--no-pr", action="store_true")
     revert_p.set_defaults(func=cmd_revert)
 
     args = ap.parse_args(argv)

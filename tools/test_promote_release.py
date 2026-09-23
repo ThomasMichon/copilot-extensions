@@ -151,6 +151,44 @@ def test_promote_push_moves_main_and_pushes_tag(tmp_path: Path, repo: Path):
     assert report["tag"] in remote_tags
 
 
+def test_promote_with_candidate_branch_never_touches_main_directly(tmp_path: Path, repo: Path):
+    """A protected main (personal-account rulesets have no Integration
+    bypass -- see the effort's Journal) must never receive a direct push;
+    promote() with candidate_branch pushes elsewhere and leaves main/the
+    tag for the caller to land via a real PR + merge."""
+    origin = tmp_path / "origin.git"
+    _git(["init", "-q", "--bare", str(origin)], tmp_path)
+    _git(["remote", "add", "origin", str(origin)], repo)
+    _git(["push", "-q", "origin", "main"], repo)
+    _git(["push", "-q", "origin", "dev"], repo)
+
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "another-file.txt").write_text("x\n", encoding="utf-8")
+    _commit(repo, "demo-plugin: another change (no changefile)")
+    _git(["push", "-q", "origin", "dev"], repo)
+    _git(["checkout", "-q", "main"], repo)
+    _git(["fetch", "-q", "origin"], repo)
+    main_before = _git(["rev-parse", "origin/main"], repo)
+
+    report = pr.promote(
+        repo=repo, dev_ref="origin/dev", main_ref="origin/main",
+        push=True, candidate_branch="release/promote-test",
+    )
+
+    assert report["promoted"] is True
+    assert report["candidate_branch"] == "release/promote-test"
+    # main itself was never touched.
+    assert _git(["ls-remote", str(origin), "refs/heads/main"], repo).split()[0] == main_before
+    # the candidate branch carries the generated commit.
+    remote_candidate = _git(
+        ["ls-remote", str(origin), "refs/heads/release/promote-test"], repo
+    ).split()[0]
+    assert remote_candidate == report["commit"]
+    # no tag pushed yet -- the caller tags the real post-merge commit.
+    remote_tags = _git(["ls-remote", "--tags", str(origin)], repo)
+    assert report["tag"] not in remote_tags
+
+
 def test_promote_message_lists_bumps_and_changefiles():
     summary = {
         "bumps": {"demo-plugin": ("0.1.0-dev1", "0.1.0-dev2")},
