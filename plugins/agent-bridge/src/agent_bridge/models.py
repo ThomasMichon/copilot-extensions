@@ -1079,14 +1079,20 @@ class ServiceConfig(BaseModel):
         "acceptable. Set conservatively; 0 disables the live-stall interrupt "
         "entirely (the runner-less resync path is unaffected).",
     )
-    agent_dispatch_url: str = Field(
-        default="http://127.0.0.1:9847",
-        description="Base URL of the local agent-dispatch coordinator, consulted "
-        "by GET /api/v1/dispatch-tasks/{id}/session to resolve a dispatch-task "
-        "reference to the session that worked it (agent-dispatch-session-"
-        "worktree-history, Phase 2). Optional dependency -- mirrors "
-        "neuron-forge's own agent_dispatch_url/AGENT_DISPATCH_URL config shape "
-        "so the two consumers agree on the same coordinator by default.",
+    agent_dispatch_url: str | None = Field(
+        default=None,
+        description="Explicit operator override for the local agent-dispatch "
+        "coordinator's base URL, consulted by GET /api/v1/dispatch-tasks/{id}"
+        "/session. Optional dependency. ``None`` (the default -- absent from "
+        "config.yaml and no AGENT_DISPATCH_URL env var) means 'no override "
+        "configured': the effective URL is resolved by config"
+        ".resolve_dispatch_url() at call time -- agent-dispatch's own zdd "
+        "routing table (its active.json) first, falling back to the "
+        "historical fixed port only if that discovery also comes up empty. "
+        "An explicit empty string (\"\") is the documented way to disable "
+        "the coordinator lookup entirely -- unlike None, it is never "
+        "reinterpreted as 'go discover'. A non-empty value always wins over "
+        "discovery.",
     )
     agent_dispatch_token: str = Field(
         default="",
