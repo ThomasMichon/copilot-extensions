@@ -308,6 +308,21 @@ def cleanup_disposition(
     # ``status == finalized`` as proof the worktree is claim-free -- only
     # ``finalize`` itself re-validates and releases at-rest claims. A
     # ``released``/``abandoned`` claim is not held and does not block.
+    #
+    # This is also why Phase 8's ``kind="session"`` claim needs no
+    # userPromptSubmit-driven reopen mechanism for cleanup safety: a session
+    # claim only ever becomes ``released`` via a genuine ``sessionEnd``
+    # (process exit), never while the process is still running -- so a
+    # still-live session settled to ``at-rest`` by a mid-conversation
+    # ``finalize`` call is STILL ``is_live`` here and still blocks pruning,
+    # exactly like an ``active`` one. An earlier design (built, then
+    # reverted -- see PR history around #3349) added a per-prompt hook to
+    # flip such a claim's own state back to ``active``; tracing
+    # ``add_resource_claim``'s reopen path showed that flip never even
+    # changes ``rec.status`` (an already-live claim never triggers
+    # ``reopen_finalized_owner``), so it had no effect on this check either
+    # -- purely cosmetic, not worth a subprocess spawn on every submitted
+    # prompt.
     held_claims = [c for c in rec.resources if c.is_live]
     if held_claims and (
         rec.status == "finalized" or info.state == S.COMPLETED

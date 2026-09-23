@@ -17,14 +17,6 @@
         "timeoutSec": 10
       }
     ],
-    "userPromptSubmitted": [
-      {
-        "type": "command",
-        "powershell": "try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; if ($env:COPILOT_EXTENSIONS_CONTEXT) { $s=if ($env:COPILOT_PLUGIN_ROOT) { Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts\\hook_client.py' } else { '' } } else { $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\hook_client.py\" }; if ($py -and $s -and (Test-Path $s)) { & $py $s userPromptSubmitted } } catch {}; exit 0",
-        "bash": "cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; if [ -n \"${COPILOT_EXTENSIONS_CONTEXT:-}\" ]; then if [ -n \"${COPILOT_PLUGIN_ROOT:-}\" ]; then s=\"$COPILOT_PLUGIN_ROOT/scripts/hook_client.py\"; else s=\"\"; fi; else s=\"$HOME/.agent-worktrees/bin/hook_client.py\"; fi; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then python3 \"$s\" userPromptSubmitted || true; fi; exit 0",
-        "timeoutSec": 10
-      }
-    ],
     "sessionStart": [
       {
         "type": "command",
