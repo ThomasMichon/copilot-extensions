@@ -22,7 +22,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'uninstall', 'status', 'update', 'stamp', 'provision')]
+    [ValidateSet('install', 'uninstall', 'status', 'update', 'stamp', 'provision', 'dev')]
     [string]$Action = 'status',
 
     [string]$InstallDir,
@@ -593,11 +593,18 @@ function Assert-Uv {
 
 function Install-PackageInto {
     <# uv pip install the vendored libs (ssh-manager, credential-relay) then
-       agent-codespaces into the given venv python. Non-editable; deps resolved
-       from pyproject.toml. The vendored libs are force-reinstalled so a local
-       code change propagates even without a version bump (uv otherwise skips a
-       same-version path dep, leaving the venv stale). #>
-    param([string]$Python)
+       agent-codespaces into the given venv python. Non-editable by default;
+       deps resolved from pyproject.toml. The vendored libs are force-reinstalled
+       so a local code change propagates even without a version bump (uv
+       otherwise skips a same-version path dep, leaving the venv stale).
+
+       -Editable (mutable-dev-slot, #3376): installs every one of these
+       path-dependencies with `uv pip install -e` instead, so the venv's
+       site-packages resolve straight back to this worktree's own checkout --
+       an ordinary source edit takes effect without re-running the installer.
+       Used only for the mutable `versions/dev` slot; never for a real
+       (numbered) version. #>
+    param([string]$Python, [switch]$Editable)
     if (-not (Test-Path (Join-Path $SshMgrDir 'pyproject.toml'))) {
         Write-ServiceErr "ssh-manager source not found at $SshMgrDir"
         return $false
@@ -616,25 +623,29 @@ function Install-PackageInto {
     Remove-ConsoleTrampolines -VenvDir (Split-Path -Parent (Split-Path -Parent $Python))
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & uv pip install --python $Python --reinstall-package agent-ssh-manager "$SshMgrDir" --quiet 2>&1 | Out-Null
+    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-ssh-manager' })
+    & uv pip install --python $Python @modeArgs "$SshMgrDir" --quiet 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         $ErrorActionPreference = $prevEAP
         Write-ServiceErr "ssh-manager install failed"
         return $false
     }
-    & uv pip install --python $Python --reinstall-package agent-credential-relay "$CredRelayDir" --quiet 2>&1 | Out-Null
+    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-credential-relay' })
+    & uv pip install --python $Python @modeArgs "$CredRelayDir" --quiet 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         $ErrorActionPreference = $prevEAP
         Write-ServiceErr "credential-relay install failed"
         return $false
     }
-    & uv pip install --python $Python --reinstall-package agent-config-migrate "$CfgMigrateDir" --quiet 2>&1 | Out-Null
+    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-config-migrate' })
+    & uv pip install --python $Python @modeArgs "$CfgMigrateDir" --quiet 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         $ErrorActionPreference = $prevEAP
         Write-ServiceErr "config-migrate install failed"
         return $false
     }
-    & uv pip install --python $Python --reinstall-package agent-codespaces "$PluginDir" --quiet 2>&1 | Out-Null
+    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-codespaces' })
+    & uv pip install --python $Python @modeArgs "$PluginDir" --quiet 2>&1 | Out-Null
     $rc = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
     if ($rc -ne 0) {
@@ -660,6 +671,130 @@ function Deploy-Package {
     # prunes any stale copy and guards against one lingering.
     return $true
 }
+
+# === mutable-dev-slot (#3376/Phase 2) ===
+function Deploy-VersionedRuntimeHelper {
+    <# Copy versioned_runtime.py into the plugin's own root (sibling of
+       versions/), so the DEPLOYED agent-codespaces CLI's `dev-release`/
+       `dev-status` verbs can shell out to it even when the operator is not
+       standing in a source checkout (docs/patterns/mutable-dev-slot.md
+       Runtime accessibility, option 1). Best-effort -- never fatal. #>
+    if (-not $VersionedRuntime) { return }
+    try {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'versioned_runtime.py') `
+            -Destination (Join-Path $InstallDir 'versioned_runtime.py') -Force
+    } catch {
+        Write-ServiceWarn "Could not stage versioned_runtime.py into ${InstallDir}: $_"
+    }
+}
+
+function Resolve-DevSlotOwner {
+    <# The absolute worktree checkout path claiming/releasing the mutable dev
+       slot -- the same value + resolution `agent-codespaces`' own
+       cross-machine CodeSpace claims already use as their `owner`
+       (docs/patterns/mutable-dev-slot.md). Falls back to this repo checkout's
+       own root when `agent-worktrees` is unavailable (e.g. a bare clone). #>
+    if (Get-Command 'agent-worktrees' -ErrorAction SilentlyContinue) {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $out = (& agent-worktrees get worktree-dir 2>$null | Out-String).Trim()
+        $ErrorActionPreference = $prevEAP
+        if ($LASTEXITCODE -eq 0 -and $out) { return $out }
+    }
+    return $RepoRoot
+}
+
+function Invoke-Dev {
+    <# Claim + (re)build the mutable `versions/dev` slot IN PLACE (an editable
+       install against THIS checkout), then activate it. Safe to call
+       repeatedly across an iteration loop: the dev venv is reused, only the
+       editable package links are refreshed -- not a fresh venv every call.
+       Release with the deployed CLI's own `dev-release` verb (not this
+       installer -- see docs/patterns/mutable-dev-slot.md). #>
+    Write-ServiceHeader "$ServiceName (dev slot)"
+    if (-not $VersionedRuntime) {
+        Write-ServiceErr 'dev mode requires the versioned-runtime layout (no version in pyproject.toml?)'
+        return $false
+    }
+    foreach ($dir in @($InstallDir, $LocalBin)) {
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    }
+    Deploy-VersionedRuntimeHelper
+
+    $owner = Resolve-DevSlotOwner
+    $devDir = Join-Path (Join-Path $InstallDir 'versions') 'dev'
+    $devPython = Join-Path $devDir 'Scripts\python.exe'
+
+    Assert-Uv
+    if (-not (Test-PythonVenv -Dir $devDir -Python $devPython)) {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & uv venv $devDir --python 3.11 --allow-existing 2>&1 | Out-Null
+        $ErrorActionPreference = $prevEAP
+        if (-not (Test-PythonVenv -Dir $devDir -Python $devPython)) {
+            Write-ServiceErr "dev venv creation failed at $devDir"
+            return $false
+        }
+        Write-ServiceOk "dev venv created at $devDir"
+    } else {
+        Write-ServiceOk "Reusing existing dev venv at $devDir (mutable in place)"
+    }
+
+    $prevVersionResult = Invoke-VersionedRuntime -Arguments @('--root', $InstallDir, '--link-name', '.venv', 'current')
+    $prevVersion = $prevVersionResult.Output
+
+    $claimArgs = @('--root', $InstallDir, 'dev-claim', '--owner', $owner)
+    if ($prevVersion) { $claimArgs += @('--previous-version', $prevVersion) }
+    if ($Force) { $claimArgs += '--force' }
+    $claim = Invoke-VersionedRuntime -Arguments $claimArgs
+    if ($claim.ExitCode -eq 2) {
+        Write-ServiceErr "dev slot is already claimed by a different owner: $($claim.Output)"
+        Write-ServiceErr "Pass -Force to override, or release it from its current owner first."
+        return $false
+    } elseif ($claim.ExitCode -ne 0) {
+        Write-ServiceErr "dev-claim failed: $($claim.Output)"
+        return $false
+    }
+    $restoreNote = if ($prevVersion) { " (restores to '$prevVersion' on release)" } else { '' }
+    Write-ServiceOk "dev slot claimed by ${owner}${restoreNote}"
+
+    if (-not (Install-PackageInto -Python $devPython -Editable)) { return $false }
+    # NOTE: deliberately do NOT call Stamp-BuildInfo here -- an editable
+    # install's "package dir" resolves straight back to src/agent_codespaces/
+    # in THIS checkout, so stamping would write _build_info.py into tracked
+    # source rather than an installed copy. `agent-codespaces version` in dev
+    # mode falls back to the plain importlib-derived __version__, which is
+    # enough for dev-mode diagnostics.
+
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $devPython -c 'import agent_codespaces' 2>$null
+    $healthOk = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prevEAP
+    if (-not $healthOk) {
+        Write-ServiceErr 'dev slot failed its health gate (import agent_codespaces) -- not activating'
+        return $false
+    }
+
+    $mc = Invoke-VersionedRuntime -Arguments @('--root', $InstallDir, '--link-name', '.venv', 'mark-complete', 'dev')
+    if ($mc.ExitCode -ne 0) {
+        Write-ServiceErr "Failed to mark dev slot complete: $($mc.Output)"
+        return $false
+    }
+    $act = Invoke-VersionedRuntime -Arguments @('--root', $InstallDir, '--link-name', '.venv', 'activate', 'dev', '--no-link')
+    if ($act.ExitCode -ne 0) {
+        Write-ServiceErr "Failed to activate dev slot: $($act.Output)"
+        return $false
+    }
+    Write-ServiceOk "dev slot active (current-version -> dev, editable install from $PluginDir)"
+
+    Deploy-SelfProvisioningBinstub
+    Write-Host ''
+    Write-ServiceOk "$ServiceName dev slot ready. Edit $PluginDir and re-run 'dev' to refresh."
+    Write-ServiceOk "Release when done: agent-codespaces dev-release"
+    return $true
+}
+# === end mutable-dev-slot ===
 
 function Deploy-Venv {
     <# Create the Python venv via uv. Deps come from pyproject at package
@@ -1015,6 +1150,10 @@ function Invoke-Install {
     # Versioned layout (#581): health-gate the slot + swap the `.venv` link.
     if (-not (Invoke-VersionedActivate)) { throw 'Runtime activation failed' }
 
+    # Stage versioned_runtime.py at the root so the deployed CLI's
+    # dev-release/dev-status verbs work without a source checkout (#3376).
+    Deploy-VersionedRuntimeHelper
+
     # Deploy binstub
     Deploy-SelfProvisioningBinstub
 
@@ -1283,6 +1422,10 @@ function Invoke-Update {
     # Versioned layout (#581): health-gate the slot + swap the `.venv` link.
     if (-not (Invoke-VersionedActivate)) { throw 'Runtime activation failed' }
 
+    # Stage versioned_runtime.py at the root so the deployed CLI's
+    # dev-release/dev-status verbs work without a source checkout (#3376).
+    Deploy-VersionedRuntimeHelper
+
     # Re-deploy binstub
     Deploy-SelfProvisioningBinstub
 
@@ -1370,6 +1513,7 @@ try {
         'update'    { Invoke-Update }
         'stamp'     { Invoke-Stamp }
         'provision' { Invoke-Install }
+        'dev'       { if (-not (Invoke-Dev)) { exit 1 } }
     }
 } catch {
     Write-ServiceErr $_.Exception.Message

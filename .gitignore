@@ -1,6 +1,11 @@
 __pycache__/
 *.pyc
 
+# Deploy-time build provenance, stamped into an INSTALLED copy's package dir
+# (never meant to be committed). A mutable-dev-slot `dev` install is editable
+# and resolves straight back to a plugin's own src/ tree, so this guards
+# against ever accidentally tracking one written there (#3376).
+**/_build_info.py
 
 *.egg-info/
 
