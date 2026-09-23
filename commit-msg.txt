@@ -1,0 +1,38 @@
+customizing-copilot: recognize suppressed maintenance-hook invocations as output-free (#3429)
+
+Fixes the customizing-copilot output-free-stack scan, which was misclassifying
+agent-index's session-start hook as "legacy-direct-or-unknown" (possibly
+non-empty output) because its second sessionStart entry -- a fire-and-forget
+"ensure" re-run of scripts/install.ps1|sh -- wasn't recognized by the scan's
+named-marker/script-content proof path (write-session-guidance./bootstrap-check./
+hook_client.py/register-).
+
+That hook entry is actually provably output-free by construction: it invokes
+an arbitrary maintenance script with EVERY output stream redirected to null
+(PowerShell `*> $null`, bash `>/dev/null 2>&1`), swallows any error, and
+unconditionally ends with the canonical empty-JSON literal as its own last
+top-level statement -- so whatever the invoked script emits is discarded
+before Copilot ever sees it, regardless of the invoked script's own content.
+
+Adds `_command_is_suppressed_maintenance_invocation` as a second acceptance
+path in `_session_start_is_structurally_output_free`, alongside the existing
+named-script path (never replacing or loosening it): splits the command into
+top-level statements (respecting brace/paren/quote nesting, so an if/then/fi
+or try/catch block is never mistaken for one opaque statement), requires the
+last statement to be exactly the canonical literal, and requires every OTHER
+statement to independently prove it isn't a literal text write.
+
+2 new tests: a positive case matching agent-index's real hooks.json shape,
+and a negative case (a redirected invocation followed by an un-redirected
+`echo`/`Write-Host` before the canonical tail) proving the hardened check
+still rejects a genuinely unsafe command -- an earlier, looser draft of this
+predicate (checking only the trailing literal) passed that first attempt
+incorrectly; the top-level-statement split was added specifically to close
+that gap.
+
+Bumps customizing-copilot's version per the still-live manual-bump
+convention (plugin.json + marketplace.json).
+
+Fixes ThomasMichon/copilot-extensions#3429.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
