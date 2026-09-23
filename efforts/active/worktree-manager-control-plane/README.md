@@ -476,9 +476,18 @@ call site.
       `terminal_fragment._load_roster`) and `ProjectInfo.wsl_distro`/
       `wsl_state`/`roster` fields, giving Step 3 everything
       `collect_local_projects` reads today.
-- [ ] **Step 3 — relocate the GUID/state-diagnosis/reconciliation core** of
-      `terminal_fragment.py` into worktree-manager, wired to
-      `harness_state.build_projects()`.
+- [x] **Step 3 — relocate the GUID/state-diagnosis/reconciliation core** of
+      `terminal_fragment.py` into worktree-manager (`build_fragment`,
+      `stable_guid`, `reconcile_generated_profiles`, `diagnose_wt_state`,
+      `migrate_selection_to_keys`), reusing `harness_state`'s
+      `RosterMachine`/`SshEnvironment` and `terminal_profiles`'s selection
+      model. 35 of 37 original tests ported verbatim; **Step 3b** (new,
+      split out) covers rewiring `collect_local_projects` itself onto
+      `harness_state.build_projects()` — deferred pending a small
+      `anchor`-override/`display_name` decision.
+- [ ] **Step 3b — rewire `collect_local_projects`** onto
+      `harness_state.build_projects()`, closing the 2 disk-collection tests
+      Step 3 deferred.
 - [ ] **Step 4 — give worktree-manager an equivalent CLI/config surface**
       for `profiles get/apply` and
       `terminal-fragment [--explain|--doctor|--migrate-selections]`.
@@ -614,6 +623,22 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-23** — Landed Phase 3e Step 3 (`terminal_fragment.py`'s pure
+  core): `worktree_manager.terminal_fragment` — `build_fragment`,
+  `stable_guid`/GUID helpers, `reconcile_generated_profiles`,
+  `diagnose_wt_state`, `migrate_selection_to_keys`, and their dataclasses —
+  ported byte-for-byte (no behavior change), reusing `harness_state`'s
+  `RosterMachine`/`SshEnvironment` (Step 2) and `terminal_profiles` (Step 1)
+  instead of redefining them. 35 of the original 37 agent-worktrees tests
+  ported verbatim (import paths only); split out **Step 3b** for the 2
+  disk-collection tests (`collect_local_projects` itself), since rewiring
+  it onto `harness_state.build_projects()` surfaced a small but real gap:
+  a projects.yaml-level `anchor` override `anchor_for()` falls back to,
+  which evidence (`register_project()` never writes it) suggests may be
+  dead code — flagged rather than silently dropped — plus a `display_name`
+  field `harness_state.ProjectInfo` doesn't carry yet (a real, written
+  field, unlike `anchor`). Full non-picker suite green (457 passed, up
+  from 422 + 35 new). worktree-manager bumped `0.1.0-dev71` -> `dev72`.
 - **2026-09-23** — Operator direction resolved Phase 3e's Open Question 1:
   the registry-read boundary is a **direct file read**, not a new
   agent-worktrees CLI verb — matching worktree-manager's existing
