@@ -188,7 +188,7 @@ before/after comparisons for every later phase; Phase 4 needs the
 accelerator, which is already done); otherwise independent and
 parallelizable across worktrees.
 
-### Phase 1 — Golden-screenshot baseline for visual regression
+### Phase 1 — Golden-screenshot baseline for visual regression (Done 2026-09-23)
 - [x] Fix the screenshot-command crash blocking `picker-shot.py` /
       `preview-picker.ps1`/`.sh` / `worktree-manager picker screenshot`.
       **Filed as [copilot-extensions#3319](https://github.com/ThomasMichon/copilot-extensions/issues/3319)**
@@ -245,19 +245,36 @@ parallelizable across worktrees.
         capture and for `list --classify` generally.
       Phase 1's golden-baseline capture is now unblocked via `--demo`/
       `--preview` against the real Picker.
-- [ ] Capture a current, mock-data-backed set of Worktrees-pivot renders
-      (the existing `capture.py` injected-source path) across representative
-      states (empty, ACTIVE-only, mixed ACTIVE+Recent+unused, claims present,
-      long-running worktree).
-- [ ] Locate the original Textual-picker-era screenshots (the ones taken
-      "when creating the Textual picker in the first place" — check
-      `worktree-manager/scripts/picker-snapshot/venue-preview/` history and
-      any linked PR/issue attachments) and produce a side-by-side comparison
-      documenting the intentional transformation since.
-- [ ] Wire the captured baseline into a checked-in golden-comparison step
-      (or confirm one already exists via `worktree-manager-control-plane`
-      Phase 3's "headless SVG capture for golden checks" and extend it) so
-      every later phase in this effort diffs against it before landing.
+- [x] Capture a current, mock-data-backed set of Worktrees-pivot renders
+      across representative states (empty, ACTIVE-only, mixed
+      ACTIVE+Recent+unused, claims present, long-running worktree).
+      **Done 2026-09-23**: added
+      `tests/production_picker/test_picker_capture_scenarios.py` (5 new
+      golden-compared tests) using the existing hermetic
+      `pcap.capture(source, live=False)` deterministic-renderer contract —
+      not the CLI `--demo` path (that's the human-facing preview tool
+      #3413 fixed; this is the checked-in regression artifact). The
+      long-running golden documents the CURRENT (pre-Phase-3) sort bug
+      directly: a 30-day-old, 47-turn worktree sorts BELOW a
+      created-yesterday/never-touched one in Recent, purely by
+      `started_at` — the exact "before" state Phase 3 should visibly flip.
+- [x] Locate the original Textual-picker-era screenshots and produce a
+      side-by-side comparison. **Done 2026-09-23**: found
+      `docs/assets/worktree-picker.png`/`.gif`, committed 2026-07-25
+      (`v1.0.0`, unmodified since) and still present. Full comparison in
+      [`screenshot-comparison.md`](screenshot-comparison.md). Headline
+      finding: the core design (sections, palette, header counters) is
+      unchanged; `SESS`→`LIVE` is a same-primitive rename; `T` (turn count)
+      is a genuine, welcome addition; **the `R` column has no historical
+      precedent at all** — direct evidence for wishlist item #5's
+      complaint, and freeing Phase 5 to redefine/retire it without a legacy
+      meaning to preserve.
+- [x] Wire the captured baseline into a checked-in golden-comparison step.
+      **Done 2026-09-23**: confirmed one already exists —
+      `tests/production_picker/test_picker_capture.py`'s
+      `GOLDEN_DIR`/`_golden()`/`AGENT_WORKTREES_UPDATE_GOLDENS=1` pattern —
+      and extended it with the 5 new scenario goldens above, in a sibling
+      file rather than duplicating the harness.
 
 ### Phase 2 — Evaluate native Textual components for the Worktrees table
 - [ ] Audit `production_picker/picker_tui/engine_views.py`'s hand-rolled
@@ -437,3 +454,25 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
   still #3418 — sidestepped here for preview purposes (the fake engine
   never reaches `list --classify`), but still open and worth its own fix.
 - Phase 1 is now unblocked for the actual golden-baseline capture next.
+
+### 2026-09-23 — Phase 1 complete: golden baseline captured + historical comparison
+- Added 5 new golden-compared scenario tests
+  (`test_picker_capture_scenarios.py`) using the existing hermetic capture
+  harness: empty, active-only, mixed, claims (open PR), and long-running.
+  The long-running golden deliberately documents today's sort bug as a
+  "before" baseline (a 47-turn/30-day worktree sorts below a
+  never-touched/1-day one, purely by `started_at`).
+- Found the original Textual-picker-era screenshot
+  (`docs/assets/worktree-picker.png`, `v1.0.0`, committed 2026-07-25,
+  unmodified since) and wrote the requested comparison in
+  `screenshot-comparison.md`. Key finding for later phases: the `R` column
+  has **no historical precedent** in the original design — confirms
+  wishlist item #5 and frees Phase 5 to redefine/retire it without a
+  legacy meaning to preserve; `SESS`→`LIVE` is a same-primitive rename;
+  `T` (turn count) is a genuinely new column since `v1.0.0`.
+- Confirmed the checked-in golden-comparison step already existed
+  (`test_picker_capture.py`'s `GOLDEN_DIR`/`AGENT_WORKTREES_UPDATE_GOLDENS`
+  pattern) and extended it rather than inventing a parallel one.
+- Full suite: 1155 passed, 1 skipped.
+- Phase 1 status: **Done**. Moving to Phase 2 (evaluate native Textual
+  components for the Worktrees table) next.

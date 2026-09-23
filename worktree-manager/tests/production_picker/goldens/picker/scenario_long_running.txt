@@ -1,0 +1,40 @@
+<<TOPBAR>>
+  WORKTREES                                                                                           ⚙ Configuration
+───────────────────────────────────────────────────────── ▲ ──────────────────────────────────────────────────────────
+ Machine  Ctrl ◀▶                                                                      ● 0 active · 2 recent · 0 done
+    All     anomalous-potato Win ✓
+
+   + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
+
+  ID     STATE    R   AGE    LIVE   T     PR
+  ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+    (none)
+  ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+☐ l002   UNUSED       1d     ·        0   —
+      Created yesterday, untouched: unused
+☐ l001   WIP          30d    ·       47   —
+      Long-haul migration: wip
+  ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
+    (none)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+───────────────────────────────────────────────────────── ▼ ──────────────────────────────────────────────────────────
+ Enter: new worktree on anomalous-potato Win · Tab region · ^◀▶ machine                                       · ready
