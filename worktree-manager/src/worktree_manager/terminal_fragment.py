@@ -18,23 +18,18 @@ This module supplies:
   ``self.agent`` diagonal, the default column for unmanaged projects,
   ``shell``/``agent`` gating, cross-project GUID de-duplication, and
   self-skip.
+- :func:`collect_local_projects` + :func:`preview_local` -- read *this*
+  machine's real ``repos.yaml``/``projects.yaml`` (via
+  ``harness_state.build_projects()``, Phase 3e Step 2's direct-file-read
+  boundary) + per-project ``machines.yaml``/``config.yaml`` and feed the
+  pure builder, so the CLI can print exactly what the next ``update`` would
+  deploy.
+- :func:`migrate_selection_to_keys` / :func:`migrate_local_selections` --
+  canonicalize a project's ``terminal_profiles`` selection from the legacy
+  ``display_name`` vocabulary to the machine **key** (full name).
 - :func:`reconcile_generated_profiles` / :func:`diagnose_wt_state` -- the
   live Windows Terminal ``state.json``/``settings.json`` reconciliation and
   read-only drift diagnosis.
-- :func:`migrate_selection_to_keys` -- canonicalize a project's
-  ``terminal_profiles`` selection from the legacy ``display_name``
-  vocabulary to the machine **key** (full name). Pure given an explicit
-  ``config_path`` + roster.
-
-**Not yet ported (Phase 3e Step 3b, follow-up):**
-``collect_local_projects``/``preview_local``/``migrate_local_selections`` --
-the *disk-collection* half that walks agent-worktrees' registry
-(``repos.yaml``/``projects.yaml``) to build the ``ProjectInput`` list for
-every registered project. That rewiring (onto
-``worktree_manager.harness_state.build_projects()``) needs one more
-decision -- a legacy, seemingly-unwritten ``projects.yaml``-level ``anchor``
-override this port has not yet reproduced -- tracked in the effort's Phase
-3e doc rather than silently dropped.
 
 **Machine identity is the roster key (full name).** A selection target's
 ``machine`` matches on the machines.yaml **key** (e.g. ``tmichon-book2``), and
@@ -72,11 +67,14 @@ __all__ = [
     "SshEnvironment",
     "WtStateDiagnosis",
     "build_fragment",
+    "collect_local_projects",
     "color_scheme",
     "default_selection_keys",
     "diagnose_wt_state",
     "is_rfc_v4_or_v5_guid",
+    "migrate_local_selections",
     "migrate_selection_to_keys",
+    "preview_local",
     "reconcile_generated_profiles",
     "sel_env_label",
     "ssh_env_label",
@@ -503,6 +501,142 @@ def build_fragment(
         profiles=emitted, plans=plans,
         self_machine=self_machine, self_env=self_env,
     )
+
+
+# ---------------------------------------------------------------------------
+# Disk collection (impure) -- assemble this machine's real inputs.
+#
+# Phase 3e Step 3b (copilot-extensions#3390): rewired onto
+# ``harness_state.build_projects()`` (the direct-file-read boundary Step 2
+# established) instead of in-process ``agent_worktrees.config``/
+# ``.installer``/``.repos`` imports.
+# ---------------------------------------------------------------------------
+
+# The runtime's own name is never a launchable project (mirrors
+# ``agent_worktrees.installer._RESERVED_BINSTUB_NAMES`` -- same single value,
+# duplicated rather than imported since this module no longer depends on
+# agent-worktrees at all).
+_RESERVED_BINSTUB_NAMES = frozenset({"agent-worktrees"})
+
+
+def _display_from_slug(slug: str) -> str:
+    """Title-case a slug ("my-project" -> "My Project") -- install.ps1 ``Get-DisplayName``."""
+    return " ".join(w.capitalize() for w in slug.replace("-", " ").split())
+
+
+def _resolve_icon(project_dir_fn, name: str) -> tuple[str, str]:
+    """Resolve (icon, wsl_icon) with install.ps1's project-then-default fallback."""
+    proj_root = project_dir_fn(name)
+    aw_root = project_dir_fn("agent-worktrees")
+
+    icon = rf"%USERPROFILE%\.{name}\aperture-science.ico"
+    if not (proj_root / "aperture-science.ico").exists():
+        icon = DEFAULT_ICON
+
+    wsl_icon = rf"%USERPROFILE%\.{name}\aperture-science-wsl.ico"
+    if not (proj_root / "aperture-science-wsl.ico").exists():
+        wsl_icon = r"%USERPROFILE%\.agent-worktrees\aperture-science-wsl.ico"
+        if not (aw_root / "aperture-science-wsl.ico").exists():
+            wsl_icon = icon
+    return icon, wsl_icon
+
+
+def collect_local_projects(
+    current_project: str | None = None, *, home_dir=None
+) -> list[ProjectInput]:
+    """Build :class:`ProjectInput` rows from this machine's on-disk config.
+
+    Reads ``repos.yaml``/``projects.yaml``/per-project ``machines.yaml``
+    roster via ``harness_state.build_projects()`` (Phase 3e Step 2's
+    direct-file-read boundary), plus each project's own
+    ``~/.<name>/config.yaml`` terminal-profile selection -- exactly the
+    sources ``Build-TerminalFragment`` consults. The ``current_project`` (if
+    any) is placed first, matching the installer's ordering (so GUID de-dup
+    resolves identically).
+    """
+    from .harness_state import build_projects as hs_build_projects
+    from .harness_state import home as hs_home
+
+    projects = hs_build_projects(home_dir)
+    by_name = {p.name: p for p in projects}
+
+    ordered: list[str] = []
+    if current_project:
+        ordered.append(current_project)
+    for p in projects:
+        if p.name not in ordered:
+            ordered.append(p.name)
+    # See _RESERVED_BINSTUB_NAMES's docstring: filtered at the single point
+    # every candidate flows through, regardless of source (a stale registry
+    # entry or ``current_project`` itself).
+    ordered = [n for n in ordered if n not in _RESERVED_BINSTUB_NAMES]
+
+    def project_dir(name: str):
+        return (home_dir or hs_home()) / f".{name}"
+
+    out: list[ProjectInput] = []
+    for name in ordered:
+        info = by_name.get(name)
+        display = (info.display_name if info else None) or _display_from_slug(name)
+        agent_exposed = bool(info.repo.agent) if info and info.repo else True
+        roster = info.roster if info else ()
+        wsl_distro = info.wsl_distro if info else None
+        wsl_state = info.wsl_state if info else None
+
+        cfg_path = project_dir(name) / "config.yaml"
+        if profiles.has_selection(cfg_path):
+            sel = frozenset(
+                f"{s.machine}|{s.env}|{s.kind}"
+                for s in profiles.load_selection(cfg_path)
+            )
+        else:
+            sel = None
+
+        icon, wsl_icon = _resolve_icon(project_dir, name)
+
+        out.append(ProjectInput(
+            name=name,
+            display=display,
+            agent_exposed=agent_exposed,
+            wsl_distro=wsl_distro,
+            wsl_state=wsl_state,
+            selection=sel,
+            roster=roster,
+            icon=icon,
+            wsl_icon=wsl_icon,
+        ))
+    return out
+
+
+def preview_local(
+    self_machine: str,
+    *,
+    current_project: str | None = None,
+    self_env: str = "Win",
+) -> FragmentResult:
+    """Collect this machine's inputs and build the fragment (no disk write)."""
+    projects = collect_local_projects(current_project=current_project)
+    return build_fragment(projects, self_machine, self_env=self_env)
+
+
+def migrate_local_selections(current_project: str | None = None) -> list[str]:
+    """Migrate every local project's selection to key vocabulary.
+
+    Returns the list of project names whose ``config.yaml`` was rewritten.
+    Safe to run repeatedly (idempotent: a key-vocabulary column is left
+    untouched).
+    """
+    from .harness_state import home as hs_home
+
+    changed: list[str] = []
+    for proj in collect_local_projects(current_project=current_project):
+        cfg_path = hs_home() / f".{proj.name}" / "config.yaml"
+        try:
+            if migrate_selection_to_keys(cfg_path, proj.roster):
+                changed.append(proj.name)
+        except Exception:
+            continue
+    return changed
 
 
 # ---------------------------------------------------------------------------
