@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from agent_index import config
+from agent_index import transport
 from agent_index.__main__ import cmd_setup
 
 
@@ -63,6 +64,40 @@ def test_read_indexers_plural_ordered(_iso):
     got = config.read_indexers(repo)
     assert [i["machine"] for i in got] == ["boxA", "boxB"]  # order preserved (primary first)
     assert got[0]["endpoint"] == "http://127.0.0.1:8420"
+
+
+def test_knowledge_repo_indexers_drive_runtime_role_resolution(_iso, monkeypatch):
+    repo = _iso / "repo"; repo.mkdir()
+    knowledge = _iso / "knowledge"; knowledge.mkdir()
+    (repo / ".agent-worktrees").mkdir()
+    (repo / ".agent-worktrees" / "config.yaml").write_text(
+        "requires_external_state_root: true\n",
+        encoding="utf-8",
+    )
+    (repo / ".agent-index").mkdir()
+    (repo / ".agent-index" / "config.yaml").write_text(
+        "corpus:\n"
+        "  sources:\n"
+        "    - name: git:repo\n"
+        "      repo: repo\n",
+        encoding="utf-8",
+    )
+    (knowledge / ".agent-index").mkdir()
+    (knowledge / ".agent-index" / "config.yaml").write_text(
+        "indexers:\n"
+        "  - machine: boxA\n"
+        "    ssh: boxA-ssh\n"
+        "  - machine: boxB\n"
+        "    ssh: boxB-ssh\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "repo_root", lambda explicit=None: repo)
+    monkeypatch.setattr(config, "_external_state_root", lambda _root: ("ready", knowledge))
+
+    assert [item["machine"] for item in config.read_indexers(repo)] == ["boxA", "boxB"]
+    role, indexer = transport.plan_route()
+    assert role == "host"
+    assert indexer == {"machine": "boxA", "ssh": "boxA-ssh"}
 
 
 def test_read_indexer_returns_primary_for_plural(_iso):

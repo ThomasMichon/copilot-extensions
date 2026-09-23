@@ -8,6 +8,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import _knowledge_overlay
+
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 0
 RUN_DIR_ENV = "AGENT_INDEX_RUN_DIR"
@@ -191,6 +193,28 @@ def _installation_marketplace_id() -> str | None:
     return marketplace_id.strip()
 
 
+def _requires_external(root: Path) -> tuple[str, bool]:
+    return _knowledge_overlay.requires_external(root)
+
+
+def _external_state_root(root: Path) -> tuple[str, Path | None]:
+    return _knowledge_overlay.external_state_root(
+        root,
+        load_installation_context=_load_installation_context,
+        agent_worktrees_home=_agent_worktrees_home,
+    )
+
+
+def _knowledge_root_for_repo(root: Path) -> Path | None:
+    policy_state, requires_external = _requires_external(root)
+    if policy_state != "ready" or not requires_external:
+        return None
+    state, knowledge_root = _external_state_root(root)
+    if state == "ready":
+        return knowledge_root
+    return None
+
+
 def _repo_base_config_path(root: Path) -> Path | None:
     for candidate in (
         root / REPO_CONFIG_RELPATH,
@@ -222,6 +246,11 @@ def _repo_config_layers(root: Path) -> list[Path]:
     base = _repo_base_config_path(root)
     if base is not None:
         layers.append(base)
+    knowledge_root = _knowledge_root_for_repo(root)
+    if knowledge_root is not None:
+        knowledge = knowledge_root / REPO_CONFIG_RELPATH
+        if knowledge.exists():
+            layers.append(knowledge)
     overlay = _repo_local_overlay_path(root)
     if overlay is not None:
         layers.append(overlay)
