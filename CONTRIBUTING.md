@@ -221,6 +221,22 @@ plugin you changed.
 > never redeploys it (dotfiles #1025). Repo-root files not vendored into any
 > plugin (`tools/`, `.github/`, repo-root `docs/`, `CONTRIBUTING.md`,
 > `README.md`) need no bump. Build artifacts under a plugin are ignored.
+>
+> **Before editing a shared lib, find every REAL copy first: `python
+> tools/check-vendored-libs-sync.py --list`.** A shared lib such as
+> `ssh-manager` is vendored **per consuming plugin**, at
+> `plugins/<plugin>/libs/<lib>/` — each copy is installed and imported
+> independently (`[tool.uv.sources] <lib> = { path = "libs/<lib>" }` in that
+> plugin's own `pyproject.toml`). Some repos also carry a legacy top-level
+> `libs/<lib>/` directory alongside these — it is easy to mistake for "the"
+> source since it sits next to the lib's own `tests/`, but `--list` only
+> enumerates the `plugins/*/libs/*` copies it keeps in sync; a top-level
+> `libs/<lib>/src` that isn't one of the listed copies is **not consumed by any
+> plugin at runtime**, and editing it silently does nothing. Edit every listed
+> copy identically (or edit one and copy it to the rest byte-for-byte), then
+> re-run `check-vendored-libs-sync.py` to confirm — it fails loudly on drift
+> between copies, but it cannot warn you about editing an unlisted, unvendored
+> directory.
 
 **agent-worktrees:**
 
@@ -314,6 +330,27 @@ They are not the normal deploy step.
 
 > Prerequisite, every time: **bump the version** (see *Where the version lives*).
 > `<repo> update` is version-gated — an un-bumped change deploys nothing.
+
+> **`<repo> update` does not validate an unmerged worktree's changes.** Per
+> [install-contract.md § Source = where the installer runs
+> from](docs/install-contract.md#source--where-the-installer-runs-from-no-flag),
+> a machine's installed footprint remembers a `source.kind` (`marketplace` or
+> `local`) from wherever its installer last ran, and `update`/`agent-worktrees
+> update --force` **keeps pulling from that same source** — for a normal,
+> already-onboarded machine that's `marketplace` (resolving `main`, typically
+> via the registered **anchor checkout**, not any feature worktree). Running
+> `agent-worktrees update --force` from inside a worktree with uncommitted or
+> unmerged commits will silently redeploy the **unchanged** marketplace/anchor
+> code — not your edit — and a version bump alone does not fix this, since
+> there is nothing on `main` yet to bump to. To validate a real change **before
+> merging**, run that specific plugin's own installer directly from the
+> worktree (see each plugin's own "Local Testing"/"Install / Update" section
+> below, e.g. `cd plugins/agent-codespaces; ./scripts/install.ps1 update`) —
+> this switches that machine's footprint to `source.kind = local`, pointed at
+> your worktree, until you run the unified `<repo> update` again (which flips
+> it back to `marketplace`). Treat this as throwaway pre-merge validation, not
+> a persistent local-dev mode: remember to run the unified `update` again after
+> merging so the machine returns to tracking the marketplace normally.
 
 ## Deploying Agent Worktrees
 
@@ -774,6 +811,76 @@ per-mux shell writer or a render-path `#()`); the guard tests in
 `#(agent-worktrees` / `#(cat` in the bar) will fail if you regress. Verified
 mechanisms: psmux 3.3.6 and tmux 3.4 both support session-scoped `set-option -t`
 (isolated per session) and `#{@user-option}` expansion.
+
+### Hot-patching a deployed venv for fast pre-merge iteration
+
+**A cached `.test-venvs/<platform>/<plugin>` venv installs a vendored
+path-dependency lib (e.g. `agent-ssh-manager`) as a normal, non-editable
+copy** — not an editable link. Editing `plugins/<p>/libs/<lib>/src/...` does
+**not** change what that venv imports until you rebuild it. Two ways to see a
+fresh edit without a full rebuild:
+
+- **Fast unit-test iteration:** prepend the vendored copy's `src/` to
+  `PYTHONPATH` so it shadows the stale installed copy, e.g. (PowerShell):
+  `$env:PYTHONPATH = "plugins\<p>\libs\<lib>\src"` before invoking the venv's
+  `python.exe -m pytest`. This is also how to run a shared lib's **own** test
+  suite (`libs/<lib>/tests/`) against one specific vendored copy — that suite
+  is not part of any plugin's `tests/` dir, so `tools/run-plugin-tests.py`
+  never runs it; point `PYTHONPATH` at the copy you want to validate and
+  invoke pytest against the shared lib's own `tests/` directory directly.
+- **`--reinstall`:** `python tools/run-plugin-tests.py <plugin> --reinstall`
+  forces a real rebuild from the current vendored source, for a true
+  integration-level check of that plugin's own suite.
+
+**Validating against the actual deployed CLI a human/agent would invoke** (not
+just the test venv) needs one more step beyond the *local installer* gotcha
+above (see *`<repo> update` does not validate an unmerged worktree's
+changes*): even a `source.kind = local` install rebuilds from a **checkout on
+disk**, so it still requires committing (or at least saving) your edit and
+re-running that plugin's installer to pick it up. For the fastest possible
+iteration loop on a live bug **before** a PR is ready, it is acceptable to
+hot-patch the **already-deployed** runtime's files directly (e.g. on Windows,
+`~/.agent-codespaces/versions/<version>/Lib/site-packages/ssh_manager/*.py`) —
+but treat this as strictly throwaway: it is silently overwritten by the next
+real install/update, must never be treated as "shipped," and the actual fix
+still needs to land through the normal commit → PR → merge → deploy flow
+before you consider it done. Re-verify against a real (non-hot-patched)
+deploy once your PR lands.
+
+### Windows `ProxyCommand` bridge: a peer-gone-away read is not a failure
+
+**If you touch `libs/ssh-manager` (any vendored copy)'s `proxy.py` or
+`process.py`:** two Windows-only behaviors are load-bearing, not incidental,
+and a "obvious" cleanup can silently reintroduce either:
+
+- A read from a bridged loopback socket/pipe (`_pump()`) can raise
+  `ConnectionResetError` (`WinError 64`, "the specified network name is no
+  longer available") when the peer closes, instead of the POSIX-style empty
+  read at EOF. This is a normal Windows ProactorEventLoop signal for "the
+  other side is gone," not an error condition — treat it as clean end-of-stream,
+  not something to log as a failure or propagate.
+- The ambient background watcher that reaps a per-command proxy's spawned
+  process (`run_process_cleanup`'s caller in `_watch_process`) must bound how
+  long **it** waits for that cleanup (`timeout=` a modest ceiling, e.g. 10s),
+  even though the underlying cleanup itself stays `shield()`-protected and
+  keeps running to completion in the background. Without that bound, a slow
+  remote process-tree kill (`taskkill /T /F`, observed 100+ seconds under
+  endpoint-protection scanning) blocks the **entire hosting CLI process's
+  exit** — `asyncio.run()`'s own shutdown sequence waits for every
+  outstanding task, including a shielded one, so an unbounded wait here isn't
+  contained to one code path; it stalls the whole invocation even after the
+  real command's result was already returned to the caller.
+
+Both were root-caused live diagnosing `agent-codespaces ssh` reliability
+(ThomasMichon/copilot-extensions#3323, fixed in #3340) — differential
+diagnosis (bare `gh codespace ssh` vs the wrapped command, `--no-relay` to
+rule out the credential-relay prelude, replaying the exact `ssh` invocation
+by hand) is what isolated these two behaviors from red herrings (a
+misdiagnosed "ADO feed-token export hang", a misdiagnosed "network/VPN
+outage" that a bare `gh` call disproved). Re-run that diagnosis shape —
+strip layers one at a time against a known-good baseline — before assuming a
+new hang/slowdown in this path is a repeat of either of these two fixed
+causes.
 
 ## Commit Messages
 
