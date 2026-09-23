@@ -261,9 +261,25 @@ def promote(
     push: bool = False,
     force: bool = False,
     tag_prefix: str = "promote",
+    candidate_branch: str | None = None,
 ) -> dict:
     """Run one full promotion cycle. Returns a report dict; never raises for
-    "nothing to promote" (reported via ``report["promoted"] is False``)."""
+    "nothing to promote" (reported via ``report["promoted"] is False``).
+
+    ``candidate_branch``, when given, changes what ``push=True`` actually
+    does: instead of pushing the generated commit directly to ``main_ref``'s
+    branch (which a real, protected ``main`` will reject -- a personal
+    GitHub account's branch rulesets have no way to grant a bypass to the
+    GitHub Actions app the way an organization's can), the commit is pushed
+    to ``refs/heads/<candidate_branch>`` and the caller (``promote.yml``,
+    via ``gh pr create``/``gh pr merge``) is responsible for landing it on
+    ``main`` through a real pull request -- the same sanctioned path every
+    other change to this repo already uses. The tag is intentionally left
+    unpushed in that mode: its target should be the real post-merge commit
+    on ``main``, not this pre-merge candidate, whose sha a squash-merge
+    replaces. Without ``candidate_branch``, the original direct-push
+    behavior is unchanged (used by the test suite and any trusted/
+    unprotected repo)."""
     dev_head = _rev_parse(dev_ref, cwd=repo)
     if dev_head is None:
         raise PromotionError(f"cannot resolve dev ref: {dev_ref!r}")
@@ -320,11 +336,17 @@ def promote(
             ["commit-tree", new_tree, "-p", main_head, "-m", message], cwd=scratch
         )
         tag_name = f"{tag_name}-{commit[:8]}"
-        _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
 
-        if push:
-            _git(["push", "origin", f"{commit}:refs/heads/main"], cwd=scratch)
-            _git(["push", "origin", tag_name], cwd=scratch)
+        if push and candidate_branch:
+            # Land via a real PR, not a direct push (see promote()'s
+            # docstring) -- the tag is created by the caller against the
+            # actual post-merge commit, not this pre-merge candidate.
+            _git(["push", "origin", f"{commit}:refs/heads/{candidate_branch}"], cwd=scratch)
+        else:
+            _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
+            if push:
+                _git(["push", "origin", f"{commit}:refs/heads/main"], cwd=scratch)
+                _git(["push", "origin", tag_name], cwd=scratch)
 
         return {
             "promoted": True,
@@ -333,6 +355,7 @@ def promote(
             "main_before": main_head,
             "dev_head": dev_head,
             "pushed": push,
+            "candidate_branch": candidate_branch if (push and candidate_branch) else None,
             **summary,
         }
     finally:
@@ -350,6 +373,11 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true",
         help="override the non-incremental-promotion guard after a rollback",
     )
+    ap.add_argument(
+        "--candidate-branch", default=None,
+        help="push the candidate commit here instead of main directly, for a "
+             "caller (promote.yml) to land via a real PR + merge",
+    )
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="default: do not push")
     mode.add_argument("--push", action="store_true", help="push the generated commit + tag")
@@ -358,7 +386,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = promote(
             repo=args.repo, dev_ref=args.dev_ref, main_ref=args.main_ref,
-            push=args.push, force=args.force,
+            push=args.push, force=args.force, candidate_branch=args.candidate_branch,
         )
     except PromotionPaused as exc:
         # A pause is an expected, intentional operator action (part of the
@@ -379,7 +407,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  dev head:    {report['dev_head']}")
     for plugin, (old, new) in sorted(report["bumps"].items()):
         print(f"  bump: {plugin} {old} -> {new}")
-    if not report["pushed"]:
+    if report.get("candidate_branch"):
+        print(f"  pushed candidate branch: {report['candidate_branch']} "
+              "(land it on main via a real PR + merge; tag the actual merged commit)")
+    elif not report["pushed"]:
         print("  (dry run -- nothing pushed; re-run with --push to update origin/main)")
     return 0
 
