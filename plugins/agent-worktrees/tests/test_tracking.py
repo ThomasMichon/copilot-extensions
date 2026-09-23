@@ -2831,6 +2831,34 @@ class TestCascadeAndOrphans:
         self._save(tmp_tracking_dir, parent)
         assert release_all_resources(parent) == []
 
+    def test_release_all_resources_snapshots_trail_for_reopen(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """worktree-finality-and-obligations Phase 2: the cascade leaves a
+        durable, persisted trail of exactly what it released, distinct from
+        the general (possibly manually-released) ``resources`` list, so a
+        later reopen notice can enumerate it."""
+        parent = self._rec("wt-parent", resources=[
+            ResourceClaim(kind="codespace", ref="cs-1", state="active", note="n1"),
+            ResourceClaim(kind="worktree", ref="test/other/wt-old", state="released"),
+        ])
+        self._save(tmp_tracking_dir, parent)
+        released = release_all_resources(parent)
+        assert [c.ref for c in released] == ["cs-1"]
+        assert [c.ref for c in parent.last_finalize_released] == ["cs-1"]
+        assert parent.last_finalize_released[0].note == "n1"
+        # Persisted, and reads back as a real (separate) copy, not the same
+        # object as the general resources list.
+        reloaded = load_record_by_id("wt-parent")
+        assert [c.ref for c in reloaded.last_finalize_released] == ["cs-1"]
+        assert reloaded.last_finalize_released[0] is not reloaded.resources[0]
+        # A second cascade with nothing new to release overwrites the trail
+        # to empty rather than leaving the prior (now-stale) snapshot behind.
+        assert release_all_resources(reloaded) == []
+        assert reloaded.last_finalize_released == []
+        reloaded_again = load_record_by_id("wt-parent")
+        assert reloaded_again.last_finalize_released == []
+
     def test_release_all_resources_excludes_session_claims(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):

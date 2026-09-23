@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -506,7 +506,15 @@ def release_all_resources(
     released = [claim for claim in record.resources if claim.is_live and claim.kind != "session"]
     for claim in released:
         claim.state = "released"
-    if released and save:
+    # worktree-finality-and-obligations Phase 2: snapshot exactly what THIS
+    # cascade released, overwriting any prior snapshot (including to empty),
+    # so a later reopen's notice reflects the most recent finalize rather than
+    # a stale one. Copies, not the same objects, so a subsequent reactivation
+    # of one of these refs (which mutates the `resources` entry in place via
+    # `add_resource_claim`) cannot silently rewrite this historical snapshot.
+    had_trail = bool(record.last_finalize_released)
+    record.last_finalize_released = [replace(claim) for claim in released]
+    if save and (released or had_trail):
         tracking.save_record(record)
     return released
 
