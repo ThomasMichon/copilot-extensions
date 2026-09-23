@@ -748,12 +748,9 @@ class ContentStore:
                 self._fts_next_retry_at = time.monotonic() + _FTS_LOCK_RECHECK_S
                 return self._fts_available
 
-            # Track *why* a full rebuild is chosen -- the three distinct
-            # triggers (never-built, recovered-unavailable, escalated from a
-            # non-retryable incremental failure) previously collapsed into an
-            # identical "created/rebuilt" log line, making a full rebuild's
-            # cause undiagnosable after the fact (#1818 follow-up). Recorded
-            # here and surfaced by ``_mark_rebuilt`` below.
+            # Track *why* a full rebuild is chosen -- three triggers (never
+            # built, recovered-unavailable, escalated-non-retryable-failure)
+            # used to collapse into one "created/rebuilt" line (#1818 follow-up).
             full_reason = "never-built" if not self._fts_available else None
 
             if not self._fts_available:
@@ -782,8 +779,7 @@ class ContentStore:
                 self._fts_next_retry_at = 0.0
                 if via_full:
                     logger.info(
-                        "FTS index created/rebuilt on %d chunks (full rebuild, "
-                        "reason=%s)",
+                        "FTS index created/rebuilt on %d chunks (full rebuild, reason=%s)",
                         count, reason or "unknown",
                     )
                 else:
@@ -817,16 +813,13 @@ class ContentStore:
                 # forever -- escalate once to a full rebuild. A merely
                 # retries-exhausted conflict keeps the existing backoff.
                 logger.warning(
-                    "FTS incremental update hit a non-retryable failure, "
-                    "escalating to a full rebuild: %s",
+                    "FTS incremental update hit a non-retryable failure, escalating to a full rebuild: %s",
                     last_err,
                 )
                 try:
                     self._run_fts_build(full=True)
-                    _mark_rebuilt(
-                        via_full=True,
-                        reason=f"escalated-non-retryable-failure: {last_err}",
-                    )
+                    reason = f"escalated-non-retryable-failure: {last_err}"
+                    _mark_rebuilt(via_full=True, reason=reason)
                     return True
                 except Exception as full_err:
                     last_err = full_err
