@@ -105,13 +105,16 @@ Write-Output "EXITCODE=$($result.ExitCode)"
 def test_preexisting_residue_is_gone_before_the_first_attempt(tmp_path: Path) -> None:
     """Regression (2026-09-23, copilot-extensions#3456 review): this
     function previously had NO scrub at all. The stub `uv` asserts the
-    residue is already gone by the time it's first invoked."""
+    residue (including the src-layout egg-info) is already gone by the time
+    it's first invoked."""
     plugin_dir = tmp_path / "plugin"
     plugin_dir.mkdir()
     _seed_build_residue(plugin_dir)
+    _seed_src_layout_egg_info(plugin_dir)
     stub = f"""
 function uv {{
-    if ((Test-Path "{plugin_dir}\\build") -or (Test-Path "{plugin_dir}\\some_pkg.egg-info")) {{
+    if ((Test-Path "{plugin_dir}\\build") -or (Test-Path "{plugin_dir}\\some_pkg.egg-info") `
+        -or (Test-Path "{plugin_dir}\\src\\some_pkg.egg-info")) {{
         [Console]::Error.WriteLine('residue still present at install time')
         $global:LASTEXITCODE = 1
         return

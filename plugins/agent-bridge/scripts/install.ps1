@@ -427,7 +427,7 @@ function Invoke-UvPipInstallResilient {
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
             (Join-Path $PluginDir 'build'), `
             (Join-Path $PluginDir '*.egg-info'), `
-            (Join-Path $PluginDir 'src\*.egg-info')
+            (Join-Path (Join-Path $PluginDir 'src') '*.egg-info')
     }
     $delays = @(3, 6, 10)
     & $scrubArtifacts
