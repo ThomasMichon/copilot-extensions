@@ -146,21 +146,29 @@ shape). `migrate_local_selections`' existing display-name -> machine-key
 rewrite is a separate, already-existing migration concern that moves with
 `terminal_fragment.py` unchanged.
 
-## Ordered implementation steps (each independently landable — sequence pending open question 1)
+## Ordered implementation steps (each independently landable)
 
-1. [ ] **Relocate `profiles.py` verbatim into worktree-manager** as an owned
+1. [x] **Relocate `profiles.py` verbatim into worktree-manager** as an owned
    module (not vendored). Update worktree-manager's `profiles_io.py` /
    `engine_profiles_view.py` to import it directly; delete
    `production_picker/profiles.py`'s proxy shim. No agent-worktrees change
    yet — agent-worktrees keeps its own copy and its `profiles`/
    `terminal-fragment` CLI verbs working exactly as today (two copies exist
-   briefly, matching Phase 3b Step 3's transitional shape).
-2. [ ] **Answer open question 1** (registry-read shape) and land whichever
-   new agent-worktrees `--json` verb (or confirmed-stable file contract) the
-   relocated `terminal_fragment.py` needs for `collect_local_projects`.
+   briefly, matching Phase 3b Step 3's transitional shape). **Landed** — PR
+   [#3398](https://github.com/ThomasMichon/copilot-extensions/pull/3398).
+2. [x] **Resolve the registry-read boundary (direct file read).** Extended
+   `harness_state.py` — worktree-manager's existing dependency-free
+   `repos.yaml`/`projects.yaml`/per-project `config.yaml` reader — with
+   `SshEnvironment`/`RosterMachine` dataclasses, `project_roster()` (a
+   verbatim port of `terminal_fragment._load_roster`), and
+   `ProjectInfo.wsl_distro`/`wsl_state`/`roster` fields populated in
+   `build_projects()`. This gives the relocated fragment-builder core
+   (Step 3) everything `collect_local_projects` reads today, through the
+   same file-reading contract `harness_state.py` already established.
 3. [ ] **Relocate the GUID/reconciliation/state-diagnosis core of
    `terminal_fragment.py`** into worktree-manager, wired to consume Step 2's
-   registry-read boundary instead of in-process imports.
+   `harness_state.build_projects()` instead of in-process
+   `config`/`installer`/`repos` imports.
 4. [ ] **Give worktree-manager an equivalent CLI/config surface** for
    `profiles get/apply` and `terminal-fragment [--explain|--doctor|
    --migrate-selections]`, proven against the same scenarios agent-worktrees'
@@ -196,11 +204,18 @@ rewrite is a separate, already-existing migration concern that moves with
 
 ## Open questions for the operator / design review
 
-1. **Registry-read shape for `collect_local_projects`.** New agent-worktrees
-   `--json` verb, or does worktree-manager already have (or gain) a
-   documented-stable read contract for `repos.yaml`/`projects.yaml`/
-   `machines.yaml` it can use directly? Affects whether Step 2 is a new
-   agent-worktrees CLI surface or a worktree-manager-side registry reader.
+1. ~~**Registry-read shape for `collect_local_projects`.**~~ **Resolved
+   (operator direction, 2026-09-23): direct file read**, not a new
+   agent-worktrees CLI verb — worktree-manager reads
+   `repos.yaml`/`projects.yaml`/`machines.yaml` directly, the same way its
+   existing `harness_state.py` module already reads `repos.yaml`,
+   `projects.yaml`, and per-project `config.yaml` as a dependency-free
+   contract (its own docstring: "reads that state from the files the harness
+   already writes for its OWN reasons — never by importing plugin code").
+   Landed: `harness_state.py` gained `SshEnvironment`/`RosterMachine`
+   dataclasses, `project_roster()` (a verbatim port of
+   `terminal_fragment._load_roster`), and `ProjectInfo.wsl_distro`/
+   `wsl_state`/`roster` fields populated in `build_projects()`.
 2. **Bundled legacy Picker's Profiles grid.** Does `picker_support/
    data_local.py`'s copy need to keep working (a zero-provider fallback), or
    is it dead code safe to delete alongside the CLI verbs in Step 6?
@@ -208,4 +223,5 @@ rewrite is a separate, already-existing migration concern that moves with
    depends on Step 1 here, confirm whether Phase 3e Step 1 should land before
    or independent of Phase 3d's other groups — they don't share a call site,
    so no ordering constraint was found, but flagging in case a reason exists
-   to sequence them.
+   to sequence them. **Resolved:** Step 1 landed independently (PR #3398)
+   and closed Phase 3d's `profiles` checkbox directly; no conflict found.

@@ -11,6 +11,9 @@ importing plugin code — so the dependency-free boundary holds:
 * **projects registry** — ``~/.agent-worktrees/projects.yaml`` (which repos are
   *projects* — harness repos worthy of binstubs + profiles — with ``config_dir``,
   ``expose_agent``, wsl).
+* **per-project machine roster** — ``<repo>/.agent-worktrees/machines.yaml``
+  (legacy fallback: ``<repo>/machines.yaml``) — the host x SSH-environment
+  roster a project's terminal-profile fragment is built against.
 * **per-project harness config** — ``~/.<project>/config.yaml`` (``knowledge_repo``
   link, ``terminal_profiles``).
 * **per-project enabled plugins** — the project checkout's own
@@ -116,6 +119,38 @@ class RepoInfo:
 
 
 @dataclass(frozen=True)
+class SshEnvironment:
+    """One ``ssh.environments`` entry from a project's ``machines.yaml``."""
+
+    name: str            # windows | wsl | linux
+    alias: str
+    shell: str = ""      # pwsh | bash
+
+
+@dataclass(frozen=True)
+class RosterMachine:
+    """One machine from a project's ``machines.yaml`` roster."""
+
+    key: str
+    display_name: str
+    ssh_ready: bool = False
+    hostname: str | None = None
+    environments: tuple[SshEnvironment, ...] = ()
+
+    def identities(self) -> set[str]:
+        """Lower-cased ids used to recognise the local host (self-skip)."""
+        ids = {self.key}
+        if self.display_name:
+            ids.add(self.display_name)
+        if self.hostname:
+            ids.add(self.hostname)
+        for e in self.environments:
+            if e.alias:
+                ids.add(e.alias)
+        return {i.lower() for i in ids if i}
+
+
+@dataclass(frozen=True)
 class ProjectInfo:
     """A registered project (projects.yaml) joined with its repo + config."""
 
@@ -126,6 +161,9 @@ class ProjectInfo:
     profiles: int
     repo: RepoInfo | None
     enabled_plugins: tuple[str, ...] = field(default=())
+    wsl_distro: str | None = None
+    wsl_state: str | None = None
+    roster: tuple[RosterMachine, ...] = field(default=())
 
 
 def repos_registry(home_dir: Path | None = None) -> dict:
@@ -138,6 +176,65 @@ def projects_registry(home_dir: Path | None = None) -> dict:
 
 def project_config(name: str, home_dir: Path | None = None) -> dict:
     return _read_yaml((home_dir or home()) / f".{name}" / "config.yaml")
+
+
+def _load_roster(machines_yaml: Path) -> tuple[RosterMachine, ...]:
+    """Parse a ``machines.yaml`` file into :class:`RosterMachine` rows.
+
+    Ported verbatim from ``agent_worktrees.terminal_fragment._load_roster``
+    (copilot-extensions#3390, Phase 3e Step 2) -- same tolerant, degrade-to-
+    empty behavior on a missing/malformed file.
+    """
+    if not machines_yaml.exists():
+        return ()
+    try:
+        data = yaml.safe_load(machines_yaml.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return ()
+    machines = data.get("machines") if isinstance(data, dict) else None
+    if not isinstance(machines, dict):
+        return ()
+    out: list[RosterMachine] = []
+    for key, entry in machines.items():
+        if not isinstance(entry, dict):
+            continue
+        ssh = entry.get("ssh") if isinstance(entry.get("ssh"), dict) else {}
+        envs = []
+        for e in (ssh.get("environments") or []):
+            if not isinstance(e, dict):
+                continue
+            name = str(e.get("name") or "").strip()
+            if not name:
+                continue
+            envs.append(SshEnvironment(
+                name=name,
+                alias=str(e.get("alias") or "").strip(),
+                shell=str(e.get("shell") or "").strip(),
+            ))
+        out.append(RosterMachine(
+            key=str(key),
+            display_name=str(entry.get("display_name") or key),
+            ssh_ready=bool(ssh.get("ready")),
+            hostname=(str(entry.get("hostname")) if entry.get("hostname") else None),
+            environments=tuple(envs),
+        ))
+    return tuple(out)
+
+
+def project_roster(repo_path: str | None) -> tuple[RosterMachine, ...]:
+    """This project's ``machines.yaml`` roster, given its resolved repo path.
+
+    Checks ``<repo_path>/.agent-worktrees/machines.yaml`` first, falling back
+    to the legacy repo-root ``<repo_path>/machines.yaml`` -- matching
+    ``terminal_fragment.collect_local_projects``'s existing fallback order.
+    """
+    if not repo_path:
+        return ()
+    root = Path(repo_path)
+    machines_yaml = root / ".agent-worktrees" / "machines.yaml"
+    if not machines_yaml.is_file():
+        machines_yaml = root / "machines.yaml"
+    return _load_roster(machines_yaml)
 
 
 def _account_for(name: str, entry: dict, account_map: dict) -> str | None:
@@ -222,6 +319,7 @@ def build_projects(home_dir: Path | None = None) -> list[ProjectInfo]:
         entry = entry or {}
         cfg = project_config(name, home_dir)
         repo = repos.get(name)
+        wsl = entry.get("wsl") if isinstance(entry.get("wsl"), dict) else {}
         out.append(ProjectInfo(
             name=name,
             config_dir=entry.get("config_dir"),
@@ -230,6 +328,9 @@ def build_projects(home_dir: Path | None = None) -> list[ProjectInfo]:
             profiles=len(cfg.get("terminal_profiles") or []),
             repo=repo,
             enabled_plugins=tuple(repo_enabled_plugins(repo.path) if repo else ()),
+            wsl_distro=wsl.get("distro"),
+            wsl_state=wsl.get("state"),
+            roster=project_roster(repo.path if repo else None),
         ))
     return sorted(out, key=lambda p: p.name)
 

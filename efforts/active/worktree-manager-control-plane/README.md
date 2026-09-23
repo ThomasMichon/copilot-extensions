@@ -468,13 +468,17 @@ call site.
       matching Phase 3b's own transitional shape). Landed as
       `worktree_manager.terminal_profiles`; full production_picker suite
       green (658 passed, same 3 pre-existing unrelated failures as #3359).
-- [ ] **Step 2 — resolve the registry-read boundary** `terminal_fragment.py`'s
-      `collect_local_projects` needs (new agent-worktrees `--json` verb vs.
-      a confirmed-stable file contract worktree-manager reads directly) —
-      an open design question, see the plan doc.
+- [x] **Step 2 — resolve the registry-read boundary (operator direction:
+      direct file read).** Extended `harness_state.py` — worktree-manager's
+      existing dependency-free `repos.yaml`/`projects.yaml`/per-project
+      `config.yaml` reader — with `SshEnvironment`/`RosterMachine` +
+      `project_roster()` (a verbatim port of
+      `terminal_fragment._load_roster`) and `ProjectInfo.wsl_distro`/
+      `wsl_state`/`roster` fields, giving Step 3 everything
+      `collect_local_projects` reads today.
 - [ ] **Step 3 — relocate the GUID/state-diagnosis/reconciliation core** of
-      `terminal_fragment.py` into worktree-manager, wired to Step 2's
-      boundary.
+      `terminal_fragment.py` into worktree-manager, wired to
+      `harness_state.build_projects()`.
 - [ ] **Step 4 — give worktree-manager an equivalent CLI/config surface**
       for `profiles get/apply` and
       `terminal-fragment [--explain|--doctor|--migrate-selections]`.
@@ -610,6 +614,21 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-23** — Operator direction resolved Phase 3e's Open Question 1:
+  the registry-read boundary is a **direct file read**, not a new
+  agent-worktrees CLI verb — matching worktree-manager's existing
+  `harness_state.py` module, which already reads `repos.yaml`/
+  `projects.yaml`/per-project `config.yaml` directly as a documented,
+  dependency-free contract. Landed Phase 3e Step 2: extended
+  `harness_state.py` with `SshEnvironment`/`RosterMachine` dataclasses,
+  `project_roster()` (a verbatim port of
+  `terminal_fragment._load_roster`), and `ProjectInfo.wsl_distro`/
+  `wsl_state`/`roster` fields populated in `build_projects()` — giving
+  Step 3's relocated fragment-builder everything `collect_local_projects`
+  reads today, through the same file-reading contract. New
+  `test_build_projects_reads_wsl_and_roster` covers the join; full
+  non-picker suite green (422 passed). worktree-manager bumped
+  `0.1.0-dev70` -> `dev71`.
 - **2026-09-23** — Landed Phase 3e Step 1 (`profiles.py` relocation):
   `worktree_manager.terminal_profiles` (verbatim copy of
   `agent_worktrees.profiles`, no behavior change — same
