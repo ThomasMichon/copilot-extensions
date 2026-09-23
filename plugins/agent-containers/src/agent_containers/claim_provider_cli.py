@@ -14,7 +14,7 @@ import logging
 import sys
 
 from . import lifecycle
-from .lease import active_session_admissions, get_deploy_hold, get_lease
+from .lease import DeployHoldError, active_session_admissions, deploy_hold, get_lease
 from .lease import release as release_lease
 
 log = logging.getLogger("agent-containers")
@@ -67,6 +67,15 @@ def _release_lease_silently(name: str) -> None:
         log.debug("lease release for %s failed: %s", name, exc)
 
 
+#: The registry's default status-callback budget is 15s;
+#: ``lifecycle._docker`` defaults to a 30s subprocess timeout, which alone
+#: could outlive the callback (killing this process before its own
+#: controlled error path runs, and possibly leaving the docker child
+#: running past that). Leave real margin under the budget for process
+#: startup/teardown too.
+_STATUS_DOCKER_TIMEOUT_SECONDS = 8.0
+
+
 def cmd_claim_status(args: argparse.Namespace) -> int:
     """``claim-status <name>``: does container NAME exist?
 
@@ -80,7 +89,10 @@ def cmd_claim_status(args: argparse.Namespace) -> int:
     non-zero (a callback failure, degrading to ``{"available": false, ...}``
     at the registry) instead of a false ``exists: false``."""
     try:
-        proc = lifecycle._docker(["inspect", "-f", "{{.State.Status}}", args.name])
+        proc = lifecycle._docker(
+            ["inspect", "-f", "{{.State.Status}}", args.name],
+            timeout=_STATUS_DOCKER_TIMEOUT_SECONDS,
+        )
     except Exception as exc:
         print(f"docker inspect failed: {exc}", file=sys.stderr)
         return 1
@@ -107,7 +119,16 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     lease blocking allocation for the lease TTL). Refuses (``reclaimed:
     false``) an actively leased container -- the same guard
     ``lifecycle.cmd_remove`` applies -- so a stale worktree claim can never
-    destroy a container another effort currently holds."""
+    destroy a container another effort currently holds.
+
+    Holds a REAL atomic fence (``lease.deploy_hold``) across the active-
+    session-admission check AND the destructive removal, rather than a
+    bare check-then-act: ``deploy_hold`` blocks any NEW provider admission
+    from starting for its duration (enforced under the same lock file a
+    borrow/``exec --stdio`` admission itself checks), and raises outright
+    if another destructive operation already holds it -- closing the race
+    a plain check would leave open between "no admission right now" and
+    "still no admission by the time we actually remove it"."""
     if not args.apply:
         print(json.dumps({"reclaimed": True, "detail": f"would remove container {args.name}"}))
         return 0
@@ -118,35 +139,31 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
             "detail": f"container is leased to {lease.effort}; release it first",
         }))
         return 0
-    # A restricted `exec --stdio` session (or a live provider-lifecycle
-    # deploy hold) can hold a container without an advisory lease at all --
-    # check both, fail closed (refuse) on any error reading either, and
-    # never proceed to the destructive removal below with either present.
     try:
-        admissions = active_session_admissions(args.name)
-        hold = get_deploy_hold(args.name)
+        with deploy_hold(args.name, "claim-reclaim"):
+            if active_session_admissions(args.name):
+                print(json.dumps({
+                    "reclaimed": False,
+                    "detail": "container has an active session admission; refusing to remove",
+                }))
+                return 0
+            try:
+                lifecycle.remove_container(args.name, force=True)
+            except RuntimeError as exc:
+                detail = str(exc)
+                if _container_looks_gone(detail):
+                    _release_lease_silently(args.name)
+                    print(json.dumps({
+                        "reclaimed": True, "detail": f"container {args.name} already gone",
+                    }))
+                    return 0
+                print(json.dumps({"reclaimed": False, "detail": detail}))
+                return 0
+    except DeployHoldError as exc:
+        print(json.dumps({"reclaimed": False, "detail": str(exc)}))
+        return 0
     except Exception as exc:
-        print(json.dumps({
-            "reclaimed": False,
-            "detail": f"admission/hold check failed: {exc}",
-        }))
-        return 0
-    if admissions or hold:
-        print(json.dumps({
-            "reclaimed": False,
-            "detail": "container has an active session admission or provider "
-            "lifecycle hold; refusing to remove",
-        }))
-        return 0
-    try:
-        lifecycle.remove_container(args.name, force=True)
-    except RuntimeError as exc:
-        detail = str(exc)
-        if _container_looks_gone(detail):
-            _release_lease_silently(args.name)
-            print(json.dumps({"reclaimed": True, "detail": f"container {args.name} already gone"}))
-            return 0
-        print(json.dumps({"reclaimed": False, "detail": detail}))
+        print(json.dumps({"reclaimed": False, "detail": f"admission/hold check failed: {exc}"}))
         return 0
     _release_lease_silently(args.name)
     print(json.dumps({"reclaimed": True, "detail": f"removed container {args.name}"}))

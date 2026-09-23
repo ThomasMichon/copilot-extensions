@@ -5,15 +5,26 @@ agent-worktrees' claim-provider registry resolves.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import types
 
 from agent_containers import claim_provider_cli as cpc
 from agent_containers import lifecycle
+from agent_containers.lease import DeployHoldError
 
 
 def _proc(returncode=0, stdout="", stderr=""):
     return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+@contextlib.contextmanager
+def _fake_hold(name, operation):
+    yield types.SimpleNamespace(container=name, operation=operation)
+
+
+def _fake_hold_raises(name, operation):
+    raise DeployHoldError(f"Container '{name}' already has a provider {operation} hold")
 
 
 def test_claim_status_exists(monkeypatch, capsys):
@@ -54,6 +65,20 @@ def test_claim_status_docker_unavailable_is_not_false_absence(monkeypatch, capsy
     assert capsys.readouterr().out == ""
 
 
+def test_claim_status_uses_a_bounded_docker_timeout(monkeypatch, capsys):
+    """The registry's own status-callback budget is 15s; the inner docker
+    call must leave real margin under it, not use docker's own 30s
+    subprocess default."""
+    captured = {}
+
+    def _docker(args, **k):
+        captured.update(k)
+        return _proc(0, stdout="running\n")
+    monkeypatch.setattr(lifecycle, "_docker", _docker)
+    cpc.cmd_claim_status(argparse.Namespace(name="c-a"))
+    assert captured.get("timeout", 999) < 15
+
+
 def test_claim_reclaim_dry_run_never_removes(monkeypatch, capsys):
     called = {"n": 0}
     monkeypatch.setattr(lifecycle, "remove_container",
@@ -67,8 +92,8 @@ def test_claim_reclaim_dry_run_never_removes(monkeypatch, capsys):
 
 def test_claim_reclaim_apply_success(monkeypatch, capsys):
     monkeypatch.setattr(cpc, "get_lease", lambda name: None)
+    monkeypatch.setattr(cpc, "deploy_hold", _fake_hold)
     monkeypatch.setattr(cpc, "active_session_admissions", lambda name: [])
-    monkeypatch.setattr(cpc, "get_deploy_hold", lambda name: None)
     monkeypatch.setattr(lifecycle, "remove_container", lambda *a, **k: None)
     released = {}
     monkeypatch.setattr(cpc, "release_lease",
@@ -98,12 +123,14 @@ def test_claim_reclaim_refuses_actively_leased_container(monkeypatch, capsys):
 
 def test_claim_reclaim_refuses_active_session_admission(monkeypatch, capsys):
     """A restricted `exec --stdio` session can hold a container WITHOUT an
-    advisory lease at all -- must still block a destructive removal."""
+    advisory lease at all -- must still block a destructive removal.
+    Checked INSIDE the atomic deploy_hold fence, so no new admission can
+    start between this check and the removal below."""
     called = {"n": 0}
     monkeypatch.setattr(cpc, "get_lease", lambda name: None)
+    monkeypatch.setattr(cpc, "deploy_hold", _fake_hold)
     monkeypatch.setattr(cpc, "active_session_admissions",
-                        lambda name: [types.SimpleNamespace(session_id="s1")])
-    monkeypatch.setattr(cpc, "get_deploy_hold", lambda name: None)
+                        lambda name: [types.SimpleNamespace(token="t1")])
     monkeypatch.setattr(lifecycle, "remove_container",
                         lambda *a, **k: called.__setitem__("n", 1))
     rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="c-a", apply=True))
@@ -113,12 +140,13 @@ def test_claim_reclaim_refuses_active_session_admission(monkeypatch, capsys):
     assert called["n"] == 0
 
 
-def test_claim_reclaim_refuses_active_deploy_hold(monkeypatch, capsys):
+def test_claim_reclaim_refuses_when_another_operation_holds_the_fence(monkeypatch, capsys):
+    """``deploy_hold`` itself raises when another destructive operation
+    already holds the container -- this callback must degrade to a refusal
+    rather than propagate/crash."""
     called = {"n": 0}
     monkeypatch.setattr(cpc, "get_lease", lambda name: None)
-    monkeypatch.setattr(cpc, "active_session_admissions", lambda name: [])
-    monkeypatch.setattr(cpc, "get_deploy_hold",
-                        lambda name: types.SimpleNamespace(operation="up"))
+    monkeypatch.setattr(cpc, "deploy_hold", _fake_hold_raises)
     monkeypatch.setattr(lifecycle, "remove_container",
                         lambda *a, **k: called.__setitem__("n", 1))
     rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="c-a", apply=True))
@@ -130,8 +158,8 @@ def test_claim_reclaim_refuses_active_deploy_hold(monkeypatch, capsys):
 
 def test_claim_reclaim_already_gone_is_idempotent(monkeypatch, capsys):
     monkeypatch.setattr(cpc, "get_lease", lambda name: None)
+    monkeypatch.setattr(cpc, "deploy_hold", _fake_hold)
     monkeypatch.setattr(cpc, "active_session_admissions", lambda name: [])
-    monkeypatch.setattr(cpc, "get_deploy_hold", lambda name: None)
 
     def _boom(*a, **k):
         raise RuntimeError("docker rm c-a failed: Error: No such container: c-a")
@@ -148,8 +176,8 @@ def test_claim_reclaim_already_gone_is_idempotent(monkeypatch, capsys):
 
 def test_claim_reclaim_real_failure(monkeypatch, capsys):
     monkeypatch.setattr(cpc, "get_lease", lambda name: None)
+    monkeypatch.setattr(cpc, "deploy_hold", _fake_hold)
     monkeypatch.setattr(cpc, "active_session_admissions", lambda name: [])
-    monkeypatch.setattr(cpc, "get_deploy_hold", lambda name: None)
 
     def _boom(*a, **k):
         raise RuntimeError("docker rm c-a failed: permission denied")
