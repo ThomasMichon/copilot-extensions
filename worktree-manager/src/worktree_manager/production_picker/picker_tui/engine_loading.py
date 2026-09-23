@@ -11,6 +11,14 @@ from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, target_row
 from .selection import ListSelection
 from .. import config as cfg
 
+# How long the Picker's shared ConfigCacheSession (below) keeps an entry
+# before treating it as stale and recomputing it. Long enough to cover one
+# launch plus a few quick manual reloads/pivot switches without repaying
+# agent_worktrees.config.load_config()'s expensive control-plane discovery;
+# short enough that a real machines.yaml/config.yaml edit is picked up
+# within roughly a minute of a live session, not just at next launch.
+_CONFIG_CACHE_TTL_SECS = 60.0
+
 class PickerScreenLoadingMixin:
     def on_mount(self):
         if self.live:
@@ -131,17 +139,38 @@ class PickerScreenLoadingMixin:
         self.applied = {}
         self._prof_unavailable = set()
     def _load_config_cache_scope(self):
-        """``cfg.cached_load_config_scope()`` when the resolved engine has it.
+        """This Picker instance's shared, TTL-bounded config-cache scope.
 
-        The Manager resolves ``agent_worktrees`` as a separate, independently
-        versioned runtime slot (``_engine_runtime.ensure_engine_runtime``) --
-        an older installed engine that predates
-        ``cached_load_config_scope`` must not crash the live setup pass over
-        a pure latency optimization. Degrades to a no-op context (the
-        pre-existing, always-fresh ``load_config()`` behavior) when absent.
+        Lazily creates ONE :class:`agent_worktrees.config.ConfigCacheSession`
+        per Picker instance (not per call) and reuses it across every thread
+        that enters this scope -- the initial live-roster fill
+        (``_setup_live_async``), the independent pivot-prewarm thread
+        (``_setup_live_pivots``), and every manual 'r' reload
+        (``setup()``) -- so they all draw on one warm cache instead of each
+        separately re-paying ``agent_worktrees.config.load_config()``'s
+        expensive control-plane discovery (profiled at several seconds per
+        call on a fleet with many registered repos). A session is a plain
+        object reference this method hands to each thread explicitly
+        (contextvars do not propagate across threads on their own), so this
+        is safe to enter concurrently from more than one thread.
+
+        Degrades to :func:`cfg.cached_load_config_scope` (single-pass, no
+        TTL) or a no-op context when the resolved engine predates
+        ``ConfigCacheSession``/``cached_load_config_scope`` -- an older,
+        independently-versioned ``agent-worktrees`` runtime slot the Manager
+        resolves at runtime must not crash the setup pass over a pure
+        latency optimization.
         """
-        scope = getattr(cfg, "cached_load_config_scope", None)
-        return scope() if callable(scope) else contextlib.nullcontext()
+        session = getattr(self, "_config_cache_session", None)
+        if session is not None:
+            return session.scope()
+        session_cls = getattr(cfg, "ConfigCacheSession", None)
+        if session_cls is None:
+            scope = getattr(cfg, "cached_load_config_scope", None)
+            return scope() if callable(scope) else contextlib.nullcontext()
+        session = session_cls(ttl=_CONFIG_CACHE_TTL_SECS)
+        self._config_cache_session = session
+        return session.scope()
 
     def _setup_live_async(self):
         """Publish bootstrap rows, then fill roster and pivots independently."""
@@ -218,6 +247,10 @@ class PickerScreenLoadingMixin:
         # registered repos. _machine_key_map() itself never blocks on this
         # (it degrades to an empty/fallback map immediately), so this is
         # purely a head start, not a correctness requirement here.
+        # (_prewarm_machine_key_map's own background thread enters this
+        # Picker instance's shared config-cache session itself -- see its
+        # docstring -- since it fans the real load_config() call out to yet
+        # another thread this call doesn't block on.)
         self._prewarm_machine_key_map()
         pivot_payload = self._scan_pivot_payload()
 

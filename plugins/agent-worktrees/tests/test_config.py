@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -1066,9 +1068,110 @@ class TestCachedLoadConfigScope:
 
         with pytest.raises(RuntimeError):
             with cfg.cached_load_config_scope():
-                assert config_cache._scope_cache.get() is not None
+                assert config_cache._current_session.get() is not None
                 raise RuntimeError("boom")
-        assert config_cache._scope_cache.get() is None
+        assert config_cache._current_session.get() is None
+
+
+class TestConfigCacheSession:
+    """The explicit, caller-owned, TTL-bounded, cross-thread-shareable cache."""
+
+    def _write_machine(self, path: Path, anchor: Path) -> None:
+        path.write_text(
+            "repo_name: ext\n"
+            "srcroot: /tmp/src\n"
+            "machine: anomalous-potato\n"
+            "platform: wsl\n"
+            "repos:\n"
+            "  ext:\n"
+            f"    anchor: {anchor}\n"
+            "    worktree_root: /tmp/src/.worktrees/ext\n"
+            "    default_branch: main\n"
+            "    remote: origin\n"
+        )
+
+    def test_session_shares_cache_across_threads(self, tmp_path, monkeypatch):
+        # A plain object reference is shared by both threads explicitly
+        # entering its .scope() -- unlike cached_load_config_scope(), this
+        # is NOT limited to one thread.
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(cfgfile, anchor)
+        calls = []
+        orig = cfg._load_config_uncached
+        monkeypatch.setattr(
+            cfg, "_load_config_uncached",
+            lambda *a, **k: (calls.append(1), orig(*a, **k))[1],
+        )
+        session = cfg.ConfigCacheSession()
+        results = []
+
+        def worker():
+            with session.scope():
+                results.append(cfg.load_config(cfgfile))
+
+        with session.scope():
+            first = cfg.load_config(cfgfile)
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+        assert len(calls) == 1  # the second thread's call hit the shared cache
+        assert results[0] is first
+
+    def test_session_expires_entries_past_ttl(self, tmp_path, monkeypatch):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(cfgfile, anchor)
+        calls = []
+        orig = cfg._load_config_uncached
+        monkeypatch.setattr(
+            cfg, "_load_config_uncached",
+            lambda *a, **k: (calls.append(1), orig(*a, **k))[1],
+        )
+        session = cfg.ConfigCacheSession(ttl=0.05)
+        with session.scope():
+            cfg.load_config(cfgfile)
+            time.sleep(0.1)
+            cfg.load_config(cfgfile)
+        assert len(calls) == 2  # the second call missed -- its entry had aged out
+
+    def test_session_none_ttl_never_expires(self, tmp_path, monkeypatch):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(cfgfile, anchor)
+        calls = []
+        orig = cfg._load_config_uncached
+        monkeypatch.setattr(
+            cfg, "_load_config_uncached",
+            lambda *a, **k: (calls.append(1), orig(*a, **k))[1],
+        )
+        session = cfg.ConfigCacheSession(ttl=None)
+        with session.scope():
+            cfg.load_config(cfgfile)
+            time.sleep(0.1)
+            cfg.load_config(cfgfile)
+        assert len(calls) == 1  # no TTL -- the second call is still a hit
+
+    def test_session_invalidate_clears_entries(self, tmp_path, monkeypatch):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(cfgfile, anchor)
+        calls = []
+        orig = cfg._load_config_uncached
+        monkeypatch.setattr(
+            cfg, "_load_config_uncached",
+            lambda *a, **k: (calls.append(1), orig(*a, **k))[1],
+        )
+        session = cfg.ConfigCacheSession()
+        with session.scope():
+            cfg.load_config(cfgfile)
+            session.invalidate()
+            cfg.load_config(cfgfile)
+        assert len(calls) == 2  # invalidate() forced a fresh call
 
 
 class TestLayeredConfig:

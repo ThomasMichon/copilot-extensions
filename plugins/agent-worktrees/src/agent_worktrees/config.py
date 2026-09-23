@@ -23,7 +23,11 @@ import yaml
 
 from . import config_migrations, project_state, registry_paths
 from .codename_config import CodenameConfig, parse_codename
-from .config_cache import cached_load_config_scope, memoize_in_scope  # noqa: F401 (re-exported)
+from .config_cache import (  # noqa: F401 (re-exported)
+    ConfigCacheSession,
+    cached_load_config_scope,
+    memoize_in_scope,
+)
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")

@@ -628,6 +628,66 @@ def test_data_ssh_bootstrap_rows_skip_full_config(monkeypatch):
     assert data_ssh.bootstrap_rows() == [{"classify": False}]
 
 
+def test_load_config_cache_scope_reuses_one_session_per_picker():
+    """``_load_config_cache_scope()`` must create the ConfigCacheSession ONCE
+    per Picker instance and hand out the SAME session on every subsequent
+    call -- that's what lets the roster thread, the pivot-prewarm thread,
+    and a later manual 'r' reload all share one warm cache."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+    screen = eng.PickerScreen(Src(), live=True)
+    with screen._load_config_cache_scope() as first:
+        pass
+    with screen._load_config_cache_scope() as second:
+        pass
+    assert first is second
+
+
+def test_load_config_cache_scope_shares_across_threads():
+    """A session handed out by ``_load_config_cache_scope()`` is a plain
+    object reference -- entering its ``.scope()`` from a second, real OS
+    thread must reuse the same cached entries as the first thread, unlike a
+    bare ``cached_load_config_scope()`` (thread-local by design)."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+    screen = eng.PickerScreen(Src(), live=True)
+    calls = []
+
+    def fake_uncached(*_a, **_k):
+        calls.append(1)
+        return "config-value"
+
+    from agent_worktrees import config as real_cfg
+    from worktree_manager.production_picker import config as pm_cfg
+    orig = real_cfg._load_config_uncached
+    real_cfg._load_config_uncached = fake_uncached
+    try:
+        results = []
+        with screen._load_config_cache_scope():
+            results.append(pm_cfg.load_config())
+
+        def worker():
+            with screen._load_config_cache_scope():
+                results.append(pm_cfg.load_config())
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+    finally:
+        real_cfg._load_config_uncached = orig
+
+    assert len(calls) == 1  # the second (real) thread's call hit the cache
+    assert results == ["config-value", "config-value"]
+
+
 def test_setup_live_async_records_failure():
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import engine as eng

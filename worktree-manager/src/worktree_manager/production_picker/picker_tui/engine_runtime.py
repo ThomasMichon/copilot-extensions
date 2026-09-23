@@ -255,7 +255,8 @@ class PickerScreenRuntimeMixin:
             except Exception:
                 pass
         snapshot_fn = getattr(self.src, "source_snapshot", None)
-        source_snapshot = snapshot_fn() if callable(snapshot_fn) else None
+        with self._load_config_cache_scope():
+            source_snapshot = snapshot_fn() if callable(snapshot_fn) else None
         # Source tabs gain a leading "All" entry that interleaves every source.
         source_tabs = getattr(self.src, "source_tabs", None)
         if callable(source_tabs):
@@ -314,13 +315,14 @@ class PickerScreenRuntimeMixin:
             except Exception:
                 local = self._source_local
         self._source_local = local or self._source_local
-        try:
-            self._source_repo_branch = (
-                getattr(self.src, "REPO", "") or "",
-                getattr(self.src, "BRANCH", "") or "",
-            )
-        except Exception:
-            self._source_repo_branch = ("", "")
+        with self._load_config_cache_scope():
+            try:
+                self._source_repo_branch = (
+                    getattr(self.src, "REPO", "") or "",
+                    getattr(self.src, "BRANCH", "") or "",
+                )
+            except Exception:
+                self._source_repo_branch = ("", "")
         self.machine_idx = self.local_index()
         self.maint_sel = ListSelection()  # drop any stale Maintenance selection
         # Worktrees selection persists across reload (#2258 P3-7): it is NOT
@@ -360,9 +362,10 @@ class PickerScreenRuntimeMixin:
         # source); fall back to the built-in defaults for sources that don't
         # provide them (e.g. fixture sources in tests).
         hc = getattr(self.src, "host_cols", None)
-        self.host_cols = (hc() if callable(hc) else None) or list(_DEFAULT_HOST_COLS)
         te = getattr(self.src, "target_envs", None)
-        target_env_list = (te() if callable(te) else None) or _DEFAULT_TARGET_ENVS
+        with self._load_config_cache_scope():
+            self.host_cols = (hc() if callable(hc) else None) or list(_DEFAULT_HOST_COLS)
+            target_env_list = (te() if callable(te) else None) or _DEFAULT_TARGET_ENVS
         # Profiles matrix: seed a "self · agent" profile on each host.
         self.targets = target_rows(target_env_list)
         self.grid = {}
