@@ -214,6 +214,44 @@ root cause, the fix, and the re-verification result. Append new rounds below;
 do not edit past rounds except to correct a factual error (note the
 correction inline, per the effort's own journal discipline)._
 
+### Round 1 — `agent-machines` first-install stamp step ran synchronously
+
+- **Found:** `bootstrap-check.ps1`/`.sh`'s legacy (non-context-selected)
+  first-install branch ran `init.{ps1,sh} stamp` **synchronously**
+  (`& $exe ... stamp *> $null` / `bash "$_init" stamp >/dev/null 2>&1`),
+  blocking the whole `sessionStart` hook until the first-install stamp step
+  finished — unlike its own sibling `$contextSelected` branch (and, in the
+  `.sh` file, the final fallback branch), which already correctly
+  backgrounded this class of call via `Start-Process`/`nohup ... &`.
+- **Root cause:** confirmed directly (not inferred) by invoking
+  `bootstrap-check.ps1` standalone in a genuinely fresh Windows clean-room
+  container/plugin-install: **22.47s** wall-clock, well past the hook's own
+  15s timeout — matching the exact `HookTimeoutError` seen in the seeding
+  full-harness session.
+- **Fix:** made the legacy stamp launch async (`Start-Process`/conhost
+  `--headless` on Windows, `nohup ... &` on POSIX), matching the pattern
+  already used by the file's own sibling branches and by agent-bridge's
+  reference `bootstrap-check.ps1`. `stamp` only needs to land before the
+  binstub is next invoked, not before the session's first turn. PR:
+  ThomasMichon/copilot-extensions#3332 (branch
+  `worktree/tmichon-book2-win-20260922-201924-820e`).
+- **Re-verified:** on a second genuinely fresh container/plugin-install with
+  the fix applied, the same standalone invocation dropped to **9.23s** — a
+  real, substantial improvement, but **not a full fix**: a *separate*,
+  distinct cost remains. Direct instrumentation traced the residual time to
+  the installation-context resolver's own synchronous status query
+  (`$statusJson = @(& $hostExe @statusArgs)`, itself a full child
+  `powershell.exe` spawn — measured standalone at ~1.4-1.7s per invocation
+  in this container, steady-state, ruling out a one-time cold-JIT effect as
+  the sole explanation). That resolver-status call is now Round 2's target:
+  either make it async too, or cache/skip it on the common
+  not-yet-provisioned path where its answer can't meaningfully change the
+  outcome. Also confirmed: `Test-Path`-gated state (`~/.agent-machines`,
+  `~/.copilot-extensions`) changes which code branch subsequent invocations
+  take, so accurate timing requires either a fresh container/install per
+  measurement or explicit removal of that state between repeated local
+  tests — noted for Phase 1's test-bench methodology going forward.
+
 ### Round 0 — Kickoff (pre-effort evidence)
 
 - **Found:** a clean single full-harness launch took 2m28s; `agent-machines`
