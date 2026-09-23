@@ -540,7 +540,7 @@ def test_grafted_plugin_is_lowest_precedence_and_primary_ignored(
 def test_cli_config_sources_preserve_harness_and_knowledge_provenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
-    from agent_worktrees import __main__ as cli
+    from agent_worktrees import related_cli as cli
     from agent_worktrees.state_root import ConfigSource
 
     harness = tmp_path / "harness"
@@ -1549,7 +1549,7 @@ def test_find_control_plane_anchor_none_when_undeclared(tmp_path: Path, monkeypa
 
 
 def test_related_lookup_anchors_falls_back_to_control_plane(monkeypatch):
-    from agent_worktrees import __main__ as cli
+    from agent_worktrees import related_cli as cli
     monkeypatch.setattr(cli, "_related_config_source_anchors", lambda base: [base])
     monkeypatch.setattr(
         related, "get_related_grafted",
@@ -1563,7 +1563,7 @@ def test_related_lookup_anchors_falls_back_to_control_plane(monkeypatch):
 
 
 def test_related_lookup_anchors_local_hit_skips_fallback(monkeypatch):
-    from agent_worktrees import __main__ as cli
+    from agent_worktrees import related_cli as cli
     monkeypatch.setattr(cli, "_related_config_source_anchors", lambda base: [base])
     monkeypatch.setattr(related, "get_related_grafted",
                         lambda anchors, name: object())
@@ -1577,7 +1577,7 @@ def test_related_lookup_anchors_local_hit_skips_fallback(monkeypatch):
 
 
 def test_related_lookup_anchors_respects_explicit_repo(monkeypatch):
-    from agent_worktrees import __main__ as cli
+    from agent_worktrees import related_cli as cli
     monkeypatch.setattr(cli, "_related_config_source_anchors", lambda base: [base])
     calls = {"cp": 0}
 
@@ -1893,7 +1893,8 @@ def test_cli_owners_is_global_via_control_plane(tmp_path: Path, monkeypatch):
     """`related owners` reads the CONTROL-PLANE index regardless of cwd (so an
     ambient consumer gets the owned set from anywhere), never raising the
     cwd-anchor guard."""
-    from agent_worktrees import __main__ as cli
+    from agent_worktrees import __main__ as m
+    from agent_worktrees import related_cli as cli
     cp = tmp_path / "control-plane"; cp.mkdir()
     _patch_registry(monkeypatch, {
         "mine": "https://github.com/me/mine.git",
@@ -1905,10 +1906,11 @@ def test_cli_owners_is_global_via_control_plane(tmp_path: Path, monkeypatch):
     }))
     monkeypatch.setattr(related, "find_control_plane_anchor", lambda: str(cp))
     # No --repo, and _related_anchor would not resolve a project here: the
-    # control-plane path must still answer.
+    # control-plane path must still answer. _related_anchor is self-owned
+    # by related_cli (patch there); _json_output is still __main__-native.
     monkeypatch.setattr(cli, "_related_anchor", lambda rest: None)
     captured: dict = {}
-    monkeypatch.setattr(cli, "_json_output", lambda payload: captured.update(payload))
+    monkeypatch.setattr(m, "_json_output", lambda payload: captured.update(payload))
     rc = cli.cmd_related_dispatch(["owners", "--json"])
     assert rc == 0
     assert captured["source"] == "control-plane"
