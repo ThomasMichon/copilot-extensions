@@ -173,3 +173,89 @@ def test_jsonc_slashes_in_values_not_stripped(copilot_home: Path) -> None:
     body = json.loads(cfg.read_text(encoding="utf-8")[len(_JSONC_HEADER):])
     assert body["homepage"] == "https://example.com/x"
     assert body["trustedFolders"] == [r"D:\wt\a"]
+
+
+# ── extension-permission-access pre-seed (github/copilot-agent-runtime#22266) ──
+
+def _write_permissions(cop: Path, data: dict) -> Path:
+    p = cop / "permissions-config.json"
+    p.write_text(json.dumps(data, indent=2))
+    return p
+
+
+def test_ensure_extension_permission_approvals_fresh_file(copilot_home: Path) -> None:
+    # No permissions-config.json at all yet (brand new install/location).
+    assert permissions.ensure_extension_permission_approvals(r"D:\wt\a") is True
+
+    perm_file = copilot_home / "permissions-config.json"
+    data = json.loads(perm_file.read_text())
+    approvals = data["locations"][r"D:\wt\a"]["tool_approvals"]
+    names = {a["extensionName"] for a in approvals}
+    assert names == {
+        "plugin:agent-bridge:agent-bridge",
+        "plugin:context-handoff:context-handoff",
+        "plugin:agent-worktrees:agent-worktrees",
+    }
+    assert all(a["kind"] == "extension-permission-access" for a in approvals)
+
+
+def test_ensure_extension_permission_approvals_idempotent(copilot_home: Path) -> None:
+    permissions.ensure_extension_permission_approvals(r"D:\wt\a")
+
+    # A second call with nothing new to add reports no change.
+    assert permissions.ensure_extension_permission_approvals(r"D:\wt\a") is False
+
+
+def test_ensure_extension_permission_approvals_preserves_existing_entries(
+    copilot_home: Path,
+) -> None:
+    perm_file = _write_permissions(
+        copilot_home,
+        {
+            "locations": {
+                r"D:\wt\a": {
+                    "tool_approvals": [
+                        {"kind": "read"},
+                        {
+                            "kind": "extension-permission-access",
+                            "extensionName": "plugin:context-handoff:context-handoff",
+                        },
+                    ]
+                }
+            }
+        },
+    )
+
+    assert permissions.ensure_extension_permission_approvals(r"D:\wt\a") is True
+
+    data = json.loads(perm_file.read_text())
+    approvals = data["locations"][r"D:\wt\a"]["tool_approvals"]
+    # The pre-existing unrelated rule and the already-approved extension
+    # survive untouched; only the two missing extensions are appended.
+    assert {"kind": "read"} in approvals
+    names = {
+        a["extensionName"]
+        for a in approvals
+        if a.get("kind") == "extension-permission-access"
+    }
+    assert names == {
+        "plugin:agent-bridge:agent-bridge",
+        "plugin:context-handoff:context-handoff",
+        "plugin:agent-worktrees:agent-worktrees",
+    }
+    assert len(approvals) == 4  # read + 3 extension approvals, no duplicate
+
+
+def test_ensure_extension_permission_approvals_preserves_other_locations(
+    copilot_home: Path,
+) -> None:
+    perm_file = _write_permissions(
+        copilot_home,
+        {"locations": {r"D:\wt\other": {"tool_approvals": [{"kind": "read"}]}}},
+    )
+
+    assert permissions.ensure_extension_permission_approvals(r"D:\wt\a") is True
+
+    data = json.loads(perm_file.read_text())
+    assert data["locations"][r"D:\wt\other"]["tool_approvals"] == [{"kind": "read"}]
+    assert r"D:\wt\a" in data["locations"]

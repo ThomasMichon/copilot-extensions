@@ -168,6 +168,87 @@ def merge_permissions(anchor_path: str, worktree_path: str) -> list[str]:
         return []
 
 
+# The facility's own marketplace plugins that register an actual JS
+# extension connection (installed-plugins/<name>/extensions/<name>/) and
+# therefore hit the native runtime's load-time permission gate: any
+# connection declaring a skipPermission tool, registering hooks, or handling
+# permission requests must be granted "extension-permission-access" before
+# its tools are ever published (sdkServerHost.ts's needsLoadTimeGate). Keep
+# in sync with the extension directories under plugins/*/extensions/.
+_FACILITY_EXTENSION_NAMES: tuple[str, ...] = (
+    "plugin:agent-bridge:agent-bridge",
+    "plugin:context-handoff:context-handoff",
+    "plugin:agent-worktrees:agent-worktrees",
+)
+
+
+def ensure_extension_permission_approvals(worktree_path: str) -> bool:
+    """Pre-approve the facility's own extensions for ``worktree_path`` BEFORE
+    Copilot ever spawns there (github/copilot-agent-runtime#22266).
+
+    Without this, a fresh location's first extension load blocks on an
+    interactive "extension-permission-access" prompt -- and any tool call
+    already dispatched to that extension queues or hangs behind it -- with
+    no one necessarily present to answer for a headless/unattended launch.
+    ``clone_permissions`` above already copies an anchor's approvals to a new
+    worktree when the anchor itself has them, but a repo whose anchor was
+    never manually approved (or a location clone_permissions didn't reach)
+    still needs this direct seed. Mirrors ``add_trusted_folder``'s own
+    pre-seed-before-first-launch pattern.
+
+    Args:
+        worktree_path: The worktree path to approve.
+
+    Returns:
+        True if any new approval was added, False if all were already
+        present or the step failed (never raises -- best-effort only, a
+        missed seed just falls back to today's interactive prompt).
+    """
+    perm_file = _permissions_path()
+    try:
+        if perm_file.exists():
+            data = json.loads(perm_file.read_text())
+        else:
+            data = {}
+        if not isinstance(data, dict):
+            return False
+
+        locations = data.setdefault("locations", {})
+        if not isinstance(locations, dict):
+            return False
+
+        location = locations.setdefault(worktree_path, {})
+        if not isinstance(location, dict):
+            return False
+
+        approvals = location.setdefault("tool_approvals", [])
+        if not isinstance(approvals, list):
+            return False
+
+        existing = {
+            (entry.get("kind"), entry.get("extensionName"))
+            for entry in approvals
+            if isinstance(entry, dict)
+        }
+
+        changed = False
+        for extension_name in _FACILITY_EXTENSION_NAMES:
+            key = ("extension-permission-access", extension_name)
+            if key not in existing:
+                approvals.append(
+                    {"kind": "extension-permission-access", "extensionName": extension_name}
+                )
+                changed = True
+
+        if not changed:
+            return False
+
+        _atomic_json_write(perm_file, data)
+        return True
+    except Exception:
+        return False
+
+
 def add_trusted_folder(worktree_path: str) -> bool:
     """Add a worktree path to trustedFolders in config.json.
 
