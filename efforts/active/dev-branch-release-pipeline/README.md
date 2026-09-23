@@ -812,3 +812,36 @@ generator contract details here or in a linked sub-doc._
   then return to Phase 2's remaining three items in the order the
   sequencing note describes, ideally during a lower-traffic window with the
   operator present.
+
+### 2026-09-23, later same day — fixed the main-red from the Phase 3 merge
+- Operator asked to fix `main`'s CI before getting serious about cutover.
+  Root-caused and fixed the pre-existing failure noted above (issue #3429):
+  `customizing-copilot`'s output-free-stack scan was misclassifying
+  `agent-index`'s session-start hook because its second sessionStart entry
+  (a fire-and-forget `install.ps1|sh ensure` re-run) wasn't recognized by
+  the scan's named-marker/script-content proof path. It's actually provably
+  output-free by construction (every stream redirected to null, errors
+  swallowed, unconditional canonical `{}` tail) — added a second, narrowly
+  scoped acceptance path in `scan_session_context.py`
+  (`_command_is_suppressed_maintenance_invocation`) rather than loosening
+  the existing path. 2 new tests, including one that proves the hardening
+  (top-level statement splitting) actually rejects an unsafe variant an
+  earlier, looser draft of the same predicate would have wrongly accepted.
+  Landed as PR #3437 (closes #3429).
+- **Then hit the recurring module-size baseline-drift pattern again** —
+  same class as the Phase 2 kickoff session flagged, now on its third
+  occurrence this effort alone. Widened via the same mechanical
+  `--refresh-baseline --allow-widen` process (PR #3441). This really is a
+  recurring pattern at this point (3 occurrences across 2 sessions in under
+  a day) — worth its own tracked issue/automation rather than continuing to
+  absorb it ad hoc each time it blocks an unrelated PR; still not filed.
+- After both merged, one further `main` CI run failed on an unrelated
+  `efforts` plugin test (`test_exact_adoption_config_emits_bounded_owned_policy`,
+  a `pwsh` subprocess timing out at exactly its 10s budget) — confirmed
+  transient by re-running the same commit's CI, which then passed clean.
+  Not a code issue; flagging only in case the timeout margin is worth
+  revisiting if it recurs.
+- **`main` is green as of commit `d1d171063` (my widen) / `decb2b9af`**
+  (a later, unrelated merge from another contributor) at the time of this
+  entry. Cutover-adjacent work (Phase 3's remaining validation-gate item, or
+  circling back to Phase 2) can proceed from a healthy baseline.
