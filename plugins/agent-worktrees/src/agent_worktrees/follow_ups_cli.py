@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from . import output, tracking
+from . import activity, output, tracking
 from . import config as cfg
 
 
@@ -200,6 +200,14 @@ def _follow_ups_add(args: argparse.Namespace, summary: str) -> int:
             return 1
         reopened = was_finalized and rec.status == "active"
         tracking.save_record(rec, rec_path)
+    activity.log_event(
+        "follow_up_added",
+        worktree_id=wt_id,
+        follow_up_id=item.id,
+        summary=item.summary,
+        refs=[f"{r.kind}:{r.ref}" for r in item.refs],
+        reopened=reopened,
+    )
     if args.json:
         _json_output({"worktree_id": wt_id, **_follow_up_to_json(item), "reopened": reopened})
         return 0
@@ -232,6 +240,12 @@ def _follow_ups_resolve(args: argparse.Namespace, follow_up_id: str) -> int:
             output.err(msg)
             return 1
         tracking.save_record(rec, rec_path)
+    activity.log_event(
+        "follow_up_resolved",
+        worktree_id=wt_id,
+        follow_up_id=item.id,
+        result_ref=item.result_ref,
+    )
     if args.json:
         _json_output({"worktree_id": wt_id, **_follow_up_to_json(item)})
         return 0
@@ -264,6 +278,12 @@ def _follow_ups_dismiss(args: argparse.Namespace, follow_up_id: str) -> int:
             output.err(msg)
             return 1
         tracking.save_record(rec, rec_path)
+    activity.log_event(
+        "follow_up_dismissed",
+        worktree_id=wt_id,
+        follow_up_id=item.id,
+        reason=reason,
+    )
     if args.json:
         _json_output({"worktree_id": wt_id, **_follow_up_to_json(item)})
         return 0

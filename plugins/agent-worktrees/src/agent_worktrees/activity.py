@@ -64,6 +64,36 @@ Events are intentionally high-level:
   handoff_predecessor_retire
                             a consumed handoff retired the predecessor pane
   handoff_retire_guard      a retire request was left in place by a safety guard
+  claim_added               ``claims add`` journaled a new outbound resource
+                            claim (or reopened a finalized worktree via one)
+  claim_released            ``claims release`` released or removed a claim
+  claim_settled             ``claims settle`` set a claim's terminal
+                            disposition (released/at-rest)
+  claim_abandoned           ``claims sweep --apply`` flipped an abandoned,
+                            provably-gone obligation to at-rest
+  claim_at_rest_reconciled  ``claims reconcile-at-rest --apply`` released a
+                            lingering at-rest claim
+  claim_reclaimed           ``claims cleanup --apply`` reclaimed a re-homed
+                            (orphaned) obligation
+  claim_handoff_offered     ``claims handoff offer`` created or re-affirmed a
+                            same-machine claim-bundle offer
+  claim_handoff_declined    ``claims handoff decline`` marked a bundle declined
+  claim_handoff_cancelled   ``claims handoff cancel`` marked a bundle cancelled
+  follow_up_added           ``follow-ups add`` journaled a new open follow-up
+                            (or reopened a finalized worktree via one)
+  follow_up_resolved        ``follow-ups resolve`` marked a follow-up done
+  follow_up_dismissed       ``follow-ups dismiss`` marked a follow-up as not
+                            requiring action
+
+Unlike the handoff-cutover stages above, the claim/follow-up-ledger events
+(``claim_*``, ``follow_up_*``) deliberately do NOT feed ``handoff_trace``'s
+unrotated per-worktree store. A claim or follow-up's *current* disposition
+already lives durably in its owning ``WorktreeRecord`` YAML -- the gap this
+instrumentation closes is *history* (an audit trail of who mutated what and
+when), not *truth* (which the YAML already guarantees survives past this
+log's 7-day rolling window). See
+efforts/active/worktree-finality-and-obligations/README.md Phase 7 and
+ThomasMichon/copilot-extensions#3113 for the full rationale.
 
 Every record carries ``worktree_id`` and (where known) ``session_id`` and
 ``launch_id``. ``launch_id`` is a short correlation token minted once at
