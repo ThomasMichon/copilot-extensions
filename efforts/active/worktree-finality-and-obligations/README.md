@@ -381,25 +381,30 @@ below for the carved implementation plan.
   `prune.interpret_descriptor_payload`) may treat it as authoritative. **Not
   done (item stays unchecked until this lands too):** the actual cockpit
   consumer calling `interpret_descriptor_payload` on this field.
-- [ ] Make mux and Picker use the descriptor's exact compact text, marker counts,
+- [x] Make mux and Picker use the descriptor's exact compact text, marker counts,
   and semantic style token; surface adapters may translate that style token to
-  their native palette without redefining state. **Split status:** the
-  PSMux/TMux status segment (`_render_status_segment`) is now done -- it
-  calls `prune.cleanup_disposition` + `prune.assemble_closure_descriptor` on
-  a record's held claims/open follow-ups and renders the descriptor's own
-  `style`-keyed color (`_DESCRIPTOR_STYLE_BG`) and `compact` text
-  (`C<N>`/`F<N>` markers included), instead of the old raw-state-only
-  `_SEGMENT_STYLE` lookup; a fetch-free (cached) poll now correctly renders
-  `MERGED` rather than `FINAL` for a COMPLETED worktree, matching design.md's
-  destructive-freshness rule. **Not done:** the Textual Picker
-  (`picker_tui/derive.py`/`engine.py`) still derives its own label
-  independently -- its `state` column is a fixed 6-char width with an exact
-  `C_STATE` dict lookup keyed on the bare label, so folding in compact
-  markers needs real column-layout work (a wider column or a new one) plus
-  golden/layout test updates, not just a data-source swap. That's its own
-  focused slice.
+  their native palette without redefining state. The PSMux/TMux status
+  segment (`_render_status_segment`) calls `prune.cleanup_disposition` +
+  `prune.assemble_closure_descriptor` on a record's held claims/open
+  follow-ups and renders the descriptor's own `style`-keyed color
+  (`_DESCRIPTOR_STYLE_BG`) and `compact` text (`C<N>`/`F<N>` markers
+  included); a fetch-free (cached) poll correctly renders `MERGED` rather
+  than `FINAL` for a COMPLETED worktree. The Textual Picker was closed out
+  under Phase 9 instead of here (2026-09-16, "Phase 9 slice 8: Picker
+  renders the markers too"): `derive._status_markers` now surfaces every
+  token in `closure.compact` AFTER the base label as a second detail row
+  per worktree, dimmed for `C<N>`/`F<N>` and warn-styled for `U*`/`OC*`,
+  confirmed live in `derive.py`/`engine.py` this session (2026-09-23
+  triage). This checkbox was left stale after Phase 9 closed the gap under
+  its own name; corrected here rather than re-building it.
 - [ ] Keep legends, filters, maintenance previews, and cleanup selections in
-  parity with the same descriptor. **Not done**, same reason as above.
+  parity with the same descriptor. **Still not done** (re-verified
+  2026-09-23): the Picker's `/`-filter and sort keys
+  (`wt_row_always_visible`, `WT_SORT_KEYS` in `derive.py`) still key off the
+  plain normalized `state` string, not `closure`/`compact`; no legend
+  surface reads the descriptor either. Genuinely open -- not superseded by
+  Phase 9's per-row marker rendering above, which only changed *display*,
+  not filtering/legend/maintenance-preview logic.
 - [x] Preserve mixed-version fleet safety: absent, unsupported, or newer
   descriptor versions render provisional/review and never `FINAL` or
   prune-eligible. Landed as `prune.interpret_descriptor_payload`: an exact
@@ -470,11 +475,21 @@ below for the carved implementation plan.
   state trace gaps beyond what the session-claim lifecycle (Phase 8) already
   covers. Tracked in
   [#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113).
-- [ ] Claim-safe terminal reclamation: finish reclaiming terminal workspaces
+- [x] Claim-safe terminal reclamation: finish reclaiming terminal workspaces
   with obligation-preserving release semantics -- inbound-claim release,
   multi-claim safety, and historical adoption/status surfaces -- rather than
   as a standalone reclamation slice. Tracked in
   [#3114](https://github.com/ThomasMichon/copilot-extensions/issues/3114).
+  **Transferred to the already-scoped `terminal-worktree-reclamation` effort**
+  (2026-09-23 triage) rather than built as a Phase 7 slice here: that effort's
+  own Phase 2 ("Release the task's inbound worktree claim", "prove no other
+  nonterminal dispatch allocation targets the same worktree") and Phase 3
+  ("dry-run inventory for terminal historical embodiments", "explicit,
+  safety-checked adoption path") already cover exactly this scope, it already
+  declares `Dependencies: #1312`, and it is mid-flight (Phases 1-2 partially
+  landed per its own journal). Building it a second time here would duplicate,
+  not complete, that work. Satisfies this Plan bullet's own "complete OR
+  transferred to a named tracked objective" bar.
 - [ ] Keep fixtures synthetic and independent of any adopting worktree registry.
 
 ### Phase 8 - Session-claim lifecycle (proposed 2026-09-14; designed 2026-09-16; build started 2026-09-17)
@@ -2280,4 +2295,52 @@ The approved design is the faceted model in [design.md](design.md):
   still need triage/completion or an explicit transfer-out decision (Phase
   7 already exists for exactly that transfer path).
 - No code changes in this entry -- documentation/tracking correction only.
+
+### 2026-09-23 (continued) - Explicit handoff: triage Phases 1, 2, 4, 5, 6, 7
+
+- Requested explicitly by the operator via a handoff ("triage the next set
+  of proposed work and remaining pieces"), not a context-pressure handoff.
+  Verified current code state against each phase's stale checkboxes rather
+  than trusting the doc as-is:
+  - **Phase 5 Picker checkbox was stale, not actually open.** The doc still
+    said the Textual Picker "derives its own label independently" and
+    needed its own slice. Verified in `worktree-manager/.../picker_tui/
+    derive.py`: `_status_markers()` already reads `closure.compact` and
+    renders a second per-row detail line (landed under Phase 9 slice 8,
+    2026-09-16, "Picker renders the markers too"). Corrected the Phase 5
+    checkbox to `[x]` with a pointer to where it actually landed, so a
+    future reader doesn't re-derive or re-build it. The adjacent
+    legend/filter/maintenance-preview parity bullet is genuinely still
+    open -- re-verified `wt_row_always_visible`/`WT_SORT_KEYS` in the same
+    file key off the plain `state` string, not the descriptor.
+  - **Phase 4's two unchecked bullets (finalize reject/release-under-freeze
+    reconciliation command; cleanup/GC descriptor consumption) are still
+    genuinely open** -- confirmed `cleanup_gc_cli.py` still calls
+    `prune.CleanupDisposition` directly, no `assemble_closure_descriptor`/
+    `interpret_descriptor_payload` use anywhere in that file.
+  - **Phase 7's #3114 item resolved by transfer, not by building it here**:
+    read `efforts/active/terminal-worktree-reclamation/README.md` in full --
+    it already declares `Dependencies: #1312`, is mid-flight (Phases 1-2
+    partially landed), and its own Phase 2/3 Plan bullets are verbatim the
+    same scope #3114 describes (inbound-claim release, multi-claim safety,
+    historical adoption). Marked the Phase 7 bullet `[x]` with an explicit
+    transfer note rather than leaving it open or duplicating the build.
+    #3113 (session/handoff cutover auditability) was left open -- no
+    matching in-flight effort found for it; still a real Phase 7 gap.
+  - **Phase 1 and Phase 6 remain entirely open** and were not touched --
+    Phase 1 is test-scaffolding work (cross-surface parity/compatibility/
+    concurrency fixtures) with no shortcut found; Phase 6 is deliberately
+    last (ship-it: fleet inventory, full regression, live lifecycle
+    exercise, publish/review/merge/deploy) and depends on 1/4/5 landing
+    something coherent first, per this session's own prior triage note.
+  - Phase 2's sole remaining bullet (reopen-history-listing) was not
+    touched this session -- confirmed still open and small, no new
+    information changes its status.
+- Net effect: two stale-doc corrections (no functional risk -- display-only
+  drift and a duplicate-effort risk), zero new code. Left explicit pointers
+  so the next session can start directly on Phase 1's fixture work or
+  Phase 5's remaining legend/filter parity slice without re-triaging.
+- No PR opened -- documentation-only change to the effort's own tracking
+  doc; will commit and push directly per this repo's effort-doc convention
+  (not a reviewable code change).
 
