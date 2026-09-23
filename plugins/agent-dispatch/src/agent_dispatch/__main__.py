@@ -196,6 +196,11 @@ from .execution_cli import (  # noqa: F401 -- re-exported for existing call site
     _spawn_detached_waiter,
     _suspend_for_detached_wait,
 )
+from .bridge_namespace_cli import (
+    _cmd_namespace_ensure_ready,
+    _cmd_namespace_list,
+    _cmd_namespace_resolve,
+)
 from .registrar_runtime_cli import (  # noqa: F401 -- re-exported for existing call sites/tests
     _WORKTREE_PARENT_SUFFIX,
     _cmd_registrar,
@@ -799,6 +804,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("task_id")
     p.set_defaults(func=_cmd_claimant)
+
+    # --- namespace-* (process-boundary resolver seam for agent-bridge, #3389)
+    # The `dispatch:` namespace resolver, exposed over a process boundary the
+    # same way agent-codespaces/agent-containers already are, so agent-bridge
+    # never imports agent-dispatch's package or calls its coordinator HTTP
+    # API directly (the a-la-carte-independence plugin-stack layering rule).
+    sub.add_parser(
+        "namespace-list",
+        help="Print `[]` -- dispatch tasks are reached by id, never browsed "
+        "as a bounded `dispatch:` namespace listing.",
+    ).set_defaults(func=lambda _args: _cmd_namespace_list())
+    ns_resolve_p = sub.add_parser(
+        "namespace-resolve",
+        help="Print JSON {type: worktree, worktree_id, venue} resolving a "
+        "dispatch-task id to the worktree it's bound to (KeyError -> exit 3 "
+        "not-found, ValueError -> exit 4 not yet bound/cross-machine).",
+    )
+    ns_resolve_p.add_argument(
+        "name", help="Task id, optionally `<task_id>@<venue>`",
+    )
+    ns_resolve_p.set_defaults(func=_cmd_namespace_resolve)
+
+    ns_ready_p = sub.add_parser(
+        "namespace-ensure-ready",
+        help="Always exit 0 -- a dispatch task has no separate wake-up step.",
+    )
+    ns_ready_p.add_argument("name", help="Task id")
+    ns_ready_p.set_defaults(func=_cmd_namespace_ensure_ready)
+
 
     p = sub.add_parser(
         "find-by-session",
