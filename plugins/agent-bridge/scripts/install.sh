@@ -364,12 +364,25 @@ _is_venv_corruption() {
 # clone it's supposed to be; a versioned runtime slot under
 # ~/.agent-bridge/versions/<ver>/ is the only place build output should end
 # up living.
+#
+# Also scrub BEFORE installing, not just after: residue already sitting in
+# "$PLUGIN_DIR" the moment an install starts (left by an earlier failed
+# attempt, a marketplace resync, or a concurrent process) shadows THIS
+# build too -- an after-only scrub only protects the NEXT install, not this
+# one. Confirmed live in the agent-dispatch sibling (copilot-extensions#3444,
+# 2026-09-23): a truncated recipes_cli.py shipped this way and crash-looped a
+# production supervisor daemon for ~8h. Also reaches the src-layout egg-info
+# (src/agent_bridge.egg-info), one level deeper than the root-level glob --
+# the exact location that shadowed a real fix and broke a live deployment
+# before being caught (registrar.py's `no_pair` field, same incident).
 _scrub_payload_build_artifacts() {
-    rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info 2>/dev/null || true
+    rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info \
+           "$PLUGIN_DIR"/src/*.egg-info 2>/dev/null || true
 }
 
 _uv_pip_install_resilient() {
     local out delay
+    _scrub_payload_build_artifacts
     if out="$(uv pip install "$@" 2>&1)"; then
         printf '%s\n' "$out"
         _scrub_payload_build_artifacts
