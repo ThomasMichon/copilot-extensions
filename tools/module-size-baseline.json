@@ -54,7 +54,7 @@
   "plugins/agent-machines/src/agent_machines/playwright_cli.py": 1816,
   "plugins/agent-machines/src/agent_machines/resources.py": 2006,
   "plugins/agent-mcp/scripts/versioned_runtime.py": 1415,
-  "plugins/agent-mcp/src/agent_mcp/config.py": 1175,
+  "plugins/agent-mcp/src/agent_mcp/config.py": 1178,
   "plugins/agent-pull-requests/scripts/versioned_runtime.py": 1415,
   "plugins/agent-ssh/scripts/versioned_runtime.py": 1415,
   "plugins/agent-ssh/src/agent_ssh/fragment_registry.py": 1195,

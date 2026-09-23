@@ -101,42 +101,87 @@ issue)."*
 - [x] Read `bridge.py` + `watchdog.py`; confirm existing EOF/parent-death
   defenses and why neither fires for this case (done this session, see
   Context above).
-- [ ] Decide the self-reap trigger: an **idle timeout** (no JSON-RPC traffic
+- [x] Decide the self-reap trigger: an **idle timeout** (no JSON-RPC traffic
   for N minutes -> bridge exits itself), mirroring `agent-mcp serve`'s
   existing `--idle-timeout` concept (currently `bridge`-side has no
   equivalent at all — confirmed via `grep idle_timeout` in `config.py`,
-  zero matches). Needs: is "idle" measured from last `session.submit()` call,
-  last upstream response, or both? Default duration (propose starting at
-  the same order of magnitude as a typical sub-agent task, e.g. 5-10 min,
-  tunable via config/env, consistent with `serve`'s existing knob naming).
-- [ ] Confirm this is safe for a bridge mid-`stdio`-upstream-child lifecycle
+  zero matches).
+  **Decision (read `serve.py` directly, not guessed — it already solves this
+  exact class of problem for `WarmPool`/`Server`):**
+  - **"Idle" is dual-gated, mirroring `serve.py`'s `_maybe_idle_evict`**
+    (`self._attached > 0 or self.pool.size > 0` guards its elapsed-time
+    check): the bridge's main loop measures elapsed time since the last
+    stdin line was read off the queue (i.e. since the last client message
+    arrived — `queue.get()` unblocking), **but only honors that elapsed time
+    when `BridgeSession` reports zero in-flight dispatch tasks.**
+    `BridgeSession.submit()` already tracks in-flight work in `self._tasks`
+    (a `set[asyncio.Task]`, drained in `aclose()`) — exposing that as a
+    `has_pending` property gives the exact authoritative liveness signal
+    `serve.py` uses, so a slow upstream response (e.g. a long-running tool
+    call) can never be reaped mid-flight even if it outlasts the idle
+    window. This directly resolves the PR #3406 Copilot-review finding that
+    a fixed inactivity timer alone is not authoritative liveness — the
+    dispatch-task-count gate *is* the authoritative signal, exactly as
+    `serve.py`'s attached/warm-pool counts already are for that daemon.
+    Last-upstream-response time is deliberately **not** the clock source: a
+    bridge with zero in-flight tasks and a quiet stdin has no live client to
+    respond to, regardless of when its last upstream reply happened.
+  - **Default duration: 300s (5 min)**, matching `serve.py`'s own
+    `_DEFAULT_IDLE_TIMEOUT = 300.0` exactly, for the same reasoning
+    documented there and so a single mental model covers both idle knobs in
+    this plugin. Tunable via a `BridgeConfig` field + CLI flag / env var
+    (Phase 2), consistent with `serve`'s existing knob naming.
+- [x] Confirm this is safe for a bridge mid-`stdio`-upstream-child lifecycle
   (does self-exit cleanly tear down the `bunx/npx gitea-mcp` child the same
   way stdin-EOF/parent-death shutdown already does today via
-  `session.aclose()`?).
+  `session.aclose()`?). **Confirmed by design, not just inspection:** the
+  idle self-reap fires from the *same* `run()` loop as the existing
+  stdin-EOF/parent-death paths, breaking out of the `while True` loop into
+  the identical `await session.aclose()` call already used by both — no new
+  teardown path, no divergent cleanup. Because the dispatch-task gate above
+  guarantees zero in-flight tasks before the idle branch can fire, `aclose()`'s
+  `asyncio.gather(*self._tasks, ...)` drain is a no-op on the self-reap path
+  (nothing to drain), and it proceeds straight to `pipeline.aclose()` /
+  `transport.end_input()` / `transport.aclose()` — the same upstream-child
+  teardown (e.g. `bunx gitea-mcp`) already exercised today.
 
 ### Phase 2 — Implement the idle self-reap
-- [ ] Add an idle-timeout watch to `Bridge.run()`'s main loop (alongside the
+- [x] Add an idle-timeout watch to `Bridge.run()`'s main loop (alongside the
   existing stdin-EOF/parent-death queue-wakeup mechanism) that pushes the
   same `None` sentinel after N seconds of no `queue.get()` activity.
-- [ ] Config surface: a `BridgeConfig` field + CLI flag / env var, following
-  existing `bridge` config conventions in `config.py`.
-- [ ] Log a clear, greppable line on idle-self-reap (distinct from the
+- [x] Config surface: a `BridgeConfig.idle_timeout` field (default 300s,
+  non-positive disables) parsed from the bridge YAML's `idle_timeout:` key,
+  overridable via the `AGENT_MCP_BRIDGE_IDLE_TIMEOUT` env var when the config
+  doesn't set it explicitly. No new `bridge` CLI flag: unlike `serve`
+  (invoked directly by a human/script), `agent-mcp bridge` is always spawned
+  by the copilot CLI's own MCP client from an `.mcp.yaml` frontmatter file,
+  so the config field is the natural knob (a CLI flag would need frontmatter
+  changes to reach anyway).
+- [x] Log a clear, greppable line on idle-self-reap (distinct from the
   existing EOF/parent-death shutdown logs) so a future investigation can
   tell *why* a bridge exited from its own log line, not just that it did.
-- [ ] Unit tests: idle timeout fires after N seconds of no traffic; is reset
+- [x] Unit tests: idle timeout fires after N seconds of no traffic; is reset
   by traffic; does not fire while a request is in-flight; `session.aclose()`
   still runs on the idle path (upstream child cleanly torn down).
 
 ### Phase 3 — Validate against tonight's exact reproduction
-- [ ] Windows: reproduce the `Get-CimInstance Win32_Process` counts from
-  tmichon/aperture-labs#3876's 2026-09-23 comment before the fix; confirm
-  bridges self-exit within the configured idle window after their owning
-  sub-agent finishes, with no live sub-agent traffic; confirm process counts
-  drop back down without operator intervention.
-- [ ] WSL: same validation on the original 2026-07-31/08-18/08-22
-  reproduction host, confirming the fix holds cross-platform (the actual
-  self-reap logic is platform-agnostic Python; only the `.CMD`-shim launch
-  chain is Windows-specific and unaffected by this fix).
+- [x] Windows: reproduced the `Get-CimInstance Win32_Process` evidence style
+  from tmichon/aperture-labs#3876's 2026-09-23 comment against the *fixed*
+  code. Spawned a real `agent-mcp bridge` subprocess (`AGENT_MCP_NO_MULTIPLEX`,
+  the classic in-process bridge path #3876 evidence targeted) over a stdio
+  upstream that itself spawns a live descendant child (mirroring the
+  `bunx gitea-mcp` shape), with `idle_timeout: 3`. `Get-CimInstance
+  Win32_Process` confirmed both the bridge PID and its descendant present
+  before the idle window, then **fully absent** afterward, with zero
+  operator intervention (bridge exit code 0). Scratch probe files were
+  removed after use (not committed).
+- [x] WSL: same live reproduction on the original 2026-07-31/08-18/08-22
+  host (`wsl -d Ubuntu`), using its own venv build of the fixed `agent-mcp`
+  and `ps -o pid,ppid,cmd` (matching #3876's WSL evidence style) instead of
+  `Get-CimInstance`. Same result: bridge PID + upstream child both present
+  before the idle window, both gone after, confirming the fix holds
+  cross-platform as expected (the self-reap logic is platform-agnostic
+  Python; only the launch-chain shape differs).
 
 ### Phase 4 — Land + close the loop
 - [ ] PR through copilot-extensions' normal review/version-bump flow.
@@ -150,19 +195,27 @@ issue)."*
 
 ## Validation Plan
 
-- [ ] New unit tests (Phase 2) pass in the `agent-mcp` plugin suite.
-- [ ] Live reproduction (Phase 3) on both Windows and WSL shows bridges
+- [x] New unit tests (Phase 2) pass in the `agent-mcp` plugin suite: the
+  4 new tests (1 `has_pending` unit test + 3 e2e idle-reap subprocess tests
+  in `tests/test_bridge_idle_reap.py`) pass, and the full `agent-mcp` plugin
+  suite (565 passed, 34 skipped) is unaffected, via
+  `python tools/run-plugin-tests.py agent-mcp`.
+- [x] Live reproduction (Phase 3) on both Windows and WSL shows bridges
   self-reaping within the configured idle window with zero operator
   intervention, matching the exact evidence commands already used in
   tmichon/aperture-labs#3876 (`Get-CimInstance Win32_Process` on Windows;
-  `ps aux --sort=-%mem` / process-age inspection on WSL).
-- [ ] No regression: a bridge actively relaying traffic (a live, in-progress
-  sub-agent delegation) is never reaped mid-use.
+  `ps` process-tree inspection on WSL) -- see Phase 3 above for the
+  specific evidence.
+- [x] No regression: a bridge actively relaying traffic (a live, in-progress
+  sub-agent delegation) is never reaped mid-use --
+  `test_in_flight_request_is_never_reaped_mid_dispatch` exercises this
+  directly with an idle_timeout shorter than the in-flight call's duration.
 
 ## Proposal
 
-_Pending — Phase 1's open design questions (idle-timeout trigger semantics,
-default duration) need resolving before Phase 2 code starts._
+Implemented as designed in Phase 1 (dual-gated idle self-reap: elapsed time
+since the last client message AND zero in-flight `BridgeSession` dispatch
+tasks), landed as PR ThomasMichon/copilot-extensions#3406.
 
 ## Journal
 
