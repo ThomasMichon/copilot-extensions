@@ -920,6 +920,17 @@ class Supervisor:
         A handle-less reservation remains untouched during its launch window.
         After that bound, this same stable supervisor identity may fail its own
         orphaned reservation so the queued task can receive a fresh attempt.
+
+        A worktree-backed reservation whose owner is confirmed LIVE but which
+        never produces an actual session in that worktree is the same class of
+        gap, previously unbounded: the embody/spawn call can silently fail or
+        hang with no session ever launched, and -- unlike the handle-less
+        case above -- this branch had no timeout at all, so it could sit in
+        ``reserving`` indefinitely with no automatic recovery (confirmed in a
+        real deployment: 46+ minutes, only noticed and manually recovered by
+        an operator -- see #3354). It now shares the same ``reserving_timeout``
+        bound: past that age, with no session ever observed, this supervisor
+        fails its own reservation so a fresh attempt can be reserved.
         """
         reconciled = 0
         for res in self._pool_reservations(state=SpawnState.RESERVING):
@@ -1082,10 +1093,37 @@ class Supervisor:
                 )
             except Exception:
                 session = None
-            if not session:
-                continue
-            session_id = session.get("session_id")
+            session_id = session.get("session_id") if session else None
             if not isinstance(session_id, str) or not session_id:
+                try:
+                    age = time.time() - float(res.get("reserved_at") or 0)
+                except (TypeError, ValueError):
+                    age = 0.0
+                if (
+                    self.reserving_timeout <= 0
+                    or res.get("reserved_by") != self.supervisor_id
+                    or age < self.reserving_timeout
+                ):
+                    continue
+                try:
+                    detail = (
+                        "reserved worktree's owner is live, but no session "
+                        f"ever appeared in the worktree after {age:.0f}s"
+                    )
+                    if res.get("worktree_ownership") == "created":
+                        self.client.request_spawn_release(
+                            res["key"],
+                            detail=detail,
+                            disposition="failed",
+                        )
+                    else:
+                        self.client.fail_spawn(res["key"], detail=detail)
+                    reconciled += 1
+                except DispatchError:
+                    log.exception(
+                        "failed to release sessionless reserving worktree %s",
+                        res["key"],
+                    )
                 continue
             try:
                 self.client.record_spawn(

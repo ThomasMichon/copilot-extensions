@@ -6101,6 +6101,92 @@ def test_reconcile_stale_handleless_reservation_is_idempotent(q, client):
     assert q.get_reservation(reservation.key).state == SpawnState.FAILED
 
 
+def test_reconcile_stale_own_reserving_worktree_with_no_session_fails(
+    q, client
+):
+    """Regression for a confirmed field incident: a stale, sessionless
+    worktree reservation with a live-owner verdict.
+
+    A reservation whose owner is confirmed LIVE (``verdict_fn`` returns
+    ``live``) but whose worktree never actually produces a session (the
+    embody/spawn call silently failed or hung) previously had no timeout at
+    all in this branch -- unlike the handle-less case above, it could sit
+    in ``reserving`` forever. It now shares the same ``reserving_timeout``
+    bound.
+    """
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(
+        task.id,
+        reserved_by="supervisor-test",
+        now=time.time() - 601,
+    )
+    q.record_spawn_worktree(reservation.key, "wt-precreated")
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        supervisor_id="supervisor-test",
+        verdict_fn=lambda *_args: "live",
+        liveness_fn=lambda _worktree, _machine: None,
+        reserving_timeout=600,
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 1
+    failed = q.get_reservation(reservation.key)
+    assert failed.state == SpawnState.FAILED
+    assert "no session" in failed.detail
+    # A fresh attempt is immediately eligible.
+    fresh, acquired = q.reserve_spawn(task.id)
+    assert acquired is True
+
+
+def test_reconcile_young_own_reserving_worktree_with_no_session_stays_reserved(
+    q, client
+):
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(task.id, reserved_by="supervisor-test")
+    q.record_spawn_worktree(reservation.key, "wt-precreated")
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        supervisor_id="supervisor-test",
+        verdict_fn=lambda *_args: "live",
+        liveness_fn=lambda _worktree, _machine: None,
+        reserving_timeout=600,
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
+
+
+def test_reconcile_stale_foreign_reserving_worktree_with_no_session_stays_reserved(
+    q, client
+):
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(
+        task.id,
+        reserved_by="supervisor-other",
+        now=time.time() - 601,
+    )
+    q.record_spawn_worktree(reservation.key, "wt-precreated")
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        supervisor_id="supervisor-test",
+        verdict_fn=lambda *_args: "live",
+        liveness_fn=lambda _worktree, _machine: None,
+        reserving_timeout=600,
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
+
+
 @pytest.mark.parametrize(
     ("session_handle", "body_kind"),
     [
