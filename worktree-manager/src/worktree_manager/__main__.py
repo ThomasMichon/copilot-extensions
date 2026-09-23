@@ -829,7 +829,7 @@ def _cmd_picker(rest: list[str]) -> int:
     flags: set[str] = set()
     positionals: list[str] = []
     value_options = {"--screenshot", "--out", "--format", "--pivot", "--wait"}
-    flag_options = {"--demo", "--local", "--live", "--json"}
+    flag_options = {"--demo", "--preview", "--local", "--live", "--json"}
     index = 0
     while index < len(args):
         token = args[index]
@@ -854,7 +854,7 @@ def _cmd_picker(rest: list[str]) -> int:
         print("error: picker accepts at most one project name")
         return 2
 
-    demo_mode = "--demo" in flags
+    demo_mode = "--demo" in flags or "--preview" in flags
     legacy_screenshot = values.get("--screenshot")
     if legacy_screenshot:
         action = "screenshot"
@@ -872,14 +872,19 @@ def _cmd_picker(rest: list[str]) -> int:
         return 2
 
     if demo_mode:
-        from . import picker_app
-        from .demo import DEMO_PROJECT
-        project = DEMO_PROJECT
-        source = picker_app.demo_source()
-        subtitle = f"{project} · demo (Aperture Labs)"
-        on_launch = _demo_launch_preview
-        contributions = ()
-        context_source = None
+        # Preview mode: render the REAL production Picker (not a stand-in
+        # app) against deterministic mock data -- see preview.py's module
+        # docstring for the two injections this composes (a fake-engine
+        # worktree data source + a manifest-injected mock pivot). This
+        # requires the named project to be a genuine locally-registered
+        # agent-worktrees project (its identity/config still resolves
+        # normally); only the worktree/pivot DATA is faked.
+        from . import preview as preview_mod
+
+        preview_mod.enable_preview_mode()
+        project = positionals[0] if positionals else preview_mod.DEMO_PROJECT
+        if action == "run":
+            return _run_production_picker(project)
     else:
         if action == "run" and not engine_available():
             print()
@@ -925,80 +930,54 @@ def _cmd_picker(rest: list[str]) -> int:
         if action == "run":
             return _run_production_picker(project)
 
-        from .production_picker import runner
+    from .production_picker import runner
 
-        if action == "mock":
-            try:
-                decision = runner.run(
-                    project,
-                    mock_mode=True,
-                    local="--local" in flags,
-                )
-            except Exception as error:
-                print(f"error: production Picker mock failed: {error}")
-                return 1
-            if "--json" in flags:
-                print(json.dumps({"mock": True, "decision": decision}))
-            else:
-                print(f"mock picker exited - decision: {decision!r}")
-            return 0
-
+    if action == "mock":
         try:
-            captures = runner.capture(
+            decision = runner.run(
                 project,
-                live="--live" in flags,
-                pivot=values.get("--pivot"),
-                wait_pivot=wait_pivot,
+                mock_mode=True,
+                local="--local" in flags,
             )
         except Exception as error:
-            print(f"error: production Picker capture failed: {error}")
+            print(f"error: production Picker mock failed: {error}")
             return 1
-        content = captures[capture_format]
-        if screenshot_out:
-            with open(screenshot_out, "w", encoding="utf-8", newline="\n") as fh:
-                fh.write(content)
-            if "--json" in flags:
-                print(json.dumps({
-                    "screenshot": screenshot_out,
-                    "format": capture_format,
-                    "bytes": len(content),
-                }))
-            else:
-                print(
-                    f"  wrote {capture_format} screenshot: {screenshot_out} "
-                    f"({len(content)} bytes)"
-                )
+        if "--json" in flags:
+            print(json.dumps({"mock": True, "decision": decision}))
         else:
-            sys.stdout.write(content)
-            if not content.endswith("\n"):
-                sys.stdout.write("\n")
+            print(f"mock picker exited - decision: {decision!r}")
         return 0
 
-    if action == "screenshot":
-        svg = picker_app.capture_svg(
-            source,
-            project=project,
-            subtitle=subtitle,
-            contributions=contributions,
-            context_source=context_source,
+    try:
+        captures = runner.capture(
+            project,
+            live="--live" in flags,
+            pivot=values.get("--pivot"),
+            wait_pivot=wait_pivot,
         )
-        if screenshot_out:
-            with open(screenshot_out, "w", encoding="utf-8", newline="\n") as fh:
-                fh.write(svg)
-            print(f"  wrote screenshot: {screenshot_out}")
+    except Exception as error:
+        print(f"error: production Picker capture failed: {error}")
+        return 1
+    content = captures[capture_format]
+    if screenshot_out:
+        with open(screenshot_out, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(content)
+        if "--json" in flags:
+            print(json.dumps({
+                "screenshot": screenshot_out,
+                "format": capture_format,
+                "bytes": len(content),
+            }))
         else:
-            sys.stdout.write(svg)
-            if not svg.endswith("\n"):
-                sys.stdout.write("\n")
-        return 0
-    return picker_app.run_picker(
-        source,
-        project=project,
-        subtitle=subtitle,
-        on_launch=on_launch,
-        contributions=contributions,
-        context_source=context_source,
-    )
+            print(
+                f"  wrote {capture_format} screenshot: {screenshot_out} "
+                f"({len(content)} bytes)"
+            )
+    else:
+        sys.stdout.write(content)
+        if not content.endswith("\n"):
+            sys.stdout.write("\n")
+    return 0
 
 
 def _remote_machine_env(decision: dict) -> tuple[str | None, str | None]:
@@ -1384,27 +1363,6 @@ def _run_launch(req) -> int:
     return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
 
 
-def _demo_launch_preview(req) -> int:
-    """Show what the launch/resume *would* run, without starting anything.
-
-    Exercises the same resolve -> compose path (through the fake Aperture engine)
-    the real launch uses, then prints the composed argv instead of executing it --
-    so the demo never spawns a Copilot session.
-    """
-    from . import launcher
-    plan, code = _resolve_for(req)
-    if plan is None:
-        return code
-    le = launcher.compose_launch(plan)
-    print()
-    target = req.worktree_id or "a new worktree"
-    print(f"  demo launch ({req.mode}) — {target}")
-    print(f"    action: {plan.action}   muxed: {le.muxed}   cwd: {le.cwd}")
-    print(f"    argv:   {' '.join(le.argv)}")
-    print("  (demo mode — not executed)")
-    print()
-    return 0
-
 
 def _prereq_line(s) -> str:
     if not s.present:
@@ -1722,7 +1680,10 @@ def main(argv: list[str] | None = None) -> int:
         print("                         production UX with simulated mutations")
         print("  picker screenshot [<project>] [--format svg|text|ansi] [--out F]")
         print("                         capture the production Picker headlessly")
-        print("  picker --demo          preview the retired minimal scaffold")
+        print("  picker [screenshot] --demo|--preview [<project>]")
+        print("                         same, against deterministic mock data (no live")
+        print("                         engine/session state required); real Picker,")
+        print("                         real project identity, faked worktree/pivot data")
         print("                         (in the Picker: l launch/resume · b bare-resume · n new)")
         print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
         print()
