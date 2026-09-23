@@ -70,7 +70,7 @@ def _creationflags() -> int:
     return no_window_flags()
 
 
-def _run_codespaces(args: list[tuple[str, bool]], *, timeout: float = 420.0):
+def _run_codespaces(args: list[tuple[str, bool]], *, timeout: float = 660.0):
     """Run agent-codespaces via the identity-verified ``codespace:``
     claim-provider registry (claim-provider-pattern effort); return the
     process, or None if unrunnable. Resolves the provider's own
@@ -88,12 +88,14 @@ def _run_codespaces(args: list[tuple[str, bool]], *, timeout: float = 420.0):
     argv (see that helper's own docstring for why a leading-dash heuristic
     would be unsafe here).
 
-    Default timeout (420s, matching
+    Default timeout (660s, matching
     ``claim_providers._RECLAIM_CALLBACK_TIMEOUT_SECONDS``) budgets for
     ``agent-codespaces claim-reclaim``'s own internal chain: pre-delete
-    session recovery (its own 300s timeout) THEN the delete subprocess
-    itself (a further 60s timeout) -- both must complete in sequence within
-    this call's own timeout, not just the first, with margin left over.
+    session recovery (boot up to 180s, THEN pull up to 300s, THEN the
+    session-sync-push subprocess up to 60s) THEN the delete subprocess
+    itself (a further 60s timeout) -- every phase must complete in FULL
+    sequence within this call's own timeout, not just the first, with
+    margin left over.
     """
     from . import claim_providers
 

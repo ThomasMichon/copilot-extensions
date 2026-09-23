@@ -405,6 +405,33 @@ class TestGetCodespaceStatus:
         assert exists is True and resolved == "acct-exact"
         assert seen_accounts == ["acct-exact"]  # never even reached the generic scan
 
+    def test_confirmed_404_under_binding_never_scans_other_accounts(self, monkeypatch):
+        """A CONFIRMED 404 under the authoritative binding must be final --
+        never fall through to the generic scan afterward, which could
+        misreport (and let claim-reclaim delete!) a DIFFERENT account's
+        CodeSpace that happens to share this exact name (claim-provider-
+        pattern effort review finding: "Do not scan other accounts after a
+        bound lookup returns 404")."""
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-other",))
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_account",
+            lambda name: "acct-exact" if name == "cs-dup" else None)
+        seen_accounts = []
+
+        def fake_under(name, account, **_kwargs):
+            seen_accounts.append(account)
+            if account == "acct-exact":
+                return False, None  # confirmed 404 under the binding
+            return True, "Available"  # a DIFFERENT account's same-named box
+
+        monkeypatch.setattr(lifecycle, "_get_codespace_status_under", fake_under)
+        exists, state, resolved = lifecycle.get_codespace_status_with_account("cs-dup")
+        assert exists is False and resolved is None
+        assert seen_accounts == ["acct-exact"]  # never scanned acct-other
+
     def test_default_account_raises_when_no_candidate_confirms_and_one_errors(self, monkeypatch):
         """A live CodeSpace in an account whose lookup failed for a REAL
         reason (not a 404) must never be reported absent just because

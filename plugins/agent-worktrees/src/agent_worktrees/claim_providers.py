@@ -81,15 +81,18 @@ _CALLBACK_TIMEOUT_SECONDS = 15.0
 #: budget is realistically too short (claim-provider-pattern effort review
 #: finding: a normal-duration reclaim could be killed mid-operation before
 #: it ever reports a result). agent-codespaces' own claim-reclaim callback
-#: chains ``sync_codespace_sessions`` (its own 300s timeout) THEN
-#: ``delete_codespace`` (a further 60s subprocess timeout) -- both must be
-#: able to complete in sequence within this budget, not just the first,
-#: with margin left over, or a slow-but-progressing recovery gets killed
-#: before deletion/lease cleanup ever runs. Matches
-#: ``agent_worktrees.cleanup._run_codespaces``'s own pre-existing 300s
-#: default only for the STATUS-shaped, non-chained call it makes; the
-#: standard reclaim CONTRACT here needs materially more.
-_RECLAIM_CALLBACK_TIMEOUT_SECONDS = 420.0
+#: chains ``sync_codespace_sessions`` (internally up to its OWN 180s boot/
+#: connect-retry timeout, THEN its 300s pull timeout, THEN its 60s
+#: session-sync-push timeout) THEN ``delete_codespace`` (a further 60s
+#: subprocess timeout) -- every one of those phases must be able to
+#: complete in FULL sequence within this budget, not just the first, or a
+#: slow-but-progressing recovery gets killed before deletion/lease cleanup
+#: ever runs (review finding: "Align reclaim timeout with full recovery
+#: and deletion phases" -- an earlier revision of this constant summed
+#: only the pull+delete phases, undercounting boot and the (then-
+#: unbounded) push step). 180 + 300 + 60 + 60 = 600s of phase budget;
+#: this leaves a full extra minute of margin on top.
+_RECLAIM_CALLBACK_TIMEOUT_SECONDS = 660.0
 
 #: cmd.exe's own structurally-significant characters, scanned for in a
 #: resolved ``.cmd``/``.bat`` path before ever routing it through

@@ -36,6 +36,16 @@ log = logging.getLogger("agent-codespaces")
 # A Shutdown CodeSpace boots on connect; match the SSH command's patience.
 _BOOT_TIMEOUT = float(os.environ.get("AGENT_CODESPACES_BOOT_TIMEOUT", "180"))
 
+#: The push subprocess (``session-sync push``) previously ran unbounded --
+#: a hung/stuck push could block a reclaim indefinitely, past whatever
+#: budget the caller (e.g. the claim-provider registry's reclaim callback
+#: timeout) actually enforces, leaving the resource neither confirmed
+#: recovered nor deleted (claim-provider-pattern effort review finding:
+#: "Align reclaim timeout with full recovery and deletion phases" --
+#: "its session-sync push subprocess is not bounded by that timeout
+#: either").
+_PUSH_TIMEOUT_SECONDS = 60.0
+
 _B64_START = "===ACS_SESSION_B64_START==="
 _B64_END = "===ACS_SESSION_B64_END==="
 _B64_CHARS = frozenset(string.ascii_letters + string.digits + "+/=")
@@ -244,7 +254,15 @@ def _push_via_session_sync(staging: Path, machine_label: str, *, verbose: bool) 
         cmd.append("--verbose")
     child_env = os.environ.copy()
     child_env.pop("COPILOT_PLUGIN_ROOT", None)
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=child_env)
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, env=child_env,
+            timeout=_PUSH_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return False, (
+            f"session-sync push timed out after {_PUSH_TIMEOUT_SECONDS:.0f}s"
+        )
     out = (proc.stdout or "").strip()
     if proc.returncode != 0:
         err = (proc.stderr or out).strip()
