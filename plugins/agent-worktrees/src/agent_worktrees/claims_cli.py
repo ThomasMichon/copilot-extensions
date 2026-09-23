@@ -458,6 +458,12 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
         )
         tracking.add_resource_claim(rec, claim, save=False)
         reopened = was_finalized and rec.status == "active"
+        # worktree-finality-and-obligations Phase 2: on reopen, surface what
+        # the earlier finalize's `release_all_resources` cascade let go --
+        # reopening restores the worktree to `active`, never those resources.
+        released_by_finalize = (
+            list(rec.last_finalize_released) if reopened else []
+        )
         tracking.save_record(rec, rec_path)
     if args.json:
         _json_output(
@@ -467,12 +473,26 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
                 "ref": ref,
                 "state": obligations.ACTIVE,
                 "reopened": reopened,
+                "released_by_earlier_finalize": [
+                    {"kind": c.kind, "ref": c.ref, "note": c.note}
+                    for c in released_by_finalize
+                ],
             }
         )
         return 0
     print(f"added outbound claim {kind}:{ref} on {wt_id}")
     if reopened:
         print(f"  reopened {wt_id}: finalized -> active (new held claim)")
+        if released_by_finalize:
+            print(
+                "  resources released by the earlier finalize (not restored "
+                "-- review/re-claim if still needed):"
+            )
+            for c in released_by_finalize:
+                label = f"    · {c.kind}: {c.ref}"
+                if c.note:
+                    label += f" ({c.note})"
+                print(label)
     return 0
 
 

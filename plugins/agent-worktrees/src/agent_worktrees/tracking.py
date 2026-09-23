@@ -760,6 +760,14 @@ class WorktreeRecord:
     #     byte-identically.
     owner_ref: str | None = None
     resources: list[ResourceClaim] = field(default_factory=list)
+    # worktree-finality-and-obligations Phase 2: the exact resources released by
+    # the MOST RECENT `release_all_resources` finalize cascade (a snapshot, not
+    # a second ledger -- the same claims remain in `resources` above with
+    # state="released"). Read back by `claims add`'s reopen notice so an
+    # operator resuming a finalized worktree sees what the earlier finalize let
+    # go, since reopening never restores them. Overwritten (including to empty)
+    # on every finalize; absent/empty keeps legacy YAML byte-identical.
+    last_finalize_released: list[ResourceClaim] = field(default_factory=list)
     # agent-bridge-worktree-native-agents: the charter (agent-bridge spawn
     # profile name, e.g. "board-sweep-worker") bound to this worktree at
     # create/embody time. A charter is never itself a first-class fabric
@@ -1856,6 +1864,15 @@ def load_record(path: Path) -> WorktreeRecord:
             if isinstance(raw, dict) and raw.get("ref"):
                 resources_list.append(_parse_claim_mapping(raw))
 
+    # worktree-finality-and-obligations Phase 2: the most recent finalize
+    # cascade's release snapshot (see the field docstring on WorktreeRecord).
+    last_finalize_released_list: list[ResourceClaim] = []
+    raw_last_finalize_released = data.get("last_finalize_released")
+    if isinstance(raw_last_finalize_released, list):
+        for raw in raw_last_finalize_released:
+            if isinstance(raw, dict) and raw.get("ref"):
+                last_finalize_released_list.append(_parse_claim_mapping(raw))
+
     # worktree-finality-and-obligations Phase 3: itemized follow-up ledger.
     # Absent in un-annotated worktrees, so legacy records parse to an empty
     # list and re-serialize byte-identically.
@@ -2102,6 +2119,7 @@ def load_record(path: Path) -> WorktreeRecord:
         owner_ref=(str(data["owner_ref"])
                    if data.get("owner_ref") else None),
         resources=resources_list,
+        last_finalize_released=last_finalize_released_list,
         bound_agent=(str(data["bound_agent"]).strip() or None
                      if data.get("bound_agent") else None),
         follow_up=bool(data.get("follow_up", False)),
@@ -2822,6 +2840,19 @@ def _save_record_unlocked(
             default_flow_style=False,
             sort_keys=False,
         )
+
+    # worktree-finality-and-obligations Phase 2: the most recent finalize
+    # cascade's release snapshot. Emitted only when non-empty, keeping legacy
+    # YAMLs identical.
+    if record.last_finalize_released:
+        content += yaml.safe_dump(
+            {"last_finalize_released": [
+                _claim_to_yaml_dict(c) for c in record.last_finalize_released
+            ]},
+            default_flow_style=False,
+            sort_keys=False,
+        )
+
 
     # worktree-finality-and-obligations Phase 3: itemized follow-up ledger.
     # Emitted only when non-empty, keeping legacy YAMLs (boolean-only

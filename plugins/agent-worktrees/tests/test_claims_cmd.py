@@ -414,6 +414,46 @@ def test_claims_add_allows_finalized_owner(monkeypatch, tmp_path, capfd):
     assert reloaded.status == "active"
 
 
+def test_claims_add_reopen_surfaces_earlier_finalize_release_trail(
+    monkeypatch, tmp_path, capfd
+):
+    """worktree-finality-and-obligations Phase 2: reopening a finalized
+    worktree via `claims add` reports exactly what the earlier finalize's
+    `release_all_resources` cascade let go, since reopening does not restore
+    those resources."""
+    _seed(tmp_path, monkeypatch)
+    path = tmp_path / "worktrees" / "wt-A.yaml"
+    rec = tracking.load_record(path)
+    rec.status = "finalized"
+    rec.last_finalize_released = [
+        tracking.ResourceClaim(
+            kind="codespace", ref="cs-old", state="released", note="idle box"),
+    ]
+    tracking.save_record(rec, path)
+    rc = m.cmd_claims(_add_args("codespace", "cs-resumed"))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["reopened"] is True
+    assert out["released_by_earlier_finalize"] == [
+        {"kind": "codespace", "ref": "cs-old", "note": "idle box"},
+    ]
+
+
+def test_claims_add_reopen_empty_trail_when_nothing_was_released(
+    monkeypatch, tmp_path, capfd
+):
+    _seed(tmp_path, monkeypatch)
+    path = tmp_path / "worktrees" / "wt-A.yaml"
+    rec = tracking.load_record(path)
+    rec.status = "finalized"
+    tracking.save_record(rec, path)
+    rc = m.cmd_claims(_add_args("codespace", "cs-resumed"))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["reopened"] is True
+    assert out["released_by_earlier_finalize"] == []
+
+
 def test_claims_add_missing_operands(monkeypatch, tmp_path):
     _seed(tmp_path, monkeypatch)
     rc = m.cmd_claims(argparse.Namespace(
