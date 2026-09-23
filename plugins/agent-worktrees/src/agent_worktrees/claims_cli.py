@@ -53,10 +53,13 @@ def add_parsers(sub) -> None:
         "a new outbound claim, OR 'release <ref>' to retire one, "
         "OR 'settle <ref>' to mark it at-rest (settled) / released, "
         "OR 'sweep' to reclaim provably-gone+safe obligations "
-        "(never-wedge), OR 'orphans' to list obligations re-homed "
-        "by an --abandon finalize (pending cleanup), OR 'cleanup "
-        "[<ref-or-source-worktree> ...]' to reclaim matching "
-        "re-homed obligations (no selector = all; --apply to act)",
+        "(never-wedge), OR 'reconcile-at-rest [<worktree-id> ...]' to "
+        "release lingering at-rest claims on existing records (never "
+        "active; no selector = all; --apply to act), OR 'orphans' to "
+        "list obligations re-homed by an --abandon finalize (pending "
+        "cleanup), OR 'cleanup [<ref-or-source-worktree> ...]' to "
+        "reclaim matching re-homed obligations (no selector = all; "
+        "--apply to act)",
     )
     p.add_argument(
         "--remove",
@@ -66,8 +69,9 @@ def add_parsers(sub) -> None:
     p.add_argument(
         "--apply",
         action="store_true",
-        help="with sweep/cleanup: write the abandonments / reclaim the "
-        "orphaned resources (default: dry-run preview only)",
+        help="with sweep/cleanup/reconcile-at-rest: write the abandonments "
+        "/ reclaim the orphaned resources / release the at-rest claims "
+        "(default: dry-run preview only)",
     )
     p.add_argument("--note", default="", help="with add: an optional human label for the claim")
     p.add_argument(
@@ -182,6 +186,8 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return _claims_settle(args, target[1])
     if target and target[0] == "sweep":
         return _claims_sweep(args)
+    if target and target[0] == "reconcile-at-rest":
+        return _claims_reconcile_at_rest(args)
     if target and target[0] == "mirror-status":
         if len(target) < 3:
             msg = (
@@ -702,6 +708,52 @@ def _claims_sweep(args: argparse.Namespace) -> int:
     verb = "Abandoned" if apply else "Would abandon (dry-run; pass --apply)"
     print(f"{verb} {len(reclaimed)} obligation(s):")
     for r in reclaimed:
+        print(f"  · {r['owner']}: {r['kind']} {r['ref']}")
+    return 0
+
+
+def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
+    """Preview/apply release of lingering at-rest claims on existing records
+    (worktree-finality-and-obligations Phase 4 / design.md's dedicated
+    reconciliation command). Never touches an ``active`` claim -- finalize's
+    own freeze already releases at-rest claims automatically when it runs;
+    this is the explicit, operator-driven catch-up for records that never
+    went through that (an older-version finalize, or at-rest claims that
+    accumulated afterward). Optional worktree-id selectors narrow the scope;
+    no selector reconciles every tracked record."""
+    apply = getattr(args, "apply", False)
+    target = list(getattr(args, "target", None) or [])
+    selectors = set(target[1:])
+    tdir = cfg.tracking_dir()
+    released: list[dict[str, str]] = []
+    for rec in tracking.list_records(tdir):
+        if selectors and rec.worktree_id not in selectors:
+            continue
+        rec_path = tdir / f"{rec.worktree_id}.yaml"
+        if apply:
+            with tracking._RecordLock(rec_path, require_sidecar=True):
+                rec = tracking.load_record(rec_path)
+                flipped = tracking.release_at_rest_resources(rec, save=False)
+                if flipped:
+                    tracking.save_record(rec, rec_path)
+        else:
+            before = {c.ref: c.state for c in rec.resources}
+            flipped = tracking.release_at_rest_resources(rec, save=False)
+            for c in rec.resources:
+                if c.ref in before:
+                    c.state = before[c.ref]
+        for c in flipped:
+            released.append({"owner": rec.worktree_id, "kind": c.kind, "ref": c.ref})
+
+    if args.json:
+        _json_output({"applied": apply, "released": released, "count": len(released)})
+        return 0
+    if not released:
+        print("claims reconcile-at-rest: no lingering at-rest claims found.")
+        return 0
+    verb = "Released" if apply else "Would release (dry-run; pass --apply)"
+    print(f"{verb} {len(released)} at-rest claim(s):")
+    for r in released:
         print(f"  · {r['owner']}: {r['kind']} {r['ref']}")
     return 0
 

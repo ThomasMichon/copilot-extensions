@@ -38,6 +38,7 @@ from agent_worktrees.tracking import (
     parse_claim_ref,
     register_session,
     release_all_resources,
+    release_at_rest_resources,
     resolve_follow_up,
     resolve_worktree_path,
     retire_record,
@@ -2858,6 +2859,51 @@ class TestCascadeAndOrphans:
         assert reloaded.last_finalize_released == []
         reloaded_again = load_record_by_id("wt-parent")
         assert reloaded_again.last_finalize_released == []
+
+    def test_release_at_rest_resources_only_touches_at_rest(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """worktree-finality-and-obligations Phase 4 / design.md's dedicated
+        reconciliation command: releases AT-REST claims only, never an
+        ``active`` one -- the explicit, operator-driven counterpart to the
+        automatic finalize-freeze release (``release_all_resources``)."""
+        parent = self._rec("wt-parent", resources=[
+            ResourceClaim(kind="codespace", ref="cs-active", state="active"),
+            ResourceClaim(kind="worktree", ref="test/other/wt-rest", state="at-rest"),
+            ResourceClaim(kind="worktree", ref="test/other/wt-old", state="released"),
+        ])
+        self._save(tmp_tracking_dir, parent)
+        released = release_at_rest_resources(parent)
+        assert [c.ref for c in released] == ["test/other/wt-rest"]
+        reloaded = load_record_by_id("wt-parent")
+        by_ref = {c.ref: c.state for c in reloaded.resources}
+        assert by_ref["cs-active"] == "active"          # never touched
+        assert by_ref["test/other/wt-rest"] == "released"
+        assert by_ref["test/other/wt-old"] == "released"  # already released
+
+    def test_release_at_rest_resources_excludes_session_claims(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        parent = self._rec("wt-session", resources=[
+            ResourceClaim(kind="session", ref="test/p/wt-session#s1", state="at-rest"),
+            ResourceClaim(kind="worktree", ref="test/other/wt-rest", state="at-rest"),
+        ])
+        self._save(tmp_tracking_dir, parent)
+        released = release_at_rest_resources(parent)
+        assert [c.ref for c in released] == ["test/other/wt-rest"]
+        reloaded = load_record_by_id("wt-session")
+        session_claim = next(c for c in reloaded.resources if c.kind == "session")
+        assert session_claim.state == "at-rest"
+
+    def test_release_at_rest_resources_idempotent(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        parent = self._rec("wt-parent", resources=[
+            ResourceClaim(kind="worktree", ref="test/other/wt-rest", state="released"),
+        ])
+        self._save(tmp_tracking_dir, parent)
+        assert release_at_rest_resources(parent) == []
+
 
     def test_release_all_resources_excludes_session_claims(
         self, tmp_tracking_dir: Path, monkeypatch_config

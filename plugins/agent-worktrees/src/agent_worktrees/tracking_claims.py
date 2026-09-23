@@ -519,6 +519,39 @@ def release_all_resources(
     return released
 
 
+def release_at_rest_resources(
+    record: tracking.WorktreeRecord,
+    *,
+    save: bool = True,
+) -> list[ResourceClaim]:
+    """Release only AT-REST claims (never ``active``) -- the explicit,
+    operator-driven reconciliation path design.md calls for
+    (worktree-finality-and-obligations Phase 4): finalize's own freeze
+    already releases at-rest claims automatically as part of ITS cascade
+    (``release_all_resources`` above), but a record finalized under an older
+    version, or one whose at-rest claims accumulated some other way, is never
+    swept by cleanup/GC on its own -- active claims are never silently
+    released, and cleanup/GC deliberately does not auto-release an at-rest
+    claim from a current-version record either. This is the dedicated
+    preview/apply command for that gap; it never touches an ``active`` claim
+    and never runs implicitly.
+
+    Session claims are excluded, matching ``release_all_resources``: they
+    have their own dedicated lifecycle (settled on finalize, released only by
+    ``deregister_session``), not this generic reconciliation sweep.
+    """
+    tracking = _tracking()
+    released = [
+        claim for claim in record.resources
+        if claim.is_at_rest and claim.kind != "session"
+    ]
+    for claim in released:
+        claim.state = "released"
+    if released and save:
+        tracking.save_record(record)
+    return released
+
+
 def orphanage_path(project: str | None = None) -> Path:
     return cfg.project_dir(project) / "orphaned-obligations.yaml"
 
