@@ -273,6 +273,47 @@ class TestAccountForCodespace:
         bind.assert_called_once_with("cs-one", "acct-a", "owner/repo")
 
 
+class TestGetCodespaceStatus:
+    """Strict, targeted single-CodeSpace lookup (claim-provider-pattern
+    effort) -- unlike ``list_codespaces()``, unambiguous about existence and
+    never silently drops a live CodeSpace to an incomplete listing."""
+
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_exists(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=json.dumps({"state": "Available"}), stderr="",
+        )
+        exists, state = lifecycle.get_codespace_status("cs-a", account="acct-a")
+        assert exists is True and state == "Available"
+
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_confirmed_absent(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="gh: Not Found (HTTP 404)",
+        )
+        exists, state = lifecycle.get_codespace_status("cs-missing", account="acct-a")
+        assert exists is False and state is None
+
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_backend_error_raises_not_false_absence(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="HTTP 503: service unavailable",
+        )
+        with pytest.raises(RuntimeError, match="503"):
+            lifecycle.get_codespace_status("cs-a", account="acct-a")
+
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_malformed_json_raises(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="not json", stderr="")
+        with pytest.raises(RuntimeError, match="invalid JSON"):
+            lifecycle.get_codespace_status("cs-a", account="acct-a")
+
+    @patch("agent_codespaces.lifecycle.subprocess.run", side_effect=FileNotFoundError)
+    def test_gh_missing_raises(self, mock_run):
+        with pytest.raises(RuntimeError, match="gh CLI not found"):
+            lifecycle.get_codespace_status("cs-a", account="acct-a")
+
+
 class TestCleanupStale:
     @patch("agent_codespaces.lifecycle.list_codespaces")
     def test_removes_stale_ssh_configs(self, mock_list, tmp_path):

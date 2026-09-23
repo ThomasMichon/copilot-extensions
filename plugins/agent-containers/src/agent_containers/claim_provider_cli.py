@@ -10,9 +10,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 
 from . import lifecycle
+from .lease import release as release_lease
+
+log = logging.getLogger("agent-containers")
 
 
 def add_claim_provider_parsers(sub) -> None:
@@ -50,6 +54,18 @@ def _container_looks_gone(detail: str) -> bool:
     return "no such container" in detail.lower()
 
 
+def _release_lease_silently(name: str) -> None:
+    """Release a container lease. Best-effort: never raises (a stale lease
+    after a terminal reclaim would otherwise keep blocking allocation for
+    the lease TTL -- see ``lease.release``'s own ``ProviderAdmissionError``,
+    which this simply logs rather than propagates)."""
+    try:
+        if release_lease(name):
+            log.info("Released lease on %s", name)
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug("lease release for %s failed: %s", name, exc)
+
+
 def cmd_claim_status(args: argparse.Namespace) -> int:
     """``claim-status <name>``: does container NAME exist?
 
@@ -85,7 +101,9 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     Without ``--apply`` this is a dry-run preview only (never removes), per
     the callback contract. Idempotent: a remove failing because the
     container is already gone ("no such container") still reports
-    ``reclaimed: true``."""
+    ``reclaimed: true`` -- and, like the successful-remove path, releases
+    any local lease on it (an already-gone resource must not leave a stale
+    lease blocking allocation for the lease TTL)."""
     if not args.apply:
         print(json.dumps({"reclaimed": True, "detail": f"would remove container {args.name}"}))
         return 0
@@ -94,9 +112,11 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         detail = str(exc)
         if _container_looks_gone(detail):
+            _release_lease_silently(args.name)
             print(json.dumps({"reclaimed": True, "detail": f"container {args.name} already gone"}))
             return 0
         print(json.dumps({"reclaimed": False, "detail": detail}))
         return 0
+    _release_lease_silently(args.name)
     print(json.dumps({"reclaimed": True, "detail": f"removed container {args.name}"}))
     return 0

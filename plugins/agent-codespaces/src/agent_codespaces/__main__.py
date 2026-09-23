@@ -362,8 +362,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Skip the pre-delete Copilot session recovery",
     )
 
-    claim_provider_cli.add_claim_provider_parsers(
-        sub, release_lease_quietly=_release_lease_quietly)
+    claim_provider_cli.add_claim_provider_parsers(sub)
     # --- finalize ---
     finalize_parser = sub.add_parser(
         "finalize",

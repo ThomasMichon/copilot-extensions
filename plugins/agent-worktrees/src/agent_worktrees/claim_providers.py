@@ -467,6 +467,35 @@ def resolve_provider_argv(
     return tuple(_windows_batch_argv(command))
 
 
+def build_provider_argv(
+    namespace: str,
+    *extra: str,
+    kind: str = "status",
+    plugins_root: str | os.PathLike[str] | None = None,
+) -> tuple[str, ...] | None:
+    """Resolve a claim provider's binstub AND append ``extra`` argv tokens in
+    one guarded step, for a caller driving a DIFFERENT subcommand than the
+    standard ``claim-status``/``claim-reclaim`` contract (which already
+    validates its own ref via :func:`split_namespaced_ref`). This is the
+    preferred entry point over calling :func:`resolve_provider_argv`
+    directly and appending tokens by hand -- it makes the same
+    :func:`is_safe_argument` validation structural rather than something
+    each caller must remember to apply itself.
+
+    Returns ``None`` when no provider is registered, it declares no command
+    of the requested ``kind``, OR any non-flag ``extra`` token fails
+    :func:`is_safe_argument`. A token starting with ``-`` is treated as a
+    flag literal and passed through unvalidated -- every call site only
+    ever passes a static, trusted flag there, never a persisted value."""
+    command = resolve_provider_argv(namespace, kind=kind, plugins_root=plugins_root)
+    if command is None:
+        return None
+    for token in extra:
+        if not token.startswith("-") and not is_safe_argument(token):
+            return None
+    return (*command, *extra)
+
+
 def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
     """Route a ``.cmd``/``.bat`` command through ``cmd.exe`` on Windows.
 

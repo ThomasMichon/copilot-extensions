@@ -677,3 +677,94 @@ def test_windows_batch_argv_is_a_noop_off_windows(monkeypatch):
     monkeypatch.setattr(cp.os, "name", "posix")
     command = ("/opt/plugin/bin/agent-codespaces.cmd", "claim-status", "ref")
     assert cp._windows_batch_argv(command) == list(command)
+
+
+# --- is_safe_argument / resolve_provider_argv / build_provider_argv --------
+
+
+@pytest.mark.parametrize("value", ["cs-a", "wt-abc", "tmichon-book2", "a.b_c/d", "123"])
+def test_is_safe_argument_accepts_ordinary_identifiers(value):
+    assert cp.is_safe_argument(value) is True
+
+
+@pytest.mark.parametrize("value", ["cs-x&whoami", "a|b", "a>b", "a<b", "a^b", 'a"b', "a!b", "-x"])
+def test_is_safe_argument_rejects_metacharacters_and_leading_dash(value):
+    assert cp.is_safe_argument(value) is False
+
+
+def test_resolve_provider_argv_degrades_when_no_provider_registered(tmp_path):
+    assert cp.resolve_provider_argv("codespace", plugins_root=tmp_path / "empty") is None
+
+
+def test_resolve_provider_argv_degrades_when_kind_not_declared(tmp_path, monkeypatch):
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    assert cp.resolve_provider_argv("codespace", kind="reclaim", plugins_root=tmp_path) is None
+
+
+def test_resolve_provider_argv_rejects_bad_kind():
+    with pytest.raises(ValueError):
+        cp.resolve_provider_argv("codespace", kind="delete")
+
+
+def test_resolve_provider_argv_returns_resolved_command(tmp_path, monkeypatch):
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    assert cp.resolve_provider_argv("codespace", plugins_root=tmp_path) == ("agent-codespaces",)
+
+
+def test_build_provider_argv_appends_safe_extra_tokens(tmp_path, monkeypatch):
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            reclaim_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.build_provider_argv(
+        "codespace", "delete", "cs-a", "--force", kind="reclaim", plugins_root=tmp_path)
+    assert result == ("agent-codespaces", "delete", "cs-a", "--force")
+
+
+def test_build_provider_argv_refuses_unsafe_extra_token(tmp_path, monkeypatch):
+    """The whole point of this helper: a caller can never forget to
+    validate an untrusted appended token, unlike calling
+    resolve_provider_argv() and appending by hand."""
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            reclaim_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.build_provider_argv(
+        "codespace", "delete", "cs-x&whoami", "--force", kind="reclaim", plugins_root=tmp_path)
+    assert result is None
+
+
+def test_build_provider_argv_degrades_when_no_provider_registered(tmp_path):
+    result = cp.build_provider_argv("codespace", "delete", "cs-a", plugins_root=tmp_path / "empty")
+    assert result is None
+

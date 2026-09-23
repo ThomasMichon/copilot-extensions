@@ -198,6 +198,49 @@ def account_for_codespace(name: str) -> str | None:
     return None
 
 
+def get_codespace_status(name: str, account: str | None = None) -> tuple[bool, str | None]:
+    """Strict, targeted single-CodeSpace existence check via ``gh api
+    /user/codespaces/<name>``.
+
+    Unlike :func:`list_codespaces` -- a paginated (``--limit 50``),
+    best-effort listing across candidate accounts that silently drops rows
+    on malformed JSON or a single failed account -- this hits exactly one
+    CodeSpace by name and returns an unambiguous verdict: ``(exists,
+    state)``. Raises :class:`RuntimeError` for any failure that is NOT an
+    unambiguous 404 (auth error, network failure, malformed response), so a
+    caller never mistakes a backend outage or incomplete listing for
+    confirmed absence.
+    """
+    from . import gh_account
+
+    validate_context()
+    if account is None:
+        account = account_for_codespace(name)
+    args = ["gh", "api", f"/user/codespaces/{name}"]
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=30,
+            creationflags=_creation_flags(),
+            env=gh_account.env_for_account(account) if account else None,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("gh CLI not found") from None
+    if result.returncode != 0:
+        combined = f"{result.stdout}\n{result.stderr}".lower()
+        if "http 404" in combined or "not found" in combined:
+            return False, None
+        raise RuntimeError(
+            f"gh api codespace lookup for {name} failed: {result.stderr.strip()}"
+        )
+    try:
+        data = json.loads(result.stdout)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f"gh api returned invalid JSON for {name}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(f"gh api returned an unexpected shape for {name}")
+    return True, data.get("state")
+
+
 def list_devcontainers(repo: str) -> list[str]:
     """Return the discoverable devcontainer config paths for a repo.
 

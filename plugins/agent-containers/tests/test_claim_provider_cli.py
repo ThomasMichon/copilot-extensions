@@ -67,20 +67,28 @@ def test_claim_reclaim_dry_run_never_removes(monkeypatch, capsys):
 
 def test_claim_reclaim_apply_success(monkeypatch, capsys):
     monkeypatch.setattr(lifecycle, "remove_container", lambda *a, **k: None)
+    released = {}
+    monkeypatch.setattr(cpc, "release_lease",
+                        lambda name: released.setdefault("name", name) or True)
     rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="c-a", apply=True))
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out["reclaimed"] is True and "removed" in out["detail"]
+    assert released["name"] == "c-a"
 
 
 def test_claim_reclaim_already_gone_is_idempotent(monkeypatch, capsys):
     def _boom(*a, **k):
         raise RuntimeError("docker rm c-a failed: Error: No such container: c-a")
     monkeypatch.setattr(lifecycle, "remove_container", _boom)
+    released = {}
+    monkeypatch.setattr(cpc, "release_lease",
+                        lambda name: released.setdefault("name", name) or True)
     rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="c-a", apply=True))
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out["reclaimed"] is True and "already gone" in out["detail"]
+    assert released["name"] == "c-a"
 
 
 def test_claim_reclaim_real_failure(monkeypatch, capsys):

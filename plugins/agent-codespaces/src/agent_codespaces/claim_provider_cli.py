@@ -9,15 +9,18 @@ resolves -- never ambient ``PATH``, always this plugin's own payload-local
 from __future__ import annotations
 
 import argparse
-import functools
 import json
+import logging
 import sys
 
-from .lifecycle import delete_codespace, list_codespaces
+from .lease import release as release_lease
+from .lifecycle import delete_codespace, get_codespace_status
 from .sessions import sync_codespace_sessions
 
+log = logging.getLogger("agent-codespaces")
 
-def add_claim_provider_parsers(sub, *, release_lease_quietly) -> None:
+
+def add_claim_provider_parsers(sub) -> None:
     """Register the ``claim-status``/``claim-reclaim`` subcommands.
 
     Not human-facing: the callback contract agent-worktrees' claim-provider
@@ -43,8 +46,7 @@ def add_claim_provider_parsers(sub, *, release_lease_quietly) -> None:
     claim_reclaim_parser.add_argument(
         "--apply", action="store_true", help="Actually delete (default: dry-run preview)",
     )
-    claim_reclaim_parser.set_defaults(
-        func=functools.partial(cmd_claim_reclaim, release_lease_quietly=release_lease_quietly))
+    claim_reclaim_parser.set_defaults(func=cmd_claim_reclaim)
 
 
 def _codespace_looks_gone(detail: str) -> bool:
@@ -63,37 +65,53 @@ def _codespace_looks_gone(detail: str) -> bool:
     return "404" in low or "not found" in low
 
 
+def _release_lease_silently(name: str) -> None:
+    """Release a CodeSpace lease WITHOUT printing (unlike ``__main__.
+    _release_lease_quietly``, which prints ``[OK] Released lease ...`` to
+    STDOUT -- fine for a human-facing command, but fatal here: it would
+    corrupt this callback's JSON-only stdout contract, making the
+    registry's own ``json.loads`` fail and report the provider
+    unavailable). Best-effort: never raises."""
+    try:
+        if release_lease(name):
+            log.info("Released lease on %s", name)
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug("lease release for %s failed: %s", name, exc)
+
+
 def cmd_claim_status(args: argparse.Namespace) -> int:
     """``claim-status <name>``: does CodeSpace NAME exist?
 
     Returns the small envelope ``agent_worktrees.claim_providers`` documents
-    -- ``exists`` (required) plus ``state`` when known. A listing failure
-    (gh/network/auth trouble) is a genuine callback failure, NOT a confirmed
-    absence -- exits non-zero with a stderr message so the registry's own
-    caller degrades to ``{"available": false, ...}`` instead of a false
-    ``exists: false`` that could make a live claim look reclaimable."""
+    -- ``exists`` (required) plus ``state`` when known. Uses
+    ``lifecycle.get_codespace_status`` -- a strict, targeted single-CodeSpace
+    lookup -- rather than the paginated, best-effort ``list_codespaces()``
+    (``--limit 50``, drops rows on a failed account), so a live CodeSpace
+    outside the first page or in a failed account is never misreported as
+    absent. Any backend failure (gh/network/auth trouble, or an ambiguous
+    listing) is a genuine callback failure, NOT a confirmed absence -- exits
+    non-zero with a stderr message so the registry's own caller degrades to
+    ``{"available": false, ...}`` instead of a false ``exists: false`` that
+    could make a live claim look reclaimable."""
     try:
-        codespaces = list_codespaces()
+        exists, state = get_codespace_status(args.name)
     except Exception as exc:
-        print(f"codespace listing failed: {exc}", file=sys.stderr)
+        print(f"codespace status lookup failed: {exc}", file=sys.stderr)
         return 1
-    for cs in codespaces:
-        if cs.name == args.name:
-            print(json.dumps({"exists": True, "state": cs.state}))
-            return 0
-    print(json.dumps({"exists": False}))
+    print(json.dumps({"exists": exists, "state": state} if exists else {"exists": False}))
     return 0
 
 
-def cmd_claim_reclaim(args: argparse.Namespace, *, release_lease_quietly) -> int:
+def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     """``claim-reclaim <name> [--apply]``: reclaim (delete) CodeSpace NAME.
 
     Without ``--apply`` this is a dry-run preview only (never deletes), per
     the callback contract. Idempotent: a delete failing because the
     CodeSpace is already gone (404/not-found) still reports
-    ``reclaimed: true``. ``release_lease_quietly`` is injected from
-    ``__main__`` to avoid a circular import. Runs the same best-effort
-    pre-delete Copilot-session recovery as ``agent-codespaces delete``
+    ``reclaimed: true`` -- and, like the successful-delete path, releases
+    any local lease on it (an already-gone resource must not leave a stale
+    lease blocking allocation). Runs the same best-effort pre-delete
+    Copilot-session recovery as ``agent-codespaces delete``
     (``__main__._cmd_delete``) so a claim-reclaim invocation never destroys
     an unrecovered session."""
     if not args.apply:
@@ -108,10 +126,11 @@ def cmd_claim_reclaim(args: argparse.Namespace, *, release_lease_quietly) -> int
     except Exception as exc:
         detail = str(exc)
         if _codespace_looks_gone(detail):
+            _release_lease_silently(args.name)
             print(json.dumps({"reclaimed": True, "detail": f"CodeSpace {args.name} already gone"}))
             return 0
         print(json.dumps({"reclaimed": False, "detail": detail}))
         return 0
-    release_lease_quietly(args.name)
+    _release_lease_silently(args.name)
     print(json.dumps({"reclaimed": True, "detail": f"deleted CodeSpace {args.name}"}))
     return 0
