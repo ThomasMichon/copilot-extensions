@@ -189,8 +189,21 @@ ambient/legacy credentials just by making the strict path fail.
    all three call, so there is exactly one place that decides
    peer-launch-vs-legacy-strip). Leaving any of the three on the direct
    `peer_env()` path means that call path keeps stripping context and
-   never gets the rebinding this design exists to add. In the adapter (or
-   centralized runner): when the resolved provider's plugin id is one of
+   never gets the rebinding this design exists to add. **Deriving the
+   peer-lookup key needs its own fix, not a direct field comparison:**
+   `ClaimProviderManifest.plugin` (as stored by the registry's own
+   `_classify()`) is `<plugin>@<marketplace>`, not a bare plugin id, while
+   the new peer roster is keyed by bare ids (`agent-codespaces`,
+   `agent-containers`, `agent-dispatch`). Comparing `manifest.plugin`
+   directly against the roster will never match, silently leaving every
+   call on the stripped-env path with no error. Derive the bare id before
+   the lookup -- either split `plugin` on `@` (verify this is a safe,
+   always-present separator by reading `_classify()`'s own construction of
+   that field first) or resolve it from `manifest.plugin_root` (the
+   installed plugin directory name) the same way `validate_owner()` does
+   for its own identity check. Add a unit test asserting a realistic
+   `<plugin>@<marketplace>`-shaped manifest actually selects the
+   peer-launch path. When the resolved provider's plugin id is one of
    the registered peers, call `run(peer_id, *callback_args, timeout=...,
    cwd=...)` with each call site's own existing timeout/cwd values. On
    success, use its stdout exactly as today. On `ContextRefused` (or any
