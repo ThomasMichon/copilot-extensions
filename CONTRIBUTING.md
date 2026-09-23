@@ -837,9 +837,26 @@ just the test venv) needs one more step beyond the *local installer* gotcha
 above (see *`<repo> update` does not validate an unmerged worktree's
 changes*): even a `source.kind = local` install rebuilds from a **checkout on
 disk**, so it still requires committing (or at least saving) your edit and
-re-running that plugin's installer to pick it up. For the fastest possible
-iteration loop on a live bug **before** a PR is ready, it is acceptable to
-hot-patch the **already-deployed** runtime's files directly (e.g. on Windows,
+re-running that plugin's installer to pick it up.
+
+**`agent-codespaces` has adopted the mutable-dev-slot pattern
+(`docs/patterns/mutable-dev-slot.md`, #3376) as the preferred path** for this:
+from your worktree, run `pwsh -File plugins\agent-codespaces\scripts\install.ps1
+dev` (`./scripts/install.sh dev` on POSIX). This claims a protected, mutable
+`versions/dev` slot, builds it as an **editable** install against your
+checkout, and activates it -- a plain source edit is then reflected by the
+deployed `agent-codespaces` CLI immediately, no rebuild needed; re-run `dev`
+only when you change a dependency. Release when done with the DEPLOYED CLI's
+own verb: `agent-codespaces dev-release` (works even without a checkout
+present -- see the design doc's "Runtime accessibility" section), which
+restores the machine to whatever version was active before you claimed dev
+mode. `agent-worktrees finalize` warns (never silently releases) if your
+worktree still holds a live dev-slot claim when you try to retire it.
+
+For any plugin that has **not yet** adopted this pattern, or when you need the
+fastest possible iteration loop on a live bug **before** even a dev-slot claim
+is worth setting up, it remains acceptable to hot-patch the **already-deployed**
+runtime's files directly (e.g. on Windows,
 `~/.agent-codespaces/versions/<version>/Lib/site-packages/ssh_manager/*.py`) —
 but treat this as strictly throwaway: it is silently overwritten by the next
 real install/update, must never be treated as "shipped," and the actual fix
