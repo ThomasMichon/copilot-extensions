@@ -67,6 +67,8 @@ def test_claim_reclaim_dry_run_never_removes(monkeypatch, capsys):
 
 def test_claim_reclaim_apply_success(monkeypatch, capsys):
     monkeypatch.setattr(cpc, "get_lease", lambda name: None)
+    monkeypatch.setattr(cpc, "active_session_admissions", lambda name: [])
+    monkeypatch.setattr(cpc, "get_deploy_hold", lambda name: None)
     monkeypatch.setattr(lifecycle, "remove_container", lambda *a, **k: None)
     released = {}
     monkeypatch.setattr(cpc, "release_lease",
@@ -94,8 +96,42 @@ def test_claim_reclaim_refuses_actively_leased_container(monkeypatch, capsys):
     assert called["n"] == 0
 
 
+def test_claim_reclaim_refuses_active_session_admission(monkeypatch, capsys):
+    """A restricted `exec --stdio` session can hold a container WITHOUT an
+    advisory lease at all -- must still block a destructive removal."""
+    called = {"n": 0}
+    monkeypatch.setattr(cpc, "get_lease", lambda name: None)
+    monkeypatch.setattr(cpc, "active_session_admissions",
+                        lambda name: [types.SimpleNamespace(session_id="s1")])
+    monkeypatch.setattr(cpc, "get_deploy_hold", lambda name: None)
+    monkeypatch.setattr(lifecycle, "remove_container",
+                        lambda *a, **k: called.__setitem__("n", 1))
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="c-a", apply=True))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False and "admission" in out["detail"]
+    assert called["n"] == 0
+
+
+def test_claim_reclaim_refuses_active_deploy_hold(monkeypatch, capsys):
+    called = {"n": 0}
+    monkeypatch.setattr(cpc, "get_lease", lambda name: None)
+    monkeypatch.setattr(cpc, "active_session_admissions", lambda name: [])
+    monkeypatch.setattr(cpc, "get_deploy_hold",
+                        lambda name: types.SimpleNamespace(operation="up"))
+    monkeypatch.setattr(lifecycle, "remove_container",
+                        lambda *a, **k: called.__setitem__("n", 1))
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="c-a", apply=True))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False
+    assert called["n"] == 0
+
+
 def test_claim_reclaim_already_gone_is_idempotent(monkeypatch, capsys):
     monkeypatch.setattr(cpc, "get_lease", lambda name: None)
+    monkeypatch.setattr(cpc, "active_session_admissions", lambda name: [])
+    monkeypatch.setattr(cpc, "get_deploy_hold", lambda name: None)
 
     def _boom(*a, **k):
         raise RuntimeError("docker rm c-a failed: Error: No such container: c-a")
@@ -112,6 +148,8 @@ def test_claim_reclaim_already_gone_is_idempotent(monkeypatch, capsys):
 
 def test_claim_reclaim_real_failure(monkeypatch, capsys):
     monkeypatch.setattr(cpc, "get_lease", lambda name: None)
+    monkeypatch.setattr(cpc, "active_session_admissions", lambda name: [])
+    monkeypatch.setattr(cpc, "get_deploy_hold", lambda name: None)
 
     def _boom(*a, **k):
         raise RuntimeError("docker rm c-a failed: permission denied")

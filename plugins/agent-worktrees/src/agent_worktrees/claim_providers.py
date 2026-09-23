@@ -80,9 +80,16 @@ _CALLBACK_TIMEOUT_SECONDS = 15.0
 #: slower than a status check and typically crosses the network -- a 15s
 #: budget is realistically too short (claim-provider-pattern effort review
 #: finding: a normal-duration reclaim could be killed mid-operation before
-#: it ever reports a result). Matches ``agent_worktrees.cleanup.
-#: _run_codespaces``'s own pre-existing 300s default for the same reason.
-_RECLAIM_CALLBACK_TIMEOUT_SECONDS = 300.0
+#: it ever reports a result). agent-codespaces' own claim-reclaim callback
+#: chains ``sync_codespace_sessions`` (its own 300s timeout) THEN
+#: ``delete_codespace`` (a further 60s subprocess timeout) -- both must be
+#: able to complete in sequence within this budget, not just the first,
+#: with margin left over, or a slow-but-progressing recovery gets killed
+#: before deletion/lease cleanup ever runs. Matches
+#: ``agent_worktrees.cleanup._run_codespaces``'s own pre-existing 300s
+#: default only for the STATUS-shaped, non-chained call it makes; the
+#: standard reclaim CONTRACT here needs materially more.
+_RECLAIM_CALLBACK_TIMEOUT_SECONDS = 420.0
 
 #: cmd.exe's own structurally-significant characters, scanned for in a
 #: resolved ``.cmd``/``.bat`` path before ever routing it through
@@ -555,24 +562,30 @@ def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
 def peer_env() -> dict[str, str] | None:
     """Environment for invoking a resolved SIBLING plugin's binstub.
 
-    Strips this process's own ``COPILOT_EXTENSIONS_CONTEXT`` (an explicit
-    marketplace-cell installation receipt identifying THIS plugin,
-    agent-worktrees) before the child inherits it unchanged -- otherwise the
-    sibling's own installation-context runtime gate validates the inherited
-    receipt against ITS OWN plugin id, sees a mismatch, and exits non-zero
-    (fails closed as unavailable) even though the provider manifest itself
-    was discovered correctly. Mirrors the same absence-means-resolve-fresh
-    contract this suite's own pivot registry already relies on
-    (``picker_support.pivot_manifest._resolve_activation``: explicit
-    context set -> validate against it; absent -> resolve fresh).
+    Strips this process's own ``COPILOT_EXTENSIONS_CONTEXT`` AND
+    ``COPILOT_PLUGIN_ROOT`` (explicit marketplace-cell installation receipts
+    identifying THIS plugin, agent-worktrees, and its own payload root)
+    before the child inherits either unchanged -- otherwise the sibling's
+    own installation-context runtime gate validates the inherited receipt
+    against ITS OWN plugin id and exits non-zero (fails closed as
+    unavailable), or a consumer keying off ``COPILOT_PLUGIN_ROOT``
+    specifically (e.g. agent-codespaces' ``sessions.
+    _agent_codespaces_marketplace()``) misreads it as ITS OWN payload root
+    and refuses to resolve a marketplace installation -- even though the
+    provider manifest itself was discovered correctly. Mirrors the same
+    absence-means-resolve-fresh contract this suite's own pivot registry
+    already relies on (``picker_support.pivot_manifest._resolve_activation``:
+    explicit context set -> validate against it; absent -> resolve fresh).
 
     Returns ``None`` (inherit the ambient environment completely
-    unmodified) when this process itself carries no such context -- the
+    unmodified) when this process itself carries neither variable -- the
     common, non-namespaced-cell case."""
-    if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
+    if not any(os.environ.get(name, "").strip() for name in
+               ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT")):
         return None
     env = dict(os.environ)
     env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    env.pop("COPILOT_PLUGIN_ROOT", None)
     return env
 
 

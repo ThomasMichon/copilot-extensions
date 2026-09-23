@@ -14,7 +14,7 @@ import logging
 import sys
 
 from . import lifecycle
-from .lease import get_lease
+from .lease import active_session_admissions, get_deploy_hold, get_lease
 from .lease import release as release_lease
 
 log = logging.getLogger("agent-containers")
@@ -116,6 +116,26 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
         print(json.dumps({
             "reclaimed": False,
             "detail": f"container is leased to {lease.effort}; release it first",
+        }))
+        return 0
+    # A restricted `exec --stdio` session (or a live provider-lifecycle
+    # deploy hold) can hold a container without an advisory lease at all --
+    # check both, fail closed (refuse) on any error reading either, and
+    # never proceed to the destructive removal below with either present.
+    try:
+        admissions = active_session_admissions(args.name)
+        hold = get_deploy_hold(args.name)
+    except Exception as exc:
+        print(json.dumps({
+            "reclaimed": False,
+            "detail": f"admission/hold check failed: {exc}",
+        }))
+        return 0
+    if admissions or hold:
+        print(json.dumps({
+            "reclaimed": False,
+            "detail": "container has an active session admission or provider "
+            "lifecycle hold; refusing to remove",
         }))
         return 0
     try:

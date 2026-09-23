@@ -6,8 +6,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import types
 
 from agent_codespaces import claim_provider_cli as cpc
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_lease_by_default(monkeypatch):
+    """Most reclaim tests aren't exercising the lease guard itself --
+    default to unleased so they don't all need to mock this explicitly."""
+    monkeypatch.setattr(cpc, "get_lease", lambda name: None)
 
 
 def test_claim_status_exists(monkeypatch, capsys):
@@ -45,6 +55,20 @@ def test_claim_reclaim_dry_run_never_deletes(monkeypatch, capsys):
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out["reclaimed"] is True and "would delete" in out["detail"]
+    assert called["n"] == 0
+
+
+def test_claim_reclaim_refuses_actively_leased_codespace(monkeypatch, capsys):
+    called = {"n": 0}
+    lease = types.SimpleNamespace(effort="other-effort")
+    monkeypatch.setattr(cpc, "get_lease", lambda name: lease)
+    monkeypatch.setattr(cpc, "sync_codespace_sessions",
+                        lambda *a, **k: called.__setitem__("n", 1))
+    monkeypatch.setattr(cpc, "delete_codespace", lambda *a, **k: called.__setitem__("n", 1))
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False and "other-effort" in out["detail"]
     assert called["n"] == 0
 
 

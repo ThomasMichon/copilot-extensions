@@ -13,6 +13,7 @@ import json
 import logging
 import sys
 
+from .lease import get_lease
 from .lease import release as release_lease
 from .lifecycle import delete_codespace, get_codespace_status
 from .sessions import sync_codespace_sessions
@@ -129,6 +130,13 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     """
     if not args.apply:
         print(json.dumps({"reclaimed": True, "detail": f"would delete CodeSpace {args.name}"}))
+        return 0
+    lease = get_lease(args.name)
+    if lease:
+        print(json.dumps({
+            "reclaimed": False,
+            "detail": f"CodeSpace is leased to {lease.effort}; release it first",
+        }))
         return 0
     try:
         recovery = sync_codespace_sessions(args.name)

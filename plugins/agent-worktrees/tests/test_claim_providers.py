@@ -704,6 +704,7 @@ def test_is_safe_argument_rejects_trailing_newline():
 
 def test_peer_env_is_none_without_a_context(monkeypatch):
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
     assert cp.peer_env() is None
 
 
@@ -713,11 +714,24 @@ def test_peer_env_strips_own_context_for_the_child(monkeypatch):
     installation-context runtime gate would validate it against the
     wrong plugin id and fail closed."""
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
     monkeypatch.setenv("SOME_OTHER_VAR", "kept")
     env = cp.peer_env()
     assert env is not None
     assert "COPILOT_EXTENSIONS_CONTEXT" not in env
     assert env.get("SOME_OTHER_VAR") == "kept"
+
+
+def test_peer_env_strips_plugin_root_even_without_a_context(monkeypatch):
+    """A consumer keying off COPILOT_PLUGIN_ROOT specifically (e.g.
+    agent-codespaces' own marketplace-installation resolution) must never
+    inherit agent-worktrees' own payload root either -- independent of
+    whether COPILOT_EXTENSIONS_CONTEXT itself happens to be set."""
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/some/agent-worktrees/payload/root")
+    env = cp.peer_env()
+    assert env is not None
+    assert "COPILOT_PLUGIN_ROOT" not in env
 
 
 def test_resolve_provider_argv_degrades_when_no_provider_registered(tmp_path):
