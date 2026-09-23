@@ -398,6 +398,73 @@ async def test_resolve_venue_none_when_absent():
 
 
 @pytest.mark.asyncio
+async def test_resolve_worktree_type_delegates_transport_to_bridge():
+    """A provider (e.g. agent-dispatch's `dispatch:` namespace, #3389) names
+    *which* worktree to resume rather than building a raw spawn_command --
+    agent-bridge's own worktree transport resolution builds the rest."""
+    fb = _Fallback()
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps({
+            "type": "worktree",
+            "worktree_id": "wt-42",
+            "venue": {"provider": "agent-dispatch", "target_id": "task-1"},
+        }))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        t = await CliNamespaceResolver("dispatch", "agent-dispatch", fb).resolve(
+            "task-1",
+        )
+    assert t.type == "local"
+    assert t.worktree_id == "wt-42"
+    assert t.spawn_command is None
+    assert t.venue == {"provider": "agent-dispatch", "target_id": "task-1"}
+    assert "resolve" not in fb.calls
+
+
+@pytest.mark.asyncio
+async def test_resolve_worktree_type_with_host_becomes_ssh_target():
+    fb = _Fallback()
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps({
+            "type": "worktree", "worktree_id": "wt-7", "host": "wheatley",
+        }))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        t = await CliNamespaceResolver("dispatch", "agent-dispatch", fb).resolve(
+            "task-2",
+        )
+    assert t.type == "ssh"
+    assert t.host == "wheatley"
+    assert t.worktree_id == "wt-7"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"type": "worktree"}, "invalid worktree_id"),
+        ({"type": "worktree", "worktree_id": ""}, "invalid worktree_id"),
+        ({"type": "worktree", "worktree_id": "  "}, "invalid worktree_id"),
+        ({"type": "worktree", "worktree_id": "wt-1", "host": ""}, "invalid host"),
+    ],
+)
+async def test_resolve_worktree_type_rejects_invalid_shape(payload, message):
+    fb = _Fallback()
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps(payload))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        with pytest.raises(RuntimeError, match=message):
+            await CliNamespaceResolver("dispatch", "agent-dispatch", fb).resolve(
+                "task-1",
+            )
+    assert "resolve" not in fb.calls
+
+
+@pytest.mark.asyncio
 async def test_resolve_not_found_maps_to_keyerror():
     fb = _Fallback()
     with patch("shutil.which", _which), patch("subprocess.run", return_value=_cp(3, "", "no such cs")):
