@@ -143,8 +143,11 @@ always declare a namespace.
   `plugin_activation.resolve_active_plugins()`, plus findings for
   malformed/inactive/duplicate manifests (module:
   `plugins/agent-worktrees/src/agent_worktrees/claim_providers.py`; tests:
-  `plugins/agent-worktrees/tests/test_claim_providers.py`, 49 collected
-  cases as of the current round of review fixes).
+  `plugins/agent-worktrees/tests/test_claim_providers.py`, 51 collected
+  cases as of the current round of review fixes; do not hardcode this
+  count again in future rounds -- verify it live via `python
+  tools/run-plugin-tests.py agent-worktrees -k claim_providers
+  --collect-only` before restating it, since it has drifted every round).
 
 ### Phase 2 — Provider registration in claim-owning plugins
 - [ ] Add a `register-claim-provider.sh`/`.ps1` pair to agent-dispatch,

@@ -80,7 +80,9 @@ _CALLBACK_TIMEOUT_SECONDS = 15.0
 #: resolved ``.cmd``/``.bat`` path before ever routing it through
 #: ``cmd.exe /c`` (see ``_resolve_command``'s own doc comment for why
 #: ordinary ``subprocess`` argv quoting cannot make this safe on its own).
-_CMD_METACHAR_RE = re.compile(r'[&|<>^%"]')
+#: ``!`` is included because this call site never disables delayed
+#: variable expansion, under which cmd.exe treats ``!`` as significant too.
+_CMD_METACHAR_RE = re.compile(r'[&|<>^%!"]')
 
 
 #: Namespace and identifier characters this module ever passes through to a
@@ -232,6 +234,10 @@ def _resolve_command(command: tuple[str, ...], *, root: Path) -> tuple[str, ...]
         raise TargetUnusableError("command must be a regular, non-symlink file")
     if os.name != "nt" and not os.access(canonical, os.X_OK):
         raise TargetUnusableError("command is not executable")
+    if os.name == "nt" and canonical.suffix.casefold() == ".ps1":
+        raise TargetUnusableError(
+            "PowerShell scripts must be invoked through an executable wrapper"
+        )
     # `payload` itself was never a symlink (checked above), but an
     # ANCESTOR directory (e.g. `root/bin` or `root` itself) could still be
     # one, letting resolve() silently escape the identity-verified root

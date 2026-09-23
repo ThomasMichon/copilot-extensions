@@ -300,6 +300,38 @@ def test_resolve_command_accepts_a_batch_path_with_no_metacharacters(tmp_path, m
     assert resolved[0].endswith("agent-codespaces.cmd")
 
 
+def test_resolve_command_rejects_exclamation_mark_in_a_batch_path(tmp_path, monkeypatch):
+    """Regression: this call site never disables delayed variable
+    expansion, under which cmd.exe treats "!" as significant too --
+    omitting it from the metacharacter check would leave a real gap in
+    the fail-closed path validation."""
+    monkeypatch.setattr(cp.os, "name", "nt")
+    plugin_root = tmp_path / "agent-codespaces!evil"
+    bin_dir = plugin_root / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "agent-codespaces.cmd").write_text("@exit /b 0\r\n")
+
+    with pytest.raises(cp.TargetUnusableError, match="metacharacter"):
+        cp._resolve_command(("agent-codespaces",), root=plugin_root)
+
+
+def test_resolve_command_rejects_a_powershell_script_on_windows(tmp_path, monkeypatch):
+    """Regression: _windows_batch_argv only wraps .cmd/.bat through
+    cmd.exe -- a manifest declaring a bare .ps1 target would otherwise be
+    admitted as an active, resolvable command, then fail at invocation
+    time since CreateProcess cannot execute a PowerShell script directly
+    either. Mirrors picker_support.pivot_targets._resolve_command's own
+    .ps1 rejection."""
+    monkeypatch.setattr(cp.os, "name", "nt")
+    plugin_root = tmp_path / "agent-codespaces"
+    bin_dir = plugin_root / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "foo.ps1").write_text("exit 0\r\n")
+
+    with pytest.raises(cp.TargetUnusableError, match="PowerShell"):
+        cp._resolve_command(("foo.ps1",), root=plugin_root)
+
+
 def test_duplicate_namespace_keeps_first_and_records_a_finding(tmp_path):
     root_a, plugins_root = _installed_plugins_tree(tmp_path, "agent-codespaces")
     root_b, _ = _installed_plugins_tree(tmp_path, "agent-containers")
