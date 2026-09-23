@@ -108,8 +108,8 @@ def parse_manifest(data: object, *, source_path: str = "") -> ClaimProviderManif
         raise ManifestError("manifest root must be a JSON object")
 
     schema_version = data.get("schema_version")
-    if schema_version != 1:
-        raise ManifestError("`schema_version` must be 1")
+    if isinstance(schema_version, bool) or schema_version != 1:
+        raise ManifestError("`schema_version` must be the integer 1")
 
     ns = data.get("namespace")
     if not isinstance(ns, str) or not ns.strip():
@@ -125,9 +125,12 @@ def parse_manifest(data: object, *, source_path: str = "") -> ClaimProviderManif
         if (
             not isinstance(value, list)
             or not value
-            or not all(isinstance(x, str) and x for x in value)
+            or not all(isinstance(x, str) and x and "\x00" not in x for x in value)
         ):
-            raise ManifestError(f"`{field}` must be a non-empty array of strings when present")
+            raise ManifestError(
+                f"`{field}` must be a non-empty array of non-empty strings "
+                "with no embedded NUL when present"
+            )
         return tuple(value)
 
     status_command = _argv("status_command")
@@ -408,6 +411,14 @@ def _run_callback(
         return None
     if not isinstance(data.get(required_bool_field), bool):
         return None
+    # The callback contract documents "state"/"detail" as optional STRING
+    # fields -- validate them too, not just the required boolean, so a
+    # malformed provider (e.g. {"exists": true, "state": {}}) cannot be
+    # reported as a successful, well-shaped result.
+    for optional_field in ("state", "detail"):
+        value = data.get(optional_field)
+        if value is not None and not isinstance(value, str):
+            return None
     return data
 
 

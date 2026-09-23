@@ -60,6 +60,26 @@ def test_parse_manifest_requires_schema_version_1():
         cp.parse_manifest({"namespace": "codespace", "status_command": ["x"]})
 
 
+def test_parse_manifest_rejects_boolean_schema_version():
+    """Regression: bool is a subclass of int in Python, so
+    `schema_version: true` == 1 would otherwise silently pass."""
+    with pytest.raises(cp.ManifestError, match="schema_version"):
+        cp.parse_manifest({"schema_version": True, "namespace": "codespace", "status_command": ["x"]})
+
+
+def test_parse_manifest_rejects_a_nul_byte_in_a_command_component():
+    """Regression: an embedded NUL previously reached _payload_command's
+    Path.is_file(), which can raise ValueError -- a class scan_directory's
+    own OSError-only catch does not convert to a finding, breaking the
+    documented never-raises discovery boundary."""
+    with pytest.raises(cp.ManifestError, match="status_command"):
+        cp.parse_manifest({"schema_version": 1, "namespace": "codespace", "status_command": ["agent-codespaces\x00"]})
+    with pytest.raises(cp.ManifestError, match="status_command"):
+        cp.parse_manifest(
+            {"schema_version": 1, "namespace": "codespace", "status_command": ["agent-codespaces", "claim-status\x00"]}
+        )
+
+
 def test_parse_manifest_requires_at_least_one_command():
     with pytest.raises(cp.ManifestError, match="status_command"):
         cp.parse_manifest({"schema_version": 1, "namespace": "codespace"})
@@ -375,6 +395,24 @@ def test_resolve_claim_status_degrades_when_required_field_wrong_type(tmp_path, 
             plugin="agent-codespaces@copilot-extensions",
             plugin_root=str(tmp_path),
             status_command=("python", "-c", "import json;print(json.dumps({'exists': 'yes'}))"),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.resolve_claim_status("codespace:my-box-1", plugins_root=tmp_path)
+    assert result["available"] is False
+
+
+def test_resolve_claim_status_degrades_when_optional_field_wrong_type(tmp_path, monkeypatch):
+    """Regression: "state"/"detail" are documented as optional STRINGS --
+    a wrong-typed value (e.g. an object) must not be silently passed
+    through as if the result were well-shaped."""
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=("python", "-c", "import json;print(json.dumps({'exists': True, 'state': {}}))"),
         )
         return {"codespace": provider}, ()
 
