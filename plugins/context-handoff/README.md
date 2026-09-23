@@ -22,8 +22,8 @@ This plugin ships four cooperating payload pieces:
 
 `context-handoff` owns **continuity policy and baton storage**:
 
-1. detect context pressure (opt-in automatic nudging; always available on
-   request),
+1. detect context pressure (soft/hard warnings fire under the default
+   `manual-only` mode too; always available on request),
 2. help the agent compose the right brief,
 3. store that brief durably,
 4. expose a short recovery seed,
@@ -737,12 +737,15 @@ thresholds:
   force_percent: 78
 ```
 
-**The default mode is `manual-only`, not `auto`** -- automatic nudges, the
-force-tier auto-trigger, and `trigger_handoff`'s live-cutover wiring (the
+**The default mode is `manual-only`, not `auto`** -- the force-tier
+auto-trigger and `trigger_handoff`'s live-cutover wiring (the
 `handoff_requested` activity event agent-worktrees' resident status-monitor
-watches for, and the agent-bridge ping) are all opt-in: a repo (or a user,
+watches for, and the agent-bridge ping) are opt-in: a repo (or a user,
 via the home-directory layer) must explicitly set `mode: auto` in
-`.context-handoff/config.yaml` to enable them. `save_handoff_prompt`,
+`.context-handoff/config.yaml` to enable them. The soft/hard context-pressure
+warnings above fire under `manual-only` too -- only the force tier's own
+automatic handoff and any live pickup signaling wait for `mode: auto`.
+`save_handoff_prompt`,
 `trigger_handoff`, and `consume_handoff` all keep working under
 `manual-only` -- `trigger_handoff` still stores/seeds the handoff and prints
 the manual pickup instructions, it just never wires up automatic pickup.
