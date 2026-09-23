@@ -77,7 +77,7 @@ class LazyLoadMixin:
             or (source.machine, source.env) in focus_keys
         )
 
-    def _ping_one(self, source):
+    def _ping_one(self, source, gen: int | None = None):
         """Cheap connectivity-only probe standing in for a deferred full load.
 
         Sets the SAME ``ready``/``failed`` state the operator already reads as
@@ -85,7 +85,18 @@ class LazyLoadMixin:
         identically to a machine that genuinely has no worktrees) -- but never
         runs the remote's ``list``/git-classification. ``ensure_loaded``
         replaces this with the real listing once the tab is actually viewed.
-        """
+
+        ``gen`` is the generation captured by the caller (``start()``) when
+        THIS ping was dispatched. ``cancel_source`` bumps the generation when
+        it re-arms a source into ``_pinged_only`` (nav-away then back before
+        the original probe returned); without this check a canceled probe
+        that later comes back nonzero would find its (now stale) key still
+        a member of ``_pinged_only`` and wrongly mark the re-armed source
+        failed, silently defeating the next nav-back's retry. Defaults to the
+        source's current generation when omitted (a direct/test call with no
+        cancellation in play)."""
+        if gen is None:
+            gen = self._gen.get(source.cache_key, 0)
         try:
             if self._cancelled.is_set():
                 return
@@ -96,7 +107,10 @@ class LazyLoadMixin:
                 self._active_source.key = None
         except Exception as exc:
             with self._lock:
-                if source.cache_key in self._pinged_only:
+                if (
+                    source.cache_key in self._pinged_only
+                    and self._gen.get(source.cache_key, 0) == gen
+                ):
                     # A failed probe must NOT stay eligible for automatic
                     # promotion: ensure_loaded()/ensure_all_loaded() only
                     # check set membership, so leaving the key here would
@@ -115,8 +129,13 @@ class LazyLoadMixin:
         with self._lock:
             # A nav-driven ensure_loaded() may have already promoted this
             # source (and possibly completed a real load) while the ping was
-            # in flight -- never clobber that with a stale ping result.
-            if source.cache_key not in self._pinged_only:
+            # in flight -- never clobber that with a stale ping result. Same
+            # for a cancel_source() that re-armed it under a NEW generation
+            # (the gen check) while this now-superseded probe was in flight.
+            if (
+                source.cache_key not in self._pinged_only
+                or self._gen.get(source.cache_key, 0) != gen
+            ):
                 return
             if proc.returncode == 0:
                 self._records[source.cache_key] = []

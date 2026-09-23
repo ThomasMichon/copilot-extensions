@@ -2067,7 +2067,7 @@ def test_start_with_focus_keys_loads_focus_fully_and_pings_the_rest(monkeypatch)
     loaded = []
     pinged = []
     monkeypatch.setattr(loader, "_load_one", lambda s, gen=None: loaded.append(s.cache_key))
-    monkeypatch.setattr(loader, "_ping_one", lambda s: pinged.append(s.cache_key))
+    monkeypatch.setattr(loader, "_ping_one", lambda s, gen=None: pinged.append(s.cache_key))
     # start() spawns real threads; run them inline for a deterministic test.
     monkeypatch.setattr(
         data_ssh.threading, "Thread",
@@ -2402,8 +2402,35 @@ def test_cancel_source_preserves_last_good_rows_for_a_routine_repoll(monkeypatch
     assert loader.cancel_source(("dev6", "Win")) is True
     assert killed == [proc]
     assert loader.state("dev6", "Win") == "ready"           # unchanged
-    assert loader.records_for_source(src.cache_key) == [{"id4": "aaaa"}]  # kept
-    assert src.cache_key not in loader._pinged_only          # NOT reset
+    assert loader.records_for_source(src.cache_key) == [{"id4": "aaaa"}]
+
+
+def test_ping_one_ignores_a_stale_result_after_cancel_source_rearms(monkeypatch):
+    """cancel_source() re-arms a resettable source into _pinged_only under a
+    NEW generation (nav-away then back before the original probe returned).
+    The original probe's OWN generation is now stale -- if it later comes
+    back nonzero, membership alone would treat it as current and wrongly
+    mark the re-armed source failed, silently defeating the next nav-back's
+    retry (#round-6 finding)."""
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    loader._pinged_only.add(src.cache_key)
+    original_gen = loader._gen.get(src.cache_key, 0)
+
+    def slow_spawn(argv, timeout):
+        # By the time this "returns", cancel_source() has already re-armed
+        # the source under a bumped generation.
+        loader.cancel_source(("dev6", "Win"))
+        return types.SimpleNamespace(returncode=255, stdout="", stderr="down")
+
+    loader._spawn = slow_spawn
+
+    loader._ping_one(src, original_gen)
+
+    # cancel_source's re-arm (ready/pinged-only/no-records) must survive
+    # untouched -- the stale probe's failure must not land.
+    assert src.cache_key in loader._pinged_only
+    assert loader.state("dev6", "Win") == "ready"
 
 
 def test_cancel_source_preserves_a_promoted_loads_already_committed_fast_rows(monkeypatch):

@@ -1387,7 +1387,8 @@ class LiveLoader(LazyLoadMixin):
                 # promotes it (picker-lazy-per-machine-loading).
                 self._pinged_only.add(s.cache_key)
                 threading.Thread(
-                    target=self._ping_one, args=(s,),
+                    target=self._ping_one,
+                    args=(s, self._gen.get(s.cache_key, 0)),
                     name=f"ping-{s.machine}-{s.env}", daemon=True,
                 ).start()
                 continue

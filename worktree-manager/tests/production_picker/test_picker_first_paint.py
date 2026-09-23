@@ -1052,3 +1052,65 @@ def test_rotate_machine_promotes_destination_and_cancels_previous_tab(monkeypatc
     scr._activate_current_machine_tab(scr._current_tab_key(), False)
     assert dev6.cache_key not in loader._pinged_only
     assert loader.state("dev6", "Win") == "loading"
+
+
+def test_programmatic_all_view_selection_promotes_ping_only_sources(monkeypatch):
+    """A headless capture helper (``capture.py``'s ``capture_async`` /
+    ``capture_frames_async`` / ``capture_modal_async``) selects the "All"
+    view by assigning ``scr.machine_idx = 0`` directly, then calls
+    ``scr._activate_current_machine_tab()`` (picker-lazy-per-machine-loading
+    #round-6 finding) -- exactly like this test does. Without that call, a
+    live aggregate capture would leave every deferred remote ping-only and
+    silently omit their rows from the documented All view."""
+    import types as _types
+
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import data_ssh, engine as eng
+
+    local = data_ssh.Source("book2", "Win", None, local=True, ready=True)
+    dev6 = data_ssh.Source(
+        "dev6", "Win",
+        data_ssh._argv_for("pwsh", "host-dev6", "dotfiles", classify=True),
+        ready=True, alias="host-dev6",
+    )
+    loader = data_ssh.LiveLoader([local, dev6])
+    monkeypatch.setattr(loader, "_load_one", lambda s, gen=None: None)
+    monkeypatch.setattr(
+        data_ssh.threading, "Thread",
+        lambda target, args=(), name=None, daemon=None: _types.SimpleNamespace(
+            start=lambda: None),  # promoted but never actually resolves
+    )
+    loader._state[local.cache_key] = "ready"
+    loader._records[local.cache_key] = [{"id4": "aaaa"}]
+    loader._pinged_only.add(dev6.cache_key)
+    loader._state[dev6.cache_key] = "ready"
+
+    class Src:
+        LOCAL = ("book2", "Win")
+        from worktree_manager.production_picker.picker_tui import derive as _derive
+        bucket = staticmethod(_derive.bucket)
+        for_machine = staticmethod(_derive.for_machine)
+
+    scr = eng.PickerScreen(Src(), live=True)
+    scr.loader = loader
+    scr.data = []
+    scr.source_tabs = [
+        {"label": "All", "machine": None, "env": None, "ready": True,
+         "source_kind": "all", "source_id": None, "local": False},
+        {"label": "book2 Win", "machine": "book2", "env": "Win", "ready": True,
+         "source_kind": "machine-ssh", "source_id": None, "local": True},
+        {"label": "dev6 Win", "machine": "dev6", "env": "Win", "ready": True,
+         "source_kind": "machine-ssh", "source_id": None, "local": False},
+    ]
+    scr.machines = [
+        (t["label"], t["machine"], t["env"], t["ready"]) for t in scr.source_tabs
+    ]
+    scr.machine_idx = 1   # a real launch starts on the local tab
+
+    # Mirror capture.py's fix: set machine_idx=0 directly (view="all"), then
+    # route it through the activation hook.
+    scr.machine_idx = 0
+    scr._activate_current_machine_tab()
+
+    assert dev6.cache_key not in loader._pinged_only
+    assert loader.state("dev6", "Win") == "loading"
