@@ -378,6 +378,55 @@ def test_sweep_does_not_cap_when_due_entries_are_within_the_limit(tmp_path):
     assert refreshed_count == 4
 
 
+def test_sweep_cap_does_not_let_a_persistently_failing_entry_starve_others(tmp_path):
+    """Regression (Copilot review, PR #3348): a failed refresh previously
+    left `computed_at` unchanged, so a chronically-broken worktree would
+    remain "the stalest" on every subsequent sweep and monopolize every
+    `max_refresh_per_sweep` slot forever -- starving every other due entry
+    from ever being attempted, contradicting the cap's own claim that
+    excess demand is served on later ticks. `_last_attempted` (updated on
+    every attempt, success OR failure) must rotate a failing entry to the
+    back of the priority queue exactly like a succeeding one."""
+    clock = {"t": 1000.0}
+    cache = WorktreeStatusCache(
+        tmp_path / "cache.sqlite3",
+        ttl_seconds=5.0,
+        max_refresh_per_sweep=1,
+        now=lambda: clock["t"],
+    )
+    # "broken" is demanded first (so it would be the stalest by computed_at
+    # alone) and always fails; "ok0"/"ok1" are demanded after and always
+    # succeed.
+    cache.get_or_refresh("proj", "broken", force=False, compute=lambda: {"v": 0})
+    clock["t"] += 1.0
+    cache.get_or_refresh("proj", "ok0", force=False, compute=lambda: {"v": 0})
+    clock["t"] += 1.0
+    cache.get_or_refresh("proj", "ok1", force=False, compute=lambda: {"v": 0})
+    clock["t"] += 5.0  # all three now past the 5s TTL
+
+    def refresh(project, worktree_id):
+        if worktree_id == "broken":
+            raise RuntimeError("simulated persistent failure")
+        return {"v": "swept"}
+
+    attempted = []
+    for _ in range(3):
+        before = set(attempted)
+        # Wrap refresh to record which key was actually attempted this tick.
+        def _tracking_refresh(p, w, _before=before):
+            attempted.append(w)
+            return refresh(p, w)
+
+        cache.sweep_due(refresh=_tracking_refresh)
+        clock["t"] += 0.001  # break exact-tie ordering between ticks
+
+    # With a starvation bug, "broken" would be re-selected every tick
+    # (still the stalest by computed_at, which never advances on failure)
+    # and "ok0"/"ok1" would never be attempted at all. The fix must let
+    # every due entry get a turn across these 3 ticks (cap=1/tick).
+    assert set(attempted) == {"broken", "ok0", "ok1"}
+
+
 def test_sweep_drops_entries_whose_demand_has_aged_out(tmp_path):
     clock = {"t": 1000.0}
     cache = WorktreeStatusCache(

@@ -137,6 +137,12 @@ class WorktreeStatusCache:
         self._lock = threading.Lock()
         # key -> (bundle, computed_at, demanded_at)
         self._entries: dict[tuple[str, str], tuple[dict, float, float]] = {}
+        # key -> last sweep-attempt timestamp (success OR failure). Separate
+        # from `computed_at` (which only advances on success) so a
+        # persistently-failing entry still rotates out of "stalest first"
+        # priority after being attempted, instead of monopolizing every
+        # `max_refresh_per_sweep` slot forever (Copilot review, PR #3348).
+        self._last_attempted: dict[tuple[str, str], float] = {}
         self._conn: sqlite3.Connection | None = None
         # Set by `close()`. Checked by `_open()` so a request-handler thread
         # still in flight when the monitor shuts down (`CoalescingServer
@@ -351,6 +357,7 @@ class WorktreeStatusCache:
                     self._entries[key] = (bundle, computed_at, now)
                     return bundle
                 self._entries.pop(key, None)
+                self._last_attempted.pop(key, None)
                 # Delete the durable row while still holding the lock --
                 # this is an infrequent, exceptional path (not the hot
                 # cache-hit path this cache otherwise deliberately avoids
@@ -384,22 +391,32 @@ class WorktreeStatusCache:
 
     def sweep_due(self, *, refresh: Callable[[str, str], dict]) -> int:
         """Refresh up to ``max_refresh_per_sweep`` demanded, TTL-expired
-        entries (stalest first); drop entries whose demand has aged out
-        (``DEMAND_TTL_SECONDS``). Returns the count refreshed. Never raises:
-        a per-entry refresh failure is skipped, leaving that entry's
-        last-known value in place rather than losing it.
+        entries (stalest-attempted first); drop entries whose demand has
+        aged out (``DEMAND_TTL_SECONDS``). Returns the count refreshed.
+        Never raises: a per-entry refresh failure is skipped, leaving that
+        entry's last-known value in place rather than losing it.
 
         The cap is defense-in-depth against the exact CPU-saturation bug
         found live (2026-09-22): a real per-entry recompute costs several
         seconds (an unavoidable git fetch), so refreshing an unbounded
         number of due entries every sweep tick can demand more CPU than one
         core provides, leaving the sweep thread running back-to-back with
-        no idle gaps. Prioritizing the STALEST entries (oldest
-        ``computed_at``) first means an operator with more demanded
-        worktrees than the cap can serve per tick sees some entries age
-        further past their nominal TTL rather than the daemon's CPU cost
-        growing unbounded with demand -- a graceful, self-limiting
-        degradation instead of the reverse.
+        no idle gaps. Prioritizing the stalest-attempted entries first means
+        an operator with more demanded worktrees than the cap can serve per
+        tick sees some entries age further past their nominal TTL rather
+        than the daemon's CPU cost growing unbounded with demand -- a
+        graceful, self-limiting degradation instead of the reverse.
+
+        Priority is by ``_last_attempted`` (updated on every attempt,
+        success OR failure), not bare ``computed_at`` (Copilot review,
+        PR #3348): ``computed_at`` only advances on a successful refresh, so
+        a persistently-failing entry would otherwise remain "the stalest"
+        forever and monopolize every cap slot, starving every other due
+        entry from ever being attempted. Recording the attempt time
+        regardless of outcome rotates a failing entry to the back of the
+        queue exactly like a succeeding one, so demand beyond capacity is
+        served round-robin across attempts rather than jamming on one
+        chronically-broken worktree.
 
         Each entry is sampled, then recomputed **outside** the lock (the same
         reason ``get_or_refresh`` computes outside it) -- so a concurrent
@@ -424,10 +441,15 @@ class WorktreeStatusCache:
                 for key, (_, _computed_at, demanded_at) in self._entries.items()
                 if now - demanded_at > self._demand_ttl
             ]
+            last_attempted_snapshot = dict(self._last_attempted)
         if len(sampled) > self._max_refresh_per_sweep:
-            # Stalest (smallest computed_at) first -- see the cap's own
-            # rationale in the docstring above.
-            stalest = sorted(sampled.items(), key=lambda item: item[1])
+            # Stalest-ATTEMPTED (smallest last_attempted, falling back to
+            # computed_at for an entry never yet attempted by a sweep) first
+            # -- see the cap's own rationale in the docstring above.
+            stalest = sorted(
+                sampled.items(),
+                key=lambda item: last_attempted_snapshot.get(item[0], item[1]),
+            )
             sampled = dict(stalest[: self._max_refresh_per_sweep])
         for project, worktree_id in expired:
             with self._lock:
@@ -442,6 +464,7 @@ class WorktreeStatusCache:
                     continue
                 stale_demanded_at = current[2]
                 self._entries.pop((project, worktree_id), None)
+                self._last_attempted.pop((project, worktree_id), None)
                 # Delete the durable row while still holding the lock (this
                 # is an infrequent prune, not the hot read path
                 # `get_or_refresh` deliberately avoids blocking on SQLite
@@ -456,9 +479,16 @@ class WorktreeStatusCache:
             try:
                 bundle = refresh(project, worktree_id)
             except Exception:
+                # Record the attempt even on failure -- see the docstring's
+                # `_last_attempted` rationale: this is what lets a
+                # persistently-failing entry rotate out of "stalest first"
+                # rather than monopolizing every cap slot forever.
+                with self._lock:
+                    self._last_attempted[(project, worktree_id)] = self._now()
                 continue
             ts = self._now()
             with self._lock:
+                self._last_attempted[(project, worktree_id)] = ts
                 existing = self._entries.get((project, worktree_id))
                 if existing is not None and existing[1] != sampled_computed_at:
                     # Someone else (a request-driven refresh) already
