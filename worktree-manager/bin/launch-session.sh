@@ -647,18 +647,22 @@ if [[ "$ACTION" == "refresh" ]]; then
             || setup_log WARN 'Full update returned non-zero -- continuing to reconcile/relaunch'
     fi
     invoke_update_apply 1 1
-    _RELAUNCH="$HOME/.agent-worktrees/bin/launch-session.sh"
-    if [[ -x "$_RELAUNCH" ]]; then
-        relaunch_args=()
-        [[ -n "$LAUNCH_PROJECT" ]] && relaunch_args+=(--project "$LAUNCH_PROJECT")
-        relaunch_args+=("$@")
-        if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
-            relaunch_args+=(-- "${COPILOT_PASSTHROUGH[@]}")
-        fi
-        exec "$_RELAUNCH" "${relaunch_args[@]}"
+    # Relaunch through the Python entry point rather than re-resolving a
+    # launcher path by hand here: `agent_worktrees`'s own cmd_launch already
+    # owns (and keeps current) the "where does the live Worktree Manager
+    # launcher now live" resolution -- a retired "$HOME/.agent-worktrees/bin/
+    # launch-session.sh" path was never updated for the phase-3b relocation
+    # and hasn't existed since (worktree-manager-control-plane/phase-3b-mux-
+    # relocation.md), so hand-rolling it here silently broke every Picker
+    # "refresh" relaunch. Delegating re-resolves fresh, post-update, exactly
+    # like the `update` call above.
+    relaunch_args=(-m agent_worktrees)
+    [[ -n "$LAUNCH_PROJECT" ]] && relaunch_args+=(--project "$LAUNCH_PROJECT")
+    relaunch_args+=("$@")
+    if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
+        relaunch_args+=(-- "${COPILOT_PASSTHROUGH[@]}")
     fi
-    setup_log WARN 'Relaunch launcher missing after refresh; exiting'
-    exit 1
+    exec "$PYTHON" "${relaunch_args[@]}"
 fi
 
 # ── Fast re-attach: skip the update when JOINING an already-live session ──

@@ -774,21 +774,25 @@ if ($plan.action -eq 'refresh') {
     # Reconcile repo-gated payloads/runtimes + reap the staged job (installer
     # and pre-launch here no-op: the full update above already deployed).
     Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile -ShowStatus
-    $newLauncher = Join-Path $env:USERPROFILE '.agent-worktrees\bin\launch-session.ps1'
-    if (Test-Path $newLauncher) {
-        $relaunchArgs = @()
-        if ($script:LaunchProject) {
-            $relaunchArgs += @('--project', $script:LaunchProject)
-        }
-        $relaunchArgs += $CopilotArgs
-        if ($CopilotPassthrough.Count -gt 0) {
-            $relaunchArgs += @('--') + $CopilotPassthrough
-        }
-        & pwsh.exe -NoProfile -File $newLauncher @relaunchArgs
-        exit $LASTEXITCODE
+    # Relaunch through the Python entry point rather than re-resolving a
+    # launcher path by hand here: `agent_worktrees`'s own cmd_launch already
+    # owns (and keeps current) the "where does the live Worktree Manager
+    # launcher now live" resolution -- a retired `~/.agent-worktrees/bin/
+    # launch-session.ps1` path was never updated for the phase-3b relocation
+    # and hasn't existed since (worktree-manager-control-plane/phase-3b-mux-
+    # relocation.md), so hand-rolling it here silently broke every Picker
+    # "refresh" relaunch. Delegating re-resolves fresh, post-update, exactly
+    # like the `update` call above.
+    $relaunchArgs = @('-m', 'agent_worktrees')
+    if ($script:LaunchProject) {
+        $relaunchArgs += @('--project', $script:LaunchProject)
     }
-    Write-SetupLog 'Relaunch launcher missing after refresh; exiting' 'WARN'
-    exit 1
+    $relaunchArgs += $CopilotArgs
+    if ($CopilotPassthrough.Count -gt 0) {
+        $relaunchArgs += @('--') + $CopilotPassthrough
+    }
+    & $VenvPython @relaunchArgs
+    exit $LASTEXITCODE
 }
 
 if ($plan.action -ne 'exec') {
