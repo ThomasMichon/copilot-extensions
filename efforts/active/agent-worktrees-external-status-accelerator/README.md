@@ -1859,3 +1859,45 @@ own position on this question.
 
 Full targeted run: 75 tests pass (28 `worktree_status_cache` + 47
 `worktree_status_audit`).
+
+### 2026-09-23 — PR #3348 review round 4: heapq.nsmallest for cap selection
+Addressed the latest Copilot review round on PR #3348:
+
+- **`sweep_due()`'s cap-selection step** used `sorted(sampled.items(), ...)`
+  to find the `max_refresh_per_sweep` stalest-attempted entries, which sorts
+  the *entire* sampled set -- O(N log N) once the demanded set exceeds the
+  cap. Replaced with `heapq.nsmallest(cap, sampled.items(), key=...)`,
+  which is O(N log cap) instead: a real complexity difference once the
+  demanded-worktree count grows well past the cap.
+- The reviewer separately noted that even with `heapq.nsmallest`, the
+  due/expired bookkeeping (the dict comprehensions scanning
+  `self._entries` to find what's due at all) is still O(N) in the
+  demanded-worktree count, so the "hard CPU ceiling independent of N"
+  claim isn't literally true for the *bookkeeping* cost. Reworded
+  `DEFAULT_MAX_REFRESH_PER_SWEEP`'s docstring to scope that claim
+  precisely: the cap bounds worst-case *recompute* cost (the expensive
+  per-entry work this whole cap exists to protect against -- an
+  unavoidable ~5-6s `git fetch`) independent of N; the O(N) bookkeeping
+  around it is N cheap dict/heap operations, several orders of magnitude
+  below one recompute, a different cost class from what the cap actually
+  protects against. A persistent priority index would remove even that
+  O(N) scan if ever needed at a much larger N than this accelerator
+  currently targets -- noted as a possible future improvement, not
+  implemented here (same scope-boundary judgment as PR #3348's other
+  already-accepted follow-ups).
+- The reviewer also flagged the PR description's own Testing section as
+  stale (still reporting "two new tests, 69 passing" from the initial
+  fix, not the later rounds' 75 passing / 28+47 split). Attempted to
+  update the PR body directly (`gh pr edit`); blocked by the same
+  Enterprise Managed User GraphQL restriction that already prevents
+  posting PR comments from this session (`Unauthorized: As an Enterprise
+  Managed User, you cannot access this content`) -- an account/API
+  permission limitation, not something fixable from this session. The
+  accurate final numbers are recorded here and in this PR's own commit
+  history instead.
+- Verified: targeted `worktree_status_cache`/`worktree_status_audit` run
+  -- 75 passed, no regressions.
+
+No consumer-facing documentation changes needed -- this round is purely an
+internal complexity optimization and docstring-precision fix; the wire
+contract, cache semantics, and every consumer-facing API are unchanged.

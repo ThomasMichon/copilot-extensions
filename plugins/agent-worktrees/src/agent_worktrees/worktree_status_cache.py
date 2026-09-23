@@ -30,6 +30,7 @@ requirement for the cache to function this session.
 
 from __future__ import annotations
 
+import heapq
 import json
 import sqlite3
 import threading
@@ -71,11 +72,21 @@ DEMAND_TTL_SECONDS = 300.0
 #: DEFAULT_TTL_SECONDS to reflect real compute cost, an operator whose
 #: demanded-worktree count grows well past what one CPU core can refresh
 #: within a TTL window would otherwise reproduce the same continuous-CPU
-#: symptom at a higher N. Capping bounds worst-case sweep cost to
-#: `max_refresh_per_sweep * (per-entry compute cost)` every sweep tick,
-#: independent of N -- excess due entries are simply picked up on a later
-#: tick (prioritizing the stalest first, see `sweep_due`), trading a wider
-#: worst-case staleness for a hard CPU ceiling rather than the reverse.
+#: symptom at a higher N. Capping bounds worst-case *recompute* cost (the
+#: expensive per-entry work -- an unavoidable `git fetch` -- that this
+#: whole cap exists to bound) to `max_refresh_per_sweep * (per-entry
+#: compute cost)` every sweep tick, independent of N -- excess due entries
+#: are simply picked up on a later tick (prioritizing the stalest first,
+#: see `sweep_due`), trading a wider worst-case staleness for a hard
+#: recompute-CPU ceiling rather than the reverse. The due/expired
+#: bookkeeping around that cap (scanning `self._entries` to find what's
+#: due, then selecting the cap-many stalest via `heapq.nsmallest`) is
+#: still O(N) in the demanded-worktree count -- but N cheap dict/heap
+#: operations, several orders of magnitude below one recompute's ~5-6s
+#: `git fetch`, is a different cost class from the thing this cap actually
+#: protects against (Copilot review, PR #3348); a persistent priority
+#: index would remove even that O(N) scan if it's ever needed at a much
+#: larger N than this accelerator currently targets.
 DEFAULT_MAX_REFRESH_PER_SWEEP = 4
 
 _SCHEMA = """
@@ -457,11 +468,16 @@ class WorktreeStatusCache:
             # Stalest-ATTEMPTED (smallest last_attempted, falling back to
             # computed_at for an entry never yet attempted by a sweep) first
             # -- see the cap's own rationale in the docstring above.
-            stalest = sorted(
+            # `heapq.nsmallest` instead of `sorted(...)`: selecting only the
+            # `max_refresh_per_sweep` smallest items is O(N log cap), not
+            # O(N log N) -- a real difference once the demanded set grows
+            # much larger than the cap (Copilot review, PR #3348).
+            stalest = heapq.nsmallest(
+                self._max_refresh_per_sweep,
                 sampled.items(),
                 key=lambda item: last_attempted_snapshot.get(item[0], item[1]),
             )
-            sampled = dict(stalest[: self._max_refresh_per_sweep])
+            sampled = dict(stalest)
         for project, worktree_id in expired:
             with self._lock:
                 # Re-check at pop time, not just at sampling time: a
