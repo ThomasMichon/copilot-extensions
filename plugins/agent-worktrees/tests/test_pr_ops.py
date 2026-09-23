@@ -151,6 +151,34 @@ class TestWorktreeSuffixHelper:
         # Deterministic: the same input always yields the same digest.
         assert pr_ops._worktree_suffix(worktree_id) == suffix
 
+
+class TestResolveHeadPattern:
+    def test_azure_devops_defaults_to_user_namespace_under_refspec(self):
+        prcfg = cfg.PRConfig(enabled=True, provider="azure-devops", head_scheme="refspec")
+        assert pr_ops.resolve_head_pattern(prcfg) == "user/{username}/{slug}-{suffix}"
+
+    def test_azure_devops_defaults_to_user_namespace_under_snapshot(self):
+        prcfg = cfg.PRConfig(enabled=True, provider="azure-devops", head_scheme="snapshot")
+        assert pr_ops.resolve_head_pattern(prcfg) == "user/{username}/{slug}-{suffix}"
+
+    def test_explicit_head_pattern_still_wins_for_azure_devops(self):
+        prcfg = cfg.PRConfig(
+            enabled=True,
+            provider="azure-devops",
+            head_scheme="snapshot",
+            head_pattern="submit/{slug}-{suffix}",
+        )
+        assert pr_ops.resolve_head_pattern(prcfg) == "submit/{slug}-{suffix}"
+
+    def test_github_and_gitea_keep_existing_scheme_defaults(self):
+        assert pr_ops.resolve_head_pattern(
+            cfg.PRConfig(enabled=True, provider="github", head_scheme="refspec")
+        ) == "pr/{slug}-{suffix}"
+        assert pr_ops.resolve_head_pattern(
+            cfg.PRConfig(enabled=True, provider="gitea", head_scheme="snapshot")
+        ) == "{prefix}/{slug}-{suffix}"
+
+
 class TestPRHeadName:
     def test_snapshot_default_matches_feature_branch_name(self):
         prcfg = cfg.PRConfig(enabled=True, branch_prefix="feature", head_scheme="snapshot")
@@ -170,6 +198,15 @@ class TestPRHeadName:
         prcfg = cfg.PRConfig(enabled=True, head_pattern="user/{username}/{slug}-{suffix}")
         name = pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", cwd=str(repo))
         assert name == "user/cjohnson/add-auth-aaaa"
+
+    def test_azure_devops_default_renders_username_tokens(self, tmp_path):
+        repo = tmp_path / "r"
+        repo.mkdir()
+        _git("init", cwd=repo)
+        _git("config", "user.email", "tmichon@example.com", cwd=repo)
+        prcfg = cfg.PRConfig(enabled=True, provider="azure-devops", head_scheme="refspec")
+        name = pr_ops.pr_head_name(prcfg, "Some title", "wt-x-a1b2", cwd=str(repo))
+        assert name == "user/tmichon/some-title-a1b2"
 
     def test_sanitizes_unresolved_segments(self):
         # No cwd -> username falls back to "user"; no empty // segments.
@@ -392,6 +429,20 @@ class TestCreatePR:
         assert _git("rev-parse", f"worktree/{wid}", cwd=wt_path) == first_head
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert len(rec.prs) == 1
+
+    def test_branch_collision_error_suggests_explicit_distinguishing_suffix(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        _git("branch", "feature/add-feature-aaaa", cwd=wt_path)
+
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert res["success"] is False
+        assert (
+            "Feature branch 'feature/add-feature-aaaa' already exists locally or on 'origin'."
+        ) in res["error"]
+        assert "--branch" in res["error"]
+        assert "'feature/add-feature-aaaa-2'" in res["error"]
+        assert "mini-task" in res["error"]
 
     def test_dirty_worktree_blocks(self, pr_repo):
         config, wid, wt_path, _ = pr_repo

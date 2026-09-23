@@ -260,9 +260,10 @@ origin/<default>  <—  worktree/{id}  ——push——>  origin/pr/{slug}-{suff
                     sits ahead while open)
 ```
 
-The head ref (`pr/{slug}-{suffix}` by default; templated via `pr.head_pattern`,
-e.g. `user/{username}/{slug}-{suffix}`) is ephemeral and provider-deleted on
-merge. Requires the repo's pre-push hook to allow the mediated
+The head ref (`pr/{slug}-{suffix}` by default for non-Azure-DevOps repos;
+Azure DevOps defaults to `user/{username}/{slug}-{suffix}` regardless of
+scheme; all of it is templated via `pr.head_pattern`) is ephemeral and
+provider-deleted on merge. Requires the repo's pre-push hook to allow the mediated
 `worktree/{id} → pr/{slug}` push (a hook that blocks `worktree/*` by ref name
 must honor `AGENT_WORKTREES_PR_PUSH=1`). A parallel `--new` PR auto-falls-back
 to a snapshot ref (one worktree branch hosts only one live refspec PR).
@@ -302,10 +303,14 @@ the human-readable body requirement.
 Squashes the worktree's commits into one and rebases onto upstream, leaving HEAD
 on `worktree/{id}` at the squashed commit (both schemes — it is never reset off
 it, #1804). Under the default **refspec** scheme it pushes `worktree/{id}`
-straight to the PR head ref (`pr/{slug}`) — no local feature branch. Under
-**snapshot** it instead copies the squashed commit onto a local `feature/{slug}`
-branch and pushes that (no reset, no checkout dance). Either way HEAD never
-leaves `worktree/{id}`. Records `pr.state` and prints the branch, base/head SHAs, and provider.
+straight to the provider-resolved PR head ref (`pr/{slug}-{suffix}` for
+non-Azure-DevOps repos; `user/{username}/{slug}-{suffix}` for Azure DevOps) —
+no local feature branch. Under **snapshot** it instead copies the squashed
+commit onto a local snapshot branch (`feature/{slug}-{suffix}` by default;
+Azure DevOps still defaults to `user/{username}/{slug}-{suffix}`) and pushes
+that (no reset, no checkout dance). Either way HEAD never leaves
+`worktree/{id}`. Records `pr.state` and prints the
+branch, base/head SHAs, and provider.
 Add `--json`
 to capture the metadata, or `--branch NAME` to override the generated name.
 Use `--repo owner/name` to target a different repo than the worktree's own,
@@ -530,9 +535,13 @@ then update the PR branch with:
 In PR mode `push-changes` updates the PR head, never the default branch. Feedback commits
 ride on `worktree/{id}` (create-pr leaves HEAD there); `push-changes` rebases
 `worktree/{id}` onto the default branch and then publishes per scheme — under **refspec**
-(default) it force-with-lease pushes `worktree/{id}` to the PR head ref
-(`pr/{slug}`); under **snapshot** it snapshots the `feature/{slug}` branch to the
-new tip and force-with-lease pushes that. Either way HEAD stays on
+(default) it force-with-lease pushes `worktree/{id}` to the provider-resolved PR
+head ref (`pr/{slug}-{suffix}` for non-Azure-DevOps repos;
+`user/{username}/{slug}-{suffix}` for Azure DevOps); under **snapshot** it
+snapshots the local publish branch (`feature/{slug}-{suffix}` by default;
+Azure DevOps still defaults to `user/{username}/{slug}-{suffix}`) to the new
+tip and force-with-lease pushes that.
+Either way HEAD stays on
 `worktree/{id}` — just commit there and run `push-changes`. (A worktree still
 checked out on a legacy feature branch is accepted too and pushed as-is.) It
 does not create a PR; it updates the existing one.
