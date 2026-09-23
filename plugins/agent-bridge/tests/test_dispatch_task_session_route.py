@@ -1,23 +1,25 @@
 """Integration tests for GET /api/v1/dispatch-tasks/{id}/session.
 
 *resolve-by-any-origin-reference* (``agent-dispatch-session-worktree-history``
-Phase 2): a dispatch-task reference resolves to the same session a direct
-session-id/worktree-id lookup would give, through the existing live-then-
-cold-store resolver plus a worktree-scoped fallback. The agent-dispatch
-coordinator itself is mocked at the ``agent_bridge.routes.dispatch_tasks``
-module boundary (``fetch_task``/``fetch_attachments``) -- these tests only
-exercise the route's own resolution/fallback logic, not the HTTP client.
+Phase 2, rewired for Phase 2.5a/#3389): a dispatch-task reference resolves to
+the same session a direct session-id/worktree-id lookup would give, through
+the existing live-then-cold-store resolver plus a worktree-scoped fallback.
+The agent-dispatch coordinator is no longer reached over HTTP by this route
+at all -- it's mocked here as a registered ``dispatch:`` namespace resolver
+(the same process-boundary seam agent-codespaces/agent-containers already
+use), so these tests exercise only the route's own resolution/fallback
+logic, never an HTTP client.
 """
 
 from __future__ import annotations
 
 import time
-from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 
-from agent_bridge import routes
+from agent_bridge.agent_registry_namespace import NamespaceResolver
+from agent_bridge.agent_registry_common import NamespaceAgentInfo
 from agent_bridge.app import create_app
 from agent_bridge.cold_store import ColdStoreSession
 from agent_bridge.models import ServiceConfig, SessionStatus
@@ -31,21 +33,24 @@ def _isolate_local_discovery(tmp_path, monkeypatch):
         "AGENT_WORKTREES_PROJECTS_YAML",
         str(tmp_path / "nonexistent-projects.yaml"),
     )
+    # Isolate the providers.d scan too -- an empty dir means
+    # refresh_provider_resolvers() never touches the manually-registered
+    # fake "dispatch" resolver these tests install.
+    monkeypatch.setenv(
+        "AGENT_BRIDGE_PROVIDERS_DIR", str(tmp_path / "providers.d"),
+    )
 
 
 @pytest.fixture
 def app(tmp_path):
-    cfg = ServiceConfig(
-        port=0, bind="127.0.0.1", db_path=str(tmp_path / "test.db"),
-        agent_dispatch_url="http://127.0.0.1:9847",
-    )
+    cfg = ServiceConfig(port=0, bind="127.0.0.1", db_path=str(tmp_path / "test.db"))
     return create_app(config=cfg, token="test-token")
 
 
 @pytest.fixture
 def client(app):
     with TestClient(app) as c:
-        c.headers["Authorization"] = "Bearer test-token"
+        c.headers["Authorization"] = f"Bearer {app.state.auth_token}"
         yield c
 
 
@@ -58,19 +63,48 @@ def _live_session(app, sid, worktree_id="wt-1"):
     return session
 
 
-def _mock_dispatch(monkeypatch, *, task, attachments=()):
-    monkeypatch.setattr(
-        routes.dispatch_tasks, "fetch_task", AsyncMock(return_value=task),
-    )
-    monkeypatch.setattr(
-        routes.dispatch_tasks, "fetch_attachments",
-        AsyncMock(return_value=list(attachments)),
-    )
+class _FakeDispatchResolver(NamespaceResolver):
+    """Stands in for agent-dispatch's own `namespace-resolve` CLI seam."""
+
+    def __init__(self, *, task=None, attachments=(), raise_not_found=False,
+                 raise_bad_state=False, worktree_id=None):
+        self._task = task
+        self._attachments = list(attachments)
+        self._raise_not_found = raise_not_found
+        self._raise_bad_state = raise_bad_state
+        self._worktree_id = worktree_id
+
+    @property
+    def prefix(self) -> str:
+        return "dispatch"
+
+    async def list(self) -> list[NamespaceAgentInfo]:
+        return []
+
+    async def resolve(self, name, *, extra_plugins=(), repo=None, repo_remote=None):
+        if self._raise_not_found:
+            raise KeyError(name)
+        if self._raise_bad_state:
+            raise ValueError(f"{name} is not bound to a worktree")
+        return SpawnTarget(
+            type="local",
+            worktree_id=self._worktree_id,
+            venue={
+                "provider": "agent-dispatch", "target_id": name,
+                "task": self._task, "attachments": self._attachments,
+            },
+        )
 
 
-def test_resolves_current_owner_live_session(app, client, monkeypatch):
+def _register_dispatch(app, **kwargs):
+    resolver = _FakeDispatchResolver(**kwargs)
+    app.state.resolver.register_namespace_resolver(resolver)
+    return resolver
+
+
+def test_resolves_current_owner_live_session(app, client):
     _live_session(app, "session-current")
-    _mock_dispatch(monkeypatch, task={"owner_session_id": "session-current"})
+    _register_dispatch(app, task={"owner_session_id": "session-current"})
 
     resp = client.get("/api/v1/dispatch-tasks/task-1/session")
     assert resp.status_code == 200
@@ -78,15 +112,15 @@ def test_resolves_current_owner_live_session(app, client, monkeypatch):
 
 
 def test_falls_through_to_attachment_history_when_owner_has_nothing_live(
-    app, client, monkeypatch,
+    app, client,
 ):
     """A released task has no live current owner -- its most recent detached
     session is still individually resolvable via cold-store."""
     mgr: SessionManager = app.state.session_manager
     cold = ColdStoreSession(session_id="session-old", status="ended")
     mgr.set_resolver(_ColdStoreResolver(cold))
-    _mock_dispatch(
-        monkeypatch,
+    _register_dispatch(
+        app,
         task={"owner_session_id": None},
         attachments=[{"session_id": "session-old"}],
     )
@@ -99,13 +133,13 @@ def test_falls_through_to_attachment_history_when_owner_has_nothing_live(
 
 
 def test_falls_back_to_worktree_latest_session_when_no_candidate_resolves(
-    app, client, monkeypatch,
+    app, client,
 ):
     """No owner, no attachment history hit -- but the task's target worktree
     still has its own known (live) bridge session."""
     _live_session(app, "session-in-worktree", worktree_id="wt-42")
-    _mock_dispatch(
-        monkeypatch,
+    _register_dispatch(
+        app,
         task={"owner_session_id": None, "target_worktree": "wt-42"},
         attachments=[],
     )
@@ -115,9 +149,7 @@ def test_falls_back_to_worktree_latest_session_when_no_candidate_resolves(
     assert resp.json()["session_id"] == "session-in-worktree"
 
 
-def test_resolves_owner_session_from_live_registration_registry(
-    app, client, monkeypatch,
-):
+def test_resolves_owner_session_from_live_registration_registry(app, client):
     """A CLI-embodied task's owner_session_id is a real ACP id registered in
     the *live-sessions* registry (an interactive CLI session the bridge
     represents but does not own), not bridge-owned SessionManager or the
@@ -129,8 +161,8 @@ def test_resolves_owner_session_from_live_registration_registry(
         repo="aperture-labs", branch="main", pid=123, role=None,
         now=1000.0,
     )
-    _mock_dispatch(
-        monkeypatch,
+    _register_dispatch(
+        app,
         task={"owner_session_id": "11111111-1111-1111-1111-111111111111"},
     )
 
@@ -142,7 +174,7 @@ def test_resolves_owner_session_from_live_registration_registry(
     assert body["acp_session_id"] == "11111111-1111-1111-1111-111111111111"
 
 
-def test_falls_back_to_worktree_latest_live_registration(app, client, monkeypatch):
+def test_falls_back_to_worktree_latest_live_registration(app, client):
     """No owner, no attachment history hit, no bridge-owned worktree
     session -- but the task's target worktree has a current *interactive*
     CLI session registered."""
@@ -153,8 +185,8 @@ def test_falls_back_to_worktree_latest_live_registration(app, client, monkeypatc
         repo="aperture-labs", branch="main", pid=456, role=None,
         now=time.time(),
     )
-    _mock_dispatch(
-        monkeypatch,
+    _register_dispatch(
+        app,
         task={"owner_session_id": None, "target_worktree": "wt-embody-2"},
         attachments=[],
     )
@@ -164,9 +196,9 @@ def test_falls_back_to_worktree_latest_live_registration(app, client, monkeypatc
     assert resp.json()["session_id"] == "22222222-2222-2222-2222-222222222222"
 
 
-def test_no_resolvable_session_is_404_not_error(app, client, monkeypatch):
-    _mock_dispatch(
-        monkeypatch,
+def test_no_resolvable_session_is_404_not_error(app, client):
+    _register_dispatch(
+        app,
         task={"owner_session_id": None, "target_worktree": "wt-gone"},
         attachments=[],
     )
@@ -175,44 +207,36 @@ def test_no_resolvable_session_is_404_not_error(app, client, monkeypatch):
     assert resp.status_code == 404
 
 
-def test_unknown_task_is_404(app, client, monkeypatch):
-    _mock_dispatch(monkeypatch, task=None)
+def test_unknown_task_is_404(app, client):
+    _register_dispatch(app, raise_not_found=True)
 
     resp = client.get("/api/v1/dispatch-tasks/does-not-exist/session")
     assert resp.status_code == 404
 
 
-def test_malformed_task_fetch_is_502_not_leaking_exception_text(
-    app, client, monkeypatch,
-):
-    """A malformed (non-object) task payload is an upstream error, not a
-    404 -- and the response body must not leak the raw exception string."""
-    monkeypatch.setattr(
-        routes.dispatch_tasks, "fetch_task",
-        AsyncMock(side_effect=ValueError("secret-connection-detail://x")),
-    )
-    monkeypatch.setattr(
-        routes.dispatch_tasks, "fetch_attachments", AsyncMock(return_value=[]),
-    )
+def test_bad_state_task_degrades_to_404_not_error(app, client):
+    """A task not yet bound to a worktree (or cross-machine) is a legitimate,
+    expected degrade -- never a hard error."""
+    _register_dispatch(app, raise_bad_state=True)
+
+    resp = client.get("/api/v1/dispatch-tasks/task-unbound/session")
+    assert resp.status_code == 404
+
+
+def test_malformed_task_payload_is_502_not_leaking_exception_text(app, client):
+    """A resolver that returns no usable task record is an upstream error,
+    not a 404 -- and the response body must not leak internals."""
+    _register_dispatch(app, task=None)
 
     resp = client.get("/api/v1/dispatch-tasks/task-6/session")
     assert resp.status_code == 502
-    assert "secret-connection-detail" not in resp.text
 
 
-def test_missing_agent_dispatch_url_is_503(tmp_path, monkeypatch):
-    monkeypatch.setenv(
-        "AGENT_WORKTREES_PROJECTS_YAML",
-        str(tmp_path / "nonexistent-projects.yaml"),
-    )
-    cfg = ServiceConfig(
-        port=0, bind="127.0.0.1", db_path=str(tmp_path / "t.db"),
-        agent_dispatch_url="",
-    )
-    app = create_app(config=cfg, token="test-token")
-    with TestClient(app) as c:
-        c.headers["Authorization"] = "Bearer test-token"
-        resp = c.get("/api/v1/dispatch-tasks/task-5/session")
+def test_missing_dispatch_provider_is_503(app, client):
+    """No `dispatch:` namespace resolver registered at all (agent-dispatch
+    not installed/running) degrades this one namespace, per
+    a-la-carte-independence -- never a bridge-wide failure."""
+    resp = client.get("/api/v1/dispatch-tasks/task-5/session")
     assert resp.status_code == 503
 
 
@@ -226,6 +250,8 @@ class _ColdStoreRegistry:
 
 class _ColdStoreResolver:
     def __init__(self, cold_session):
+        from unittest.mock import AsyncMock
+
         client = AsyncMock()
         client.fetch_session.return_value = cold_session
         self.cold_store = _ColdStoreRegistry(client)

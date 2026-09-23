@@ -333,6 +333,40 @@ class CliNamespaceResolver(NamespaceResolver):
                         else:
                             venue["security_profile"] = security_profile
                     target_type = spec.get("type", "command")
+                    if target_type == "worktree":
+                        # A provider that resolves to an existing worktree
+                        # (e.g. agent-dispatch's `dispatch:` namespace,
+                        # #3389) delegates transport/spawn construction to
+                        # agent-bridge's own already-correct worktree
+                        # resolution (`transport.py`'s `_resolve_worktree`/
+                        # `_resolve_worktree_remote`) instead of building a
+                        # raw spawn_command itself -- it only needs to name
+                        # *which* worktree, never how to reach it.
+                        worktree_id = spec.get("worktree_id")
+                        if (
+                            not isinstance(worktree_id, str)
+                            or not worktree_id.strip()
+                        ):
+                            raise RuntimeError(
+                                f"{self._binstub} namespace-resolve returned "
+                                "an invalid worktree_id"
+                            )
+                        host = spec.get("host")
+                        if host is not None and (
+                            not isinstance(host, str) or not host.strip()
+                        ):
+                            raise RuntimeError(
+                                f"{self._binstub} namespace-resolve returned "
+                                "an invalid host"
+                            )
+                        self.invalidate_list_cache()
+                        return SpawnTarget(
+                            type="ssh" if host else "local",
+                            worktree_id=worktree_id,
+                            host=host,
+                            user=spec.get("user"),
+                            venue=venue or None,
+                        )
                     spawn_command = spec.get("spawn_command")
                     if target_type != "command":
                         raise RuntimeError(
