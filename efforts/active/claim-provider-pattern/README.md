@@ -176,7 +176,9 @@ always declare a namespace.
 
 ### Phase 4 — Cross-plugin identity rebinding + codespaces atomic lease fence
 (follow-up filed as [#3461](https://github.com/ThomasMichon/copilot-extensions/issues/3461)
-after Phase 2/3 review, PR [#3388](https://github.com/ThomasMichon/copilot-extensions/pull/3388))
+after Phase 2/3 review, PR [#3388](https://github.com/ThomasMichon/copilot-extensions/pull/3388);
+design note for the rebinding work:
+[`phase-4-peer-rebinding-design.md`](phase-4-peer-rebinding-design.md))
 - [x] Build a `deploy_hold`-equivalent atomic admission fence for
   agent-codespaces, mirroring
   `plugins/agent-containers/src/agent_containers/lease.py`'s
