@@ -941,6 +941,28 @@ if ($plan.env) {
 Remove-Item Env:WORKTREE_ID -ErrorAction SilentlyContinue
 Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue
 
+# Copilot CLI identity enforcement (prototype -- see
+# ThomasMichon/copilot-extensions#3296). Copilot CLI's own inference identity
+# (~/.copilot/config.json lastLoggedInUser) is a *separate* system from the
+# 'gh' account this launcher already resolves for AHP above, and nothing
+# enforced it before this. Acting here -- once, right before Copilot boots --
+# sidesteps trying to coordinate identity live across the many long-lived
+# concurrent copilot.exe processes a machine can have running; it only
+# guarantees each *new* launch starts correct. Best-effort and never fatal: a
+# resolution/login failure here must not block an otherwise-good launch.
+if ($env:AGENT_WORKTREES_SKIP_COPILOT_IDENTITY -ne '1') {
+    try {
+        $identityArgs = @('-m', 'agent_worktrees', 'copilot-identity', 'ensure', '--json')
+        if ($script:LaunchProject) {
+            $identityArgs += @('--repo', $script:LaunchProject)
+        }
+        $identityOutput = & $VenvPython @identityArgs 2>&1
+        Write-SetupLog "Copilot identity ensure (exit ${LASTEXITCODE}): $identityOutput"
+    } catch {
+        Write-SetupLog "Copilot identity ensure threw (non-fatal): $_" 'WARN'
+    }
+}
+
 $cmd = @($plan.cmd)
 
 $executionLeg = $null

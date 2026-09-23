@@ -1,0 +1,194 @@
+"""Tests for Copilot CLI's own identity resolution/enforcement.
+
+Prototype for ThomasMichon/copilot-extensions#3296: Copilot CLI's own
+inference identity (``~/.copilot/config.json``) is a separate system from the
+``gh`` CLI account already governed by ``repos.py``'s ``account``/
+``account_map``. These tests cover the repo-keyed ``copilot_account``
+resolution chain and the non-interactive ``ensure_login`` enforcement.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from agent_worktrees import config as cfg
+from agent_worktrees import copilot_identity, repos
+
+
+@pytest.fixture
+def home(tmp_path: Path, monkeypatch) -> Path:
+    """Redirect ~ so the registry and Copilot config read/write under a tmp dir."""
+    monkeypatch.setattr(repos.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(copilot_identity.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    return tmp_path
+
+
+def _write_registry(home: Path, text: str) -> None:
+    path = home / ".agent-worktrees" / "repos.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _write_copilot_config(home: Path, last_login: str | None) -> None:
+    path = home / ".copilot" / "config.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {}
+    if last_login is not None:
+        data["lastLoggedInUser"] = {"host": "https://github.com", "login": last_login}
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# resolve_copilot_account / copilot_account_for
+# ---------------------------------------------------------------------------
+
+def test_resolve_copilot_account_explicit_override(home: Path):
+    _write_registry(
+        home,
+        "repos:\n"
+        "  aperture-labs:\n"
+        "    class: worktree\n"
+        "    copilot_account: ThomasMichon\n",
+    )
+    entry = repos.find_repo("aperture-labs")
+    assert repos.resolve_copilot_account(entry) == "ThomasMichon"
+    assert repos.copilot_account_for("aperture-labs") == "ThomasMichon"
+
+
+def test_copilot_account_for_falls_back_to_machine_default(home: Path, monkeypatch):
+    _write_registry(
+        home,
+        "repos:\n"
+        "  odsp-web-harness:\n"
+        "    class: worktree\n"
+        "    remote: \"https://github.com/gim-home/odsp-web-harness.git\"\n",
+    )
+    monkeypatch.setattr(
+        cfg, "load_config",
+        lambda *a, **k: cfg.Config(
+            srcroot=str(home), machine="test", platform="windows",
+            default_copilot_account="tmichon_microsoft",
+        ),
+    )
+    assert repos.copilot_account_for("odsp-web-harness") == "tmichon_microsoft"
+
+
+def test_copilot_account_for_none_when_nothing_set(home: Path, monkeypatch):
+    _write_registry(
+        home,
+        "repos:\n"
+        "  some-repo:\n"
+        "    class: reference\n",
+    )
+    monkeypatch.setattr(
+        cfg, "load_config",
+        lambda *a, **k: cfg.Config(srcroot=str(home), machine="test", platform="windows"),
+    )
+    assert repos.copilot_account_for("some-repo") is None
+
+
+def test_set_and_unset_copilot_account(home: Path):
+    _write_registry(home, "repos:\n  demo:\n    class: worktree\n")
+    assert repos.set_copilot_account("demo", "ThomasMichon") is True
+    assert repos.copilot_account_for("demo") == "ThomasMichon"
+    assert repos.unset_copilot_account("demo") is True
+    assert repos.resolve_copilot_account(repos.find_repo("demo")) is None
+    # No-op on an unregistered repo.
+    assert repos.set_copilot_account("does-not-exist", "X") is False
+
+
+# ---------------------------------------------------------------------------
+# current_login
+# ---------------------------------------------------------------------------
+
+def test_current_login_reads_last_logged_in_user(home: Path):
+    _write_copilot_config(home, "tmichon_microsoft")
+    assert copilot_identity.current_login() == "tmichon_microsoft"
+
+
+def test_current_login_none_when_missing(home: Path):
+    assert copilot_identity.current_login() is None
+
+
+# ---------------------------------------------------------------------------
+# ensure_login
+# ---------------------------------------------------------------------------
+
+def test_ensure_login_already_correct_skips_subprocess(home: Path, monkeypatch):
+    _write_copilot_config(home, "tmichon_microsoft")
+
+    def _boom(*_a, **_k):
+        raise AssertionError("must not shell out when already correct")
+
+    monkeypatch.setattr(copilot_identity.subprocess, "run", _boom)
+    result = copilot_identity.ensure_login("tmichon_microsoft")
+    assert result.status == "already-correct"
+    assert result.ok
+
+
+def test_ensure_login_no_target_is_a_noop(home: Path):
+    result = copilot_identity.ensure_login(None)
+    assert result.status == "no-target"
+    assert not result.ok
+
+
+def test_ensure_login_switches_via_gh_token(home: Path, monkeypatch):
+    _write_copilot_config(home, "ThomasMichon")
+    monkeypatch.setattr(copilot_identity.shutil, "which", lambda _name: "/usr/bin/x")
+
+    calls = []
+
+    class _Proc:
+        def __init__(self, returncode, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def _run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        if cmd[:3] == ["gh", "auth", "token"]:
+            return _Proc(0, stdout="fake-token-value\n")
+        if cmd[:2] == ["copilot", "login"]:
+            assert kwargs.get("input") == "fake-token-value"
+            return _Proc(0, stdout="Signed in successfully as tmichon_microsoft.\n")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(copilot_identity.subprocess, "run", _run)
+    result = copilot_identity.ensure_login("tmichon_microsoft")
+    assert result.status == "switched"
+    assert result.ok
+    assert result.previous == "ThomasMichon"
+    assert result.target == "tmichon_microsoft"
+    # The token must never be logged/returned anywhere in the result.
+    assert "fake-token-value" not in (result.detail or "")
+
+
+def test_ensure_login_no_cached_token(home: Path, monkeypatch):
+    _write_copilot_config(home, "ThomasMichon")
+    monkeypatch.setattr(copilot_identity.shutil, "which", lambda _name: "/usr/bin/x")
+
+    class _Proc:
+        returncode = 1
+        stdout = ""
+        stderr = "not logged in as that user"
+
+    monkeypatch.setattr(copilot_identity.subprocess, "run", lambda *a, **k: _Proc())
+    result = copilot_identity.ensure_login("tmichon_microsoft")
+    assert result.status == "no-cached-token"
+    assert not result.ok
+
+
+def test_ensure_login_dry_run_never_shells_out(home: Path, monkeypatch):
+    _write_copilot_config(home, "ThomasMichon")
+
+    def _boom(*_a, **_k):
+        raise AssertionError("dry-run must not shell out")
+
+    monkeypatch.setattr(copilot_identity.subprocess, "run", _boom)
+    result = copilot_identity.ensure_login("tmichon_microsoft", dry_run=True)
+    assert result.status == "switched"
+    assert "dry-run" in result.detail
