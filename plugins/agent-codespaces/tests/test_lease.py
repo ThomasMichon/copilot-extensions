@@ -262,6 +262,15 @@ def test_claim_force_takes_over_live_owner(leases):
     assert cl.worktree == "/wt/b"
 
 
+def test_claim_is_blocked_by_provider_deploy_hold(leases):
+    with lease_mod.deploy_hold("cs-one", "claim-reclaim"):
+        with pytest.raises(
+            lease_mod.ProviderAdmissionError,
+            match="provider claim-reclaim is in progress",
+        ):
+            lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"})
+
+
 def test_claim_auto_releases_dead_owner(leases):
     first, second = str(leases / "a"), str(leases / "b")
     lease_mod.claim("cs-one", first, active={first})
@@ -335,6 +344,69 @@ def test_claim_l2_conflict_cross_machine_names_ref(leases, monkeypatch):
                         holder_ref="m/p/wt-b")
     assert ei.value.holder == "remote/p/wt-r"
     assert ei.value.host == "(cross-machine)"
+
+
+def test_claim_releases_new_l2_token_when_hold_appears_before_local_write(leases, monkeypatch):
+    from agent_codespaces import coordination
+
+    responses = iter([
+        {},
+        {
+            "cs-one": lease_mod.DeployHold(
+                codespace="cs-one",
+                operation="claim-reclaim",
+                token="hold-token",
+                pid=123,
+                host=lease_mod._this_host(),
+                environment=lease_mod._this_environment(),
+                acquired_at=time.time(),
+                heartbeat_at=time.time(),
+                expires_at=time.time() + lease_mod.DEPLOY_HOLD_TTL,
+            )
+        },
+    ])
+    original_read_live_records = lease_mod._read_live_records
+
+    def _staged_records(path, record_type, ttl):
+        if path == lease_mod._DEPLOY_HOLDS_FILE and record_type is lease_mod.DeployHold:
+            return next(responses)
+        return original_read_live_records(path, record_type, ttl)
+
+    monkeypatch.setattr(lease_mod, "_read_live_records", _staged_records)
+    monkeypatch.setattr(
+        coordination,
+        "preflight",
+        lambda holder_ref: coordination.PreflightResult("ready"),
+    )
+    monkeypatch.setattr(
+        coordination,
+        "acquire",
+        lambda codespace, holder_ref: coordination.L2Result(
+            "ok",
+            token="new-token",
+        ),
+    )
+    released = {}
+    monkeypatch.setattr(
+        coordination,
+        "release",
+        lambda codespace, token: released.update(
+            {"codespace": codespace, "token": token}
+        ),
+    )
+
+    with pytest.raises(
+        lease_mod.ProviderAdmissionError,
+        match="provider claim-reclaim is in progress",
+    ):
+        lease_mod.claim(
+            "cs-one",
+            "/wt/a",
+            active={"/wt/a"},
+            holder_ref="m/p/wt-a",
+        )
+
+    assert released == {"codespace": "cs-one", "token": "new-token"}
 
 
 def test_same_holder_ref_matches_worktree_id():

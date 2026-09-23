@@ -10,8 +10,22 @@ import types
 from contextlib import contextmanager
 
 from agent_codespaces import claim_provider_cli as cpc
+from agent_codespaces import lease as lease_mod
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _lease_state_tmp(monkeypatch, tmp_path):
+    monkeypatch.setattr(lease_mod, "LEASE_FILE", tmp_path / "leases.json")
+    monkeypatch.setattr(lease_mod, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(lease_mod, "_LOCK_FILE", tmp_path / "leases.lock")
+    monkeypatch.setattr(
+        lease_mod,
+        "_DEPLOY_HOLDS_FILE",
+        tmp_path / "deploy-holds.json",
+    )
+    monkeypatch.setattr(lease_mod, "ensure_runtime_dir", lambda: None)
 
 
 @pytest.fixture(autouse=True)
@@ -210,11 +224,17 @@ def test_claim_reclaim_holds_deploy_fence_through_recovery_and_delete(monkeypatc
 
     @contextmanager
     def _hold(name, operation):
+        hold = types.SimpleNamespace(token="hold-token")
         events.append(("enter", name, operation))
-        yield object()
+        yield hold
         events.append(("exit", name, operation))
 
     monkeypatch.setattr(cpc, "deploy_hold", _hold)
+    monkeypatch.setattr(
+        cpc,
+        "verify_deploy_hold",
+        lambda name, token: events.append(("verify", name, token)),
+    )
     monkeypatch.setattr(
         cpc,
         "sync_codespace_sessions",
@@ -235,6 +255,7 @@ def test_claim_reclaim_holds_deploy_fence_through_recovery_and_delete(monkeypatc
     assert events == [
         ("enter", "cs-a", "claim-reclaim"),
         ("sync", "cs-a"),
+        ("verify", "cs-a", "hold-token"),
         ("delete", "cs-a"),
         ("exit", "cs-a", "claim-reclaim"),
     ]
@@ -267,6 +288,64 @@ def test_claim_reclaim_reports_busy_deploy_hold(monkeypatch, capsys):
     assert out["reclaimed"] is False
     assert "already has a provider claim-reclaim hold" in out["detail"]
     assert called["n"] == 0
+
+
+def test_claim_reclaim_fails_closed_when_hold_expires_before_delete(monkeypatch, capsys):
+    @contextmanager
+    def _hold(*_args, **_kwargs):
+        yield types.SimpleNamespace(token="hold-token")
+
+    monkeypatch.setattr(cpc, "deploy_hold", _hold)
+    monkeypatch.setattr(cpc, "sync_codespace_sessions", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(
+        cpc,
+        "verify_deploy_hold",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            RuntimeError("Provider lifecycle hold for 'cs-a' is no longer owned by this operation")
+        ),
+    )
+    called = {"n": 0}
+    monkeypatch.setattr(
+        cpc,
+        "delete_codespace",
+        lambda *a, **k: called.__setitem__("n", 1),
+    )
+
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False
+    assert "admission/hold check failed" in out["detail"]
+    assert called["n"] == 0
+
+
+def test_claim_reclaim_marks_hold_uncertain_on_ambiguous_delete_failure(monkeypatch, capsys):
+    @contextmanager
+    def _hold(*_args, **_kwargs):
+        yield types.SimpleNamespace(token="hold-token")
+
+    monkeypatch.setattr(cpc, "deploy_hold", _hold)
+    monkeypatch.setattr(cpc, "sync_codespace_sessions", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(cpc, "verify_deploy_hold", lambda *a, **k: None)
+
+    def _boom(*a, **k):
+        raise RuntimeError("HTTP 500: server exploded")
+
+    monkeypatch.setattr(cpc, "delete_codespace", _boom)
+    marked = {}
+    monkeypatch.setattr(
+        cpc,
+        "mark_deploy_hold_uncertain",
+        lambda name, token: marked.update({"name": name, "token": token}),
+    )
+
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False
+    assert marked == {"name": "cs-a", "token": "hold-token"}
 
 
 def test_claim_reclaim_blocks_delete_when_recovery_fails_and_still_exists(monkeypatch, capsys):

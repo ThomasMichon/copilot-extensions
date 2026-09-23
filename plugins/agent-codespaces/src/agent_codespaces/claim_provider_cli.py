@@ -13,7 +13,13 @@ import json
 import logging
 import sys
 
-from .lease import DeployHoldError, deploy_hold, get_lease
+from .lease import (
+    DeployHoldError,
+    deploy_hold,
+    get_lease,
+    mark_deploy_hold_uncertain,
+    verify_deploy_hold,
+)
 from .lease import release as release_lease
 from .lifecycle import delete_codespace, get_codespace_status, get_codespace_status_with_account
 from .sessions import sync_codespace_sessions
@@ -193,7 +199,7 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
             }))
             return 0
     try:
-        with deploy_hold(args.name, "claim-reclaim"):
+        with deploy_hold(args.name, "claim-reclaim") as hold:
             # Re-check the lease INSIDE the fence too -- the earlier check,
             # above, ran before deploy_hold was even acquired, leaving a
             # window in which another effort could still acquire the lease
@@ -217,6 +223,7 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
                     "detail": f"pre-delete session recovery failed: {recovery.get('detail', '')}",
                 }))
                 return 0
+            verify_deploy_hold(args.name, hold.token)
             try:
                 delete_codespace(
                     args.name,
@@ -233,6 +240,7 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
                         "detail": f"CodeSpace {args.name} already gone",
                     }))
                     return 0
+                mark_deploy_hold_uncertain(args.name, hold.token)
                 print(json.dumps({"reclaimed": False, "detail": detail}))
                 return 0
     except DeployHoldError as exc:

@@ -1,11 +1,4 @@
-"""Lease broker for advisory CodeSpace borrows and exclusive worktree claims.
-
-Leases live in ``~/.agent-codespaces/leases.json`` behind an exclusive lock
-file, coordinate only the common same-machine case, and expire by TTL unless a
-holder refreshes or releases them. The provider deploy-hold sidecar mirrors the
-agent-containers admission fence so destructive reclaim blocks new borrows for
-the full recovery/delete window.
-"""
+"""Lease broker for CodeSpace borrows, worktree claims, and reclaim holds."""
 
 from __future__ import annotations
 
@@ -319,12 +312,7 @@ def _cleanup_record_silent(
 
 
 def _is_stale(lease: Lease, ttl: float) -> bool:
-    """A lease is stale once it exceeds the TTL since its last heartbeat.
-
-    Liveness is intentionally NOT tied to the borrowing process: a lease is
-    held by an *effort* and persists across CLI invocations and dispatches
-    until explicitly released or the TTL elapses.
-    """
+    """A lease is stale once its heartbeat exceeds the TTL."""
     return lease.age() > ttl
 
 
@@ -360,16 +348,7 @@ def borrow(
     force: bool = False,
     ttl: float = DEFAULT_TTL,
 ) -> Lease:
-    """Acquire an advisory lease on ``codespace`` for ``effort``.
-
-    A CodeSpace is addressed by name (unlike the container fleet, there is no
-    "pick a free one" -- the caller knows which CodeSpace it wants). If the
-    CodeSpace is already leased by a *different* live effort, refuse unless
-    ``force`` is set (the escape hatch for a stale/buggy holder).
-
-    Re-borrowing the same CodeSpace for the same effort is idempotent
-    (refreshes the heartbeat, preserves ``acquired_at``).
-    """
+    """Acquire or refresh an advisory lease on ``codespace`` for ``effort``."""
     if not codespace:
         raise RuntimeError("borrow requires a CodeSpace name")
     with _lease_lock():
@@ -421,10 +400,7 @@ def borrow(
 
 
 def release(target: str, ttl: float = DEFAULT_TTL) -> bool:
-    """Release a lease by CodeSpace name or effort name.
-
-    Returns True if a lease was removed.
-    """
+    """Release a lease by CodeSpace name or effort name."""
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
         to_remove = [
@@ -441,12 +417,7 @@ def release(target: str, ttl: float = DEFAULT_TTL) -> bool:
 
 
 def heartbeat(codespace: str, ttl: float = DEFAULT_TTL) -> bool:
-    """Refresh the heartbeat on a held lease. Returns True if updated.
-
-    Also renews the cross-machine L2 lease (best-effort) and rotates the stored
-    fencing token when one is held -- so a live holder keeps its distributed grip
-    and a crashed holder's L2 lease expires on the store's timer.
-    """
+    """Refresh the local heartbeat and best-effort renew any L2 token."""
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
         lease = leases.get(codespace)
@@ -542,11 +513,7 @@ def mark_deploy_hold_uncertain(codespace: str, token: str) -> None:
 
 
 def clear_stale_provider_records(codespace: str | None = None) -> dict[str, int]:
-    """Safely clear only expired/dead deploy holds.
-
-    Fresh records owned by another OS environment remain fail-closed because
-    Windows and WSL cannot safely inspect each other's process IDs.
-    """
+    """Clear only expired/dead deploy holds; cross-environment records stay closed."""
     cleared = {"deploy_holds": 0}
     with _lease_lock():
         try:
@@ -827,6 +794,18 @@ def claim(
         raise RuntimeError("claim requires a CodeSpace name")
     if not owner:
         raise RuntimeError("claim requires an owner worktree")
+    with _lease_lock():
+        holds = _read_live_records(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+        )
+        hold = holds.get(codespace)
+        if hold:
+            raise ProviderAdmissionError(
+                f"CodeSpace '{codespace}' is unavailable while provider "
+                f"{hold.operation} is in progress"
+            )
 
     lease_token = ""
     if coordinate and holder_ref:
@@ -876,6 +855,27 @@ def claim(
                 lease_token = ""
 
     with _lease_lock():
+        holds = _read_live_records(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+        )
+        hold = holds.get(codespace)
+        if hold:
+            if lease_token:
+                try:
+                    coordination.release(codespace, lease_token)
+                except Exception:
+                    log.warning(
+                        "Could not release cross-machine token for '%s' "
+                        "after deploy-hold rejection",
+                        codespace,
+                        exc_info=True,
+                    )
+            raise ProviderAdmissionError(
+                f"CodeSpace '{codespace}' is unavailable while provider "
+                f"{hold.operation} is in progress"
+            )
         leases = _prune(_read_leases(), ttl)
         held = leases.get(codespace)
         if held and _claim_owner(held) != owner:
