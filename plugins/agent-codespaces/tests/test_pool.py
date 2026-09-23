@@ -726,9 +726,36 @@ def test_ado_remote_ref_parses_ssh_and_https_variants():
     ssh = _ado_remote_ref("ssh://git@ssh.dev.azure.com/v3/OneDrive/StorageWeb/odsp-web")
     https = _ado_remote_ref("https://dev.azure.com/OneDrive/StorageWeb/_git/odsp-web")
     legacy = _ado_remote_ref("https://onedrive.visualstudio.com/StorageWeb/_git/odsp-web")
+    optimized = _ado_remote_ref("https://onedrive.visualstudio.com/ODSP-Web/_git/_optimized/odsp-web")
     assert ssh and ssh.organization == "OneDrive" and ssh.project == "StorageWeb"
     assert https and https.repository == "odsp-web"
     assert legacy and legacy.host == "onedrive.visualstudio.com"
+    assert optimized and optimized.project == "ODSP-Web" and optimized.repository == "odsp-web"
+
+
+def test_codespace_git_probe_parses_origin_and_branch(monkeypatch):
+    from agent_codespaces.pool import _codespace_git_probe
+
+    class _Proc:
+        returncode = 0
+        stdout = (
+            "origin=https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web\n"
+            "branch=feature/tmichon/docs-navigation-minor-doc-fix\n"
+        )
+
+    monkeypatch.setattr(
+        "agent_codespaces.lifecycle.account_for_codespace",
+        lambda _codespace_name: "example-account",
+    )
+    monkeypatch.setattr(
+        "agent_codespaces.gh_account.env_for_account",
+        lambda account: {"EXAMPLE_ACCOUNT": account or ""},
+    )
+    monkeypatch.setattr("agent_codespaces.pool.subprocess.run", lambda *a, **k: _Proc())
+
+    origin, branch = _codespace_git_probe("cs-1")
+    assert origin == "https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web"
+    assert branch == "feature/tmichon/docs-navigation-minor-doc-fix"
 
 
 def test_auto_claim_odsp_web_pr_journals_existing_claim_ledger(monkeypatch):
@@ -746,8 +773,15 @@ def test_auto_claim_odsp_web_pr_journals_existing_claim_ledger(monkeypatch):
     monkeypatch.setitem(sys.modules, "agent_worktrees", fake_pkg)
     monkeypatch.setitem(sys.modules, "agent_worktrees.tracking", fake_tracking)
     monkeypatch.setattr(
+        "agent_codespaces.pool._codespace_git_probe",
+        lambda codespace_name, repository=None, owner_worktree=None: (
+            "https://dev.azure.com/OneDrive/StorageWeb/_git/odsp-web",
+            "users/alex/topic",
+        ),
+    )
+    monkeypatch.setattr(
         "agent_codespaces.pool._odsp_web_pr_ref",
-        lambda codespace_name, branch: "https://dev.azure.com/OneDrive/StorageWeb/_git/odsp-web/pullrequest/2481",
+        lambda codespace_name, branch, *, remote_url=None: "https://dev.azure.com/OneDrive/StorageWeb/_git/odsp-web/pullrequest/2481",
     )
     seen = []
     monkeypatch.setattr(
@@ -755,12 +789,60 @@ def test_auto_claim_odsp_web_pr_journals_existing_claim_ledger(monkeypatch):
         lambda kind, ref, owner_ref: seen.append((kind, ref, owner_ref)) or True,
     )
 
-    ref = _auto_claim_odsp_web_pr("cs-1", "microsoft/odsp-web", "users/alex/topic", "host-win-20260922-111111-a1c4")
+    ref = _auto_claim_odsp_web_pr(
+        "cs-1",
+        "microsoft/odsp-web",
+        "users/alex/topic",
+        "host-win-20260922-111111-a1c4",
+    )
     assert ref and ref.endswith("/2481")
     assert seen == [(
         "pr",
         "https://dev.azure.com/OneDrive/StorageWeb/_git/odsp-web/pullrequest/2481",
         "machine/project/worktree#session",
+    )]
+
+
+def test_auto_claim_odsp_web_pr_uses_live_workspace_branch_and_remote(monkeypatch):
+    from agent_codespaces.pool import _auto_claim_odsp_web_pr
+    import sys
+    import types
+
+    class _Record:
+        owner_ref = "machine/project/worktree#session"
+
+    fake_tracking = types.ModuleType("agent_worktrees.tracking")
+    fake_tracking.load_record_by_id = lambda worktree_id: _Record()
+    fake_pkg = types.ModuleType("agent_worktrees")
+    fake_pkg.tracking = fake_tracking
+    monkeypatch.setitem(sys.modules, "agent_worktrees", fake_pkg)
+    monkeypatch.setitem(sys.modules, "agent_worktrees.tracking", fake_tracking)
+    monkeypatch.setattr(
+        "agent_codespaces.pool._codespace_git_probe",
+        lambda codespace_name, repository=None, owner_worktree=None: (
+            "https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web",
+            "feature/tmichon/docs-navigation-minor-doc-fix",
+        ),
+    )
+    seen: list[tuple[str, str | None]] = []
+
+    def fake_pr_ref(codespace_name, branch, *, remote_url=None):
+        seen.append((branch, remote_url))
+        return "https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2398823"
+
+    monkeypatch.setattr("agent_codespaces.pool._odsp_web_pr_ref", fake_pr_ref)
+    monkeypatch.setattr("agent_codespaces.coordination.journal_claim", lambda *a, **k: True)
+
+    ref = _auto_claim_odsp_web_pr(
+        "phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7",
+        "odsp-microsoft/odsp-web-codespaces",
+        "main",
+        "tmichon-cloud1-win-20260921-180855-6e3c",
+    )
+    assert ref and ref.endswith("/2398823")
+    assert seen == [(
+        "feature/tmichon/docs-navigation-minor-doc-fix",
+        "https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web",
     )]
 
 
