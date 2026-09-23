@@ -756,7 +756,8 @@ _ensure_runtime() {
         # build/lib/ can silently shadow fresh src/ on a later install if
         # setuptools' incremental-build mtime check decides nothing
         # "changed" (the exact failure mode that crashed agent-bridge's
-        # deployed daemon in a restart loop -- aperture-labs#7281/#7279).
+        # deployed daemon in a restart loop, and later agent-dispatch's
+        # supervisor daemon -- see copilot-extensions#3444).
         # The src-layout egg-info (src/agent_dispatch.egg-info) sits ONE
         # LEVEL DEEPER than the root-level glob reaches -- a bare
         # "$PLUGIN_DIR"/*.egg-info never matches it, so it survived every

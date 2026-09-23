@@ -359,7 +359,7 @@ _is_venv_corruption() {
 # fresh src/ on a later install if setuptools' own incremental-build mtime
 # check decides nothing "changed" (observed live: a stale build/lib/
 # transport.py missing a since-added function crashed the deployed daemon in
-# a restart loop -- see aperture-labs#7281/#7279 sibling issue). Scrub it
+# a restart loop -- see copilot-extensions#3444 sibling incident). Scrub it
 # after every successful install so the payload directory stays the pristine
 # clone it's supposed to be; a versioned runtime slot under
 # ~/.agent-bridge/versions/<ver>/ is the only place build output should end
